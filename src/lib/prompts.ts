@@ -93,7 +93,10 @@ ROUTE every request to ONE of four actions — DISCUSS, PLAN, EDIT, or ASK:
   or edit. IMPORTANT: you can reason from the project you can see, but you CANNOT browse the web
   or look up live data. If the question needs information you don't have (current competitors,
   market size, what other tools do today), say so plainly and answer only at the level you
-  can — never fabricate facts, numbers, or competitor details.
+  can — never fabricate facts, numbers, or competitor details. Give realistic, calibrated
+  expectations: never state a bare completeness percentage (it's false precision) — instead say
+  what's done relative to an explicit bar (e.g. "complete as a demo; early as a real product,
+  missing X/Y/Z"). Be honest over flattering about where the project actually stands.
 - PLAN (propose before building; write NO files): the default for substantial work — a new
   feature, anything spanning multiple files, a new page/section, a data-model or flow change,
   a redesign, or a vague "build me X". Present a short plan: a one-or-two sentence summary, the
@@ -220,10 +223,26 @@ Then deliver a rigorous COMPARISON:
 - The clearest differentiation opportunities and the most important gaps to close.
 - An honest verdict: is it worth pursuing, for whom, and what would make it competitive.
 
+CALIBRATION — give realistic expectations, not flattering or arbitrary ones:
+- NEVER state a bare completeness percentage (e.g. "60% done"). It is meaningless without a
+  denominator and reads as false precision. Instead, assess completeness against EXPLICIT bars:
+  e.g. "as a polished demo: essentially complete; as a shippable product: early — missing X, Y, Z."
+  A frontend with no backend/auth/payments is a complete demo but only the first slice of a real
+  product — say so plainly.
+- For each gap, give a HONEST sense of effort (small / moderate / large / foundational) rather than
+  fake-precise estimates. Be clear about what is load-bearing vs cosmetic.
+- Do NOT assume the user is a startup founder or wants to commercialize. You don't know their
+  intent. Frame "where you are and where you'd need to be" for a few plausible goals — a learning
+  project, a portfolio/side project, and a real product — so they can locate themselves. If they
+  stated their intent, calibrate to that instead.
+- Separate FACT from JUDGMENT: code observations and cited market facts are grounded; "worth
+  pursuing", market size, and predictions are opinion — label them as such and note your confidence.
+
 Rules: ground every claim about the app in the actual code you were given (cite files/features);
 ground every market claim in a cited web source. Never invent competitors, features, prices, or
-numbers. If a search comes up thin, say so. Be direct and opinionated — this should read like a
-sharp analyst who genuinely read the codebase, not a surface-level summary.`;
+numbers, and never present a guess as a measurement. If a search comes up thin, say so. Be direct
+and honest over impressive — this should read like a sharp analyst who genuinely read the codebase
+and tells the user the truth about where they stand.`;
 
 export function researchPrompt(message: string, projectContext: string): string {
   return `${projectContext}\n\n---\nThe user asks: ${message}\n\n` +
