@@ -35,11 +35,12 @@ export type EditEvent =
   | { type: 'deletion'; path: string }
   | { type: 'done' };
 export interface EditResult {
+  // 'discuss' = a conversational answer/opinion; no files, no plan.
   // 'ask' = the assistant needs clarification and changed nothing yet.
   // 'plan' = the assistant proposed a plan to approve; no files changed yet.
   // 'edit' = files were modified. Defaults to 'edit' for backward compatibility
   // with edge-function responses that predate the conversational protocol.
-  action: 'edit' | 'ask' | 'plan';
+  action: 'edit' | 'ask' | 'plan' | 'discuss';
   explanation: string;
   question?: string;
   options?: string[];
@@ -131,7 +132,8 @@ async function edgeEditStream(
 
   if (held.error) throw new Error(held.error);
   if (!held.final) throw new Error('The edit stream ended unexpectedly.');
-  const action = held.final.action === 'ask' ? 'ask' : held.final.action === 'plan' ? 'plan' : 'edit';
+  const a = held.final.action;
+  const action = a === 'ask' || a === 'plan' || a === 'discuss' ? a : 'edit';
   return {
     action,
     explanation: held.final.explanation ?? '',
@@ -376,6 +378,15 @@ async function directEdit(projectId: string, message: string, previewError?: str
       project_id: projectId, user_id: userId, role: 'assistant', content: parsed.question,
     });
     return { action: 'ask', explanation: '', question: parsed.question, options: parsed.options ?? [], changed: [], deleted: [] };
+  }
+
+  // Conversational answer/opinion — change nothing, record the reply.
+  if (parsed.action === 'discuss') {
+    const answer = parsed.explanation ?? '';
+    await supabase.from('ai_messages').insert({
+      project_id: projectId, user_id: userId, role: 'assistant', content: answer,
+    });
+    return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
   }
 
   // Plan mode: proposed a plan, no files changed. Record it and hand it to the UI.
@@ -637,6 +648,17 @@ async function directEditStream(
     });
     onEvent?.({ type: 'done' });
     return { action: 'ask', explanation: '', question: result.question, options: result.options, changed: [], deleted: [] };
+  }
+
+  // Discuss: a conversational answer/opinion. Change NO files; record the answer as an
+  // assistant message (it already streamed into the UI via explanation events).
+  if (result.action === 'discuss') {
+    const answer = result.explanation || 'Happy to help — what would you like to dig into?';
+    await supabase.from('ai_messages').insert({
+      project_id: projectId, user_id: userId, role: 'assistant', content: answer,
+    });
+    onEvent?.({ type: 'done' });
+    return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
   }
 
   // Plan mode: the assistant proposed a plan. Change NO files; record the plan as an

@@ -152,6 +152,8 @@ export default function ProjectWorkspace() {
           setAskOptions(result.options ?? []);
         } else if (result.action === 'plan') {
           if (result.plan) setPendingPlan(result.plan);
+        } else if (result.action === 'discuss') {
+          // Conversational answer — it's already in the chat; nothing else to do.
         } else {
           toast('success', result.changed.length
             ? `Updated ${result.changed.length} file${result.changed.length === 1 ? '' : 's'}.`
