@@ -9,6 +9,7 @@ import { supabase } from './supabase';
 
 export const BRAIN_PATH = '/.fableforge/brain.md';
 export const MAP_PATH = '/.fableforge/project-map.md';
+export const ROADMAP_PATH = '/.fableforge/roadmap.md';
 /** Files under this prefix are project metadata, not app source. */
 export const META_PREFIX = '/.fableforge/';
 
@@ -67,7 +68,27 @@ export async function saveMap(projectId: string, content: string): Promise<void>
   );
 }
 
-/** True for project-metadata files (brain, project map) that are not app source. */
+/** Read the saved roadmap. '' if none generated yet. */
+export async function getRoadmap(projectId: string): Promise<string> {
+  const { data } = await supabase
+    .from('project_files')
+    .select('content')
+    .eq('project_id', projectId)
+    .eq('path', ROADMAP_PATH)
+    .is('deleted_at', null)
+    .maybeSingle();
+  return data?.content ?? '';
+}
+
+/** Persist the generated roadmap. */
+export async function saveRoadmap(projectId: string, content: string): Promise<void> {
+  await supabase.from('project_files').upsert(
+    { project_id: projectId, path: ROADMAP_PATH, content, updated_by_ai: true },
+    { onConflict: 'project_id,path' },
+  );
+}
+
+/** True for project-metadata files (brain, project map, roadmap) that are not app source. */
 export function isMetaFile(path: string): boolean {
   return path.startsWith(META_PREFIX);
 }

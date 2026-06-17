@@ -266,6 +266,37 @@ export function projectMapPrompt(codeDigest: string): string {
   return `Here is the app's source code:\n${codeDigest}\n\nProduce the project map now.`;
 }
 
+// Phased "what's next" roadmap, grounded in the Brain (intent) + Map (reality) + code.
+export const ROADMAP_SYSTEM = `You are FableForge's product strategist. Using the project's BRAIN
+(the user's vision/goals/decisions), its MAP (what the app currently is, what's stubbed, the gaps),
+and its SOURCE CODE, produce a prioritized, PHASED roadmap of what to build next — specific to THIS
+app, grounded in its code and goals. Never generic.
+
+Lead with a one-paragraph honest read on where the project stands — calibrated, NO bare completeness
+percentages; use explicit bars (e.g. "solid demo; early as a product"). Then explicitly name the
+single most important next thing.
+
+Then organize recommendations into three phases:
+- ## Now — build next (highest leverage, ready to do)
+- ## Next — soon after
+- ## Later — bigger bets / deferred
+
+For each item: a clear title; one line of WHY it matters (tie to the user's goals when you can); an
+effort tag (small / moderate / large / foundational); and where relevant tag it:
+[API: <specific service>] when it needs an external integration (name it — e.g. Stripe, Resend,
+Clerk, Mux, OpenAI), [AUTOMATE] for an automation opportunity (job/cron/webhook/ingestion),
+[GAP] when it closes a gap the Map flagged. Be honest about what's foundational vs cosmetic.
+Clean markdown, skimmable.`;
+
+export function roadmapPrompt(brain: string, map: string, codeDigest: string): string {
+  return [
+    brain.trim() ? `PROJECT BRAIN:\n${brain.trim()}` : '(No Brain set — infer intent from the code.)',
+    map.trim() ? `PROJECT MAP:\n${map.trim()}` : '',
+    `SOURCE CODE:\n${codeDigest}`,
+    'Produce the phased roadmap now.',
+  ].filter(Boolean).join('\n\n');
+}
+
 // Analyze an uploaded document (brief, spec, research, notes) into durable Brain notes.
 export const DOC_ANALYZE_SYSTEM = `You are FableForge's analyst. The user uploaded a document related
 to their app (a brief, spec, research doc, or notes). Extract what matters for BUILDING the app and

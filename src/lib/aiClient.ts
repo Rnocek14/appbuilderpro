@@ -10,11 +10,11 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, filesPromptStream, editPrompt } from './prompts';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, filesPromptStream, editPrompt } from './prompts';
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
 import type { EditPlan } from '../types';
-import { BRAIN_PATH, MAP_PATH, brainContext, mapContext, saveMap, isMetaFile } from './projectBrain';
+import { BRAIN_PATH, MAP_PATH, brainContext, mapContext, saveMap, saveRoadmap, isMetaFile } from './projectBrain';
 
 export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'local';
 
@@ -62,6 +62,28 @@ export async function startGeneration(projectId: string, prompt: string, planCon
   if (error) throw new Error(await readFnError(error));
   if (data?.error) throw new Error(data.error);
   return data as GenerateResult;
+}
+
+// Phased "what's next" roadmap from the Brain (intent) + Map (reality) + code. Saved so the
+// user can revisit it; regenerate after meaningful changes.
+export async function generateRoadmap(projectId: string): Promise<string> {
+  if (!DIRECT) throw new Error('Roadmap generation currently requires direct mode (edge mirror coming).');
+  const { data: files } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const all = files ?? [];
+  const appFiles = all.filter((f) => !isMetaFile(f.path));
+  if (!appFiles.length) throw new Error('No app files yet — generate the app first.');
+  const brain = all.find((f) => f.path === BRAIN_PATH)?.content ?? '';
+  const map = all.find((f) => f.path === MAP_PATH)?.content ?? '';
+
+  const raw = await rawComplete([
+    { role: 'system', content: ROADMAP_SYSTEM },
+    { role: 'user', content: roadmapPrompt(brain, map, buildCodeDigest(appFiles)) },
+  ], 3000);
+  const roadmap = raw.text.trim();
+  await saveRoadmap(projectId, roadmap);
+  return roadmap;
 }
 
 // Analyze an uploaded document into concise, build-relevant notes for the Project Brain.

@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload } from 'lucide-react';
+import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Compass } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { FileTree } from '../components/editor/FileTree';
 import { CodeEditorPane } from '../components/editor/CodeEditorPane';
 import { PreviewPane } from '../components/editor/PreviewPane';
 import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
-import { sendEdit, startGeneration, researchAnswer, generateProjectMap, analyzeDocument, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, analyzeDocument, type EditEvent } from '../lib/aiClient';
 import { extractText } from '../lib/docExtract';
 import { Markdown } from '../components/Markdown';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Modal } from '../components/ui';
-import { getBrain, saveBrain, getMap, DEFAULT_BRAIN, isMetaFile } from '../lib/projectBrain';
+import { getBrain, saveBrain, getMap, getRoadmap, DEFAULT_BRAIN, isMetaFile } from '../lib/projectBrain';
 import { cn } from '../lib/utils';
 import type { Project, Deployment, EditPlan } from '../types';
 
@@ -53,6 +53,10 @@ export default function ProjectWorkspace() {
   const [mapOpen, setMapOpen] = useState(false);
   const [mapText, setMapText] = useState('');
   const [mapLoading, setMapLoading] = useState(false);
+  // "What's next" phased roadmap (recommendations grounded in Brain + Map + code).
+  const [roadmapOpen, setRoadmapOpen] = useState(false);
+  const [roadmapText, setRoadmapText] = useState('');
+  const [roadmapLoading, setRoadmapLoading] = useState(false);
   // Live edit progress while the assistant streams its response.
   const [stream, setStream] = useState<{ explanation: string; files: { path: string; done: boolean }[] } | null>(null);
 
@@ -171,6 +175,26 @@ export default function ProjectWorkspace() {
       toast('error', err instanceof Error ? err.message : 'Could not analyze that document.');
     } finally {
       setDocBusy(false);
+    }
+  };
+
+  const openRoadmap = async () => {
+    setRoadmapOpen(true);
+    if (!id) return;
+    setRoadmapText(await getRoadmap(id));
+  };
+
+  const refreshRoadmap = async () => {
+    if (!id) return;
+    setRoadmapLoading(true);
+    try {
+      setRoadmapText(await generateRoadmap(id));
+      await refreshFiles();
+      toast('success', 'Roadmap updated.');
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not generate the roadmap.');
+    } finally {
+      setRoadmapLoading(false);
     }
   };
 
@@ -301,6 +325,9 @@ export default function ProjectWorkspace() {
             <Button size="sm" variant="outline" onClick={openMap}>
               <Map size={13} /> Map
             </Button>
+            <Button size="sm" variant="outline" onClick={openRoadmap}>
+              <Compass size={13} /> Next
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setDeployOpen(true)}>
               <Rocket size={13} /> Deploy
             </Button>
@@ -345,6 +372,25 @@ export default function ProjectWorkspace() {
           </div>
         </div>
       </div>
+
+      {/* What's-next roadmap */}
+      <Modal open={roadmapOpen} onClose={() => setRoadmapOpen(false)} title="What's next">
+        <p className="text-sm text-forge-dim">
+          A phased, prioritized roadmap — what to build next, what to automate, and which APIs to
+          add — grounded in your Brain, Map, and code. For sharpest results, set the Brain and
+          generate the Map first.
+        </p>
+        <div className="mt-3 flex justify-end">
+          <Button size="sm" loading={roadmapLoading} onClick={refreshRoadmap}>
+            {roadmapText ? 'Regenerate' : 'Generate roadmap'}
+          </Button>
+        </div>
+        <div className="mt-3 max-h-[55vh] overflow-y-auto rounded-lg border border-forge-border bg-forge-panel p-3">
+          {roadmapText
+            ? <Markdown content={roadmapText} />
+            : <p className="text-sm text-forge-dim">No roadmap yet — click Generate to get prioritized next steps.</p>}
+        </div>
+      </Modal>
 
       {/* Project Map viewer */}
       <Modal open={mapOpen} onClose={() => setMapOpen(false)} title="Project Map">
