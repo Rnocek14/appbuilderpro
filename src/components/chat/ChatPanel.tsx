@@ -4,6 +4,7 @@ import type { AIMessage, Generation, EditPlan } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { PlanCard } from '../PlanCard';
+import { Markdown } from '../Markdown';
 
 const QUICK_ACTIONS = [
   'Add a dashboard',
@@ -115,13 +116,15 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
           <div key={m.id} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
             <div
               className={cn(
-                'max-w-[90%] rounded-xl px-3 py-2 text-sm',
+                'min-w-0 rounded-xl px-3 py-2 text-sm',
                 m.role === 'user'
-                  ? 'bg-forge-ember/15 border border-forge-ember/25'
-                  : 'bg-forge-raised border border-forge-border',
+                  ? 'max-w-[90%] bg-forge-ember/15 border border-forge-ember/25'
+                  : 'w-full bg-forge-raised border border-forge-border',
               )}
             >
-              <p className="whitespace-pre-wrap">{m.content}</p>
+              {m.role === 'user'
+                ? <p className="whitespace-pre-wrap">{m.content}</p>
+                : <Markdown content={m.content} />}
               {m.files_changed?.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {m.files_changed.map((f) => (
