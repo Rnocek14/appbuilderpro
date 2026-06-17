@@ -266,6 +266,18 @@ export function projectMapPrompt(codeDigest: string): string {
   return `Here is the app's source code:\n${codeDigest}\n\nProduce the project map now.`;
 }
 
+// Analyze an uploaded document (brief, spec, research, notes) into durable Brain notes.
+export const DOC_ANALYZE_SYSTEM = `You are FableForge's analyst. The user uploaded a document related
+to their app (a brief, spec, research doc, or notes). Extract what matters for BUILDING the app and
+distill it into concise markdown: the vision/intent, concrete requirements or features, key
+decisions or constraints, and any open questions it raises. Be faithful to the document — never
+invent. Write durable notes (not "the document says…"), tight, under ~250 words. These will be
+folded into the project's Brain (its standing context for every future conversation).`;
+
+export function docAnalyzePrompt(filename: string, text: string): string {
+  return `Document: ${filename}\n\n${text}\n\nDistill the build-relevant points now.`;
+}
+
 export function blueprintPrompt(userPrompt: string): string {
   return `Design an app blueprint for this request:\n"""${userPrompt}"""\n
 Respond with ONLY JSON matching:

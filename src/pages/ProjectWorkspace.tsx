@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map } from 'lucide-react';
+import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { FileTree } from '../components/editor/FileTree';
 import { CodeEditorPane } from '../components/editor/CodeEditorPane';
 import { PreviewPane } from '../components/editor/PreviewPane';
 import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
-import { sendEdit, startGeneration, researchAnswer, generateProjectMap, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, researchAnswer, generateProjectMap, analyzeDocument, type EditEvent } from '../lib/aiClient';
+import { extractText } from '../lib/docExtract';
 import { Markdown } from '../components/Markdown';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
@@ -46,6 +47,8 @@ export default function ProjectWorkspace() {
   const [brainOpen, setBrainOpen] = useState(false);
   const [brainText, setBrainText] = useState('');
   const [brainSaving, setBrainSaving] = useState(false);
+  const [docBusy, setDocBusy] = useState(false);
+  const docInputRef = useRef<HTMLInputElement>(null);
   // Living project map (auto-summary of what the app currently is).
   const [mapOpen, setMapOpen] = useState(false);
   const [mapText, setMapText] = useState('');
@@ -151,6 +154,23 @@ export default function ProjectWorkspace() {
       toast('error', err instanceof Error ? err.message : 'Could not save the Brain.');
     } finally {
       setBrainSaving(false);
+    }
+  };
+
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-uploading the same file
+    if (!file) return;
+    setDocBusy(true);
+    try {
+      const text = await extractText(file);
+      const notes = await analyzeDocument(file.name, text);
+      setBrainText((prev) => `${prev.trim()}\n\n## From: ${file.name}\n${notes}\n`);
+      toast('success', `Analyzed ${file.name} — review the notes below, then Save Brain.`);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not analyze that document.');
+    } finally {
+      setDocBusy(false);
     }
   };
 
@@ -357,10 +377,23 @@ export default function ProjectWorkspace() {
           aria-label="Project Brain"
           className="mt-3 w-full resize-none rounded-lg border border-forge-border bg-forge-panel px-3 py-2 font-mono text-xs focus:border-forge-ember/60 focus:outline-none"
         />
-        <div className="mt-3 flex justify-end gap-2">
-          <Button variant="outline" onClick={() => setBrainOpen(false)}>Cancel</Button>
-          <Button loading={brainSaving} onClick={handleSaveBrain}>Save Brain</Button>
+        <input
+          ref={docInputRef}
+          type="file"
+          accept=".txt,.md,.docx"
+          className="hidden"
+          onChange={handleDocUpload}
+        />
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <Button variant="outline" loading={docBusy} onClick={() => docInputRef.current?.click()}>
+            <Upload size={13} /> {docBusy ? 'Analyzing…' : 'Upload & analyze doc'}
+          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setBrainOpen(false)}>Cancel</Button>
+            <Button loading={brainSaving} onClick={handleSaveBrain}>Save Brain</Button>
+          </div>
         </div>
+        <p className="mt-1 text-[11px] text-forge-dim">Upload a brief, spec, or research doc (.txt, .md, .docx) — I'll distill it into the Brain.</p>
       </Modal>
 
       {/* deploy modal */}

@@ -10,7 +10,7 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, filesPromptStream, editPrompt } from './prompts';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, filesPromptStream, editPrompt } from './prompts';
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
 import type { EditPlan } from '../types';
@@ -62,6 +62,17 @@ export async function startGeneration(projectId: string, prompt: string, planCon
   if (error) throw new Error(await readFnError(error));
   if (data?.error) throw new Error(data.error);
   return data as GenerateResult;
+}
+
+// Analyze an uploaded document into concise, build-relevant notes for the Project Brain.
+export async function analyzeDocument(filename: string, text: string): Promise<string> {
+  if (!DIRECT) throw new Error('Document analysis currently requires direct mode (edge mirror coming).');
+  if (!text.trim()) throw new Error('That document appears to be empty.');
+  const raw = await rawComplete([
+    { role: 'system', content: DOC_ANALYZE_SYSTEM },
+    { role: 'user', content: docAnalyzePrompt(filename, text.slice(0, 60_000)) },
+  ], 1500);
+  return raw.text.trim();
 }
 
 // Living project map: summarize the app's current source into a concise map (what exists,
