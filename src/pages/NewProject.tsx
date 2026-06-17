@@ -2,15 +2,26 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles, LayoutDashboard, Users, Store, MessageSquare,
-  GraduationCap, Home, Briefcase, ShieldCheck, type LucideIcon,
+  GraduationCap, Home, Briefcase, ShieldCheck, ClipboardList, type LucideIcon,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useProjects } from '../hooks/useProjectData';
-import { startGeneration } from '../lib/aiClient';
+import { startGeneration, draftGenerationPlan } from '../lib/aiClient';
 import { useToast } from '../context/ToastContext';
 import { Button, Card } from '../components/ui';
+import { PlanCard } from '../components/PlanCard';
 import { TEMPLATES } from '../data/templates';
 import { cn } from '../lib/utils';
+import type { EditPlan } from '../types';
+
+/** Serialize an approved plan into context the generator can follow. */
+function planToText(plan: EditPlan): string {
+  const lines = [plan.summary, ''];
+  if (plan.steps.length) lines.push('Pages/features:', ...plan.steps.map((s) => `- ${s}`), '');
+  if (plan.fileHints.length) lines.push('Files:', ...plan.fileHints.map((f) => `- ${f}`), '');
+  if (plan.options.length) lines.push('Decisions:', ...plan.options.map((o) => `- ${o}`), '');
+  return lines.join('\n').trim();
+}
 
 const ICONS: Record<string, LucideIcon> = {
   LayoutDashboard, Users, Store, MessageSquare, GraduationCap, Home, Briefcase, ShieldCheck,
@@ -23,6 +34,10 @@ export default function NewProject() {
   const [prompt, setPrompt] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Plan-first: when on, we propose a plan to approve before generating any files.
+  const [planFirst, setPlanFirst] = useState(false);
+  const [plan, setPlan] = useState<EditPlan | null>(null);
+  const [planProjectId, setPlanProjectId] = useState<string | null>(null);
 
   const pickTemplate = (slug: string) => {
     const t = TEMPLATES.find((x) => x.slug === slug)!;
@@ -37,8 +52,31 @@ export default function NewProject() {
     try {
       const project = await createProject(text.slice(0, 60), selected ?? undefined);
       if (!project) throw new Error('Could not create the project. Check your Supabase connection.');
+
+      if (planFirst) {
+        // Propose a plan first — generate nothing yet.
+        const { plan } = await draftGenerationPlan(text);
+        setPlan(plan);
+        setPlanProjectId(project.id);
+        setBusy(false);
+        return;
+      }
+
       await startGeneration(project.id, text);
       navigate(`/project/${project.id}`);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Generation could not start.');
+      setBusy(false);
+    }
+  };
+
+  // Approve the proposed plan and build the app, following the approved plan.
+  const approveAndBuild = async () => {
+    if (!planProjectId || !plan) return;
+    setBusy(true);
+    try {
+      await startGeneration(planProjectId, prompt.trim(), planToText(plan));
+      navigate(`/project/${planProjectId}`);
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Generation could not start.');
       setBusy(false);
@@ -61,12 +99,42 @@ export default function NewProject() {
             className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-forge-dim/60"
           />
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-[11px] text-forge-dim">{prompt.length}/2000</span>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-forge-dim">{prompt.length}/2000</span>
+              <button
+                type="button"
+                onClick={() => setPlanFirst((v) => !v)}
+                aria-pressed={planFirst}
+                title="Propose a plan to review before generating any files"
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+                  planFirst ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
+                )}
+              >
+                <ClipboardList size={12} /> Plan first
+                <span className={cn('ml-1 rounded px-1 text-[9px] font-medium', planFirst ? 'bg-forge-ember/30 text-forge-ink' : 'bg-forge-border/40 text-forge-dim')}>
+                  {planFirst ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            </div>
             <Button onClick={forge} loading={busy} disabled={!prompt.trim()}>
-              <Sparkles size={15} /> Forge app
+              <Sparkles size={15} /> {planFirst ? 'Plan it' : 'Forge app'}
             </Button>
           </div>
         </Card>
+
+        {plan && (
+          <div className="mt-4">
+            <PlanCard plan={plan} onApprove={approveAndBuild} approveLabel="Approve & build app" />
+            <button
+              type="button"
+              onClick={() => { setPlan(null); setPlanProjectId(null); }}
+              className="mt-2 text-[11px] text-forge-dim hover:text-forge-ink"
+            >
+              ← Discard plan and edit the prompt
+            </button>
+          </div>
+        )}
 
         <h2 className="mt-8 text-xs font-medium uppercase tracking-wide text-forge-dim">Start from a template</h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

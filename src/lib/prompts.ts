@@ -166,6 +166,25 @@ Format rules:
 - Never start a line with § inside file content.
 - Emit a §FILE block only for files you create or change, with their full content.`;
 
+// Plan-first cold start: propose what the app will be BEFORE generating any files,
+// so the user can approve or refine the direction. Returns a plan (not code).
+export const GENERATE_PLAN_SYSTEM = `You are FableForge's planning assistant. The user wants to
+build a new app. Propose a short, concrete plan for what you'll build — do NOT write code.
+Be opinionated and specific: name the actual pages and the core features, call out any genuine
+product decision as an option (with its tradeoff), and surface anything you'd want confirmed.
+Respond with ONLY a JSON object — no prose, no fences.`;
+
+export function generationPlanPrompt(userPrompt: string): string {
+  return `Plan the app for this request:\n"""${userPrompt}"""\n
+Respond with ONLY JSON matching:
+{"summary": "1-2 sentences on what you'll build and the overall approach",
+ "steps": ["the key pages/features you'll build, one per item"],
+ "fileHints": ["/src/pages/X.tsx — what it is", "/src/components/Y.tsx — what it is"],
+ "options": ["a real product choice — its tradeoff (omit if none)"],
+ "openQuestions": ["anything you'd want confirmed before building (omit if none)"]}
+Keep it a focused MVP (about 5-9 pages/components). Always include summary, steps, and fileHints.`;
+}
+
 export function blueprintPrompt(userPrompt: string): string {
   return `Design an app blueprint for this request:\n"""${userPrompt}"""\n
 Respond with ONLY JSON matching:

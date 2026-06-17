@@ -10,7 +10,7 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, filesPromptStream, editPrompt } from './prompts';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, filesPromptStream, editPrompt } from './prompts';
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
 import type { EditPlan } from '../types';
@@ -52,14 +52,36 @@ export interface EditResult {
 // Public API
 // ----------------------------------------------------------------
 
-export async function startGeneration(projectId: string, prompt: string): Promise<GenerateResult> {
-  if (DIRECT) return directGenerate(projectId, prompt);
+export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
+  if (DIRECT) return directGenerate(projectId, prompt, planContext);
   const { data, error } = await supabase.functions.invoke('generate-app', {
-    body: { projectId, prompt },
+    body: { projectId, prompt, planContext },
   });
   if (error) throw new Error(await readFnError(error));
   if (data?.error) throw new Error(data.error);
   return data as GenerateResult;
+}
+
+// Plan-first cold start: propose the app (pages, features, files) for the user to approve
+// BEFORE generating any files. A single lightweight model call — generates nothing. The
+// approved plan is later passed to startGeneration() as planContext so the build follows it.
+export async function draftGenerationPlan(prompt: string): Promise<{ plan: EditPlan }> {
+  const raw = await rawComplete([
+    { role: 'system', content: GENERATE_PLAN_SYSTEM },
+    { role: 'user', content: generationPlanPrompt(prompt) },
+  ], 4000);
+  const p = await parseJsonWithRepair<{
+    summary?: string; steps?: string[]; fileHints?: string[]; options?: string[]; openQuestions?: string[];
+  }>(raw.text);
+  return {
+    plan: {
+      summary: (p.summary ?? '').trim(),
+      steps: p.steps ?? [],
+      fileHints: p.fileHints ?? [],
+      options: p.options ?? [],
+      openQuestions: p.openQuestions ?? [],
+    },
+  };
 }
 
 export async function sendEdit(
@@ -211,7 +233,7 @@ async function parseJsonWithRepair<T>(raw: string): Promise<T> {
   }
 }
 
-async function directGenerate(projectId: string, prompt: string): Promise<GenerateResult> {
+async function directGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
 
@@ -240,9 +262,14 @@ async function directGenerate(projectId: string, prompt: string): Promise<Genera
       await mark('interpret', 'done');
 
       await mark('blueprint', 'running');
+      // If the user approved a plan up front, fold it into the blueprint request so the
+      // generated app follows what they signed off on.
+      const bpUserPrompt = planContext
+        ? `${prompt}\n\nThe user reviewed and approved this plan — follow it:\n${planContext}`
+        : prompt;
       const bpRaw = await rawComplete([
         { role: 'system', content: GENERATE_SYSTEM },
-        { role: 'user', content: blueprintPrompt(prompt) },
+        { role: 'user', content: blueprintPrompt(bpUserPrompt) },
       ]);
       const blueprint = await parseJsonWithRepair<Record<string, unknown>>(bpRaw.text);
       await supabase.from('app_blueprints').insert({ project_id: projectId, ...blueprint });
