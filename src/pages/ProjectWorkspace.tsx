@@ -13,7 +13,7 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Modal } from '../components/ui';
 import { cn } from '../lib/utils';
-import type { Project, Deployment } from '../types';
+import type { Project, Deployment, EditPlan } from '../types';
 
 type MiddleTab = 'chat' | 'code';
 
@@ -38,6 +38,8 @@ export default function ProjectWorkspace() {
   const [deploying, setDeploying] = useState(false);
   // Quick-reply chips offered when the assistant asks a clarifying question.
   const [askOptions, setAskOptions] = useState<string[]>([]);
+  // A plan the assistant proposed (plan mode) awaiting the user's approval.
+  const [pendingPlan, setPendingPlan] = useState<EditPlan | null>(null);
   // Live edit progress while the assistant streams its response.
   const [stream, setStream] = useState<{ explanation: string; files: { path: string; done: boolean }[] } | null>(null);
 
@@ -107,6 +109,13 @@ export default function ProjectWorkspace() {
     }
   }, []);
 
+  // Approve the proposed plan: clear it and send a follow-up that the model
+  // recognizes as approval, which routes it straight to an edit that implements the plan.
+  const approvePlan = () => {
+    setPendingPlan(null);
+    void handleSend('Approved — go ahead and implement this plan now, exactly as described.');
+  };
+
   const open = (path: string) => {
     setOpenPaths((p) => (p.includes(path) ? p : [...p, path]));
     setActivePath(path);
@@ -126,6 +135,7 @@ export default function ProjectWorkspace() {
     setBusy(true);
     setTab('chat');
     setAskOptions([]); // clear any stale quick-replies from a prior question
+    setPendingPlan(null); // clear any prior plan once a new turn starts
     try {
       if (files.length === 0) {
         await startGeneration(id, message);
@@ -134,6 +144,8 @@ export default function ProjectWorkspace() {
         const result = await sendEdit(id, message, previewError, onStreamEvent);
         if (result.action === 'ask') {
           setAskOptions(result.options ?? []);
+        } else if (result.action === 'plan') {
+          if (result.plan) setPendingPlan(result.plan);
         } else {
           toast('success', `Updated ${result.changed.length} file${result.changed.length === 1 ? '' : 's'}.`);
           // Drop drafts for files the AI just rewrote — its version supersedes the
@@ -221,7 +233,7 @@ export default function ProjectWorkspace() {
 
           <div className={cn('min-w-0 border-r border-forge-border', tab === 'chat' ? 'w-full md:w-[380px] md:shrink-0' : 'flex-1')}>
             {tab === 'chat' ? (
-              <ChatPanel messages={messages} activeGeneration={activeGeneration} busy={busy} askOptions={askOptions} stream={stream} onSend={(m) => handleSend(m)} />
+              <ChatPanel messages={messages} activeGeneration={activeGeneration} busy={busy} askOptions={askOptions} plan={pendingPlan} onApprovePlan={approvePlan} stream={stream} onSend={(m) => handleSend(m)} />
             ) : (
               <CodeEditorPane
                 files={files}

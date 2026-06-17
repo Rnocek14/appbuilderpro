@@ -80,6 +80,18 @@ export interface AIMessage {
   created_at: string;
 }
 
+// A proposed implementation plan the assistant presents before writing code
+// (plan mode). The user approves it, refines it in chat, or discusses — no
+// files change until approval. Named EditPlan to avoid clashing with the
+// billing `Plan` type above.
+export interface EditPlan {
+  summary: string;
+  steps: string[];
+  fileHints: string[];
+  options: string[];
+  openQuestions: string[];
+}
+
 export interface Subscription {
   id: string;
   user_id: string;

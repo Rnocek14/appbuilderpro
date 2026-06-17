@@ -13,6 +13,7 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, filesPromptStream, editPrompt } from './prompts';
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
+import type { EditPlan } from '../types';
 
 export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'local';
 
@@ -35,12 +36,14 @@ export type EditEvent =
   | { type: 'done' };
 export interface EditResult {
   // 'ask' = the assistant needs clarification and changed nothing yet.
+  // 'plan' = the assistant proposed a plan to approve; no files changed yet.
   // 'edit' = files were modified. Defaults to 'edit' for backward compatibility
   // with edge-function responses that predate the conversational protocol.
-  action: 'edit' | 'ask';
+  action: 'edit' | 'ask' | 'plan';
   explanation: string;
   question?: string;
   options?: string[];
+  plan?: EditPlan;
   changed: string[];
   deleted: string[];
 }
@@ -90,7 +93,7 @@ async function edgeEditStream(
     throw new Error(body?.error ?? `chat-edit failed (${res.status})`);
   }
 
-  interface DoneMsg { action?: string; explanation?: string; question?: string; options?: string[]; changed?: string[]; deleted?: string[] }
+  interface DoneMsg { action?: string; explanation?: string; question?: string; options?: string[]; plan?: EditPlan; changed?: string[]; deleted?: string[] }
   const parser = makeStreamParser((e) => onEvent?.(e));
   // Holder object so the assignments inside the SSE callback survive TS flow analysis.
   const held: { final: DoneMsg | null; error: string | null } = { final: null, error: null };
@@ -106,11 +109,13 @@ async function edgeEditStream(
 
   if (held.error) throw new Error(held.error);
   if (!held.final) throw new Error('The edit stream ended unexpectedly.');
+  const action = held.final.action === 'ask' ? 'ask' : held.final.action === 'plan' ? 'plan' : 'edit';
   return {
-    action: held.final.action === 'ask' ? 'ask' : 'edit',
+    action,
     explanation: held.final.explanation ?? '',
     question: held.final.question,
     options: held.final.options ?? [],
+    plan: held.final.plan,
     changed: held.final.changed ?? [],
     deleted: held.final.deleted ?? [],
   };
@@ -334,6 +339,7 @@ async function directEdit(projectId: string, message: string, previewError?: str
   ], 16000);
   const parsed = await parseJsonWithRepair<{
     action?: string; explanation?: string; question?: string; options?: string[];
+    summary?: string; steps?: string[]; fileHints?: string[]; openQuestions?: string[];
     changes?: { path: string; content: string }[]; deletions?: string[];
   }>(raw.text);
 
@@ -343,6 +349,18 @@ async function directEdit(projectId: string, message: string, previewError?: str
       project_id: projectId, user_id: userId, role: 'assistant', content: parsed.question,
     });
     return { action: 'ask', explanation: '', question: parsed.question, options: parsed.options ?? [], changed: [], deleted: [] };
+  }
+
+  // Plan mode: proposed a plan, no files changed. Record it and hand it to the UI.
+  if (parsed.action === 'plan' && (parsed.summary || parsed.steps?.length)) {
+    const plan: EditPlan = {
+      summary: (parsed.summary ?? '').trim(), steps: parsed.steps ?? [],
+      fileHints: parsed.fileHints ?? [], options: parsed.options ?? [], openQuestions: parsed.openQuestions ?? [],
+    };
+    await supabase.from('ai_messages').insert({
+      project_id: projectId, user_id: userId, role: 'assistant', content: renderPlanText(plan),
+    });
+    return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
   for (const c of parsed.changes ?? []) {
@@ -450,15 +468,45 @@ interface ParsedEdit {
   options: string[];
   changes: { path: string; content: string }[];
   deletions: string[];
+  // plan-mode fields
+  summary: string;
+  steps: string[];
+  fileHints: string[];
+  openQuestions: string[];
+}
+
+/** Project the parsed protocol's plan fields into the public EditPlan shape. */
+function toEditPlan(p: { summary: string; steps: string[]; fileHints: string[]; options: string[]; openQuestions: string[] }): EditPlan {
+  return {
+    summary: p.summary.trim(),
+    steps: p.steps,
+    fileHints: p.fileHints,
+    options: p.options,
+    openQuestions: p.openQuestions,
+  };
+}
+
+/** A readable markdown rendering of a plan, stored in ai_messages so it persists in chat. */
+function renderPlanText(plan: EditPlan): string {
+  const lines = [`**Plan:** ${plan.summary}`, ''];
+  if (plan.steps.length) { lines.push('Steps:'); plan.steps.forEach((s, i) => lines.push(`${i + 1}. ${s}`)); lines.push(''); }
+  if (plan.fileHints.length) { lines.push('Files:'); plan.fileHints.forEach((f) => lines.push(`• ${f}`)); lines.push(''); }
+  if (plan.options.length) { lines.push('Options:'); plan.options.forEach((o) => lines.push(`• ${o}`)); lines.push(''); }
+  if (plan.openQuestions.length) { lines.push('Open questions:'); plan.openQuestions.forEach((q) => lines.push(`• ${q}`)); lines.push(''); }
+  lines.push('_Approve to build, or reply to change the plan._');
+  return lines.join('\n').trim();
 }
 
 /** Incrementally parse the §-delimited edit protocol, emitting progress events. */
 function makeStreamParser(emit: (e: EditEvent) => void) {
   let buf = '';
-  let section: 'explanation' | 'file' | 'question' | null = null;
+  let section: 'explanation' | 'file' | 'question' | 'summary' | null = null;
   let curPath: string | null = null;
   let curContent = '';
-  const out: ParsedEdit = { action: 'edit', explanation: '', question: '', options: [], changes: [], deletions: [] };
+  const out: ParsedEdit = {
+    action: 'edit', explanation: '', question: '', options: [], changes: [], deletions: [],
+    summary: '', steps: [], fileHints: [], openQuestions: [],
+  };
 
   const finishSection = () => {
     if (section === 'file' && curPath !== null) {
@@ -473,6 +521,10 @@ function makeStreamParser(emit: (e: EditEvent) => void) {
       const rest = line.slice(1);
       if (rest.startsWith('ACTION')) { finishSection(); out.action = rest.slice(6).trim() || 'edit'; section = null; }
       else if (rest.startsWith('EXPLANATION')) { finishSection(); section = 'explanation'; }
+      else if (rest.startsWith('SUMMARY')) { finishSection(); section = 'summary'; }
+      else if (rest.startsWith('STEP')) { finishSection(); const s = rest.slice(4).trim(); if (s) out.steps.push(s); section = null; }
+      // FILEHINT must be checked before FILE — both start with "FILE".
+      else if (rest.startsWith('FILEHINT')) { finishSection(); const h = rest.slice(8).trim(); if (h) out.fileHints.push(h); section = null; }
       else if (rest.startsWith('FILE')) {
         finishSection(); curPath = rest.slice(4).trim(); section = 'file';
         emit({ type: 'file-start', path: curPath });
@@ -482,6 +534,7 @@ function makeStreamParser(emit: (e: EditEvent) => void) {
         if (p) { out.deletions.push(p); emit({ type: 'deletion', path: p }); }
         section = null;
       } else if (rest.startsWith('QUESTION')) { finishSection(); section = 'question'; }
+      else if (rest.startsWith('OPENQ')) { finishSection(); const q = rest.slice(5).trim(); if (q) out.openQuestions.push(q); section = null; }
       else if (rest.startsWith('OPTION')) {
         finishSection();
         const o = rest.slice(6).trim();
@@ -491,6 +544,9 @@ function makeStreamParser(emit: (e: EditEvent) => void) {
     } else if (section === 'explanation') {
       out.explanation += (out.explanation ? '\n' : '') + line;
       emit({ type: 'explanation', text: out.explanation });
+    } else if (section === 'summary') {
+      out.summary += (out.summary ? '\n' : '') + line;
+      emit({ type: 'explanation', text: out.summary });
     } else if (section === 'file') {
       curContent += line + '\n';
     } else if (section === 'question') {
@@ -549,6 +605,18 @@ async function directEditStream(
     });
     onEvent?.({ type: 'done' });
     return { action: 'ask', explanation: '', question: result.question, options: result.options, changed: [], deleted: [] };
+  }
+
+  // Plan mode: the assistant proposed a plan. Change NO files; record the plan as an
+  // assistant message (so it stays in the conversation context) and hand it to the UI
+  // for approval. Approval comes back as a normal follow-up edit.
+  if (result.action === 'plan' && (result.summary || result.steps.length)) {
+    const plan = toEditPlan(result);
+    await supabase.from('ai_messages').insert({
+      project_id: projectId, user_id: userId, role: 'assistant', content: renderPlanText(plan),
+    });
+    onEvent?.({ type: 'done' });
+    return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
   // Apply atomically once the stream completes: progressive writes would flash transient
