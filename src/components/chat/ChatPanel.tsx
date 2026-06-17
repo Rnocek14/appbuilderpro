@@ -46,13 +46,15 @@ interface Props {
 
 /** The plan card: what the assistant proposes before writing any code. */
 function PlanCard({ plan, onApprove }: { plan: EditPlan; onApprove?: () => void }) {
+  // An implementation plan names files it will touch; an analysis/audit plan does not.
+  const isImplementation = plan.fileHints.length > 0;
   return (
     <div className="rounded-xl border border-forge-ember/40 bg-forge-raised p-3 shadow-ember">
       <div className="flex items-center gap-2">
         <ClipboardList size={15} className="text-forge-ember" />
-        <span className="font-display text-sm font-medium">Proposed plan</span>
+        <span className="font-display text-sm font-medium">{isImplementation ? 'Proposed plan' : 'Proposed approach'}</span>
         <span className="ml-auto rounded-full border border-forge-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-forge-dim">
-          no files changed yet
+          {isImplementation ? 'no files changed yet' : 'analysis · no code'}
         </span>
       </div>
       {plan.summary && <p className="mt-2 whitespace-pre-wrap text-sm text-forge-ink">{plan.summary}</p>}
@@ -90,7 +92,7 @@ function PlanCard({ plan, onApprove }: { plan: EditPlan; onApprove?: () => void 
 
       <div className="mt-3 flex items-center gap-2">
         <Button size="sm" onClick={onApprove}>
-          <Check size={14} /> Approve &amp; build
+          <Check size={14} /> {isImplementation ? 'Approve & build' : 'Approve & continue'}
         </Button>
         <span className="text-[11px] text-forge-dim">…or reply below to change the plan.</span>
       </div>

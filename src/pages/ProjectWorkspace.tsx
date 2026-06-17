@@ -109,11 +109,17 @@ export default function ProjectWorkspace() {
     }
   }, []);
 
-  // Approve the proposed plan: clear it and send a follow-up that the model
-  // recognizes as approval, which routes it straight to an edit that implements the plan.
+  // Approve the proposed plan: clear it and send a follow-up the model recognizes as
+  // approval. Implementation plans (with file hints) route to an edit; analysis/audit
+  // plans (no files) route to the model carrying out the analysis and reporting back.
   const approvePlan = () => {
+    const isBuild = (pendingPlan?.fileHints.length ?? 0) > 0;
     setPendingPlan(null);
-    void handleSend('Approved — go ahead and implement this plan now, exactly as described.');
+    void handleSend(
+      isBuild
+        ? 'Approved — go ahead and implement this plan now, exactly as described.'
+        : 'Approved — go ahead and carry out this plan; report your findings.',
+    );
   };
 
   const open = (path: string) => {
@@ -147,7 +153,9 @@ export default function ProjectWorkspace() {
         } else if (result.action === 'plan') {
           if (result.plan) setPendingPlan(result.plan);
         } else {
-          toast('success', `Updated ${result.changed.length} file${result.changed.length === 1 ? '' : 's'}.`);
+          toast('success', result.changed.length
+            ? `Updated ${result.changed.length} file${result.changed.length === 1 ? '' : 's'}.`
+            : 'Done — see the assistant’s reply.');
           // Drop drafts for files the AI just rewrote — its version supersedes the
           // stale unsaved overlay, so the preview shows the actual new content.
           if (result.changed.length) {
