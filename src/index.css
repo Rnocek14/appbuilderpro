@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html.light { color-scheme: light; }
+
+body {
+  @apply bg-forge-bg text-forge-ink font-body antialiased;
+}
+
+html.light body {
+  @apply bg-[#F7F6F3] text-[#1B1D24];
+}
+
+::selection { background: rgba(255, 138, 61, 0.35); }
+
+/* focus visibility — quality floor */
+:focus-visible {
+  outline: 2px solid #ff8a3d;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* thin scrollbars for panels */
+.panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.panel-scroll::-webkit-scrollbar-thumb { background: #262b3a; border-radius: 8px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* the forge signature: molten seam under active elements */
+.ember-seam {
+  position: relative;
+}
+.ember-seam::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ff8a3d 30%, #ffb573 50%, #ff8a3d 70%, transparent);
+  border-radius: 2px;
+}

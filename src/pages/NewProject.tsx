@@ -1,0 +1,97 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Sparkles, LayoutDashboard, Users, Store, MessageSquare,
+  GraduationCap, Home, Briefcase, ShieldCheck, type LucideIcon,
+} from 'lucide-react';
+import { AppShell } from '../components/layout/AppShell';
+import { useProjects } from '../hooks/useProjectData';
+import { startGeneration } from '../lib/aiClient';
+import { useToast } from '../context/ToastContext';
+import { Button, Card } from '../components/ui';
+import { TEMPLATES } from '../data/templates';
+import { cn } from '../lib/utils';
+
+const ICONS: Record<string, LucideIcon> = {
+  LayoutDashboard, Users, Store, MessageSquare, GraduationCap, Home, Briefcase, ShieldCheck,
+};
+
+export default function NewProject() {
+  const navigate = useNavigate();
+  const { createProject } = useProjects();
+  const { toast } = useToast();
+  const [prompt, setPrompt] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const pickTemplate = (slug: string) => {
+    const t = TEMPLATES.find((x) => x.slug === slug)!;
+    setSelected(slug === selected ? null : slug);
+    setPrompt(slug === selected ? '' : t.prompt);
+  };
+
+  const forge = async () => {
+    const text = prompt.trim();
+    if (text.length < 12) return toast('error', 'Describe the app in a bit more detail — at least a sentence.');
+    setBusy(true);
+    try {
+      const project = await createProject(text.slice(0, 60), selected ?? undefined);
+      if (!project) throw new Error('Could not create the project. Check your Supabase connection.');
+      await startGeneration(project.id, text);
+      navigate(`/project/${project.id}`);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Generation could not start.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AppShell>
+      <div className="mx-auto max-w-3xl">
+        <h1 className="font-display text-xl font-semibold">What should we forge?</h1>
+        <p className="mt-1 text-sm text-forge-dim">Describe the app in plain language, or heat up a template and adjust it.</p>
+
+        <Card className="mt-5 p-4">
+          <textarea
+            value={prompt}
+            onChange={(e) => { setPrompt(e.target.value); setSelected(null); }}
+            rows={4}
+            placeholder="e.g. A habit tracker with streaks, a weekly heatmap, and reminders. Clean dark UI."
+            aria-label="Describe your app"
+            className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-forge-dim/60"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-[11px] text-forge-dim">{prompt.length}/2000</span>
+            <Button onClick={forge} loading={busy} disabled={!prompt.trim()}>
+              <Sparkles size={15} /> Forge app
+            </Button>
+          </div>
+        </Card>
+
+        <h2 className="mt-8 text-xs font-medium uppercase tracking-wide text-forge-dim">Start from a template</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {TEMPLATES.map((t) => {
+            const Icon = ICONS[t.icon] ?? Sparkles;
+            return (
+              <button
+                key={t.slug}
+                onClick={() => pickTemplate(t.slug)}
+                aria-pressed={selected === t.slug}
+                className={cn(
+                  'rounded-xl border p-4 text-left transition-colors',
+                  selected === t.slug
+                    ? 'border-forge-ember/60 bg-forge-ember/10 shadow-ember'
+                    : 'border-forge-border bg-forge-panel hover:border-forge-ember/40',
+                )}
+              >
+                <Icon size={16} className="text-forge-ember" />
+                <p className="mt-2 font-display text-sm font-semibold">{t.name}</p>
+                <p className="mt-0.5 text-[11px] text-forge-dim">{t.tagline}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </AppShell>
+  );
+}

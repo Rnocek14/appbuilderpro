@@ -1,0 +1,37 @@
+{
+  "name": "fableforge",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "db:push": "supabase db push",
+    "functions:deploy": "supabase functions deploy generate-app chat-edit"
+  },
+  "dependencies": {
+    "@codesandbox/sandpack-react": "^2.19.10",
+    "@monaco-editor/react": "^4.6.0",
+    "@supabase/supabase-js": "^2.45.4",
+    "diff": "^7.0.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.453.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2",
+    "recharts": "^2.13.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^5.2.2",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8"
+  }
+}
