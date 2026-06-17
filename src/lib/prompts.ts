@@ -1,6 +1,22 @@
 // Prompt templates shared by direct mode; the edge functions carry their own copies
 // so they can be tuned independently of client releases.
 
+// The platform's hard runtime constraints. Injected into the planning/advisory prompts (map,
+// roadmap, ideation, autopilot) so they never recommend or build something the in-browser Vite
+// runtime can't actually run — e.g. swapping CDN Tailwind for a PostCSS build.
+export const PLATFORM_CONSTRAINTS = `PLATFORM CONSTRAINTS — this app runs in FableForge's in-browser
+Vite runtime. Respect these absolutely; never recommend, plan, or make changes that violate them,
+and never treat them as "gaps" to fix:
+- Tailwind is loaded via CDN — there is NO PostCSS step, no tailwind.config processing, no CSS
+  build. Do NOT replace CDN Tailwind with a PostCSS/local install; the runtime cannot build it.
+- Only these packages may be imported: react, react-dom, react-router-dom, lucide-react, recharts,
+  @supabase/supabase-js, date-fns, clsx. Do not introduce others.
+- Browser only — never use Node built-ins (fs, path, crypto, …); use the global crypto.randomUUID()
+  for IDs.
+- Persist data with localStorage; mark real-backend spots with // INTEGRATION: comments.
+- The build files (/package.json, /vite.config.ts, /tsconfig.json, /index.html, /src/main.tsx)
+  are fixed — do not modify them.`;
+
 const GENERATE_CORE = `You are FableForge's code generation engine. You generate complete, runnable,
 production-quality React apps as real Vite + TypeScript projects that run in an in-browser
 Vite runtime and can be deployed as-is.
@@ -68,8 +84,9 @@ PROJECT SHAPE:
 - Real Vite + TypeScript. Entry /src/main.tsx -> /src/App.tsx (defines the <Routes>). Pages in
   /src/pages/*.tsx, components in /src/components/*.tsx, helpers in /src/lib/*.ts.
 - TypeScript + JSX (.tsx/.ts). Write valid TS; every import must resolve, every referenced file
-  must exist. Do not edit /package.json, /vite.config.ts, /tsconfig.json, /index.html, or
-  /src/main.tsx unless strictly necessary.
+  must exist. NEVER replace CDN Tailwind with a PostCSS/build-time setup, and do NOT modify the
+  build files (/package.json, /vite.config.ts, /tsconfig.json, /index.html, /src/main.tsx) — the
+  in-browser runtime can't build them. If a request seems to require that, stop and explain instead.
 - Routing: react-router-dom (router is <HashRouter>, set up in main.tsx). Navigate with
   <Link>/useNavigate only — never a raw <a href> to an internal route. Styling: Tailwind
   utility classes (loaded via CDN — no config).
@@ -263,7 +280,9 @@ Cover, in short markdown sections:
 - Stubbed or incomplete — fake players, localStorage placeholders, // INTEGRATION markers, dead code
 - Key gaps — the most important things missing for this to be a real product
 Ground every line in the actual code. Be specific (name files/features). No code blocks unless
-essential. Keep it under ~400 words — this is a map, not a report.`;
+essential. Keep it under ~400 words — this is a map, not a report.
+
+${PLATFORM_CONSTRAINTS}`;
 
 export function projectMapPrompt(codeDigest: string): string {
   return `Here is the app's source code:\n${codeDigest}\n\nProduce the project map now.`;
@@ -289,7 +308,9 @@ effort tag (small / moderate / large / foundational); and where relevant tag it:
 [API: <specific service>] when it needs an external integration (name it — e.g. Stripe, Resend,
 Clerk, Mux, OpenAI), [AUTOMATE] for an automation opportunity (job/cron/webhook/ingestion),
 [GAP] when it closes a gap the Map flagged. Be honest about what's foundational vs cosmetic.
-Clean markdown, skimmable.`;
+Clean markdown, skimmable.
+
+${PLATFORM_CONSTRAINTS}`;
 
 export function roadmapPrompt(brain: string, map: string, codeDigest: string): string {
   return [
@@ -307,7 +328,9 @@ go — 3-5 distinct, ambitious-but-grounded directions. For each: a bold title; 
 pitch; why it fits (or productively stretches) the North Star; what it would take (effort:
 small/moderate/large/foundational); and the upside + the main risk. Range from natural next
 expansions to bigger pivots. Be specific to THIS app — never generic. End with the single
-direction you'd bet on and why. Clean, skimmable markdown.`;
+direction you'd bet on and why. Clean, skimmable markdown.
+
+${PLATFORM_CONSTRAINTS}`;
 
 export function ideationPrompt(brain: string, map: string, codeDigest: string): string {
   return [
@@ -324,14 +347,18 @@ BRAIN (intent/North Star/decisions), MAP (current state, stubs, gaps), ROADMAP, 
 decide the SINGLE most valuable next step to move the app toward its goals. Return ONE concrete,
 buildable change — small enough to implement in a single focused edit, NOT a whole feature.
 
-- If the next step needs a product decision you must not guess (auth model, payment provider, a
-  fork in direction, anything destructive or irreversible), return action "ask" with a precise
-  question and 2-4 options.
+- If the next step is FOUNDATIONAL — it changes the build setup or runtime, swaps the styling
+  system, wires a backend (auth, database, Supabase), or needs a product decision you must not
+  guess (auth model, payment provider, a fork in direction, anything destructive or irreversible)
+  — return action "ask" with a precise question and 2-4 options. Autonomous building is ONLY for
+  small, reversible, scoped changes; escalate anything foundational to the user.
 - If the Brain's goals and the roadmap's "Now" items are essentially satisfied, return action "done".
 - Otherwise return action "build" with a precise, scoped instruction the build step can execute.
 
 Honor the Brain's decisions and constraints. Respond with ONLY JSON:
-{"action":"build|ask|done","title":"short label","instruction":"the exact change to make (build)","question":"the decision needed (ask)","options":["..."],"rationale":"why this is the next step"}`;
+{"action":"build|ask|done","title":"short label","instruction":"the exact change to make (build)","question":"the decision needed (ask)","options":["..."],"rationale":"why this is the next step"}
+
+${PLATFORM_CONSTRAINTS}`;
 
 export function autopilotDecidePrompt(brain: string, map: string, roadmap: string, codeDigest: string, done: string[]): string {
   return [
