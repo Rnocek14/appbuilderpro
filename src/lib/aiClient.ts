@@ -69,6 +69,17 @@ export async function startGeneration(projectId: string, prompt: string, planCon
 export async function researchAnswer(
   projectId: string, message: string, onEvent?: (e: EditEvent) => void,
 ): Promise<EditResult> {
+  // Production path: the research edge function holds the key and runs web search server-side.
+  if (!DIRECT) {
+    onEvent?.({ type: 'start' });
+    onEvent?.({ type: 'explanation', text: 'Reading your code, then searching the web…' });
+    const { data, error } = await supabase.functions.invoke('research', { body: { projectId, message } });
+    onEvent?.({ type: 'done' });
+    if (error) throw new Error(await readFnError(error));
+    if (data?.error) throw new Error(data.error);
+    return { action: 'discuss', explanation: (data as { answer?: string })?.answer ?? '', changed: [], deleted: [] };
+  }
+
   if (PROVIDER !== 'anthropic') throw new Error('Research currently requires the Anthropic provider (set VITE_AI_PROVIDER=anthropic).');
   if (!KEY) throw new Error('Research needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
 
@@ -153,6 +164,16 @@ function buildCodeDigest(files: { path: string; content: string }[]): string {
 // BEFORE generating any files. A single lightweight model call — generates nothing. The
 // approved plan is later passed to startGeneration() as planContext so the build follows it.
 export async function draftGenerationPlan(prompt: string): Promise<{ plan: EditPlan }> {
+  // Production path: the draft-plan edge function holds the key.
+  if (!DIRECT) {
+    const { data, error } = await supabase.functions.invoke('draft-plan', { body: { prompt } });
+    if (error) throw new Error(await readFnError(error));
+    if (data?.error) throw new Error(data.error);
+    const p = (data as { plan?: EditPlan })?.plan;
+    if (!p) throw new Error('Could not draft a plan.');
+    return { plan: p };
+  }
+
   const raw = await rawComplete([
     { role: 'system', content: GENERATE_PLAN_SYSTEM },
     { role: 'user', content: generationPlanPrompt(prompt) },

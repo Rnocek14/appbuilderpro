@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
-  const { projectId, prompt } = await req.json();
+  const { projectId, prompt, planContext } = await req.json();
   if (!projectId || !prompt) return json({ error: 'projectId and prompt are required' }, 400);
 
   // ownership + plan limit checks
@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
   if (genErr) return json({ error: genErr.message }, 500);
 
   // run pipeline in background; respond immediately with the generation id
-  runPipeline(supabaseAdmin, gen.id, projectId, user.id, prompt).catch(async (err) => {
+  runPipeline(supabaseAdmin, gen.id, projectId, user.id, prompt, planContext).catch(async (err) => {
     await supabaseAdmin.from('project_generations').update({
       status: 'failed', error: String(err), finished_at: new Date().toISOString(),
     }).eq('id', gen.id);
@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
   return json({ generationId: gen.id });
 });
 
-async function runPipeline(db: SupabaseClient, genId: string, projectId: string, userId: string, prompt: string) {
+async function runPipeline(db: SupabaseClient, genId: string, projectId: string, userId: string, prompt: string, planContext?: string) {
   let totalIn = 0, totalOut = 0, totalCost = 0;
   const stageLog: { stage: Stage; status: string; started_at: string; finished_at?: string; note?: string }[] = [];
 
@@ -121,7 +121,8 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
   await mark('blueprint', 'running');
   const blueprintRaw = await ask([
     { role: 'system', content: SYSTEM },
-    { role: 'user', content: `Design an app blueprint for this request:\n"""${prompt}"""\n
+    { role: 'user', content: `Design an app blueprint for this request:\n"""${prompt}"""\n` +
+      (planContext ? `\nThe user reviewed and approved this plan — follow it:\n${planContext}\n` : '') + `
 Respond with ONLY JSON matching:
 {"app_name": str, "description": str,
  "user_roles": [{"name": str, "permissions": [str]}],

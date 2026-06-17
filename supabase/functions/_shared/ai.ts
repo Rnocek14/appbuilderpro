@@ -199,6 +199,49 @@ export async function completeStream(
   return { text: full, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, inTok, outTok) };
 }
 
+export interface AIResearchResult extends AIResult {
+  sources: string[];
+}
+
+/**
+ * Anthropic-only: a completion with the built-in web_search tool enabled. Anthropic runs the
+ * searches server-side and returns synthesized text + citations. Used by the research function.
+ */
+export async function completeWithWebSearch(
+  messages: AIMessage[],
+  opts: { model?: string; maxTokens?: number; maxUses?: number } = {},
+): Promise<AIResearchResult> {
+  const model = opts.model ?? getProviderConfig().model;
+  const maxTokens = opts.maxTokens ?? 8000;
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
+  const rest = messages.filter((m) => m.role !== 'system');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      system,
+      messages: rest,
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: opts.maxUses ?? 10 }],
+    }),
+  });
+  if (!res.ok) throw new Error(`anthropic ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  const blocks = (data.content ?? []) as Array<{ type: string; text?: string; citations?: Array<{ url?: string; title?: string }> }>;
+  const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
+  const sources = new Set<string>();
+  for (const b of blocks) for (const c of b.citations ?? []) if (c.url) sources.add(`${c.title ?? c.url} — ${c.url}`);
+  const inTok = data.usage?.input_tokens ?? 0;
+  const outTok = data.usage?.output_tokens ?? 0;
+  return { text, sources: [...sources], inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, inTok, outTok) };
+}
+
 /** Strip markdown fences and parse JSON safely. */
 export function parseJson<T>(raw: string): T {
   const clean = raw.replace(/```json|```/g, '').trim();
