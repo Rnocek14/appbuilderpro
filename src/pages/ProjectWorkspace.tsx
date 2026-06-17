@@ -7,7 +7,7 @@ import { CodeEditorPane } from '../components/editor/CodeEditorPane';
 import { PreviewPane } from '../components/editor/PreviewPane';
 import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
-import { sendEdit, startGeneration, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, researchAnswer, type EditEvent } from '../lib/aiClient';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
@@ -136,14 +136,17 @@ export default function ProjectWorkspace() {
     });
   };
 
-  const handleSend = async (message: string, previewError?: string, planFirst?: boolean) => {
+  const handleSend = async (message: string, previewError?: string, planFirst?: boolean, research?: boolean) => {
     if (!id || busy) return;
     setBusy(true);
     setTab('chat');
     setAskOptions([]); // clear any stale quick-replies from a prior question
     setPendingPlan(null); // clear any prior plan once a new turn starts
     try {
-      if (files.length === 0) {
+      if (research) {
+        // Web-research answer (live search) — conversational, never touches files.
+        await researchAnswer(id, message, onStreamEvent);
+      } else if (files.length === 0) {
         await startGeneration(id, message);
         toast('info', 'Generation started — watch the forge.');
       } else {
@@ -243,7 +246,7 @@ export default function ProjectWorkspace() {
 
           <div className={cn('min-w-0 border-r border-forge-border', tab === 'chat' ? 'w-full md:w-[380px] md:shrink-0' : 'flex-1')}>
             {tab === 'chat' ? (
-              <ChatPanel messages={messages} activeGeneration={activeGeneration} busy={busy} askOptions={askOptions} plan={pendingPlan} onApprovePlan={approvePlan} stream={stream} onSend={(m, opts) => handleSend(m, undefined, opts?.planFirst)} />
+              <ChatPanel messages={messages} activeGeneration={activeGeneration} busy={busy} askOptions={askOptions} plan={pendingPlan} onApprovePlan={approvePlan} stream={stream} onSend={(m, opts) => handleSend(m, undefined, opts?.planFirst, opts?.research)} />
             ) : (
               <CodeEditorPane
                 files={files}

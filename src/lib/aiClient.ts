@@ -10,7 +10,7 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, filesPromptStream, editPrompt } from './prompts';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, filesPromptStream, editPrompt } from './prompts';
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
 import type { EditPlan } from '../types';
@@ -61,6 +61,65 @@ export async function startGeneration(projectId: string, prompt: string, planCon
   if (error) throw new Error(await readFnError(error));
   if (data?.error) throw new Error(data.error);
   return data as GenerateResult;
+}
+
+// Web research: answer market/competition/strategy questions with live web search via
+// Anthropic's built-in web_search tool (no separate search API needed). Returns a discuss-style
+// answer with citations. Anthropic runs the searches server-side, so this works in direct mode.
+export async function researchAnswer(
+  projectId: string, message: string, onEvent?: (e: EditEvent) => void,
+): Promise<EditResult> {
+  if (PROVIDER !== 'anthropic') throw new Error('Research currently requires the Anthropic provider (set VITE_AI_PROVIDER=anthropic).');
+  if (!KEY) throw new Error('Research needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
+
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user!.id;
+  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
+
+  onEvent?.({ type: 'start' });
+  onEvent?.({ type: 'explanation', text: 'Searching the web…' });
+
+  // A little project context so the research is grounded in what they're building.
+  const { data: project } = await supabase.from('projects').select('name, description').eq('id', projectId).single();
+  const { data: files } = await supabase.from('project_files').select('path').eq('project_id', projectId).is('deleted_at', null);
+  const ctx = [
+    project?.name ? `Name: ${project.name}` : '',
+    project?.description ? `Description: ${project.description}` : '',
+    files?.length ? `Pages/files: ${files.map((f) => f.path).join(', ')}` : '',
+  ].filter(Boolean).join('\n');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      max_tokens: 4000,
+      system: RESEARCH_SYSTEM,
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+      messages: [{ role: 'user', content: researchPrompt(message, ctx) }],
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Research failed (anthropic ${res.status}). ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  const blocks = (data.content ?? []) as Array<{ type: string; text?: string; citations?: Array<{ url?: string; title?: string }> }>;
+  const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
+  const sources = new Set<string>();
+  for (const b of blocks) for (const c of b.citations ?? []) if (c.url) sources.add(`${c.title ?? c.url} — ${c.url}`);
+  const answer = (text || 'I searched but did not find enough to answer confidently.') +
+    (sources.size ? `\n\nSources:\n${[...sources].map((s) => `• ${s}`).join('\n')}` : '');
+
+  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'assistant', content: answer });
+  onEvent?.({ type: 'done' });
+  return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
 }
 
 // Plan-first cold start: propose the app (pages, features, files) for the user to approve

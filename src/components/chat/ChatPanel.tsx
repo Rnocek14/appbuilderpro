@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList } from 'lucide-react';
+import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe } from 'lucide-react';
 import type { AIMessage, Generation, EditPlan } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
@@ -42,7 +42,7 @@ interface Props {
   onApprovePlan?: () => void;
   /** Live progress while the assistant streams an edit. */
   stream?: StreamState | null;
-  onSend: (message: string, opts?: { planFirst?: boolean }) => void;
+  onSend: (message: string, opts?: { planFirst?: boolean; research?: boolean }) => void;
 }
 
 /** Signature element: the forging strip — stages heat up as the agent works. */
@@ -80,6 +80,8 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
   const [input, setInput] = useState('');
   // When on, the next message is planned (proposed for approval) before any code is written.
   const [planFirst, setPlanFirst] = useState(false);
+  // When on, the next message is answered with live web research (no code).
+  const [research, setResearch] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -89,7 +91,7 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
   const submit = () => {
     const text = input.trim();
     if (!text || busy) return;
-    onSend(text, { planFirst });
+    onSend(text, { planFirst, research });
     setInput('');
   };
 
@@ -198,7 +200,7 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
             <button
               key={a}
               disabled={busy}
-              onClick={() => onSend(a, { planFirst })}
+              onClick={() => onSend(a, { planFirst, research })}
               className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-40"
             >
               {a}
@@ -224,7 +226,25 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
               {planFirst ? 'ON' : 'OFF'}
             </span>
           </button>
-          {planFirst && <span className="text-[10px] text-forge-dim">I'll propose a plan before changing any files.</span>}
+          <button
+            type="button"
+            onClick={() => setResearch((v) => !v)}
+            aria-pressed={research}
+            title="Answer with live web research (market, competition) instead of editing"
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+              research ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
+            )}
+          >
+            <Globe size={12} />
+            Research
+            <span className={cn('ml-1 rounded px-1 text-[9px] font-medium', research ? 'bg-forge-ember/30 text-forge-ink' : 'bg-forge-border/40 text-forge-dim')}>
+              {research ? 'ON' : 'OFF'}
+            </span>
+          </button>
+          {research
+            ? <span className="text-[10px] text-forge-dim">I'll search the web and answer with sources.</span>
+            : planFirst && <span className="text-[10px] text-forge-dim">I'll propose a plan before changing any files.</span>}
         </div>
         <div className="flex items-end gap-2">
           <textarea

@@ -200,6 +200,20 @@ Respond with ONLY JSON matching:
 Keep it a focused MVP (about 5-9 pages/components). Always include summary, steps, and fileHints.`;
 }
 
+// Web research: answer market/competition/strategy questions using live web search.
+export const RESEARCH_SYSTEM = `You are FableForge's research assistant. Use web search to answer
+the user's question about their app, its market, or its competition. Synthesize what you find
+into a concrete, honest, opinionated answer — name real competitors, note positioning and
+tradeoffs, and give a clear view on whether the idea is worth pursuing and why. Cite your
+sources. If the searches turn up little of value, say so rather than padding. Keep it tight and
+skimmable (short sections or bullets). Never invent facts, numbers, or competitors — ground
+every claim in what you actually found.`;
+
+export function researchPrompt(message: string, projectContext: string): string {
+  return (projectContext ? `The user's app, for context:\n${projectContext}\n\n` : '') +
+    `Research request: ${message}`;
+}
+
 export function blueprintPrompt(userPrompt: string): string {
   return `Design an app blueprint for this request:\n"""${userPrompt}"""\n
 Respond with ONLY JSON matching:
