@@ -10,11 +10,11 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, filesPromptStream, editPrompt } from './prompts';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, filesPromptStream, editPrompt } from './prompts';
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
 import type { EditPlan } from '../types';
-import { BRAIN_PATH, brainContext, isMetaFile } from './projectBrain';
+import { BRAIN_PATH, MAP_PATH, brainContext, mapContext, saveMap, isMetaFile } from './projectBrain';
 
 export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'local';
 
@@ -62,6 +62,25 @@ export async function startGeneration(projectId: string, prompt: string, planCon
   if (error) throw new Error(await readFnError(error));
   if (data?.error) throw new Error(data.error);
   return data as GenerateResult;
+}
+
+// Living project map: summarize the app's current source into a concise map (what exists,
+// what's stubbed, the gaps), saved to /.fableforge/project-map.md and injected into every mode.
+export async function generateProjectMap(projectId: string): Promise<string> {
+  if (!DIRECT) throw new Error('Map generation currently requires direct mode (edge mirror coming).');
+  const { data: files } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
+  if (!appFiles.length) throw new Error('No app files yet — generate the app first, then map it.');
+
+  const raw = await rawComplete([
+    { role: 'system', content: PROJECT_MAP_SYSTEM },
+    { role: 'user', content: projectMapPrompt(buildCodeDigest(appFiles)) },
+  ], 2000);
+  const map = raw.text.trim();
+  await saveMap(projectId, map);
+  return map;
 }
 
 // Web research: answer market/competition/strategy questions with live web search via
@@ -474,10 +493,11 @@ async function directEdit(projectId: string, message: string, previewError?: str
   await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
 
   const brainNs = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
+  const mapNs = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const appFilesNs = (files ?? []).filter((f) => !isMetaFile(f.path));
   const raw = await rawComplete([
     { role: 'system', content: EDIT_SYSTEM },
-    { role: 'user', content: brainContext(brainNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) },
+    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) },
   ], 16000);
   const parsed = await parseJsonWithRepair<{
     action?: string; explanation?: string; question?: string; options?: string[];
@@ -750,10 +770,11 @@ async function directEditStream(
     ? '\n\nIMPORTANT: The user asked you to PLAN first. Respond with §ACTION plan only — propose the plan and change NO files yet.'
     : '';
   const brain = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
+  const map = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
-    { role: 'user', content: brainContext(brain) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + planDirective },
+    { role: 'user', content: brainContext(brain) + mapContext(map) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + planDirective },
   ], 16000, (delta) => parser.push(delta));
   const result = parser.end();
 

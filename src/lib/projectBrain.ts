@@ -8,6 +8,7 @@
 import { supabase } from './supabase';
 
 export const BRAIN_PATH = '/.fableforge/brain.md';
+export const MAP_PATH = '/.fableforge/project-map.md';
 /** Files under this prefix are project metadata, not app source. */
 export const META_PREFIX = '/.fableforge/';
 
@@ -46,7 +47,27 @@ export async function saveBrain(projectId: string, content: string): Promise<voi
   );
 }
 
-/** True for project-metadata files (brain, future project map) that are not app source. */
+/** Read the saved project map for a project. '' if none generated yet. */
+export async function getMap(projectId: string): Promise<string> {
+  const { data } = await supabase
+    .from('project_files')
+    .select('content')
+    .eq('project_id', projectId)
+    .eq('path', MAP_PATH)
+    .is('deleted_at', null)
+    .maybeSingle();
+  return data?.content ?? '';
+}
+
+/** Persist the generated project map. Marked updated_by_ai:true — it's machine-derived. */
+export async function saveMap(projectId: string, content: string): Promise<void> {
+  await supabase.from('project_files').upsert(
+    { project_id: projectId, path: MAP_PATH, content, updated_by_ai: true },
+    { onConflict: 'project_id,path' },
+  );
+}
+
+/** True for project-metadata files (brain, project map) that are not app source. */
 export function isMetaFile(path: string): boolean {
   return path.startsWith(META_PREFIX);
 }
@@ -57,4 +78,12 @@ export function brainContext(brain: string): string {
   if (!trimmed) return '';
   return `PROJECT BRAIN — the app's vision, goals, and decisions. Honor these in everything you do; ` +
     `flag it if a request contradicts them:\n${trimmed}\n\n`;
+}
+
+/** Wrap the project map as a context block. Empty string if no map yet. */
+export function mapContext(map: string): string {
+  const trimmed = map.trim();
+  if (!trimmed) return '';
+  return `PROJECT MAP — an overview of what the app currently contains, what is stubbed/incomplete, ` +
+    `and known gaps. Use it to reason about the whole project and what to do next:\n${trimmed}\n\n`;
 }

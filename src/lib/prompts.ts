@@ -249,6 +249,23 @@ export function researchPrompt(message: string, projectContext: string): string 
     `Analyze the app from its code above, research the market with web search, then deliver the comparison.`;
 }
 
+// Living project map: a concise, accurate overview of the app AS IT ACTUALLY IS.
+export const PROJECT_MAP_SYSTEM = `You are FableForge's project cartographer. Given an app's full
+source code, produce a concise, accurate MAP of the project as it ACTUALLY is — not aspirational.
+Cover, in short markdown sections:
+- What it is (one line)
+- Stack (frameworks, key libraries, how data is stored)
+- Features / pages — each with a one-line description of what it does
+- Data model / state — what's tracked and where
+- Stubbed or incomplete — fake players, localStorage placeholders, // INTEGRATION markers, dead code
+- Key gaps — the most important things missing for this to be a real product
+Ground every line in the actual code. Be specific (name files/features). No code blocks unless
+essential. Keep it under ~400 words — this is a map, not a report.`;
+
+export function projectMapPrompt(codeDigest: string): string {
+  return `Here is the app's source code:\n${codeDigest}\n\nProduce the project map now.`;
+}
+
 export function blueprintPrompt(userPrompt: string): string {
   return `Design an app blueprint for this request:\n"""${userPrompt}"""\n
 Respond with ONLY JSON matching:
