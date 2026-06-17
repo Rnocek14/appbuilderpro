@@ -10,11 +10,11 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, filesPromptStream, editPrompt } from './prompts';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, IDEATION_SYSTEM, AUTOPILOT_DECIDE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, ideationPrompt, autopilotDecidePrompt, filesPromptStream, editPrompt } from './prompts';
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
 import type { EditPlan } from '../types';
-import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, isMetaFile } from './projectBrain';
+import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
 
 export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'local';
 
@@ -95,6 +95,62 @@ export async function analyzeDocument(filename: string, text: string): Promise<s
     { role: 'user', content: docAnalyzePrompt(filename, text.slice(0, 60_000)) },
   ], 1500);
   return raw.text.trim();
+}
+
+export interface NextStep {
+  action: 'build' | 'ask' | 'done';
+  title: string;
+  instruction?: string;
+  question?: string;
+  options?: string[];
+  rationale?: string;
+}
+
+// Helper: pull a project's files + meta context for the intelligence functions.
+async function loadProjectForAI(projectId: string) {
+  const { data: files } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const all = files ?? [];
+  return {
+    appFiles: all.filter((f) => !isMetaFile(f.path)),
+    brain: all.find((f) => f.path === BRAIN_PATH)?.content ?? '',
+    map: all.find((f) => f.path === MAP_PATH)?.content ?? '',
+    roadmap: all.find((f) => f.path === ROADMAP_PATH)?.content ?? '',
+  };
+}
+
+// Ideation: where could this app go? Divergent grounded directions, saved for revisiting.
+export async function generateIdeation(projectId: string): Promise<string> {
+  if (!DIRECT) throw new Error('Ideation currently requires direct mode (edge mirror coming).');
+  const { appFiles, brain, map } = await loadProjectForAI(projectId);
+  if (!appFiles.length) throw new Error('No app files yet — generate the app first.');
+  const raw = await rawComplete([
+    { role: 'system', content: IDEATION_SYSTEM },
+    { role: 'user', content: ideationPrompt(brain, map, buildCodeDigest(appFiles)) },
+  ], 3000);
+  const ideas = raw.text.trim();
+  await saveIdeation(projectId, ideas);
+  return ideas;
+}
+
+// Autopilot planner: decide the single most valuable next step (structured).
+export async function decideNextStep(projectId: string, doneTitles: string[]): Promise<NextStep> {
+  if (!DIRECT) throw new Error('Autopilot currently requires direct mode (edge mirror coming).');
+  const { appFiles, brain, map, roadmap } = await loadProjectForAI(projectId);
+  const raw = await rawComplete([
+    { role: 'system', content: AUTOPILOT_DECIDE_SYSTEM },
+    { role: 'user', content: autopilotDecidePrompt(brain, map, roadmap, buildCodeDigest(appFiles), doneTitles) },
+  ], 2000);
+  const p = await parseJsonWithRepair<NextStep>(raw.text);
+  return {
+    action: p.action === 'ask' || p.action === 'done' ? p.action : 'build',
+    title: p.title ?? 'Next step',
+    instruction: p.instruction,
+    question: p.question,
+    options: p.options ?? [],
+    rationale: p.rationale,
+  };
 }
 
 // Living project map: summarize the app's current source into a concise map (what exists,

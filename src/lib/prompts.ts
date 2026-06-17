@@ -300,6 +300,50 @@ export function roadmapPrompt(brain: string, map: string, codeDigest: string): s
   ].filter(Boolean).join('\n\n');
 }
 
+// Ideation: where could this app go? Divergent, grounded directions.
+export const IDEATION_SYSTEM = `You are FableForge's product visionary. Given the app's BRAIN
+(vision/North Star), MAP (what currently exists), and source code, propose where this app could
+go — 3-5 distinct, ambitious-but-grounded directions. For each: a bold title; a 1-2 sentence
+pitch; why it fits (or productively stretches) the North Star; what it would take (effort:
+small/moderate/large/foundational); and the upside + the main risk. Range from natural next
+expansions to bigger pivots. Be specific to THIS app — never generic. End with the single
+direction you'd bet on and why. Clean, skimmable markdown.`;
+
+export function ideationPrompt(brain: string, map: string, codeDigest: string): string {
+  return [
+    brain.trim() ? `PROJECT BRAIN:\n${brain.trim()}` : '(No Brain set — infer intent from the code.)',
+    map.trim() ? `PROJECT MAP:\n${map.trim()}` : '',
+    `SOURCE CODE:\n${codeDigest}`,
+    'Propose where this app could go.',
+  ].filter(Boolean).join('\n\n');
+}
+
+// Autopilot planner: decide the single most valuable next step (structured).
+export const AUTOPILOT_DECIDE_SYSTEM = `You are FableForge's autopilot planner. Given the project's
+BRAIN (intent/North Star/decisions), MAP (current state, stubs, gaps), ROADMAP, and source code,
+decide the SINGLE most valuable next step to move the app toward its goals. Return ONE concrete,
+buildable change — small enough to implement in a single focused edit, NOT a whole feature.
+
+- If the next step needs a product decision you must not guess (auth model, payment provider, a
+  fork in direction, anything destructive or irreversible), return action "ask" with a precise
+  question and 2-4 options.
+- If the Brain's goals and the roadmap's "Now" items are essentially satisfied, return action "done".
+- Otherwise return action "build" with a precise, scoped instruction the build step can execute.
+
+Honor the Brain's decisions and constraints. Respond with ONLY JSON:
+{"action":"build|ask|done","title":"short label","instruction":"the exact change to make (build)","question":"the decision needed (ask)","options":["..."],"rationale":"why this is the next step"}`;
+
+export function autopilotDecidePrompt(brain: string, map: string, roadmap: string, codeDigest: string, done: string[]): string {
+  return [
+    brain.trim() ? `PROJECT BRAIN:\n${brain.trim()}` : '(No Brain set — infer intent from the code.)',
+    map.trim() ? `PROJECT MAP:\n${map.trim()}` : '',
+    roadmap.trim() ? `ROADMAP:\n${roadmap.trim()}` : '',
+    done.length ? `Already done this run (do NOT repeat):\n${done.map((d) => `- ${d}`).join('\n')}` : '',
+    `SOURCE CODE:\n${codeDigest}`,
+    'Decide the single next step now.',
+  ].filter(Boolean).join('\n\n');
+}
+
 // Analyze an uploaded document (brief, spec, research, notes) into durable Brain notes.
 export const DOC_ANALYZE_SYSTEM = `You are FableForge's analyst. The user uploaded a document related
 to their app (a brief, spec, research doc, or notes). Extract what matters for BUILDING the app and

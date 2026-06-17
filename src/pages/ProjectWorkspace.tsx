@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Compass, ShieldCheck, CircleX, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Compass, ShieldCheck, CircleX, TriangleAlert, Lightbulb, Zap } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { FileTree } from '../components/editor/FileTree';
 import { CodeEditorPane } from '../components/editor/CodeEditorPane';
 import { PreviewPane } from '../components/editor/PreviewPane';
 import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
-import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, analyzeDocument, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, type EditEvent } from '../lib/aiClient';
 import { extractText } from '../lib/docExtract';
 import { runQA, issuesToFixRequest, type QAIssue } from '../lib/projectQA';
+import { runAutopilot, type AutopilotEvent } from '../lib/autopilot';
 import { Markdown } from '../components/Markdown';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Modal } from '../components/ui';
-import { getBrain, saveBrain, getMap, getRoadmap, saveDoc, listDocs, getDoc, DEFAULT_BRAIN, isMetaFile, type BrainDoc } from '../lib/projectBrain';
+import { getBrain, saveBrain, getMap, getRoadmap, getIdeation, saveDoc, listDocs, getDoc, DEFAULT_BRAIN, isMetaFile, type BrainDoc } from '../lib/projectBrain';
 import { cn } from '../lib/utils';
 import type { Project, Deployment, EditPlan } from '../types';
 
@@ -65,6 +66,16 @@ export default function ProjectWorkspace() {
   const [qaOpen, setQaOpen] = useState(false);
   const [qaIssues, setQaIssues] = useState<QAIssue[] | null>(null);
   const [qaLoading, setQaLoading] = useState(false);
+  // Ideation: where could this app go?
+  const [ideasOpen, setIdeasOpen] = useState(false);
+  const [ideasText, setIdeasText] = useState('');
+  const [ideasLoading, setIdeasLoading] = useState(false);
+  // Autopilot: supervised build loop.
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
+  const [autoSteps, setAutoSteps] = useState(5);
+  const [autoLog, setAutoLog] = useState<AutopilotEvent[]>([]);
+  const autoStopRef = useRef(false);
   // Live edit progress while the assistant streams its response.
   const [stream, setStream] = useState<{ explanation: string; files: { path: string; done: boolean }[] } | null>(null);
 
@@ -196,6 +207,49 @@ export default function ProjectWorkspace() {
       setDocBusy(false);
     }
   };
+
+  const openIdeas = async () => {
+    setIdeasOpen(true);
+    if (!id) return;
+    setIdeasText(await getIdeation(id));
+  };
+
+  const refreshIdeas = async () => {
+    if (!id) return;
+    setIdeasLoading(true);
+    try {
+      setIdeasText(await generateIdeation(id));
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not generate ideas.');
+    } finally {
+      setIdeasLoading(false);
+    }
+  };
+
+  const startAuto = async () => {
+    if (!id || autoRunning) return;
+    setAutoRunning(true);
+    setAutoLog([]);
+    autoStopRef.current = false;
+    try {
+      await runAutopilot(id, {
+        maxSteps: autoSteps,
+        shouldStop: () => autoStopRef.current,
+        onEvent: (e) => {
+          setAutoLog((log) => [...log, e]);
+          if (e.status === 'done' || e.status === 'finished') void refreshFiles();
+        },
+      });
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Autopilot hit an error.');
+    } finally {
+      setAutoRunning(false);
+      await refreshFiles();
+      await refreshGens();
+    }
+  };
+
+  const stopAuto = () => { autoStopRef.current = true; };
 
   const openQA = async () => {
     setQaOpen(true);
@@ -376,6 +430,12 @@ export default function ProjectWorkspace() {
             <Button size="sm" variant="outline" onClick={openQA}>
               <ShieldCheck size={13} /> Check
             </Button>
+            <Button size="sm" variant="outline" onClick={openIdeas}>
+              <Lightbulb size={13} /> Ideas
+            </Button>
+            <Button size="sm" onClick={() => setAutoOpen(true)}>
+              <Zap size={13} /> Autopilot
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setDeployOpen(true)}>
               <Rocket size={13} /> Deploy
             </Button>
@@ -420,6 +480,70 @@ export default function ProjectWorkspace() {
           </div>
         </div>
       </div>
+
+      {/* Autopilot — supervised build loop */}
+      <Modal open={autoOpen} onClose={() => { if (!autoRunning) setAutoOpen(false); }} title="Autopilot">
+        <p className="text-sm text-forge-dim">
+          A supervised loop: decide the next step from your Brain, Map & roadmap → build it → run
+          Check → fix → repeat. It pauses for real decisions and stops when you say so. Reviewable,
+          bounded, and you can watch every step.
+        </p>
+        <div className="mt-3 flex items-center gap-2">
+          {!autoRunning ? (
+            <>
+              <label className="text-xs text-forge-dim">Max steps</label>
+              <input
+                type="number" min={1} max={15} value={autoSteps}
+                onChange={(e) => setAutoSteps(Math.max(1, Math.min(15, Number(e.target.value) || 1)))}
+                className="w-16 rounded-lg border border-forge-border bg-forge-panel px-2 py-1 text-sm"
+              />
+              <Button size="sm" onClick={startAuto}><Zap size={13} /> Start</Button>
+            </>
+          ) : (
+            <Button size="sm" variant="outline" onClick={stopAuto}>Stop after this step</Button>
+          )}
+          {autoRunning && <span className="text-xs text-forge-dim">Working…</span>}
+        </div>
+        {autoLog.length > 0 && (
+          <ul className="mt-3 max-h-[45vh] space-y-1.5 overflow-y-auto">
+            {autoLog.map((e, i) => (
+              <li key={i} className="rounded-lg border border-forge-border bg-forge-panel px-2.5 py-1.5 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    'rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide',
+                    e.status === 'done' || e.status === 'finished' ? 'bg-forge-ok/20 text-forge-ok'
+                    : e.status === 'error' || e.status === 'blocked' ? 'bg-forge-err/20 text-forge-err'
+                    : 'bg-forge-ember/20 text-forge-ember',
+                  )}>{e.status}</span>
+                  <span className="text-forge-ink">{e.title}</span>
+                </div>
+                {e.detail && <p className="mt-0.5 text-forge-dim">{e.detail}</p>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {autoLog.some((e) => e.status === 'blocked') && (
+          <p className="mt-2 text-[11px] text-forge-ember">Autopilot needs a decision — answer in the chat, then run again.</p>
+        )}
+      </Modal>
+
+      {/* Ideation — where could this app go? */}
+      <Modal open={ideasOpen} onClose={() => setIdeasOpen(false)} title="Ideas — where could this go?">
+        <p className="text-sm text-forge-dim">
+          Divergent directions for the app, grounded in your Brain, Map, and code — from natural
+          expansions to bigger pivots. Promote any direction by adding it to the Brain.
+        </p>
+        <div className="mt-3 flex justify-end">
+          <Button size="sm" loading={ideasLoading} onClick={refreshIdeas}>
+            {ideasText ? 'Regenerate' : 'Generate ideas'}
+          </Button>
+        </div>
+        <div className="mt-3 max-h-[55vh] overflow-y-auto rounded-lg border border-forge-border bg-forge-panel p-3">
+          {ideasText
+            ? <Markdown content={ideasText} />
+            : <p className="text-sm text-forge-dim">No ideas yet — click Generate to explore directions.</p>}
+        </div>
+      </Modal>
 
       {/* Self-QA / static checks */}
       <Modal open={qaOpen} onClose={() => setQaOpen(false)} title="Self-QA — static checks">

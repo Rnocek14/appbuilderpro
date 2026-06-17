@@ -10,6 +10,7 @@ import { supabase } from './supabase';
 export const BRAIN_PATH = '/.fableforge/brain.md';
 export const MAP_PATH = '/.fableforge/project-map.md';
 export const ROADMAP_PATH = '/.fableforge/roadmap.md';
+export const IDEATION_PATH = '/.fableforge/ideation.md';
 /** Files under this prefix are project metadata, not app source. */
 export const META_PREFIX = '/.fableforge/';
 
@@ -87,6 +88,22 @@ export async function getRoadmap(projectId: string): Promise<string> {
 export async function saveRoadmap(projectId: string, content: string): Promise<void> {
   await supabase.from('project_files').upsert(
     { project_id: projectId, path: ROADMAP_PATH, content, updated_by_ai: true },
+    { onConflict: 'project_id,path' },
+  );
+}
+
+/** Read the saved ideation directions. '' if none. */
+export async function getIdeation(projectId: string): Promise<string> {
+  const { data } = await supabase
+    .from('project_files').select('content')
+    .eq('project_id', projectId).eq('path', IDEATION_PATH).is('deleted_at', null).maybeSingle();
+  return data?.content ?? '';
+}
+
+/** Persist generated ideation directions. */
+export async function saveIdeation(projectId: string, content: string): Promise<void> {
+  await supabase.from('project_files').upsert(
+    { project_id: projectId, path: IDEATION_PATH, content, updated_by_ai: true },
     { onConflict: 'project_id,path' },
   );
 }
