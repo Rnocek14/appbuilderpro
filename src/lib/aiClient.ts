@@ -77,15 +77,17 @@ export async function researchAnswer(
   await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
 
   onEvent?.({ type: 'start' });
-  onEvent?.({ type: 'explanation', text: 'Searching the web…' });
+  onEvent?.({ type: 'explanation', text: 'Reading your code, then searching the web…' });
 
-  // A little project context so the research is grounded in what they're building.
+  // Deep context: the FULL source so the model can analyze what the app really is, then compare.
   const { data: project } = await supabase.from('projects').select('name, description').eq('id', projectId).single();
-  const { data: files } = await supabase.from('project_files').select('path').eq('project_id', projectId).is('deleted_at', null);
+  const { data: files } = await supabase.from('project_files').select('path, content').eq('project_id', projectId).is('deleted_at', null);
   const ctx = [
-    project?.name ? `Name: ${project.name}` : '',
+    project?.name ? `App name: ${project.name}` : '',
     project?.description ? `Description: ${project.description}` : '',
-    files?.length ? `Pages/files: ${files.map((f) => f.path).join(', ')}` : '',
+    '',
+    'FULL SOURCE CODE:',
+    buildCodeDigest(files ?? []),
   ].filter(Boolean).join('\n');
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -98,9 +100,9 @@ export async function researchAnswer(
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 4000,
+      max_tokens: 8000,
       system: RESEARCH_SYSTEM,
-      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }],
+      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 10 }],
       messages: [{ role: 'user', content: researchPrompt(message, ctx) }],
     }),
   });
@@ -120,6 +122,31 @@ export async function researchAnswer(
   await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'assistant', content: answer });
   onEvent?.({ type: 'done' });
   return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
+}
+
+// Build a full-source digest for deep research. Includes complete file contents, ordered
+// app → pages → components → lib, capped so a large project can't blow context/cost.
+function buildCodeDigest(files: { path: string; content: string }[]): string {
+  const TOTAL_CAP = 140_000; // ~35k tokens
+  const PER_FILE_CAP = 14_000;
+  const rank = (p: string) =>
+    /App\.(t|j)sx?$/.test(p) ? 0 : /\/pages\//.test(p) ? 1 : /\/components\//.test(p) ? 2 : /\/lib\//.test(p) ? 3 : 4;
+  const sorted = [...files].sort((a, b) => rank(a.path) - rank(b.path) || a.path.localeCompare(b.path));
+
+  const parts: string[] = [];
+  let used = 0;
+  let included = 0;
+  for (const f of sorted) {
+    if (used >= TOTAL_CAP) break;
+    let content = f.content ?? '';
+    if (content.length > PER_FILE_CAP) content = content.slice(0, PER_FILE_CAP) + '\n…(file truncated)';
+    const block = `\n===== ${f.path} =====\n${content}\n`;
+    parts.push(block);
+    used += block.length;
+    included++;
+  }
+  if (included < sorted.length) parts.push(`\n…(${sorted.length - included} more file(s) omitted for length)`);
+  return parts.join('');
 }
 
 // Plan-first cold start: propose the app (pages, features, files) for the user to approve
