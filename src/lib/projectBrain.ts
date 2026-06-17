@@ -13,10 +13,13 @@ export const ROADMAP_PATH = '/.fableforge/roadmap.md';
 /** Files under this prefix are project metadata, not app source. */
 export const META_PREFIX = '/.fableforge/';
 
-export const DEFAULT_BRAIN = `# Project Brain
+export const DOCS_PREFIX = '/.fableforge/docs/';
+
+export const DEFAULT_BRAIN = `## North Star
+The one sentence that captures what this is and why it matters.
 
 ## Vision
-What is this app, and who is it for? (one or two sentences)
+What is this app, and who is it for?
 
 ## Goals
 -
@@ -107,4 +110,50 @@ export function mapContext(map: string): string {
   if (!trimmed) return '';
   return `PROJECT MAP — an overview of what the app currently contains, what is stubbed/incomplete, ` +
     `and known gaps. Use it to reason about the whole project and what to do next:\n${trimmed}\n\n`;
+}
+
+/** Wrap the saved roadmap as a context block. Empty string if none. */
+export function roadmapContext(roadmap: string): string {
+  const trimmed = roadmap.trim();
+  if (!trimmed) return '';
+  return `ROADMAP — the project's current phased plan of what to build next. Use it when the user ` +
+    `asks what's next or how the app is doing:\n${trimmed}\n\n`;
+}
+
+// ---- Uploaded documents (kept after upload: viewable AND part of context) ----
+
+export interface BrainDoc {
+  path: string;
+  name: string;
+}
+
+/** Persist an uploaded document's extracted text so it stays available and viewable. */
+export async function saveDoc(projectId: string, filename: string, text: string): Promise<void> {
+  const safe = filename.replace(/[^a-zA-Z0-9._-]+/g, '_');
+  await supabase.from('project_files').upsert(
+    { project_id: projectId, path: `${DOCS_PREFIX}${safe}`, content: text, updated_by_ai: false },
+    { onConflict: 'project_id,path' },
+  );
+}
+
+/** List the documents uploaded to this project's brain. */
+export async function listDocs(projectId: string): Promise<BrainDoc[]> {
+  const { data } = await supabase
+    .from('project_files')
+    .select('path')
+    .eq('project_id', projectId)
+    .like('path', `${DOCS_PREFIX}%`)
+    .is('deleted_at', null);
+  return (data ?? []).map((f) => ({ path: f.path, name: f.path.slice(DOCS_PREFIX.length) }));
+}
+
+/** Read one uploaded document's text. */
+export async function getDoc(projectId: string, path: string): Promise<string> {
+  const { data } = await supabase
+    .from('project_files')
+    .select('content')
+    .eq('project_id', projectId)
+    .eq('path', path)
+    .maybeSingle();
+  return data?.content ?? '';
 }

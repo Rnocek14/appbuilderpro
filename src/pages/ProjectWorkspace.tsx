@@ -15,7 +15,7 @@ import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Modal } from '../components/ui';
-import { getBrain, saveBrain, getMap, getRoadmap, DEFAULT_BRAIN, isMetaFile } from '../lib/projectBrain';
+import { getBrain, saveBrain, getMap, getRoadmap, saveDoc, listDocs, getDoc, DEFAULT_BRAIN, isMetaFile, type BrainDoc } from '../lib/projectBrain';
 import { cn } from '../lib/utils';
 import type { Project, Deployment, EditPlan } from '../types';
 
@@ -50,6 +50,9 @@ export default function ProjectWorkspace() {
   const [brainSaving, setBrainSaving] = useState(false);
   const [docBusy, setDocBusy] = useState(false);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const [brainEdit, setBrainEdit] = useState(false);
+  const [docs, setDocs] = useState<BrainDoc[]>([]);
+  const [viewingDoc, setViewingDoc] = useState<{ name: string; text: string } | null>(null);
   // Living project map (auto-summary of what the app currently is).
   const [mapOpen, setMapOpen] = useState(false);
   const [mapText, setMapText] = useState('');
@@ -146,9 +149,17 @@ export default function ProjectWorkspace() {
 
   const openBrain = async () => {
     setBrainOpen(true);
+    setViewingDoc(null);
+    setBrainEdit(false);
     if (!id) return;
-    const existing = await getBrain(id);
+    const [existing, docList] = await Promise.all([getBrain(id), listDocs(id)]);
     setBrainText(existing || DEFAULT_BRAIN);
+    setDocs(docList);
+  };
+
+  const viewDoc = async (doc: BrainDoc) => {
+    if (!id) return;
+    setViewingDoc({ name: doc.name, text: await getDoc(id, doc.path) });
   };
 
   const handleSaveBrain = async () => {
@@ -169,13 +180,16 @@ export default function ProjectWorkspace() {
   const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-uploading the same file
-    if (!file) return;
+    if (!file || !id) return;
     setDocBusy(true);
     try {
       const text = await extractText(file);
+      await saveDoc(id, file.name, text); // keep the doc — viewable later
       const notes = await analyzeDocument(file.name, text);
       setBrainText((prev) => `${prev.trim()}\n\n## From: ${file.name}\n${notes}\n`);
-      toast('success', `Analyzed ${file.name} — review the notes below, then Save Brain.`);
+      setDocs(await listDocs(id));
+      setBrainEdit(true); // show the appended notes so the user can review before saving
+      toast('success', `Analyzed ${file.name} — review the notes, then Save Brain.`);
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Could not analyze that document.');
     } finally {
@@ -483,34 +497,73 @@ export default function ProjectWorkspace() {
 
       {/* Project Brain editor */}
       <Modal open={brainOpen} onClose={() => setBrainOpen(false)} title="Project Brain">
-        <p className="text-sm text-forge-dim">
-          The vision, goals, and decisions for this project. The assistant reads this in every chat —
-          so it builds, plans, and advises with your intent in mind. Plain text or markdown.
-        </p>
-        <textarea
-          value={brainText}
-          onChange={(e) => setBrainText(e.target.value)}
-          rows={16}
-          aria-label="Project Brain"
-          className="mt-3 w-full resize-none rounded-lg border border-forge-border bg-forge-panel px-3 py-2 font-mono text-xs focus:border-forge-ember/60 focus:outline-none"
-        />
-        <input
-          ref={docInputRef}
-          type="file"
-          accept=".txt,.md,.docx"
-          className="hidden"
-          onChange={handleDocUpload}
-        />
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <Button variant="outline" loading={docBusy} onClick={() => docInputRef.current?.click()}>
-            <Upload size={13} /> {docBusy ? 'Analyzing…' : 'Upload & analyze doc'}
-          </Button>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setBrainOpen(false)}>Cancel</Button>
-            <Button loading={brainSaving} onClick={handleSaveBrain}>Save Brain</Button>
+        <input ref={docInputRef} type="file" accept=".txt,.md,.docx" className="hidden" onChange={handleDocUpload} />
+
+        {viewingDoc ? (
+          <div>
+            <button onClick={() => setViewingDoc(null)} className="text-xs text-forge-ember hover:underline">← Back to Brain</button>
+            <h3 className="mt-2 font-display text-sm font-semibold">{viewingDoc.name}</h3>
+            <div className="mt-2 max-h-[55vh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-forge-border bg-forge-panel p-3 text-xs text-forge-ink">
+              {viewingDoc.text || '(empty)'}
+            </div>
           </div>
-        </div>
-        <p className="mt-1 text-[11px] text-forge-dim">Upload a brief, spec, or research doc (.txt, .md, .docx) — I'll distill it into the Brain.</p>
+        ) : (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm text-forge-dim">
+                The vision, goals, and decisions for this project. The assistant reads this in every
+                chat — it builds, plans, and advises with your intent in mind.
+              </p>
+              <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-forge-border p-0.5">
+                <button onClick={() => setBrainEdit(false)} className={cn('rounded-md px-2 py-1 text-xs', !brainEdit ? 'bg-forge-raised text-forge-ink' : 'text-forge-dim')}>Read</button>
+                <button onClick={() => setBrainEdit(true)} className={cn('rounded-md px-2 py-1 text-xs', brainEdit ? 'bg-forge-raised text-forge-ink' : 'text-forge-dim')}>Edit</button>
+              </div>
+            </div>
+
+            {brainEdit ? (
+              <textarea
+                value={brainText}
+                onChange={(e) => setBrainText(e.target.value)}
+                rows={14}
+                aria-label="Project Brain"
+                className="mt-3 w-full resize-none rounded-lg border border-forge-border bg-forge-panel px-3 py-2 font-mono text-xs focus:border-forge-ember/60 focus:outline-none"
+              />
+            ) : (
+              <div className="mt-3 max-h-[45vh] overflow-y-auto rounded-lg border border-forge-border bg-forge-panel p-3">
+                {brainText.trim()
+                  ? <Markdown content={brainText} />
+                  : <p className="text-sm text-forge-dim">Empty — switch to Edit to set your North Star and goals.</p>}
+              </div>
+            )}
+
+            {/* Documents — kept after upload, viewable, and distilled into the Brain */}
+            <div className="mt-4 border-t border-forge-border pt-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-medium uppercase tracking-wide text-forge-dim">Documents</h4>
+                <Button size="sm" variant="outline" loading={docBusy} onClick={() => docInputRef.current?.click()}>
+                  <Upload size={12} /> {docBusy ? 'Analyzing…' : 'Upload & analyze'}
+                </Button>
+              </div>
+              {docs.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {docs.map((d) => (
+                    <li key={d.path} className="flex items-center justify-between rounded-lg border border-forge-border bg-forge-panel px-2.5 py-1.5 text-xs">
+                      <span className="truncate font-mono text-forge-ink">{d.name}</span>
+                      <button onClick={() => viewDoc(d)} className="ml-2 shrink-0 text-forge-ember hover:underline">View</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-2 text-[11px] text-forge-dim">No documents yet — upload a brief, spec, or research doc (.txt, .md, .docx). It's kept here and distilled into the Brain.</p>
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setBrainOpen(false)}>Cancel</Button>
+              <Button loading={brainSaving} onClick={handleSaveBrain}>Save Brain</Button>
+            </div>
+          </>
+        )}
       </Modal>
 
       {/* deploy modal */}
