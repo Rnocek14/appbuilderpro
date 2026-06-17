@@ -20,14 +20,44 @@ RUNTIME CONSTRAINTS (the app stops rendering if you break these):
 - Styles go in /styles.css, imported from /App.js. Persist data with localStorage.
 - Mark external-service touchpoints with a // INTEGRATION: <what to wire> comment.
 
-DECIDE: EDIT when intent is reasonably clear (prefer this; under minor ambiguity pick the
-most likely interpretation, build it, and state your assumption). ASK only when the request
-truly forks into materially different builds, is destructive/irreversible, or refers to
-something you cannot see — then ask ONE focused question with 2-4 concrete options and change
-no files. Never ask something the conversation already answers. When editing, modify ONLY the
-files that must change, never rewrite untouched files, and preserve existing behavior.
+ROUTE every request to ONE of four actions — DISCUSS, PLAN, EDIT, or ASK:
+- DISCUSS (just talk — no code): when the user asks your opinion/advice, asks a question, or wants
+  to brainstorm ("what do you think", "is this worth doing"). Answer honestly like a thoughtful
+  teammate — give a real opinion and push back when warranted. You CANNOT browse the web; if the
+  question needs live data (competitors, market size), say so and never fabricate. Give calibrated
+  expectations — never a bare completeness percentage; say what's done against an explicit bar
+  (e.g. "complete as a demo; early as a product, missing X/Y/Z").
+- PLAN (propose before building — change NO files): the default for substantial work (a new
+  feature, multiple files, a redesign, or a vague "build me X"). Propose a short plan and let the
+  user approve before writing code. A plan is either an IMPLEMENTATION plan (list files via
+  §FILEHINT) or an ANALYSIS plan (audit/advice — no file hints).
+- EDIT (make the change now): for a clear, localized change. Under minor ambiguity pick the most
+  likely interpretation, build it, and state your assumption.
+- ASK (one focused question, no files): only when the request truly forks into materially
+  different builds, is destructive/irreversible, or refers to something you cannot see.
+If the user approves a plan you proposed, carry it out immediately — EDIT for an implementation
+plan; for an analysis plan, report findings in §EXPLANATION with no file changes. Never ask or
+plan something the conversation already settled. When editing, modify ONLY the files that must
+change, never rewrite untouched files, and preserve existing behavior.
 
 OUTPUT FORMAT — use these line markers (each on its own line, beginning with §). No JSON, no fences.
+
+To DISCUSS (answer / opinion — change NO files):
+§ACTION discuss
+§EXPLANATION
+<your answer — warm, direct, honest>
+§END
+
+To PLAN (propose before building — change NO files):
+§ACTION plan
+§SUMMARY
+<1-2 sentences: what you'll build and the approach>
+§STEP <a concrete step>
+§FILEHINT /components/X.js — why this file will change
+§OPTION <a choice — its tradeoff>
+§OPENQ <a question whose answer would change the build>
+§END
+(Include §FILEHINT only for an implementation plan; §OPTION/§OPENQ only when genuinely relevant.)
 
 To EDIT:
 §ACTION edit
@@ -57,12 +87,20 @@ interface ParsedEdit {
   options: string[];
   changes: { path: string; content: string }[];
   deletions: string[];
+  // plan-mode fields
+  summary: string;
+  steps: string[];
+  fileHints: string[];
+  openQuestions: string[];
 }
 
-/** Parse the full §-delimited protocol text into a structured edit. */
+/** Parse the full §-delimited protocol text into a structured edit/plan/discuss. */
 function parseProtocol(text: string): ParsedEdit {
-  const out: ParsedEdit = { action: 'edit', explanation: '', question: '', options: [], changes: [], deletions: [] };
-  let section: 'explanation' | 'file' | 'question' | null = null;
+  const out: ParsedEdit = {
+    action: 'edit', explanation: '', question: '', options: [], changes: [], deletions: [],
+    summary: '', steps: [], fileHints: [], openQuestions: [],
+  };
+  let section: 'explanation' | 'file' | 'question' | 'summary' | null = null;
   let curPath: string | null = null;
   let curContent = '';
   const finish = () => {
@@ -74,17 +112,34 @@ function parseProtocol(text: string): ParsedEdit {
       const rest = line.slice(1);
       if (rest.startsWith('ACTION')) { finish(); out.action = rest.slice(6).trim() || 'edit'; section = null; }
       else if (rest.startsWith('EXPLANATION')) { finish(); section = 'explanation'; }
+      else if (rest.startsWith('SUMMARY')) { finish(); section = 'summary'; }
+      else if (rest.startsWith('STEP')) { finish(); const s = rest.slice(4).trim(); if (s) out.steps.push(s); section = null; }
+      // FILEHINT must be checked before FILE — both start with "FILE".
+      else if (rest.startsWith('FILEHINT')) { finish(); const h = rest.slice(8).trim(); if (h) out.fileHints.push(h); section = null; }
       else if (rest.startsWith('FILE')) { finish(); curPath = rest.slice(4).trim(); section = 'file'; }
       else if (rest.startsWith('DELETE')) { finish(); const p = rest.slice(6).trim(); if (p) out.deletions.push(p); section = null; }
       else if (rest.startsWith('QUESTION')) { finish(); section = 'question'; }
+      else if (rest.startsWith('OPENQ')) { finish(); const q = rest.slice(5).trim(); if (q) out.openQuestions.push(q); section = null; }
       else if (rest.startsWith('OPTION')) { finish(); const o = rest.slice(6).trim(); if (o) out.options.push(o); section = null; }
       else if (rest.startsWith('END')) { finish(); section = null; }
     } else if (section === 'explanation') out.explanation += (out.explanation ? '\n' : '') + line;
+    else if (section === 'summary') out.summary += (out.summary ? '\n' : '') + line;
     else if (section === 'file') curContent += line + '\n';
     else if (section === 'question') out.question += (out.question ? '\n' : '') + line;
   }
   finish();
   return out;
+}
+
+/** Readable markdown for a plan, stored as an assistant message so it persists in chat. */
+function renderPlanText(p: ParsedEdit): string {
+  const lines = [`**Plan:** ${p.summary}`, ''];
+  if (p.steps.length) { lines.push('Steps:'); p.steps.forEach((s, i) => lines.push(`${i + 1}. ${s}`)); lines.push(''); }
+  if (p.fileHints.length) { lines.push('Files:'); p.fileHints.forEach((f) => lines.push(`• ${f}`)); lines.push(''); }
+  if (p.options.length) { lines.push('Options:'); p.options.forEach((o) => lines.push(`• ${o}`)); lines.push(''); }
+  if (p.openQuestions.length) { lines.push('Open questions:'); p.openQuestions.forEach((q) => lines.push(`• ${q}`)); lines.push(''); }
+  lines.push('_Approve to build, or reply to change the plan._');
+  return lines.join('\n').trim();
 }
 
 Deno.serve(async (req) => {
@@ -98,7 +153,7 @@ Deno.serve(async (req) => {
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
-  const { projectId, message, previewError } = await req.json();
+  const { projectId, message, previewError, planFirst } = await req.json();
   if (!projectId || !message) return json({ error: 'projectId and message are required' }, 400);
 
   const { data: project } = await admin.from('projects').select('id, owner_id').eq('id', projectId).single();
@@ -134,7 +189,8 @@ Deno.serve(async (req) => {
             `Current files:\n${contextPayload(files ?? [], message, previewError ?? '')}\n\n` +
             `Recent conversation (newest first):\n${JSON.stringify(history ?? [])}\n\n` +
             (previewError ? `Current preview error to fix:\n${previewError}\n\n` : '') +
-            `Change request: ${message}` },
+            `Change request: ${message}` +
+            (planFirst ? '\n\nIMPORTANT: The user asked you to PLAN first. Respond with §ACTION plan only — propose the plan and change NO files yet.' : '') },
         ], { maxTokens: 16000 }, (delta) => send({ t: delta }));
 
         const parsed = parseProtocol(result.text);
@@ -155,6 +211,43 @@ Deno.serve(async (req) => {
             user_id: user.id, project_id: projectId, event_type: 'edit', provider: cfg.provider, model: cfg.model, ...usage,
           });
           send({ done: true, action: 'ask', question: parsed.question, options: parsed.options, changed: [], deleted: [] });
+          return;
+        }
+
+        // Discuss: a conversational answer/opinion — change no files, record the reply.
+        if (parsed.action === 'discuss') {
+          const answer = parsed.explanation || 'Happy to help — what would you like to dig into?';
+          await admin.from('ai_messages').insert({
+            project_id: projectId, user_id: user.id, generation_id: gen?.id,
+            role: 'assistant', content: answer, files_changed: [],
+          });
+          await admin.from('project_generations').update({
+            status: 'succeeded', summary: answer.slice(0, 200), ...usage, finished_at: new Date().toISOString(),
+          }).eq('id', gen!.id);
+          await admin.from('usage_events').insert({
+            user_id: user.id, project_id: projectId, event_type: 'edit', provider: cfg.provider, model: cfg.model, ...usage,
+          });
+          send({ done: true, action: 'discuss', explanation: answer, changed: [], deleted: [] });
+          return;
+        }
+
+        // Plan: proposed a plan to approve — change no files, record it, hand it to the UI.
+        if (parsed.action === 'plan' && (parsed.summary || parsed.steps.length)) {
+          const plan = {
+            summary: parsed.summary.trim(), steps: parsed.steps,
+            fileHints: parsed.fileHints, options: parsed.options, openQuestions: parsed.openQuestions,
+          };
+          await admin.from('ai_messages').insert({
+            project_id: projectId, user_id: user.id, generation_id: gen?.id,
+            role: 'assistant', content: renderPlanText(parsed), files_changed: [],
+          });
+          await admin.from('project_generations').update({
+            status: 'succeeded', summary: parsed.summary.slice(0, 200), ...usage, finished_at: new Date().toISOString(),
+          }).eq('id', gen!.id);
+          await admin.from('usage_events').insert({
+            user_id: user.id, project_id: projectId, event_type: 'edit', provider: cfg.provider, model: cfg.model, ...usage,
+          });
+          send({ done: true, action: 'plan', plan, explanation: '', changed: [], deleted: [] });
           return;
         }
 
