@@ -14,6 +14,7 @@ import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_
 import { contextPayload } from './contextBudget';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
 import type { EditPlan } from '../types';
+import { BRAIN_PATH, brainContext, isMetaFile } from './projectBrain';
 
 export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'local';
 
@@ -93,12 +94,15 @@ export async function researchAnswer(
   // Deep context: the FULL source so the model can analyze what the app really is, then compare.
   const { data: project } = await supabase.from('projects').select('name, description').eq('id', projectId).single();
   const { data: files } = await supabase.from('project_files').select('path, content').eq('project_id', projectId).is('deleted_at', null);
+  const allFiles = files ?? [];
+  const brain = allFiles.find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const ctx = [
     project?.name ? `App name: ${project.name}` : '',
     project?.description ? `Description: ${project.description}` : '',
+    brain.trim() ? `\nPROJECT BRAIN (vision/goals/decisions):\n${brain.trim()}` : '',
     '',
     'FULL SOURCE CODE:',
-    buildCodeDigest(files ?? []),
+    buildCodeDigest(allFiles.filter((f) => !isMetaFile(f.path))),
   ].filter(Boolean).join('\n');
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -469,9 +473,11 @@ async function directEdit(projectId: string, message: string, previewError?: str
 
   await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
 
+  const brainNs = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
+  const appFilesNs = (files ?? []).filter((f) => !isMetaFile(f.path));
   const raw = await rawComplete([
     { role: 'system', content: EDIT_SYSTEM },
-    { role: 'user', content: editPrompt(contextPayload(files ?? [], message, previewError ?? ''), message, previewError, historyText) },
+    { role: 'user', content: brainContext(brainNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) },
   ], 16000);
   const parsed = await parseJsonWithRepair<{
     action?: string; explanation?: string; question?: string; options?: string[];
@@ -743,9 +749,11 @@ async function directEditStream(
   const planDirective = planFirst
     ? '\n\nIMPORTANT: The user asked you to PLAN first. Respond with §ACTION plan only — propose the plan and change NO files yet.'
     : '';
+  const brain = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
+  const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
-    { role: 'user', content: editPrompt(contextPayload(files ?? [], message, previewError ?? ''), message, previewError, historyText) + planDirective },
+    { role: 'user', content: brainContext(brain) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + planDirective },
   ], 16000, (delta) => parser.push(delta));
   const result = parser.end();
 

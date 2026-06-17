@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Code2, MessageSquare, Rocket, Globe } from 'lucide-react';
+import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { FileTree } from '../components/editor/FileTree';
 import { CodeEditorPane } from '../components/editor/CodeEditorPane';
@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { Badge, Button, Modal } from '../components/ui';
+import { getBrain, saveBrain, DEFAULT_BRAIN, isMetaFile } from '../lib/projectBrain';
 import { cn } from '../lib/utils';
 import type { Project, Deployment, EditPlan } from '../types';
 
@@ -40,6 +41,10 @@ export default function ProjectWorkspace() {
   const [askOptions, setAskOptions] = useState<string[]>([]);
   // A plan the assistant proposed (plan mode) awaiting the user's approval.
   const [pendingPlan, setPendingPlan] = useState<EditPlan | null>(null);
+  // Project Brain editor (vision/goals/decisions the assistant carries into every turn).
+  const [brainOpen, setBrainOpen] = useState(false);
+  const [brainText, setBrainText] = useState('');
+  const [brainSaving, setBrainSaving] = useState(false);
   // Live edit progress while the assistant streams its response.
   const [stream, setStream] = useState<{ explanation: string; files: { path: string; done: boolean }[] } | null>(null);
 
@@ -120,6 +125,28 @@ export default function ProjectWorkspace() {
         ? 'Approved — go ahead and implement this plan now, exactly as described.'
         : 'Approved — go ahead and carry out this plan; report your findings.',
     );
+  };
+
+  const openBrain = async () => {
+    setBrainOpen(true);
+    if (!id) return;
+    const existing = await getBrain(id);
+    setBrainText(existing || DEFAULT_BRAIN);
+  };
+
+  const handleSaveBrain = async () => {
+    if (!id) return;
+    setBrainSaving(true);
+    try {
+      await saveBrain(id, brainText);
+      await refreshFiles();
+      toast('success', 'Project Brain saved — the assistant will use it in every chat.');
+      setBrainOpen(false);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not save the Brain.');
+    } finally {
+      setBrainSaving(false);
+    }
   };
 
   const open = (path: string) => {
@@ -223,6 +250,9 @@ export default function ProjectWorkspace() {
                 <Code2 size={13} /> Code
               </button>
             </div>
+            <Button size="sm" variant="outline" onClick={openBrain}>
+              <Brain size={13} /> Brain
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setDeployOpen(true)}>
               <Rocket size={13} /> Deploy
             </Button>
@@ -234,7 +264,7 @@ export default function ProjectWorkspace() {
           {tab === 'code' && (
             <div className="hidden w-52 shrink-0 border-r border-forge-border bg-forge-panel md:block">
               <FileTree
-                files={files}
+                files={files.filter((f) => !isMetaFile(f.path))}
                 activePath={activePath}
                 onOpen={open}
                 onCreate={createFile}
@@ -267,6 +297,25 @@ export default function ProjectWorkspace() {
           </div>
         </div>
       </div>
+
+      {/* Project Brain editor */}
+      <Modal open={brainOpen} onClose={() => setBrainOpen(false)} title="Project Brain">
+        <p className="text-sm text-forge-dim">
+          The vision, goals, and decisions for this project. The assistant reads this in every chat —
+          so it builds, plans, and advises with your intent in mind. Plain text or markdown.
+        </p>
+        <textarea
+          value={brainText}
+          onChange={(e) => setBrainText(e.target.value)}
+          rows={16}
+          aria-label="Project Brain"
+          className="mt-3 w-full resize-none rounded-lg border border-forge-border bg-forge-panel px-3 py-2 font-mono text-xs focus:border-forge-ember/60 focus:outline-none"
+        />
+        <div className="mt-3 flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setBrainOpen(false)}>Cancel</Button>
+          <Button loading={brainSaving} onClick={handleSaveBrain}>Save Brain</Button>
+        </div>
+      </Modal>
 
       {/* deploy modal */}
       <Modal open={deployOpen} onClose={() => setDeployOpen(false)} title="Deploy this app">
