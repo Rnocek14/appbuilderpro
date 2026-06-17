@@ -528,9 +528,12 @@ async function directEdit(projectId: string, message: string, previewError?: str
   const brainNs = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const mapNs = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const appFilesNs = (files ?? []).filter((f) => !isMetaFile(f.path));
+  const debugNs = previewError
+    ? '\n\nThis is a bug fix. Diagnose the ROOT CAUSE (not just the symptom), state it in one line, then make the smallest change that addresses it.'
+    : '';
   const raw = await rawComplete([
     { role: 'system', content: EDIT_SYSTEM },
-    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) },
+    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) + debugNs },
   ], 16000);
   const parsed = await parseJsonWithRepair<{
     action?: string; explanation?: string; question?: string; options?: string[];
@@ -802,12 +805,15 @@ async function directEditStream(
   const planDirective = planFirst
     ? '\n\nIMPORTANT: The user asked you to PLAN first. Respond with §ACTION plan only — propose the plan and change NO files yet.'
     : '';
+  const debugDirective = previewError
+    ? '\n\nThis is a bug fix. Diagnose the ROOT CAUSE (not just the symptom), state it in one line in §EXPLANATION, then make the smallest change that addresses it. Do not rewrite unrelated code.'
+    : '';
   const brain = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const map = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
-    { role: 'user', content: brainContext(brain) + mapContext(map) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + planDirective },
+    { role: 'user', content: brainContext(brain) + mapContext(map) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + planDirective + debugDirective },
   ], 16000, (delta) => parser.push(delta));
   const result = parser.end();
 

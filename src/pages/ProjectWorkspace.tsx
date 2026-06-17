@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Compass } from 'lucide-react';
+import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Compass, ShieldCheck, CircleX, TriangleAlert } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { FileTree } from '../components/editor/FileTree';
 import { CodeEditorPane } from '../components/editor/CodeEditorPane';
@@ -9,6 +9,7 @@ import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
 import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, analyzeDocument, type EditEvent } from '../lib/aiClient';
 import { extractText } from '../lib/docExtract';
+import { runQA, issuesToFixRequest, type QAIssue } from '../lib/projectQA';
 import { Markdown } from '../components/Markdown';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
@@ -57,6 +58,10 @@ export default function ProjectWorkspace() {
   const [roadmapOpen, setRoadmapOpen] = useState(false);
   const [roadmapText, setRoadmapText] = useState('');
   const [roadmapLoading, setRoadmapLoading] = useState(false);
+  // Self-QA: deterministic static checks over the generated code.
+  const [qaOpen, setQaOpen] = useState(false);
+  const [qaIssues, setQaIssues] = useState<QAIssue[] | null>(null);
+  const [qaLoading, setQaLoading] = useState(false);
   // Live edit progress while the assistant streams its response.
   const [stream, setStream] = useState<{ explanation: string; files: { path: string; done: boolean }[] } | null>(null);
 
@@ -178,6 +183,24 @@ export default function ProjectWorkspace() {
     }
   };
 
+  const openQA = async () => {
+    setQaOpen(true);
+    if (!id) return;
+    setQaLoading(true);
+    try {
+      setQaIssues(await runQA(id));
+    } finally {
+      setQaLoading(false);
+    }
+  };
+
+  const fixIssues = () => {
+    if (!qaIssues?.length) return;
+    const msg = issuesToFixRequest(qaIssues);
+    setQaOpen(false);
+    void handleSend(msg);
+  };
+
   const openRoadmap = async () => {
     setRoadmapOpen(true);
     if (!id) return;
@@ -267,6 +290,14 @@ export default function ProjectWorkspace() {
             });
           }
           await refreshFiles();
+          if (result.changed.length) {
+            const issues = await runQA(id);
+            const errs = issues.filter((i) => i.severity === 'error');
+            if (errs.length) {
+              setQaIssues(issues);
+              toast('error', `Self-QA found ${errs.length} issue${errs.length === 1 ? '' : 's'} — open Check to review/fix.`);
+            }
+          }
         }
       }
       await refreshGens();
@@ -328,6 +359,9 @@ export default function ProjectWorkspace() {
             <Button size="sm" variant="outline" onClick={openRoadmap}>
               <Compass size={13} /> Next
             </Button>
+            <Button size="sm" variant="outline" onClick={openQA}>
+              <ShieldCheck size={13} /> Check
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setDeployOpen(true)}>
               <Rocket size={13} /> Deploy
             </Button>
@@ -372,6 +406,43 @@ export default function ProjectWorkspace() {
           </div>
         </div>
       </div>
+
+      {/* Self-QA / static checks */}
+      <Modal open={qaOpen} onClose={() => setQaOpen(false)} title="Self-QA — static checks">
+        <p className="text-sm text-forge-dim">
+          Deterministic checks over the generated code: broken imports, Node built-ins that don't
+          run in the browser, packages outside the allowed set, and a missing entry file.
+        </p>
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <Button size="sm" variant="outline" loading={qaLoading} onClick={openQA}>Re-check</Button>
+          {!!qaIssues?.some((i) => i.severity === 'error') && (
+            <Button size="sm" onClick={fixIssues}>Fix these</Button>
+          )}
+        </div>
+        <div className="mt-3 max-h-[50vh] overflow-y-auto">
+          {qaLoading && <p className="text-sm text-forge-dim">Checking…</p>}
+          {!qaLoading && qaIssues && qaIssues.length === 0 && (
+            <div className="flex items-center gap-2 rounded-lg border border-forge-ok/40 bg-forge-raised p-3 text-sm text-forge-ok">
+              <ShieldCheck size={15} /> No issues found.
+            </div>
+          )}
+          {!qaLoading && qaIssues && qaIssues.length > 0 && (
+            <ul className="space-y-1.5">
+              {qaIssues.map((i, idx) => (
+                <li key={idx} className="flex items-start gap-2 rounded-lg border border-forge-border bg-forge-raised p-2 text-xs">
+                  {i.severity === 'error'
+                    ? <CircleX size={14} className="mt-0.5 shrink-0 text-forge-err" />
+                    : <TriangleAlert size={14} className="mt-0.5 shrink-0 text-forge-warn" />}
+                  <div>
+                    <span className="font-mono text-forge-ink">{i.path}</span>
+                    <p className="text-forge-dim">{i.message}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Modal>
 
       {/* What's-next roadmap */}
       <Modal open={roadmapOpen} onClose={() => setRoadmapOpen(false)} title="What's next">
