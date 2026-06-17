@@ -64,18 +64,18 @@ export async function startGeneration(projectId: string, prompt: string): Promis
 
 export async function sendEdit(
   projectId: string, message: string, previewError?: string,
-  onEvent?: (e: EditEvent) => void,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
 ): Promise<EditResult> {
   // Both paths stream so the UI can render the edit landing file-by-file.
-  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent);
-  return edgeEditStream(projectId, message, previewError, onEvent);
+  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst);
+  return edgeEditStream(projectId, message, previewError, onEvent, planFirst);
 }
 
 // Calls the streaming chat-edit edge function. supabase-js's functions.invoke buffers the
 // whole response, so we fetch the function URL directly and read its SSE body.
 async function edgeEditStream(
   projectId: string, message: string, previewError: string | undefined,
-  onEvent?: (e: EditEvent) => void,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
 ): Promise<EditResult> {
   const { data: { session } } = await supabase.auth.getSession();
   onEvent?.({ type: 'start' });
@@ -86,7 +86,7 @@ async function edgeEditStream(
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${session?.access_token ?? supabaseAnonKey}`,
     },
-    body: JSON.stringify({ projectId, message, previewError }),
+    body: JSON.stringify({ projectId, message, previewError, planFirst }),
   });
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => null);
@@ -574,7 +574,7 @@ function makeStreamParser(emit: (e: EditEvent) => void) {
 
 async function directEditStream(
   projectId: string, message: string, previewError: string | undefined,
-  onEvent?: (e: EditEvent) => void,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
 ): Promise<EditResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
@@ -593,9 +593,14 @@ async function directEditStream(
 
   onEvent?.({ type: 'start' });
   const parser = makeStreamParser((e) => onEvent?.(e));
+  // "Plan first" forces plan mode regardless of routing — directive goes to the
+  // model only, not into the stored user message.
+  const planDirective = planFirst
+    ? '\n\nIMPORTANT: The user asked you to PLAN first. Respond with §ACTION plan only — propose the plan and change NO files yet.'
+    : '';
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
-    { role: 'user', content: editPrompt(contextPayload(files ?? [], message, previewError ?? ''), message, previewError, historyText) },
+    { role: 'user', content: editPrompt(contextPayload(files ?? [], message, previewError ?? ''), message, previewError, historyText) + planDirective },
   ], 16000, (delta) => parser.push(delta));
   const result = parser.end();
 

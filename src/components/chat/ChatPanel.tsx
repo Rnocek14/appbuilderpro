@@ -41,7 +41,7 @@ interface Props {
   onApprovePlan?: () => void;
   /** Live progress while the assistant streams an edit. */
   stream?: StreamState | null;
-  onSend: (message: string) => void;
+  onSend: (message: string, opts?: { planFirst?: boolean }) => void;
 }
 
 /** The plan card: what the assistant proposes before writing any code. */
@@ -131,6 +131,8 @@ function ForgeProgress({ gen }: { gen: Generation }) {
 
 export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], plan = null, onApprovePlan, stream = null, onSend }: Props) {
   const [input, setInput] = useState('');
+  // When on, the next message is planned (proposed for approval) before any code is written.
+  const [planFirst, setPlanFirst] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -140,7 +142,7 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
   const submit = () => {
     const text = input.trim();
     if (!text || busy) return;
-    onSend(text);
+    onSend(text, { planFirst });
     setInput('');
   };
 
@@ -249,12 +251,33 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
             <button
               key={a}
               disabled={busy}
-              onClick={() => onSend(a)}
+              onClick={() => onSend(a, { planFirst })}
               className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-40"
             >
               {a}
             </button>
           ))}
+        </div>
+        <div className="mb-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPlanFirst((v) => !v)}
+            aria-pressed={planFirst}
+            title="Propose a plan for approval before writing any code"
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+              planFirst
+                ? 'border-forge-ember bg-forge-ember/15 text-forge-ink'
+                : 'border-forge-border text-forge-dim hover:text-forge-ink',
+            )}
+          >
+            <ClipboardList size={12} />
+            Plan first
+            <span className={cn('ml-1 rounded px-1 text-[9px] font-medium', planFirst ? 'bg-forge-ember/30 text-forge-ink' : 'bg-forge-border/40 text-forge-dim')}>
+              {planFirst ? 'ON' : 'OFF'}
+            </span>
+          </button>
+          {planFirst && <span className="text-[10px] text-forge-dim">I'll propose a plan before changing any files.</span>}
         </div>
         <div className="flex items-end gap-2">
           <textarea

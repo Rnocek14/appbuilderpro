@@ -130,7 +130,7 @@ export default function ProjectWorkspace() {
     });
   };
 
-  const handleSend = async (message: string, previewError?: string) => {
+  const handleSend = async (message: string, previewError?: string, planFirst?: boolean) => {
     if (!id || busy) return;
     setBusy(true);
     setTab('chat');
@@ -141,7 +141,7 @@ export default function ProjectWorkspace() {
         await startGeneration(id, message);
         toast('info', 'Generation started — watch the forge.');
       } else {
-        const result = await sendEdit(id, message, previewError, onStreamEvent);
+        const result = await sendEdit(id, message, previewError, onStreamEvent, planFirst);
         if (result.action === 'ask') {
           setAskOptions(result.options ?? []);
         } else if (result.action === 'plan') {
@@ -233,7 +233,7 @@ export default function ProjectWorkspace() {
 
           <div className={cn('min-w-0 border-r border-forge-border', tab === 'chat' ? 'w-full md:w-[380px] md:shrink-0' : 'flex-1')}>
             {tab === 'chat' ? (
-              <ChatPanel messages={messages} activeGeneration={activeGeneration} busy={busy} askOptions={askOptions} plan={pendingPlan} onApprovePlan={approvePlan} stream={stream} onSend={(m) => handleSend(m)} />
+              <ChatPanel messages={messages} activeGeneration={activeGeneration} busy={busy} askOptions={askOptions} plan={pendingPlan} onApprovePlan={approvePlan} stream={stream} onSend={(m, opts) => handleSend(m, undefined, opts?.planFirst)} />
             ) : (
               <CodeEditorPane
                 files={files}
