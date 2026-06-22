@@ -217,17 +217,35 @@ export interface AppMetric {
   created_at: string;
 }
 
+export type AgentRunStatus =
+  | 'queued' | 'running' | 'waiting_approval' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
+
 export interface AgentRun {
   id: string;
   owner_id: string;
   app_id: string | null; // null = portfolio-wide
   kind: 'research' | 'content' | 'build' | 'analyze' | 'recommend';
   title: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: AgentRunStatus;
   input: string | null;
   output: string | null;
   recommendation: string | null;
   cost_usd: number;
   created_at: string;
   finished_at: string | null;
+  // ---- runtime (app_0004) ----
+  phase: 'observe' | 'plan' | 'act';
+  priority: number;
+  budget_usd: number;
+  spent_usd: number;
+  lease_until: string | null;
+  checkpoint: GarvisCheckpoint | null;
+  error: string | null;
+  started_at: string | null;
+}
+
+/** Resumable execution state persisted on agent_runs after every step. */
+export interface GarvisCheckpoint {
+  step: number;
+  history: { role: 'user' | 'assistant' | 'tool'; content: string }[];
 }
