@@ -9,6 +9,7 @@ import { useProjects } from '../hooks/useProjectData';
 import { startGeneration, draftGenerationPlan } from '../lib/aiClient';
 import { useToast } from '../context/ToastContext';
 import { Button, Card } from '../components/ui';
+import { ModelPicker } from '../components/ModelPicker';
 import { PlanCard } from '../components/PlanCard';
 import { TEMPLATES } from '../data/templates';
 import { cn } from '../lib/utils';
@@ -38,6 +39,7 @@ export default function NewProject() {
   const [planFirst, setPlanFirst] = useState(false);
   const [plan, setPlan] = useState<EditPlan | null>(null);
   const [planProjectId, setPlanProjectId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const pickTemplate = (slug: string) => {
     const t = TEMPLATES.find((x) => x.slug === slug)!;
@@ -99,7 +101,8 @@ export default function NewProject() {
             className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-forge-dim/60"
           />
           <div className="mt-2 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <ModelPicker open={pickerOpen} onToggle={setPickerOpen} />
               <span className="text-[11px] text-forge-dim">{prompt.length}/2000</span>
               <button
                 type="button"

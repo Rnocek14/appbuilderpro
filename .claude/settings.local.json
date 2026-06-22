@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(curl -s -X POST https://axqudbzrevbhwcrqacpa.supabase.co/functions/v1/apply-migration -H 'Authorization: Bearer __TRACKED_VAR__' -H 'apikey: __TRACKED_VAR__' -H 'content-type: application/json' -d '{\"projectRef\":\"aobrsurgymnyxifoqfpu\",\"sql\":\"select table_name from information_schema.tables where table_schema = '\\\\''public'\\\\'' order by table_name;\"}')"
     ]
   }
 }

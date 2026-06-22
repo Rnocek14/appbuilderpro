@@ -10,19 +10,92 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, IDEATION_SYSTEM, AUTOPILOT_DECIDE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, ideationPrompt, autopilotDecidePrompt, filesPromptStream, editPrompt } from './prompts';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, IDEATION_SYSTEM, AUTOPILOT_DECIDE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, SCHEMA_SYSTEM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, ideationPrompt, autopilotDecidePrompt, filesPromptStream, editPrompt, schemaPrompt, schemaFromCodePrompt } from './prompts';
 import { contextPayload } from './contextBudget';
-import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
+import { SCAFFOLD_FILES, SCAFFOLD_PATHS, THEME_FOUNDATION, UI_INDEX_THEMETOGGLE_EXPORT } from './scaffold';
+import { buildIndexCss, buildIndexCssForHue, getPreset } from './themePresets';
+import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
+import { PREFS_PATH, prefsContext } from './preferences';
+import { MAIN_THREAD_ID, threadOf } from './threads';
+import { previewContext } from './previewRuntime';
+import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
+import { PREFERENCE_DISTILL_SYSTEM } from './prompts';
+import { recordUsage } from './usage';
 
-export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'local';
+interface Usage { inputTokens: number; outputTokens: number }
+interface AIMessageRow { role: string; content: string; thread_id?: string | null }
 
-const DIRECT = import.meta.env.VITE_AI_DIRECT === 'true';
-const PROVIDER = (import.meta.env.VITE_AI_PROVIDER ?? 'anthropic') as Provider;
-const MODEL = import.meta.env.VITE_AI_MODEL ?? 'claude-sonnet-4-6';
-const KEY = import.meta.env.VITE_AI_API_KEY ?? '';
-const LOCAL_BASE = import.meta.env.VITE_LOCAL_AI_BASE_URL ?? 'http://localhost:11434/v1';
+export type { Provider };
+
+// ----------------------------------------------------------------
+// Provider HTTP helpers — friendly, actionable errors. A raw `fetch()` that can't reach the
+// host rejects with the opaque "Failed to fetch"; we translate that (and HTTP errors) into a
+// message that tells the user what to actually do (check key / provider / network).
+// ----------------------------------------------------------------
+
+/** fetch() that turns a network-level rejection into an actionable message naming the provider. */
+async function providerFetch(url: string, init: RequestInit, providerLabel: string): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(
+      `Couldn't reach ${providerLabel}. The request failed before any response — usually a network drop, ` +
+      `an ad/privacy blocker, or a missing/invalid API key for this provider. ` +
+      `Check the model picker (key + provider) and your connection, then try again.`,
+    );
+  }
+}
+
+/** Build a clear error from a non-2xx provider response. */
+async function httpError(res: Response, providerLabel: string): Promise<Error> {
+  let detail = '';
+  try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
+  if (res.status === 401 || res.status === 403) {
+    return new Error(`${providerLabel} rejected the API key (${res.status}). Add or fix the key in the model picker.`);
+  }
+  if (res.status === 404) {
+    return new Error(`${providerLabel} returned 404 — the model id is probably wrong for this provider. Pick a valid model. ${detail}`);
+  }
+  if (res.status === 429) {
+    if (/too large|tokens per min|\bTPM\b|rate limit|context length|maximum context/i.test(detail)) {
+      return new Error(
+        `${providerLabel}: this request is over your per-minute token limit. Pick a smaller model ` +
+        `(e.g. gpt-4o-mini / a -mini or -flash model has a much higher limit), upgrade your plan, or wait a minute. ${detail}`,
+      );
+    }
+    return new Error(`${providerLabel} is rate-limited or out of quota (429). Wait a moment or check your plan. ${detail}`);
+  }
+  return new Error(`${providerLabel} request failed (${res.status}). ${detail}`);
+}
+
+/**
+ * Open a connection to a provider with retry on transient failures (network drop, 429, 5xx).
+ * Retries only the connect — once a 2xx body is returned the caller streams it, so we never
+ * replay a partially-consumed stream. Throws an actionable error after the final attempt.
+ */
+async function connectProvider(url: string, init: RequestInit, providerLabel: string): Promise<Response> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch {
+      if (attempt < 2) { await new Promise((r) => setTimeout(r, 800 * 2 ** attempt)); continue; }
+      throw new Error(
+        `Couldn't reach ${providerLabel}. The request failed before any response — usually a network drop, ` +
+        `an ad/privacy blocker, or a missing/invalid API key. Check the model picker and your connection, then retry.`,
+      );
+    }
+    if (res.ok) return res;
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 800 * 2 ** attempt));
+      continue;
+    }
+    throw await httpError(res, providerLabel);
+  }
+  throw new Error(`Couldn't reach ${providerLabel}.`);
+}
 
 export interface GenerateResult { generationId: string }
 
@@ -84,6 +157,25 @@ export async function generateRoadmap(projectId: string): Promise<string> {
   const roadmap = raw.text.trim();
   await saveRoadmap(projectId, roadmap);
   return roadmap;
+}
+
+// Distill a user's note/correction into one durable preference rule (the "learning"). Falls back
+// to the cleaned-up raw text if direct mode is off or the model call fails — so a preference is
+// never lost just because distillation didn't run.
+export async function distillPreference(raw: string, recentContext?: string): Promise<string> {
+  const clean = raw.trim();
+  if (!clean) return '';
+  if (!DIRECT || !resolveAI().ready) return clean;
+  try {
+    const out = await rawComplete([
+      { role: 'system', content: PREFERENCE_DISTILL_SYSTEM },
+      { role: 'user', content: `Turn this into one durable preference rule.${recentContext ? `\n\nRecent context:\n${recentContext.slice(0, 1500)}` : ''}\n\nUser note: "${clean}"` },
+    ], 200);
+    const rule = out.text.trim().replace(/^["']|["']$/g, '').split('\n')[0].trim();
+    return rule || clean;
+  } catch {
+    return clean;
+  }
 }
 
 // Analyze an uploaded document into concise, build-relevant notes for the Project Brain.
@@ -176,7 +268,7 @@ export async function generateProjectMap(projectId: string): Promise<string> {
 // Anthropic's built-in web_search tool (no separate search API needed). Returns a discuss-style
 // answer with citations. Anthropic runs the searches server-side, so this works in direct mode.
 export async function researchAnswer(
-  projectId: string, message: string, onEvent?: (e: EditEvent) => void,
+  projectId: string, message: string, onEvent?: (e: EditEvent) => void, threadId: string = MAIN_THREAD_ID,
 ): Promise<EditResult> {
   // Production path: the research edge function holds the key and runs web search server-side.
   if (!DIRECT) {
@@ -189,12 +281,13 @@ export async function researchAnswer(
     return { action: 'discuss', explanation: (data as { answer?: string })?.answer ?? '', changed: [], deleted: [] };
   }
 
-  if (PROVIDER !== 'anthropic') throw new Error('Research currently requires the Anthropic provider (set VITE_AI_PROVIDER=anthropic).');
-  if (!KEY) throw new Error('Research needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
+  const ai = resolveAI();
+  if (ai.provider !== 'anthropic') throw new Error('Research needs the Anthropic provider (web search runs server-side at Anthropic). Switch the model picker to Claude.');
+  if (!ai.key) throw new Error('Research needs an Anthropic API key — add one in the model picker.');
 
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
-  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
+  await insertAiMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
 
   onEvent?.({ type: 'start' });
   onEvent?.({ type: 'explanation', text: 'Reading your code, then searching the web…' });
@@ -213,26 +306,23 @@ export async function researchAnswer(
     buildCodeDigest(allFiles.filter((f) => !isMetaFile(f.path))),
   ].filter(Boolean).join('\n');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await providerFetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': KEY,
+      'x-api-key': ai.key,
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: ai.model,
       max_tokens: 8000,
       system: RESEARCH_SYSTEM,
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 10 }],
       messages: [{ role: 'user', content: researchPrompt(message, ctx) }],
     }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Research failed (anthropic ${res.status}). ${body.slice(0, 200)}`);
-  }
+  }, 'Anthropic');
+  if (!res.ok) throw await httpError(res, 'Anthropic');
 
   const data = await res.json();
   const blocks = (data.content ?? []) as Array<{ type: string; text?: string; citations?: Array<{ url?: string; title?: string }> }>;
@@ -242,7 +332,9 @@ export async function researchAnswer(
   const answer = (text || 'I searched but did not find enough to answer confidently.') +
     (sources.size ? `\n\nSources:\n${[...sources].map((s) => `• ${s}`).join('\n')}` : '');
 
-  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'assistant', content: answer });
+  const id = await insertAiMessage({ project_id: projectId, user_id: userId, role: 'assistant', content: answer, thread_id: threadId });
+  // Note: web_search billing isn't in token usage, so this undercounts research a little.
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: data.usage?.input_tokens ?? 0, outputTokens: data.usage?.output_tokens ?? 0, messageId: id });
   onEvent?.({ type: 'done' });
   return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
 }
@@ -306,18 +398,18 @@ export async function draftGenerationPlan(prompt: string): Promise<{ plan: EditP
 
 export async function sendEdit(
   projectId: string, message: string, previewError?: string,
-  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
 ): Promise<EditResult> {
   // Both paths stream so the UI can render the edit landing file-by-file.
-  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst);
-  return edgeEditStream(projectId, message, previewError, onEvent, planFirst);
+  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId);
+  return edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId);
 }
 
 // Calls the streaming chat-edit edge function. supabase-js's functions.invoke buffers the
 // whole response, so we fetch the function URL directly and read its SSE body.
 async function edgeEditStream(
   projectId: string, message: string, previewError: string | undefined,
-  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
 ): Promise<EditResult> {
   const { data: { session } } = await supabase.auth.getSession();
   onEvent?.({ type: 'start' });
@@ -328,7 +420,8 @@ async function edgeEditStream(
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${session?.access_token ?? supabaseAnonKey}`,
     },
-    body: JSON.stringify({ projectId, message, previewError, planFirst }),
+    // `image`/`threadId` are forwarded for when the edge function supports them; harmless if ignored.
+    body: JSON.stringify({ projectId, message, previewError, planFirst, image, threadId }),
   });
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => null);
@@ -382,47 +475,52 @@ async function readFnError(error: unknown): Promise<string> {
 interface RawResult { text: string; inputTokens: number; outputTokens: number }
 
 async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192): Promise<RawResult> {
-  if (!KEY && PROVIDER !== 'local') {
-    throw new Error('Direct mode needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
+  const ai = resolveAI();
+  const label = providerInfo(ai.provider).label;
+  if (!ai.ready) {
+    throw new Error(`No API key set for ${label}. Add one in the model picker (or switch provider).`);
   }
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      if (PROVIDER === 'anthropic') {
+      if (ai.provider === 'anthropic') {
         const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
         const rest = messages.filter((m) => m.role !== 'system');
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
+        const res = await providerFetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-api-key': KEY,
+            'x-api-key': ai.key,
             'anthropic-version': '2023-06-01',
             'anthropic-dangerous-direct-browser-access': 'true',
           },
-          body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: rest }),
-        });
-        if (!res.ok) throw new Error(`anthropic ${res.status}`);
+          body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest }),
+        }, label);
+        if (!res.ok) throw await httpError(res, label);
         const data = await res.json();
+        const inputTokens = data.usage?.input_tokens ?? 0;
+        const outputTokens = data.usage?.output_tokens ?? 0;
+        recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
         return {
           text: data.content.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n'),
-          inputTokens: data.usage?.input_tokens ?? 0,
-          outputTokens: data.usage?.output_tokens ?? 0,
+          inputTokens,
+          outputTokens,
         };
       }
-      const base =
-        PROVIDER === 'openai' ? 'https://api.openai.com/v1'
-        : PROVIDER === 'openrouter' ? 'https://openrouter.ai/api/v1'
-        : LOCAL_BASE;
-      const res = await fetch(`${base}/chat/completions`, {
+      // OpenAI-compatible providers (openai, xai/Grok, gemini, openrouter, local).
+      const res = await providerFetch(`${ai.openAIBase}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY || 'local'}` },
-        body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages }),
-      });
-      if (!res.ok) throw new Error(`${PROVIDER} ${res.status}`);
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
+        body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages }),
+      }, label);
+      if (!res.ok) throw await httpError(res, label);
       const data = await res.json();
+      const inputTokens = data.usage?.prompt_tokens ?? 0;
+      const outputTokens = data.usage?.completion_tokens ?? 0;
+      recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
       return {
         text: data.choices?.[0]?.message?.content ?? '',
-        inputTokens: data.usage?.prompt_tokens ?? 0,
-        outputTokens: data.usage?.completion_tokens ?? 0,
+        inputTokens,
+        outputTokens,
       };
     } catch (err) {
       if (attempt === 2) throw err;
@@ -452,6 +550,209 @@ async function parseJsonWithRepair<T>(raw: string): Promise<T> {
     ], 16000);
     return parseJson<T>(fixed.text);
   }
+}
+
+// A typed Supabase client for generated apps — reads env, warns if unset. Static (no model call).
+const GENERATED_SUPABASE_CLIENT = `// src/lib/supabaseClient.ts — generated by FableForge.
+// Connect this app to your backend: create a project at https://supabase.com, then set
+// VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env (see .env.example).
+import { createClient } from '@supabase/supabase-js';
+
+const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+if (!url || !anonKey) {
+  console.warn('[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set — running on localStorage until you connect a backend.');
+}
+
+// createClient THROWS on an empty URL, which would crash the whole app before a backend is
+// connected. Fall back to an inert placeholder so the module loads; data access goes through
+// db.ts, which only talks to Supabase when VITE_SUPABASE_URL is actually set — so this is never hit.
+export const supabase = createClient(url || 'https://placeholder.supabase.co', anonKey || 'placeholder-anon-key');
+export const isSupabaseConnected = Boolean(url && anonKey);
+`;
+
+const GENERATED_ENV_EXAMPLE = `# Supabase — create a project at https://supabase.com, open Project Settings > API,
+# then paste the values here and rename this file to .env
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+`;
+
+function stripFences(s: string): string {
+  const m = s.match(/\`\`\`(?:sql)?\s*([\s\S]*?)\`\`\`/i);
+  return (m ? m[1] : s).trim();
+}
+
+async function writeProjectFile(projectId: string, path: string, content: string): Promise<void> {
+  await supabase.from('project_files').upsert(
+    { project_id: projectId, path, content, updated_by_ai: true },
+    { onConflict: 'project_id,path' },
+  );
+}
+
+/**
+ * Insert an ai_messages row (including thread_id) and return its id. If the thread_id column
+ * doesn't exist yet (migration not applied), it transparently retries WITHOUT thread_id, so chat
+ * keeps working as a single Main thread until the one-line migration is run.
+ */
+async function insertAiMessage(row: Record<string, unknown>): Promise<string | undefined> {
+  const res = await supabase.from('ai_messages').insert(row).select('id').single();
+  if (res.error && /thread_id|column|schema cache|does not exist/i.test(res.error.message ?? '')) {
+    const { thread_id: _omit, ...rest } = row; void _omit;
+    const retry = await supabase.from('ai_messages').insert(rest).select('id').single();
+    return (retry.data as { id?: string } | null)?.id;
+  }
+  return (res.data as { id?: string } | null)?.id;
+}
+
+/**
+ * Materialize the blueprint's database_schema/auth_rules into real, deployable backend files:
+ * a Supabase migration (tables + RLS + owner policies + auth trigger), a typed client, and a
+ * .env.example. Direct mode only for now (edge mirror pending). Returns the table count;
+ * a zero-table blueprint writes nothing.
+ */
+export async function generateBackend(projectId: string, blueprintJson: string): Promise<{ tables: number }> {
+  let tables = 0;
+  try {
+    const bp = JSON.parse(blueprintJson) as { database_schema?: { tables?: unknown[] } };
+    tables = bp.database_schema?.tables?.length ?? 0;
+  } catch { tables = 0; }
+  if (!tables) return { tables: 0 };
+
+  const sqlRaw = await rawComplete([
+    { role: 'system', content: SCHEMA_SYSTEM },
+    { role: 'user', content: schemaPrompt(blueprintJson) },
+  ]);
+  const sql = stripFences(sqlRaw.text);
+  if (!sql || /^--\s*no tables required/i.test(sql)) return { tables: 0 };
+
+  await writeProjectFile(projectId, '/supabase/migrations/0001_init.sql', sql + '\n');
+  await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+  await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+  return { tables };
+}
+
+/**
+ * Generate a backend for an EXISTING project (generated or imported) by inferring the schema
+ * from its source code — no blueprint needed. Writes the migration + client + .env.example.
+ * Direct mode only (edge mirror pending). Returns the number of tables created.
+ */
+export async function generateBackendFromProject(projectId: string): Promise<{ tables: number }> {
+  if (!DIRECT) throw new Error('Backend generation currently requires direct mode (edge mirror coming).');
+  const { data } = await supabase.from('project_files').select('path,content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const files = ((data ?? []) as { path: string; content: string }[])
+    .filter((f) => !isMetaFile(f.path) && !f.path.startsWith('/supabase/'));
+  if (!files.length) throw new Error('No source files to analyze.');
+
+  const sqlRaw = await rawComplete([
+    { role: 'system', content: SCHEMA_SYSTEM },
+    { role: 'user', content: schemaFromCodePrompt(buildCodeDigest(files)) },
+  ]);
+  const sql = stripFences(sqlRaw.text);
+  if (!sql || /^--\s*no tables required/i.test(sql)) return { tables: 0 };
+
+  await writeProjectFile(projectId, '/supabase/migrations/0001_init.sql', sql + '\n');
+  await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+  await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+  return { tables: (sql.match(/create table/gi) ?? []).length };
+}
+
+/**
+ * Convert an existing project to the design-token theme by mechanically tokenizing the color
+ * classes in every app source file (deterministic, guaranteed coverage), and ensuring the theme
+ * foundation exists. Returns how many files changed. Pair with applyThemePreset to recolor.
+ */
+export async function convertProjectToTokens(projectId: string): Promise<{ changed: number }> {
+  const { data } = await supabase.from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const all = (data ?? []) as { path: string; content: string }[];
+  await ensureThemeFoundation(projectId, all);
+
+  const targets = all.filter(
+    (f) => /\.(t|j)sx?$/.test(f.path) && f.path.startsWith('/src/') && !isMetaFile(f.path),
+  );
+  let changed = 0;
+  for (const f of targets) {
+    const next = tokenizeColors(f.content);
+    if (next !== f.content) {
+      await writeProjectFile(projectId, f.path, next);
+      changed++;
+    }
+  }
+  return { changed };
+}
+
+/**
+ * Silently make sure a FableForge-kit project has the theme foundation, so theming is automatic
+ * (no button needed): write the theme hook / ThemeToggle / barrel export if missing, and upgrade
+ * the OLD `--color-*` scaffold stylesheet to the canonical token system when detected. Idempotent
+ * and cheap — only writes what's missing/outdated. Skips non-kit (imported/foreign) projects and
+ * never overwrites a stylesheet the user has already moved onto tokens or customized.
+ */
+/**
+ * Apply a named color preset to a project: rewrite /src/index.css with the preset's token values
+ * (instant, no model call) and make sure the theme hook + toggle exist. Recolors the whole app at
+ * once because every surface is token-driven. Returns the preset name.
+ */
+export async function applyThemePreset(projectId: string, presetId: string): Promise<{ name: string; changed: number }> {
+  // Tokenize the app's colors first (idempotent — no-ops once already on tokens), so the preset
+  // visibly recolors the WHOLE app, not just elements that already used tokens. Then write the
+  // palette. One click = convert + recolor.
+  const { changed } = await convertProjectToTokens(projectId);
+  await writeProjectFile(projectId, '/src/index.css', buildIndexCss(presetId));
+  return { name: getPreset(presetId).name, changed };
+}
+
+async function ensureThemeFoundation(projectId: string, files: { path: string; content: string }[]): Promise<void> {
+  const has = (p: string) => files.some((f) => f.path === p);
+  const get = (p: string) => files.find((f) => f.path === p)?.content ?? '';
+  // Only touch apps that use our UI kit — leave imported/foreign projects alone.
+  if (!has('/src/components/ui/Button.tsx')) return;
+  const want = (p: string) => THEME_FOUNDATION.find((f) => f.path === p)?.content ?? '';
+
+  if (!has('/src/lib/theme.ts')) await writeProjectFile(projectId, '/src/lib/theme.ts', want('/src/lib/theme.ts'));
+  if (!has('/src/components/ui/ThemeToggle.tsx')) await writeProjectFile(projectId, '/src/components/ui/ThemeToggle.tsx', want('/src/components/ui/ThemeToggle.tsx'));
+
+  // Upgrade the old scaffold stylesheet (had --color-bg, no shadcn tokens) to the token system.
+  const css = get('/src/index.css');
+  if (!css || (css.includes('--color-bg') && !css.includes('--background'))) {
+    await writeProjectFile(projectId, '/src/index.css', want('/src/index.css'));
+  }
+  const barrel = get('/src/components/ui/index.ts');
+  if (barrel && !barrel.includes('./ThemeToggle')) {
+    await writeProjectFile(projectId, '/src/components/ui/index.ts', barrel.trimEnd() + '\n' + UI_INDEX_THEMETOGGLE_EXPORT + '\n');
+  }
+}
+
+/**
+ * Retrofit an existing project onto the shadcn design-token theme system: write the canonical
+ * token stylesheet, the theme hook, the <ThemeToggle/>, and the index.html that carries the
+ * Tailwind token config + pre-paint script; ensure the ui barrel exports ThemeToggle. This sets
+ * up the FOUNDATION deterministically — converting the app's hardcoded colors to tokens is then
+ * done by a follow-up AI edit (the model knows the token rules from its system prompt). Returns
+ * the conversion instruction the caller should send through sendEdit so dark mode works fully.
+ */
+export async function setupThemeFoundation(projectId: string): Promise<{ conversionInstruction: string }> {
+  for (const f of THEME_FOUNDATION) {
+    await writeProjectFile(projectId, f.path, f.content);
+  }
+  // Make <ThemeToggle/> importable from the ui barrel if one exists and doesn't already export it.
+  const { data: barrel } = await supabase.from('project_files').select('content')
+    .eq('project_id', projectId).eq('path', '/src/components/ui/index.ts').is('deleted_at', null).maybeSingle();
+  if (barrel?.content && !barrel.content.includes('./ThemeToggle')) {
+    await writeProjectFile(projectId, '/src/components/ui/index.ts', barrel.content.trimEnd() + '\n' + UI_INDEX_THEMETOGGLE_EXPORT + '\n');
+  }
+  return {
+    conversionInstruction:
+      'Convert this app to the shadcn design-token theme that was just set up. Replace EVERY hardcoded ' +
+      'color across all pages and components with the semantic tokens: surfaces → bg-background / bg-card / ' +
+      'bg-muted, primary text → text-foreground, secondary text → text-muted-foreground, all borders → ' +
+      'border-border, the accent → bg-primary/text-primary-foreground, danger → bg-destructive. Remove ' +
+      'bg-white, bg-gray-*/slate-*, text-black, text-gray-*/slate-*, and hex colors. Mount a <ThemeToggle/> ' +
+      '(import from the ui kit) in the app\'s header/nav. Do NOT change layout, structure, or logic — only colors ' +
+      'and the toggle. Apply it everywhere so light and dark are both complete (no white borders, readable text).',
+  };
 }
 
 async function directGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
@@ -501,8 +802,19 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
       }).eq('id', projectId);
       await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
 
-      const tableCount = (blueprint.database_schema as { tables?: unknown[] })?.tables?.length ?? 0;
-      await mark('schema', 'done', tableCount ? `${tableCount} tables` : undefined);
+      // Backend FIRST, so the file generator can wire the app to it. Additive & resilient:
+      // a failure here never fails the whole generation — the app falls back to localStorage.
+      await mark('schema', 'running');
+      let backendFiles = 0;
+      let hasBackend = false;
+      let backendNote = 'no backend needed';
+      try {
+        const { tables } = await generateBackend(projectId, JSON.stringify(blueprint));
+        if (tables) { backendFiles = 3; hasBackend = true; backendNote = `${tables} tables + RLS + auth`; }
+      } catch (e) {
+        backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
+      }
+      await mark('schema', 'done', backendNote);
 
       await mark('file_tree', 'running');
       // Seed the fixed Vite/TS scaffold first so the project can boot as its source streams in.
@@ -512,16 +824,37 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           { onConflict: 'project_id,path' },
         );
       }
-      // Stream the source files (§FILE protocol) — no giant JSON blob, live progress.
+      // Give the app a distinctive, domain-appropriate palette (the blueprint picks an accent hue)
+      // instead of the default slate — this is the biggest single lever for "looks intentional,
+      // not generic AI output". Falls back to the scaffold default if no hue was chosen.
+      const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
+      const accentHue = Number(design?.accentHue);
+      if (Number.isFinite(accentHue)) {
+        const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForHue(accentHue, headingFont), updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
+      // Stream the source files (§FILE protocol). hasBackend tells the model to route data through
+      // /src/lib/db.ts against Supabase (with a localStorage fallback) instead of plain localStorage.
       const parser = makeStreamParser((e) => {
         if (e.type === 'file-start') void mark('file_tree', 'running', e.path.split('/').pop());
       });
+      const genAi = resolveAI();
+      let genUsage: Usage = { inputTokens: 0, outputTokens: 0 };
       await streamComplete([
         { role: 'system', content: GENERATE_FILES_STREAM },
-        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint)) },
-      ], 32000, (delta) => parser.push(delta));
-      const scaffoldPaths = new Set(SCAFFOLD_PATHS);
-      const appFiles = parser.end().changes.filter((f) => f.path && f.content.trim() && !scaffoldPaths.has(f.path));
+        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint), hasBackend) },
+      ], 32000, (delta) => parser.push(delta), undefined, (u) => { genUsage = u; });
+      // Never let a model-emitted file clobber the fixed scaffold or the generated backend files.
+      const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
+      // The UI kit under /src/components/ui/ is authoritative (scaffold-provided). Drop ANY model
+      // file there — a model-emitted ui/index.tsx alongside the scaffold's index.ts caused the
+      // duplicate-component / visual-drift bug the audit flagged.
+      const appFiles = parser.end().changes.filter(
+        (f) => f.path && f.content.trim() && !reserved.has(f.path) && !f.path.startsWith('/src/components/ui/'),
+      );
       if (!appFiles.length) throw new Error('The model produced no source files.');
       for (const f of appFiles) {
         await supabase.from('project_files').upsert(
@@ -529,19 +862,27 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           { onConflict: 'project_id,path' },
         );
       }
-      const total = SCAFFOLD_FILES.length + appFiles.length;
+      const total = SCAFFOLD_FILES.length + appFiles.length + backendFiles;
       await mark('file_tree', 'done', `${total} files`);
       for (const s of ['frontend', 'backend', 'auth_logic', 'styling', 'validate', 'fix'] as const) {
         await mark(s, 'done');
       }
 
       await mark('summarize', 'running');
-      await supabase.from('ai_messages').insert({
+      const summaryId = await insertAiMessage({
         project_id: projectId, user_id: userId, generation_id: genId,
         role: 'assistant',
-        content: `Generated ${total} files for ${blueprint.app_name}. Open the preview to try it, then keep iterating in chat.`,
+        content: `Generated ${total} files for ${blueprint.app_name}.` +
+          (hasBackend
+            ? ` It's full-stack: a Supabase backend (${backendNote}) lives at /supabase/migrations/0001_init.sql and the app talks to it through /src/lib/db.ts. Run that SQL in Supabase, then use "Supabase" in the header to connect — it runs on localStorage until you do.`
+            : '') +
+          ` Open the preview to try it, then keep iterating in chat.`,
         files_changed: appFiles.map((f) => f.path),
+        thread_id: MAIN_THREAD_ID,
       });
+      // The file-generation stream is the big cost; attribute it to the summary message.
+      // (The blueprint rawComplete call already recorded its own usage to the ledger.)
+      recordUsage({ provider: genAi.provider, model: genAi.model, inputTokens: genUsage.inputTokens, outputTokens: genUsage.outputTokens, messageId: summaryId });
       await mark('summarize', 'done');
 
       await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
@@ -584,13 +925,14 @@ async function directEdit(projectId: string, message: string, previewError?: str
   const brainNs = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const mapNs = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const roadmapNs = (files ?? []).find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const prefsNs = (files ?? []).find((f) => f.path === PREFS_PATH)?.content ?? '';
   const appFilesNs = (files ?? []).filter((f) => !isMetaFile(f.path));
   const debugNs = previewError
     ? '\n\nThis is a bug fix. Diagnose the ROOT CAUSE (not just the symptom), state it in one line, then make the smallest change that addresses it.'
     : '';
   const raw = await rawComplete([
     { role: 'system', content: EDIT_SYSTEM },
-    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + roadmapContext(roadmapNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) + debugNs },
+    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + roadmapContext(roadmapNs) + prefsContext(prefsNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) + previewContext() + debugNs },
   ], 16000);
   const parsed = await parseJsonWithRepair<{
     action?: string; explanation?: string; question?: string; options?: string[];
@@ -673,55 +1015,101 @@ async function readSSE(body: ReadableStream<Uint8Array>, onData: (data: string) 
   }
 }
 
-/** Stream a completion, calling onDelta with each text chunk as it arrives. */
+// Convert a `data:image/...;base64,...` URL into an Anthropic image content block.
+function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
+  const m = /^data:(image\/[a-z+.-]+);base64,(.+)$/i.exec(dataUrl);
+  if (!m) return null;
+  return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } };
+}
+
+/** Stream a completion, calling onDelta with each text chunk as it arrives. An optional
+ * `image` (data URL) is attached to the last user message so vision models can see it. */
 async function streamComplete(
   messages: { role: string; content: string }[], maxTokens: number, onDelta: (t: string) => void,
+  image?: string, onUsage?: (u: Usage) => void,
 ): Promise<string> {
-  if (!KEY && PROVIDER !== 'local') {
-    throw new Error('Direct mode needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
+  const ai = resolveAI();
+  const label = providerInfo(ai.provider).label;
+  if (!ai.ready) {
+    throw new Error(`No API key set for ${label}. Add one in the model picker (or switch provider).`);
   }
   let full = '';
-  if (PROVIDER === 'anthropic') {
+  // Capture token usage as it streams; fall back to a length-based estimate if the provider
+  // doesn't report it (some OpenAI-compatible endpoints omit usage on streamed responses).
+  const usage: Usage = { inputTokens: 0, outputTokens: 0 };
+  let sawUsage = false;
+  const finishUsage = () => {
+    // Estimate when the provider reported no usage (or reported zeros), so a cost is always
+    // attributed — otherwise the message would show no cost tag at all.
+    if (!sawUsage || (!usage.inputTokens && !usage.outputTokens)) {
+      const inChars = messages.reduce((n, m) => n + m.content.length, 0);
+      usage.inputTokens = Math.round(inChars / 4);
+      usage.outputTokens = Math.round(full.length / 4);
+    }
+    onUsage?.(usage);
+  };
+  if (ai.provider === 'anthropic') {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
-    const rest = messages.filter((m) => m.role !== 'system');
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // Content may be a plain string or, when an image is attached, a content-block array.
+    const rest: { role: string; content: unknown }[] = messages.filter((m) => m.role !== 'system');
+    const block = image ? imageBlockFromDataUrl(image) : null;
+    if (block) {
+      for (let i = rest.length - 1; i >= 0; i--) {
+        if (rest[i].role === 'user') {
+          rest[i] = { role: 'user', content: [{ type: 'text', text: rest[i].content as string }, block] };
+          break;
+        }
+      }
+    }
+    const res = await connectProvider('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': KEY,
+        'x-api-key': ai.key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: rest, stream: true }),
-    });
-    if (!res.ok || !res.body) throw new Error(`anthropic ${res.status}`);
+      body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest, stream: true }),
+    }, label);
+    if (!res.body) throw new Error(`${label} returned an empty response.`);
     await readSSE(res.body, (data) => {
       if (data === '[DONE]') return;
-      let evt: { type?: string; delta?: { type?: string; text?: string } };
+      let evt: { type?: string; delta?: { type?: string; text?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number } }; usage?: { output_tokens?: number } };
       try { evt = JSON.parse(data); } catch { return; }
       if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta.text) {
         full += evt.delta.text; onDelta(evt.delta.text);
+      } else if (evt.type === 'message_start' && evt.message?.usage) {
+        usage.inputTokens = evt.message.usage.input_tokens ?? 0; sawUsage = true;
+      } else if (evt.type === 'message_delta' && evt.usage?.output_tokens != null) {
+        usage.outputTokens = evt.usage.output_tokens; sawUsage = true; // cumulative
       }
     });
+    finishUsage();
     return full;
   }
-  const base =
-    PROVIDER === 'openai' ? 'https://api.openai.com/v1'
-    : PROVIDER === 'openrouter' ? 'https://openrouter.ai/api/v1'
-    : LOCAL_BASE;
-  const res = await fetch(`${base}/chat/completions`, {
+  // OpenAI-compatible providers (openai, xai/Grok, gemini, openrouter, local). For providers
+  // that can't see images this way, the image is simply ignored (text still streams).
+  // stream_options.include_usage asks for a final usage chunk (ignored by providers that
+  // don't support it — we estimate in that case).
+  const res = await connectProvider(`${ai.openAIBase}/chat/completions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY || 'local'}` },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages, stream: true }),
-  });
-  if (!res.ok || !res.body) throw new Error(`${PROVIDER} ${res.status}`);
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
+    body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
+  }, label);
+  if (!res.body) throw new Error(`${label} returned an empty response.`);
   await readSSE(res.body, (data) => {
     if (data === '[DONE]') return;
-    let evt: { choices?: { delta?: { content?: string } }[] };
+    let evt: { choices?: { delta?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
     try { evt = JSON.parse(data); } catch { return; }
     const delta = evt.choices?.[0]?.delta?.content;
     if (delta) { full += delta; onDelta(delta); }
+    if (evt.usage) {
+      usage.inputTokens = evt.usage.prompt_tokens ?? 0;
+      usage.outputTokens = evt.usage.completion_tokens ?? 0;
+      sawUsage = true;
+    }
   });
+  finishUsage();
   return full;
 }
 
@@ -838,7 +1226,7 @@ function makeStreamParser(emit: (e: EditEvent) => void) {
 
 async function directEditStream(
   projectId: string, message: string, previewError: string | undefined,
-  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
 ): Promise<EditResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
@@ -846,14 +1234,21 @@ async function directEditStream(
   const { data: files } = await supabase
     .from('project_files').select('path, content')
     .eq('project_id', projectId).is('deleted_at', null);
+  // Pull recent turns scoped to THIS thread so the model's context stays focused on this idea.
+  // select('*') (not specific columns) so it works whether or not the thread_id column exists.
   const { data: history } = await supabase
-    .from('ai_messages').select('role, content')
-    .eq('project_id', projectId).order('created_at', { ascending: false }).limit(8);
-  const historyText = (history ?? []).reverse()
-    .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content.slice(0, 600)}`)
+    .from('ai_messages').select('*')
+    .eq('project_id', projectId).order('created_at', { ascending: false }).limit(120);
+  const historyText = ((history ?? []) as AIMessageRow[])
+    .filter((m) => threadOf(m.thread_id) === threadId)
+    .slice(0, 8).reverse()
+    .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${(m.content ?? '').slice(0, 600)}`)
     .join('\n');
 
-  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
+  await insertAiMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
+
+  // Keep the theme foundation in place automatically, so the user never has to click "Theme".
+  await ensureThemeFoundation(projectId, files ?? []);
 
   onEvent?.({ type: 'start' });
   const parser = makeStreamParser((e) => onEvent?.(e));
@@ -868,17 +1263,24 @@ async function directEditStream(
   const brain = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const map = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const roadmap = (files ?? []).find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const prefs = (files ?? []).find((f) => f.path === PREFS_PATH)?.content ?? '';
   const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
+  const ai = resolveAI();
+  let streamUsage: Usage = { inputTokens: 0, outputTokens: 0 };
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
-    { role: 'user', content: brainContext(brain) + mapContext(map) + roadmapContext(roadmap) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + planDirective + debugDirective },
-  ], 16000, (delta) => parser.push(delta));
+    { role: 'user', content: brainContext(brain) + mapContext(map) + roadmapContext(roadmap) + prefsContext(prefs) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + previewContext() + planDirective + debugDirective },
+  ], 16000, (delta) => parser.push(delta), image, (u) => { streamUsage = u; });
   const result = parser.end();
+  // Attribute this turn's token cost to the assistant message we're about to insert.
+  const logCost = (messageId?: string) =>
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: streamUsage.inputTokens, outputTokens: streamUsage.outputTokens, messageId });
 
   if (result.action === 'ask' && result.question) {
-    await supabase.from('ai_messages').insert({
-      project_id: projectId, user_id: userId, role: 'assistant', content: result.question,
+    const id = await insertAiMessage({
+      project_id: projectId, user_id: userId, role: 'assistant', content: result.question, thread_id: threadId,
     });
+    logCost(id);
     onEvent?.({ type: 'done' });
     return { action: 'ask', explanation: '', question: result.question, options: result.options, changed: [], deleted: [] };
   }
@@ -887,9 +1289,10 @@ async function directEditStream(
   // assistant message (it already streamed into the UI via explanation events).
   if (result.action === 'discuss') {
     const answer = result.explanation || 'Happy to help — what would you like to dig into?';
-    await supabase.from('ai_messages').insert({
-      project_id: projectId, user_id: userId, role: 'assistant', content: answer,
+    const id = await insertAiMessage({
+      project_id: projectId, user_id: userId, role: 'assistant', content: answer, thread_id: threadId,
     });
+    logCost(id);
     onEvent?.({ type: 'done' });
     return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
   }
@@ -899,9 +1302,10 @@ async function directEditStream(
   // for approval. Approval comes back as a normal follow-up edit.
   if (result.action === 'plan' && (result.summary || result.steps.length)) {
     const plan = toEditPlan(result);
-    await supabase.from('ai_messages').insert({
-      project_id: projectId, user_id: userId, role: 'assistant', content: renderPlanText(plan),
+    const id = await insertAiMessage({
+      project_id: projectId, user_id: userId, role: 'assistant', content: renderPlanText(plan), thread_id: threadId,
     });
+    logCost(id);
     onEvent?.({ type: 'done' });
     return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
@@ -920,10 +1324,11 @@ async function directEditStream(
       .eq('project_id', projectId).eq('path', path);
   }
   const explanation = result.explanation || 'Done.';
-  await supabase.from('ai_messages').insert({
+  const id = await insertAiMessage({
     project_id: projectId, user_id: userId, role: 'assistant',
-    content: explanation, files_changed: result.changes.map((c) => c.path),
+    content: explanation, files_changed: result.changes.map((c) => c.path), thread_id: threadId,
   });
+  logCost(id);
 
   onEvent?.({ type: 'done' });
   return { action: 'edit', explanation, changed: result.changes.map((c) => c.path), deleted: result.deletions };

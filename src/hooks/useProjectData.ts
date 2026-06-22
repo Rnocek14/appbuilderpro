@@ -1,7 +1,7 @@
 // src/hooks/useProjectData.ts
 // Data hooks for projects, files, generations, and chat — all with realtime updates.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import type { Project, ProjectFile, Generation, AIMessage, FileVersion } from '../types';
@@ -81,15 +81,52 @@ export function useProjects() {
 export function useProjectFiles(projectId: string | undefined) {
   const [files, setFiles] = useState<ProjectFile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Discards results from a load that was superseded (e.g. a realtime refire
+  // started a newer load while this one was still paging).
+  const loadToken = useRef(0);
 
+  // Load every file for the project in pages. A single `select('*')` over a large
+  // imported app pulls all file contents at once and can exceed Supabase's 8s
+  // statement timeout — which used to fail silently (data=null → files=[]) and
+  // leave the preview stuck on "Waiting for project files…". Paging keeps each
+  // request small and reliable, and surfaces errors instead of swallowing them.
+  // Pages are accumulated and committed once so the preview never sees a partial
+  // file set (which would flash a spurious "No entry file found").
   const refresh = useCallback(async () => {
     if (!projectId) return;
-    const { data } = await supabase
-      .from('project_files').select('*')
-      .eq('project_id', projectId).is('deleted_at', null)
-      .order('path');
-    setFiles((data as ProjectFile[]) ?? []);
-    setLoading(false);
+    const token = ++loadToken.current;
+    setLoading(true);
+    setLoadError(null);
+    const PAGE = 100;
+    const acc: ProjectFile[] = [];
+    try {
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from('project_files')
+          .select('id,project_id,path,content,version,updated_by_ai,updated_at')
+          .eq('project_id', projectId).is('deleted_at', null)
+          .order('path')
+          .range(from, from + PAGE - 1);
+        if (token !== loadToken.current) return; // a newer load won; drop this one
+        if (error) {
+          console.error('[useProjectFiles] load failed:', error);
+          setLoadError(error.message);
+          return; // keep whatever was loaded before; don't clobber with a partial set
+        }
+        const batch = (data as ProjectFile[]) ?? [];
+        acc.push(...batch);
+        if (batch.length < PAGE) break; // last page
+      }
+      if (token === loadToken.current) setFiles(acc);
+    } catch (e) {
+      if (token === loadToken.current) {
+        console.error('[useProjectFiles] load threw:', e);
+        setLoadError(e instanceof Error ? e.message : 'Failed to load files');
+      }
+    } finally {
+      if (token === loadToken.current) setLoading(false);
+    }
   }, [projectId]);
 
   useEffect(() => {
@@ -135,7 +172,7 @@ export function useProjectFiles(projectId: string | undefined) {
     return (data as FileVersion[]) ?? [];
   };
 
-  return { files, loading, refresh, saveFile, createFile, renameFile, deleteFile, getVersions };
+  return { files, loading, loadError, refresh, saveFile, createFile, renameFile, deleteFile, getVersions };
 }
 
 // ---------------- generations (realtime) ----------------

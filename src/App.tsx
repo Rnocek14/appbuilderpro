@@ -7,6 +7,7 @@ import { Spinner } from './components/ui';
 import Landing from './pages/Landing';
 import Auth from './pages/Auth';
 import Dashboard from './pages/Dashboard';
+import Garvis from './pages/Garvis';
 import NewProject from './pages/NewProject';
 import ImportProject from './pages/ImportProject';
 import Autopilot from './pages/Autopilot';
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="/" element={<Landing />} />
               <Route path="/auth" element={<Auth />} />
               <Route path="/pricing" element={<Pricing />} />
+              <Route path="/garvis" element={<Protected><Garvis /></Protected>} />
               <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
               <Route path="/new" element={<Protected><NewProject /></Protected>} />
               <Route path="/import" element={<Protected><ImportProject /></Protected>} />

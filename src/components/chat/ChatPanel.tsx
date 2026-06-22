@@ -1,10 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
-import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe } from 'lucide-react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe, Camera, X, Brain } from 'lucide-react';
 import type { AIMessage, Generation, EditPlan } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { PlanCard } from '../PlanCard';
 import { Markdown } from '../Markdown';
+import { ModelPicker } from '../ModelPicker';
+import { RememberModal } from '../RememberModal';
+import { ThreadSwitcher } from './ThreadSwitcher';
+import type { Thread } from '../../lib/threads';
+import { captureScreenshot } from '../../lib/previewRuntime';
+import { costForMessage, subscribeUsage, formatUSD } from '../../lib/usage';
+
+/** Tiny estimated-cost tag shown in the corner of an assistant message. */
+function CostTag({ messageId }: { messageId: string }) {
+  const cost = useSyncExternalStore(subscribeUsage, () => costForMessage(messageId));
+  if (cost == null) return null;
+  return (
+    <span title="Estimated cost of this response (tokens × model price)" className="font-mono text-[10px] text-forge-dim/70">
+      ~{formatUSD(cost)}
+    </span>
+  );
+}
 
 const QUICK_ACTIONS = [
   'Add a dashboard',
@@ -32,9 +49,19 @@ const STAGE_LABELS: Record<string, string> = {
 interface StreamState { explanation: string; files: { path: string; done: boolean }[] }
 
 interface Props {
+  projectId: string;
   messages: AIMessage[];
   activeGeneration: Generation | null;
   busy: boolean;
+  /** Conversation threads + controls (shown in the header in place of "Assistant"). */
+  threads: Thread[];
+  activeThreadId: string;
+  /** False when the thread_id DB migration hasn't been applied (threads can't fully separate yet). */
+  threadsReady: boolean;
+  onSwitchThread: (id: string) => void;
+  onNewThread: () => void;
+  onRenameThread: (id: string, title: string) => void;
+  onDeleteThread: (id: string) => void;
   /** Quick-reply chips for a clarifying question the assistant just asked. */
   askOptions?: string[];
   /** A plan the assistant proposed (plan mode), awaiting approval. */
@@ -43,7 +70,7 @@ interface Props {
   onApprovePlan?: () => void;
   /** Live progress while the assistant streams an edit. */
   stream?: StreamState | null;
-  onSend: (message: string, opts?: { planFirst?: boolean; research?: boolean }) => void;
+  onSend: (message: string, opts?: { planFirst?: boolean; research?: boolean; image?: string }) => void;
 }
 
 /** Signature element: the forging strip — stages heat up as the agent works. */
@@ -77,13 +104,30 @@ function ForgeProgress({ gen }: { gen: Generation }) {
   );
 }
 
-export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], plan = null, onApprovePlan, stream = null, onSend }: Props) {
+export function ChatPanel({ projectId, messages, activeGeneration, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend }: Props) {
   const [input, setInput] = useState('');
+  // The "Remember a preference" panel + a seed taken from the most recent user message, so
+  // correcting something then clicking Remember pre-fills what you just said.
+  const [rememberOpen, setRememberOpen] = useState(false);
+  const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   // When on, the next message is planned (proposed for approval) before any code is written.
   const [planFirst, setPlanFirst] = useState(false);
   // When on, the next message is answered with live web research (no code).
   const [research, setResearch] = useState(false);
+  // A screenshot of the current preview, attached to the next message so the model can see it.
+  const [shot, setShot] = useState<string | null>(null);
+  const [shooting, setShooting] = useState(false);
+  // Whether the coding-model picker popover is open.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const capture = async () => {
+    if (shooting) return;
+    setShooting(true);
+    const img = await captureScreenshot();
+    setShooting(false);
+    setShot(img); // null if the preview isn't running/ready — the button hint reflects that
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -92,15 +136,24 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
   const submit = () => {
     const text = input.trim();
     if (!text || busy) return;
-    onSend(text, { planFirst, research });
+    onSend(text, { planFirst, research, image: shot ?? undefined });
     setInput('');
+    setShot(null);
   };
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-forge-border px-3 py-2">
-        <Flame size={14} className="text-forge-ember" />
-        <span className="text-xs font-medium uppercase tracking-wide text-forge-dim">Assistant</span>
+      <div className="flex items-center gap-1.5 border-b border-forge-border px-2 py-1.5">
+        <Flame size={14} className="shrink-0 text-forge-ember" />
+        <ThreadSwitcher
+          threads={threads}
+          activeId={activeThreadId}
+          ready={threadsReady}
+          onSwitch={onSwitchThread}
+          onNew={onNewThread}
+          onRename={onRenameThread}
+          onDelete={onDeleteThread}
+        />
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto panel-scroll p-3">
@@ -132,6 +185,11 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
                       <FileCode2 size={10} /> {f}
                     </span>
                   ))}
+                </div>
+              )}
+              {m.role === 'assistant' && (
+                <div className="mt-1 flex justify-end">
+                  <CostTag messageId={m.id} />
                 </div>
               )}
             </div>
@@ -198,56 +256,83 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
             ))}
           </div>
         )}
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {QUICK_ACTIONS.map((a) => (
-            <button
-              key={a}
-              disabled={busy}
-              onClick={() => onSend(a, { planFirst, research })}
-              className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-40"
-            >
-              {a}
+
+        {/* Suggestions — only while the box is empty, in one tidy scroll row, so the bar stays calm. */}
+        {!input.trim() && !busy && askOptions.length === 0 && (
+          <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5 panel-scroll">
+            {QUICK_ACTIONS.map((a) => (
+              <button
+                key={a}
+                onClick={() => onSend(a, { planFirst, research })}
+                className="shrink-0 whitespace-nowrap rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {shot && (
+          <div className="mb-2 inline-flex items-center gap-2 rounded-lg border border-forge-border bg-forge-panel p-1.5">
+            <img src={shot} alt="Preview screenshot to send" className="h-10 w-auto rounded border border-forge-border" />
+            <span className="text-[11px] text-forge-dim">Preview attached</span>
+            <button type="button" onClick={() => setShot(null)} aria-label="Remove screenshot" className="rounded p-0.5 text-forge-dim hover:text-forge-ink">
+              <X size={13} />
             </button>
-          ))}
-        </div>
-        <div className="mb-2 flex items-center gap-2">
+          </div>
+        )}
+
+        {/* Controls — one clean row: model + mode toggles on the left, utilities on the right. */}
+        <div className="mb-2 flex items-center gap-1.5">
+          <ModelPicker open={pickerOpen} onToggle={setPickerOpen} />
+          <span className="mx-0.5 h-5 w-px bg-forge-border" />
           <button
             type="button"
             onClick={() => setPlanFirst((v) => !v)}
             aria-pressed={planFirst}
-            title="Propose a plan for approval before writing any code"
+            title="Plan first — propose a plan for approval before writing any code"
             className={cn(
               'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
-              planFirst
-                ? 'border-forge-ember bg-forge-ember/15 text-forge-ink'
-                : 'border-forge-border text-forge-dim hover:text-forge-ink',
+              planFirst ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
             )}
           >
-            <ClipboardList size={12} />
-            Plan first
-            <span className={cn('ml-1 rounded px-1 text-[9px] font-medium', planFirst ? 'bg-forge-ember/30 text-forge-ink' : 'bg-forge-border/40 text-forge-dim')}>
-              {planFirst ? 'ON' : 'OFF'}
-            </span>
+            <ClipboardList size={12} /> Plan
           </button>
           <button
             type="button"
             onClick={() => setResearch((v) => !v)}
             aria-pressed={research}
-            title="Answer with live web research (market, competition) instead of editing"
+            title="Research — answer with live web research instead of editing"
             className={cn(
               'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
               research ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
             )}
           >
-            <Globe size={12} />
-            Research
-            <span className={cn('ml-1 rounded px-1 text-[9px] font-medium', research ? 'bg-forge-ember/30 text-forge-ink' : 'bg-forge-border/40 text-forge-dim')}>
-              {research ? 'ON' : 'OFF'}
-            </span>
+            <Globe size={12} /> Research
           </button>
-          {research
-            ? <span className="text-[10px] text-forge-dim">I'll search the web and answer with sources.</span>
-            : planFirst && <span className="text-[10px] text-forge-dim">I'll propose a plan before changing any files.</span>}
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={capture}
+              disabled={shooting || busy}
+              aria-pressed={!!shot}
+              title={shot ? 'Screenshot attached — click to retake' : 'Attach a screenshot of the preview'}
+              className={cn(
+                'inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors disabled:opacity-50',
+                shot ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
+              )}
+            >
+              {shooting ? <CircleDashed size={13} className="animate-spin" /> : <Camera size={13} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setRememberOpen(true)}
+              title="Remember — teach FableForge a lasting preference"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-forge-border text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+            >
+              <Brain size={13} />
+            </button>
+          </div>
         </div>
         <div className="flex items-end gap-2">
           <textarea
@@ -267,6 +352,8 @@ export function ChatPanel({ messages, activeGeneration, busy, askOptions = [], p
           </Button>
         </div>
       </div>
+
+      <RememberModal projectId={projectId} seed={lastUserMessage} open={rememberOpen} onClose={() => setRememberOpen(false)} />
     </div>
   );
 }

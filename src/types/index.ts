@@ -78,6 +78,8 @@ export interface AIMessage {
   content: string;
   files_changed: string[];
   created_at: string;
+  /** Conversation thread this message belongs to. NULL/undefined = the default "Main" thread. */
+  thread_id?: string | null;
 }
 
 // A proposed implementation plan the assistant presents before writing code
@@ -178,4 +180,54 @@ export interface AgentQuestion {
   answer: string | null;
   status: 'pending' | 'answered' | 'skipped';
   created_at: string;
+}
+
+// ---------------- garvis portfolio (control plane above the builder) ----------------
+export type AppStage = 'idea' | 'building' | 'launched' | 'growing' | 'paused' | 'archived';
+
+/** A REAL owned product Garvis manages — distinct from a generated `Project`. */
+export interface PortfolioApp {
+  id: string;
+  owner_id: string;
+  name: string;
+  slug: string | null;
+  description: string | null;
+  repo_url: string | null;
+  deploy_url: string | null;
+  stage: AppStage;
+  project_id: string | null; // optional link to the FableForge project that builds it
+  goals: string | null;
+  monthly_revenue: number;
+  tags: string[];
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AppMetric {
+  id: string;
+  app_id: string;
+  owner_id: string;
+  metric_date: string;
+  source: 'manual' | 'ga' | 'stripe' | 'plausible' | 'custom';
+  visitors: number;
+  signups: number;
+  active_users: number;
+  revenue: number;
+  created_at: string;
+}
+
+export interface AgentRun {
+  id: string;
+  owner_id: string;
+  app_id: string | null; // null = portfolio-wide
+  kind: 'research' | 'content' | 'build' | 'analyze' | 'recommend';
+  title: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  input: string | null;
+  output: string | null;
+  recommendation: string | null;
+  cost_usd: number;
+  created_at: string;
+  finished_at: string | null;
 }

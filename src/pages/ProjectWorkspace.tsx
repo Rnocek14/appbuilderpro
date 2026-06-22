@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Compass, ShieldCheck, CircleX, TriangleAlert, Lightbulb, Zap } from 'lucide-react';
+import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Compass, ShieldCheck, CircleX, TriangleAlert, Lightbulb, Zap, Terminal as TerminalIcon, X, Database, Gauge, Server, Palette, Monitor, Tablet, Smartphone, Terminal, type LucideIcon } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { FileTree } from '../components/editor/FileTree';
 import { CodeEditorPane } from '../components/editor/CodeEditorPane';
-import { PreviewPane } from '../components/editor/PreviewPane';
+import { PreviewPane, type Device } from '../components/editor/PreviewPane';
+import { WebContainerPane } from '../components/editor/WebContainerPane';
+import { WebContainerTerminal } from '../components/editor/WebContainerTerminal';
 import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
-import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, type EditEvent } from '../lib/aiClient';
+import { captureScreenshot, getPreviewSnapshot } from '../lib/previewRuntime';
 import { extractText } from '../lib/docExtract';
 import { runQA, issuesToFixRequest, type QAIssue } from '../lib/projectQA';
 import { runAutopilot, type AutopilotEvent } from '../lib/autopilot';
@@ -15,23 +18,80 @@ import { Markdown } from '../components/Markdown';
 import { supabase } from '../lib/supabase';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
-import { Badge, Button, Modal } from '../components/ui';
+import { Badge, Button, Input, Modal } from '../components/ui';
 import { getBrain, saveBrain, getMap, getRoadmap, getIdeation, saveDoc, listDocs, getDoc, DEFAULT_BRAIN, isMetaFile, type BrainDoc } from '../lib/projectBrain';
 import { cn } from '../lib/utils';
+import { ThemeModal } from '../components/ThemeModal';
+import { getThreads, createThread, renameThread, deleteThread, getActiveThread, setActiveThread, threadsEnabled, threadOf, MAIN_THREAD_ID, type Thread } from '../lib/threads';
 import type { Project, Deployment, EditPlan } from '../types';
 
 type MiddleTab = 'chat' | 'code';
+
+/**
+ * Wait for the live preview to render the latest code, then report any uncaught runtime error.
+ * Resolves with the error string if the render threw, null if it rendered cleanly (or we couldn't
+ * observe within the timeout). This lets the edit flow catch render-time failures that static
+ * checks can't see (e.g. a default/named import mismatch → React error #130).
+ */
+async function awaitPreviewError(sinceTs: number, timeoutMs = 6000): Promise<string | null> {
+  const start = Date.now();
+  for (;;) {
+    const s = getPreviewSnapshot();
+    if (s.updatedAt > sinceTs) {
+      if (s.error) return s.error;
+      if (s.dom || s.route || s.title) return null; // rendered content, no error
+    }
+    if (Date.now() - start > timeoutMs) return s.updatedAt > sinceTs ? s.error : null;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
+/** A compact icon-only header tool button with a tooltip — keeps the toolbar to one clean line. */
+function HeaderTool({ icon: Icon, label, onClick, active }: {
+  icon: LucideIcon; label: string; onClick: () => void; active?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={cn(
+        'rounded-md p-1.5 transition-colors',
+        active ? 'bg-forge-raised text-forge-ember' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink',
+      )}
+    >
+      <Icon size={15} />
+    </button>
+  );
+}
 
 export default function ProjectWorkspace() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
   const { session, refreshProfile } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
-  const { files, saveFile, createFile, renameFile, deleteFile, getVersions, refresh: refreshFiles } = useProjectFiles(id);
+  const { files, loading: filesLoading, loadError, saveFile, createFile, renameFile, deleteFile, getVersions, refresh: refreshFiles } = useProjectFiles(id);
   const { active: activeGeneration, refresh: refreshGens } = useGenerations(id);
   const { messages } = useChatMessages(id);
 
   const [tab, setTab] = useState<MiddleTab>('chat');
+  const [termOpen, setTermOpen] = useState(false);
+  // Per-project runtime choice: false = fast same-origin blob preview (default), true = real
+  // WebContainer (npm install + Vite build, any package). Imported projects always use WebContainer.
+  const [fullRuntime, setFullRuntime] = useState(() => !!id && localStorage.getItem(`ff:full-runtime:${id}`) === '1');
+  useEffect(() => { setFullRuntime(!!id && localStorage.getItem(`ff:full-runtime:${id}`) === '1'); }, [id]);
+  const toggleFullRuntime = (next: boolean) => {
+    setFullRuntime(next);
+    if (id) localStorage.setItem(`ff:full-runtime:${id}`, next ? '1' : '0');
+  };
+  // Supabase connection (stored in the project's /.env so the preview + app use it).
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [sbUrl, setSbUrl] = useState('');
+  const [sbKey, setSbKey] = useState('');
+  const [sbSaving, setSbSaving] = useState(false);
+  const [sbGenerating, setSbGenerating] = useState(false);
+  const [sbApplying, setSbApplying] = useState(false);
   const [openPaths, setOpenPaths] = useState<string[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   // Unsaved editor edits, keyed by path. These drive the live preview immediately
@@ -72,6 +132,14 @@ export default function ProjectWorkspace() {
   const [ideasLoading, setIdeasLoading] = useState(false);
   // Autopilot: supervised build loop.
   const [autoOpen, setAutoOpen] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+  // Preview controls — lifted here so they share the Runtime bar (one toolbar row, not two).
+  const [device, setDevice] = useState<Device>('desktop');
+  const [showConsole, setShowConsole] = useState(false);
+  // Conversation threads — separate chat flows within this project (all edit the same code).
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string>(MAIN_THREAD_ID);
+  const [threadsReady, setThreadsReady] = useState(true); // false = thread_id migration not applied
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoSteps, setAutoSteps] = useState(5);
   const [autoLog, setAutoLog] = useState<AutopilotEvent[]>([]);
@@ -129,6 +197,15 @@ export default function ProjectWorkspace() {
     if (Object.keys(drafts).length === 0) return files;
     return files.map((f) => (drafts[f.path] !== undefined ? { ...f, content: drafts[f.path] } : f));
   }, [files, drafts]);
+
+  // Which runtime backs the preview. Imported (possibly full-stack) projects always need the
+  // real WebContainer; generated projects use it only when the user flips on "Full build".
+  const isImported = project?.template_slug === 'imported';
+  const useWebContainer = isImported || fullRuntime;
+  const handleFixError = async (err: string) => {
+    const image = await captureScreenshot();
+    void handleSend('Fix the preview error', err, undefined, undefined, image ?? undefined);
+  };
 
   const onStreamEvent = useCallback((e: EditEvent) => {
     switch (e.type) {
@@ -309,6 +386,63 @@ export default function ProjectWorkspace() {
     }
   };
 
+  // One-click: install the shadcn token theme foundation, then run an AI pass to convert the
+  // app's hardcoded colors to tokens + add a ThemeToggle — fixes dark mode properly for an
+  // existing app (e.g. LearnFlow) rather than patching one surface at a time.
+  const setupTheme = async () => {
+    if (!id || busy) return;
+    try {
+      toast('info', 'Converting the app to theme tokens…');
+      const { changed } = await convertProjectToTokens(id);
+      await refreshFiles();
+      toast('success', `Tokenized ${changed} file${changed === 1 ? '' : 's'}. Pick a theme in the Theme panel — and adding a dark-mode toggle…`);
+      // Small, reliable follow-up: mount the toggle + catch any color the mapper couldn't (gradients, inline styles).
+      await handleSend(
+        "Add a <ThemeToggle/> (import it from the project's ui kit, e.g. ../components/ui) into the app's main header or top nav so users can switch light/dark. " +
+        'Also, if any element STILL uses a hardcoded color (bg-white, bg-gray-*, text-gray-*, text-black, border-gray-*, a hex value, or an inline style color), replace it with the matching shadcn token (bg-card/bg-background/bg-muted, text-foreground/text-muted-foreground, border-border, bg-primary). Otherwise change nothing.',
+      );
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not convert the theme.');
+    }
+  };
+
+  // AI design-polish pass: improve spacing/hierarchy/consistency without touching features.
+  const polishDesign = async () => {
+    if (!id || busy) return;
+    await handleSend(
+      'Polish the VISUAL DESIGN of this app without changing its features, page structure, routes, or logic — styling only. ' +
+      'Apply modern shadcn/ui polish: a clear page header on each page (a text-2xl font-semibold tracking-tight title + a one-line text-muted-foreground description, primary action on the right); ' +
+      'constrain content width with max-w-7xl mx-auto px-4 sm:px-6 lg:px-8; cards as rounded-xl border border-border bg-card shadow-sm with p-5/p-6; ' +
+      'generous, consistent spacing (gap-2/3/4/6, section py-6/py-8); ALL secondary text as text-muted-foreground; consistent control sizing (h-10 buttons/inputs); lucide icons at h-4 w-4; ' +
+      'hover + transition-colors + focus-visible:ring-2 ring-ring on interactive elements; tables with a muted header row, border-b rows, and hover:bg-muted/50; and proper empty/loading/skeleton states. ' +
+      'Keep using theme tokens — never hardcoded colors. Make it feel clean, spacious, and premium.',
+    );
+  };
+
+  // Load this project's threads + restore the last-active one, and check the migration status.
+  useEffect(() => {
+    if (!id) return;
+    setActiveThreadId(getActiveThread(id));
+    void getThreads(id).then(setThreads);
+    void threadsEnabled().then(setThreadsReady);
+  }, [id]);
+
+  const reloadThreads = useCallback(async () => { if (id) setThreads(await getThreads(id)); }, [id]);
+  const switchThread = (tid: string) => { if (!id) return; setActiveThreadId(tid); setActiveThread(id, tid); setTab('chat'); };
+  const newThread = async () => {
+    if (!id) return;
+    const t = await createThread(id);
+    await reloadThreads();
+    switchThread(t.id);
+  };
+  const handleRenameThread = async (tid: string, title: string) => { if (id) { await renameThread(id, tid, title); await reloadThreads(); } };
+  const handleDeleteThread = async (tid: string) => {
+    if (!id) return;
+    if (activeThreadId === tid) switchThread(MAIN_THREAD_ID);
+    await deleteThread(id, tid);
+    await reloadThreads();
+  };
+
   const open = (path: string) => {
     setOpenPaths((p) => (p.includes(path) ? p : [...p, path]));
     setActivePath(path);
@@ -323,8 +457,13 @@ export default function ProjectWorkspace() {
     });
   };
 
-  const handleSend = async (message: string, previewError?: string, planFirst?: boolean, research?: boolean) => {
+  const handleSend = async (message: string, previewError?: string, planFirst?: boolean, research?: boolean, image?: string) => {
     if (!id || busy) return;
+    // Auto-name a fresh thread from its first message, so threads get meaningful titles.
+    if (activeThreadId !== MAIN_THREAD_ID) {
+      const t = threads.find((x) => x.id === activeThreadId);
+      if (t && t.title === 'New thread') void renameThread(id, activeThreadId, message.slice(0, 48)).then(reloadThreads);
+    }
     setBusy(true);
     setTab('chat');
     setAskOptions([]); // clear any stale quick-replies from a prior question
@@ -332,12 +471,12 @@ export default function ProjectWorkspace() {
     try {
       if (research) {
         // Web-research answer (live search) — conversational, never touches files.
-        await researchAnswer(id, message, onStreamEvent);
+        await researchAnswer(id, message, onStreamEvent, activeThreadId);
       } else if (files.length === 0) {
         await startGeneration(id, message);
         toast('info', 'Generation started — watch the forge.');
       } else {
-        const result = await sendEdit(id, message, previewError, onStreamEvent, planFirst);
+        const result = await sendEdit(id, message, previewError, onStreamEvent, planFirst, image, activeThreadId);
         if (result.action === 'ask') {
           setAskOptions(result.options ?? []);
         } else if (result.action === 'plan') {
@@ -359,11 +498,42 @@ export default function ProjectWorkspace() {
           }
           await refreshFiles();
           if (result.changed.length) {
-            const issues = await runQA(id);
-            const errs = issues.filter((i) => i.severity === 'error');
+            // Verify → auto-fix loop: catch structural errors (broken imports, Node builtins,
+            // dead nav links, missing entry) and fix them automatically before handing back, so
+            // a feature actually works rather than shipping broken. Bounded to 2 passes.
+            let issues = await runQA(id);
+            let errs = issues.filter((i) => i.severity === 'error');
+            const hadErrors = errs.length;
+            for (let pass = 1; pass <= 2 && errs.length; pass++) {
+              toast('info', `Found ${errs.length} issue${errs.length === 1 ? '' : 's'} — auto-fixing…`);
+              await sendEdit(id, issuesToFixRequest(errs), undefined, onStreamEvent, false, undefined, activeThreadId);
+              await refreshFiles();
+              issues = await runQA(id);
+              errs = issues.filter((i) => i.severity === 'error');
+            }
             if (errs.length) {
               setQaIssues(issues);
-              toast('error', `Self-QA found ${errs.length} issue${errs.length === 1 ? '' : 's'} — open Check to review/fix.`);
+              toast('error', `Couldn't auto-fix ${errs.length} issue${errs.length === 1 ? '' : 's'} — open Check to review.`);
+            } else if (hadErrors) {
+              toast('success', 'Auto-fixed the issues — all checks pass.');
+            }
+
+            // Runtime verification: static checks can't see render-time failures (e.g. a default
+            // vs named import mismatch → React #130). Watch the live preview render the new code,
+            // and if it threw, auto-fix that error once before handing back.
+            if (!useWebContainer) {
+              const since = Date.now();
+              await refreshFiles(); // trigger a fresh render to observe
+              const runtimeErr = await awaitPreviewError(since);
+              if (runtimeErr) {
+                toast('info', 'Preview threw a runtime error — auto-fixing…');
+                await sendEdit(
+                  id,
+                  'The live preview threw the runtime error shown below. Find the ROOT CAUSE — most often a default-vs-named import/export mismatch, or rendering undefined/an object as a component — and make the smallest correct fix.',
+                  runtimeErr, onStreamEvent, false, undefined, activeThreadId,
+                );
+                await refreshFiles();
+              }
             }
           }
         }
@@ -389,6 +559,79 @@ export default function ProjectWorkspace() {
     if (data) setDeployments((d) => [data as Deployment, ...d]);
     setDeploying(false);
     toast('info', `Deployment to ${target} recorded. Connect a deploy hook to push live builds.`);
+  };
+
+  // Connect a Supabase project: store its URL + anon key in this project's /.env so the live
+  // preview (and the generated app's /src/lib/db.ts) talk to the real backend.
+  const openConnect = () => {
+    const env = files.find((f) => f.path === '/.env')?.content ?? '';
+    setSbUrl(/VITE_SUPABASE_URL\s*=\s*(.*)/.exec(env)?.[1]?.trim() ?? '');
+    setSbKey(/VITE_SUPABASE_ANON_KEY\s*=\s*(.*)/.exec(env)?.[1]?.trim() ?? '');
+    setConnectOpen(true);
+  };
+  const saveConnection = async () => {
+    setSbSaving(true);
+    try {
+      await saveFile('/.env', `VITE_SUPABASE_URL=${sbUrl.trim()}\nVITE_SUPABASE_ANON_KEY=${sbKey.trim()}\n`);
+      toast('success', 'Supabase connected — the preview now uses your backend.');
+      setConnectOpen(false);
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not save the connection.');
+    } finally {
+      setSbSaving(false);
+    }
+  };
+  const migrationSql = () => files.find((f) => f.path === '/supabase/migrations/0001_init.sql')?.content ?? '';
+  const projectRef = () => /https?:\/\/([a-z0-9]+)\.supabase\.co/i.exec(sbUrl)?.[1];
+
+  // One-click: apply the migration to the user's Supabase via the apply-migration edge
+  // function (server-side Management API — the browser can't call it directly: no CORS).
+  const autoApply = async () => {
+    const sql = migrationSql();
+    const ref = projectRef();
+    if (!sql) { toast('error', 'No migration to apply — generate the backend first.'); return; }
+    if (!ref) { toast('error', 'Enter your Supabase project URL above first.'); return; }
+    setSbApplying(true);
+    try {
+      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string }>('apply-migration', { body: { projectRef: ref, sql } });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      toast('success', 'Database populated — tables, RLS policies, and auth created in your Supabase project.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Apply failed.';
+      toast('error', /not found|failed to send|fetch|404|not deployed/i.test(msg)
+        ? 'The apply-migration function isn’t deployed yet — deploy it once (see the note below), or use "Copy SQL & open editor".'
+        : msg);
+    } finally {
+      setSbApplying(false);
+    }
+  };
+
+  // Fallback (zero-deploy): copy the SQL and open the project's SQL editor to paste + Run.
+  const copySqlAndOpen = async () => {
+    const sql = migrationSql();
+    if (sql) {
+      try { await navigator.clipboard.writeText(sql); toast('success', 'Migration SQL copied — paste it in the editor and click Run.'); }
+      catch { toast('info', 'Open the SQL file and copy it, then paste in the editor.'); }
+    }
+    const ref = projectRef();
+    window.open(ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard', '_blank');
+  };
+  // Infer + generate a backend (migration + client) for this project from its code.
+  const handleGenerateBackend = async () => {
+    if (!id) return;
+    setSbGenerating(true);
+    try {
+      const { tables } = await generateBackendFromProject(id);
+      await refreshFiles();
+      toast(tables ? 'success' : 'info', tables
+        ? `Generated a backend: ${tables} table${tables === 1 ? '' : 's'} + RLS at /supabase/migrations/0001_init.sql. Run it in Supabase, then connect below.`
+        : 'No persistent data found in this app — no backend needed.');
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Could not generate the backend.');
+    } finally {
+      setSbGenerating(false);
+    }
   };
 
   return (
@@ -418,21 +661,19 @@ export default function ProjectWorkspace() {
                 <Code2 size={13} /> Code
               </button>
             </div>
-            <Button size="sm" variant="outline" onClick={openBrain}>
-              <Brain size={13} /> Brain
-            </Button>
-            <Button size="sm" variant="outline" onClick={openMap}>
-              <Map size={13} /> Map
-            </Button>
-            <Button size="sm" variant="outline" onClick={openRoadmap}>
-              <Compass size={13} /> Next
-            </Button>
-            <Button size="sm" variant="outline" onClick={openQA}>
-              <ShieldCheck size={13} /> Check
-            </Button>
-            <Button size="sm" variant="outline" onClick={openIdeas}>
-              <Lightbulb size={13} /> Ideas
-            </Button>
+            {/* Secondary tools — grouped icon buttons (tooltips on hover) so the bar stays to one clean line. */}
+            <div className="flex items-center gap-0.5 rounded-lg border border-forge-border p-0.5">
+              <HeaderTool icon={Brain} label="Brain — project memory & vision" onClick={openBrain} />
+              <HeaderTool icon={Map} label="Map — what the app contains" onClick={openMap} />
+              <HeaderTool icon={Compass} label="Next — what to build next" onClick={openRoadmap} />
+              <HeaderTool icon={ShieldCheck} label="Check — scan for issues" onClick={openQA} />
+              <HeaderTool icon={Lightbulb} label="Ideas — where this could go" onClick={openIdeas} />
+              <HeaderTool icon={Palette} label="Theme — colors & dark mode" onClick={() => setThemeOpen(true)} />
+              <HeaderTool icon={Database} label="Supabase — connect a backend" onClick={openConnect} />
+              {useWebContainer && (
+                <HeaderTool icon={TerminalIcon} label="Terminal" onClick={() => setTermOpen((v) => !v)} active={termOpen} />
+              )}
+            </div>
             <Button size="sm" onClick={() => setAutoOpen(true)}>
               <Zap size={13} /> Autopilot
             </Button>
@@ -441,6 +682,20 @@ export default function ProjectWorkspace() {
             </Button>
           </div>
         </div>
+
+        {/* file-load failure — visible instead of an endless "Waiting for project files…" */}
+        {loadError && (
+          <div className="flex items-center gap-3 border-b border-forge-err/40 bg-forge-err/10 px-4 py-2 text-xs text-forge-err">
+            <TriangleAlert size={14} className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate">Couldn't load project files: {loadError}</span>
+            <Button size="sm" variant="outline" onClick={() => void refreshFiles()}>Retry</Button>
+          </div>
+        )}
+        {!loadError && !filesLoading && files.length === 0 && (
+          <div className="border-b border-forge-border bg-forge-panel px-4 py-2 text-xs text-forge-dim">
+            This project has no files yet.
+          </div>
+        )}
 
         {/* 3-pane body */}
         <div className="flex min-h-0 flex-1">
@@ -459,7 +714,24 @@ export default function ProjectWorkspace() {
 
           <div className={cn('min-w-0 border-r border-forge-border', tab === 'chat' ? 'w-full md:w-[380px] md:shrink-0' : 'flex-1')}>
             {tab === 'chat' ? (
-              <ChatPanel messages={messages} activeGeneration={activeGeneration} busy={busy} askOptions={askOptions} plan={pendingPlan} onApprovePlan={approvePlan} stream={stream} onSend={(m, opts) => handleSend(m, undefined, opts?.planFirst, opts?.research)} />
+              <ChatPanel
+                projectId={id ?? ''}
+                messages={messages.filter((m) => threadOf(m.thread_id) === activeThreadId)}
+                activeGeneration={activeGeneration}
+                busy={busy}
+                threads={threads}
+                activeThreadId={activeThreadId}
+                threadsReady={threadsReady}
+                onSwitchThread={switchThread}
+                onNewThread={newThread}
+                onRenameThread={handleRenameThread}
+                onDeleteThread={handleDeleteThread}
+                askOptions={askOptions}
+                plan={pendingPlan}
+                onApprovePlan={approvePlan}
+                stream={stream}
+                onSend={(m, opts) => handleSend(m, undefined, opts?.planFirst, opts?.research, opts?.image)}
+              />
             ) : (
               <CodeEditorPane
                 files={files}
@@ -475,10 +747,81 @@ export default function ProjectWorkspace() {
             )}
           </div>
 
-          <div className={cn('min-w-0 flex-1', tab === 'code' ? 'hidden lg:block lg:w-[420px] lg:flex-none' : 'hidden md:block')}>
-            <PreviewPane files={liveFiles} onFixError={(err) => handleSend('Fix the preview error', err)} />
+          <div className={cn('flex min-w-0 flex-1 flex-col', tab === 'code' ? 'hidden lg:flex lg:w-[420px] lg:flex-none' : 'hidden md:flex')}>
+            {/* Unified preview bar: Runtime switch + (Fast mode) device size & console, all one row.
+                Hidden for imported apps (no runtime toggle, no device controls — WebContainerPane has its own). */}
+            {(!isImported || !useWebContainer) && (
+            <div className="flex items-center gap-2 border-b border-forge-border bg-forge-panel px-2 py-1.5">
+              {!isImported && (
+                <>
+                  <span className="px-1 text-[10px] font-medium uppercase tracking-wide text-forge-dim">Runtime</span>
+                  <div className="flex items-center gap-0.5 rounded-lg border border-forge-border p-0.5" role="group" aria-label="Preview runtime">
+                    <button
+                      onClick={() => toggleFullRuntime(false)} aria-pressed={!fullRuntime}
+                      title="Instant preview — loads any browser package from a CDN, no build step"
+                      className={cn('flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px]', !fullRuntime ? 'bg-forge-raised text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}
+                    >
+                      <Gauge size={12} /> Fast
+                    </button>
+                    <button
+                      onClick={() => toggleFullRuntime(true)} aria-pressed={fullRuntime}
+                      title="Real Vite + npm install — any package incl. build-time ones; slower to start"
+                      className={cn('flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px]', fullRuntime ? 'bg-forge-raised text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}
+                    >
+                      <Server size={12} /> Full build
+                    </button>
+                  </div>
+                  <span className="hidden truncate text-[10px] text-forge-dim xl:inline">
+                    {fullRuntime ? 'Real Vite + npm (slower start)' : 'Instant (CDN, no build)'}
+                  </span>
+                </>
+              )}
+              {/* Device size + console only apply to the Fast (in-browser) preview. */}
+              {!useWebContainer && (
+                <div className="ml-auto flex items-center gap-2">
+                  <div className="flex items-center gap-0.5 rounded-lg border border-forge-border p-0.5" role="group" aria-label="Device size">
+                    {([['desktop', Monitor], ['tablet', Tablet], ['mobile', Smartphone]] as const).map(([d, Icon]) => (
+                      <button key={d} aria-label={`${d} preview`} aria-pressed={device === d} onClick={() => setDevice(d)}
+                        className={cn('rounded-md p-1.5', device === d ? 'bg-forge-raised text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>
+                        <Icon size={14} />
+                      </button>
+                    ))}
+                  </div>
+                  <button aria-label="Toggle console" aria-pressed={showConsole} onClick={() => setShowConsole((v) => !v)}
+                    title="Toggle console output"
+                    className={cn('rounded-md p-1.5', showConsole ? 'bg-forge-raised text-forge-ember' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink')}>
+                    <Terminal size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+            )}
+            <div className="min-h-0 flex-1">
+              {useWebContainer ? (
+                <WebContainerPane files={files} projectId={id!} onFixError={handleFixError} />
+              ) : (
+                <PreviewPane files={liveFiles} onFixError={handleFixError} device={device} showConsole={showConsole} />
+              )}
+            </div>
           </div>
         </div>
+
+        {/* Interactive shell into the running WebContainer (any project on the real runtime) */}
+        {termOpen && useWebContainer && (
+          <div className="flex h-60 shrink-0 flex-col border-t border-forge-border bg-[#0A0B0F]">
+            <div className="flex items-center justify-between border-b border-forge-border px-3 py-1.5">
+              <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-forge-dim">
+                <TerminalIcon size={13} /> Terminal
+              </span>
+              <button onClick={() => setTermOpen(false)} aria-label="Close terminal" className="text-forge-dim hover:text-forge-ink">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 p-2">
+              <WebContainerTerminal />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Autopilot — supervised build loop */}
@@ -690,7 +1033,74 @@ export default function ProjectWorkspace() {
         )}
       </Modal>
 
+      {/* Connect Supabase — stores the project's backend credentials in /.env */}
+      <Modal open={connectOpen} onClose={() => setConnectOpen(false)} title="Connect Supabase">
+        <p className="text-sm text-forge-dim">
+          Paste your Supabase project's URL and anon key (Supabase → Project Settings → API). They're
+          saved to this project's <span className="font-mono">.env</span>, so the live preview and the
+          generated app's data layer talk to your real backend. The anon key is safe to store here.
+        </p>
+        <div className="mt-3 rounded-lg border border-forge-border bg-forge-panel p-3">
+          {files.some((f) => f.path === '/supabase/migrations/0001_init.sql') ? (
+            <p className="text-xs text-forge-dim">
+              Migration ready at{' '}
+              <span className="font-mono text-forge-ink">/supabase/migrations/0001_init.sql</span> — run it in
+              your Supabase SQL editor to create the tables, RLS policies, and auth trigger, then connect below.
+            </p>
+          ) : (
+            <p className="text-xs text-forge-dim">
+              No backend yet. Generate one from this app's code — FableForge infers the data model and writes a
+              Supabase migration (tables + RLS + auth) plus a typed client.
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" loading={sbGenerating} onClick={handleGenerateBackend}>
+              <Database size={13} />
+              {files.some((f) => f.path === '/supabase/migrations/0001_init.sql') ? 'Regenerate from code' : 'Generate backend from this app'}
+            </Button>
+            {files.some((f) => f.path === '/supabase/migrations/0001_init.sql') && (
+              <>
+                <Button size="sm" loading={sbApplying} onClick={autoApply}>
+                  <Rocket size={13} /> Apply to Supabase
+                </Button>
+                <Button size="sm" variant="outline" onClick={copySqlAndOpen}>Copy SQL & open editor</Button>
+              </>
+            )}
+          </div>
+          {files.some((f) => f.path === '/supabase/migrations/0001_init.sql') && (
+            <p className="mt-2 text-[11px] text-forge-dim">
+              <b>Apply to Supabase</b> populates your database automatically (enter the project URL above first).
+              It needs the one-time server function — deploy it once:{' '}
+              <span className="font-mono">supabase functions deploy apply-migration</span> then{' '}
+              <span className="font-mono">supabase secrets set SB_MANAGEMENT_TOKEN=&lt;your token&gt;</span>.
+              No setup? Use <b>Copy SQL & open editor</b> and paste + Run.
+            </p>
+          )}
+        </div>
+        <label className="mt-3 block text-xs text-forge-dim">
+          Project URL
+          <Input className="mt-1" placeholder="https://xxxxxxxx.supabase.co" value={sbUrl} onChange={(e) => setSbUrl(e.target.value)} />
+        </label>
+        <label className="mt-2 block text-xs text-forge-dim">
+          Anon key
+          <Input className="mt-1" type="password" placeholder="eyJhbGci…" value={sbKey} onChange={(e) => setSbKey(e.target.value)} />
+        </label>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConnectOpen(false)}>Cancel</Button>
+          <Button loading={sbSaving} onClick={saveConnection}>Save connection</Button>
+        </div>
+      </Modal>
+
       {/* deploy modal */}
+      <ThemeModal
+        projectId={id ?? ''}
+        open={themeOpen}
+        onClose={() => setThemeOpen(false)}
+        onApplied={() => void refreshFiles()}
+        onConvert={setupTheme}
+        onPolish={polishDesign}
+      />
+
       <Modal open={deployOpen} onClose={() => setDeployOpen(false)} title="Deploy this app">
         <p className="text-sm text-forge-dim">
           Pick a target. FableForge records the deployment and tracks its status; connect a deploy hook

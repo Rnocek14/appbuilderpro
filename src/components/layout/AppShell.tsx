@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
@@ -10,6 +10,7 @@ import { cn } from '../../lib/utils';
 import { CommandPalette } from '../CommandPalette';
 
 const nav = [
+  { to: '/garvis', label: 'Garvis', icon: Boxes },
   { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
   { to: '/new', label: 'New project', icon: Plus },
   { to: '/import', label: 'Import', icon: FolderDown },
@@ -25,6 +26,8 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
   const { pendingCount } = useInbox();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  // Desktop sidebar collapse (slim icon rail), persisted across sessions.
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ff:sidebar-collapsed') === '1');
   const [light, setLight] = useState(() => document.documentElement.classList.contains('light'));
 
   useEffect(() => {
@@ -32,6 +35,10 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
     document.addEventListener('ff:open-palette', open);
     return () => document.removeEventListener('ff:open-palette', open);
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('ff:sidebar-collapsed', collapsed ? '1' : '0');
+  }, [collapsed]);
 
   const toggleTheme = () => {
     document.documentElement.classList.toggle('light');
@@ -42,41 +49,68 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
   const limit = profile?.monthly_generation_limit ?? 10;
   const pct = Math.min(100, Math.round((usageThisMonth / limit) * 100));
 
-  const sidebar = (
-    <aside className="flex h-full w-60 flex-col border-r border-forge-border bg-forge-panel">
-      <div className="flex items-center gap-2 px-4 py-4">
-        <Flame size={20} className="text-forge-ember" />
-        <span className="font-display text-lg font-semibold tracking-tight">FableForge</span>
+  const navLinkClass = (collapsed: boolean) => ({ isActive }: { isActive: boolean }) =>
+    cn(
+      'relative flex items-center rounded-lg text-sm transition-colors',
+      collapsed ? 'justify-center px-2 py-2' : 'gap-2.5 px-3 py-2',
+      isActive ? 'bg-forge-raised text-forge-ink ember-seam' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink',
+    );
+
+  // `collapsed` slims the rail to icons only; `collapsible` shows the toggle (desktop only —
+  // the mobile drawer is always full-width and toggled by the header hamburger instead).
+  const renderSidebar = (collapsed: boolean, collapsible = true) => (
+    <aside className={cn('flex h-full flex-col border-r border-forge-border bg-forge-panel', collapsed ? 'w-16' : 'w-60')}>
+      <div className={cn('flex items-center py-4', collapsed ? 'flex-col gap-2 px-2' : 'gap-2 px-4')}>
+        <Flame size={20} className="shrink-0 text-forge-ember" />
+        {!collapsed && <span className="font-display text-lg font-semibold tracking-tight">FableForge</span>}
+        {collapsible && (
+          <button
+            onClick={() => setCollapsed((v) => !v)}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className={cn('rounded p-1.5 text-forge-dim hover:text-forge-ink', !collapsed && 'ml-auto')}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        )}
       </div>
 
       <button
         onClick={() => setPaletteOpen(true)}
-        className="mx-3 mb-3 flex items-center gap-2 rounded-lg border border-forge-border px-3 py-2 text-xs text-forge-dim hover:border-forge-ember/40"
+        title="Search & commands (⌘K)"
+        className={cn(
+          'mb-3 flex items-center rounded-lg border border-forge-border text-xs text-forge-dim hover:border-forge-ember/40',
+          collapsed ? 'mx-2 justify-center px-2 py-2' : 'mx-3 gap-2 px-3 py-2',
+        )}
       >
         <CommandIcon size={13} />
-        <span>Search & commands</span>
-        <kbd className="ml-auto rounded border border-forge-border px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+        {!collapsed && (
+          <>
+            <span>Search & commands</span>
+            <kbd className="ml-auto rounded border border-forge-border px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+          </>
+        )}
       </button>
 
-      <nav className="flex-1 space-y-0.5 px-3" aria-label="Main">
+      <nav className={cn('flex-1 space-y-0.5', collapsed ? 'px-2' : 'px-3')} aria-label="Main">
         {nav.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             onClick={() => setMobileOpen(false)}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
-                isActive ? 'bg-forge-raised text-forge-ink ember-seam' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink',
-              )
-            }
+            title={collapsed ? label : undefined}
+            className={navLinkClass(collapsed)}
           >
-            <Icon size={16} />
-            {label}
+            <Icon size={16} className="shrink-0" />
+            {!collapsed && label}
             {to === '/inbox' && pendingCount > 0 && (
-              <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg">
-                {pendingCount}
-              </span>
+              collapsed ? (
+                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${pendingCount} pending`} />
+              ) : (
+                <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg">
+                  {pendingCount}
+                </span>
+              )
             )}
           </NavLink>
         ))}
@@ -84,46 +118,49 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
           <NavLink
             to="/admin"
             onClick={() => setMobileOpen(false)}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors',
-                isActive ? 'bg-forge-raised text-forge-ink ember-seam' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink',
-              )
-            }
+            title={collapsed ? 'Admin' : undefined}
+            className={navLinkClass(collapsed)}
           >
-            <ShieldCheck size={16} />
-            Admin
+            <ShieldCheck size={16} className="shrink-0" />
+            {!collapsed && 'Admin'}
           </NavLink>
         )}
       </nav>
 
-      <div className="border-t border-forge-border p-3">
-        <div className="mb-3 rounded-lg bg-forge-raised p-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-forge-dim">Generations</span>
-            <span className="font-mono">{usageThisMonth}/{limit}</span>
+      <div className={cn('border-t border-forge-border p-3', collapsed && 'px-2')}>
+        {!collapsed && (
+          <div className="mb-3 rounded-lg bg-forge-raised p-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-forge-dim">Generations</span>
+              <span className="font-mono">{usageThisMonth}/{limit}</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-forge-border" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+              <div
+                className={cn('h-full rounded-full transition-all', pct >= 90 ? 'bg-forge-err' : 'bg-forge-ember')}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {profile?.plan === 'free' && pct >= 70 && (
+              <button onClick={() => navigate('/pricing')} className="mt-2 text-xs text-forge-ember hover:underline">
+                Upgrade for more →
+              </button>
+            )}
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-forge-border" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-            <div
-              className={cn('h-full rounded-full transition-all', pct >= 90 ? 'bg-forge-err' : 'bg-forge-ember')}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          {profile?.plan === 'free' && pct >= 70 && (
-            <button onClick={() => navigate('/pricing')} className="mt-2 text-xs text-forge-ember hover:underline">
-              Upgrade for more →
-            </button>
-          )}
-        </div>
+        )}
 
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-forge-ember/20 text-xs font-semibold text-forge-ember">
+        <div className={cn('flex items-center', collapsed ? 'flex-col gap-2' : 'gap-2')}>
+          <div
+            title={collapsed ? `${profile?.full_name || profile?.email} · ${profile?.plan} plan` : undefined}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-forge-ember/20 text-xs font-semibold text-forge-ember"
+          >
             {(profile?.full_name || profile?.email || '?').slice(0, 1).toUpperCase()}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium">{profile?.full_name || profile?.email}</p>
-            <p className="text-[11px] capitalize text-forge-dim">{profile?.plan} plan</p>
-          </div>
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-medium">{profile?.full_name || profile?.email}</p>
+              <p className="text-[11px] capitalize text-forge-dim">{profile?.plan} plan</p>
+            </div>
+          )}
           <button aria-label="Toggle theme" onClick={toggleTheme} className="rounded p-1.5 text-forge-dim hover:text-forge-ink">
             {light ? <Moon size={15} /> : <Sun size={15} />}
           </button>
@@ -137,13 +174,13 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <div className="hidden md:block">{sidebar}</div>
+      <div className="hidden md:block">{renderSidebar(collapsed)}</div>
 
-      {/* mobile drawer */}
+      {/* mobile drawer — always full width, no collapse toggle */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
-          <div className="absolute left-0 top-0 h-full">{sidebar}</div>
+          <div className="absolute left-0 top-0 h-full">{renderSidebar(false, false)}</div>
         </div>
       )}
 

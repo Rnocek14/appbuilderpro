@@ -84,7 +84,47 @@ export function validateProject(files: { path: string; content: string }[]): QAI
   const hasEntry = fileSet.has('/src/App.tsx') || fileSet.has('/App.js') || [...fileSet].some((p) => /\/App\.(t|j)sx?$/.test(p));
   if (!hasEntry) issues.push({ path: '/src/App.tsx', severity: 'error', message: 'No App entry file found' });
 
+  // Dead-navigation check: a <Link>/<NavLink to>/navigate() pointing at a path with no matching
+  // <Route> is a broken click (the "added a nav item that goes nowhere" bug). Conservative: only
+  // runs when the app actually defines routes, exempts home/external/catch-all, and matches on the
+  // first path segment so param routes (/post/:id) don't false-positive.
+  issues.push(...deadLinkIssues(files));
+
   return issues;
+}
+
+const firstSeg = (p: string) => p.replace(/^\/+/, '').split('/')[0] ?? '';
+
+function deadLinkIssues(files: { path: string; content: string }[]): QAIssue[] {
+  const routes = new Set<string>();
+  const links: { file: string; target: string }[] = [];
+  for (const f of files) {
+    if (!CODE_RE.test(f.path)) continue;
+    for (const m of f.content.matchAll(/<Route\b[^>]*\bpath=["']([^"']+)["']/g)) routes.add(m[1]);
+    for (const m of f.content.matchAll(/\bpath:\s*["']([^"']+)["']/g)) routes.add(m[1]);
+    for (const re of [/<Link\b[^>]*\bto=["']([^"']+)["']/g, /<NavLink\b[^>]*\bto=["']([^"']+)["']/g, /\bnavigate\(\s*["']([^"']+)["']/g]) {
+      for (const m of f.content.matchAll(re)) links.push({ file: f.path, target: m[1] });
+    }
+  }
+  if (routes.size === 0) return []; // app doesn't use routing — nothing to validate
+  const routeSegs = new Set([...routes].map(firstSeg));
+  const catchAll = [...routes].some((r) => r.includes('*'));
+  if (catchAll) return [];
+
+  const out: QAIssue[] = [];
+  const seen = new Set<string>();
+  for (const l of links) {
+    const t = l.target;
+    if (/^(https?:|mailto:|tel:|\/\/|#)/i.test(t) || t.includes('://')) continue; // external / hash
+    const lp = t.split('?')[0].split('#')[0];
+    if (lp === '' || lp === '/' || lp === '.') continue; // home always exists
+    if (routeSegs.has(firstSeg(lp))) continue;
+    const key = `${l.file}|${t}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ path: l.file, severity: 'error', message: `Link/navigate to '${t}' has no matching <Route> — the navigation is dead. Add the route + its page, or fix the link.` });
+  }
+  return out;
 }
 
 /** A compact message describing the issues, for handing to the assistant to fix. */
