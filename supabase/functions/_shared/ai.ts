@@ -35,6 +35,21 @@ export function getProviderConfig() {
   return { provider, model };
 }
 
+// Free tier runs the cheapest capable model (~4× cheaper), so the free credit grant stretches and
+// free-user exposure stays low; paid tiers get the operator's configured model. This is what makes
+// the free tier both generous-feeling and cheap. Override the free model via AI_FREE_MODEL.
+export function modelForPlan(plan: string | null | undefined): { provider: AIProvider; model: string } {
+  const cfg = getProviderConfig();
+  if (plan === 'pro' || plan === 'starter') return cfg;
+  const cheapest: Record<AIProvider, string> = {
+    anthropic: 'claude-haiku-4-5-20251001',
+    openai: 'gpt-4o-mini',
+    openrouter: 'anthropic/claude-3.5-haiku',
+    local: cfg.model,
+  };
+  return { provider: cfg.provider, model: Deno.env.get('AI_FREE_MODEL') ?? cheapest[cfg.provider] ?? cfg.model };
+}
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {

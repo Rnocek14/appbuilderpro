@@ -6,8 +6,8 @@
 // pinging this endpoint keeps the queue draining.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, parseJson, corsHeaders } from '../_shared/ai.ts';
-import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { complete, parseJson, corsHeaders, modelForPlan } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { contextPayload } from '../_shared/context.ts';
 import { notify } from '../_shared/notify.ts';
 
@@ -135,6 +135,7 @@ async function step(job: Job): Promise<boolean> {
     if (e instanceof InsufficientCreditsError) { await pause(job, "You're out of credits — top up or wait for your monthly refill to resume.", ctx.projectName, webhook); return false; }
     throw e;
   }
+  const m = modelForPlan(await getUserPlan(admin, job.owner_id)); // free → cheap model
 
   const answeredBlock = ctx.answered.length
     ? `Answered questions (treat as requirements):\n${ctx.answered.map((q) => `Q: ${q.question}\nA: ${q.answer}`).join('\n')}\n`
@@ -147,7 +148,7 @@ async function step(job: Job): Promise<boolean> {
       { role: 'user', content:
         `Brief: ${job.brief}\n\nProject memory:\n${memoryBlock(ctx.memory)}\n\n${answeredBlock}` +
         `Existing files (tree only):\n${ctx.files.map((f) => f.path).join('\n') || '(empty project)'}` },
-    ], { maxTokens: 4000 });
+    ], { maxTokens: 4000, provider: m.provider, model: m.model });
     await spend(job, res.costUsd, res, 'decompose');
     const plan = parseJson<{ milestones: { title: string; description: string }[]; questions?: never[] }>(res.text);
 
@@ -181,7 +182,7 @@ async function step(job: Job): Promise<boolean> {
       { role: 'user', content:
         `Brief: ${job.brief}\nMilestone outcomes:\n` +
         JSON.stringify((milestones ?? []).map((m) => ({ title: m.title, status: m.status, summary: m.summary, warning: m.warning }))) },
-    ], { maxTokens: 2000 });
+    ], { maxTokens: 2000, provider: m.provider, model: m.model });
     await spend(job, res.costUsd, res, 'report');
     const report = parseJson<Record<string, unknown>>(res.text);
     await admin.from('jobs').update({
@@ -208,7 +209,7 @@ async function step(job: Job): Promise<boolean> {
         `Overall brief: ${job.brief}\n\nThis milestone: ${current.title} — ${current.description}\n\n` +
         `${answeredBlock}Project memory:\n${memoryBlock(ctx.memory)}\n\n` +
         `Current files:\n${contextPayload(ctx.files, `${current.title} ${current.description}`)}` },
-    ], { maxTokens: 16000 });
+    ], { maxTokens: 16000, provider: m.provider, model: m.model });
     await spend(job, res.costUsd, res, 'build');
     const out = parseJson<{
       changes: { path: string; content: string }[]; deletions?: string[]; summary?: string;
@@ -240,7 +241,7 @@ async function step(job: Job): Promise<boolean> {
     const res = await complete([
       { role: 'system', content: VALIDATE_SYSTEM },
       { role: 'user', content: `Milestone just built: ${current.title}\nFiles:\n${contextPayload(freshFiles, current.title)}` },
-    ], { maxTokens: 2000 });
+    ], { maxTokens: 2000, provider: m.provider, model: m.model });
     await spend(job, res.costUsd, res, 'validate');
     const verdict = parseJson<{ ok: boolean; problems?: string[] }>(res.text);
 
@@ -263,7 +264,7 @@ async function step(job: Job): Promise<boolean> {
       { role: 'system', content: FIX_SYSTEM },
       { role: 'user', content:
         `Problems:\n${(verdict.problems ?? []).join('\n')}\n\nFiles:\n${contextPayload(freshFiles, (verdict.problems ?? []).join(' '))}` },
-    ], { maxTokens: 16000 });
+    ], { maxTokens: 16000, provider: m.provider, model: m.model });
     await spend(job, fix.costUsd, fix, 'fix');
     const patch = parseJson<{ changes: { path: string; content: string }[]; deletions?: string[] }>(fix.text);
     await applyChanges(job, patch.changes ?? [], patch.deletions ?? []);

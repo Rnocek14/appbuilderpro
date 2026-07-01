@@ -7,13 +7,13 @@
 // canonical modules — no more divergent Sandpack prompt. Progress streams to project_generations.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { complete, completeStream, parseJson, corsHeaders, getProviderConfig, type AIMessage } from '../_shared/ai.ts';
+import { complete, completeStream, parseJson, corsHeaders, modelForPlan, type AIMessage } from '../_shared/ai.ts';
 import {
   GENERATE_SYSTEM, GENERATE_FILES_STREAM, EDIT_SYSTEM_STREAM,
   blueprintPrompt, filesPromptStream, SCHEMA_SYSTEM, schemaPrompt,
 } from '../_shared/prompts.ts';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from '../_shared/scaffold.ts';
-import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { buildIndexCssForHue } from '../_shared/themePresets.ts';
 import { validateProject, issuesToFixRequest } from '../_shared/qa.ts';
 import { parseProtocol } from '../_shared/streamparse.ts';
@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
 
 async function runPipeline(db: SupabaseClient, genId: string, projectId: string, userId: string, prompt: string, planContext?: string) {
   let totalIn = 0, totalOut = 0, totalCost = 0;
+  const m = modelForPlan(await getUserPlan(db, userId)); // free → cheap model; paid → operator model
   const stageLog: { stage: Stage; status: string; started_at: string; finished_at?: string; note?: string }[] = [];
 
   const mark = async (stage: Stage, status: 'running' | 'done', note?: string) => {
@@ -116,7 +117,7 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
     }).eq('id', genId);
   };
   const ask = async (messages: AIMessage[], maxTokens = 8192) => {
-    const r = await complete(messages, { maxTokens });
+    const r = await complete(messages, { maxTokens, provider: m.provider, model: m.model });
     totalIn += r.inputTokens; totalOut += r.outputTokens; totalCost += r.costUsd;
     return r.text;
   };
@@ -124,7 +125,7 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
   // max_tokens risks the provider's stream-required threshold + socket timeouts (mirrors the client,
   // which streams this step). Also avoids withRetry replaying the most expensive call on a transient error.
   const askStream = async (messages: AIMessage[], maxTokens: number) => {
-    const r = await completeStream(messages, { maxTokens }, () => {});
+    const r = await completeStream(messages, { maxTokens, provider: m.provider, model: m.model }, () => {});
     totalIn += r.inputTokens; totalOut += r.outputTokens; totalCost += r.costUsd;
     return r.text;
   };
@@ -267,8 +268,7 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
     role: 'assistant', content: summary, files_changed: appFiles.map((f) => f.path),
   });
   await spendCredits(db, userId, {
-    costUsd: totalCost, kind: 'generation',
-    provider: getProviderConfig().provider, model: getProviderConfig().model,
+    costUsd: totalCost, kind: 'generation', provider: m.provider, model: m.model,
     inputTokens: totalIn, outputTokens: totalOut, projectId,
   });
   await db.from('projects').update({ status: 'ready', updated_at: new Date().toISOString() }).eq('id', projectId);

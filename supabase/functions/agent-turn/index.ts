@@ -9,8 +9,8 @@
 // (AI_MODEL) — the client never picks the model in edge mode.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { corsHeaders, estimateCost } from '../_shared/ai.ts';
-import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { corsHeaders, estimateCost, modelForPlan } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -28,7 +28,6 @@ Deno.serve(async (req) => {
 
     const key = Deno.env.get('ANTHROPIC_API_KEY');
     if (!key) return json({ error: 'ANTHROPIC_API_KEY is not set for this deployment.' }, 500);
-    const model = Deno.env.get('AI_MODEL') ?? 'claude-sonnet-4-6';
 
     // CREDIT GATE — every agentic turn is metered, so a long loop stops when credits run out and a
     // browser can't hammer this proxy for free. Checked per turn (the loop calls this repeatedly).
@@ -39,6 +38,9 @@ Deno.serve(async (req) => {
       if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
       throw e;
     }
+
+    // Free tier runs the cheap model; paid tiers the operator's model.
+    const { model } = modelForPlan(await getUserPlan(admin, user.id));
 
     const { system, messages, tools, maxTokens } = (await req.json().catch(() => ({}))) as {
       system?: string; messages?: unknown[]; tools?: unknown[]; maxTokens?: number;

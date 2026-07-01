@@ -5,8 +5,8 @@
 
 import { contextPayload } from '../_shared/context.ts';
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { completeStream, corsHeaders, getProviderConfig } from '../_shared/ai.ts';
-import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { completeStream, corsHeaders, modelForPlan } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 // Canonical edit prompt — the SAME modern Vite + TS + design-token + integrations knowledge the client
 // uses (was a divergent Sandpack/plain-JS prompt here). Single source: _shared/prompts.ts.
 import { EDIT_SYSTEM_STREAM as SYSTEM } from '../_shared/prompts.ts';
@@ -97,6 +97,7 @@ Deno.serve(async (req) => {
     if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
     throw e;
   }
+  const m = modelForPlan(await getUserPlan(admin, user.id)); // free → cheap model
 
   const { data: files } = await admin
     .from('project_files').select('path, content')
@@ -124,16 +125,15 @@ Deno.serve(async (req) => {
             (previewError ? `Current preview error to fix:\n${previewError}\n\n` : '') +
             `Change request: ${message}` +
             (planFirst ? '\n\nIMPORTANT: The user asked you to PLAN first. Respond with §ACTION plan only — propose the plan and change NO files yet.' : '') },
-        ], { maxTokens: 16000 }, (delta) => send({ t: delta }));
+        ], { maxTokens: 16000, provider: m.provider, model: m.model }, (delta) => send({ t: delta }));
 
         const parsed = parseProtocol(result.text);
-        const cfg = getProviderConfig();
         const usage = {
           input_tokens: result.inputTokens, output_tokens: result.outputTokens, cost_usd: result.costUsd,
         };
         // Charge once for this edit (whichever branch runs below); spendCredits also logs usage_events.
         await spendCredits(admin, user.id, {
-          costUsd: result.costUsd, kind: 'edit', provider: cfg.provider, model: cfg.model,
+          costUsd: result.costUsd, kind: 'edit', provider: m.provider, model: m.model,
           inputTokens: result.inputTokens, outputTokens: result.outputTokens, projectId,
         });
 
@@ -201,9 +201,6 @@ Deno.serve(async (req) => {
         await admin.from('project_generations').update({
           status: 'succeeded', summary: explanation, ...usage, finished_at: new Date().toISOString(),
         }).eq('id', gen!.id);
-        await admin.from('usage_events').insert({
-          user_id: user.id, project_id: projectId, event_type: 'edit', provider: cfg.provider, model: cfg.model, ...usage,
-        });
 
         send({ done: true, action: 'edit', explanation, changed: changedPaths, deleted: parsed.deletions });
       } catch (err) {

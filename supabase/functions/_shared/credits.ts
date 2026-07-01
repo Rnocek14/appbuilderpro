@@ -41,6 +41,15 @@ export class InsufficientCreditsError extends Error {
   }
 }
 
+/** The user's plan ('free' | 'starter' | 'pro'), defaulting to 'free'. Drives model selection.
+ *  `admin.from` is typed loosely (=> any) on purpose: the full supabase-js query-builder type is so
+ *  deep that matching it structurally trips TS's "excessively deep" guard at every call site. */
+// deno-lint-ignore no-explicit-any
+export async function getUserPlan(admin: { from: (table: string) => any }, userId: string): Promise<string> {
+  const { data } = await admin.from('profiles').select('plan').eq('id', userId).single();
+  return (data?.plan as string | undefined) ?? 'free';
+}
+
 /** Refresh the monthly window and ensure the user can afford `kind`. Throws InsufficientCreditsError. */
 export async function checkCredits(admin: Admin, userId: string, kind: CreditKind): Promise<number> {
   const { data, error } = await admin.rpc('refresh_credits', { p_user: userId });

@@ -15,8 +15,8 @@
 // The runtime assigns tool-call ids and records cost; we just return the shape + costUsd.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, corsHeaders, parseJson, getProviderConfig, type AIMessage } from '../_shared/ai.ts';
-import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { complete, corsHeaders, parseJson, modelForPlan, type AIMessage } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 
 type Mode = 'observe' | 'plan' | 'act';
 
@@ -150,6 +150,7 @@ Deno.serve(async (req) => {
     if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
     throw e;
   }
+  const m = modelForPlan(await getUserPlan(admin, user.id));
 
   let body: BrainRequest;
   try {
@@ -168,14 +169,13 @@ Deno.serve(async (req) => {
 
   let result;
   try {
-    result = await complete(messages, { maxTokens: 1500 });
+    result = await complete(messages, { maxTokens: 1500, provider: m.provider, model: m.model });
   } catch (e) {
     return json({ error: `model error: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
   // Charge the real cost of this reasoning step (both the parse-fail and normal paths below return it).
-  const cfg = getProviderConfig();
   await spendCredits(admin, user.id, {
-    costUsd: result.costUsd, kind: 'garvis', provider: cfg.provider, model: cfg.model,
+    costUsd: result.costUsd, kind: 'garvis', provider: m.provider, model: m.model,
     inputTokens: result.inputTokens, outputTokens: result.outputTokens,
   });
 

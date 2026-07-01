@@ -4,8 +4,8 @@
 // The approved plan is later sent to generate-app as planContext so the build follows it.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, parseJson, corsHeaders, getProviderConfig } from '../_shared/ai.ts';
-import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { complete, parseJson, corsHeaders, modelForPlan } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 
 const GENERATE_PLAN_SYSTEM = `You are FableForge's planning assistant. The user wants to build a new
 app. Propose a short, concrete plan for what you'll build — do NOT write code. Be opinionated and
@@ -45,14 +45,14 @@ Deno.serve(async (req) => {
     if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
     throw e;
   }
+  const m = modelForPlan(await getUserPlan(admin, user.id));
 
   try {
     const r = await complete([
       { role: 'system', content: GENERATE_PLAN_SYSTEM },
       { role: 'user', content: generationPlanPrompt(prompt) },
-    ], { maxTokens: 4000 });
-    const cfg = getProviderConfig();
-    await spendCredits(admin, user.id, { costUsd: r.costUsd, kind: 'plan', provider: cfg.provider, model: cfg.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens });
+    ], { maxTokens: 4000, provider: m.provider, model: m.model });
+    await spendCredits(admin, user.id, { costUsd: r.costUsd, kind: 'plan', provider: m.provider, model: m.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens });
     const p = parseJson<{ summary?: string; steps?: string[]; fileHints?: string[]; options?: string[]; openQuestions?: string[] }>(r.text);
     const plan = {
       summary: (p.summary ?? '').trim(),
