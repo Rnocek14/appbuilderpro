@@ -13,6 +13,7 @@ import {
   blueprintPrompt, filesPromptStream, SCHEMA_SYSTEM, schemaPrompt,
 } from '../_shared/prompts.ts';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from '../_shared/scaffold.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 import { buildIndexCssForHue } from '../_shared/themePresets.ts';
 import { validateProject, issuesToFixRequest } from '../_shared/qa.ts';
 import { parseProtocol } from '../_shared/streamparse.ts';
@@ -71,11 +72,13 @@ Deno.serve(async (req) => {
     .from('projects').select('id, owner_id, name').eq('id', projectId).single();
   if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
 
-  const { data: profile } = await supabaseAdmin
-    .from('profiles').select('plan, monthly_generation_limit').eq('id', user.id).single();
-  const { data: used } = await supabaseAdmin.rpc('generations_this_month', { uid: user.id });
-  if ((used ?? 0) >= (profile?.monthly_generation_limit ?? 10)) {
-    return json({ error: 'Monthly generation limit reached. Upgrade to Pro for more.' }, 429);
+  // CREDIT GATE — a full app build is the most expensive action; reject up front if the balance
+  // can't cover it (replaces the old generation-count limit with the unified credit balance).
+  try {
+    await checkCredits(supabaseAdmin, user.id, 'generation');
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
+    throw e;
   }
 
   const { data: gen, error: genErr } = await supabaseAdmin
@@ -263,10 +266,10 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
     project_id: projectId, user_id: userId, generation_id: genId,
     role: 'assistant', content: summary, files_changed: appFiles.map((f) => f.path),
   });
-  await db.from('usage_events').insert({
-    user_id: userId, project_id: projectId, event_type: 'generation',
+  await spendCredits(db, userId, {
+    costUsd: totalCost, kind: 'generation',
     provider: getProviderConfig().provider, model: getProviderConfig().model,
-    input_tokens: totalIn, output_tokens: totalOut, cost_usd: totalCost,
+    inputTokens: totalIn, outputTokens: totalOut, projectId,
   });
   await db.from('projects').update({ status: 'ready', updated_at: new Date().toISOString() }).eq('id', projectId);
   await db.from('project_generations').update({

@@ -24,7 +24,7 @@ const PRICING: Record<string, { in: number; out: number }> = {
   'gpt-4o-mini': { in: 0.15, out: 0.6 },
 };
 
-function estimateCost(model: string, inTok: number, outTok: number): number {
+export function estimateCost(model: string, inTok: number, outTok: number): number {
   const p = PRICING[model] ?? { in: 3, out: 15 };
   return (inTok * p.in + outTok * p.out) / 1_000_000;
 }
