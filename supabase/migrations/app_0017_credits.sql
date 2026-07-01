@@ -15,9 +15,15 @@ alter table public.usage_events
   add column if not exists credits int not null default 0;
 
 -- Monthly credit grant by plan — the ONE place to tune allotments (or override per-profile later).
+-- A credit ≈ $0.01 of AI cost, so credits × $0.01 is the cost CEILING you grant per user/month.
+-- Sized for a healthy margin at typical use with a bounded worst case (see the pricing analysis):
+--   free 150  → $1.50 ceiling (intended for Haiku — gate free-tier model choice to keep it cheap)
+--   pro  2500 → $25   ceiling (Pro sold ~$49/mo → ~72% typical / ~45% worst-case gross margin)
+-- (5000 was a margin bug: $50 of cost for a $49 plan = a loss at full use.) A 'starter' tier ($19 /
+-- ~800 credits) needs a plan_tier enum migration — add it when wiring Stripe if you want 3 tiers.
 create or replace function public.plan_monthly_credits(p plan_tier)
 returns int language sql immutable as $$
-  select case p when 'pro' then 5000 else 100 end;
+  select case p when 'pro' then 2500 else 150 end;
 $$;
 
 -- Dollars of underlying AI cost that one credit represents (1 credit = $0.01 of cost).
