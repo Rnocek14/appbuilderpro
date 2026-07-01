@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe, Camera, X, Brain } from 'lucide-react';
+import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe, Camera, X, Brain, Undo2, Eye, Paperclip, Square } from 'lucide-react';
 import type { AIMessage, Generation, EditPlan } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
@@ -70,7 +70,15 @@ interface Props {
   onApprovePlan?: () => void;
   /** Live progress while the assistant streams an edit. */
   stream?: StreamState | null;
-  onSend: (message: string, opts?: { planFirst?: boolean; research?: boolean; image?: string }) => void;
+  onSend: (message: string, opts?: { planFirst?: boolean; research?: boolean; image?: string; reviewEdits?: boolean }) => void;
+  /** Cancel the in-flight turn (Stop button / Esc). */
+  onStop?: () => void;
+  /** Initial state of the "Plan first" toggle — defaulted ON for imported/real projects. */
+  defaultPlanFirst?: boolean;
+  /** Initial state of the "Review" (diff-before-write) toggle — defaulted ON for imported/real projects. */
+  defaultReviewEdits?: boolean;
+  /** Restore every file a prior edit changed to its pre-edit version (atomic change-set undo). */
+  onRevert?: (paths: string[]) => void;
 }
 
 /** Signature element: the forging strip — stages heat up as the agent works. */
@@ -104,14 +112,15 @@ function ForgeProgress({ gen }: { gen: Generation }) {
   );
 }
 
-export function ChatPanel({ projectId, messages, activeGeneration, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend }: Props) {
+export function ChatPanel({ projectId, messages, activeGeneration, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert }: Props) {
   const [input, setInput] = useState('');
   // The "Remember a preference" panel + a seed taken from the most recent user message, so
   // correcting something then clicking Remember pre-fills what you just said.
   const [rememberOpen, setRememberOpen] = useState(false);
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   // When on, the next message is planned (proposed for approval) before any code is written.
-  const [planFirst, setPlanFirst] = useState(false);
+  const [planFirst, setPlanFirst] = useState(defaultPlanFirst);
+  const [reviewEdits, setReviewEdits] = useState(defaultReviewEdits);
   // When on, the next message is answered with live web research (no code).
   const [research, setResearch] = useState(false);
   // A screenshot of the current preview, attached to the next message so the model can see it.
@@ -120,6 +129,10 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
   // Whether the coding-model picker popover is open.
   const [pickerOpen, setPickerOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Whether the message list is scrolled near the bottom — gates auto-scroll so reading back isn't fought.
+  const [atBottom, setAtBottom] = useState(true);
 
   const capture = async () => {
     if (shooting) return;
@@ -129,14 +142,43 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
     setShot(img); // null if the preview isn't running/ready — the button hint reflects that
   };
 
+  // Attach files from disk: images ride the same vision pipeline as screenshots; text files
+  // (code, markdown, CSV…) get pasted into the prompt as a fenced block so the model can read them.
+  const attachFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    for (const file of Array.from(files)) {
+      if (file.type.startsWith('image/')) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(file);
+        });
+        setShot(dataUrl); // one image at a time — last attached wins (matches the vision pipeline)
+      } else {
+        const text = await file.text();
+        const clipped = text.length > 20000 ? text.slice(0, 20000) + '\n…(truncated)' : text;
+        setInput((prev) => `${prev ? prev + '\n\n' : ''}\`\`\`${file.name}\n${clipped}\n\`\`\`\n`);
+      }
+    }
+  };
+
+  // Auto-scroll to newest content ONLY when already near the bottom, so scrolling up to re-read
+  // isn't yanked back on every streamed token. A pill offers a manual jump when there's more below.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, activeGeneration?.current_stage, stream?.explanation, stream?.files.length]);
+    if (atBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, activeGeneration?.current_stage, stream?.explanation, stream?.files.length, atBottom]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+  };
+  const scrollToBottom = () => { setAtBottom(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
   const submit = () => {
     const text = input.trim();
     if (!text || busy) return;
-    onSend(text, { planFirst, research, image: shot ?? undefined });
+    onSend(text, { planFirst, research, reviewEdits, image: shot ?? undefined });
     setInput('');
     setShot(null);
   };
@@ -156,7 +198,8 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
         />
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto panel-scroll p-3">
+      <div className="relative flex-1 overflow-hidden">
+      <div ref={scrollRef} onScroll={onScroll} className="h-full space-y-3 overflow-y-auto panel-scroll p-3">
         {messages.length === 0 && !activeGeneration && (
           <div className="rounded-xl border border-dashed border-forge-border p-4 text-center">
             <p className="text-sm text-forge-dim">
@@ -166,12 +209,12 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
         )}
 
         {messages.map((m) => (
-          <div key={m.id} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+          <div key={m.id} className={cn('flex animate-fadeInUp [animation-duration:0.3s]', m.role === 'user' ? 'justify-end' : 'justify-start')}>
             <div
               className={cn(
                 'min-w-0 rounded-xl px-3 py-2 text-sm',
                 m.role === 'user'
-                  ? 'max-w-[90%] bg-forge-ember/15 border border-forge-ember/25'
+                  ? 'max-w-[90%] bg-ember-gradient text-[#1A0E04] shadow-soft'
                   : 'w-full bg-forge-raised border border-forge-border',
               )}
             >
@@ -179,12 +222,21 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
                 ? <p className="whitespace-pre-wrap">{m.content}</p>
                 : <Markdown content={m.content} />}
               {m.files_changed?.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
+                <div className="mt-2 flex flex-wrap items-center gap-1">
                   {m.files_changed.map((f) => (
                     <span key={f} className="inline-flex items-center gap-1 rounded border border-forge-border bg-forge-panel px-1.5 py-0.5 font-mono text-[10px] text-forge-dim">
                       <FileCode2 size={10} /> {f}
                     </span>
                   ))}
+                  {onRevert && (
+                    <button
+                      onClick={() => onRevert(m.files_changed)}
+                      title="Restore every file this change touched to its previous version"
+                      className="inline-flex items-center gap-1 rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink"
+                    >
+                      <Undo2 size={10} /> Revert this change
+                    </button>
+                  )}
                 </div>
               )}
               {m.role === 'assistant' && (
@@ -212,7 +264,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
               <span className="font-display text-sm font-medium">Working on it</span>
             </div>
             {stream.explanation && (
-              <p className="mt-1.5 whitespace-pre-wrap text-xs text-forge-dim">{stream.explanation}</p>
+              <Markdown content={stream.explanation} className="mt-1.5 text-forge-dim" />
             )}
             {stream.files.length > 0 && (
               <ul className="mt-2 space-y-1">
@@ -241,6 +293,16 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
 
         <div ref={bottomRef} />
       </div>
+        {!atBottom && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-forge-border bg-forge-raised px-3 py-1 text-[11px] text-forge-dim shadow-soft transition-colors hover:text-forge-ink"
+          >
+            ↓ Jump to latest
+          </button>
+        )}
+      </div>
 
       <div className="border-t border-forge-border p-3">
         {askOptions.length > 0 && !busy && (
@@ -263,7 +325,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
             {QUICK_ACTIONS.map((a) => (
               <button
                 key={a}
-                onClick={() => onSend(a, { planFirst, research })}
+                onClick={() => onSend(a, { planFirst, research, reviewEdits })}
                 className="shrink-0 whitespace-nowrap rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
               >
                 {a}
@@ -274,16 +336,17 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
 
         {shot && (
           <div className="mb-2 inline-flex items-center gap-2 rounded-lg border border-forge-border bg-forge-panel p-1.5">
-            <img src={shot} alt="Preview screenshot to send" className="h-10 w-auto rounded border border-forge-border" />
-            <span className="text-[11px] text-forge-dim">Preview attached</span>
-            <button type="button" onClick={() => setShot(null)} aria-label="Remove screenshot" className="rounded p-0.5 text-forge-dim hover:text-forge-ink">
+            <img src={shot} alt="Image to send" className="h-10 w-auto rounded border border-forge-border" />
+            <span className="text-[11px] text-forge-dim">Image attached</span>
+            <button type="button" onClick={() => setShot(null)} aria-label="Remove image" className="rounded p-0.5 text-forge-dim hover:text-forge-ink">
               <X size={13} />
             </button>
           </div>
         )}
 
-        {/* Controls — one clean row: model + mode toggles on the left, utilities on the right. */}
-        <div className="mb-2 flex items-center gap-1.5">
+        {/* Controls — model + mode toggles on the left, utilities on the right. Wraps on narrow
+            panels so nothing gets clipped. */}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
           <ModelPicker open={pickerOpen} onToggle={setPickerOpen} />
           <span className="mx-0.5 h-5 w-px bg-forge-border" />
           <button
@@ -300,6 +363,18 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
           </button>
           <button
             type="button"
+            onClick={() => setReviewEdits((v) => !v)}
+            aria-pressed={reviewEdits}
+            title="Review — preview the diff and approve before any file is written"
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+              reviewEdits ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
+            )}
+          >
+            <Eye size={12} /> Review
+          </button>
+          <button
+            type="button"
             onClick={() => setResearch((v) => !v)}
             aria-pressed={research}
             title="Research — answer with live web research instead of editing"
@@ -311,6 +386,23 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
             <Globe size={12} /> Research
           </button>
           <div className="ml-auto flex items-center gap-1">
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              accept="image/*,.txt,.md,.markdown,.ts,.tsx,.js,.jsx,.json,.css,.scss,.html,.csv,.sql,.env,.py,.yml,.yaml"
+              className="hidden"
+              onChange={(e) => { void attachFiles(e.target.files); e.target.value = ''; }}
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={busy}
+              title="Attach a file or image to your message"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-forge-border text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-50"
+            >
+              <Paperclip size={13} />
+            </button>
             <button
               type="button"
               onClick={capture}
@@ -340,6 +432,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+              else if (e.key === 'Escape' && busy && onStop) { e.preventDefault(); onStop(); }
             }}
             rows={2}
             placeholder={busy ? 'Working…' : 'Describe a change… (Enter to send)'}
@@ -347,9 +440,15 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
             aria-label="Message the assistant"
             className="flex-1 resize-none rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm placeholder:text-forge-dim/70 focus:border-forge-ember/60 focus:outline-none disabled:opacity-50"
           />
-          <Button onClick={submit} disabled={busy || !input.trim()} aria-label="Send">
-            <Send size={15} />
-          </Button>
+          {busy && onStop ? (
+            <Button onClick={onStop} aria-label="Stop generating" title="Stop (Esc)" className="bg-forge-raised text-forge-ink hover:bg-forge-panel">
+              <Square size={14} className="fill-current" />
+            </Button>
+          ) : (
+            <Button onClick={submit} disabled={busy || !input.trim()} aria-label="Send">
+              <Send size={15} />
+            </Button>
+          )}
         </div>
       </div>
 

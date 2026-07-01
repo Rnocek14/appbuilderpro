@@ -133,7 +133,7 @@ export function useProjectFiles(projectId: string | undefined) {
     refresh();
     if (!projectId) return;
     const channel = supabase
-      .channel(`files-${projectId}`)
+      .channel(`files-${projectId}-${crypto.randomUUID()}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'project_files', filter: `project_id=eq.${projectId}` },
         () => refresh())
@@ -191,7 +191,7 @@ export function useGenerations(projectId: string | undefined) {
     refresh();
     if (!projectId) return;
     const channel = supabase
-      .channel(`gens-${projectId}`)
+      .channel(`gens-${projectId}-${crypto.randomUUID()}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'project_generations', filter: `project_id=eq.${projectId}` },
         () => refresh())
@@ -219,7 +219,7 @@ export function useChatMessages(projectId: string | undefined) {
     refresh();
     if (!projectId) return;
     const channel = supabase
-      .channel(`msgs-${projectId}`)
+      .channel(`msgs-${projectId}-${crypto.randomUUID()}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'ai_messages', filter: `project_id=eq.${projectId}` },
         () => refresh())

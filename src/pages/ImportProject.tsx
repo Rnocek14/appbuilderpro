@@ -174,6 +174,11 @@ export default function ImportProject() {
               {analysis.skipped.length > 0 && (
                 <Badge>{analysis.skipped.length} files skipped (deps, builds, binaries)</Badge>
               )}
+              {analysis.redactedSecrets > 0 && (
+                <Badge tone="warn">
+                  {analysis.redactedSecrets} secret file{analysis.redactedSecrets === 1 ? '' : 's'} redacted (.env values stripped)
+                </Badge>
+              )}
             </div>
             <div className="max-h-44 overflow-auto panel-scroll rounded-lg border border-forge-border bg-forge-bg p-3 font-mono text-[11px] leading-5 text-forge-dim">
               {analysis.files.slice(0, 40).map((f) => <div key={f.path}>{f.path}</div>)}

@@ -12,7 +12,9 @@
 //   (a Supabase Personal Access Token from https://supabase.com/dashboard/account/tokens
 //    — note: full account scope)
 
+import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
+import { projectSupabaseToken } from '../_shared/oauth.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -23,14 +25,29 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   try {
-    const token = Deno.env.get('SB_MANAGEMENT_TOKEN');
-    if (!token) {
-      return json({ error: 'SB_MANAGEMENT_TOKEN secret is not set. Run: supabase secrets set SB_MANAGEMENT_TOKEN=<your Supabase personal access token>' }, 400);
-    }
+    // AUTHZ — this runs SQL on a project via the privileged Management token, so the caller must be
+    // an authenticated FableForge user acting on a project they own (confused-deputy guard).
+    const authClient = createClient(
+      Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
+    );
+    const { data: { user } } = await authClient.auth.getUser();
+    if (!user) return json({ error: 'Unauthorized' }, 401);
 
-    const { projectRef, sql } = await req.json().catch(() => ({} as { projectRef?: string; sql?: string }));
+    const { projectId, projectRef, sql } = await req.json().catch(() => ({} as { projectId?: string; projectRef?: string; sql?: string }));
+    if (!projectId) return json({ error: 'projectId is required.' }, 400);
     if (!projectRef || !sql) return json({ error: 'projectRef and sql are required.' }, 400);
     if (!/^[a-z0-9]{16,40}$/i.test(projectRef)) return json({ error: `Invalid project ref "${projectRef}".` }, 400);
+
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { data: project } = await admin.from('projects').select('id, owner_id, supabase_managed').eq('id', projectId).single();
+    if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
+
+    // Managed (FableForge Cloud) DBs use the platform token; user-owned DBs use the user's OAuth token.
+    const token = await projectSupabaseToken(admin, user.id, (project.supabase_managed as boolean) ?? false);
+    if (!token) {
+      return json({ error: 'Connect Supabase (Settings → Connections), or set the SB_MANAGEMENT_TOKEN edge secret.' }, 400);
+    }
 
     const res = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
       method: 'POST',

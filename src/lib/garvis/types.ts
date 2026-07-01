@@ -47,6 +47,8 @@ export interface GarvisToolContext {
   ownerId: string;
   /** The app this run is scoped to, if any (null = portfolio-wide). */
   appId: string | null;
+  /** The agent_run this tool call belongs to — recorded as provenance on knowledge writes. */
+  runId?: string | null;
 }
 
 /**

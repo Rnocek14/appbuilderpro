@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
 import { Button, Card, Input } from '../components/ui';
+import { ConnectionsHub } from '../components/ConnectionsHub';
 import {
   PROVIDERS, providerInfo, resolveAI, subscribeAIConfig,
   getProvider, getModel, getKey, setProvider, setModel, setKey, DIRECT,
@@ -259,6 +260,13 @@ export default function Settings() {
         </Card>
 
         <AIProviderCard />
+
+        <Card className="mt-4 p-5">
+          <h2 className="text-sm font-medium">Connections</h2>
+          <p className="mt-1 mb-3 text-xs text-forge-dim">Connect Supabase, GitHub, and Netlify once — every project reuses them for databases, exports, and publishing.</p>
+          <ConnectionsHub />
+        </Card>
+
         <SpendCard />
       </div>
     </AppShell>

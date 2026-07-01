@@ -28,7 +28,7 @@ export function useJobs() {
   useEffect(() => {
     if (!session) return;
     const channel = supabase
-      .channel('jobs-feed')
+      .channel(`jobs-feed-${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, refresh)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -70,7 +70,7 @@ export function useMilestones(jobId: string | null) {
   useEffect(() => {
     if (!jobId) return;
     const channel = supabase
-      .channel(`milestones-${jobId}`)
+      .channel(`milestones-${jobId}-${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'job_milestones', filter: `job_id=eq.${jobId}` }, refresh)
       .subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -98,7 +98,7 @@ export function useInbox() {
   useEffect(() => {
     if (!session) return;
     const channel = supabase
-      .channel('inbox-feed')
+      .channel(`inbox-feed-${crypto.randomUUID()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_questions' }, refresh)
       .subscribe();
     return () => { supabase.removeChannel(channel); };

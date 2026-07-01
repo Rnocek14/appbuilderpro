@@ -4,7 +4,7 @@ import { Plus, Search, FolderOpen, Copy, Archive, Trash2, MoreVertical, Hammer, 
 import { AppShell } from '../components/layout/AppShell';
 import { useProjects } from '../hooks/useProjectData';
 import { useToast } from '../context/ToastContext';
-import { Badge, Button, Card, EmptyState, Input, Spinner } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, SkeletonCard } from '../components/ui';
 import { timeAgo } from '../lib/utils';
 
 export default function Dashboard() {
@@ -49,7 +49,9 @@ export default function Dashboard() {
         </div>
 
         {loading ? (
-          <div className="py-20 text-center"><Spinner label="Loading projects…" /></div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
+          </div>
         ) : visible.length === 0 ? (
           <EmptyState
             icon={<Hammer size={28} />}
@@ -58,9 +60,9 @@ export default function Dashboard() {
             action={!query && !showArchived ? <Link to="/new"><Button><Plus size={15} /> Forge your first app</Button></Link> : undefined}
           />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 stagger sm:grid-cols-2 lg:grid-cols-3">
             {visible.map((p) => (
-              <Card key={p.id} className="group relative p-4 transition-colors hover:border-forge-ember/40">
+              <Card key={p.id} interactive className="group relative p-4">
                 <button onClick={() => navigate(`/project/${p.id}`)} className="block w-full text-left">
                   <div className="flex items-start justify-between gap-2">
                     <FolderOpen size={16} className="mt-0.5 shrink-0 text-forge-ember" />

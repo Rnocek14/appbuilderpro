@@ -4,6 +4,7 @@
 
 import JSZip from 'jszip';
 import { supabase } from './supabase';
+import { isEnvSecretFile, redactEnvValues } from './importSafety';
 
 export interface ImportedFile { path: string; content: string }
 export interface ImportAnalysis {
@@ -12,6 +13,8 @@ export interface ImportAnalysis {
   skipped: { path: string; reason: string }[];
   isVite: boolean;
   hasSupabase: boolean;
+  /** How many .env files had their secret VALUES stripped on import (keys kept). */
+  redactedSecrets: number;
 }
 
 const SKIP_DIRS = ['node_modules/', '.git/', 'dist/', 'build/', '.next/', '.vercel/', 'coverage/', '.idea/', '.vscode/'];
@@ -164,18 +167,28 @@ export async function analyzeZip(data: ArrayBuffer | Blob, fallbackName: string)
 
 /** Compute the name + capability flags from a collected file set (shared by zip + GitHub import). */
 function finalizeAnalysis(files: ImportedFile[], skipped: { path: string; reason: string }[], fallbackName: string): ImportAnalysis {
+  // Redact real .env secrets BEFORE anything else touches the files, so plaintext credentials never
+  // reach the database, the preview, or the model. Keys + comments are preserved; values are stripped.
+  let redactedSecrets = 0;
+  const safeFiles = files.map((f) => {
+    if (!isEnvSecretFile(f.path)) return f;
+    redactedSecrets++;
+    return { path: f.path, content: redactEnvValues(f.content) };
+  });
+
   let name = fallbackName;
-  const pkg = files.find((f) => f.path === '/package.json');
+  const pkg = safeFiles.find((f) => f.path === '/package.json');
   if (pkg) {
     try { name = JSON.parse(pkg.content).name || name; } catch { /* keep fallback */ }
   }
-  const allPaths = files.map((f) => f.path).join('\n');
+  const allPaths = safeFiles.map((f) => f.path).join('\n');
   return {
     name,
-    files,
+    files: safeFiles,
     skipped,
-    isVite: files.some((f) => /\/vite\.config\.(ts|js|mjs)$/.test(f.path)),
-    hasSupabase: files.some((f) => f.content.includes('@supabase/supabase-js')) || allPaths.includes('/supabase/'),
+    isVite: safeFiles.some((f) => /\/vite\.config\.(ts|js|mjs)$/.test(f.path)),
+    hasSupabase: safeFiles.some((f) => f.content.includes('@supabase/supabase-js')) || allPaths.includes('/supabase/'),
+    redactedSecrets,
   };
 }
 

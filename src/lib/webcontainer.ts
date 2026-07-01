@@ -192,17 +192,22 @@ function depsChanged(oldContent: string | undefined, newContent: string): boolea
 // ---------------------------------------------------------------------------
 
 export type RunnerStatus = 'idle' | 'booting' | 'mounting' | 'installing' | 'starting' | 'ready' | 'error';
+/** A single TypeScript diagnostic from `tsc --noEmit`, normalized to a project path. */
+export interface TsDiag { path: string; line: number; message: string }
+export interface TypecheckState { status: 'running' | 'pass' | 'fail' | 'skipped'; errors: TsDiag[] }
 export interface RunnerState {
   projectId: string;
   status: RunnerStatus;
   url: string | null;
   error: string | null;
   logs: string[];
+  typecheck?: TypecheckState;
 }
 
 let state: RunnerState = { projectId: '', status: 'idle', url: null, error: null, logs: [] };
 const listeners = new Set<() => void>();
 let runToken = 0;            // guards against stale async steps after a project switch/restart
+let tcToken = 0;             // guards typecheck: only the latest tsc run may patch state.typecheck
 let handlersAttached = false;
 let mountedProjectId: string | null = null; // whose files are mounted + npm-installed
 let devProc: WebContainerProcess | null = null;
@@ -217,6 +222,55 @@ export function getRunnerState(): RunnerState { return state; }
 
 function pipe(proc: WebContainerProcess, token: number) {
   proc.output.pipeTo(new WritableStream({ write(d) { if (token === runToken) pushLog(d); } })).catch(() => { /* closed on kill */ });
+}
+
+/** Parse `tsc --noEmit --pretty false` output ("src/App.tsx(12,5): error TS2304: ...") into diagnostics. */
+function parseTscOutput(out: string): TsDiag[] {
+  const diags: TsDiag[] = [];
+  const seen = new Set<string>();
+  for (const raw of out.split('\n')) {
+    const m = /^(.+?)\((\d+),\d+\):\s*error\s+TS\d+:\s*(.+?)\s*$/.exec(raw.trim());
+    if (!m) continue;
+    const path = '/' + m[1].replace(/^\.\//, '').replace(/^\/+/, '');
+    const message = m[3].trim();
+    const key = `${path}:${m[2]}:${message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    diags.push({ path, line: Number(m[2]), message });
+    if (diags.length >= 50) break; // cap noise
+  }
+  return diags;
+}
+
+/**
+ * Run a REAL TypeScript type-check (`tsc --noEmit`) inside the running container and return the
+ * diagnostics — the deepest verification gate (catches type/undefined/prop errors the regex QA can't).
+ * Runs concurrently with the dev server (never blocks it). No-op/skip if the container isn't this
+ * project's or tsc can't run. TypeScript is already in the scaffold's devDependencies.
+ */
+export async function runTypecheck(projectId: string): Promise<TsDiag[]> {
+  if (state.projectId !== projectId) return [];
+  const my = ++tcToken; // only the LATEST typecheck may write state (concurrent runs can't clobber)
+  const fresh = () => my === tcToken && state.projectId === projectId;
+  patch({ typecheck: { status: 'running', errors: state.typecheck?.errors ?? [] } });
+  pushLog('$ npx tsc --noEmit  (type-check)');
+  try {
+    const wc = await getWebContainer();
+    const proc = await wc.spawn('npx', ['--no-install', 'tsc', '--noEmit', '--pretty', 'false']);
+    let buf = '';
+    proc.output.pipeTo(new WritableStream({ write(d) { buf += d; if (fresh()) pushLog(d); } })).catch(() => {});
+    const code = await proc.exit;
+    const errors = parseTscOutput(buf);
+    if (fresh()) {
+      patch({ typecheck: { status: code === 0 || errors.length === 0 ? 'pass' : 'fail', errors } });
+      pushLog(errors.length ? `$ tsc: ${errors.length} type error(s)` : '$ tsc: clean');
+    }
+    return errors;
+  } catch (e) {
+    if (fresh()) patch({ typecheck: { status: 'skipped', errors: [] } });
+    pushLog('$ tsc skipped: ' + (e instanceof Error ? e.message : String(e)));
+    return [];
+  }
 }
 
 /**
@@ -278,6 +332,7 @@ export async function startRunner(projectId: string, files: ProjectFile[], opts:
     devProc = proc;
     pipe(proc, token);
     proc.exit.then((c) => { if (token === runToken && c !== 0) patch({ status: 'error', error: 'Dev server exited (code ' + c + '). See the log.' }); });
+    void runTypecheck(projectId); // real type-check, concurrent — never blocks the dev server
   } catch (e) {
     if (token === runToken) patch({ status: 'error', error: e instanceof Error ? e.message : String(e) });
   }
@@ -311,6 +366,53 @@ export async function syncFiles(projectId: string, files: ProjectFile[]): Promis
   if (pkgChanged) void reinstall(projectId, prepared);
 }
 
+export interface BuiltFile { path: string; b64: string; sha1: string }
+
+async function sha1Hex(bytes: Uint8Array): Promise<string> {
+  const h = await crypto.subtle.digest('SHA-1', new Uint8Array(bytes)); // ArrayBuffer-backed copy
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+function bytesToB64(bytes: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/**
+ * Production-BUILD the app in the WebContainer (`npm run build` → `tsc && vite build`) and read the
+ * resulting `dist/` tree as base64 + sha1 per file — ready to upload to a static host. This is the
+ * build half of one-click publish; the upload happens server-side (deploy-site edge fn) so the host
+ * token never reaches the browser. Reuses the real toolchain (so a type error fails the build).
+ */
+export async function runBuild(projectId: string): Promise<{ ok: boolean; error?: string; files: BuiltFile[] }> {
+  if (state.projectId !== projectId) return { ok: false, error: 'The runtime isn’t active for this project — switch to Full build first.', files: [] };
+  try {
+    const wc = await getWebContainer();
+    pushLog('$ npm run build');
+    const proc = await wc.spawn('npm', ['run', 'build']);
+    proc.output.pipeTo(new WritableStream({ write(d) { pushLog(d); } })).catch(() => {});
+    const code = await proc.exit;
+    if (code !== 0) return { ok: false, error: `Build failed (exit ${code}) — see the log (often a type error).`, files: [] };
+
+    const files: BuiltFile[] = [];
+    const walk = async (dir: string, base: string): Promise<void> => {
+      const entries = await wc.fs.readdir(dir, { withFileTypes: true });
+      for (const e of entries) {
+        const full = `${dir}/${e.name}`;
+        const rel = `${base}/${e.name}`;
+        if (e.isDirectory()) await walk(full, rel);
+        else { const bytes = await wc.fs.readFile(full); files.push({ path: rel, b64: bytesToB64(bytes), sha1: await sha1Hex(bytes) }); }
+      }
+    };
+    try { await walk('dist', ''); } catch { return { ok: false, error: 'Build produced no dist/ output.', files: [] }; }
+    if (!files.length) return { ok: false, error: 'Build produced no files.', files: [] };
+    pushLog(`$ build ok — ${files.length} files in dist/`);
+    return { ok: true, files };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e), files: [] };
+  }
+}
+
 /** Reinstall dependencies and restart the dev server in-place (after package.json changed). */
 async function reinstall(projectId: string, files: ProjectFile[]): Promise<void> {
   if (state.projectId !== projectId) return;
@@ -331,4 +433,5 @@ async function reinstall(projectId: string, files: ProjectFile[]): Promise<void>
   devProc = proc;
   pipe(proc, token);
   proc.exit.then((c) => { if (token === runToken && c !== 0) patch({ status: 'error', error: 'Dev server exited (code ' + c + '). See the log.' }); });
+  void runTypecheck(projectId);
 }

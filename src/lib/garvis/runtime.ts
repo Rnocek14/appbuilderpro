@@ -32,7 +32,7 @@ export async function runGarvisTask(run: AgentRun, opts: RunOptions): Promise<vo
   const maxSteps = opts.maxSteps ?? 12;
   const emit = opts.onEvent ?? (() => {});
   const mode: GarvisMode = run.phase ?? 'observe';
-  const ctx: GarvisToolContext = { ownerId: run.owner_id, appId: run.app_id };
+  const ctx: GarvisToolContext = { ownerId: run.owner_id, appId: run.app_id, runId: run.id };
 
   // Resume from checkpoint if one exists.
   const history: GarvisMessage[] = run.checkpoint?.history ? [...run.checkpoint.history] : [];

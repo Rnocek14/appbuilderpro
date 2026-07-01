@@ -60,6 +60,29 @@ export function selectContext(files: SlimFile[], message: string, previewError =
   return { tree, included, trimmed: true };
 }
 
+/**
+ * Safe-edit guardrail: refuse writes/deletes to EXISTING files the model could NOT see in context
+ * (trimmed out of a large project) — editing those from imagination silently destroys real code.
+ * Creating brand-new files is always allowed. For small (untrimmed) projects every file is visible,
+ * so nothing is ever blocked; this only bites on large real apps — exactly the risk case.
+ */
+export function applyEditGuardrail(
+  appFiles: SlimFile[],
+  message: string,
+  previewError: string,
+  changes: { path: string; content: string }[],
+  deletions: string[],
+): { safeChanges: { path: string; content: string }[]; safeDeletions: string[]; blocked: string[] } {
+  const { included } = selectContext(appFiles, message, previewError);
+  const visible = new Set(included.map((f) => f.path));
+  const existing = new Set(appFiles.map((f) => f.path));
+  const allow = (p: string) => visible.has(p) || !existing.has(p); // visible edit, or a new file
+  const blocked: string[] = [];
+  const safeChanges = changes.filter((c) => (allow(c.path) ? true : (blocked.push(c.path), false)));
+  const safeDeletions = deletions.filter((p) => (allow(p) ? true : (blocked.includes(p) || blocked.push(p), false)));
+  return { safeChanges, safeDeletions, blocked };
+}
+
 /** Serialize the selected context for the edit prompt. */
 export function contextPayload(files: SlimFile[], message: string, previewError = ''): string {
   const { tree, included, trimmed } = selectContext(files, message, previewError);

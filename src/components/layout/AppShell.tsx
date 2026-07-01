@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
@@ -10,7 +10,12 @@ import { cn } from '../../lib/utils';
 import { CommandPalette } from '../CommandPalette';
 
 const nav = [
+  { to: '/garvis/command', label: 'Command', icon: Sparkles },
+  { to: '/garvis/control', label: 'Mission Control', icon: Activity },
   { to: '/garvis', label: 'Garvis', icon: Boxes },
+  { to: '/garvis/missions', label: 'Missions', icon: Rocket },
+  { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },
+  { to: '/garvis/marketing', label: 'Marketing', icon: Megaphone },
   { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
   { to: '/new', label: 'New project', icon: Plus },
   { to: '/import', label: 'Import', icon: FolderDown },
@@ -18,6 +23,7 @@ const nav = [
   { to: '/inbox', label: 'Inbox', icon: InboxIcon },
   { to: '/billing', label: 'Billing', icon: CreditCard },
   { to: '/settings', label: 'Settings', icon: Settings },
+  { to: '/spike/clusters', label: 'Cluster spike', icon: FlaskConical }, // TEMP dev-only gate; remove later
 ];
 
 export function AppShell({ children, fullBleed }: { children: ReactNode; fullBleed?: boolean }) {
@@ -97,6 +103,7 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
           <NavLink
             key={to}
             to={to}
+            end={to === '/garvis'}
             onClick={() => setMobileOpen(false)}
             title={collapsed ? label : undefined}
             className={navLinkClass(collapsed)}

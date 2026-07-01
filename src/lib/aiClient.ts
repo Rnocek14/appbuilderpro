@@ -11,18 +11,22 @@
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, IDEATION_SYSTEM, AUTOPILOT_DECIDE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, SCHEMA_SYSTEM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, ideationPrompt, autopilotDecidePrompt, filesPromptStream, editPrompt, schemaPrompt, schemaFromCodePrompt } from './prompts';
-import { contextPayload } from './contextBudget';
+import { contextPayload, applyEditGuardrail } from './contextBudget';
+import { buildPendingFiles, type PendingEdit } from './pendingEdit';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS, THEME_FOUNDATION, UI_INDEX_THEMETOGGLE_EXPORT } from './scaffold';
 import { buildIndexCss, buildIndexCssForHue, getPreset } from './themePresets';
 import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
+import { runQA, issuesToFixRequest, type QAIssue } from './projectQA';
 import { PREFS_PATH, prefsContext } from './preferences';
 import { MAIN_THREAD_ID, threadOf } from './threads';
 import { previewContext } from './previewRuntime';
 import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
 import { PREFERENCE_DISTILL_SYSTEM } from './prompts';
 import { recordUsage } from './usage';
+import { agenticEdit, agenticVerifyAndFix } from './agent/edit';
+import { agentAvailable } from './agent/loop';
 
 interface Usage { inputTokens: number; outputTokens: number }
 interface AIMessageRow { role: string; content: string; thread_id?: string | null }
@@ -81,6 +85,7 @@ async function connectProvider(url: string, init: RequestInit, providerLabel: st
     try {
       res = await fetch(url, init);
     } catch {
+      if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError'); // user hit Stop — don't retry
       if (attempt < 2) { await new Promise((r) => setTimeout(r, 800 * 2 ** attempt)); continue; }
       throw new Error(
         `Couldn't reach ${providerLabel}. The request failed before any response — usually a network drop, ` +
@@ -114,13 +119,18 @@ export interface EditResult {
   // 'plan' = the assistant proposed a plan to approve; no files changed yet.
   // 'edit' = files were modified. Defaults to 'edit' for backward compatibility
   // with edge-function responses that predate the conversational protocol.
-  action: 'edit' | 'ask' | 'plan' | 'discuss';
+  // 'review' = a proposed change set awaiting the user's diff approval; nothing written yet.
+  action: 'edit' | 'ask' | 'plan' | 'discuss' | 'review';
   explanation: string;
   question?: string;
   options?: string[];
   plan?: EditPlan;
   changed: string[];
   deleted: string[];
+  /** Edits the safe-edit guardrail refused to write (existing files the model couldn't see). */
+  blocked?: string[];
+  /** Present when action === 'review': the not-yet-written change set for diff approval. */
+  pending?: PendingEdit;
 }
 
 // ----------------------------------------------------------------
@@ -399,10 +409,19 @@ export async function draftGenerationPlan(prompt: string): Promise<{ plan: EditP
 export async function sendEdit(
   projectId: string, message: string, previewError?: string,
   onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
+  reviewMode?: boolean, signal?: AbortSignal,
 ): Promise<EditResult> {
-  // Both paths stream so the UI can render the edit landing file-by-file.
-  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId);
-  return edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId);
+  // AGENTIC PATH (default when available): the model works with tools — it reads files, researches the
+  // web, edits, and verifies with the real compiler, iterating until clean. This is the trust/capability
+  // upgrade. Plan-first and review-before-write keep the classic single-shot path (they need the plan /
+  // diff-approval protocol the tool loop doesn't produce). Non-Anthropic providers use the classic path.
+  if (!planFirst && !reviewMode && agentAvailable()) {
+    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, signal);
+  }
+  // Both classic paths stream so the UI can render the edit landing file-by-file.
+  // reviewMode (review-before-write) is direct-mode only for now; the edge path applies as before.
+  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, reviewMode, signal);
+  return edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, signal);
 }
 
 // Calls the streaming chat-edit edge function. supabase-js's functions.invoke buffers the
@@ -410,11 +429,13 @@ export async function sendEdit(
 async function edgeEditStream(
   projectId: string, message: string, previewError: string | undefined,
   onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
+  signal?: AbortSignal,
 ): Promise<EditResult> {
   const { data: { session } } = await supabase.auth.getSession();
   onEvent?.({ type: 'start' });
   const res = await fetch(`${supabaseUrl}/functions/v1/chat-edit`, {
     method: 'POST',
+    signal,
     headers: {
       'content-type': 'application/json',
       apikey: supabaseAnonKey,
@@ -474,7 +495,7 @@ async function readFnError(error: unknown): Promise<string> {
 
 interface RawResult { text: string; inputTokens: number; outputTokens: number }
 
-async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192): Promise<RawResult> {
+export async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192): Promise<RawResult> {
   const ai = resolveAI();
   const label = providerInfo(ai.provider).label;
   if (!ai.ready) {
@@ -755,6 +776,41 @@ export async function setupThemeFoundation(projectId: string): Promise<{ convers
   };
 }
 
+// Generation-time self-heal: ask the model to fix the static QA errors and apply the changes,
+// reusing the proven edit-apply path (guardrail + upsert). Silent — it writes no chat messages,
+// so a clean generation stays clean in the conversation. Best-effort: any failure is swallowed by
+// the caller's try/catch around it. This is what makes "generated" mean "verified", not "hoped".
+async function qaFixPass(projectId: string, issues: QAIssue[]): Promise<void> {
+  const { data: files } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
+  const fixMsg = issuesToFixRequest(issues) +
+    '\n\nRespond with §ACTION edit only — fix the root cause of each issue and change nothing else. Do not plan or ask.';
+  const parser = makeStreamParser(() => {});
+  const ai = resolveAI();
+  let fixUsage: Usage = { inputTokens: 0, outputTokens: 0 };
+  await streamComplete([
+    { role: 'system', content: EDIT_SYSTEM_STREAM },
+    { role: 'user', content: editPrompt(contextPayload(appFiles, fixMsg, ''), fixMsg) },
+  ], 16000, (d) => parser.push(d), undefined, (u) => { fixUsage = u; });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: fixUsage.inputTokens, outputTokens: fixUsage.outputTokens });
+  const result = parser.end();
+  if (result.action !== 'edit') return;
+  const { safeChanges, safeDeletions } = applyEditGuardrail(appFiles, fixMsg, '', result.changes, result.deletions);
+  for (const c of safeChanges) {
+    await supabase.from('project_files').upsert(
+      { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
+      { onConflict: 'project_id,path' },
+    );
+  }
+  for (const path of safeDeletions) {
+    await supabase.from('project_files')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('project_id', projectId).eq('path', path);
+  }
+}
+
 async function directGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
@@ -802,6 +858,23 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
       }).eq('id', projectId);
       await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
 
+      // INTEGRATION MANIFEST — read the blueprint's declared server-side integrations and the secret
+      // keys they need. This drives edge-function generation and the secret-request popup (Phase 6).
+      const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
+        ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
+        : [];
+      const requiredSecrets: { env: string; service: string; purpose: string; status: 'missing' }[] = [];
+      for (const it of integrations) {
+        const service = typeof it.service === 'string' ? it.service : '';
+        const purpose = typeof it.purpose === 'string' ? it.purpose : '';
+        const secrets = Array.isArray(it.secrets) ? it.secrets : [];
+        for (const s of secrets) if (typeof s === 'string' && s.trim()) requiredSecrets.push({ env: s.trim(), service, purpose, status: 'missing' });
+      }
+      const secretEnvs = [...new Set(requiredSecrets.map((s) => s.env))];
+      const manifestSecrets = secretEnvs.map((env) => requiredSecrets.find((s) => s.env === env)!);
+      const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
+      const hasIntegrations = integrations.length > 0;
+
       // Backend FIRST, so the file generator can wire the app to it. Additive & resilient:
       // a failure here never fails the whole generation — the app falls back to localStorage.
       await mark('schema', 'running');
@@ -815,6 +888,14 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
         backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
       }
       await mark('schema', 'done', backendNote);
+
+      // Integrations invoke edge functions through the Supabase client, so /src/lib/supabaseClient.ts
+      // (and .env.example) must exist even when the app has no database tables of its own — otherwise
+      // /src/lib/api.ts's import would not resolve.
+      if (hasIntegrations && !hasBackend) {
+        await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+        await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+      }
 
       await mark('file_tree', 'running');
       // Seed the fixed Vite/TS scaffold first so the project can boot as its source streams in.
@@ -845,7 +926,7 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
       let genUsage: Usage = { inputTokens: 0, outputTokens: 0 };
       await streamComplete([
         { role: 'system', content: GENERATE_FILES_STREAM },
-        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint), hasBackend) },
+        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint), hasBackend, hasIntegrations) },
       ], 32000, (delta) => parser.push(delta), undefined, (u) => { genUsage = u; });
       // Never let a model-emitted file clobber the fixed scaffold or the generated backend files.
       const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
@@ -862,11 +943,47 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           { onConflict: 'project_id,path' },
         );
       }
+      // Write the secret manifest so the studio can prompt the user for the keys (the secret popup)
+      // and the deploy step knows what to push to Supabase Function Secrets. Deterministic — derived
+      // from the blueprint, not the model's free-text output.
+      if (hasIntegrations) {
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path: '/supabase/.fableforge/secrets.json',
+            content: JSON.stringify({ secrets: manifestSecrets, integrations }, null, 2) + '\n', updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
       const total = SCAFFOLD_FILES.length + appFiles.length + backendFiles;
       await mark('file_tree', 'done', `${total} files`);
-      for (const s of ['frontend', 'backend', 'auth_logic', 'styling', 'validate', 'fix'] as const) {
+      for (const s of ['frontend', 'backend', 'auth_logic', 'styling'] as const) {
         await mark(s, 'done');
       }
+
+      // VERIFY + FIX — the app just streamed in one pass; now make "generated" mean "works". Run the
+      // checks and, if anything's wrong, hand off to the AGENTIC repair loop (reads the failing files,
+      // researches if unsure, fixes the root cause, re-checks until clean). Falls back to the classic
+      // regex-fix passes when the agent isn't available (non-Anthropic provider).
+      await mark('validate', 'running');
+      let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s) found` : 'clean');
+      if (qaErrors.length) {
+        await mark('fix', 'running');
+        try {
+          if (agentAvailable()) {
+            await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });
+          } else {
+            for (let attempt = 0; attempt < 2 && qaErrors.length; attempt++) {
+              try { await qaFixPass(projectId, qaErrors); } catch { break; }
+              qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+            }
+          }
+        } catch { /* best-effort — report whatever remains below */ }
+        qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        await mark('fix', 'done', qaErrors.length ? `${qaErrors.length} unresolved` : 'fixed');
+      } else {
+        await mark('fix', 'done');
+      }
+      const unresolved = qaErrors.length;
 
       await mark('summarize', 'running');
       const summaryId = await insertAiMessage({
@@ -876,7 +993,9 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           (hasBackend
             ? ` It's full-stack: a Supabase backend (${backendNote}) lives at /supabase/migrations/0001_init.sql and the app talks to it through /src/lib/db.ts. Run that SQL in Supabase, then use "Supabase" in the header to connect — it runs on localStorage until you do.`
             : '') +
-          ` Open the preview to try it, then keep iterating in chat.`,
+          ` Open the preview to try it, then keep iterating in chat.` +
+          (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
+          (unresolved ? `\n\n⚠️ ${unresolved} static issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
         files_changed: appFiles.map((f) => f.path),
         thread_id: MAIN_THREAD_ID,
       });
@@ -969,27 +1088,36 @@ async function directEdit(projectId: string, message: string, previewError?: str
     return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
-  for (const c of parsed.changes ?? []) {
+  // Safe-edit guardrail: drop edits to existing files the model couldn't see (see directEditStream).
+  const { safeChanges, safeDeletions, blocked } = applyEditGuardrail(
+    appFilesNs, message, previewError ?? '', parsed.changes ?? [], parsed.deletions ?? [],
+  );
+  for (const c of safeChanges) {
     await supabase.from('project_files').upsert(
       { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
       { onConflict: 'project_id,path' },
     );
   }
-  for (const path of parsed.deletions ?? []) {
+  for (const path of safeDeletions) {
     await supabase.from('project_files')
       .update({ deleted_at: new Date().toISOString() })
       .eq('project_id', projectId).eq('path', path);
   }
+  const blockedNote = blocked.length
+    ? `\n\n⚠️ Skipped ${blocked.length} change(s) to file(s) I couldn't see (${blocked.join(', ')}). Open them so I can edit them safely.`
+    : '';
+  const explanation = (parsed.explanation ?? 'Done.') + blockedNote;
   await supabase.from('ai_messages').insert({
     project_id: projectId, user_id: userId, role: 'assistant',
-    content: parsed.explanation ?? 'Done.', files_changed: (parsed.changes ?? []).map((c) => c.path),
+    content: explanation, files_changed: safeChanges.map((c) => c.path),
   });
 
   return {
     action: 'edit',
-    explanation: parsed.explanation ?? 'Done.',
-    changed: (parsed.changes ?? []).map((c) => c.path),
-    deleted: parsed.deletions ?? [],
+    explanation,
+    changed: safeChanges.map((c) => c.path),
+    deleted: safeDeletions,
+    blocked,
   };
 }
 
@@ -1024,9 +1152,9 @@ function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type
 
 /** Stream a completion, calling onDelta with each text chunk as it arrives. An optional
  * `image` (data URL) is attached to the last user message so vision models can see it. */
-async function streamComplete(
+export async function streamComplete(
   messages: { role: string; content: string }[], maxTokens: number, onDelta: (t: string) => void,
-  image?: string, onUsage?: (u: Usage) => void,
+  image?: string, onUsage?: (u: Usage) => void, signal?: AbortSignal,
 ): Promise<string> {
   const ai = resolveAI();
   const label = providerInfo(ai.provider).label;
@@ -1063,6 +1191,7 @@ async function streamComplete(
     }
     const res = await connectProvider('https://api.anthropic.com/v1/messages', {
       method: 'POST',
+      signal,
       headers: {
         'content-type': 'application/json',
         'x-api-key': ai.key,
@@ -1093,6 +1222,7 @@ async function streamComplete(
   // don't support it — we estimate in that case).
   const res = await connectProvider(`${ai.openAIBase}/chat/completions`, {
     method: 'POST',
+    signal,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
     body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
   }, label);
@@ -1224,9 +1354,74 @@ function makeStreamParser(emit: (e: EditEvent) => void) {
   };
 }
 
+/**
+ * Atomic change-set undo: restore every file a prior edit changed back to its pre-edit content.
+ * Uses the project_file_versions snapshots the `snapshot_file_version` trigger already records, so no
+ * schema change is needed. Files the edit CREATED (no prior snapshot) are soft-deleted. Note: this
+ * cleanly undoes the MOST RECENT edit to each path; if a file was edited again afterward, revert
+ * restores that later pre-edit state. Deletions performed by the edit are not reconstructed here.
+ */
+export async function revertChangeSet(projectId: string, paths: string[]): Promise<{ restored: string[]; removed: string[] }> {
+  const restored: string[] = [];
+  const removed: string[] = [];
+  for (const path of paths) {
+    const { data: versions } = await supabase
+      .from('project_file_versions')
+      .select('content, version')
+      .eq('project_id', projectId).eq('path', path)
+      .order('version', { ascending: false }).limit(1);
+    const prior = versions?.[0] as { content: string } | undefined;
+    if (prior) {
+      await supabase.from('project_files').upsert(
+        { project_id: projectId, path, content: prior.content, updated_by_ai: false },
+        { onConflict: 'project_id,path' },
+      );
+      restored.push(path);
+    } else {
+      // No prior version → this file was created by the edit. Undo = remove it.
+      await supabase.from('project_files')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('project_id', projectId).eq('path', path);
+      removed.push(path);
+    }
+  }
+  return { restored, removed };
+}
+
+/**
+ * Write a PendingEdit the user approved in the diff modal: the same upsert/delete the normal apply
+ * path does, just gated behind review. Inserts the (deferred) assistant message and returns the paths
+ * actually changed so the caller can run post-edit checks.
+ */
+export async function applyPendingEdit(projectId: string, pending: PendingEdit, threadId: string = MAIN_THREAD_ID): Promise<string[]> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user!.id;
+  for (const c of pending.changes) {
+    await supabase.from('project_files').upsert(
+      { project_id: projectId, path: c.path, content: c.after, updated_by_ai: true },
+      { onConflict: 'project_id,path' },
+    );
+  }
+  for (const path of pending.deletions) {
+    await supabase.from('project_files')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('project_id', projectId).eq('path', path);
+  }
+  const blockedNote = pending.blocked.length
+    ? `\n\n⚠️ Skipped ${pending.blocked.length} change(s) to file(s) I couldn't see (${pending.blocked.join(', ')}).`
+    : '';
+  const changed = pending.changes.map((c) => c.path);
+  await insertAiMessage({
+    project_id: projectId, user_id: userId, role: 'assistant',
+    content: pending.explanation + blockedNote, files_changed: changed, thread_id: threadId,
+  });
+  return changed;
+}
+
 async function directEditStream(
   projectId: string, message: string, previewError: string | undefined,
   onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
+  reviewMode?: boolean, signal?: AbortSignal,
 ): Promise<EditResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
@@ -1270,7 +1465,7 @@ async function directEditStream(
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
     { role: 'user', content: brainContext(brain) + mapContext(map) + roadmapContext(roadmap) + prefsContext(prefs) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + previewContext() + planDirective + debugDirective },
-  ], 16000, (delta) => parser.push(delta), image, (u) => { streamUsage = u; });
+  ], 16000, (delta) => parser.push(delta), image, (u) => { streamUsage = u; }, signal);
   const result = parser.end();
   // Attribute this turn's token cost to the assistant message we're about to insert.
   const logCost = (messageId?: string) =>
@@ -1310,26 +1505,48 @@ async function directEditStream(
     return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
+  // Safe-edit guardrail BEFORE writing: drop edits to existing files the model couldn't see.
+  const { safeChanges, safeDeletions, blocked } = applyEditGuardrail(
+    appFiles, message, previewError ?? '', result.changes, result.deletions,
+  );
+
+  // Review-before-write: when on, do NOT write — return the change set for the user to diff + approve.
+  // The assistant message is deferred to applyPendingEdit so a discarded edit leaves no "done" message.
+  if (reviewMode && (safeChanges.length || safeDeletions.length)) {
+    logCost();
+    onEvent?.({ type: 'done' });
+    const pending: PendingEdit = {
+      changes: buildPendingFiles(appFiles, safeChanges),
+      deletions: safeDeletions,
+      explanation: result.explanation || 'Proposed changes — review below.',
+      blocked,
+    };
+    return { action: 'review', explanation: pending.explanation, changed: [], deleted: [], blocked, pending };
+  }
+
   // Apply atomically once the stream completes: progressive writes would flash transient
   // "module not found" states in the preview while imported files are still arriving.
-  for (const c of result.changes) {
+  for (const c of safeChanges) {
     await supabase.from('project_files').upsert(
       { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
       { onConflict: 'project_id,path' },
     );
   }
-  for (const path of result.deletions) {
+  for (const path of safeDeletions) {
     await supabase.from('project_files')
       .update({ deleted_at: new Date().toISOString() })
       .eq('project_id', projectId).eq('path', path);
   }
-  const explanation = result.explanation || 'Done.';
+  const blockedNote = blocked.length
+    ? `\n\n⚠️ Skipped ${blocked.length} change(s) to file(s) I couldn't see in this large project (${blocked.join(', ')}). Open them or ask about them specifically so I can edit them safely.`
+    : '';
+  const explanation = (result.explanation || 'Done.') + blockedNote;
   const id = await insertAiMessage({
     project_id: projectId, user_id: userId, role: 'assistant',
-    content: explanation, files_changed: result.changes.map((c) => c.path), thread_id: threadId,
+    content: explanation, files_changed: safeChanges.map((c) => c.path), thread_id: threadId,
   });
   logCost(id);
 
   onEvent?.({ type: 'done' });
-  return { action: 'edit', explanation, changed: result.changes.map((c) => c.path), deleted: result.deletions };
+  return { action: 'edit', explanation, changed: safeChanges.map((c) => c.path), deleted: safeDeletions, blocked };
 }

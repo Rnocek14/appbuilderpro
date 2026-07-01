@@ -2,7 +2,32 @@
   "permissions": {
     "allow": [
       "Bash(npm run *)",
-      "Bash(curl -s -X POST https://axqudbzrevbhwcrqacpa.supabase.co/functions/v1/apply-migration -H 'Authorization: Bearer __TRACKED_VAR__' -H 'apikey: __TRACKED_VAR__' -H 'content-type: application/json' -d '{\"projectRef\":\"aobrsurgymnyxifoqfpu\",\"sql\":\"select table_name from information_schema.tables where table_schema = '\\\\''public'\\\\'' order by table_name;\"}')"
+      "Bash(curl -s -X POST https://axqudbzrevbhwcrqacpa.supabase.co/functions/v1/apply-migration -H 'Authorization: Bearer __TRACKED_VAR__' -H 'apikey: __TRACKED_VAR__' -H 'content-type: application/json' -d '{\"projectRef\":\"aobrsurgymnyxifoqfpu\",\"sql\":\"select table_name from information_schema.tables where table_schema = '\\\\''public'\\\\'' order by table_name;\"}')",
+      "Bash(npx tsc *)",
+      "Bash(npx tsx *)",
+      "WebSearch",
+      "WebFetch(domain:codeculture.store)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:ar5iv.labs.arxiv.org)",
+      "Bash(node -e \"const d=require\\('./package.json'\\).dependencies; console.log\\(Object.keys\\(d\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(node -e \"const s=require\\('./package.json'\\).scripts; for\\(const k of ['dev','start','preview','build']\\) if\\(s[k]\\) console.log\\(k+': '+s[k]\\)\")",
+      "Bash(timeout 240 npx vite build)",
+      "Bash(curl -s -L -o gz.png \"https://i.gyazo.com/a37863f1a76742c37ee86b67dd400698.png\")",
+      "Bash(cp gz.png \"C:/Users/suppo/Downloads/fableforge/gz_ref.png\")",
+      "Bash(git check-ignore *)",
+      "Bash(sed -E 's/=\\(.{6}\\).*/=\\\\1…\\(masked\\)/' .env)",
+      "Bash(sed -E 's/=\\(.{6}\\).*/=\\\\1…\\(masked\\)/' .env.local)",
+      "Bash(node scripts/discover-test.mjs)",
+      "Bash(sed -i 's/window.setInterval\\(tick, 50000\\)/window.setInterval\\(tick, 90000\\)/' src/pages/spike/GalaxyView.tsx)",
+      "Bash(sed -i 's/setLeads\\(leadsCache.current\\\\[id\\\\] ?? \\\\[\\\\]\\); setBridge\\(null\\); setStreamText\\(.\\\\{0,2\\\\}\\);/&MIND/' src/pages/spike/GalaxyView.tsx)",
+      "PowerShell(npx vite build 2>&1 | Select-Object -Last 20)",
+      "Bash(curl -s -m 30 -D - -o /tmp/jina.txt \"https://r.jina.ai/https://en.wikipedia.org/wiki/Beehive\" -H \"X-Return-Format: text\")",
+      "Bash(curl -s -m 30 -D - -o /dev/null \"https://r.jina.ai/https://en.wikipedia.org/wiki/Beehive\" -H \"X-Return-Format: text\" -H \"Origin: http://localhost:5173\")",
+      "Bash(curl -s -m 25 -D - -o /dev/null -X OPTIONS \"https://google.serper.dev/images\" -H \"Origin: http://localhost:5173\" -H \"Access-Control-Request-Method: POST\" -H \"Access-Control-Request-Headers: content-type,x-api-key\")",
+      "Bash(deno --version)",
+      "Bash(deno check *)",
+      "Bash(echo \"EXIT: $?\")",
+      "PowerShell(npx tsx src/lib/qaCheck.verify.ts)"
     ]
   }
 }
