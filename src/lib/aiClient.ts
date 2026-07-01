@@ -10,19 +10,97 @@
 // writes files to Supabase itself. Never ship a production build in this mode.
 
 import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
-import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, IDEATION_SYSTEM, AUTOPILOT_DECIDE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, ideationPrompt, autopilotDecidePrompt, filesPromptStream, editPrompt } from './prompts';
-import { contextPayload } from './contextBudget';
-import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from './scaffold';
+import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_SYSTEM, PROJECT_MAP_SYSTEM, DOC_ANALYZE_SYSTEM, ROADMAP_SYSTEM, IDEATION_SYSTEM, AUTOPILOT_DECIDE_SYSTEM, EDIT_SYSTEM, EDIT_SYSTEM_STREAM, SCHEMA_SYSTEM, blueprintPrompt, generationPlanPrompt, researchPrompt, projectMapPrompt, docAnalyzePrompt, roadmapPrompt, ideationPrompt, autopilotDecidePrompt, filesPromptStream, editPrompt, schemaPrompt, schemaFromCodePrompt } from './prompts';
+import { contextPayload, applyEditGuardrail } from './contextBudget';
+import { buildPendingFiles, type PendingEdit } from './pendingEdit';
+import { SCAFFOLD_FILES, SCAFFOLD_PATHS, THEME_FOUNDATION, UI_INDEX_THEMETOGGLE_EXPORT } from './scaffold';
+import { buildIndexCss, buildIndexCssForHue, getPreset } from './themePresets';
+import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
+import { runQA, issuesToFixRequest, type QAIssue } from './projectQA';
+import { PREFS_PATH, prefsContext } from './preferences';
+import { MAIN_THREAD_ID, threadOf } from './threads';
+import { previewContext } from './previewRuntime';
+import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
+import { PREFERENCE_DISTILL_SYSTEM } from './prompts';
+import { recordUsage } from './usage';
+import { agenticEdit, agenticVerifyAndFix } from './agent/edit';
+import { agentAvailable } from './agent/loop';
 
-export type Provider = 'anthropic' | 'openai' | 'openrouter' | 'local';
+interface Usage { inputTokens: number; outputTokens: number }
+interface AIMessageRow { role: string; content: string; thread_id?: string | null }
 
-const DIRECT = import.meta.env.VITE_AI_DIRECT === 'true';
-const PROVIDER = (import.meta.env.VITE_AI_PROVIDER ?? 'anthropic') as Provider;
-const MODEL = import.meta.env.VITE_AI_MODEL ?? 'claude-sonnet-4-6';
-const KEY = import.meta.env.VITE_AI_API_KEY ?? '';
-const LOCAL_BASE = import.meta.env.VITE_LOCAL_AI_BASE_URL ?? 'http://localhost:11434/v1';
+export type { Provider };
+
+// ----------------------------------------------------------------
+// Provider HTTP helpers — friendly, actionable errors. A raw `fetch()` that can't reach the
+// host rejects with the opaque "Failed to fetch"; we translate that (and HTTP errors) into a
+// message that tells the user what to actually do (check key / provider / network).
+// ----------------------------------------------------------------
+
+/** fetch() that turns a network-level rejection into an actionable message naming the provider. */
+async function providerFetch(url: string, init: RequestInit, providerLabel: string): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(
+      `Couldn't reach ${providerLabel}. The request failed before any response — usually a network drop, ` +
+      `an ad/privacy blocker, or a missing/invalid API key for this provider. ` +
+      `Check the model picker (key + provider) and your connection, then try again.`,
+    );
+  }
+}
+
+/** Build a clear error from a non-2xx provider response. */
+async function httpError(res: Response, providerLabel: string): Promise<Error> {
+  let detail = '';
+  try { detail = (await res.text()).slice(0, 300); } catch { /* ignore */ }
+  if (res.status === 401 || res.status === 403) {
+    return new Error(`${providerLabel} rejected the API key (${res.status}). Add or fix the key in the model picker.`);
+  }
+  if (res.status === 404) {
+    return new Error(`${providerLabel} returned 404 — the model id is probably wrong for this provider. Pick a valid model. ${detail}`);
+  }
+  if (res.status === 429) {
+    if (/too large|tokens per min|\bTPM\b|rate limit|context length|maximum context/i.test(detail)) {
+      return new Error(
+        `${providerLabel}: this request is over your per-minute token limit. Pick a smaller model ` +
+        `(e.g. gpt-4o-mini / a -mini or -flash model has a much higher limit), upgrade your plan, or wait a minute. ${detail}`,
+      );
+    }
+    return new Error(`${providerLabel} is rate-limited or out of quota (429). Wait a moment or check your plan. ${detail}`);
+  }
+  return new Error(`${providerLabel} request failed (${res.status}). ${detail}`);
+}
+
+/**
+ * Open a connection to a provider with retry on transient failures (network drop, 429, 5xx).
+ * Retries only the connect — once a 2xx body is returned the caller streams it, so we never
+ * replay a partially-consumed stream. Throws an actionable error after the final attempt.
+ */
+async function connectProvider(url: string, init: RequestInit, providerLabel: string): Promise<Response> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, init);
+    } catch {
+      if (init.signal?.aborted) throw new DOMException('Aborted', 'AbortError'); // user hit Stop — don't retry
+      if (attempt < 2) { await new Promise((r) => setTimeout(r, 800 * 2 ** attempt)); continue; }
+      throw new Error(
+        `Couldn't reach ${providerLabel}. The request failed before any response — usually a network drop, ` +
+        `an ad/privacy blocker, or a missing/invalid API key. Check the model picker and your connection, then retry.`,
+      );
+    }
+    if (res.ok) return res;
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 800 * 2 ** attempt));
+      continue;
+    }
+    throw await httpError(res, providerLabel);
+  }
+  throw new Error(`Couldn't reach ${providerLabel}.`);
+}
 
 export interface GenerateResult { generationId: string }
 
@@ -41,13 +119,18 @@ export interface EditResult {
   // 'plan' = the assistant proposed a plan to approve; no files changed yet.
   // 'edit' = files were modified. Defaults to 'edit' for backward compatibility
   // with edge-function responses that predate the conversational protocol.
-  action: 'edit' | 'ask' | 'plan' | 'discuss';
+  // 'review' = a proposed change set awaiting the user's diff approval; nothing written yet.
+  action: 'edit' | 'ask' | 'plan' | 'discuss' | 'review';
   explanation: string;
   question?: string;
   options?: string[];
   plan?: EditPlan;
   changed: string[];
   deleted: string[];
+  /** Edits the safe-edit guardrail refused to write (existing files the model couldn't see). */
+  blocked?: string[];
+  /** Present when action === 'review': the not-yet-written change set for diff approval. */
+  pending?: PendingEdit;
 }
 
 // ----------------------------------------------------------------
@@ -84,6 +167,25 @@ export async function generateRoadmap(projectId: string): Promise<string> {
   const roadmap = raw.text.trim();
   await saveRoadmap(projectId, roadmap);
   return roadmap;
+}
+
+// Distill a user's note/correction into one durable preference rule (the "learning"). Falls back
+// to the cleaned-up raw text if direct mode is off or the model call fails — so a preference is
+// never lost just because distillation didn't run.
+export async function distillPreference(raw: string, recentContext?: string): Promise<string> {
+  const clean = raw.trim();
+  if (!clean) return '';
+  if (!DIRECT || !resolveAI().ready) return clean;
+  try {
+    const out = await rawComplete([
+      { role: 'system', content: PREFERENCE_DISTILL_SYSTEM },
+      { role: 'user', content: `Turn this into one durable preference rule.${recentContext ? `\n\nRecent context:\n${recentContext.slice(0, 1500)}` : ''}\n\nUser note: "${clean}"` },
+    ], 200);
+    const rule = out.text.trim().replace(/^["']|["']$/g, '').split('\n')[0].trim();
+    return rule || clean;
+  } catch {
+    return clean;
+  }
 }
 
 // Analyze an uploaded document into concise, build-relevant notes for the Project Brain.
@@ -176,7 +278,7 @@ export async function generateProjectMap(projectId: string): Promise<string> {
 // Anthropic's built-in web_search tool (no separate search API needed). Returns a discuss-style
 // answer with citations. Anthropic runs the searches server-side, so this works in direct mode.
 export async function researchAnswer(
-  projectId: string, message: string, onEvent?: (e: EditEvent) => void,
+  projectId: string, message: string, onEvent?: (e: EditEvent) => void, threadId: string = MAIN_THREAD_ID,
 ): Promise<EditResult> {
   // Production path: the research edge function holds the key and runs web search server-side.
   if (!DIRECT) {
@@ -189,12 +291,13 @@ export async function researchAnswer(
     return { action: 'discuss', explanation: (data as { answer?: string })?.answer ?? '', changed: [], deleted: [] };
   }
 
-  if (PROVIDER !== 'anthropic') throw new Error('Research currently requires the Anthropic provider (set VITE_AI_PROVIDER=anthropic).');
-  if (!KEY) throw new Error('Research needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
+  const ai = resolveAI();
+  if (ai.provider !== 'anthropic') throw new Error('Research needs the Anthropic provider (web search runs server-side at Anthropic). Switch the model picker to Claude.');
+  if (!ai.key) throw new Error('Research needs an Anthropic API key — add one in the model picker.');
 
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
-  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
+  await insertAiMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
 
   onEvent?.({ type: 'start' });
   onEvent?.({ type: 'explanation', text: 'Reading your code, then searching the web…' });
@@ -213,26 +316,23 @@ export async function researchAnswer(
     buildCodeDigest(allFiles.filter((f) => !isMetaFile(f.path))),
   ].filter(Boolean).join('\n');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await providerFetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': KEY,
+      'x-api-key': ai.key,
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: ai.model,
       max_tokens: 8000,
       system: RESEARCH_SYSTEM,
       tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 10 }],
       messages: [{ role: 'user', content: researchPrompt(message, ctx) }],
     }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Research failed (anthropic ${res.status}). ${body.slice(0, 200)}`);
-  }
+  }, 'Anthropic');
+  if (!res.ok) throw await httpError(res, 'Anthropic');
 
   const data = await res.json();
   const blocks = (data.content ?? []) as Array<{ type: string; text?: string; citations?: Array<{ url?: string; title?: string }> }>;
@@ -242,7 +342,9 @@ export async function researchAnswer(
   const answer = (text || 'I searched but did not find enough to answer confidently.') +
     (sources.size ? `\n\nSources:\n${[...sources].map((s) => `• ${s}`).join('\n')}` : '');
 
-  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'assistant', content: answer });
+  const id = await insertAiMessage({ project_id: projectId, user_id: userId, role: 'assistant', content: answer, thread_id: threadId });
+  // Note: web_search billing isn't in token usage, so this undercounts research a little.
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: data.usage?.input_tokens ?? 0, outputTokens: data.usage?.output_tokens ?? 0, messageId: id });
   onEvent?.({ type: 'done' });
   return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
 }
@@ -306,29 +408,41 @@ export async function draftGenerationPlan(prompt: string): Promise<{ plan: EditP
 
 export async function sendEdit(
   projectId: string, message: string, previewError?: string,
-  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
+  reviewMode?: boolean, signal?: AbortSignal,
 ): Promise<EditResult> {
-  // Both paths stream so the UI can render the edit landing file-by-file.
-  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst);
-  return edgeEditStream(projectId, message, previewError, onEvent, planFirst);
+  // AGENTIC PATH (default when available): the model works with tools — it reads files, researches the
+  // web, edits, and verifies with the real compiler, iterating until clean. This is the trust/capability
+  // upgrade. Plan-first and review-before-write keep the classic single-shot path (they need the plan /
+  // diff-approval protocol the tool loop doesn't produce). Non-Anthropic providers use the classic path.
+  if (!planFirst && !reviewMode && agentAvailable()) {
+    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, signal);
+  }
+  // Both classic paths stream so the UI can render the edit landing file-by-file.
+  // reviewMode (review-before-write) is direct-mode only for now; the edge path applies as before.
+  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, reviewMode, signal);
+  return edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, signal);
 }
 
 // Calls the streaming chat-edit edge function. supabase-js's functions.invoke buffers the
 // whole response, so we fetch the function URL directly and read its SSE body.
 async function edgeEditStream(
   projectId: string, message: string, previewError: string | undefined,
-  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
+  signal?: AbortSignal,
 ): Promise<EditResult> {
   const { data: { session } } = await supabase.auth.getSession();
   onEvent?.({ type: 'start' });
   const res = await fetch(`${supabaseUrl}/functions/v1/chat-edit`, {
     method: 'POST',
+    signal,
     headers: {
       'content-type': 'application/json',
       apikey: supabaseAnonKey,
       Authorization: `Bearer ${session?.access_token ?? supabaseAnonKey}`,
     },
-    body: JSON.stringify({ projectId, message, previewError, planFirst }),
+    // `image`/`threadId` are forwarded for when the edge function supports them; harmless if ignored.
+    body: JSON.stringify({ projectId, message, previewError, planFirst, image, threadId }),
   });
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => null);
@@ -381,48 +495,53 @@ async function readFnError(error: unknown): Promise<string> {
 
 interface RawResult { text: string; inputTokens: number; outputTokens: number }
 
-async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192): Promise<RawResult> {
-  if (!KEY && PROVIDER !== 'local') {
-    throw new Error('Direct mode needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
+export async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192): Promise<RawResult> {
+  const ai = resolveAI();
+  const label = providerInfo(ai.provider).label;
+  if (!ai.ready) {
+    throw new Error(`No API key set for ${label}. Add one in the model picker (or switch provider).`);
   }
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      if (PROVIDER === 'anthropic') {
+      if (ai.provider === 'anthropic') {
         const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
         const rest = messages.filter((m) => m.role !== 'system');
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
+        const res = await providerFetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-api-key': KEY,
+            'x-api-key': ai.key,
             'anthropic-version': '2023-06-01',
             'anthropic-dangerous-direct-browser-access': 'true',
           },
-          body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: rest }),
-        });
-        if (!res.ok) throw new Error(`anthropic ${res.status}`);
+          body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest }),
+        }, label);
+        if (!res.ok) throw await httpError(res, label);
         const data = await res.json();
+        const inputTokens = data.usage?.input_tokens ?? 0;
+        const outputTokens = data.usage?.output_tokens ?? 0;
+        recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
         return {
           text: data.content.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n'),
-          inputTokens: data.usage?.input_tokens ?? 0,
-          outputTokens: data.usage?.output_tokens ?? 0,
+          inputTokens,
+          outputTokens,
         };
       }
-      const base =
-        PROVIDER === 'openai' ? 'https://api.openai.com/v1'
-        : PROVIDER === 'openrouter' ? 'https://openrouter.ai/api/v1'
-        : LOCAL_BASE;
-      const res = await fetch(`${base}/chat/completions`, {
+      // OpenAI-compatible providers (openai, xai/Grok, gemini, openrouter, local).
+      const res = await providerFetch(`${ai.openAIBase}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY || 'local'}` },
-        body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages }),
-      });
-      if (!res.ok) throw new Error(`${PROVIDER} ${res.status}`);
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
+        body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages }),
+      }, label);
+      if (!res.ok) throw await httpError(res, label);
       const data = await res.json();
+      const inputTokens = data.usage?.prompt_tokens ?? 0;
+      const outputTokens = data.usage?.completion_tokens ?? 0;
+      recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
       return {
         text: data.choices?.[0]?.message?.content ?? '',
-        inputTokens: data.usage?.prompt_tokens ?? 0,
-        outputTokens: data.usage?.completion_tokens ?? 0,
+        inputTokens,
+        outputTokens,
       };
     } catch (err) {
       if (attempt === 2) throw err;
@@ -451,6 +570,244 @@ async function parseJsonWithRepair<T>(raw: string): Promise<T> {
       { role: 'user', content: `This was meant to be a single JSON object but failed to parse. Return the corrected JSON only:\n\n${raw.slice(0, 60_000)}` },
     ], 16000);
     return parseJson<T>(fixed.text);
+  }
+}
+
+// A typed Supabase client for generated apps — reads env, warns if unset. Static (no model call).
+const GENERATED_SUPABASE_CLIENT = `// src/lib/supabaseClient.ts — generated by FableForge.
+// Connect this app to your backend: create a project at https://supabase.com, then set
+// VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env (see .env.example).
+import { createClient } from '@supabase/supabase-js';
+
+const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+
+if (!url || !anonKey) {
+  console.warn('[supabase] VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY are not set — running on localStorage until you connect a backend.');
+}
+
+// createClient THROWS on an empty URL, which would crash the whole app before a backend is
+// connected. Fall back to an inert placeholder so the module loads; data access goes through
+// db.ts, which only talks to Supabase when VITE_SUPABASE_URL is actually set — so this is never hit.
+export const supabase = createClient(url || 'https://placeholder.supabase.co', anonKey || 'placeholder-anon-key');
+export const isSupabaseConnected = Boolean(url && anonKey);
+`;
+
+const GENERATED_ENV_EXAMPLE = `# Supabase — create a project at https://supabase.com, open Project Settings > API,
+# then paste the values here and rename this file to .env
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+`;
+
+function stripFences(s: string): string {
+  const m = s.match(/\`\`\`(?:sql)?\s*([\s\S]*?)\`\`\`/i);
+  return (m ? m[1] : s).trim();
+}
+
+async function writeProjectFile(projectId: string, path: string, content: string): Promise<void> {
+  await supabase.from('project_files').upsert(
+    { project_id: projectId, path, content, updated_by_ai: true },
+    { onConflict: 'project_id,path' },
+  );
+}
+
+/**
+ * Insert an ai_messages row (including thread_id) and return its id. If the thread_id column
+ * doesn't exist yet (migration not applied), it transparently retries WITHOUT thread_id, so chat
+ * keeps working as a single Main thread until the one-line migration is run.
+ */
+async function insertAiMessage(row: Record<string, unknown>): Promise<string | undefined> {
+  const res = await supabase.from('ai_messages').insert(row).select('id').single();
+  if (res.error && /thread_id|column|schema cache|does not exist/i.test(res.error.message ?? '')) {
+    const { thread_id: _omit, ...rest } = row; void _omit;
+    const retry = await supabase.from('ai_messages').insert(rest).select('id').single();
+    return (retry.data as { id?: string } | null)?.id;
+  }
+  return (res.data as { id?: string } | null)?.id;
+}
+
+/**
+ * Materialize the blueprint's database_schema/auth_rules into real, deployable backend files:
+ * a Supabase migration (tables + RLS + owner policies + auth trigger), a typed client, and a
+ * .env.example. Direct mode only for now (edge mirror pending). Returns the table count;
+ * a zero-table blueprint writes nothing.
+ */
+export async function generateBackend(projectId: string, blueprintJson: string): Promise<{ tables: number }> {
+  let tables = 0;
+  try {
+    const bp = JSON.parse(blueprintJson) as { database_schema?: { tables?: unknown[] } };
+    tables = bp.database_schema?.tables?.length ?? 0;
+  } catch { tables = 0; }
+  if (!tables) return { tables: 0 };
+
+  const sqlRaw = await rawComplete([
+    { role: 'system', content: SCHEMA_SYSTEM },
+    { role: 'user', content: schemaPrompt(blueprintJson) },
+  ]);
+  const sql = stripFences(sqlRaw.text);
+  if (!sql || /^--\s*no tables required/i.test(sql)) return { tables: 0 };
+
+  await writeProjectFile(projectId, '/supabase/migrations/0001_init.sql', sql + '\n');
+  await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+  await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+  return { tables };
+}
+
+/**
+ * Generate a backend for an EXISTING project (generated or imported) by inferring the schema
+ * from its source code — no blueprint needed. Writes the migration + client + .env.example.
+ * Direct mode only (edge mirror pending). Returns the number of tables created.
+ */
+export async function generateBackendFromProject(projectId: string): Promise<{ tables: number }> {
+  if (!DIRECT) throw new Error('Backend generation currently requires direct mode (edge mirror coming).');
+  const { data } = await supabase.from('project_files').select('path,content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const files = ((data ?? []) as { path: string; content: string }[])
+    .filter((f) => !isMetaFile(f.path) && !f.path.startsWith('/supabase/'));
+  if (!files.length) throw new Error('No source files to analyze.');
+
+  const sqlRaw = await rawComplete([
+    { role: 'system', content: SCHEMA_SYSTEM },
+    { role: 'user', content: schemaFromCodePrompt(buildCodeDigest(files)) },
+  ]);
+  const sql = stripFences(sqlRaw.text);
+  if (!sql || /^--\s*no tables required/i.test(sql)) return { tables: 0 };
+
+  await writeProjectFile(projectId, '/supabase/migrations/0001_init.sql', sql + '\n');
+  await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+  await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+  return { tables: (sql.match(/create table/gi) ?? []).length };
+}
+
+/**
+ * Convert an existing project to the design-token theme by mechanically tokenizing the color
+ * classes in every app source file (deterministic, guaranteed coverage), and ensuring the theme
+ * foundation exists. Returns how many files changed. Pair with applyThemePreset to recolor.
+ */
+export async function convertProjectToTokens(projectId: string): Promise<{ changed: number }> {
+  const { data } = await supabase.from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const all = (data ?? []) as { path: string; content: string }[];
+  await ensureThemeFoundation(projectId, all);
+
+  const targets = all.filter(
+    (f) => /\.(t|j)sx?$/.test(f.path) && f.path.startsWith('/src/') && !isMetaFile(f.path),
+  );
+  let changed = 0;
+  for (const f of targets) {
+    const next = tokenizeColors(f.content);
+    if (next !== f.content) {
+      await writeProjectFile(projectId, f.path, next);
+      changed++;
+    }
+  }
+  return { changed };
+}
+
+/**
+ * Silently make sure a FableForge-kit project has the theme foundation, so theming is automatic
+ * (no button needed): write the theme hook / ThemeToggle / barrel export if missing, and upgrade
+ * the OLD `--color-*` scaffold stylesheet to the canonical token system when detected. Idempotent
+ * and cheap — only writes what's missing/outdated. Skips non-kit (imported/foreign) projects and
+ * never overwrites a stylesheet the user has already moved onto tokens or customized.
+ */
+/**
+ * Apply a named color preset to a project: rewrite /src/index.css with the preset's token values
+ * (instant, no model call) and make sure the theme hook + toggle exist. Recolors the whole app at
+ * once because every surface is token-driven. Returns the preset name.
+ */
+export async function applyThemePreset(projectId: string, presetId: string): Promise<{ name: string; changed: number }> {
+  // Tokenize the app's colors first (idempotent — no-ops once already on tokens), so the preset
+  // visibly recolors the WHOLE app, not just elements that already used tokens. Then write the
+  // palette. One click = convert + recolor.
+  const { changed } = await convertProjectToTokens(projectId);
+  await writeProjectFile(projectId, '/src/index.css', buildIndexCss(presetId));
+  return { name: getPreset(presetId).name, changed };
+}
+
+async function ensureThemeFoundation(projectId: string, files: { path: string; content: string }[]): Promise<void> {
+  const has = (p: string) => files.some((f) => f.path === p);
+  const get = (p: string) => files.find((f) => f.path === p)?.content ?? '';
+  // Only touch apps that use our UI kit — leave imported/foreign projects alone.
+  if (!has('/src/components/ui/Button.tsx')) return;
+  const want = (p: string) => THEME_FOUNDATION.find((f) => f.path === p)?.content ?? '';
+
+  if (!has('/src/lib/theme.ts')) await writeProjectFile(projectId, '/src/lib/theme.ts', want('/src/lib/theme.ts'));
+  if (!has('/src/components/ui/ThemeToggle.tsx')) await writeProjectFile(projectId, '/src/components/ui/ThemeToggle.tsx', want('/src/components/ui/ThemeToggle.tsx'));
+
+  // Upgrade the old scaffold stylesheet (had --color-bg, no shadcn tokens) to the token system.
+  const css = get('/src/index.css');
+  if (!css || (css.includes('--color-bg') && !css.includes('--background'))) {
+    await writeProjectFile(projectId, '/src/index.css', want('/src/index.css'));
+  }
+  const barrel = get('/src/components/ui/index.ts');
+  if (barrel && !barrel.includes('./ThemeToggle')) {
+    await writeProjectFile(projectId, '/src/components/ui/index.ts', barrel.trimEnd() + '\n' + UI_INDEX_THEMETOGGLE_EXPORT + '\n');
+  }
+}
+
+/**
+ * Retrofit an existing project onto the shadcn design-token theme system: write the canonical
+ * token stylesheet, the theme hook, the <ThemeToggle/>, and the index.html that carries the
+ * Tailwind token config + pre-paint script; ensure the ui barrel exports ThemeToggle. This sets
+ * up the FOUNDATION deterministically — converting the app's hardcoded colors to tokens is then
+ * done by a follow-up AI edit (the model knows the token rules from its system prompt). Returns
+ * the conversion instruction the caller should send through sendEdit so dark mode works fully.
+ */
+export async function setupThemeFoundation(projectId: string): Promise<{ conversionInstruction: string }> {
+  for (const f of THEME_FOUNDATION) {
+    await writeProjectFile(projectId, f.path, f.content);
+  }
+  // Make <ThemeToggle/> importable from the ui barrel if one exists and doesn't already export it.
+  const { data: barrel } = await supabase.from('project_files').select('content')
+    .eq('project_id', projectId).eq('path', '/src/components/ui/index.ts').is('deleted_at', null).maybeSingle();
+  if (barrel?.content && !barrel.content.includes('./ThemeToggle')) {
+    await writeProjectFile(projectId, '/src/components/ui/index.ts', barrel.content.trimEnd() + '\n' + UI_INDEX_THEMETOGGLE_EXPORT + '\n');
+  }
+  return {
+    conversionInstruction:
+      'Convert this app to the shadcn design-token theme that was just set up. Replace EVERY hardcoded ' +
+      'color across all pages and components with the semantic tokens: surfaces → bg-background / bg-card / ' +
+      'bg-muted, primary text → text-foreground, secondary text → text-muted-foreground, all borders → ' +
+      'border-border, the accent → bg-primary/text-primary-foreground, danger → bg-destructive. Remove ' +
+      'bg-white, bg-gray-*/slate-*, text-black, text-gray-*/slate-*, and hex colors. Mount a <ThemeToggle/> ' +
+      '(import from the ui kit) in the app\'s header/nav. Do NOT change layout, structure, or logic — only colors ' +
+      'and the toggle. Apply it everywhere so light and dark are both complete (no white borders, readable text).',
+  };
+}
+
+// Generation-time self-heal: ask the model to fix the static QA errors and apply the changes,
+// reusing the proven edit-apply path (guardrail + upsert). Silent — it writes no chat messages,
+// so a clean generation stays clean in the conversation. Best-effort: any failure is swallowed by
+// the caller's try/catch around it. This is what makes "generated" mean "verified", not "hoped".
+async function qaFixPass(projectId: string, issues: QAIssue[]): Promise<void> {
+  const { data: files } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
+  const fixMsg = issuesToFixRequest(issues) +
+    '\n\nRespond with §ACTION edit only — fix the root cause of each issue and change nothing else. Do not plan or ask.';
+  const parser = makeStreamParser(() => {});
+  const ai = resolveAI();
+  let fixUsage: Usage = { inputTokens: 0, outputTokens: 0 };
+  await streamComplete([
+    { role: 'system', content: EDIT_SYSTEM_STREAM },
+    { role: 'user', content: editPrompt(contextPayload(appFiles, fixMsg, ''), fixMsg) },
+  ], 16000, (d) => parser.push(d), undefined, (u) => { fixUsage = u; });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: fixUsage.inputTokens, outputTokens: fixUsage.outputTokens });
+  const result = parser.end();
+  if (result.action !== 'edit') return;
+  const { safeChanges, safeDeletions } = applyEditGuardrail(appFiles, fixMsg, '', result.changes, result.deletions);
+  for (const c of safeChanges) {
+    await supabase.from('project_files').upsert(
+      { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
+      { onConflict: 'project_id,path' },
+    );
+  }
+  for (const path of safeDeletions) {
+    await supabase.from('project_files')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('project_id', projectId).eq('path', path);
   }
 }
 
@@ -501,8 +858,44 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
       }).eq('id', projectId);
       await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
 
-      const tableCount = (blueprint.database_schema as { tables?: unknown[] })?.tables?.length ?? 0;
-      await mark('schema', 'done', tableCount ? `${tableCount} tables` : undefined);
+      // INTEGRATION MANIFEST — read the blueprint's declared server-side integrations and the secret
+      // keys they need. This drives edge-function generation and the secret-request popup (Phase 6).
+      const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
+        ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
+        : [];
+      const requiredSecrets: { env: string; service: string; purpose: string; status: 'missing' }[] = [];
+      for (const it of integrations) {
+        const service = typeof it.service === 'string' ? it.service : '';
+        const purpose = typeof it.purpose === 'string' ? it.purpose : '';
+        const secrets = Array.isArray(it.secrets) ? it.secrets : [];
+        for (const s of secrets) if (typeof s === 'string' && s.trim()) requiredSecrets.push({ env: s.trim(), service, purpose, status: 'missing' });
+      }
+      const secretEnvs = [...new Set(requiredSecrets.map((s) => s.env))];
+      const manifestSecrets = secretEnvs.map((env) => requiredSecrets.find((s) => s.env === env)!);
+      const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
+      const hasIntegrations = integrations.length > 0;
+
+      // Backend FIRST, so the file generator can wire the app to it. Additive & resilient:
+      // a failure here never fails the whole generation — the app falls back to localStorage.
+      await mark('schema', 'running');
+      let backendFiles = 0;
+      let hasBackend = false;
+      let backendNote = 'no backend needed';
+      try {
+        const { tables } = await generateBackend(projectId, JSON.stringify(blueprint));
+        if (tables) { backendFiles = 3; hasBackend = true; backendNote = `${tables} tables + RLS + auth`; }
+      } catch (e) {
+        backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
+      }
+      await mark('schema', 'done', backendNote);
+
+      // Integrations invoke edge functions through the Supabase client, so /src/lib/supabaseClient.ts
+      // (and .env.example) must exist even when the app has no database tables of its own — otherwise
+      // /src/lib/api.ts's import would not resolve.
+      if (hasIntegrations && !hasBackend) {
+        await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+        await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+      }
 
       await mark('file_tree', 'running');
       // Seed the fixed Vite/TS scaffold first so the project can boot as its source streams in.
@@ -512,16 +905,37 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           { onConflict: 'project_id,path' },
         );
       }
-      // Stream the source files (§FILE protocol) — no giant JSON blob, live progress.
+      // Give the app a distinctive, domain-appropriate palette (the blueprint picks an accent hue)
+      // instead of the default slate — this is the biggest single lever for "looks intentional,
+      // not generic AI output". Falls back to the scaffold default if no hue was chosen.
+      const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
+      const accentHue = Number(design?.accentHue);
+      if (Number.isFinite(accentHue)) {
+        const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForHue(accentHue, headingFont), updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
+      // Stream the source files (§FILE protocol). hasBackend tells the model to route data through
+      // /src/lib/db.ts against Supabase (with a localStorage fallback) instead of plain localStorage.
       const parser = makeStreamParser((e) => {
         if (e.type === 'file-start') void mark('file_tree', 'running', e.path.split('/').pop());
       });
+      const genAi = resolveAI();
+      let genUsage: Usage = { inputTokens: 0, outputTokens: 0 };
       await streamComplete([
         { role: 'system', content: GENERATE_FILES_STREAM },
-        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint)) },
-      ], 32000, (delta) => parser.push(delta));
-      const scaffoldPaths = new Set(SCAFFOLD_PATHS);
-      const appFiles = parser.end().changes.filter((f) => f.path && f.content.trim() && !scaffoldPaths.has(f.path));
+        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint), hasBackend, hasIntegrations) },
+      ], 32000, (delta) => parser.push(delta), undefined, (u) => { genUsage = u; });
+      // Never let a model-emitted file clobber the fixed scaffold or the generated backend files.
+      const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
+      // The UI kit under /src/components/ui/ is authoritative (scaffold-provided). Drop ANY model
+      // file there — a model-emitted ui/index.tsx alongside the scaffold's index.ts caused the
+      // duplicate-component / visual-drift bug the audit flagged.
+      const appFiles = parser.end().changes.filter(
+        (f) => f.path && f.content.trim() && !reserved.has(f.path) && !f.path.startsWith('/src/components/ui/'),
+      );
       if (!appFiles.length) throw new Error('The model produced no source files.');
       for (const f of appFiles) {
         await supabase.from('project_files').upsert(
@@ -529,19 +943,65 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           { onConflict: 'project_id,path' },
         );
       }
-      const total = SCAFFOLD_FILES.length + appFiles.length;
+      // Write the secret manifest so the studio can prompt the user for the keys (the secret popup)
+      // and the deploy step knows what to push to Supabase Function Secrets. Deterministic — derived
+      // from the blueprint, not the model's free-text output.
+      if (hasIntegrations) {
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path: '/supabase/.fableforge/secrets.json',
+            content: JSON.stringify({ secrets: manifestSecrets, integrations }, null, 2) + '\n', updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
+      const total = SCAFFOLD_FILES.length + appFiles.length + backendFiles;
       await mark('file_tree', 'done', `${total} files`);
-      for (const s of ['frontend', 'backend', 'auth_logic', 'styling', 'validate', 'fix'] as const) {
+      for (const s of ['frontend', 'backend', 'auth_logic', 'styling'] as const) {
         await mark(s, 'done');
       }
 
+      // VERIFY + FIX — the app just streamed in one pass; now make "generated" mean "works". Run the
+      // checks and, if anything's wrong, hand off to the AGENTIC repair loop (reads the failing files,
+      // researches if unsure, fixes the root cause, re-checks until clean). Falls back to the classic
+      // regex-fix passes when the agent isn't available (non-Anthropic provider).
+      await mark('validate', 'running');
+      let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s) found` : 'clean');
+      if (qaErrors.length) {
+        await mark('fix', 'running');
+        try {
+          if (agentAvailable()) {
+            await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });
+          } else {
+            for (let attempt = 0; attempt < 2 && qaErrors.length; attempt++) {
+              try { await qaFixPass(projectId, qaErrors); } catch { break; }
+              qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+            }
+          }
+        } catch { /* best-effort — report whatever remains below */ }
+        qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        await mark('fix', 'done', qaErrors.length ? `${qaErrors.length} unresolved` : 'fixed');
+      } else {
+        await mark('fix', 'done');
+      }
+      const unresolved = qaErrors.length;
+
       await mark('summarize', 'running');
-      await supabase.from('ai_messages').insert({
+      const summaryId = await insertAiMessage({
         project_id: projectId, user_id: userId, generation_id: genId,
         role: 'assistant',
-        content: `Generated ${total} files for ${blueprint.app_name}. Open the preview to try it, then keep iterating in chat.`,
+        content: `Generated ${total} files for ${blueprint.app_name}.` +
+          (hasBackend
+            ? ` It's full-stack: a Supabase backend (${backendNote}) lives at /supabase/migrations/0001_init.sql and the app talks to it through /src/lib/db.ts. Run that SQL in Supabase, then use "Supabase" in the header to connect — it runs on localStorage until you do.`
+            : '') +
+          ` Open the preview to try it, then keep iterating in chat.` +
+          (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
+          (unresolved ? `\n\n⚠️ ${unresolved} static issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
         files_changed: appFiles.map((f) => f.path),
+        thread_id: MAIN_THREAD_ID,
       });
+      // The file-generation stream is the big cost; attribute it to the summary message.
+      // (The blueprint rawComplete call already recorded its own usage to the ledger.)
+      recordUsage({ provider: genAi.provider, model: genAi.model, inputTokens: genUsage.inputTokens, outputTokens: genUsage.outputTokens, messageId: summaryId });
       await mark('summarize', 'done');
 
       await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
@@ -584,13 +1044,14 @@ async function directEdit(projectId: string, message: string, previewError?: str
   const brainNs = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const mapNs = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const roadmapNs = (files ?? []).find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const prefsNs = (files ?? []).find((f) => f.path === PREFS_PATH)?.content ?? '';
   const appFilesNs = (files ?? []).filter((f) => !isMetaFile(f.path));
   const debugNs = previewError
     ? '\n\nThis is a bug fix. Diagnose the ROOT CAUSE (not just the symptom), state it in one line, then make the smallest change that addresses it.'
     : '';
   const raw = await rawComplete([
     { role: 'system', content: EDIT_SYSTEM },
-    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + roadmapContext(roadmapNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) + debugNs },
+    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + roadmapContext(roadmapNs) + prefsContext(prefsNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) + previewContext() + debugNs },
   ], 16000);
   const parsed = await parseJsonWithRepair<{
     action?: string; explanation?: string; question?: string; options?: string[];
@@ -627,27 +1088,36 @@ async function directEdit(projectId: string, message: string, previewError?: str
     return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
-  for (const c of parsed.changes ?? []) {
+  // Safe-edit guardrail: drop edits to existing files the model couldn't see (see directEditStream).
+  const { safeChanges, safeDeletions, blocked } = applyEditGuardrail(
+    appFilesNs, message, previewError ?? '', parsed.changes ?? [], parsed.deletions ?? [],
+  );
+  for (const c of safeChanges) {
     await supabase.from('project_files').upsert(
       { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
       { onConflict: 'project_id,path' },
     );
   }
-  for (const path of parsed.deletions ?? []) {
+  for (const path of safeDeletions) {
     await supabase.from('project_files')
       .update({ deleted_at: new Date().toISOString() })
       .eq('project_id', projectId).eq('path', path);
   }
+  const blockedNote = blocked.length
+    ? `\n\n⚠️ Skipped ${blocked.length} change(s) to file(s) I couldn't see (${blocked.join(', ')}). Open them so I can edit them safely.`
+    : '';
+  const explanation = (parsed.explanation ?? 'Done.') + blockedNote;
   await supabase.from('ai_messages').insert({
     project_id: projectId, user_id: userId, role: 'assistant',
-    content: parsed.explanation ?? 'Done.', files_changed: (parsed.changes ?? []).map((c) => c.path),
+    content: explanation, files_changed: safeChanges.map((c) => c.path),
   });
 
   return {
     action: 'edit',
-    explanation: parsed.explanation ?? 'Done.',
-    changed: (parsed.changes ?? []).map((c) => c.path),
-    deleted: parsed.deletions ?? [],
+    explanation,
+    changed: safeChanges.map((c) => c.path),
+    deleted: safeDeletions,
+    blocked,
   };
 }
 
@@ -673,55 +1143,103 @@ async function readSSE(body: ReadableStream<Uint8Array>, onData: (data: string) 
   }
 }
 
-/** Stream a completion, calling onDelta with each text chunk as it arrives. */
-async function streamComplete(
+// Convert a `data:image/...;base64,...` URL into an Anthropic image content block.
+function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
+  const m = /^data:(image\/[a-z+.-]+);base64,(.+)$/i.exec(dataUrl);
+  if (!m) return null;
+  return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } };
+}
+
+/** Stream a completion, calling onDelta with each text chunk as it arrives. An optional
+ * `image` (data URL) is attached to the last user message so vision models can see it. */
+export async function streamComplete(
   messages: { role: string; content: string }[], maxTokens: number, onDelta: (t: string) => void,
+  image?: string, onUsage?: (u: Usage) => void, signal?: AbortSignal,
 ): Promise<string> {
-  if (!KEY && PROVIDER !== 'local') {
-    throw new Error('Direct mode needs VITE_AI_API_KEY in .env (or deploy the edge functions).');
+  const ai = resolveAI();
+  const label = providerInfo(ai.provider).label;
+  if (!ai.ready) {
+    throw new Error(`No API key set for ${label}. Add one in the model picker (or switch provider).`);
   }
   let full = '';
-  if (PROVIDER === 'anthropic') {
+  // Capture token usage as it streams; fall back to a length-based estimate if the provider
+  // doesn't report it (some OpenAI-compatible endpoints omit usage on streamed responses).
+  const usage: Usage = { inputTokens: 0, outputTokens: 0 };
+  let sawUsage = false;
+  const finishUsage = () => {
+    // Estimate when the provider reported no usage (or reported zeros), so a cost is always
+    // attributed — otherwise the message would show no cost tag at all.
+    if (!sawUsage || (!usage.inputTokens && !usage.outputTokens)) {
+      const inChars = messages.reduce((n, m) => n + m.content.length, 0);
+      usage.inputTokens = Math.round(inChars / 4);
+      usage.outputTokens = Math.round(full.length / 4);
+    }
+    onUsage?.(usage);
+  };
+  if (ai.provider === 'anthropic') {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
-    const rest = messages.filter((m) => m.role !== 'system');
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    // Content may be a plain string or, when an image is attached, a content-block array.
+    const rest: { role: string; content: unknown }[] = messages.filter((m) => m.role !== 'system');
+    const block = image ? imageBlockFromDataUrl(image) : null;
+    if (block) {
+      for (let i = rest.length - 1; i >= 0; i--) {
+        if (rest[i].role === 'user') {
+          rest[i] = { role: 'user', content: [{ type: 'text', text: rest[i].content as string }, block] };
+          break;
+        }
+      }
+    }
+    const res = await connectProvider('https://api.anthropic.com/v1/messages', {
       method: 'POST',
+      signal,
       headers: {
         'content-type': 'application/json',
-        'x-api-key': KEY,
+        'x-api-key': ai.key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: rest, stream: true }),
-    });
-    if (!res.ok || !res.body) throw new Error(`anthropic ${res.status}`);
+      body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest, stream: true }),
+    }, label);
+    if (!res.body) throw new Error(`${label} returned an empty response.`);
     await readSSE(res.body, (data) => {
       if (data === '[DONE]') return;
-      let evt: { type?: string; delta?: { type?: string; text?: string } };
+      let evt: { type?: string; delta?: { type?: string; text?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number } }; usage?: { output_tokens?: number } };
       try { evt = JSON.parse(data); } catch { return; }
       if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta.text) {
         full += evt.delta.text; onDelta(evt.delta.text);
+      } else if (evt.type === 'message_start' && evt.message?.usage) {
+        usage.inputTokens = evt.message.usage.input_tokens ?? 0; sawUsage = true;
+      } else if (evt.type === 'message_delta' && evt.usage?.output_tokens != null) {
+        usage.outputTokens = evt.usage.output_tokens; sawUsage = true; // cumulative
       }
     });
+    finishUsage();
     return full;
   }
-  const base =
-    PROVIDER === 'openai' ? 'https://api.openai.com/v1'
-    : PROVIDER === 'openrouter' ? 'https://openrouter.ai/api/v1'
-    : LOCAL_BASE;
-  const res = await fetch(`${base}/chat/completions`, {
+  // OpenAI-compatible providers (openai, xai/Grok, gemini, openrouter, local). For providers
+  // that can't see images this way, the image is simply ignored (text still streams).
+  // stream_options.include_usage asks for a final usage chunk (ignored by providers that
+  // don't support it — we estimate in that case).
+  const res = await connectProvider(`${ai.openAIBase}/chat/completions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY || 'local'}` },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages, stream: true }),
-  });
-  if (!res.ok || !res.body) throw new Error(`${PROVIDER} ${res.status}`);
+    signal,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
+    body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
+  }, label);
+  if (!res.body) throw new Error(`${label} returned an empty response.`);
   await readSSE(res.body, (data) => {
     if (data === '[DONE]') return;
-    let evt: { choices?: { delta?: { content?: string } }[] };
+    let evt: { choices?: { delta?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
     try { evt = JSON.parse(data); } catch { return; }
     const delta = evt.choices?.[0]?.delta?.content;
     if (delta) { full += delta; onDelta(delta); }
+    if (evt.usage) {
+      usage.inputTokens = evt.usage.prompt_tokens ?? 0;
+      usage.outputTokens = evt.usage.completion_tokens ?? 0;
+      sawUsage = true;
+    }
   });
+  finishUsage();
   return full;
 }
 
@@ -836,9 +1354,74 @@ function makeStreamParser(emit: (e: EditEvent) => void) {
   };
 }
 
+/**
+ * Atomic change-set undo: restore every file a prior edit changed back to its pre-edit content.
+ * Uses the project_file_versions snapshots the `snapshot_file_version` trigger already records, so no
+ * schema change is needed. Files the edit CREATED (no prior snapshot) are soft-deleted. Note: this
+ * cleanly undoes the MOST RECENT edit to each path; if a file was edited again afterward, revert
+ * restores that later pre-edit state. Deletions performed by the edit are not reconstructed here.
+ */
+export async function revertChangeSet(projectId: string, paths: string[]): Promise<{ restored: string[]; removed: string[] }> {
+  const restored: string[] = [];
+  const removed: string[] = [];
+  for (const path of paths) {
+    const { data: versions } = await supabase
+      .from('project_file_versions')
+      .select('content, version')
+      .eq('project_id', projectId).eq('path', path)
+      .order('version', { ascending: false }).limit(1);
+    const prior = versions?.[0] as { content: string } | undefined;
+    if (prior) {
+      await supabase.from('project_files').upsert(
+        { project_id: projectId, path, content: prior.content, updated_by_ai: false },
+        { onConflict: 'project_id,path' },
+      );
+      restored.push(path);
+    } else {
+      // No prior version → this file was created by the edit. Undo = remove it.
+      await supabase.from('project_files')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('project_id', projectId).eq('path', path);
+      removed.push(path);
+    }
+  }
+  return { restored, removed };
+}
+
+/**
+ * Write a PendingEdit the user approved in the diff modal: the same upsert/delete the normal apply
+ * path does, just gated behind review. Inserts the (deferred) assistant message and returns the paths
+ * actually changed so the caller can run post-edit checks.
+ */
+export async function applyPendingEdit(projectId: string, pending: PendingEdit, threadId: string = MAIN_THREAD_ID): Promise<string[]> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user!.id;
+  for (const c of pending.changes) {
+    await supabase.from('project_files').upsert(
+      { project_id: projectId, path: c.path, content: c.after, updated_by_ai: true },
+      { onConflict: 'project_id,path' },
+    );
+  }
+  for (const path of pending.deletions) {
+    await supabase.from('project_files')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('project_id', projectId).eq('path', path);
+  }
+  const blockedNote = pending.blocked.length
+    ? `\n\n⚠️ Skipped ${pending.blocked.length} change(s) to file(s) I couldn't see (${pending.blocked.join(', ')}).`
+    : '';
+  const changed = pending.changes.map((c) => c.path);
+  await insertAiMessage({
+    project_id: projectId, user_id: userId, role: 'assistant',
+    content: pending.explanation + blockedNote, files_changed: changed, thread_id: threadId,
+  });
+  return changed;
+}
+
 async function directEditStream(
   projectId: string, message: string, previewError: string | undefined,
-  onEvent?: (e: EditEvent) => void, planFirst?: boolean,
+  onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
+  reviewMode?: boolean, signal?: AbortSignal,
 ): Promise<EditResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
@@ -846,14 +1429,21 @@ async function directEditStream(
   const { data: files } = await supabase
     .from('project_files').select('path, content')
     .eq('project_id', projectId).is('deleted_at', null);
+  // Pull recent turns scoped to THIS thread so the model's context stays focused on this idea.
+  // select('*') (not specific columns) so it works whether or not the thread_id column exists.
   const { data: history } = await supabase
-    .from('ai_messages').select('role, content')
-    .eq('project_id', projectId).order('created_at', { ascending: false }).limit(8);
-  const historyText = (history ?? []).reverse()
-    .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content.slice(0, 600)}`)
+    .from('ai_messages').select('*')
+    .eq('project_id', projectId).order('created_at', { ascending: false }).limit(120);
+  const historyText = ((history ?? []) as AIMessageRow[])
+    .filter((m) => threadOf(m.thread_id) === threadId)
+    .slice(0, 8).reverse()
+    .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${(m.content ?? '').slice(0, 600)}`)
     .join('\n');
 
-  await supabase.from('ai_messages').insert({ project_id: projectId, user_id: userId, role: 'user', content: message });
+  await insertAiMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
+
+  // Keep the theme foundation in place automatically, so the user never has to click "Theme".
+  await ensureThemeFoundation(projectId, files ?? []);
 
   onEvent?.({ type: 'start' });
   const parser = makeStreamParser((e) => onEvent?.(e));
@@ -868,17 +1458,24 @@ async function directEditStream(
   const brain = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const map = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const roadmap = (files ?? []).find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const prefs = (files ?? []).find((f) => f.path === PREFS_PATH)?.content ?? '';
   const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
+  const ai = resolveAI();
+  let streamUsage: Usage = { inputTokens: 0, outputTokens: 0 };
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
-    { role: 'user', content: brainContext(brain) + mapContext(map) + roadmapContext(roadmap) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + planDirective + debugDirective },
-  ], 16000, (delta) => parser.push(delta));
+    { role: 'user', content: brainContext(brain) + mapContext(map) + roadmapContext(roadmap) + prefsContext(prefs) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + previewContext() + planDirective + debugDirective },
+  ], 16000, (delta) => parser.push(delta), image, (u) => { streamUsage = u; }, signal);
   const result = parser.end();
+  // Attribute this turn's token cost to the assistant message we're about to insert.
+  const logCost = (messageId?: string) =>
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: streamUsage.inputTokens, outputTokens: streamUsage.outputTokens, messageId });
 
   if (result.action === 'ask' && result.question) {
-    await supabase.from('ai_messages').insert({
-      project_id: projectId, user_id: userId, role: 'assistant', content: result.question,
+    const id = await insertAiMessage({
+      project_id: projectId, user_id: userId, role: 'assistant', content: result.question, thread_id: threadId,
     });
+    logCost(id);
     onEvent?.({ type: 'done' });
     return { action: 'ask', explanation: '', question: result.question, options: result.options, changed: [], deleted: [] };
   }
@@ -887,9 +1484,10 @@ async function directEditStream(
   // assistant message (it already streamed into the UI via explanation events).
   if (result.action === 'discuss') {
     const answer = result.explanation || 'Happy to help — what would you like to dig into?';
-    await supabase.from('ai_messages').insert({
-      project_id: projectId, user_id: userId, role: 'assistant', content: answer,
+    const id = await insertAiMessage({
+      project_id: projectId, user_id: userId, role: 'assistant', content: answer, thread_id: threadId,
     });
+    logCost(id);
     onEvent?.({ type: 'done' });
     return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
   }
@@ -899,32 +1497,56 @@ async function directEditStream(
   // for approval. Approval comes back as a normal follow-up edit.
   if (result.action === 'plan' && (result.summary || result.steps.length)) {
     const plan = toEditPlan(result);
-    await supabase.from('ai_messages').insert({
-      project_id: projectId, user_id: userId, role: 'assistant', content: renderPlanText(plan),
+    const id = await insertAiMessage({
+      project_id: projectId, user_id: userId, role: 'assistant', content: renderPlanText(plan), thread_id: threadId,
     });
+    logCost(id);
     onEvent?.({ type: 'done' });
     return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
+  // Safe-edit guardrail BEFORE writing: drop edits to existing files the model couldn't see.
+  const { safeChanges, safeDeletions, blocked } = applyEditGuardrail(
+    appFiles, message, previewError ?? '', result.changes, result.deletions,
+  );
+
+  // Review-before-write: when on, do NOT write — return the change set for the user to diff + approve.
+  // The assistant message is deferred to applyPendingEdit so a discarded edit leaves no "done" message.
+  if (reviewMode && (safeChanges.length || safeDeletions.length)) {
+    logCost();
+    onEvent?.({ type: 'done' });
+    const pending: PendingEdit = {
+      changes: buildPendingFiles(appFiles, safeChanges),
+      deletions: safeDeletions,
+      explanation: result.explanation || 'Proposed changes — review below.',
+      blocked,
+    };
+    return { action: 'review', explanation: pending.explanation, changed: [], deleted: [], blocked, pending };
+  }
+
   // Apply atomically once the stream completes: progressive writes would flash transient
   // "module not found" states in the preview while imported files are still arriving.
-  for (const c of result.changes) {
+  for (const c of safeChanges) {
     await supabase.from('project_files').upsert(
       { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
       { onConflict: 'project_id,path' },
     );
   }
-  for (const path of result.deletions) {
+  for (const path of safeDeletions) {
     await supabase.from('project_files')
       .update({ deleted_at: new Date().toISOString() })
       .eq('project_id', projectId).eq('path', path);
   }
-  const explanation = result.explanation || 'Done.';
-  await supabase.from('ai_messages').insert({
+  const blockedNote = blocked.length
+    ? `\n\n⚠️ Skipped ${blocked.length} change(s) to file(s) I couldn't see in this large project (${blocked.join(', ')}). Open them or ask about them specifically so I can edit them safely.`
+    : '';
+  const explanation = (result.explanation || 'Done.') + blockedNote;
+  const id = await insertAiMessage({
     project_id: projectId, user_id: userId, role: 'assistant',
-    content: explanation, files_changed: result.changes.map((c) => c.path),
+    content: explanation, files_changed: safeChanges.map((c) => c.path), thread_id: threadId,
   });
+  logCost(id);
 
   onEvent?.({ type: 'done' });
-  return { action: 'edit', explanation, changed: result.changes.map((c) => c.path), deleted: result.deletions };
+  return { action: 'edit', explanation, changed: safeChanges.map((c) => c.path), deleted: safeDeletions, blocked };
 }

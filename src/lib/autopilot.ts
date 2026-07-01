@@ -62,12 +62,14 @@ export async function runAutopilot(projectId: string, opts: AutopilotOptions): P
       errs = issues.filter((i) => i.severity === 'error');
     }
 
+    // "Done" means VERIFIED. If errors remain after the fix loop, STOP — never keep building on top
+    // of a broken step (that compounds breakage). Surface it for the user / the Check panel.
+    if (errs.length) {
+      opts.onEvent({ n, title: next.title, status: 'error', detail: `${errs.length} issue(s) unresolved — paused so autopilot doesn't build on a broken step. Open Check to review.` });
+      return;
+    }
     done.push(next.title);
-    opts.onEvent({
-      n, title: next.title,
-      status: errs.length ? 'error' : 'done',
-      detail: errs.length ? `${errs.length} issue(s) unresolved` : next.rationale,
-    });
+    opts.onEvent({ n, title: next.title, status: 'done', detail: next.rationale });
   }
 
   // Refresh the map so it reflects everything autopilot built.

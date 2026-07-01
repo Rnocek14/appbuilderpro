@@ -1,0 +1,230 @@
+// src/lib/agent/edit.ts
+// The agentic edit entry point: wire a live project into the tool loop. Instead of the old single-shot
+// "here's the whole codebase, emit changes" call, the model gets the file TREE + context and pulls the
+// files it needs (read_file), edits them (write_file), researches unknowns (web_search), and verifies
+// with the real gate (run_typecheck) — iterating until clean. This is the trust/capability upgrade.
+
+import { supabase } from '../supabase';
+import { resolveAI } from '../aiConfig';
+import { recordUsage } from '../usage';
+import { AGENT_BUILD_SYSTEM } from '../prompts';
+import { runQA, issuesToFixRequest } from '../projectQA';
+import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
+import { PREFS_PATH, prefsContext } from '../preferences';
+import { previewContext } from '../previewRuntime';
+import { MAIN_THREAD_ID, threadOf } from '../threads';
+import type { ProjectFile } from '../../types';
+import type { EditEvent, EditResult } from '../aiClient';
+import { runAgent } from './loop';
+import type { AgentToolContext } from './tools';
+
+interface AIMessageRow { role: string; content: string; thread_id?: string | null }
+
+/** Insert an ai_messages row with graceful fallback if the thread_id column isn't there yet. */
+async function insertMessage(row: Record<string, unknown>): Promise<string | undefined> {
+  const res = await supabase.from('ai_messages').insert(row).select('id').single();
+  if (res.error && /thread_id|column|schema cache|does not exist/i.test(res.error.message ?? '')) {
+    const { thread_id: _omit, ...rest } = row; void _omit;
+    const retry = await supabase.from('ai_messages').insert(rest).select('id').single();
+    return (retry.data as { id?: string } | null)?.id;
+  }
+  return (res.data as { id?: string } | null)?.id;
+}
+
+function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
+  const m = /^data:(image\/[a-z+.-]+);base64,(.+)$/i.exec(dataUrl);
+  return m ? { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } } : null;
+}
+
+/**
+ * Verification gate for the agent's run_typecheck tool. Static QA (import resolution, exports, dead
+ * links, node-builtins) always runs off the DB — and reflects the writes the agent just made. When the
+ * full WebContainer runtime is already up for this project (the user has the Full-runtime preview open),
+ * we ALSO run the real `tsc` for deep type-checking. Together they are the "does it actually work" gate.
+ */
+async function verifyProject(projectId: string, files: Map<string, string>): Promise<{ ok: boolean; summary: string }> {
+  const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+  let tscErrors: string | null = null; // null = not run, '' = clean, else the error list
+  try {
+    const wc = await import('../webcontainer');
+    const st = wc.getRunnerState();
+    if (st.projectId === projectId && st.status === 'ready') {
+      const arr = [...files].map(([path, content]) => ({ path, content })) as unknown as ProjectFile[];
+      await wc.syncFiles(projectId, arr);
+      const diags = await wc.runTypecheck(projectId);
+      tscErrors = diags.length ? diags.slice(0, 40).map((d) => `${d.path}:${d.line} — ${d.message}`).join('\n') : '';
+    }
+  } catch { /* best-effort: real tsc only when the runtime is available */ }
+
+  const parts: string[] = [];
+  if (qaErrors.length) parts.push(`Static checks found ${qaErrors.length} issue(s):\n${issuesToFixRequest(qaErrors)}`);
+  if (tscErrors) parts.push(`TypeScript compiler reported errors:\n${tscErrors}`);
+  if (!parts.length) {
+    return { ok: true, summary: tscErrors === '' ? 'run_typecheck: clean — tsc passed and all imports/exports resolve.' : 'run_typecheck: clean — static checks passed (imports/exports/links OK).' };
+  }
+  return { ok: false, summary: parts.join('\n\n') + '\n\nFix the root cause of each error, then run run_typecheck again.' };
+}
+
+/**
+ * Generation-time agentic VERIFY + FIX: after a fresh app is generated (streamed in one pass), hand it
+ * to the tool loop to make it actually compile/run. The agent runs run_typecheck, reads the offending
+ * files, researches if unsure, fixes the root cause, and re-checks until clean. Silent (writes no chat
+ * messages) so a generation stays clean in the conversation — this is what makes "generated" mean
+ * "verified". Best-effort: the caller swallows failures and reports the residual issue count.
+ */
+export async function agenticVerifyAndFix(
+  projectId: string, opts?: { onActivity?: (label: string) => void },
+): Promise<{ verified: boolean | null; changed: string[]; deleted: string[] }> {
+  const { data: fileRows } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const files = new Map<string, string>();
+  for (const f of (fileRows ?? []) as { path: string; content: string }[]) {
+    if (!isMetaFile(f.path)) files.set(f.path, f.content);
+  }
+
+  const ctx: AgentToolContext = {
+    projectId,
+    files,
+    changed: new Set<string>(),
+    deleted: new Set<string>(),
+    writeFile: async (path, content) => {
+      await supabase.from('project_files').upsert(
+        { project_id: projectId, path, content, updated_by_ai: true },
+        { onConflict: 'project_id,path' },
+      );
+    },
+    deleteFile: async (path) => {
+      await supabase.from('project_files')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('project_id', projectId).eq('path', path);
+    },
+    typecheck: () => verifyProject(projectId, files),
+    onActivity: opts?.onActivity,
+  };
+
+  const tree = [...files.keys()].sort().join('\n') || '(empty project)';
+  const userContent = [
+    'A React app was just generated in this project. Your job is to make sure it actually compiles and runs, and fix anything that does not.',
+    'Steps:',
+    '1. Call run_typecheck.',
+    '2. If it reports ANY error, read the offending file(s), fix the ROOT cause (use web_search if you are unsure of the correct approach), then call run_typecheck again.',
+    '3. Repeat until run_typecheck is clean. Keep changes minimal — only what is needed for the app to be correct.',
+    'When run_typecheck is clean, stop and reply with one short line confirming it.',
+    `\nPROJECT FILES (call read_file to see any):\n${tree}`,
+  ].join('\n');
+
+  const ai = resolveAI();
+  const result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: 12, webSearch: true });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+  return { verified: result.verified, changed: result.changed, deleted: result.deleted };
+}
+
+/**
+ * Run an agentic edit turn. Same public shape as the classic edit path so it drops into sendEdit.
+ * planFirst / reviewMode are handled by the caller (they route to the classic path); this path makes
+ * confident, verified changes directly.
+ */
+export async function agenticEdit(
+  projectId: string, message: string, previewError: string | undefined,
+  onEvent?: (e: EditEvent) => void, image?: string, threadId: string = MAIN_THREAD_ID,
+  signal?: AbortSignal,
+): Promise<EditResult> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user!.id;
+
+  const { data: fileRows } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const all = (fileRows ?? []) as { path: string; content: string }[];
+
+  // The agent operates on real source files; meta (brain/map/prefs) is context, not editable source.
+  const files = new Map<string, string>();
+  for (const f of all) if (!isMetaFile(f.path)) files.set(f.path, f.content);
+
+  const brain = all.find((f) => f.path === BRAIN_PATH)?.content ?? '';
+  const map = all.find((f) => f.path === MAP_PATH)?.content ?? '';
+  const roadmap = all.find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const prefs = all.find((f) => f.path === PREFS_PATH)?.content ?? '';
+
+  const { data: history } = await supabase
+    .from('ai_messages').select('*')
+    .eq('project_id', projectId).order('created_at', { ascending: false }).limit(120);
+  const historyText = ((history ?? []) as AIMessageRow[])
+    .filter((m) => threadOf(m.thread_id) === threadId)
+    .slice(0, 8).reverse()
+    .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${(m.content ?? '').slice(0, 600)}`)
+    .join('\n');
+
+  await insertMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
+  onEvent?.({ type: 'start' });
+
+  // Build the opening turn: context + the file TREE (not contents — the agent pulls what it needs).
+  const tree = [...files.keys()].sort().join('\n') || '(empty project)';
+  const preamble = [
+    brainContext(brain), mapContext(map), roadmapContext(roadmap), prefsContext(prefs),
+    previewContext(),
+    historyText ? `RECENT CONVERSATION:\n${historyText}` : '',
+    `PROJECT FILES (call read_file to see any of these):\n${tree}`,
+    previewError ? `\nThe preview has a runtime error to fix — diagnose the ROOT cause, then fix it:\n${previewError}` : '',
+    `\nTASK:\n${message}`,
+  ].filter(Boolean).join('\n\n');
+
+  const imgBlock = image ? imageBlockFromDataUrl(image) : null;
+  const userContent = imgBlock ? [{ type: 'text', text: preamble }, imgBlock] : preamble;
+
+  const ctx: AgentToolContext = {
+    projectId,
+    files,
+    changed: new Set<string>(),
+    deleted: new Set<string>(),
+    writeFile: async (path, content) => {
+      await supabase.from('project_files').upsert(
+        { project_id: projectId, path, content, updated_by_ai: true },
+        { onConflict: 'project_id,path' },
+      );
+      onEvent?.({ type: 'file-done', path });
+    },
+    deleteFile: async (path) => {
+      await supabase.from('project_files')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('project_id', projectId).eq('path', path);
+      onEvent?.({ type: 'deletion', path });
+    },
+    typecheck: () => verifyProject(projectId, files),
+    onActivity: (label) => onEvent?.({ type: 'explanation', text: label }),
+  };
+
+  const ai = resolveAI();
+  const result = await runAgent({
+    system: AGENT_BUILD_SYSTEM,
+    userContent,
+    ctx,
+    signal,
+    onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
+  });
+
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+
+  const changed = result.changed;
+  const deleted = result.deleted;
+  const didEdit = changed.length > 0 || deleted.length > 0;
+  const verifyNote = didEdit && result.verified === false
+    ? '\n\n⚠️ Some checks were still failing when I stopped — open the preview and tell me what looks off.'
+    : '';
+  const explanation = (result.text || (didEdit ? 'Done.' : 'Here you go.')) + verifyNote;
+
+  const id = await insertMessage({
+    project_id: projectId, user_id: userId, role: 'assistant',
+    content: explanation, files_changed: changed, thread_id: threadId,
+  });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: 0, outputTokens: 0, messageId: id });
+
+  onEvent?.({ type: 'done' });
+  return {
+    action: didEdit ? 'edit' : 'discuss',
+    explanation,
+    changed,
+    deleted,
+  };
+}

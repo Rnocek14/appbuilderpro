@@ -49,3 +49,44 @@ html.light body {
   background: linear-gradient(90deg, transparent, #ff8a3d 30%, #ffb573 50%, #ff8a3d 70%, transparent);
   border-radius: 2px;
 }
+
+/* card hover-lift — the premium "this is interactive" cue */
+.card-lift {
+  transition: transform .25s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow .25s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color .25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 32px -12px rgba(0,0,0,.6), 0 2px 8px -4px rgba(0,0,0,.4);
+  border-color: rgba(255,138,61,.35);
+}
+
+/* skeleton shimmer loader — replaces bare spinners */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #1A1E29;
+  border-radius: 8px;
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+  animation: shimmer 1.6s infinite;
+}
+html.light .skeleton { background: #E7E5E0; }
+html.light .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(0,0,0,.05), transparent);
+}
+
+/* staggered reveal — children fade up in sequence */
+.stagger > * { opacity: 0; animation: fadeInUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.stagger > *:nth-child(1) { animation-delay: .04s; }
+.stagger > *:nth-child(2) { animation-delay: .10s; }
+.stagger > *:nth-child(3) { animation-delay: .16s; }
+.stagger > *:nth-child(4) { animation-delay: .22s; }
+.stagger > *:nth-child(5) { animation-delay: .28s; }
+.stagger > *:nth-child(6) { animation-delay: .34s; }

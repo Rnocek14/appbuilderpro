@@ -8,7 +8,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { Button, Card, Input, Badge } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { analyzeZip, fetchGitHubZip, parseGitHubUrl, persistImport, type ImportAnalysis } from '../lib/importer';
+import { analyzeZip, fetchGitHubFiles, parseGitHubUrl, persistImport, type ImportAnalysis } from '../lib/importer';
 import { cn } from '../lib/utils';
 
 type Source = 'github' | 'zip';
@@ -31,13 +31,15 @@ export default function ImportProject() {
     if (!parsed) { toast('error', 'Enter a GitHub URL like https://github.com/you/my-app'); return; }
     setBusy('analyzing');
     try {
-      const data = await fetchGitHubZip(parsed.owner, parsed.repo, parsed.ref, token || undefined);
-      const result = await analyzeZip(data, parsed.repo);
+      const result = await fetchGitHubFiles(parsed.owner, parsed.repo, parsed.ref, token || undefined);
       setAnalysis(result);
       setName(result.name);
       setSourceLabel(`github.com/${parsed.owner}/${parsed.repo}`);
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Could not fetch the repo');
+      const msg = e instanceof Error ? e.message : 'Could not fetch the repo';
+      toast('error', /failed to fetch/i.test(msg)
+        ? 'Network/CORS error reaching GitHub. Check the URL, or use a zip export instead.'
+        : msg);
     } finally {
       setBusy(null);
     }
@@ -171,6 +173,11 @@ export default function ImportProject() {
               {analysis.hasSupabase && <Badge tone="ember">Uses Supabase</Badge>}
               {analysis.skipped.length > 0 && (
                 <Badge>{analysis.skipped.length} files skipped (deps, builds, binaries)</Badge>
+              )}
+              {analysis.redactedSecrets > 0 && (
+                <Badge tone="warn">
+                  {analysis.redactedSecrets} secret file{analysis.redactedSecrets === 1 ? '' : 's'} redacted (.env values stripped)
+                </Badge>
               )}
             </div>
             <div className="max-h-44 overflow-auto panel-scroll rounded-lg border border-forge-border bg-forge-bg p-3 font-mono text-[11px] leading-5 text-forge-dim">

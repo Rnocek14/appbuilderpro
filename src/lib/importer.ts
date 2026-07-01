@@ -4,6 +4,7 @@
 
 import JSZip from 'jszip';
 import { supabase } from './supabase';
+import { isEnvSecretFile, redactEnvValues } from './importSafety';
 
 export interface ImportedFile { path: string; content: string }
 export interface ImportAnalysis {
@@ -12,6 +13,8 @@ export interface ImportAnalysis {
   skipped: { path: string; reason: string }[];
   isVite: boolean;
   hasSupabase: boolean;
+  /** How many .env files had their secret VALUES stripped on import (keys kept). */
+  redactedSecrets: number;
 }
 
 const SKIP_DIRS = ['node_modules/', '.git/', 'dist/', 'build/', '.next/', '.vercel/', 'coverage/', '.idea/', '.vscode/'];
@@ -55,16 +58,85 @@ export function parseGitHubUrl(input: string): { owner: string; repo: string; re
   }
 }
 
-/** Download a repo as a zip via the GitHub API. Token needed for private repos. */
-export async function fetchGitHubZip(owner: string, repo: string, ref?: string, token?: string): Promise<ArrayBuffer> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/zipball/${ref ?? ''}`;
+function ghError(res: Response): Error {
+  if (res.status === 404) return new Error('Repo or branch not found. Private repos need a personal access token.');
+  if (res.status === 401) return new Error('Not authorized — check your access token.');
+  if (res.status === 403) return new Error('GitHub rate limit hit (or forbidden). Add a token to raise the limit.');
+  return new Error(`GitHub returned ${res.status}`);
+}
+
+// GitHub blob contents come back base64-encoded; decode as UTF-8.
+function decodeBase64Utf8(b64: string): string {
+  const bin = atob(b64.replace(/\s/g, ''));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+async function mapWithConcurrency<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) { const idx = i++; await fn(items[idx]); }
+  });
+  await Promise.all(workers);
+}
+
+/**
+ * Fetch a GitHub repo's files without the zipball (whose codeload redirect has no CORS,
+ * so it fails in the browser). Lists files via the git tree API, then pulls each from
+ * raw.githubusercontent.com (public) or the blobs API (private, with token).
+ */
+export async function fetchGitHubFiles(owner: string, repo: string, ref?: string, token?: string): Promise<ImportAnalysis> {
   const headers: Record<string, string> = { Accept: 'application/vnd.github+json' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(url, { headers });
-  if (res.status === 404) throw new Error('Repo not found. Private repos need a personal access token.');
-  if (res.status === 401 || res.status === 403) throw new Error('Not authorized — check your access token.');
-  if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
-  return res.arrayBuffer();
+
+  let branch = ref || '';
+  if (!branch) {
+    const r = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+    if (!r.ok) throw ghError(r);
+    branch = ((await r.json()).default_branch as string) || 'main';
+  }
+
+  const tr = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers });
+  if (!tr.ok) throw ghError(tr);
+  const tree = await tr.json();
+  const blobs: { path: string; sha: string; size?: number }[] = (tree.tree ?? []).filter((t: { type: string }) => t.type === 'blob');
+
+  const skipped: { path: string; reason: string }[] = [];
+  const toFetch: { path: string; sha: string }[] = [];
+  for (const b of blobs) {
+    const path = '/' + b.path;
+    const reason = shouldSkip(path);
+    if (reason) { skipped.push({ path, reason }); continue; }
+    if (typeof b.size === 'number' && b.size > MAX_FILE_BYTES) { skipped.push({ path, reason: 'file too large' }); continue; }
+    if (toFetch.length >= MAX_FILES) { skipped.push({ path, reason: 'file limit reached' }); continue; }
+    toFetch.push({ path, sha: b.sha });
+  }
+
+  const files: ImportedFile[] = [];
+  const useRaw = !token; // public repos: raw is CORS-friendly and not tightly rate-limited
+  const safeBranch = branch as string;
+  await mapWithConcurrency(toFetch, 8, async ({ path, sha }) => {
+    try {
+      let content: string;
+      if (useRaw) {
+        const rr = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${safeBranch}${path}`);
+        if (!rr.ok) { skipped.push({ path, reason: `fetch ${rr.status}` }); return; }
+        content = await rr.text();
+      } else {
+        const br = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/blobs/${sha}`, { headers });
+        if (!br.ok) { skipped.push({ path, reason: `fetch ${br.status}` }); return; }
+        const j = await br.json();
+        content = j.encoding === 'base64' ? decodeBase64Utf8(j.content) : j.content;
+      }
+      if (content.length > MAX_FILE_BYTES) { skipped.push({ path, reason: 'file too large' }); return; }
+      files.push({ path, content });
+    } catch {
+      skipped.push({ path, reason: 'could not fetch file' });
+    }
+  });
+
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return finalizeAnalysis(files, skipped, repo);
 }
 
 /** Extract + filter project files from a zip (GitHub zipball or Lovable/manual export). */
@@ -90,19 +162,33 @@ export async function analyzeZip(data: ArrayBuffer | Blob, fallbackName: string)
     files.push({ path, content });
   }
 
+  return finalizeAnalysis(files, skipped, fallbackName);
+}
+
+/** Compute the name + capability flags from a collected file set (shared by zip + GitHub import). */
+function finalizeAnalysis(files: ImportedFile[], skipped: { path: string; reason: string }[], fallbackName: string): ImportAnalysis {
+  // Redact real .env secrets BEFORE anything else touches the files, so plaintext credentials never
+  // reach the database, the preview, or the model. Keys + comments are preserved; values are stripped.
+  let redactedSecrets = 0;
+  const safeFiles = files.map((f) => {
+    if (!isEnvSecretFile(f.path)) return f;
+    redactedSecrets++;
+    return { path: f.path, content: redactEnvValues(f.content) };
+  });
+
   let name = fallbackName;
-  const pkg = files.find((f) => f.path === '/package.json');
+  const pkg = safeFiles.find((f) => f.path === '/package.json');
   if (pkg) {
     try { name = JSON.parse(pkg.content).name || name; } catch { /* keep fallback */ }
   }
-
-  const allContent = files.map((f) => f.path).join('\n');
+  const allPaths = safeFiles.map((f) => f.path).join('\n');
   return {
     name,
-    files,
+    files: safeFiles,
     skipped,
-    isVite: files.some((f) => /\/vite\.config\.(ts|js|mjs)$/.test(f.path)),
-    hasSupabase: files.some((f) => f.content.includes('@supabase/supabase-js')) || allContent.includes('/supabase/'),
+    isVite: safeFiles.some((f) => /\/vite\.config\.(ts|js|mjs)$/.test(f.path)),
+    hasSupabase: safeFiles.some((f) => f.content.includes('@supabase/supabase-js')) || allPaths.includes('/supabase/'),
+    redactedSecrets,
   };
 }
 

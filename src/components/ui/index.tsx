@@ -5,7 +5,7 @@ import { cn } from '../../lib/utils';
 // ---------------- Button ----------------
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'ghost' | 'danger' | 'outline';
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
   loading?: boolean;
 }
 
@@ -14,9 +14,12 @@ export function Button({ variant = 'primary', size = 'md', loading, className, c
     <button
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-        size === 'sm' ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm',
-        variant === 'primary' && 'bg-forge-ember text-[#1A0E04] hover:bg-forge-heat',
+        // transition-all + active-scale gives buttons a tactile, "designed" feel
+        'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all duration-150 ease-forge active:scale-[0.97] disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100',
+        size === 'sm' && 'px-3 py-1.5 text-xs',
+        size === 'md' && 'px-4 py-2 text-sm',
+        size === 'lg' && 'px-6 py-3 text-base',
+        variant === 'primary' && 'bg-ember-gradient text-[#1A0E04] shadow-soft hover:shadow-liftEmber hover:-translate-y-px',
         variant === 'ghost' && 'text-forge-dim hover:text-forge-ink hover:bg-forge-raised',
         variant === 'outline' && 'border border-forge-border text-forge-ink hover:border-forge-ember/50 hover:bg-forge-raised',
         variant === 'danger' && 'bg-forge-err/15 text-forge-err border border-forge-err/30 hover:bg-forge-err/25',
@@ -24,7 +27,7 @@ export function Button({ variant = 'primary', size = 'md', loading, className, c
       )}
       {...rest}
     >
-      {loading && <Loader2 size={14} className="animate-spin" />}
+      {loading && <Loader2 size={size === 'lg' ? 18 : 14} className="animate-spin" />}
       {children}
     </button>
   );
@@ -35,7 +38,8 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
   return (
     <input
       className={cn(
-        'w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/70 focus:border-forge-ember/60 focus:outline-none',
+        // modern ring+offset focus (matches shadcn) instead of a bare border shift
+        'w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/70 transition-colors duration-150 focus:border-forge-ember/60 focus:outline-none focus:ring-2 focus:ring-forge-ember/30 focus:ring-offset-2 focus:ring-offset-forge-bg',
         className,
       )}
       {...rest}
@@ -44,10 +48,31 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
 }
 
 // ---------------- Card ----------------
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
+// `interactive` adds the hover-lift cue for clickable cards (premium feel)
+export function Card({ className, children, interactive }: { className?: string; children: ReactNode; interactive?: boolean }) {
   return (
-    <div className={cn('rounded-xl border border-forge-border bg-forge-panel', className)}>
+    <div className={cn('rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen', interactive && 'card-lift cursor-pointer', className)}>
       {children}
+    </div>
+  );
+}
+
+// ---------------- Skeleton ----------------
+// shimmer placeholders — replaces bare spinners for a polished loading state
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn('skeleton', className)} aria-hidden="true" />;
+}
+
+export function SkeletonCard() {
+  return (
+    <div className="rounded-xl border border-forge-border bg-forge-panel p-4">
+      <Skeleton className="h-4 w-2/3" />
+      <Skeleton className="mt-3 h-3 w-full" />
+      <Skeleton className="mt-2 h-3 w-4/5" />
+      <div className="mt-4 flex gap-2">
+        <Skeleton className="h-5 w-16 rounded-full" />
+        <Skeleton className="h-5 w-12 rounded-full" />
+      </div>
     </div>
   );
 }
@@ -96,9 +121,9 @@ export function Spinner({ label }: { label?: string }) {
 export function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
-      <div className="w-full max-w-md rounded-xl border border-forge-border bg-forge-panel p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <h2 className="mb-4 font-display text-lg font-semibold">{title}</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeInUp [animation-duration:0.18s]" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
+      <div className="w-full max-w-md rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen p-5 shadow-lift animate-scaleIn" onClick={(e) => e.stopPropagation()}>
+        <h2 className="mb-4 font-display text-lg font-semibold tracking-tight">{title}</h2>
         {children}
       </div>
     </div>
