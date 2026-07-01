@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, Plus, MessagesSquare, Pencil, Trash2, Check } from 'lucide-react';
+import { ChevronDown, Plus, MessagesSquare, Pencil, Trash2, Check, X } from 'lucide-react';
 import type { Thread } from '../../lib/threads';
 import { MAIN_THREAD_ID } from '../../lib/threads';
 import { cn } from '../../lib/utils';
@@ -20,6 +20,12 @@ export function ThreadSwitcher({ threads, activeId, ready, onSwitch, onNew, onRe
 }) {
   const [open, setOpen] = useState(false);
   const active = threads.find((t) => t.id === activeId) ?? threads[0];
+  // Inline rename + delete-confirm (themed, replacing native prompt/confirm dialogs).
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const startRename = (id: string, title: string) => { setEditingId(id); setDraft(title); setConfirmId(null); };
+  const saveRename = (id: string, fallback: string) => { onRename(id, draft.trim() || fallback); setEditingId(null); };
 
   return (
     <div className="relative">
@@ -51,33 +57,46 @@ export function ThreadSwitcher({ threads, activeId, ready, onSwitch, onNew, onRe
             <ul className="max-h-72 overflow-y-auto panel-scroll">
               {threads.map((t) => (
                 <li key={t.id} className="group flex items-center gap-1">
-                  <button
-                    onClick={() => { onSwitch(t.id); setOpen(false); }}
-                    className={cn(
-                      'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
-                      t.id === activeId ? 'bg-forge-ember/10 text-forge-ink' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink',
-                    )}
-                  >
-                    {t.id === activeId ? <Check size={12} className="shrink-0 text-forge-ember" /> : <span className="w-3 shrink-0" />}
-                    <span className="truncate">{t.title}</span>
-                  </button>
-                  {t.id !== MAIN_THREAD_ID && (
-                    <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        aria-label="Rename thread"
-                        onClick={() => { const v = window.prompt('Rename thread', t.title); if (v != null) onRename(t.id, v); }}
-                        className="rounded p-1 text-forge-dim hover:text-forge-ink"
-                      >
-                        <Pencil size={12} />
-                      </button>
-                      <button
-                        aria-label="Delete thread"
-                        onClick={() => { if (window.confirm(`Delete "${t.title}"? Its messages move to Main.`)) { onDelete(t.id); } }}
-                        className="rounded p-1 text-forge-dim hover:text-forge-err"
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                  {editingId === t.id ? (
+                    <div className="flex min-w-0 flex-1 items-center gap-1 px-1 py-0.5">
+                      <input
+                        autoFocus
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); saveRename(t.id, t.title); }
+                          else if (e.key === 'Escape') { e.preventDefault(); setEditingId(null); }
+                        }}
+                        className="min-w-0 flex-1 rounded-md border border-forge-ember/50 bg-forge-panel px-2 py-1 text-xs text-forge-ink focus:outline-none"
+                      />
+                      <button aria-label="Save name" onClick={() => saveRename(t.id, t.title)} className="rounded p-1 text-forge-ok hover:bg-forge-raised"><Check size={12} /></button>
+                      <button aria-label="Cancel rename" onClick={() => setEditingId(null)} className="rounded p-1 text-forge-dim hover:bg-forge-raised"><X size={12} /></button>
                     </div>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => { onSwitch(t.id); setOpen(false); }}
+                        className={cn(
+                          'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors',
+                          t.id === activeId ? 'bg-forge-ember/10 text-forge-ink' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink',
+                        )}
+                      >
+                        {t.id === activeId ? <Check size={12} className="shrink-0 text-forge-ember" /> : <span className="w-3 shrink-0" />}
+                        <span className="truncate">{t.title}</span>
+                      </button>
+                      {t.id !== MAIN_THREAD_ID && (confirmId === t.id ? (
+                        <div className="flex shrink-0 items-center gap-0.5">
+                          <span className="text-[10px] text-forge-dim">Delete?</span>
+                          <button aria-label="Confirm delete" onClick={() => { onDelete(t.id); setConfirmId(null); }} className="rounded p-1 text-forge-err hover:bg-forge-raised"><Check size={12} /></button>
+                          <button aria-label="Cancel delete" onClick={() => setConfirmId(null)} className="rounded p-1 text-forge-dim hover:bg-forge-raised"><X size={12} /></button>
+                        </div>
+                      ) : (
+                        <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
+                          <button aria-label="Rename thread" onClick={() => startRename(t.id, t.title)} className="rounded p-1 text-forge-dim hover:text-forge-ink"><Pencil size={12} /></button>
+                          <button aria-label="Delete thread" onClick={() => setConfirmId(t.id)} className="rounded p-1 text-forge-dim hover:text-forge-err"><Trash2 size={12} /></button>
+                        </div>
+                      ))}
+                    </>
                   )}
                 </li>
               ))}

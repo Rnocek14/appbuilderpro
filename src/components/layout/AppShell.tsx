@@ -9,21 +9,43 @@ import { useInbox } from '../../hooks/useAutopilot';
 import { cn } from '../../lib/utils';
 import { CommandPalette } from '../CommandPalette';
 
-const nav = [
-  { to: '/garvis/command', label: 'Command', icon: Sparkles },
-  { to: '/garvis/control', label: 'Mission Control', icon: Activity },
-  { to: '/garvis', label: 'Garvis', icon: Boxes },
-  { to: '/garvis/missions', label: 'Missions', icon: Rocket },
-  { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },
-  { to: '/garvis/marketing', label: 'Marketing', icon: Megaphone },
-  { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
-  { to: '/new', label: 'New project', icon: Plus },
-  { to: '/import', label: 'Import', icon: FolderDown },
-  { to: '/autopilot', label: 'Autopilot', icon: Bot },
-  { to: '/inbox', label: 'Inbox', icon: InboxIcon },
-  { to: '/billing', label: 'Billing', icon: CreditCard },
-  { to: '/settings', label: 'Settings', icon: Settings },
-  { to: '/spike/clusters', label: 'Cluster spike', icon: FlaskConical }, // TEMP dev-only gate; remove later
+// Grouped nav — one labeled section per job so the sidebar reads at a glance instead of as one long
+// list. "Garvis" = the portfolio OS (overview is the home/hub), "Build" = the app builder, then Account.
+const navSections = [
+  {
+    title: 'Garvis',
+    items: [
+      { to: '/garvis', label: 'Overview', icon: Boxes, end: true },
+      { to: '/garvis/command', label: 'Command', icon: Sparkles },
+      { to: '/garvis/control', label: 'Mission Control', icon: Activity },
+      { to: '/garvis/missions', label: 'Missions', icon: Rocket },
+      { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },
+      { to: '/garvis/marketing', label: 'Marketing', icon: Megaphone },
+    ],
+  },
+  {
+    title: 'Build',
+    items: [
+      { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
+      { to: '/new', label: 'New project', icon: Plus },
+      { to: '/import', label: 'Import', icon: FolderDown },
+      { to: '/autopilot', label: 'Autopilot', icon: Bot },
+      { to: '/inbox', label: 'Inbox', icon: InboxIcon },
+    ],
+  },
+  {
+    title: 'Account',
+    items: [
+      { to: '/billing', label: 'Billing', icon: CreditCard },
+      { to: '/settings', label: 'Settings', icon: Settings },
+    ],
+  },
+  {
+    title: 'Labs',
+    items: [
+      { to: '/spike/clusters', label: 'Cluster spike', icon: FlaskConical }, // TEMP dev-only gate; remove later
+    ],
+  },
 ];
 
 export function AppShell({ children, fullBleed }: { children: ReactNode; fullBleed?: boolean }) {
@@ -98,40 +120,47 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
         )}
       </button>
 
-      <nav className={cn('flex-1 space-y-0.5', collapsed ? 'px-2' : 'px-3')} aria-label="Main">
-        {nav.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/garvis'}
-            onClick={() => setMobileOpen(false)}
-            title={collapsed ? label : undefined}
-            className={navLinkClass(collapsed)}
-          >
-            <Icon size={16} className="shrink-0" />
-            {!collapsed && label}
-            {to === '/inbox' && pendingCount > 0 && (
-              collapsed ? (
-                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${pendingCount} pending`} />
-              ) : (
-                <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg">
-                  {pendingCount}
-                </span>
-              )
+      <nav className={cn('flex-1 space-y-3 overflow-y-auto panel-scroll', collapsed ? 'px-2' : 'px-3')} aria-label="Main">
+        {navSections.map((section, si) => (
+          <div key={section.title} className="space-y-0.5">
+            {collapsed
+              ? si > 0 && <div className="mx-2 mb-2 border-t border-forge-border" />
+              : <p className="px-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-forge-dim/70">{section.title}</p>}
+            {section.items.map(({ to, label, icon: Icon, ...rest }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={'end' in rest ? (rest as { end?: boolean }).end : undefined}
+                onClick={() => setMobileOpen(false)}
+                title={collapsed ? label : undefined}
+                className={navLinkClass(collapsed)}
+              >
+                <Icon size={16} className="shrink-0" />
+                {!collapsed && label}
+                {to === '/inbox' && pendingCount > 0 && (
+                  collapsed ? (
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${pendingCount} pending`} />
+                  ) : (
+                    <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg">
+                      {pendingCount}
+                    </span>
+                  )
+                )}
+              </NavLink>
+            ))}
+            {section.title === 'Account' && profile?.role === 'admin' && (
+              <NavLink
+                to="/admin"
+                onClick={() => setMobileOpen(false)}
+                title={collapsed ? 'Admin' : undefined}
+                className={navLinkClass(collapsed)}
+              >
+                <ShieldCheck size={16} className="shrink-0" />
+                {!collapsed && 'Admin'}
+              </NavLink>
             )}
-          </NavLink>
+          </div>
         ))}
-        {profile?.role === 'admin' && (
-          <NavLink
-            to="/admin"
-            onClick={() => setMobileOpen(false)}
-            title={collapsed ? 'Admin' : undefined}
-            className={navLinkClass(collapsed)}
-          >
-            <ShieldCheck size={16} className="shrink-0" />
-            {!collapsed && 'Admin'}
-          </NavLink>
-        )}
       </nav>
 
       <div className={cn('border-t border-forge-border p-3', collapsed && 'px-2')}>

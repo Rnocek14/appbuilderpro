@@ -971,7 +971,7 @@ export default function ProjectWorkspace() {
             </div>
           )}
 
-          <div className={cn('min-w-0 border-r border-forge-border', tab === 'chat' ? 'w-full md:w-[380px] md:shrink-0' : 'flex-1')}>
+          <div className={cn('min-w-0 border-r border-forge-border', tab === 'chat' ? 'w-full md:w-[440px] md:shrink-0' : 'flex-1')}>
             {tab === 'chat' ? (
               <ChatPanel
                 projectId={id ?? ''}
