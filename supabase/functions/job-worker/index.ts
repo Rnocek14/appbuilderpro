@@ -7,6 +7,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { complete, parseJson, corsHeaders } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 import { contextPayload } from '../_shared/context.ts';
 import { notify } from '../_shared/notify.ts';
 
@@ -70,9 +71,9 @@ function memoryBlock(memory: { conventions?: string; decisions?: unknown[] } | n
 async function spend(job: Job, costUsd: number, tokens: { inputTokens: number; outputTokens: number }, kind: string) {
   job.spent_usd = Number(job.spent_usd) + costUsd;
   await admin.from('jobs').update({ spent_usd: job.spent_usd, updated_at: new Date().toISOString() }).eq('id', job.id);
-  await admin.from('usage_events').insert({
-    user_id: job.owner_id, project_id: job.project_id, event_type: `job.${kind}`,
-    input_tokens: tokens.inputTokens, output_tokens: tokens.outputTokens, cost_usd: costUsd,
+  // Deduct the user's credits + log usage in one call (replaces the manual usage_events insert).
+  await spendCredits(admin, job.owner_id, {
+    costUsd, kind: `job.${kind}`, inputTokens: tokens.inputTokens, outputTokens: tokens.outputTokens, projectId: job.project_id,
   });
 }
 
@@ -124,6 +125,15 @@ async function step(job: Job): Promise<boolean> {
   if (overBudget(job)) {
     await pause(job, `Budget cap of $${Number(job.budget_usd).toFixed(2)} reached.`, ctx.projectName, webhook);
     return false;
+  }
+
+  // CREDIT GATE — an autonomous job self-chains; if the owner runs out of credits, pause instead of
+  // burning more of our API spend than they've paid for. Checked before every phase step.
+  try {
+    await checkCredits(admin, job.owner_id, 'agent');
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) { await pause(job, "You're out of credits — top up or wait for your monthly refill to resume.", ctx.projectName, webhook); return false; }
+    throw e;
   }
 
   const answeredBlock = ctx.answered.length

@@ -5,6 +5,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { completeWithWebSearch, corsHeaders, getProviderConfig } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 const RESEARCH_SYSTEM = `You are FableForge's senior product and market analyst. You will be given
 the user's app — INCLUDING ITS FULL SOURCE CODE — and a question about its market or competition.
@@ -73,6 +74,14 @@ Deno.serve(async (req) => {
   const { data: project } = await admin.from('projects').select('id, owner_id, name, description').eq('id', projectId).single();
   if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
 
+  // CREDIT GATE — research runs live web search + a large-context call; meter it.
+  try {
+    await checkCredits(admin, user.id, 'research');
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
+    throw e;
+  }
+
   const { data: files } = await admin
     .from('project_files').select('path, content')
     .eq('project_id', projectId).is('deleted_at', null);
@@ -97,10 +106,9 @@ Deno.serve(async (req) => {
       (result.sources.length ? `\n\nSources:\n${result.sources.map((s) => `• ${s}`).join('\n')}` : '');
 
     await admin.from('ai_messages').insert({ project_id: projectId, user_id: user.id, role: 'assistant', content: answer });
-    await admin.from('usage_events').insert({
-      user_id: user.id, project_id: projectId, event_type: 'research',
-      provider: cfg.provider, model: cfg.model,
-      input_tokens: result.inputTokens, output_tokens: result.outputTokens, cost_usd: result.costUsd,
+    await spendCredits(admin, user.id, {
+      costUsd: result.costUsd, kind: 'research', provider: cfg.provider, model: cfg.model,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens, projectId,
     });
 
     return json({ answer });

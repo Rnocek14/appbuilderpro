@@ -15,7 +15,8 @@
 // The runtime assigns tool-call ids and records cost; we just return the shape + costUsd.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, corsHeaders, parseJson, type AIMessage } from '../_shared/ai.ts';
+import { complete, corsHeaders, parseJson, getProviderConfig, type AIMessage } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 type Mode = 'observe' | 'plan' | 'act';
 
@@ -141,6 +142,15 @@ Deno.serve(async (req) => {
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
+  // CREDIT GATE — each Garvis reasoning step is metered (a run makes several; each is checked).
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  try {
+    await checkCredits(admin, user.id, 'garvis');
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
+    throw e;
+  }
+
   let body: BrainRequest;
   try {
     body = await req.json();
@@ -162,6 +172,12 @@ Deno.serve(async (req) => {
   } catch (e) {
     return json({ error: `model error: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
+  // Charge the real cost of this reasoning step (both the parse-fail and normal paths below return it).
+  const cfg = getProviderConfig();
+  await spendCredits(admin, user.id, {
+    costUsd: result.costUsd, kind: 'garvis', provider: cfg.provider, model: cfg.model,
+    inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+  });
 
   let raw: RawDecision;
   try {

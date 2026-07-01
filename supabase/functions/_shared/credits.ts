@@ -54,7 +54,7 @@ export async function checkCredits(admin: Admin, userId: string, kind: CreditKin
  *  (a completed AI call shouldn't fail because the ledger write hiccuped — it logs and returns 0). */
 export async function spendCredits(
   admin: Admin, userId: string,
-  opts: { costUsd: number; kind: CreditKind; provider?: string; model?: string; inputTokens?: number; outputTokens?: number; projectId?: string },
+  opts: { costUsd: number; kind: CreditKind | string; provider?: string; model?: string; inputTokens?: number; outputTokens?: number; projectId?: string },
 ): Promise<number> {
   const { data, error } = await admin.rpc('spend_credits', {
     p_user: userId,
