@@ -8,6 +8,7 @@
 // Everything is best-effort and wrapped so a failure returns [] rather than throwing.
 
 import { resolveAI } from '../aiConfig';
+import { supabase } from '../supabase';
 
 export interface MediaImage { title: string; url: string; thumb: string; source: string }
 
@@ -19,33 +20,29 @@ export interface MediaImage { title: string; url: string; thumb: string; source:
 
 export interface DiscoverResult { overview: string; images: MediaImage[]; sources: { title: string; url: string }[]; costUsd: number }
 
-// Perplexity has no CORS headers, so a browser-direct call fails. Once we see that, stop retrying
-// it every focus (it just spams the console + adds latency) and let Wikipedia/Serper carry media.
-// The real production path is a Supabase edge function calling Perplexity server-side.
+// Perplexity now runs through the discover-media EDGE FUNCTION (key server-side, credit-metered) —
+// never browser-direct (that leaked the key and hit the CORS wall anyway). We only learn the feature
+// is off when the edge says so, so cache that to stop re-calling.
 let perplexityBlocked = false;
 export function perplexityAvailable(): boolean {
-  return !perplexityBlocked && !!(import.meta.env.VITE_PERPLEXITY_API_KEY as string | undefined);
+  return !perplexityBlocked; // the server holds the key; treat as available until a call says otherwise
 }
 
 export async function perplexityDiscover(topic: string): Promise<DiscoverResult | null> {
-  const key = import.meta.env.VITE_PERPLEXITY_API_KEY as string | undefined;
-  if (!key) return null;
+  if (perplexityBlocked) return null;
   try {
-    const res = await fetch('https://api.perplexity.ai/chat/completions', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: 'sonar',
-        return_images: true,
-        max_tokens: 450,
-        messages: [
-          { role: 'system', content: 'Explain the topic to a curious mind: a vivid, specific, genuinely interesting 3-5 sentence understanding — the version a brilliant friend would tell you, concrete and a little surprising. No preamble, no headers, no bullet lists — just the explanation.' },
-          { role: 'user', content: topic },
-        ],
-      }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
+    const { data: resp, error } = await supabase.functions.invoke('discover-media', { body: { provider: 'perplexity', topic } });
+    if (error) return null;
+    if (resp && (resp as { available?: boolean }).available === false) { perplexityBlocked = true; return null; }
+    const data = (resp as {
+      data?: {
+        choices?: { message?: { content?: string } }[];
+        images?: Array<string | { image_url?: string; url?: string; title?: string }>;
+        search_results?: Array<{ title?: string; url?: string }>;
+        citations?: string[];
+      };
+    })?.data;
+    if (!data) return null;
     const overview = (data?.choices?.[0]?.message?.content ?? '').trim();
 
     const rawImages = (data?.images ?? []) as Array<string | { image_url?: string; url?: string; title?: string }>;
@@ -136,8 +133,9 @@ export async function fetchWikipedia(query: string): Promise<Gathered> {
 // API. Key in VITE_SERPER_API_KEY (.env.local). Browser-direct for the spike; edge fn for prod.
 // ---------------------------------------------------------------------------
 
+let serperBlocked = false;
 export function serperAvailable(): boolean {
-  return !!(import.meta.env.VITE_SERPER_API_KEY as string | undefined);
+  return !serperBlocked; // key is server-side (discover-media edge fn); available until a call says off
 }
 export function discoverAvailable(): boolean {
   return perplexityAvailable() || serperAvailable();
@@ -166,16 +164,12 @@ function imgScore(domain: string, w?: number): number {
 }
 
 async function serper<T>(path: string, q: string): Promise<T | null> {
-  const key = import.meta.env.VITE_SERPER_API_KEY as string | undefined;
-  if (!key) return null;
+  if (serperBlocked) return null;
   try {
-    const res = await fetch(`https://google.serper.dev/${path}`, {
-      method: 'POST',
-      headers: { 'X-API-KEY': key, 'content-type': 'application/json' },
-      body: JSON.stringify({ q }),
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    const { data: resp, error } = await supabase.functions.invoke('discover-media', { body: { provider: 'serper', path, q } });
+    if (error) return null;
+    if (resp && (resp as { available?: boolean }).available === false) { serperBlocked = true; return null; }
+    return ((resp as { data?: T })?.data) ?? null;
   } catch { return null; }
 }
 
