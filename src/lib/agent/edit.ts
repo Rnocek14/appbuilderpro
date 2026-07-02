@@ -4,6 +4,7 @@
 // files it needs (read_file), edits them (write_file), researches unknowns (web_search), and verifies
 // with the real gate (run_typecheck) — iterating until clean. This is the trust/capability upgrade.
 
+import { diffLines } from 'diff';
 import { supabase } from '../supabase';
 import { resolveAI } from '../aiConfig';
 import { recordUsage } from '../usage';
@@ -20,11 +21,23 @@ import type { AgentToolContext } from './tools';
 
 interface AIMessageRow { role: string; content: string; thread_id?: string | null }
 
-/** Insert an ai_messages row with graceful fallback if the thread_id column isn't there yet. */
+/** One file's before/after for a chat turn — powers per-message diff cards in the chat. */
+export interface MessageFileChange { path: string; before: string; after: string; additions: number; deletions: number }
+
+function diffstat(before: string, after: string): { additions: number; deletions: number } {
+  let additions = 0, deletions = 0;
+  for (const p of diffLines(before, after)) {
+    if (p.added) additions += p.count ?? 0;
+    else if (p.removed) deletions += p.count ?? 0;
+  }
+  return { additions, deletions };
+}
+
+/** Insert an ai_messages row, gracefully dropping newer columns (thread_id, changes) if the DB predates them. */
 async function insertMessage(row: Record<string, unknown>): Promise<string | undefined> {
   const res = await supabase.from('ai_messages').insert(row).select('id').single();
-  if (res.error && /thread_id|column|schema cache|does not exist/i.test(res.error.message ?? '')) {
-    const { thread_id: _omit, ...rest } = row; void _omit;
+  if (res.error && /thread_id|changes|column|schema cache|does not exist/i.test(res.error.message ?? '')) {
+    const { thread_id: _t, changes: _c, ...rest } = row; void _t; void _c;
     const retry = await supabase.from('ai_messages').insert(rest).select('id').single();
     return (retry.data as { id?: string } | null)?.id;
   }
@@ -38,21 +51,27 @@ function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type
 
 /**
  * Verification gate for the agent's run_typecheck tool. Static QA (import resolution, exports, dead
- * links, node-builtins) always runs off the DB — and reflects the writes the agent just made. When the
- * full WebContainer runtime is already up for this project (the user has the Full-runtime preview open),
- * we ALSO run the real `tsc` for deep type-checking. Together they are the "does it actually work" gate.
+ * links, node-builtins) always runs off the DB — and reflects the writes the agent just made. Real
+ * `tsc` runs when the WebContainer runtime is already up for this project — and in DEEP mode
+ * (generation verify) it is booted headlessly on demand (mount + install + tsc, no dev server) so
+ * every fresh generation is compiler-verified even with the preview closed.
  */
-async function verifyProject(projectId: string, files: Map<string, string>): Promise<{ ok: boolean; summary: string }> {
+async function verifyProject(projectId: string, files: Map<string, string>, deep = false): Promise<{ ok: boolean; summary: string }> {
   const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
   let tscErrors: string | null = null; // null = not run, '' = clean, else the error list
   try {
     const wc = await import('../webcontainer');
+    const arr = [...files].map(([path, content]) => ({ path, content })) as unknown as ProjectFile[];
     const st = wc.getRunnerState();
     if (st.projectId === projectId && st.status === 'ready') {
-      const arr = [...files].map(([path, content]) => ({ path, content })) as unknown as ProjectFile[];
       await wc.syncFiles(projectId, arr);
       const diags = await wc.runTypecheck(projectId);
       tscErrors = diags.length ? diags.slice(0, 40).map((d) => `${d.path}:${d.line} — ${d.message}`).join('\n') : '';
+    } else if (deep) {
+      const res = await wc.deepTypecheck(projectId, arr);
+      if (res.ran) {
+        tscErrors = res.diags.length ? res.diags.slice(0, 40).map((d) => `${d.path}:${d.line} — ${d.message}`).join('\n') : '';
+      }
     }
   } catch { /* best-effort: real tsc only when the runtime is available */ }
 
@@ -66,6 +85,26 @@ async function verifyProject(projectId: string, files: Map<string, string>): Pro
 }
 
 /**
+ * The generation COMPILE GATE: load the project's files and run the deep compiler check (headless
+ * boot when the preview isn't open). Returns the number of type errors, or null when this
+ * environment can't run the compiler (no cross-origin isolation) — callers fall back to
+ * static-only verification and say so honestly.
+ */
+export async function generationCompileGate(projectId: string): Promise<number | null> {
+  const { data: fileRows } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const arr = ((fileRows ?? []) as { path: string; content: string }[]).filter((f) => !isMetaFile(f.path));
+  try {
+    const wc = await import('../webcontainer');
+    const res = await wc.deepTypecheck(projectId, arr as unknown as ProjectFile[]);
+    return res.ran ? res.diags.length : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Generation-time agentic VERIFY + FIX: after a fresh app is generated (streamed in one pass), hand it
  * to the tool loop to make it actually compile/run. The agent runs run_typecheck, reads the offending
  * files, researches if unsure, fixes the root cause, and re-checks until clean. Silent (writes no chat
@@ -73,7 +112,7 @@ async function verifyProject(projectId: string, files: Map<string, string>): Pro
  * "verified". Best-effort: the caller swallows failures and reports the residual issue count.
  */
 export async function agenticVerifyAndFix(
-  projectId: string, opts?: { onActivity?: (label: string) => void },
+  projectId: string, opts?: { onActivity?: (label: string) => void; maxSteps?: number },
 ): Promise<{ verified: boolean | null; changed: string[]; deleted: string[] }> {
   const { data: fileRows } = await supabase
     .from('project_files').select('path, content')
@@ -99,7 +138,7 @@ export async function agenticVerifyAndFix(
         .update({ deleted_at: new Date().toISOString() })
         .eq('project_id', projectId).eq('path', path);
     },
-    typecheck: () => verifyProject(projectId, files),
+    typecheck: () => verifyProject(projectId, files, true), // deep: boot the compiler even with the preview closed
     onActivity: opts?.onActivity,
   };
 
@@ -115,7 +154,7 @@ export async function agenticVerifyAndFix(
   ].join('\n');
 
   const ai = resolveAI();
-  const result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: 12, webSearch: true });
+  const result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true });
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
   return { verified: result.verified, changed: result.changed, deleted: result.deleted };
 }
@@ -173,12 +212,22 @@ export async function agenticEdit(
   const imgBlock = image ? imageBlockFromDataUrl(image) : null;
   const userContent = imgBlock ? [{ type: 'text', text: preamble }, imgBlock] : preamble;
 
+  // Per-turn before/after capture: first-write-wins on "before" so multiple writes to one file
+  // diff cleanly from the turn's start. (ctx.files still holds the OLD content here — the tool
+  // executor updates it after writeFile returns.)
+  const turnChanges = new Map<string, { before: string; after: string }>();
+  const recordChange = (path: string, after: string) => {
+    const prev = turnChanges.get(path);
+    turnChanges.set(path, { before: prev?.before ?? files.get(path) ?? '', after });
+  };
+
   const ctx: AgentToolContext = {
     projectId,
     files,
     changed: new Set<string>(),
     deleted: new Set<string>(),
     writeFile: async (path, content) => {
+      recordChange(path, content);
       await supabase.from('project_files').upsert(
         { project_id: projectId, path, content, updated_by_ai: true },
         { onConflict: 'project_id,path' },
@@ -186,37 +235,63 @@ export async function agenticEdit(
       onEvent?.({ type: 'file-done', path });
     },
     deleteFile: async (path) => {
+      recordChange(path, '');
       await supabase.from('project_files')
         .update({ deleted_at: new Date().toISOString() })
         .eq('project_id', projectId).eq('path', path);
       onEvent?.({ type: 'deletion', path });
     },
     typecheck: () => verifyProject(projectId, files),
-    onActivity: (label) => onEvent?.({ type: 'explanation', text: label }),
+    onActivity: (label) => onEvent?.({ type: 'activity', text: label }),
   };
 
   const ai = resolveAI();
-  const result = await runAgent({
+  let result = await runAgent({
     system: AGENT_BUILD_SYSTEM,
     userContent,
     ctx,
     signal,
     onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
   });
-
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+
+  // RELENTLESS REPAIR: never end a turn mid-surgery. If verification was still failing when the
+  // step budget ran out, continue with fresh budget (up to 2 rounds) — the ctx (files, changed
+  // sets) carries over, so each round resumes exactly where the last stopped.
+  for (let round = 0; round < 2 && result.verified === false && (result.changed.length || result.deleted.length); round++) {
+    onEvent?.({ type: 'activity', text: `Verification still failing — repair round ${round + 2}…` });
+    const cont = await runAgent({
+      system: AGENT_BUILD_SYSTEM,
+      userContent: 'Your previous pass ended with verification still FAILING. Continue the repair: call run_typecheck, fix EVERY remaining error (truncated/malformed files must be rewritten COMPLETELY), and do not stop until it reports clean.',
+      ctx,
+      signal,
+      maxSteps: 12,
+      onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
+    });
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens });
+    result = { ...cont, text: cont.text || result.text };
+  }
 
   const changed = result.changed;
   const deleted = result.deleted;
   const didEdit = changed.length > 0 || deleted.length > 0;
+  // NEVER surface internal tool/verification dumps as the reply — the user reads this.
+  const rawText = (result.text || '').trim();
+  const looksInternal = /^these static checks failed/i.test(rawText) || /^run_typecheck:/i.test(rawText) || /^- \[error\]/im.test(rawText.slice(0, 200));
   const verifyNote = didEdit && result.verified === false
-    ? '\n\n⚠️ Some checks were still failing when I stopped — open the preview and tell me what looks off.'
+    ? '\n\n⚠️ I used my full repair budget and some checks still fail. Say "continue fixing" and I\'ll pick up exactly where I left off.'
     : '';
-  const explanation = (result.text || (didEdit ? 'Done.' : 'Here you go.')) + verifyNote;
+  const explanation = ((!rawText || looksInternal) ? (didEdit ? 'Done — changes applied and verified where possible.' : 'Here you go.') : rawText) + verifyNote;
+
+  // Persist this turn's per-file before/after + diffstat — the chat renders them as diff cards.
+  const messageChanges: MessageFileChange[] = [...turnChanges.entries()]
+    .filter(([, c]) => c.before !== c.after)
+    .map(([path, c]) => ({ path, before: c.before, after: c.after, ...diffstat(c.before, c.after) }));
 
   const id = await insertMessage({
     project_id: projectId, user_id: userId, role: 'assistant',
     content: explanation, files_changed: changed, thread_id: threadId,
+    changes: messageChanges.length ? messageChanges : null,
   });
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: 0, outputTokens: 0, messageId: id });
 

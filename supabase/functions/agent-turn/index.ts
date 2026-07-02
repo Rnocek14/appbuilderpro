@@ -39,13 +39,14 @@ Deno.serve(async (req) => {
       throw e;
     }
 
-    // Free tier runs the cheap model; paid tiers the operator's model.
-    const { model } = modelForPlan(await getUserPlan(admin, user.id));
-
-    const { system, messages, tools, maxTokens } = (await req.json().catch(() => ({}))) as {
-      system?: string; messages?: unknown[]; tools?: unknown[]; maxTokens?: number;
+    const { system, messages, tools, maxTokens, fast } = (await req.json().catch(() => ({}))) as {
+      system?: string; messages?: unknown[]; tools?: unknown[]; maxTokens?: number; fast?: boolean;
     };
     if (!Array.isArray(messages) || !messages.length) return json({ error: 'messages[] is required.' }, 400);
+
+    // Free tier runs the cheap model; paid tiers the operator's model. `fast: true` opts a call
+    // INTO the cheap tier (design previews, small classifications) — 3-4x faster + cheaper.
+    const { model } = modelForPlan(fast ? 'free' : await getUserPlan(admin, user.id));
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

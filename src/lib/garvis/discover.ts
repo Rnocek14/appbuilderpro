@@ -14,8 +14,8 @@ export interface MediaImage { title: string; url: string; thumb: string; source:
 
 // ---------------------------------------------------------------------------
 // PERPLEXITY (Sonar) — the real "interesting search": a synthesized answer + real web images +
-// sources, in one call. Key lives in VITE_PERPLEXITY_API_KEY (.env.local, git-ignored). Browser-
-// direct for the local spike; the production path is the same call from a Supabase edge function.
+// sources, in one call. Runs through the discover-media edge function (key server-side,
+// credit-metered) — see perplexityDiscover below.
 // ---------------------------------------------------------------------------
 
 export interface DiscoverResult { overview: string; images: MediaImage[]; sources: { title: string; url: string }[]; costUsd: number }
@@ -130,7 +130,7 @@ export async function fetchWikipedia(query: string): Promise<Gathered> {
 
 // ---------------------------------------------------------------------------
 // SERPER (Google) — real Google images + explainer videos + "people also ask" currents, one cheap
-// API. Key in VITE_SERPER_API_KEY (.env.local). Browser-direct for the spike; edge fn for prod.
+// API. Runs through the discover-media edge function (key server-side, credit-metered).
 // ---------------------------------------------------------------------------
 
 let serperBlocked = false;

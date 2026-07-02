@@ -18,7 +18,8 @@ interface Admin {
 }
 
 export type CreditKind =
-  | 'generation' | 'edit' | 'agent' | 'garvis' | 'short_script' | 'research' | 'plan' | 'discover';
+  | 'generation' | 'edit' | 'agent' | 'garvis' | 'short_script' | 'research' | 'plan' | 'discover' | 'explore'
+  | 'app_ai'; // a generated app's runtime AI call through the FableForge AI gateway
 
 // Conservative pre-call estimate (in credits; 1 credit ≈ $0.01 of cost). Used ONLY to reject a start
 // when the balance clearly can't cover it — the real charge uses actual cost after the call.
@@ -31,6 +32,8 @@ const KIND_ESTIMATE: Record<CreditKind, number> = {
   research: 20,     // includes web search
   plan: 10,         // draft-plan
   discover: 8,      // media/search discovery
+  explore: 3,       // one Explorer turn (overview/leads/think — small, frequent calls)
+  app_ai: 2,        // one runtime AI call from a generated app (gateway; small, frequent)
 };
 
 export class InsufficientCreditsError extends Error {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles, LayoutDashboard, Users, Store, MessageSquare,
@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useProjects } from '../hooks/useProjectData';
-import { startGeneration, draftGenerationPlan } from '../lib/aiClient';
+import { startGeneration, draftGenerationPlan, generateDesignDirections, type DesignDirection } from '../lib/aiClient';
+import { DirectionPicker } from '../components/DirectionPicker';
 import { useToast } from '../context/ToastContext';
 import { Button, Card } from '../components/ui';
 import { ModelPicker } from '../components/ModelPicker';
@@ -47,6 +48,22 @@ export default function NewProject() {
     setPrompt(slug === selected ? '' : t.prompt);
   };
 
+  // Design-direction picker state: 3 committed identities proposed before the build starts.
+  // The picker UI appears IMMEDIATELY (skeleton cards) while directions generate in the
+  // background — the user can always skip straight to building, and any failure auto-builds.
+  const [directions, setDirections] = useState<DesignDirection[]>([]);
+  const [directionProjectId, setDirectionProjectId] = useState<string | null>(null);
+  const [directionsLoading, setDirectionsLoading] = useState(false);
+  const skippedRef = useRef(false);
+
+  /** Serialize the chosen direction into context the blueprint must follow exactly. */
+  const directionContext = (d: DesignDirection): string => [
+    `DESIGN DIRECTION — the user chose "${d.name}" (${d.archetype}, ${d.risk}). Follow it EXACTLY:`,
+    d.brief,
+    `Set the blueprint's design.accentHue to ${Math.round(d.accentHue)} and design.headingFont to "${d.headingFont}".`,
+    `Body font: ${d.bodyFont}. Make design.vibe restate this direction. Every page commits to this bundle — its palette strategy, radius, surface logic, layout archetype, and motion character.`,
+  ].join('\n');
+
   const forge = async () => {
     const text = prompt.trim();
     if (text.length < 12) return toast('error', 'Describe the app in a bit more detail — at least a sentence.');
@@ -64,8 +81,51 @@ export default function NewProject() {
         return;
       }
 
-      await startGeneration(project.id, text);
-      navigate(`/project/${project.id}`);
+      // DESIGN DIRECTIONS: show the picker at once (skeletons) and generate the 3 identities in
+      // the background. Skip is always available; failure or an empty result auto-builds.
+      skippedRef.current = false;
+      setDirectionProjectId(project.id);
+      setDirectionsLoading(true);
+      setBusy(false);
+      void (async () => {
+        try {
+          // Directions arrive one by one (parallel fan-out) — show each the moment it lands.
+          const dirs = await generateDesignDirections(text, (d) => {
+            if (!skippedRef.current) setDirections((prev) => [...prev, d]);
+          });
+          if (skippedRef.current) return; // user already skipped to the build
+          if (dirs.length >= 2) {
+            setDirectionsLoading(false);
+            return;
+          }
+        } catch { /* fall through to the auto-build below */ }
+        if (skippedRef.current) return;
+        setDirections([]);
+        setDirectionsLoading(false);
+        // Couldn't produce directions (edge mode / provider error) — build without blocking.
+        setBusy(true);
+        try {
+          await startGeneration(project.id, text);
+          navigate(`/project/${project.id}`);
+        } catch (err) {
+          toast('error', err instanceof Error ? err.message : 'Generation could not start.');
+          setBusy(false);
+        }
+      })();
+    } catch (err) {
+      toast('error', err instanceof Error ? err.message : 'Generation could not start.');
+      setBusy(false);
+    }
+  };
+
+  // Build with the chosen direction (or without one via Skip) once the picker is up.
+  const buildWithDirection = async (d: DesignDirection | null) => {
+    if (!directionProjectId) return;
+    skippedRef.current = d == null; // a Skip cancels any in-flight direction generation
+    setBusy(true);
+    try {
+      await startGeneration(directionProjectId, prompt.trim(), d ? directionContext(d) : undefined);
+      navigate(`/project/${directionProjectId}`);
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Generation could not start.');
       setBusy(false);
@@ -120,11 +180,23 @@ export default function NewProject() {
                 </span>
               </button>
             </div>
-            <Button onClick={forge} loading={busy} disabled={!prompt.trim()}>
+            <Button onClick={forge} loading={busy} disabled={!prompt.trim() || directions.length > 0 || directionsLoading}>
               <Sparkles size={15} /> {planFirst ? 'Plan it' : 'Forge app'}
             </Button>
           </div>
         </Card>
+
+        {(directions.length > 0 || directionsLoading) && (
+          <div className="mt-5">
+            <DirectionPicker
+              directions={directions}
+              loading={directionsLoading}
+              busy={busy}
+              onPick={(d) => void buildWithDirection(d)}
+              onSkip={() => void buildWithDirection(null)}
+            />
+          </div>
+        )}
 
         {plan && (
           <div className="mt-4">

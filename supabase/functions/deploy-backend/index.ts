@@ -62,8 +62,28 @@ Deno.serve(async (req) => {
 
     const results: { step: string; ok: boolean; detail?: string }[] = [];
 
+    // 0) FABLEFORGE AI — every deployed app gets managed AI with no keys: ensure the per-app
+    // gateway key exists and push it (+ the gateway URL) into the app's Function Secrets. The
+    // ai-gateway function meters each call against the owner's credit balance.
+    const gatewaySecrets: DeploySecret[] = [];
+    try {
+      const { data: proj } = await admin.from('projects').select('ai_gateway_key').eq('id', projectId).single();
+      let gatewayKey = ((proj as { ai_gateway_key?: string | null } | null)?.ai_gateway_key) ?? '';
+      if (!gatewayKey) {
+        gatewayKey = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+        const { error: keyErr } = await admin.from('projects').update({ ai_gateway_key: gatewayKey }).eq('id', projectId);
+        if (keyErr) gatewayKey = ''; // column missing (migration not applied yet) — skip quietly
+      }
+      if (gatewayKey) {
+        gatewaySecrets.push(
+          { name: 'FABLEFORGE_AI_KEY', value: gatewayKey },
+          { name: 'FABLEFORGE_AI_URL', value: `${Deno.env.get('SUPABASE_URL')}/functions/v1/ai-gateway` },
+        );
+      }
+    } catch { /* best-effort — apps can still deploy without managed AI */ }
+
     // 1) SECRETS — set all at once (reliable; mirrors the apply-migration call shape).
-    const secretList = (secrets ?? []).filter((s) => s && s.name && s.value);
+    const secretList = [...gatewaySecrets, ...(secrets ?? []).filter((s) => s && s.name && s.value)];
     if (secretList.length) {
       const r = await api('/secrets', {
         method: 'POST',
@@ -87,6 +107,63 @@ Deno.serve(async (req) => {
         results.push({ step: `function ${fn.slug}`, ok: r.ok, detail: r.ok ? undefined : `${r.status}: ${t.slice(0, 300)}` });
       } catch (e) {
         results.push({ step: `function ${fn.slug}`, ok: false, detail: e instanceof Error ? e.message : String(e) });
+      }
+    }
+
+    // 3) AUTOMATION TICK — when the project ships an automation-runner, wire the every-minute
+    // pg_cron tick that drives it. Idempotent: cron.schedule upserts by job name, and the vault
+    // secrets (runner URL + bearer) are upserted, so re-deploys are safe. The tick authenticates
+    // to the runner with the target project's service-role key, held in Vault (cron SQL cannot
+    // read Function Secrets); the runner rejects any other caller.
+    const runnerDeployed = results.some((r) => r.step === 'function automation-runner' && r.ok);
+    if (runnerDeployed) {
+      try {
+        let serviceKey = '';
+        const kr = await api('/api-keys?reveal=true', { method: 'GET' });
+        if (kr.ok) {
+          const keys = (await kr.json()) as { name?: string; api_key?: string }[];
+          serviceKey = keys.find((k) => k.name === 'service_role')?.api_key ?? '';
+        }
+        if (!serviceKey) throw new Error('could not read the service_role key to authorize the cron tick');
+        const esc = (s: string) => s.replace(/'/g, "''");
+        const runnerUrl = `https://${projectRef}.supabase.co/functions/v1/automation-runner`;
+        const sql = `
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+do $$
+declare sid uuid;
+begin
+  select id into sid from vault.secrets where name = 'ff_automation_url';
+  if sid is null then perform vault.create_secret('${esc(runnerUrl)}', 'ff_automation_url');
+  else perform vault.update_secret(sid, '${esc(runnerUrl)}'); end if;
+  select id into sid from vault.secrets where name = 'ff_automation_bearer';
+  if sid is null then perform vault.create_secret('${esc(serviceKey)}', 'ff_automation_bearer');
+  else perform vault.update_secret(sid, '${esc(serviceKey)}'); end if;
+end $$;
+select cron.schedule(
+  'fableforge-automation-tick',
+  '* * * * *',
+  $cron$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_automation_url'),
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'ff_automation_bearer')
+    ),
+    body := jsonb_build_object('tick', now()),
+    timeout_milliseconds := 8000
+  );
+  $cron$
+);`;
+        const r = await api('/database/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: sql }),
+        });
+        const t = await r.text();
+        results.push({ step: 'automation tick (pg_cron, every minute)', ok: r.ok, detail: r.ok ? undefined : `${r.status}: ${t.slice(0, 300)}` });
+      } catch (e) {
+        results.push({ step: 'automation tick (pg_cron, every minute)', ok: false, detail: e instanceof Error ? e.message : String(e) });
       }
     }
 

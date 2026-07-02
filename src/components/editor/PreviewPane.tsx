@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Wand2 } from 'lucide-react';
+import { Wand2, MousePointerClick } from 'lucide-react';
 import type { ProjectFile } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
@@ -8,12 +8,19 @@ import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerSc
 export type Device = 'desktop' | 'tablet' | 'mobile';
 const DEVICE_WIDTH: Record<Device, string> = { desktop: '100%', tablet: '768px', mobile: '390px' };
 
+/** An element the user clicked in select mode — maps straight back to its source JSX. */
+export interface SelectedElement { loc: string; tag: string; text: string; className: string; count: number }
+
 interface Props {
   files: ProjectFile[];
   onFixError: (error: string) => void;
   // Controlled by the workspace so the preview controls share the Runtime bar (one toolbar row).
   device: Device;
   showConsole: boolean;
+  /** True while the assistant is already working — pauses auto-fix so runs never overlap. */
+  busy?: boolean;
+  /** Select mode: the user clicked an element in the preview — becomes precise chat context. */
+  onSelectElement?: (sel: SelectedElement) => void;
 }
 
 // ============================================================
@@ -396,6 +403,52 @@ function resolvePath(p){
   for(const x of c) if(x in window.FILES) return x;
   return null;
 }
+// VISUAL EDITS groundwork: tag every host JSX element with its source location at compile time
+// (data-ff-loc="file:line:col"). We own the compiler, so this is a free, deterministic map from
+// any rendered DOM node back to the exact JSX that produced it. Registered LAZILY — this shell
+// script executes before the Babel <script> finishes loading, so a top-level registerPlugin
+// throws "Babel is not defined"; makeRequire calls this right before the first transform.
+var __ffLocRegistered=false;
+function registerFfLoc(){
+  if(__ffLocRegistered||typeof Babel==='undefined') return;
+  __ffLocRegistered=true;
+  Babel.registerPlugin('ff-loc', function(b){
+    const t=b.types;
+    return {visitor:{JSXOpeningElement:function(path,state){
+      const n=path.node; if(!n.loc) return;
+      const nm=n.name; if(!nm||nm.type!=='JSXIdentifier'||!/^[a-z]/.test(nm.name)) return; // host elements only
+      for(var i=0;i<n.attributes.length;i++){ var a=n.attributes[i]; if(a.type==='JSXAttribute'&&a.name&&a.name.name==='data-ff-loc') return; }
+      var file=(state.file&&state.file.opts&&state.file.opts.filename)||'?';
+      n.attributes.push(t.jsxAttribute(t.jsxIdentifier('data-ff-loc'),t.stringLiteral(file+':'+n.loc.start.line+':'+n.loc.start.column)));
+    }}};
+  });
+}
+
+// Selection mode: parent toggles it; hovering highlights tagged elements, clicking reports the
+// element's source location (and how many siblings share it — a .map() renders one JSX many times).
+(function(){
+  var hl=null;
+  function box(){ if(hl) return hl; hl=document.createElement('div');
+    hl.style.cssText='position:fixed;z-index:2147483000;pointer-events:none;border:2px solid #FF8A3D;background:rgba(255,138,61,0.08);border-radius:4px;transition:all 60ms;display:none';
+    document.body.appendChild(hl); return hl; }
+  function target(e){ return e.target&&e.target.closest?e.target.closest('[data-ff-loc]'):null; }
+  function move(e){ var el=target(e); var b=box();
+    if(!el){ b.style.display='none'; return; }
+    var r=el.getBoundingClientRect();
+    b.style.display='block'; b.style.left=r.left+'px'; b.style.top=r.top+'px'; b.style.width=r.width+'px'; b.style.height=r.height+'px'; }
+  function click(e){ var el=target(e); if(!el) return;
+    e.preventDefault(); e.stopPropagation();
+    var loc=el.getAttribute('data-ff-loc');
+    var dup=document.querySelectorAll('[data-ff-loc="'+loc+'"]').length;
+    parent.postMessage({__ff:true,type:'selected',loc:loc,tag:el.tagName.toLowerCase(),
+      text:(el.textContent||'').slice(0,160),className:el.getAttribute('class')||'',count:dup},'*'); }
+  window.addEventListener('message',function(ev){ var d=ev.data;
+    if(!d||!d.__ff_cmd||d.type!=='edit-mode') return;
+    if(d.on){ document.addEventListener('mousemove',move,true); document.addEventListener('click',click,true); }
+    else{ document.removeEventListener('mousemove',move,true); document.removeEventListener('click',click,true); if(hl) hl.style.display='none'; }
+  });
+})();
+
 function makeRequire(base){
   return function(spec){
     if(spec==='react') return reactExport;
@@ -424,9 +477,11 @@ function makeRequire(base){
     const mod={exports:{}}; modules[path]=mod;
     let code;
     try{
+      registerFfLoc();
       code=Babel.transform(window.FILES[path],{
         presets:[['react',{runtime:'classic'}],['env',{modules:'commonjs'}],
           (/\\.tsx?$/.test(path)?'typescript':null)].filter(Boolean),
+        plugins:(__ffLocRegistered?['ff-loc']:[]),
         filename:path
       }).code;
     }catch(e){ throw new Error('Compile error in '+path+':\\n'+(e.message||e)); }
@@ -462,7 +517,14 @@ function detectServerFramework(){
 
 function info(msg){
   const r=document.getElementById('root');
-  if(r) r.innerHTML='<div style="padding:40px;font:14px/1.5 system-ui;color:#888;text-align:center">'+msg+'</div>';
+  if(r) r.innerHTML='<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0B0D12;color:#8A8F98;font:13px/1.6 ui-sans-serif,system-ui,sans-serif;text-align:center;padding:40px">'
+    +'<style>@keyframes ffp{0%,100%{opacity:.55;transform:scale(.94)}50%{opacity:1;transform:scale(1.06)}}@keyframes ffb{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}</style>'
+    +'<div style="width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#FF8A3D,#FF5C39);display:flex;align-items:center;justify-content:center;animation:ffp 1.6s ease-in-out infinite;box-shadow:0 0 34px rgba(255,138,61,.35)">'
+    +'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1A0E04" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></div>'
+    +'<div style="color:#E8E6E1;font-weight:600;font-size:14px;letter-spacing:-0.01em">'+msg+'</div>'
+    +'<div style="color:#8A8F98;font-size:11px">Your app is being forged — files land here live</div>'
+    +'<div style="width:180px;height:3px;border-radius:99px;background:#1E222B;overflow:hidden"><div style="width:40%;height:100%;border-radius:99px;background:linear-gradient(90deg,#FF8A3D,#FF5C39);animation:ffb 1.4s ease-in-out infinite"></div></div>'
+    +'</div>';
   // Clear the parent's "Building preview…" overlay so this message is actually visible.
   try{ parent.postMessage({__ff:true,type:'ready'},'*'); }catch(e){}
 }
@@ -490,6 +552,18 @@ function renderApp(){
     }
     try{ parent.postMessage({__ff:true,type:'ready'},'*'); }catch(e){}
     installSnapshotWatchers(); scheduleSnapshot();
+    // BLANK-SCREEN DETECTOR: a mounted app that renders NOTHING throws no error — but silence
+    // is not success. If the root has no visible content 3s after mount, report it as an error
+    // so the auto-fix loop engages instead of leaving a white screen with no explanation.
+    setTimeout(function(){
+      try{
+        var r=document.getElementById('root');
+        var txt=(r&&r.innerText||'').trim();
+        if(r&&r.childElementCount===0&&!txt){
+          parent.postMessage({__ff:true,type:'error',message:'The app mounted but rendered a BLANK screen at "'+(location.hash||'#/')+'" — no elements, no text, and no thrown error. Likely causes: the route renders null, a data guard never resolves (loading state stuck), or App returns nothing. Find the root cause and fix it.'},'*');
+        }
+      }catch(e){}
+    },3000);
   }catch(err){ showError((err&&err.stack)||(err&&err.message)||err); }
 }
 
@@ -576,12 +650,34 @@ function useDebounced<T>(value: T, delay: number): T {
 
 /** In-browser preview for generated apps. The iframe shell mounts once; file changes
  * are streamed in via postMessage for flash-free hot updates. */
-function NativePreview({ files, device, showConsole, onFixError }: {
-  files: ProjectFile[]; device: Device; showConsole: boolean; onFixError: (e: string) => void;
+function NativePreview({ files, device, showConsole, onFixError, busy, onSelectElement }: {
+  files: ProjectFile[]; device: Device; showConsole: boolean; onFixError: (e: string) => void; busy?: boolean;
+  onSelectElement?: (sel: SelectedElement) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const shellReady = useRef(false);
   const [error, setError] = useState<string | null>(null);
+
+  // AUTO-FIX: when the app hits a runtime/compile error, hand it to the AI immediately — no
+  // button press needed. Debounced (transient errors during a rebuild settle first), paused
+  // while the assistant is already working, and capped at 2 attempts per distinct error so a
+  // stubborn failure can never loop credits away.
+  const fixAttempts = useRef(new Map<string, number>());
+  const [autoFixing, setAutoFixing] = useState(false);
+  useEffect(() => {
+    if (!error) { setAutoFixing(false); return; }
+    if (busy) return;
+    const sig = error.slice(0, 200);
+    const n = fixAttempts.current.get(sig) ?? 0;
+    if (n >= 2) { setAutoFixing(false); return; }
+    const t = window.setTimeout(() => {
+      fixAttempts.current.set(sig, n + 1);
+      setAutoFixing(true);
+      onFixError(error);
+    }, 1200);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error, busy]);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [slow, setSlow] = useState(false); // true once a load has run long enough to look stuck
@@ -639,6 +735,9 @@ function NativePreview({ files, device, showConsole, onFixError }: {
         pushPreviewLog({ level: d.level, text });
       } else if (d.type === 'dom') {
         updatePreviewSnapshot({ dom: d.dom ?? null, title: d.title ?? null, route: d.route ?? null });
+      } else if (d.type === 'selected') {
+        setEditMode(false);
+        onSelectRef.current?.({ loc: d.loc ?? '', tag: d.tag ?? '', text: d.text ?? '', className: d.className ?? '', count: d.count ?? 1 });
       } else if (d.type === 'screenshot' || d.type === 'screenshot-error') {
         const p = pendingShot.current;
         if (p) { clearTimeout(p.timer); pendingShot.current = null; p.resolve(d.type === 'screenshot' ? (d.dataUrl ?? null) : null); }
@@ -662,8 +761,70 @@ function NativePreview({ files, device, showConsole, onFixError }: {
     return () => registerScreenshotCapture(null);
   }, []);
 
+  // PAGE SELECTOR: every concrete <Route path> in the app, jumpable from a dropdown. The blob
+  // iframe is same-origin, so navigation is a direct hash set (HashRouter picks it up).
+  const routes = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of files) {
+      if (!/\.(t|j)sx?$/.test(f.path)) continue;
+      for (const m of f.content.matchAll(/<Route\b[^>]*\bpath=["']([^"']+)["']/g)) {
+        const p = m[1];
+        if (p.includes('*') || p.includes(':')) continue; // skip catch-alls + param routes
+        set.add(p.startsWith('/') ? p : '/' + p);
+      }
+    }
+    return [...set].sort((a, b) => (a === '/' ? -1 : b === '/' ? 1 : a.localeCompare(b)));
+  }, [files]);
+  const [page, setPage] = useState('/');
+  const goto = (path: string) => {
+    setPage(path);
+    try {
+      const w = iframeRef.current?.contentWindow;
+      if (w) w.location.hash = '#' + path;
+    } catch { /* cross-origin shouldn't happen for blob previews; ignore */ }
+  };
+
+  // Select-to-edit mode: toggles the in-iframe overlay; a click there reports the element and
+  // turns the mode back off. Callback kept in a ref so the message listener stays stable.
+  const [editMode, setEditMode] = useState(false);
+  const onSelectRef = useRef(onSelectElement);
+  useEffect(() => { onSelectRef.current = onSelectElement; }, [onSelectElement]);
+  useEffect(() => {
+    try { iframeRef.current?.contentWindow?.postMessage({ __ff_cmd: true, type: 'edit-mode', on: editMode }, '*'); } catch { /* not ready */ }
+  }, [editMode]);
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-1.5 border-b border-forge-border bg-forge-panel px-2 py-1">
+        {routes.length > 1 && (
+          <>
+            <span className="text-[10px] font-medium uppercase tracking-wide text-forge-dim">Page</span>
+            <select
+              value={page}
+              onChange={(e) => goto(e.target.value)}
+              aria-label="Jump to a page"
+              className="h-6 rounded border border-forge-border bg-forge-bg px-1.5 font-mono text-[11px] text-forge-ink focus:border-forge-ember/60 focus:outline-none"
+            >
+              {routes.map((r) => <option key={r} value={r}>{r === '/' ? '/ (home)' : r}</option>)}
+            </select>
+            <span className="text-[10px] text-forge-dim">{routes.length} pages</span>
+          </>
+        )}
+        {onSelectElement && (
+          <button
+            type="button"
+            onClick={() => setEditMode((v) => !v)}
+            aria-pressed={editMode}
+            title="Select an element — click anything in the preview to target it in chat"
+            className={cn(
+              'ml-auto inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] transition-colors',
+              editMode ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink',
+            )}
+          >
+            <MousePointerClick size={11} /> {editMode ? 'Click an element…' : 'Select'}
+          </button>
+        )}
+      </div>
       <div className="flex min-h-0 flex-1 items-start justify-center overflow-auto panel-scroll bg-[#0A0B0F] p-3">
         <div
           className="relative h-full overflow-hidden rounded-lg border border-forge-border bg-white transition-all"
@@ -708,12 +869,21 @@ function NativePreview({ files, device, showConsole, onFixError }: {
           <pre className="mt-1 max-h-24 overflow-auto panel-scroll whitespace-pre-wrap font-mono text-[11px] text-forge-dim">
             {error}
           </pre>
-          <div className="mt-2 flex gap-2">
-            <Button size="sm" onClick={() => onFixError(error)}>
-              <Wand2 size={13} /> Fix with AI
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => setNonce((n) => n + 1)}>Retry</Button>
-          </div>
+          {(autoFixing || busy) ? (
+            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-ink">
+              <Wand2 size={12} className="animate-pulse text-forge-ember" /> Auto-fixing this error…
+            </p>
+          ) : (
+            <div className="mt-2 flex items-center gap-2">
+              <Button size="sm" onClick={() => onFixError(error)}>
+                <Wand2 size={13} /> Fix with AI
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setNonce((n) => n + 1)}>Retry</Button>
+              {(fixAttempts.current.get(error.slice(0, 200)) ?? 0) >= 2 && (
+                <span className="text-[10px] text-forge-dim">Auto-fix tried twice — tell the chat what you expected to see.</span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -732,12 +902,12 @@ function NativePreview({ files, device, showConsole, onFixError }: {
   );
 }
 
-export function PreviewPane({ files, onFixError, device, showConsole }: Props) {
+export function PreviewPane({ files, onFixError, device, showConsole, busy, onSelectElement }: Props) {
   // The toolbar (device size + console) now lives in the workspace's unified Runtime bar, so the
   // preview area is just the rendered app — one toolbar row instead of two.
   return (
     <div className="flex h-full flex-col">
-      <NativePreview files={files} device={device} showConsole={showConsole} onFixError={onFixError} />
+      <NativePreview files={files} device={device} showConsole={showConsole} onFixError={onFixError} busy={busy} onSelectElement={onSelectElement} />
     </div>
   );
 }

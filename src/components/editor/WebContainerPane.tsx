@@ -13,6 +13,8 @@ interface Props {
   projectId: string;
   onFixError: (error: string) => void;
   onHealTypes?: (diags: TsDiag[]) => void | Promise<void>;
+  /** True while the assistant is already working — pauses auto-fix so runs never overlap. */
+  aiBusy?: boolean;
 }
 
 const STATUS_LABEL: Record<RunnerStatus, string> = {
@@ -30,7 +32,7 @@ const STATUS_LABEL: Record<RunnerStatus, string> = {
  * module scope (see lib/webcontainer.ts), so navigating away and back re-attaches instantly
  * instead of rebooting/reinstalling. This component only reflects state and issues commands.
  */
-export function WebContainerPane({ files, projectId, onFixError, onHealTypes }: Props) {
+export function WebContainerPane({ files, projectId, onFixError, onHealTypes, aiBusy }: Props) {
   const runner = useSyncExternalStore(subscribeRunner, getRunnerState);
   const [showLog, setShowLog] = useState(true);
   const [showTypes, setShowTypes] = useState(false);
@@ -45,14 +47,17 @@ export function WebContainerPane({ files, projectId, onFixError, onHealTypes }: 
 
   // Boot ONCE per project — but only after the project's files (incl. package.json) have actually
   // loaded. Booting on mount raced the async file load and surfaced a false "No package.json" error
-  // that never recovered (the start effect didn't re-run when files arrived).
+  // that never recovered (the start effect didn't re-run when files arrived). ALSO re-boot when the
+  // runner is parked 'idle' for this project (a deep verify mounted+installed then parked the
+  // container without starting the dev server — the boot rides its warm mount).
   const bootedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (bootedRef.current === projectId) return;
+    const parkedIdle = runner.projectId === projectId && runner.status === 'idle';
+    if (bootedRef.current === projectId && !parkedIdle) return;
     if (!hasPackageJson(files)) return; // wait for the files to load
     bootedRef.current = projectId;
     void startRunner(projectId, files);
-  }, [projectId, files]);
+  }, [projectId, files, runner.projectId, runner.status]);
 
   // Live-sync saved/AI edits into the running container so the dev server hot-reloads.
   useEffect(() => { void syncFiles(projectId, files); }, [files, projectId, runner.status]);
@@ -67,6 +72,28 @@ export function WebContainerPane({ files, projectId, onFixError, onHealTypes }: 
   const busy = status !== 'ready' && status !== 'error';
   // A loaded project with no package.json can't run in the full build (it's a lightweight/Instant app).
   const noPackage = files.length > 0 && !hasPackageJson(files);
+
+  // AUTO-FIX app-level crashes (dev server exited / install broke after an edit) — same behavior
+  // as the Instant preview: debounced, paused while the assistant works, capped at 2 attempts per
+  // distinct error. Infra errors (cross-origin isolation, no package.json) stay manual — the AI
+  // can't fix the environment.
+  const fixAttempts = useRef(new Map<string, number>());
+  const [autoFixing, setAutoFixing] = useState(false);
+  useEffect(() => {
+    if (!error || status !== 'error') { setAutoFixing(false); return; }
+    if (aiBusy) return;
+    if (!/dev server exited|npm install failed/i.test(error)) return; // infra errors stay manual
+    const sig = error.slice(0, 200);
+    const n = fixAttempts.current.get(sig) ?? 0;
+    if (n >= 2) { setAutoFixing(false); return; }
+    const t = window.setTimeout(() => {
+      fixAttempts.current.set(sig, n + 1);
+      setAutoFixing(true);
+      onFixError(error + '\n\n' + logs.slice(-40).join(''));
+    }, 1200);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error, status, aiBusy]);
 
   // Collapse the log automatically once the app is up.
   useEffect(() => { if (status === 'ready') setShowLog(false); }, [status]);
@@ -123,7 +150,9 @@ export function WebContainerPane({ files, projectId, onFixError, onHealTypes }: 
   }, [url]);
 
   const restart = () => void startRunner(projectId, filesRef.current, { force: true });
-  const retry = () => void startRunner(projectId, filesRef.current);
+  // Retry after a failure is a FORCED clean re-run (fresh mount + install) — a partial/broken
+  // mount from the failed attempt must never be reused.
+  const retry = () => void startRunner(projectId, filesRef.current, { force: true });
 
   return (
     <div className="flex h-full flex-col">
@@ -201,20 +230,41 @@ export function WebContainerPane({ files, projectId, onFixError, onHealTypes }: 
                   <p className="text-sm font-medium text-forge-ink">This project has no package.json</p>
                   <p className="mt-1 text-xs text-forge-dim">It's a lightweight app — switch the preview toggle to <span className="font-medium text-forge-ink">Instant</span> to run it, or ask the AI in chat to “scaffold this as a full Vite + TypeScript project” to enable the full build.</p>
                 </>
+              ) : status === 'error' && error && /single webcontainer instance/i.test(error) ? (
+                <>
+                  {/* An orphaned runtime instance (page kept it through a code hot-update). No code
+                      path can reclaim it — only a full page reload. Retry/AI would both be lies here. */}
+                  <p className="text-sm font-medium text-forge-err">The preview runtime needs a page reload</p>
+                  <p className="mt-1 text-xs text-forge-dim">
+                    A studio update left the previous runtime instance orphaned in this page — it can only be
+                    released by fully reloading. One reload fixes it.
+                  </p>
+                  <div className="mt-3 flex justify-center">
+                    <Button size="sm" onClick={() => window.location.reload()}>
+                      <RotateCw size={13} /> Reload the page
+                    </Button>
+                  </div>
+                </>
               ) : status === 'error' ? (
                 <>
                   <p className="text-sm font-medium text-forge-err">Couldn’t run the preview</p>
                   <p className="mt-1 whitespace-pre-wrap text-xs text-forge-dim">{error}</p>
-                  <div className="mt-3 flex justify-center gap-2">
-                    <Button size="sm" variant="outline" onClick={retry}>
-                      <RotateCw size={13} /> Retry
-                    </Button>
-                    {error && (
-                      <Button size="sm" onClick={() => onFixError(error + '\n\n' + logs.slice(-40).join(''))}>
-                        <Wand2 size={13} /> Fix with AI
+                  {(autoFixing || (aiBusy && error)) ? (
+                    <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-forge-ink">
+                      <Wand2 size={13} className="animate-pulse text-forge-ember" /> Auto-fixing this error…
+                    </p>
+                  ) : (
+                    <div className="mt-3 flex justify-center gap-2">
+                      <Button size="sm" variant="outline" onClick={retry}>
+                        <RotateCw size={13} /> Retry
                       </Button>
-                    )}
-                  </div>
+                      {error && (
+                        <Button size="sm" onClick={() => onFixError(error + '\n\n' + logs.slice(-40).join(''))}>
+                          <Wand2 size={13} /> Fix with AI
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="space-y-2">

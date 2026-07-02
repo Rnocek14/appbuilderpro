@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "db:push": "supabase db push",
-    "functions:deploy": "supabase functions deploy generate-app chat-edit garvis-brain garvis-short-script",
+    "functions:deploy": "supabase functions deploy generate-app chat-edit garvis-brain garvis-short-script explorer-turn discover-media fetch-url",
     "verify:knowledge": "tsx src/lib/garvis/knowledge.verify.ts",
     "verify:objective": "tsx src/lib/garvis/objective.verify.ts",
     "verify:profiles": "tsx src/lib/garvis/profiles.verify.ts",
@@ -24,7 +24,9 @@
     "verify:content": "tsx src/lib/garvis/content.verify.ts",
     "verify:safeedit": "tsx src/lib/safeedit.verify.ts",
     "verify:pendingedit": "tsx src/lib/pendingEdit.verify.ts",
-    "verify:clustering": "tsx src/lib/garvis/clustering.verify.ts"
+    "verify:clustering": "tsx src/lib/garvis/clustering.verify.ts",
+    "verify:universe": "tsx src/lib/garvis/universe.verify.ts",
+    "verify:loops": "tsx src/lib/garvis/loops.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
@@ -42,7 +44,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.26.2",
-    "recharts": "^2.13.0"
+    "recharts": "^2.13.0",
+    "stripe": "^18.5.0"
   },
   "devDependencies": {
     "@types/diff": "^5.2.2",

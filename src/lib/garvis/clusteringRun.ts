@@ -1,11 +1,12 @@
 // src/lib/garvis/clusteringRun.ts
 // Impure half of the clustering spike (mirrors marketing.ts / marketingRun.ts): it calls the model
-// via rawComplete, then runs the deterministic rails from clustering.ts (canonicalize + merge).
+// via explorerAI (the metered explorer-turn edge proxy, with a local-key fallback for dev), then
+// runs the deterministic rails from clustering.ts (canonicalize + merge).
 // Also hosts the "Explorer" actions — expand/split a cluster, attach generated media — that make
 // the universe feel alive. Kept separate so clustering.ts stays Supabase/LLM-free and testable.
 
-import { rawComplete, streamComplete } from '../aiClient';
-import { estimateCostUsd, shortScriptDirect } from './directBrain';
+import { exploreComplete, exploreStream } from './explorerAI';
+import { shortScriptDirect } from './directBrain';
 import { embedTexts, cosine } from './embeddings';
 import { fetchWikipedia, fetchYouTube, youTubeSearchUrl, perplexityDiscover, perplexityAvailable, serperImages, serperVideos, serperAvailable, discoverAvailable } from './discover';
 import {
@@ -19,6 +20,14 @@ import {
   REFRAME_SYSTEM,
   THINK_SYSTEM,
   MIND_SYSTEM,
+  SCENE_SYSTEM,
+  buildSceneUser,
+  parseScene,
+  extractSceneField,
+  sceneArtifact,
+  sceneOf,
+  SCENE_ARTIFACT_ID,
+  type Scene,
   BRIDGE_SYSTEM,
   DECOMPOSE_SYSTEM,
   ANGLE_SYSTEM,
@@ -82,14 +91,14 @@ export interface ClusterResult { graph: ClusterGraph; costUsd: number }
 
 /** One-shot: cluster a whole conversation from scratch. */
 export async function clusterConversation(turns: Turn[]): Promise<ClusterResult> {
-  const r = await rawComplete(
+  const r = await exploreComplete(
     [
       { role: 'system', content: CLUSTER_SYSTEM },
       { role: 'user', content: buildClusterUser(turns) },
     ],
     3500,
   );
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const costUsd = r.costUsd;
   try {
     return { graph: dedupeClusters(normalizeGraph(extractJson<RawGraph>(r.text))), costUsd };
   } catch {
@@ -134,14 +143,14 @@ export interface ExtendResult extends ClusterResult { report: StabilityReport; m
  *                → mergeGraphs (re-add dropped, freeze structure).
  */
 export async function extendClusters(prev: ClusterGraph, newTurns: Turn[]): Promise<ExtendResult> {
-  const r = await rawComplete(
+  const r = await exploreComplete(
     [
       { role: 'system', content: EXTEND_SYSTEM },
       { role: 'user', content: buildExtendUser(prev, newTurns) },
     ],
     3500,
   );
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const costUsd = r.costUsd;
   let raw: ClusterGraph;
   try {
     raw = normalizeGraph(extractJson<RawGraph>(r.text));
@@ -170,14 +179,14 @@ export async function expandCluster(graph: ClusterGraph, focusId: string, mode: 
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return { graph, costUsd: 0, newIds: [] };
   const nearby = graph.clusters.filter((c) => c.parentId === focusId).map((c) => c.title);
-  const r = await rawComplete(
+  const r = await exploreComplete(
     [
       { role: 'system', content: EXPAND_SYSTEM },
       { role: 'user', content: buildExpandUser(focus, mode, nearby) },
     ],
     1500,
   );
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const costUsd = r.costUsd;
   let children: Record<string, unknown>[] = [];
   try {
     children = (extractJson<{ children?: unknown[] }>(r.text).children ?? []) as Record<string, unknown>[];
@@ -212,12 +221,11 @@ export async function streamOverview(graph: ClusterGraph, focusId: string, trail
   if (!focus) return { graph, costUsd: 0 };
   let acc = '';
   let usd = 0;
-  const full = await streamComplete(
+  const full = await exploreStream(
     [{ role: 'system', content: OVERVIEW_SYSTEM }, { role: 'user', content: buildOverviewUser(focus, trail) }],
     500,
-    (d) => { acc += d; onDelta(acc); },
-    undefined,
-    (u) => { usd = estimateCostUsd(u.inputTokens, u.outputTokens); },
+    (t) => { acc = t; onDelta(t); },
+    (u) => { usd = u.costUsd; },
   );
   const text = (full || acc).trim();
   const parts = text.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -231,12 +239,83 @@ export async function streamOverview(graph: ClusterGraph, focusId: string, trail
   return { graph: nextGraph, costUsd: usd };
 }
 
+export interface SceneResult { graph: ClusterGraph; scene: Scene | null; leads: Lead[]; costUsd: number }
+
+/**
+ * THE SCENE — one call composes the whole curiosity loop for an idea (prime → gap → guess options →
+ * reveal beats → regap → lure currents). Streams so the prime/gap paint while the rest composes
+ * (onPartial gets the best partial read). On parse failure returns scene:null and the caller falls
+ * back to the classic streamOverview + fetchLeads pair — the map never dead-ends on a bad JSON.
+ * Writes: the scene artifact (persists through universe sync), an 'understanding' artifact (beats,
+ * for the detail panel), summary = prime, trajectory = regap (the forward-looking line).
+ */
+export async function composeScene(
+  graph: ClusterGraph, focusId: string, trail: string[] = [], onPartial?: (text: string) => void,
+): Promise<SceneResult> {
+  const focus = graph.clusters.find((c) => c.id === focusId);
+  if (!focus) return { graph, scene: null, leads: [], costUsd: 0 };
+  let usd = 0;
+  let raw = '';
+  try {
+    raw = await exploreStream(
+      [{ role: 'system', content: SCENE_SYSTEM }, { role: 'user', content: buildSceneUser(focus, trail) }],
+      1400,
+      (t) => {
+        if (!onPartial) return;
+        const gap = extractSceneField(t, 'gap');
+        const prime = extractSceneField(t, 'prime');
+        const best = gap || prime;
+        if (best) onPartial(best);
+      },
+      (u) => { usd = u.costUsd; },
+    );
+  } catch {
+    return { graph, scene: null, leads: [], costUsd: usd };
+  }
+  let scene: Scene | null = null;
+  try { scene = parseScene(extractJson(raw)); } catch { scene = null; }
+  if (!scene) return { graph, scene: null, leads: [], costUsd: usd };
+  const understanding: Artifact = {
+    id: 'understanding', kind: 'research', title: `Understanding: ${focus.title}`,
+    detail: [scene.beats.join('\n\n'), scene.regap && `Open question: ${scene.regap}`].filter(Boolean).join('\n\n'),
+    source: 'garvis',
+  };
+  const nextGraph: ClusterGraph = {
+    ...graph,
+    clusters: graph.clusters.map((c) => {
+      if (c.id !== focusId) return c;
+      const rest = c.artifacts.filter((a) => a.id !== SCENE_ARTIFACT_ID && a.id !== 'understanding');
+      return {
+        ...c,
+        summary: scene!.prime || c.summary,
+        trajectory: scene!.regap || c.trajectory,
+        artifacts: [sceneArtifact(scene!), understanding, ...rest],
+      };
+    }),
+  };
+  return { graph: nextGraph, scene, leads: scene.currents, costUsd: usd };
+}
+
+/** Record the user's guess on a cluster's scene (persists with the universe). Pure of AI. */
+export function recordSceneGuess(graph: ClusterGraph, focusId: string, guessed: number): ClusterGraph {
+  const focus = graph.clusters.find((c) => c.id === focusId);
+  const scene = focus && sceneOf(focus);
+  if (!focus || !scene) return graph;
+  const updated = sceneArtifact({ ...scene, guessed });
+  return {
+    ...graph,
+    clusters: graph.clusters.map((c) => (c.id === focusId
+      ? { ...c, artifacts: c.artifacts.map((a) => (a.id === SCENE_ARTIFACT_ID ? updated : a)) }
+      : c)),
+  };
+}
+
 /** Leaner currents-only call (trajectory + leads); the streamed overview handles understanding. */
 export async function fetchLeads(graph: ClusterGraph, focusId: string, trail: string[]): Promise<LeadsResult> {
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return { graph, leads: [], costUsd: 0 };
-  const r = await rawComplete([{ role: 'system', content: LEADS_SYSTEM }, { role: 'user', content: buildLeadUser(focus, trail) }], 600);
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const r = await exploreComplete([{ role: 'system', content: LEADS_SYSTEM }, { role: 'user', content: buildLeadUser(focus, trail) }], 600);
+  const costUsd = r.costUsd;
   let parsed: { trajectory?: string; leads?: { label?: string; kind?: string }[] } = {};
   try { parsed = extractJson(r.text); } catch { return { graph, leads: [], costUsd }; }
   const leads: Lead[] = (parsed.leads ?? []).filter((l) => typeof l?.label === 'string' && l.label.trim()).slice(0, 6)
@@ -255,14 +334,14 @@ export interface LeadsResult { graph: ClusterGraph; leads: Lead[]; costUsd: numb
 export async function exploreLeads(graph: ClusterGraph, focusId: string, trail: string[] = []): Promise<LeadsResult> {
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return { graph, leads: [], costUsd: 0 };
-  const r = await rawComplete(
+  const r = await exploreComplete(
     [
       { role: 'system', content: LEAD_SYSTEM },
       { role: 'user', content: buildLeadUser(focus, trail) },
     ],
     700,
   );
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const costUsd = r.costUsd;
   let parsed: { takeaway?: string; overview?: string; why?: string; trajectory?: string; leads?: { label?: string; kind?: string }[] } = {};
   try { parsed = extractJson(r.text); } catch { return { graph, leads: [], costUsd }; }
   const leads: Lead[] = (parsed.leads ?? [])
@@ -295,6 +374,7 @@ export interface Prospect {
   topic: string;
   summary: string;
   trajectory?: string;
+  scene?: Artifact;         // the SEALED curiosity loop — arriving means the guess is instant
   understanding?: Artifact;
   images: Artifact[];
   leads: Lead[];
@@ -303,9 +383,9 @@ export interface Prospect {
 
 /**
  * PREDICTIVE CURIOSITY — compose a prospective idea (a likely next direction) in the background,
- * WITHOUT touching the live universe. Returns everything an Idea Room needs (answer + images +
- * next leads) so that when the user drifts into it, it's already there — no loading. The caller
- * caches these by topic and applies one on arrival.
+ * WITHOUT touching the live universe. Composes the full SCENE (gap + guess + beats + regap) plus
+ * media, so when the user drifts in, Garvis is literally holding the answer — the salience law made
+ * real. The caller caches these by topic and applies one on arrival.
  */
 export async function composeProspect(topic: string, trail: string[] = []): Promise<Prospect> {
   const slug = slugify(topic);
@@ -315,7 +395,11 @@ export async function composeProspect(topic: string, trail: string[] = []): Prom
   });
   let leads: Lead[] = [];
   let costUsd = 0;
-  try { const r = await exploreLeads(g, slug, trail); g = r.graph; leads = r.leads; costUsd += r.costUsd; } catch { /* lone */ }
+  try {
+    const r = await composeScene(g, slug, trail);
+    if (r.scene) { g = r.graph; leads = r.leads; costUsd += r.costUsd; }
+    else { const lr = await exploreLeads(g, slug, trail); g = lr.graph; leads = lr.leads; costUsd += lr.costUsd + r.costUsd; }
+  } catch { /* lone */ }
   try {
     if (discoverAvailable()) {
       const r = await gatherDiscover(g, slug);
@@ -328,6 +412,7 @@ export async function composeProspect(topic: string, trail: string[] = []): Prom
     topic,
     summary: c?.summary ?? '',
     trajectory: c?.trajectory,
+    scene: c?.artifacts.find((a) => a.id === SCENE_ARTIFACT_ID),
     understanding: c?.artifacts.find((a) => a.id === 'understanding'),
     images: c?.artifacts.filter((a) => a.kind === 'image') ?? [],
     leads,
@@ -346,14 +431,14 @@ export async function interpretThought(graph: ClusterGraph, focusId: string, utt
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus || !utterance.trim()) return { graph, focusId, costUsd: 0, created: false };
   const children = graph.clusters.filter((c) => c.parentId === focusId);
-  const r = await rawComplete(
+  const r = await exploreComplete(
     [
       { role: 'system', content: THINK_SYSTEM },
       { role: 'user', content: buildThinkUser(focus, children.map((c) => c.title), utterance) },
     ],
     450,
   );
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const costUsd = r.costUsd;
   let parsed: { target?: string; title?: string; kind?: string; state?: string; suggestion?: { label?: string; action?: string } } = {};
   try { parsed = extractJson(r.text); } catch { return { graph, focusId, costUsd, created: false }; }
   const state = STATES.includes(parsed.state as CuriosityState) ? (parsed.state as CuriosityState) : undefined;
@@ -378,12 +463,11 @@ export async function reframe(graph: ClusterGraph, focusId: string, onDelta: (te
   if (!focus) return { graph, costUsd: 0 };
   let acc = '';
   let usd = 0;
-  const full = await streamComplete(
+  const full = await exploreStream(
     [{ role: 'system', content: REFRAME_SYSTEM }, { role: 'user', content: buildOverviewUser(focus) }],
     500,
-    (d) => { acc += d; onDelta(acc); },
-    undefined,
-    (u) => { usd = estimateCostUsd(u.inputTokens, u.outputTokens); },
+    (t) => { acc = t; onDelta(t); },
+    (u) => { usd = u.costUsd; },
   );
   const text = (full || acc).trim();
   const parts = text.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -403,8 +487,8 @@ export async function findBridge(graph: ClusterGraph, focusId: string): Promise<
   const cands = universeConnections(graph, focusId, { limit: 18, min: 0.12 });
   const pool = (cands.length ? cands.map((c) => graph.clusters.find((x) => x.id === c.id)!).filter(Boolean) : graph.clusters.filter((c) => c.id !== focusId)).slice(0, 20);
   if (!pool.length) return null;
-  const r = await rawComplete([{ role: 'system', content: BRIDGE_SYSTEM }, { role: 'user', content: buildBridgeUser(focus, pool.map((c) => c.title)) }], 220);
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const r = await exploreComplete([{ role: 'system', content: BRIDGE_SYSTEM }, { role: 'user', content: buildBridgeUser(focus, pool.map((c) => c.title)) }], 220);
+  const costUsd = r.costUsd;
   let parsed: { title?: string; why?: string } = {};
   try { parsed = extractJson(r.text); } catch { return null; }
   const title = (parsed.title ?? '').trim();
@@ -426,8 +510,8 @@ export async function investigate(graph: ClusterGraph, focusId: string, onProgre
   let cost = 0;
 
   // 1. decompose into angles
-  const dr = await rawComplete([{ role: 'system', content: DECOMPOSE_SYSTEM }, { role: 'user', content: buildDecomposeUser(focus) }], 400);
-  cost += estimateCostUsd(dr.inputTokens, dr.outputTokens);
+  const dr = await exploreComplete([{ role: 'system', content: DECOMPOSE_SYSTEM }, { role: 'user', content: buildDecomposeUser(focus) }], 400);
+  cost += dr.costUsd;
   let angles: { title?: string }[] = [];
   try { angles = (extractJson<{ angles?: { title?: string }[] }>(dr.text).angles ?? []); } catch { return { graph, costUsd: cost }; }
   const titles = angles.map((a) => (a?.title ?? '').trim()).filter(Boolean).slice(0, 6);
@@ -444,9 +528,9 @@ export async function investigate(graph: ClusterGraph, focusId: string, onProgre
 
   // 3. research every angle IN PARALLEL — each fills its own node as it returns
   await Promise.all(investigators.map(({ id, title }) =>
-    rawComplete([{ role: 'system', content: ANGLE_SYSTEM }, { role: 'user', content: buildAngleUser(focus.title, title) }], 400)
+    exploreComplete([{ role: 'system', content: ANGLE_SYSTEM }, { role: 'user', content: buildAngleUser(focus.title, title) }], 400)
       .then((r) => {
-        cost += estimateCostUsd(r.inputTokens, r.outputTokens);
+        cost += r.costUsd;
         const finding = r.text.trim();
         const understanding: Artifact = { id: 'understanding', kind: 'research', title: 'Finding', detail: finding, source: 'garvis' };
         g = { ...g, clusters: g.clusters.map((c) => (c.id === id ? { ...c, summary: finding.split(/(?<=\.)\s/)[0].slice(0, 150), artifacts: [understanding, ...c.artifacts.filter((a) => a.id !== 'understanding')] } : c)) };
@@ -458,8 +542,8 @@ export async function investigate(graph: ClusterGraph, focusId: string, onProgre
   // 4. synthesize a verdict onto the focus
   const findings = investigators.map((iv) => ({ title: iv.title, finding: g.clusters.find((c) => c.id === iv.id)?.artifacts.find((a) => a.id === 'understanding')?.detail ?? '' })).filter((f) => f.finding);
   if (findings.length) {
-    const sr = await rawComplete([{ role: 'system', content: SYNTHESIZE_SYSTEM }, { role: 'user', content: buildSynthesizeUser(focus, findings) }], 600);
-    cost += estimateCostUsd(sr.inputTokens, sr.outputTokens);
+    const sr = await exploreComplete([{ role: 'system', content: SYNTHESIZE_SYSTEM }, { role: 'user', content: buildSynthesizeUser(focus, findings) }], 600);
+    cost += sr.costUsd;
     const conclusion = sr.text.trim();
     const understanding: Artifact = { id: 'understanding', kind: 'research', title: 'Synthesis', detail: conclusion, source: 'garvis' };
     g = { ...g, clusters: g.clusters.map((c) => (c.id === focusId ? { ...c, artifacts: [understanding, ...c.artifacts.filter((a) => a.id !== 'understanding')] } : c)) };
@@ -476,8 +560,8 @@ export async function investigate(graph: ClusterGraph, focusId: string, onProgre
 export async function updateMind(graph: ClusterGraph, focusId: string, path: string[], recent: string[]): Promise<{ mind: GarvisMind; costUsd: number } | null> {
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return null;
-  const r = await rawComplete([{ role: 'system', content: MIND_SYSTEM }, { role: 'user', content: buildMindUser(path, recent, focus.title) }], 400);
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const r = await exploreComplete([{ role: 'system', content: MIND_SYSTEM }, { role: 'user', content: buildMindUser(path, recent, focus.title) }], 400);
+  const costUsd = r.costUsd;
   let p: { intent?: string; state?: string; nextDirections?: string[]; anomaly?: string; confidence?: number } = {};
   try { p = extractJson(r.text); } catch { return null; }
   const state = STATES.includes(p.state as CuriosityState) ? (p.state as CuriosityState) : 'exploring';
@@ -502,8 +586,8 @@ const nid = () => `n_${Math.random().toString(36).slice(2, 9)}`;
 async function detectTheme(graph: ClusterGraph): Promise<Notice | null> {
   const titles = graph.clusters.map((c) => c.title);
   if (titles.length < 5) return null;
-  const r = await rawComplete([{ role: 'system', content: THEME_SYSTEM }, { role: 'user', content: buildThemeUser(titles) }], 300);
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const r = await exploreComplete([{ role: 'system', content: THEME_SYSTEM }, { role: 'user', content: buildThemeUser(titles) }], 300);
+  const costUsd = r.costUsd;
   let p: { theme?: string; members?: string[] } = {};
   try { p = extractJson(r.text); } catch { return null; }
   if (!p.theme || !(p.members && p.members.length >= 3)) return null;
@@ -636,14 +720,14 @@ export async function generateVideoArtifact(graph: ClusterGraph, focusId: string
 export async function generateImageArtifact(graph: ClusterGraph, focusId: string): Promise<ClusterResult> {
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return { graph, costUsd: 0 };
-  const r = await rawComplete(
+  const r = await exploreComplete(
     [
       { role: 'system', content: IMAGE_CONCEPT_SYSTEM },
       { role: 'user', content: buildImageUser(focus) },
     ],
     600,
   );
-  const costUsd = estimateCostUsd(r.inputTokens, r.outputTokens);
+  const costUsd = r.costUsd;
   let parsed: { title?: string; prompt?: string; style?: string } = {};
   try { parsed = extractJson(r.text); } catch { parsed = { prompt: r.text }; }
   const artifact: Artifact = {

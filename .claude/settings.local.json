@@ -27,7 +27,27 @@
       "Bash(deno --version)",
       "Bash(deno check *)",
       "Bash(echo \"EXIT: $?\")",
-      "PowerShell(npx tsx src/lib/qaCheck.verify.ts)"
+      "PowerShell(npx tsx src/lib/qaCheck.verify.ts)",
+      "Bash(echo \"TSC exit: $?\")",
+      "Skill(deep-research)",
+      "Workflow(deep-research)",
+      "WebFetch(domain:www.nngroup.com)",
+      "WebFetch(domain:kailukoff.com)",
+      "WebFetch(domain:www.scientificamerican.com)",
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(npx vite build 2>&1 | Select-Object -Last 5)",
+      "PowerShell(deno check supabase/functions/_shared/scaffold.ts supabase/functions/_shared/themePresets.ts supabase/functions/_shared/prompts.ts supabase/functions/deploy-backend/index.ts supabase/functions/generate-app/index.ts supabase/functions/chat-edit/index.ts)",
+      "PowerShell(npm run *)",
+      "PowerShell(deno check supabase/functions/_shared/stripe.ts supabase/functions/create-checkout/index.ts supabase/functions/customer-portal/index.ts supabase/functions/stripe-webhook/index.ts)",
+      "PowerShell(npm install *)",
+      "PowerShell(deno check supabase/functions/project-logs/index.ts)",
+      "PowerShell(npx supabase functions deploy project-logs create-checkout customer-portal fetch-url deploy-backend generate-app chat-edit agent-turn 2>&1 | Select-Object -Last 15)",
+      "PowerShell(npx supabase functions deploy stripe-webhook --no-verify-jwt 2>&1 | Select-Object -Last 5)",
+      "Bash(yes)",
+      "Bash(npx supabase *)",
+      "PowerShell(npx supabase functions deploy generate-app chat-edit agent-turn 2>&1 | Select-Object -Last 2)",
+      "PowerShell(npx vite build 2>&1 | Select-Object -Last 2; npx tsx src/lib/qaCheck.verify.ts 2>&1 | Select-Object -Last 1; deno check supabase/functions/_shared/prompts.ts supabase/functions/_shared/streamparse.ts supabase/functions/generate-app/index.ts)",
+      "PowerShell(npx supabase functions deploy generate-app chat-edit agent-turn 2>&1 | Select-Object -Last 1)"
     ]
   }
 }

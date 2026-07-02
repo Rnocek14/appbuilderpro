@@ -1,12 +1,13 @@
 // src/pages/spike/ClusterSpike.tsx
 // The Knowledge Universe (spike). The experience: open into "What are you curious about today?",
 // fall into a living galaxy of that idea, branch/dive/gather media — and it's STILL THERE when you
-// come back (local-first persistence; Supabase migration app_0013 is the cloud upgrade). The old
-// clustering test tools live in a collapsible Dev panel. Needs an API key in the model picker.
+// come back. THE RULE: the universe only grows — "New" opens a new world, it never erases one.
+// Local-first (multi-world localStorage) with best-effort Supabase sync (app_0013/app_0018), so
+// worlds follow you across devices. The old clustering test tools live in a collapsible Dev panel.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  GitBranch, RefreshCw, Plus, ChevronRight, Orbit, ListTree, Sparkles, ArrowRight, RotateCcw, FlaskConical, Check,
+  GitBranch, RefreshCw, Plus, ChevronRight, Orbit, ListTree, Sparkles, ArrowRight, RotateCcw, FlaskConical, Check, Globe2, Cloud, Loader2,
 } from 'lucide-react';
 import { Button, Card } from '../../components/ui';
 import GalaxyView from './GalaxyView';
@@ -16,7 +17,11 @@ import {
   type Turn, type ClusterGraph, type Cluster, type StabilityReport,
 } from '../../lib/garvis/clustering';
 import { clusterConversation, extendClusters } from '../../lib/garvis/clusteringRun';
-import { loadUniverse, saveUniverse, clearUniverse, newUniverse, lastSeen, type Universe } from '../../lib/garvis/universe';
+import {
+  loadUniverse, saveUniverse, leaveUniverse, newUniverse, lastSeen, listWorlds, loadWorld, syncUniverse,
+  type Universe, type WorldMeta,
+} from '../../lib/garvis/universe';
+import { migrateLoops } from '../../lib/garvis/loops';
 
 const CURIOSITIES = ['Black holes', 'The Roman Empire', 'How memory works', 'Bioluminescence', 'The history of money', 'Why we dream', 'Lake Geneva real estate', 'How LLMs actually work'];
 
@@ -85,10 +90,16 @@ export default function ClusterSpike() {
   const [reportLabel, setReportLabel] = useState('');
   const [showJson, setShowJson] = useState(false);
 
+  const [worlds, setWorlds] = useState<WorldMeta[]>([]);
+  const [opening, setOpening] = useState<string | null>(null);
+  const [synced, setSynced] = useState(false);
+
   const meta = useRef<{ id: string; createdAt: string }>({ id: '', createdAt: '' });
   const stats = graph ? graphStats(graph) : null;
 
-  // restore the universe on mount — "still here when you come back"
+  const refreshWorlds = () => { void listWorlds().then(setWorlds).catch(() => {}); };
+
+  // restore the universe on mount — "still here when you come back" — and learn what other worlds exist
   useEffect(() => {
     const u = loadUniverse();
     if (u) {
@@ -97,9 +108,11 @@ export default function ClusterSpike() {
       setWelcome(`Welcome back — last explored ${lastSeen(u)}`);
       setSaved(true);
     }
+    refreshWorlds();
   }, []);
 
-  // auto-save (debounced) as the universe grows
+  // auto-save (debounced): localStorage immediately, then a best-effort cloud push. The first push
+  // assigns the world its server uuid — adopt it so every later save updates the same world.
   useEffect(() => {
     if (!graph || !meta.current.id) return;
     setSaved(false);
@@ -107,6 +120,12 @@ export default function ClusterSpike() {
       const u: Universe = { id: meta.current.id, title, graph, focusId, createdAt: meta.current.createdAt, updatedAt: '' };
       saveUniverse(u);
       setSaved(true);
+      void syncUniverse(u).then((sid) => {
+        if (sid) {
+          if (sid !== meta.current.id) { migrateLoops(meta.current.id, sid); meta.current.id = sid; }
+          setSynced(true);
+        }
+      }).catch(() => {});
     }, 700);
     return () => window.clearTimeout(h);
   }, [graph, focusId, title]);
@@ -133,7 +152,26 @@ export default function ClusterSpike() {
     install(t, g, slug);
   });
 
-  const startOver = () => { clearUniverse(); meta.current = { id: '', createdAt: '' }; setGraph(null); setFocusId(null); setTitle(''); setWelcome(null); setCuriosity(''); };
+  // "New" LEAVES the current world (it stays saved, locally and in the cloud) and returns to the
+  // cold start, where every world — this one included — is one click away. Nothing is ever erased.
+  const startOver = () => {
+    leaveUniverse();
+    meta.current = { id: '', createdAt: '' };
+    setGraph(null); setFocusId(null); setTitle(''); setWelcome(null); setCuriosity(''); setSynced(false);
+    refreshWorlds();
+  };
+
+  // reopen a world from the cold-start list (local instantly; cloud-only worlds are pulled down)
+  const open = (id: string) => {
+    setOpening(id); setErr('');
+    void loadWorld(id).then((u) => {
+      if (!u) { setErr('Could not open that world — it may only exist on another device while offline.'); return; }
+      meta.current = { id: u.id, createdAt: u.createdAt };
+      setTitle(u.title); setGraph(u.graph); setFocusId(u.focusId); setView('universe');
+      setWelcome(`Welcome back — last explored ${lastSeen(u)}`);
+      setSaved(true);
+    }).finally(() => setOpening(null));
+  };
 
   // ---- dev tools ----
   const build = () => run('build', async () => {
@@ -185,6 +223,26 @@ export default function ClusterSpike() {
             ))}
           </div>
 
+          {/* YOUR WORLDS — every exploration keeps living; step back into any of them */}
+          {worlds.length > 0 && (
+            <div className="mt-8">
+              <div className="mb-2 flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-[0.2em] text-forge-dim/70"><Globe2 size={12} /> return to a world</div>
+              <div className="flex flex-wrap justify-center gap-2">
+                {worlds.slice(0, 8).map((w) => (
+                  <button
+                    key={w.id} onClick={() => open(w.id)} disabled={!!opening}
+                    className="group flex items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/70 px-3 py-2 text-left backdrop-blur transition-all hover:-translate-y-0.5 hover:border-forge-ember/50 disabled:opacity-60"
+                  >
+                    {opening === w.id ? <Loader2 size={13} className="shrink-0 animate-spin text-forge-ember" /> : <Sparkles size={13} className="shrink-0 text-forge-ember/80" />}
+                    <span className="max-w-[180px] truncate text-xs font-medium text-forge-ink">{w.title}</span>
+                    <span className="text-[10px] text-forge-dim">{lastSeen(w)}{typeof w.clusterCount === 'number' ? ` · ${w.clusterCount} ideas` : ''}</span>
+                    {w.remote && <Cloud size={11} className="shrink-0 text-sky-400/80" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {busy === 'begin' && <p className="mt-6 text-sm text-forge-ember">Composing your universe…</p>}
           {err && <p className="mt-4 rounded-lg border border-forge-err/30 bg-forge-err/10 p-3 text-sm text-forge-err">{err}</p>}
 
@@ -213,6 +271,7 @@ export default function ClusterSpike() {
         <h1 className="font-display text-base font-semibold text-forge-ink">{title || 'Your universe'}</h1>
         <span className="inline-flex items-center gap-1 text-[11px] text-forge-dim">
           {saved ? <><Check size={11} className="text-emerald-400" /> saved</> : 'saving…'}
+          {synced && <Cloud size={11} className="ml-1 text-sky-400/80" aria-label="Synced to cloud" />}
         </span>
         {welcome && <span className="hidden text-[11px] text-forge-ember sm:inline">· {welcome}</span>}
         <div className="ml-auto flex items-center gap-2">
@@ -229,7 +288,7 @@ export default function ClusterSpike() {
 
       <div className="relative min-h-0 flex-1">
         {view === 'universe' ? (
-          <GalaxyView graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={setCost} />
+          <GalaxyView graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={setCost} worldKey={meta.current.id || 'local'} />
         ) : (
           <div className="grid h-full gap-4 overflow-auto p-4 md:grid-cols-2">
             <Card className="p-4">

@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe, Camera, X, Brain, Undo2, Eye, Paperclip, Square, Copy, RefreshCw } from 'lucide-react';
+import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe, Camera, X, Brain, Undo2, Eye, Paperclip, Square, Copy, RefreshCw, Link2 } from 'lucide-react';
+import { extractUrls, fetchLinks, withLinkContext, splitLinkContext, hostOf, LINK_CONTEXT_MARKER } from '../../lib/linkContext';
+import { MousePointerClick, ChevronDown } from 'lucide-react';
+import { diffLines } from 'diff';
+import type { SelectedElement } from '../editor/PreviewPane';
 import type { AIMessage, Generation, EditPlan } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
@@ -46,7 +50,52 @@ const STAGE_LABELS: Record<string, string> = {
   summarize: 'Writing the summary',
 };
 
-interface StreamState { explanation: string; files: { path: string; done: boolean }[] }
+interface StreamState { explanation: string; files: { path: string; done: boolean }[]; activity?: string[] }
+
+type FileChange = NonNullable<AIMessage['changes']>[number];
+
+/** One changed file: collapsed diffstat row → expandable unified diff (computed only on expand). */
+function FileDiffRow({ c }: { c: FileChange }) {
+  const [open, setOpen] = useState(false);
+  const big = c.additions + c.deletions > 400;
+  return (
+    <div className="min-w-0 rounded-md border border-forge-border bg-forge-panel/50">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 px-2 py-1 text-left" aria-expanded={open}>
+        <FileCode2 size={10} className="shrink-0 text-forge-dim" />
+        <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-forge-ink">{c.path}</span>
+        {c.additions > 0 && <span className="font-mono text-[10px] text-forge-ok">+{c.additions}</span>}
+        {c.deletions > 0 && <span className="font-mono text-[10px] text-forge-err">−{c.deletions}</span>}
+        <ChevronDown size={10} className={cn('shrink-0 text-forge-dim transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (big ? (
+        <p className="border-t border-forge-border px-2 py-1.5 text-[10px] text-forge-dim">Large change — open the file in the editor to review it comfortably.</p>
+      ) : (
+        <pre className="max-h-64 overflow-auto panel-scroll border-t border-forge-border p-2 font-mono text-[10px] leading-relaxed">
+          {diffLines(c.before, c.after).map((p, i) => {
+            const raw = p.value.endsWith('\n') ? p.value.slice(0, -1) : p.value;
+            let lines = raw.split('\n');
+            if (!p.added && !p.removed && lines.length > 6) lines = [...lines.slice(0, 2), '  ⋯', ...lines.slice(-2)];
+            const prefix = p.added ? '+ ' : p.removed ? '− ' : '  ';
+            return (
+              <span key={i} className={cn('block whitespace-pre-wrap', p.added ? 'bg-forge-ok/10 text-forge-ok' : p.removed ? 'bg-forge-err/10 text-forge-err' : 'text-forge-dim/70')}>
+                {lines.map((l) => (l === '  ⋯' ? l : prefix + l)).join('\n')}
+              </span>
+            );
+          })}
+        </pre>
+      ))}
+    </div>
+  );
+}
+
+/** Compact relative timestamp ("just now", "4m", "2h", then a date). */
+function relTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return 'just now';
+  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m`;
+  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 interface Props {
   projectId: string;
@@ -79,6 +128,9 @@ interface Props {
   defaultReviewEdits?: boolean;
   /** Restore every file a prior edit changed to its pre-edit version (atomic change-set undo). */
   onRevert?: (paths: string[]) => void;
+  /** Element picked via the preview's Select mode — attached to the next message as precise context. */
+  selection?: SelectedElement | null;
+  onClearSelection?: () => void;
 }
 
 /** Signature element: the forging strip — stages heat up as the agent works. */
@@ -112,7 +164,7 @@ function ForgeProgress({ gen }: { gen: Generation }) {
   );
 }
 
-export function ChatPanel({ projectId, messages, activeGeneration, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert }: Props) {
+export function ChatPanel({ projectId, messages, activeGeneration, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection }: Props) {
   const [input, setInput] = useState('');
   // The "Remember a preference" panel + a seed taken from the most recent user message, so
   // correcting something then clicking Remember pre-fills what you just said.
@@ -180,7 +232,17 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
 
   // Auto-scroll to newest content ONLY when already near the bottom, so scrolling up to re-read
   // isn't yanked back on every streamed token. A pill offers a manual jump when there's more below.
+  // Opening a project/thread JUMPS to the latest message instantly — never the slow scroll-from-
+  // the-top animation over the whole history.
+  const prevCount = useRef(0);
+  useEffect(() => { prevCount.current = 0; }, [projectId, activeThreadId]);
   useEffect(() => {
+    const initialLoad = prevCount.current === 0 && messages.length > 0;
+    prevCount.current = messages.length;
+    if (initialLoad) {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto' });
+      return;
+    }
     if (atBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, activeGeneration?.current_stage, stream?.explanation, stream?.files.length, atBottom]);
 
@@ -190,10 +252,57 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
   };
   const scrollToBottom = () => { setAtBottom(true); bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
+  // Message QUEUE: typing stays enabled while the agent works; Enter queues the message and it
+  // auto-sends when the current turn finishes (the Lovable/Cursor pattern users expect).
+  const [queue, setQueue] = useState<string[]>([]);
+  const draining = useRef(false);
+  useEffect(() => {
+    if (busy) { draining.current = false; return; }
+    if (queue.length && !draining.current) {
+      draining.current = true;
+      const [next, ...rest] = queue;
+      setQueue(rest);
+      void sendWithLinks(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, queue.length]);
+
+  // Pasted LINKS become real context: fetch each page server-side and ride it along with the
+  // message (marked block, hidden in the rendered bubble) so the model reads the actual content.
+  const [readingLinks, setReadingLinks] = useState(false);
+  const pendingUrls = extractUrls(input);
+
+  const sendWithLinks = async (text: string, image?: string) => {
+    const urls = extractUrls(text);
+    let message = text;
+    if (urls.length) {
+      setReadingLinks(true);
+      try { message = withLinkContext(text, await fetchLinks(urls)); }
+      catch { /* best-effort — send the plain text if fetching fails */ }
+      setReadingLinks(false);
+    }
+    // A picked element rides along as precise context (hidden in the bubble, same as link context).
+    if (selection) {
+      const block = [
+        `--- Selected element (<${selection.tag}> at ${selection.loc}) ---`,
+        selection.count > 1 ? `Renders ${selection.count} instances (one JSX in a list/map) — editing it changes all of them.` : '',
+        `classes: ${selection.className || '(none)'}`,
+        `text: ${selection.text || '(empty)'}`,
+        `The user's request refers to THIS element — edit it at its source location.`,
+      ].filter(Boolean).join('\n');
+      message = message.includes(LINK_CONTEXT_MARKER)
+        ? `${message}\n\n${block}`
+        : `${message}\n\n${LINK_CONTEXT_MARKER}\n${block}`;
+      onClearSelection?.();
+    }
+    onSend(message, { planFirst, research, reviewEdits, image });
+  };
+
   const submit = () => {
     const text = input.trim();
-    if (!text || busy) return;
-    onSend(text, { planFirst, research, reviewEdits, image: shot ?? undefined });
+    if (!text || readingLinks) return;
+    if (busy) { setQueue((q) => [...q, text]); setInput(''); return; }
+    void sendWithLinks(text, shot ?? undefined);
     setInput('');
     setShot(null);
   };
@@ -249,9 +358,34 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
               )}
             >
               {m.role === 'user'
-                ? <p className="whitespace-pre-wrap">{m.content}</p>
+                ? (() => {
+                    const { visible, linkCount } = splitLinkContext(m.content);
+                    return (
+                      <>
+                        <p className="whitespace-pre-wrap">{visible}</p>
+                        {linkCount > 0 && (
+                          <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-black/15 px-2 py-0.5 text-[10px] font-medium" title="Context attached to this message (fetched pages / selected elements)">
+                            <Link2 size={10} /> {linkCount} context item{linkCount > 1 ? 's' : ''} attached
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()
                 : <Markdown content={m.content} />}
-              {m.files_changed?.length > 0 && (
+              {(m.changes?.length ?? 0) > 0 ? (
+                <div className="mt-2 space-y-1">
+                  {m.changes!.map((c) => <FileDiffRow key={c.path} c={c} />)}
+                  {onRevert && (
+                    <button
+                      onClick={() => onRevert(m.files_changed)}
+                      title="Restore every file this change touched to its previous version"
+                      className="inline-flex items-center gap-1 rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink"
+                    >
+                      <Undo2 size={10} /> Revert this change
+                    </button>
+                  )}
+                </div>
+              ) : m.files_changed?.length > 0 && (
                 <div className="mt-2 flex flex-wrap items-center gap-1">
                   {m.files_changed.map((f) => (
                     <span key={f} className="inline-flex items-center gap-1 rounded border border-forge-border bg-forge-panel px-1.5 py-0.5 font-mono text-[10px] text-forge-dim">
@@ -279,6 +413,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
                       <RefreshCw size={12} />
                     </button>
                   </div>
+                  <span title={new Date(m.created_at).toLocaleString()} className="text-[10px] text-forge-dim/60">{relTime(m.created_at)}</span>
                   <CostTag messageId={m.id} />
                 </div>
               )}
@@ -303,6 +438,19 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
             </div>
             {stream.explanation && (
               <Markdown content={stream.explanation} className="mt-1.5 text-forge-dim" />
+            )}
+            {!!stream.activity?.length && (
+              <div className="mt-1.5 space-y-0.5">
+                {stream.activity.length > 3 && (
+                  <p className="text-[10px] text-forge-dim/50">… {stream.activity.length - 3} earlier steps</p>
+                )}
+                {stream.activity.slice(-3).map((a, i, arr) => (
+                  <p key={`${a}-${i}`} className={cn('flex items-center gap-1.5 font-mono text-[11px]', i === arr.length - 1 ? 'text-forge-ink' : 'text-forge-dim/60')}>
+                    {i === arr.length - 1 ? <CircleDashed size={11} className="animate-spin text-forge-ember" /> : <CircleCheck size={11} className="text-forge-ok/60" />}
+                    {a}
+                  </p>
+                ))}
+              </div>
             )}
             {stream.files.length > 0 && (
               <ul className="mt-2 space-y-1">
@@ -369,6 +517,44 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
                 {a}
               </button>
             ))}
+          </div>
+        )}
+
+        {selection && (
+          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-forge-ember/40 bg-forge-ember/10 px-2.5 py-1 text-[11px] text-forge-ink">
+            <MousePointerClick size={11} className="text-forge-ember" />
+            <span className="font-mono">&lt;{selection.tag}&gt;</span>
+            <span className="max-w-[180px] truncate text-forge-dim">{selection.loc.replace(/^\/src\//, '')}</span>
+            {selection.count > 1 && <span className="text-forge-dim">×{selection.count}</span>}
+            <button type="button" aria-label="Clear selected element" onClick={onClearSelection} className="text-forge-dim hover:text-forge-ink">
+              <X size={11} />
+            </button>
+          </div>
+        )}
+
+        {(pendingUrls.length > 0 || readingLinks) && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {pendingUrls.map((u) => (
+              <span key={u} title={u} className="inline-flex items-center gap-1.5 rounded-full border border-forge-ember/40 bg-forge-ember/10 px-2.5 py-1 text-[11px] text-forge-ink">
+                {readingLinks ? <CircleDashed size={11} className="animate-spin text-forge-ember" /> : <Link2 size={11} className="text-forge-ember" />}
+                {hostOf(u)}
+              </span>
+            ))}
+            <span className="text-[10px] text-forge-dim">{readingLinks ? 'Reading pages…' : 'Will be read and used as context'}</span>
+          </div>
+        )}
+
+        {queue.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {queue.map((q, i) => (
+              <span key={`${i}-${q.slice(0, 16)}`} className="inline-flex max-w-[240px] items-center gap-1.5 rounded-full border border-forge-border bg-forge-panel px-2.5 py-1 text-[11px] text-forge-dim">
+                <span className="truncate">{q}</span>
+                <button type="button" aria-label="Remove queued message" onClick={() => setQueue((qs) => qs.filter((_, j) => j !== i))} className="shrink-0 text-forge-dim hover:text-forge-ink">
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+            <span className="text-[10px] text-forge-dim">Queued — sends when the current turn finishes</span>
           </div>
         )}
 
@@ -473,8 +659,8 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
               else if (e.key === 'Escape' && busy && onStop) { e.preventDefault(); onStop(); }
             }}
             rows={2}
-            placeholder={busy ? 'Working…' : 'Describe a change… (Enter to send)'}
-            disabled={busy}
+            placeholder={busy ? 'Working… type your next message — Enter queues it' : 'Describe a change… (Enter to send, paste a link to have it read)'}
+            disabled={readingLinks}
             aria-label="Message the assistant"
             className="flex-1 resize-none rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm placeholder:text-forge-dim/70 focus:border-forge-ember/60 focus:outline-none disabled:opacity-50"
           />

@@ -56,8 +56,10 @@ export interface Cluster {
 
 // A high-"scent" next dive (information-foraging trigger). The engine of the rabbit hole — each is a
 // one-click descent into a related subject, a provocative question, or a surprising tangent.
+// `tease` is the scent payload (Pirolli & Card: proximal cues drive the pursue/skip decision) — one
+// whispered line about what's behind the door, always withheld, never a spoiler.
 export type LeadKind = 'dig' | 'question' | 'tangent';
-export interface Lead { label: string; kind: LeadKind }
+export interface Lead { label: string; kind: LeadKind; tease?: string }
 export interface ClusterEdge {
   sourceId: string;
   targetId: string;
@@ -775,6 +777,155 @@ then pull them deeper. Given the topic, return a complete little "room" for it:
 
 Output EXACTLY ONE JSON object, no prose, no fences:
 {"takeaway":"…","overview":"…","why":"…","trajectory":"…","leads":[{"label":"Why does time freeze at the horizon?","kind":"question"}]}`;
+
+// ---------------------------------------------------------------------------
+// THE SCENE — the curiosity loop that replaces "answer in a card". Built on the verified science
+// (see the rabbit-hole doctrine): curiosity is triggered by NAMING a gap (information-gap theory),
+// peaks at "some idea + low confidence" (inverted-U → guess-before-reveal), intensifies when the
+// answer is visibly HELD (salience), and dies on closure (belief resolution → every reveal ends by
+// opening the next gap). The scene is the anatomy of one idea:
+//   PRIME (scaffold) → GAP (named) → GUESS (3 options) → sealed answer → BEATS (reveal) → REGAP.
+// ---------------------------------------------------------------------------
+
+// A scene's staging — the model art-directs each idea so no two look alike (the anti-"card" move):
+//   reveal    — the default gap→guess→truth
+//   flip      — a MISCONCEPTION struck through, the truth slamming in (myth/truth)
+//   bigNumber — one staggering figure that reframes the whole idea (bigValue/bigUnit)
+//   mystery   — the near-dark room: nobody fully knows; one lit line, the currents glow brightest
+export type SceneRecipe = 'reveal' | 'flip' | 'bigNumber' | 'mystery';
+export const SCENE_RECIPES: SceneRecipe[] = ['reveal', 'flip', 'bigNumber', 'mystery'];
+
+export interface Scene {
+  recipe: SceneRecipe;  // how this idea is STAGED — drives a distinct visual template
+  prime: string;        // one scaffold line — gives the user "some idea" (inverted-U footing)
+  gap: string;          // the NAMED gap, phrased as an irresistible question
+  options: string[];    // 3 plausible one-line guesses
+  answerIndex: number;  // which option is closest to the truth (truth should still be stranger)
+  beats: string[];      // 1-4 reveal beats; beat 0 answers the gap; the LAST beat raises tension
+  regap: string;        // the next named gap this opens — the open loop that keeps the hole going
+  currents: Lead[];     // 5 lures with teases: 4 coherent (dig/question) + exactly 1 tethered tangent
+  myth?: string;        // flip: the thing they probably believe (struck through on reveal)
+  truth?: string;       // flip: the striking correction that lands in its place
+  bigValue?: string;    // bigNumber: the figure itself ("200,000")
+  bigUnit?: string;     // bigNumber: what it counts ("bee-flights to fill one honey jar")
+  guessed?: number;     // set after the user commits (-1 = skipped straight to reveal)
+}
+
+export const SCENE_ARTIFACT_ID = 'scene';
+
+/** The scene a cluster carries (persisted as an artifact so it survives the universe sync). */
+export function sceneOf(c: Cluster): Scene | null {
+  const a = c.artifacts.find((x) => x.id === SCENE_ARTIFACT_ID);
+  if (!a?.detail) return null;
+  try { return parseScene(JSON.parse(a.detail)); } catch { return null; }
+}
+
+export function sceneArtifact(scene: Scene): Artifact {
+  return { id: SCENE_ARTIFACT_ID, kind: 'research', title: 'Scene', detail: JSON.stringify(scene), source: 'garvis' };
+}
+
+/** Tolerant scene validation. Fails to null (caller falls back to the classic overview path). */
+export function parseScene(raw: unknown): Scene | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== 'object') return null;
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const prime = str(r.prime);
+  const gap = str(r.gap);
+  const beats = (Array.isArray(r.beats) ? r.beats : []).map(str).filter(Boolean).slice(0, 4);
+  if (!gap || !beats.length) return null; // a scene without a gap or a reveal is not a scene
+  const options = (Array.isArray(r.options) ? r.options : []).map(str).filter(Boolean).slice(0, 3);
+  const ai = typeof r.answerIndex === 'number' && Number.isInteger(r.answerIndex) ? r.answerIndex : 0;
+  const currents: Lead[] = (Array.isArray(r.currents) ? r.currents : [])
+    .map((l) => l as Record<string, unknown>)
+    .filter((l) => typeof l?.label === 'string' && (l.label as string).trim())
+    .slice(0, 6)
+    .map((l) => ({
+      label: (l.label as string).trim(),
+      kind: (['dig', 'question', 'tangent'].includes(l.kind as string) ? l.kind : 'dig') as LeadKind,
+      tease: typeof l.tease === 'string' && l.tease.trim() ? (l.tease as string).trim() : undefined,
+    }));
+  const guessed = typeof r.guessed === 'number' && Number.isInteger(r.guessed) ? (r.guessed as number) : undefined;
+  let recipe: SceneRecipe = SCENE_RECIPES.includes(r.recipe as SceneRecipe) ? (r.recipe as SceneRecipe) : 'reveal';
+  const myth = str(r.myth);
+  const truth = str(r.truth);
+  const bigValue = str(r.bigValue);
+  const bigUnit = str(r.bigUnit);
+  // a recipe only "counts" if its payload is present; otherwise fall back to reveal so the renderer
+  // never stages an empty flip/bigNumber.
+  if (recipe === 'flip' && !(myth && truth)) recipe = 'reveal';
+  if (recipe === 'bigNumber' && !bigValue) recipe = 'reveal';
+  return {
+    recipe,
+    prime,
+    gap,
+    options,
+    answerIndex: options.length ? Math.max(0, Math.min(options.length - 1, ai)) : 0,
+    beats,
+    regap: str(r.regap),
+    currents,
+    ...(myth ? { myth } : {}),
+    ...(truth ? { truth } : {}),
+    ...(bigValue ? { bigValue } : {}),
+    ...(bigUnit ? { bigUnit } : {}),
+    ...(guessed !== undefined ? { guessed } : {}),
+  };
+}
+
+/**
+ * Progressive extraction of one string field from a PARTIAL JSON stream, so the prime/gap can paint
+ * while the rest of the scene is still composing (<1s first paint preserved). Pure.
+ */
+export function extractSceneField(partial: string, field: 'prime' | 'gap'): string {
+  const m = new RegExp(`"${field}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`).exec(partial);
+  if (!m) return '';
+  try { return JSON.parse(`"${m[1]}"`) as string; } catch { return m[1]; }
+}
+
+export const SCENE_SYSTEM = `You are GARVIS, a brilliant thinking partner walking someone INTO an idea.
+You never deliver an encyclopedia answer — you engineer a CURIOSITY LOOP and you ART-DIRECT it. Voice:
+a brilliant friend three steps ahead; vivid, concrete, a little sly; zero academic tone; no hedging.
+
+FIRST decide how to STAGE this idea — pick the recipe that would hit hardest for THIS specific idea:
+- "flip": there's a common MISCONCEPTION worth detonating. Fill myth (what they likely believe) + truth
+  (the striking correction). Best when the everyday intuition is simply wrong.
+- "bigNumber": one staggering figure reframes everything. Fill bigValue (the number, e.g. "200,000")
+  + bigUnit (what it counts, vivid). Best when scale IS the shock.
+- "mystery": nobody fully knows — the edge of human knowledge. Best when the honest answer is "we're
+  not sure, and that's thrilling."
+- "reveal": the default — a surprising answer to a sharp gap. Use when none of the above fits cleanly.
+
+Output EXACTLY ONE JSON object, no prose, no fences:
+{"recipe":"reveal|flip|bigNumber|mystery",
+ "prime":"one scaffold sentence giving them SOME footing — enough to form a guess, never the answer",
+ "gap":"the named gap — the specific thing they don't know yet, phrased as an irresistible question",
+ "options":["three one-line guesses a smart person might actually make — each genuinely plausible","…","…"],
+ "answerIndex":0,
+ "beats":["2-4 reveal beats, each 1-3 vivid sentences. Beat 1 ANSWERS the gap with the most surprising
+   TRUE framing (stranger than even the right guess). The LAST beat must end on a new tension.","…"],
+ "regap":"the next gap this reveal just opened — one question they now NEED answered, momentum-phrased",
+ "myth":"(flip only) the belief to strike through","truth":"(flip only) what lands in its place",
+ "bigValue":"(bigNumber only) the figure","bigUnit":"(bigNumber only) what it counts, vividly",
+ "currents":[{"label":"the next thought phrased AS the thought (\\"Wait — do bees actually vote?\\"), never a category",
+   "kind":"dig|question|tangent",
+   "tease":"a whispered scent line about what's behind this door — withheld, never a spoiler ('the answer involves cannibalism')"}]}
+
+RULES:
+- Always fill recipe, prime, gap, options, beats, regap, currents. Fill myth/truth ONLY for flip and
+  bigValue/bigUnit ONLY for bigNumber. Beat 1 is always the truth (so the reveal works for any recipe).
+- options: exactly 3. answerIndex marks the one CLOSEST to the truth; the truth must still outdo it.
+- currents: exactly 5 — FOUR that stay in this idea's neighborhood (dig/question; deep rabbit holes are
+  coherent, not random), and exactly ONE tangent to a DIFFERENT domain that shares the same underlying
+  shape (name the shape in its tease).
+- Plain prose everywhere. No markdown. Momentum, not organization.`;
+
+export function buildSceneUser(focus: Cluster, trail: string[] = []): string {
+  return [
+    `THE IDEA THEY JUST WALKED INTO: ${focus.title}`,
+    focus.summary ? `WHAT THEY ALREADY SAW: ${focus.summary}` : '',
+    trail.length ? `HOW THEY GOT HERE: ${trail.join(' → ')}` : '',
+    'Compose the scene now. Return the single JSON object.',
+  ].filter(Boolean).join('\n');
+}
 
 // ---------------------------------------------------------------------------
 // LIVING CONVERSATION — you think out loud; Garvis decides where your mind moved and the map follows.

@@ -97,7 +97,7 @@ export async function runAgent(opts: {
   onEvent?: (e: AgentEvent) => void;
 }): Promise<AgentRunResult> {
   const maxSteps = opts.maxSteps ?? 16;
-  const maxTokens = opts.maxTokens ?? 8000;
+  const maxTokens = opts.maxTokens ?? 12000;
   const tools: unknown[] = [...AGENT_TOOLS];
   if (opts.webSearch !== false) tools.push(WEB_SEARCH_TOOL);
 
@@ -121,6 +121,20 @@ export async function runAgent(opts: {
     messages.push({ role: 'assistant', content: blocks });
 
     const toolUses = blocks.filter((b) => b.type === 'tool_use');
+
+    // TRUNCATION GUARD: a turn cut at the token limit mid-tool-call carries INCOMPLETE input —
+    // executing it writes half a file (unclosed JSX, unbalanced braces). Never execute; tell the
+    // model and let it redo the action in smaller pieces.
+    if (resp.stop_reason === 'max_tokens' && toolUses.length) {
+      messages.push({
+        role: 'user',
+        content: toolUses.map((tu) => ({
+          type: 'tool_result', tool_use_id: tu.id, is_error: true,
+          content: 'Your message hit the output-token limit — this tool call arrived TRUNCATED and was NOT executed. Re-issue it in smaller pieces: ONE file per message, and split very large files into smaller components first.',
+        })),
+      });
+      continue;
+    }
     if (resp.stop_reason !== 'tool_use' || toolUses.length === 0) break; // task complete
 
     const results: unknown[] = [];

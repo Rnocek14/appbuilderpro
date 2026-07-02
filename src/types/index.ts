@@ -80,6 +80,8 @@ export interface AIMessage {
   created_at: string;
   /** Conversation thread this message belongs to. NULL/undefined = the default "Main" thread. */
   thread_id?: string | null;
+  /** Per-file before/after + diffstat for this turn's edits — powers the chat's diff cards. */
+  changes?: { path: string; before: string; after: string; additions: number; deletions: number }[] | null;
 }
 
 // A proposed implementation plan the assistant presents before writing code

@@ -30,10 +30,13 @@ const RESOLVE_EXTS = ['', '.tsx', '.ts', '.jsx', '.js', '.css'];
 
 function parseSpecifiers(content: string): string[] {
   const specs: string[] = [];
-  const re = /(?:import|export)[^'"]*?from\s*['"]([^'"]+)['"]|import\s*['"]([^'"]+)['"]/g;
+  // Static imports/exports, side-effect imports, AND dynamic import('…') — React.lazy routes
+  // (lazy(() => import('./pages/X'))) are dynamic imports; missing them let apps ship with
+  // App.tsx routing to pages that were never generated (blank app, Vite resolve error).
+  const re = /(?:import|export)[^'"]*?from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]\s*\)|import\s*['"]([^'"]+)['"]/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content)) !== null) {
-    const s = m[1] ?? m[2];
+    const s = m[1] ?? m[2] ?? m[3];
     if (s) specs.push(s);
   }
   return specs;
@@ -187,7 +190,114 @@ export function validateProject(files: { path: string; content: string }[]): QAI
   // first path segment so param routes (/post/:id) don't false-positive.
   issues.push(...deadLinkIssues(files));
 
+  // In-page anchors break HashRouter apps: <a href="#id"> changes the ROUTE, not the scroll
+  // position — the user lands on a nonexistent route (blank screen).
+  issues.push(...anchorIssues(files));
+
+  // A routed app with no catch-all renders a BLANK screen for any unknown URL.
+  issues.push(...catchAllIssues(files));
+
+  // Truncated/malformed source: a stream cut mid-file leaves unbalanced braces and cryptic
+  // downstream errors ("no corresponding closing tag") — flag the file itself for a full rewrite.
+  issues.push(...truncationIssues(files));
+
+  // RLS lint: a public table created without row level security is readable/writable by anyone
+  // holding the anon key — the most common security hole in generated Supabase apps.
+  issues.push(...rlsIssues(files));
+
   return issues;
+}
+
+/** Unbalanced-brace detector (strings/comments stripped first; |delta| >= 2 to avoid noise). */
+function truncationIssues(files: { path: string; content: string }[]): QAIssue[] {
+  const out: QAIssue[] = [];
+  for (const f of files) {
+    if (!CODE_RE.test(f.path)) continue;
+    const src = f.content
+      .replace(/`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '""')
+      .replace(/\/\/[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    let d = 0;
+    for (const ch of src) { if (ch === '{') d++; else if (ch === '}') d--; }
+    if (Math.abs(d) >= 2) {
+      out.push({
+        path: f.path, severity: 'error',
+        message: `File appears truncated or malformed (${d > 0 ? `${d} unclosed` : `${Math.abs(d)} extra`} '{' braces) — read it and rewrite the COMPLETE file.`,
+      });
+    }
+  }
+  return out;
+}
+
+/** <a href="#section"> in a HashRouter app navigates to route "#section" (blank screen). #/route links are fine. */
+function anchorIssues(files: { path: string; content: string }[]): QAIssue[] {
+  const out: QAIssue[] = [];
+  for (const f of files) {
+    if (!CODE_RE.test(f.path)) continue;
+    for (const m of f.content.matchAll(/<a\b[^>]*\bhref=["']#(?!\/)([^"']+)["']/g)) {
+      out.push({
+        path: f.path, severity: 'error',
+        message: `In-page anchor href="#${m[1]}" breaks HashRouter routing — it navigates to a nonexistent route (blank screen) instead of scrolling. Use onClick={() => document.getElementById('${m[1]}')?.scrollIntoView({ behavior: 'smooth' })} instead.`,
+      });
+    }
+  }
+  return out;
+}
+
+/** A routed app should have a catch-all <Route path="*"> so unknown URLs show a 404, not a blank screen. */
+function catchAllIssues(files: { path: string; content: string }[]): QAIssue[] {
+  let routesFile: string | null = null;
+  let hasRoutes = false;
+  let hasCatchAll = false;
+  for (const f of files) {
+    if (!CODE_RE.test(f.path)) continue;
+    if (/<Route\b[^>]*\bpath=/.test(f.content)) { hasRoutes = true; routesFile = routesFile ?? f.path; }
+    if (/<Route\b[^>]*\bpath=["'][^"']*\*["']/.test(f.content)) hasCatchAll = true;
+  }
+  if (!hasRoutes || hasCatchAll || !routesFile) return [];
+  return [{
+    path: routesFile, severity: 'warning',
+    message: 'No catch-all route — an unknown URL renders a blank screen. Add <Route path="*" element={<NotFound />} /> with a designed 404 page linking home.',
+  }];
+}
+
+/**
+ * RLS lint for generated migrations: every table created in /supabase/migrations/*.sql must have
+ * `alter table <t> enable row level security`, and (once enabled) at least one `create policy`.
+ * Missing RLS = error (open to the world via the anon key); RLS with no policy = warning (locked
+ * to service-role only — sometimes intentional, e.g. automation internals).
+ */
+function rlsIssues(files: { path: string; content: string }[]): QAIssue[] {
+  const out: QAIssue[] = [];
+  for (const f of files) {
+    if (!/^\/supabase\/migrations\/.+\.sql$/i.test(f.path)) continue;
+    const sql = f.content
+      .replace(/--[^\n]*/g, '')          // strip line comments
+      .replace(/\/\*[\s\S]*?\*\//g, '')  // strip block comments
+      .toLowerCase();
+    const created = new Set<string>();
+    for (const m of sql.matchAll(/create\s+table\s+(?:if\s+not\s+exists\s+)?(?:"?([a-z_][a-z0-9_]*)"?\.)?"?([a-z_][a-z0-9_]*)"?/g)) {
+      const schema = m[1] ?? 'public';
+      if (schema === 'public') created.add(m[2]);
+    }
+    if (created.size === 0) continue;
+    const rlsEnabled = new Set<string>();
+    for (const m of sql.matchAll(/alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:"?([a-z_][a-z0-9_]*)"?\.)?"?([a-z_][a-z0-9_]*)"?\s+enable\s+row\s+level\s+security/g)) {
+      rlsEnabled.add(m[2]);
+    }
+    const hasPolicy = new Set<string>();
+    for (const m of sql.matchAll(/create\s+policy\s+(?:"[^"]*"|[a-z0-9_]+)\s+on\s+(?:"?([a-z_][a-z0-9_]*)"?\.)?"?([a-z_][a-z0-9_]*)"?/g)) {
+      hasPolicy.add(m[2]);
+    }
+    for (const t of created) {
+      if (!rlsEnabled.has(t)) {
+        out.push({ path: f.path, severity: 'error', message: `Table '${t}' is created without ROW LEVEL SECURITY — anyone with the anon key can read/write it. Add \`alter table ${t} enable row level security;\` plus the appropriate policies.` });
+      } else if (!hasPolicy.has(t)) {
+        out.push({ path: f.path, severity: 'warning', message: `Table '${t}' has RLS enabled but no CREATE POLICY — app users can't read/write it (service-role only). Intentional for internal tables; otherwise add policies.` });
+      }
+    }
+  }
+  return out;
 }
 
 const firstSeg = (p: string) => p.replace(/^\/+/, '').split('/')[0] ?? '';
