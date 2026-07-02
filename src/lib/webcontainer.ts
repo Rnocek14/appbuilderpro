@@ -12,20 +12,45 @@ import { isMetaFile } from './projectBrain';
 
 export type { WebContainerProcess };
 
-// WebContainer allows only ONE instance per page, and React StrictMode double-invokes
-// effects in dev — so the boot is a module-level singleton, never per-component.
-let bootPromise: Promise<WebContainer> | null = null;
+// WebContainer allows only ONE instance per PAGE — and module-level state does not survive
+// Vite HMR: a hot reload resets a module singleton while the booted instance lives on in the
+// page, so the next boot throws "Only a single WebContainer instance can be booted". The boot
+// promise therefore lives on globalThis (page-scoped), not in this module.
+const BOOT_KEY = '__ff_wc_boot__';
 
 export function getWebContainer(): Promise<WebContainer> {
-  if (!bootPromise) {
+  const g = globalThis as Record<string, unknown>;
+  let p = g[BOOT_KEY] as Promise<WebContainer> | undefined | null;
+  if (!p) {
     // coep must match the header the page is served with so preview iframes load.
-    bootPromise = WebContainer.boot({ coep: 'credentialless' });
+    p = WebContainer.boot({ coep: 'credentialless' }).catch((e) => {
+      // NEVER cache a failed boot — a transient failure would otherwise poison every later
+      // caller (pane, deep verify, Retry button) until a full page reload.
+      (globalThis as Record<string, unknown>)[BOOT_KEY] = null;
+      throw e;
+    });
+    g[BOOT_KEY] = p;
   }
-  return bootPromise;
+  return p;
 }
 
 export function isolationReady(): boolean {
   return typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated === true;
+}
+
+/**
+ * Wipe the previous project's files from the container FS before mounting a DIFFERENT project.
+ * wc.mount() MERGES trees — without this, a project with few files (e.g. a stalled generation)
+ * renders the LEFTOVER files of whatever project was mounted before (cross-project bleed).
+ * node_modules is kept: npm install runs on every project switch anyway and reconciles deps.
+ */
+async function wipeProjectFs(wc: WebContainer): Promise<void> {
+  let entries: string[] = [];
+  try { entries = (await wc.fs.readdir('/')) as string[]; } catch { return; }
+  await Promise.all(entries.map(async (name) => {
+    if (name === 'node_modules' || name.startsWith('.')) return;
+    try { await wc.fs.rm('/' + name, { recursive: true, force: true }); } catch { /* best-effort */ }
+  }));
 }
 
 /** Convert flat project files (/src/main.tsx → content) into WebContainer's nested tree. */
@@ -123,6 +148,11 @@ const NODE_BUILTINS = new Set([
   'util', 'events', 'buffer', 'process', 'module', 'zlib', 'net', 'tls', 'dns', 'assert',
 ]);
 
+// Official npm package-name shape. The HARD gate: whatever the scan regexes false-positive on
+// (SQL `from "users"` in template strings, prose, code-in-strings), nothing that isn't a real
+// installable name may ever reach `npm install` — a single garbage entry fails the whole install.
+const NPM_NAME_RE = /^(@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+
 /** Extract the installable package name from an import specifier, or null if not a bare package. */
 function pkgNameOf(spec: string): string | null {
   if (!spec || spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('@/')) return null;
@@ -131,6 +161,7 @@ function pkgNameOf(spec: string): string | null {
   const parts = spec.split('/');
   const name = spec.startsWith('@') ? (parts.length >= 2 ? parts[0] + '/' + parts[1] : '') : parts[0];
   if (!name || NODE_BUILTINS.has(name)) return null;
+  if (name.length > 64 || !NPM_NAME_RE.test(name)) return null;
   return name;
 }
 
@@ -138,10 +169,12 @@ function pkgNameOf(spec: string): string | null {
 function scanImports(files: ProjectFile[]): Set<string> {
   const names = new Set<string>();
   const patterns = [
-    /(?:import|export)[^'"]*?\bfrom\s*['"]([^'"]+)['"]/g,
-    /\bimport\s*['"]([^'"]+)['"]/g,
-    /\brequire\(\s*['"]([^'"]+)['"]\s*\)/g,
-    /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g,
+    // Anchored to a statement start, and the run may not cross quotes OR backticks — so
+    // `select * from "users"` inside a template literal can never look like an import.
+    /(?:^|[\n;])\s*(?:import|export)\b[^'"`]*?\bfrom\s*['"]([^'"\n]+)['"]/g,
+    /(?:^|[\n;])\s*import\s*['"]([^'"\n]+)['"]/g,
+    /\brequire\(\s*['"]([^'"\n]+)['"]\s*\)/g,
+    /\bimport\(\s*['"]([^'"\n]+)['"]\s*\)/g,
   ];
   for (const f of files) {
     if (isMetaFile(f.path) || !/\.(t|j)sx?$/.test(f.path)) continue;
@@ -281,7 +314,12 @@ export async function runTypecheck(projectId: string): Promise<TsDiag[]> {
 export async function startRunner(projectId: string, files: ProjectFile[], opts: { force?: boolean } = {}): Promise<void> {
   const force = !!opts.force;
   // Already up (or on its way) for this project — leave it. This is what survives navigation.
-  if (!force && state.projectId === projectId && state.status !== 'idle' && state.status !== 'error') return;
+  // A deep verify's transient states (deepActive) do NOT count as "on its way": the dev server
+  // must still be started once the verify parks the container.
+  if (!force && !deepActive && state.projectId === projectId && state.status !== 'idle' && state.status !== 'error') return;
+  // Never fight an in-flight deep verify for the container (two concurrent npm installs thrash
+  // the same FS) — wait for it to park, then boot on the warm mount it leaves behind.
+  if (deepRun) { try { await deepRun; } catch { /* verify failures don't block booting */ } }
   if (force) mountedProjectId = null; // force => full clean re-run
 
   const token = ++runToken;
@@ -310,6 +348,7 @@ export async function startRunner(projectId: string, files: ProjectFile[], opts:
       if (devProc) { try { devProc.kill(); } catch { /* noop */ } devProc = null; }
       const reconciled = reconcilePackageJson(files);
       patch({ status: 'mounting' }); pushLog('$ mounting ' + reconciled.length + ' files…');
+      if (mountedProjectId) { pushLog('$ clearing previous project…'); await wipeProjectFs(wc); }
       await wc.mount(buildFileTree(injectObservability(reconciled)));
       if (token !== runToken) return;
 
@@ -364,6 +403,98 @@ export async function syncFiles(projectId: string, files: ProjectFile[]): Promis
   // A dependency change means the running node_modules is stale — reinstall, then restart the
   // dev server so the new package is actually available (Vite HMR alone can't add a dep).
   if (pkgChanged) void reinstall(projectId, prepared);
+}
+
+/**
+ * Generation-time DEEP verify: run the real `tsc --noEmit` for a project even when the Full-runtime
+ * preview isn't open — boot + mount + npm install headlessly (no dev server), then type-check. This
+ * is what makes EVERY generation end compiler-verified instead of only sessions with the preview up.
+ * Cheap when repeated: the mounted+installed container is reused for the same project (and a later
+ * startRunner skips its own mount/install too). Returns ran:false when the environment can't run it
+ * (no cross-origin isolation, no package.json, or the container is busy with another project).
+ */
+let deepActive = false;                                            // a deep verify owns the container
+let deepRun: Promise<{ ran: boolean; diags: TsDiag[] }> | null = null; // in-flight verify (startRunner awaits it)
+
+export async function deepTypecheck(projectId: string, files: ProjectFile[]): Promise<{ ran: boolean; diags: TsDiag[] }> {
+  try {
+    if (!isolationReady() || !hasPackageJson(files)) return { ran: false, diags: [] };
+
+    // The live runner already serves this project — reuse it wholesale.
+    if (state.projectId === projectId && state.status === 'ready') {
+      await syncFiles(projectId, files);
+      return { ran: true, diags: await runTypecheck(projectId) };
+    }
+    // A verify is already running — share its result instead of racing it.
+    if (deepRun) return deepRun;
+    // The container is busy with ANOTHER project (or mid-boot) — never clobber a live session.
+    if (state.projectId !== projectId && state.status !== 'idle' && state.status !== 'error') {
+      return { ran: false, diags: [] };
+    }
+    // A REAL boot (dev server) is in flight for this project — never fight it; static-only.
+    if (state.projectId === projectId && !deepActive
+        && (state.status === 'booting' || state.status === 'mounting' || state.status === 'installing' || state.status === 'starting')) {
+      return { ran: false, diags: [] };
+    }
+
+    deepRun = runDeep(projectId, files);
+    return await deepRun;
+  } catch {
+    return { ran: false, diags: [] };
+  }
+}
+
+async function runDeep(projectId: string, files: ProjectFile[]): Promise<{ ran: boolean; diags: TsDiag[] }> {
+  deepActive = true;
+  try {
+    const wc = await getWebContainer();
+
+    // Same project already mounted + installed (e.g. a prior deep verify) — write changed files only.
+    if (mountedProjectId === projectId) {
+      const prepared = reconcilePackageJson(files);
+      for (const f of prepared) {
+        if (isMetaFile(f.path) || f.path === '/index.html') continue; // keep the injected shim
+        if (syncedFiles.get(f.path) === f.content) continue;
+        const rel = f.path.replace(/^\/+/, '');
+        const slash = rel.lastIndexOf('/');
+        try {
+          if (slash > 0) await wc.fs.mkdir(rel.slice(0, slash), { recursive: true });
+          await wc.fs.writeFile(rel, f.content);
+          syncedFiles.set(f.path, f.content);
+        } catch { /* ignore individual write failures */ }
+      }
+      if (state.projectId !== projectId) patch({ projectId });
+      return { ran: true, diags: await runTypecheck(projectId) };
+    }
+
+    // Fresh headless mount + install (no dev server). Guarded by runToken so an incoming
+    // startRunner (the user opening the Full-runtime preview) safely cancels these steps.
+    const token = ++runToken;
+    patch({ projectId, status: 'mounting', url: null, error: null });
+    pushLog('$ deep verify: mounting project…');
+    const reconciled = reconcilePackageJson(files);
+    if (mountedProjectId && mountedProjectId !== projectId) await wipeProjectFs(wc);
+    await wc.mount(buildFileTree(injectObservability(reconciled)));
+    if (token !== runToken) return { ran: false, diags: [] };
+    patch({ status: 'installing' });
+    pushLog('$ npm install --no-audit --no-fund   (deep verify)');
+    const install = await wc.spawn('npm', ['install', '--no-audit', '--no-fund']);
+    pipe(install, token);
+    const code = await install.exit;
+    if (token !== runToken) return { ran: false, diags: [] };
+    if (code !== 0) { patch({ status: 'idle' }); return { ran: false, diags: [] }; }
+    mountedProjectId = projectId;
+    syncedFiles = new Map(reconciled.filter((f) => !isMetaFile(f.path)).map((f) => [f.path, f.content]));
+    const diags = await runTypecheck(projectId);
+    // Park the container idle-but-warm: a later startRunner for this project skips mount+install.
+    if (token === runToken) patch({ status: 'idle' });
+    return { ran: true, diags };
+  } catch {
+    return { ran: false, diags: [] };
+  } finally {
+    deepActive = false;
+    deepRun = null;
+  }
 }
 
 export interface BuiltFile { path: string; b64: string; sha1: string }

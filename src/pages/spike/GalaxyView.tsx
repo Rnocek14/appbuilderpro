@@ -9,15 +9,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, ArrowRight, ArrowLeft, ExternalLink, Maximize2, Layers, HelpCircle, Shuffle, Wand2, Clapperboard, Play, Loader2, Paperclip, GitBranch,
-  Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Link2, Image as ImageIcon, FileText, Lightbulb, Repeat2, X,
+  Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Link2, Image as ImageIcon, FileText, Lightbulb, Repeat2, X, Flame, Lock,
 } from 'lucide-react';
 import {
-  universeConnections, addChild, slugify, titleSimilarity,
+  universeConnections, addChild, slugify, titleSimilarity, sceneOf,
   type ClusterGraph, type Cluster, type ClusterKind, type ClusterMaturity, type Artifact, type ExpandMode, type Lead, type LeadKind, type UniverseConnection, type CuriosityState, type ThinkSuggestion, type GarvisMind,
 } from '../../lib/garvis/clustering';
-import { streamOverview, fetchLeads, expandCluster, gatherWikiMedia, gatherDiscover, gatherVideos, findBridge, investigate, observe, reframe, updateMind, composeProspect, interpretThought, discoverAvailable, type Prospect, type Bridge, type Notice } from '../../lib/garvis/clusteringRun';
+import { composeScene, recordSceneGuess, streamOverview, fetchLeads, expandCluster, gatherWikiMedia, gatherDiscover, gatherVideos, findBridge, investigate, observe, reframe, updateMind, composeProspect, interpretThought, discoverAvailable, type Prospect, type Bridge, type Notice } from '../../lib/garvis/clusteringRun';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
 import { serperRelated, serperAvailable, youTubeId } from '../../lib/garvis/discover';
+import { addLoopPure, closeLoopsPure, epiphanyCount, newLoop, readLoops, writeLoops, type OpenLoop } from '../../lib/garvis/loops';
+import SceneStage, { type StageCurrent } from './SceneStage';
 
 const MIND_HEX = '#a78bfa'; // the violet of Garvis's mind — where your thinking is heading
 type ViewerItem = { kind: 'image' | 'video' | 'link'; url: string; title: string };
@@ -77,9 +79,11 @@ interface Props {
   focusId: string | null;
   setFocusId: (id: string) => void;
   onCost?: (usd: number) => void;
+  /** stable key for the per-world open-loop ledger */
+  worldKey?: string;
 }
 
-export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCost }: Props) {
+export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCost, worldKey = 'local' }: Props) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(0.85);
   const [busy, setBusy] = useState<string | null>(null);
@@ -97,8 +101,15 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   const [mind, setMind] = useState<GarvisMind | null>(() => { try { const r = localStorage.getItem('ff:mind:v1'); return r ? (JSON.parse(r) as GarvisMind) : null; } catch { return null; } });
   const [suggestion, setSuggestion] = useState<ThinkSuggestion | null>(null);
   const [viewer, setViewer] = useState<ViewerItem | null>(null);
+  // OPEN LOOPS — the questions Garvis named that you haven't chased (embers on the map's edge)
+  const [loops, setLoops] = useState<OpenLoop[]>(() => readLoops(worldKey));
+  const [whisper, setWhisper] = useState(false);      // "had this one ready for you"
+  const [nudge, setNudge] = useState<Lead | null>(null); // patch-leaving: the richer vein
+  const [mapMode, setMapMode] = useState(false);      // zoomed out to the constellation vs. in the scene
   const drag = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
   const leadsCache = useRef<Record<string, Lead[]>>({});
+  const leadsRef = useRef<Lead[]>([]);
+  const whisperT = useRef(0);
   const prefetch = useRef<Record<string, Prospect | 'loading'>>({});
   const liveRef = useRef<{ graph: ClusterGraph; focusId: string | null; mind: GarvisMind | null }>({ graph, focusId, mind });
   const noticingRef = useRef(false);
@@ -107,6 +118,11 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   const lastMind = useRef(0);
   const refreshRef = useRef<() => void>(() => {});
   liveRef.current = { graph, focusId, mind };
+  leadsRef.current = leads;
+
+  useEffect(() => { setLoops(readLoops(worldKey)); }, [worldKey]);
+  const updateLoops = (fn: (l: OpenLoop[]) => OpenLoop[]) =>
+    setLoops((prev) => { const nxt = fn(prev); writeLoops(worldKey, nxt); return nxt; });
 
   const byId = useMemo(() => new Map(graph.clusters.map((c) => [c.id, c])), [graph]);
   const positions = useMemo(() => layoutTree(graph), [graph]);
@@ -123,36 +139,44 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   useEffect(() => {
     if (!focus) return;
     const id = focus.id;
-    setLeads(leadsCache.current[id] ?? []); setBridge(null); setStreamText(''); setSuggestion(null); setViewer(null);
+    const c0 = byId.get(id)!;
+    setLeads(leadsCache.current[id] ?? sceneOf(c0)?.currents ?? []); setBridge(null); setStreamText(''); setSuggestion(null); setViewer(null); setNudge(null);
     let cancelled = false;
-    const c = byId.get(id)!;
     const trail = parent ? [parent.title] : [];
-    const needAnswer = !c.artifacts.some((a) => a.id === 'understanding');
-    const needMedia = !c.artifacts.some((a) => a.kind === 'image');
-    const needVideo = !c.artifacts.some((a) => a.kind === 'video');
+    const needAnswer = !c0.artifacts.some((a) => a.id === 'scene') && !c0.artifacts.some((a) => a.id === 'understanding');
+    const needMedia = !c0.artifacts.some((a) => a.kind === 'image');
+    const needVideo = !c0.artifacts.some((a) => a.kind === 'video');
     setLoading({ answer: needAnswer, media: needMedia, video: needVideo });
     setErr('');
     (async () => {
       let g = graph;
       if (needAnswer) {
+        let gotLeads: Lead[] = [];
         try {
-          // STREAM the answer — first words appear in <1s
-          const sr = await streamOverview(g, id, trail, (t) => { if (!cancelled) setStreamText(t); });
+          // THE SCENE — one call composes the curiosity loop; the gap paints as it streams
+          const sr = await composeScene(g, id, trail, (t) => { if (!cancelled) setStreamText(t); });
           if (cancelled) return;
-          g = sr.graph; setGraph(g); if (sr.costUsd) onCost?.(sr.costUsd);
-        } catch (e) { if (!cancelled) setErr(e instanceof Error ? e.message : 'Could not compose this idea — check your API key in Settings.'); }
-        // currents (separate, after the answer is on screen)
-        try {
-          const lr = await fetchLeads(g, id, trail);
-          if (cancelled) return;
-          g = lr.graph; leadsCache.current[id] = lr.leads; setLeads(lr.leads); setGraph(g); if (lr.costUsd) onCost?.(lr.costUsd);
+          if (sr.costUsd) onCost?.(sr.costUsd);
+          if (sr.scene) {
+            g = sr.graph; setGraph(g); setStreamText('');
+            gotLeads = sr.leads; leadsCache.current[id] = sr.leads; setLeads(sr.leads);
+            if (sr.scene.regap) updateLoops((l) => addLoopPure(l, newLoop(sr.scene!.regap, id)));
+          } else {
+            // classic fallback: streamed overview + separate currents (a bad JSON never dead-ends the map)
+            const so = await streamOverview(g, id, trail, (t) => { if (!cancelled) setStreamText(t); });
+            if (cancelled) return;
+            g = so.graph; setGraph(g); if (so.costUsd) onCost?.(so.costUsd);
+            const lr = await fetchLeads(g, id, trail);
+            if (cancelled) return;
+            g = lr.graph; gotLeads = lr.leads; leadsCache.current[id] = lr.leads; setLeads(lr.leads); setGraph(g); if (lr.costUsd) onCost?.(lr.costUsd);
+          }
           if (serperAvailable()) void serperRelated(focus.title).then((rels) => {
             if (cancelled || !rels.length) return;
-            const have = new Set(lr.leads.map((l) => slugify(l.label))); const merged = [...lr.leads];
+            const have = new Set(gotLeads.map((l) => slugify(l.label))); const merged = [...gotLeads];
             for (const q of rels) { const k = slugify(q); if (!have.has(k)) { have.add(k); merged.push({ label: q, kind: /\?\s*$/.test(q) ? 'question' : 'dig' }); } }
             leadsCache.current[id] = merged; setLeads(merged);
           }).catch(() => {});
-        } catch { /* leads best-effort */ }
+        } catch (e) { if (!cancelled) setErr(e instanceof Error ? e.message : 'Could not compose this idea — try again in a moment.'); }
         finally { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); }
       }
       if (needMedia && !cancelled) {
@@ -176,7 +200,10 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
     if (!focus || !leads.length) return;
     const trail = [parent?.title, focus.title].filter(Boolean) as string[];
     const bias = kindBias();
-    const top = [...leads].sort((a, b) => bias[b.kind] - bias[a.kind]).slice(0, PREFETCH_N);
+    // the regap is the hottest open loop — always hold ITS answer too (the sealed-envelope law)
+    const regap = sceneOf(focus)?.regap;
+    const cands: Lead[] = [...(regap ? [{ label: regap, kind: 'question' as LeadKind }] : []), ...[...leads].sort((a, b) => bias[b.kind] - bias[a.kind])];
+    const top = cands.slice(0, PREFETCH_N);
     let cancelled = false;
     (async () => {
       for (const l of top) {
@@ -191,6 +218,25 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.id, leads]);
+
+  // PATCH-LEAVING (foraging law): when this idea has been consumed and dwell runs long, point at the
+  // richer vein instead of letting the session stall out. One calm line, never a popup.
+  useEffect(() => {
+    if (!focus) return;
+    const t = window.setTimeout(() => {
+      const { graph: g, focusId: fid } = liveRef.current;
+      if (!fid) return;
+      const f = g.clusters.find((x) => x.id === fid);
+      if (!f) return;
+      const revealed = sceneOf(f) ? sceneOf(f)!.guessed !== undefined : f.artifacts.some((a) => a.id === 'understanding');
+      if (!revealed) return;
+      const kids = new Set(g.clusters.filter((x) => x.parentId === fid).map((x) => slugify(x.title)));
+      const next = leadsRef.current.find((l) => !kids.has(slugify(l.label)));
+      if (next) setNudge(next);
+    }, 45000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.id]);
 
   useEffect(() => {
     if (!focus) return;
@@ -226,17 +272,23 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
 
   if (!focus) return <p className="p-6 text-sm text-forge-dim">Name a curiosity to begin.</p>;
 
-  const travel = (id: string) => { if (id !== focus.id) { setFocusId(id); setBridge(null); } };
+  const travel = (id: string) => { setMapMode(false); if (id !== focus.id) { setFocusId(id); setBridge(null); } };
   const dive = (lead: Lead) => {
     recordPick(lead.kind);
     const { graph: g2, id } = addChild(graph, focus.id, { title: lead.label, kind: leadToKind(lead.kind) });
     if (!id) return;
     const p = prefetch.current[slugify(lead.label)];
     if (p && p !== 'loading') {
-      const arts: Artifact[] = [...(p.understanding ? [p.understanding] : []), ...p.images];
+      const arts: Artifact[] = [...(p.scene ? [p.scene] : []), ...(p.understanding ? [p.understanding] : []), ...p.images];
       leadsCache.current[id] = p.leads;
       setGraph({ ...g2, clusters: g2.clusters.map((c) => (c.id === id ? { ...c, summary: p.summary || c.summary, trajectory: p.trajectory ?? c.trajectory, artifacts: [...arts, ...c.artifacts] } : c)) });
+      // the anticipation, caught in the act — only whisper when it's TRUE
+      setWhisper(true);
+      window.clearTimeout(whisperT.current);
+      whisperT.current = window.setTimeout(() => setWhisper(false), 2600);
     } else setGraph(g2);
+    // chasing a question retires its ember (belief resolution: closed loops leave the stage)
+    updateLoops((l) => closeLoopsPure(l, lead.label).kept);
     travel(id);
   };
   const run = async (label: string, fn: () => Promise<{ graph?: ClusterGraph; costUsd?: number }>) => {
@@ -265,7 +317,11 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
       recentUtter.current = [u, ...recentUtter.current].slice(0, 3);
       setThought(''); setGraph(res.graph); setSuggestion(res.suggestion ?? null);
       if (res.state) setMind((m) => (m ? { ...m, state: res.state! } : { intent: '', state: res.state!, nextDirections: [], anomaly: '', confidence: 0.4, updatedAt: '' }));
-      if (res.focusId !== focus.id) travel(res.focusId);
+      if (res.focusId !== focus.id) {
+        const nt = res.graph.clusters.find((c) => c.id === res.focusId)?.title;
+        if (nt) updateLoops((l) => closeLoopsPure(l, nt).kept);
+        travel(res.focusId);
+      }
       lastMind.current = 0; void refreshMind(); // re-read the mind after a thought
     } finally { setThinking(false); }
   };
@@ -328,8 +384,21 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
     ...imagesOf(focus).slice(0, 6).map((a) => ({ kind: 'img' as const, url: a.url || a.thumb || '', thumb: a.thumb || a.url || '', title: a.title })),
     ...videosOf(focus).slice(0, 2).map((v) => ({ kind: 'vid' as const, url: v.url, thumb: v.thumb || '', title: v.title })),
   ];
-  const RMEDIA = 250;
+  const RMEDIA = 310; // the bloom is bigger than the old focus card — the constellation rings wider
   const haloPos = (i: number) => { const t = -Math.PI / 2 + (i / Math.max(1, halo.length)) * Math.PI * 2 + 0.5; return { x: focusPos.x + RMEDIA * Math.cos(t), y: focusPos.y + RMEDIA * Math.sin(t) }; };
+
+  // ---- props for the cinematic SceneStage (the full-canvas "you are here") ----
+  const stageTrail: string[] = [];
+  { let cur = focus.parentId, gd = 0; const acc: string[] = []; while (cur && gd++ < 12) { const c = byId.get(cur); if (!c) break; acc.unshift(c.title); cur = c.parentId; } stageTrail.push(...acc); }
+  const stageHero = imagesOf(focus)[0]?.url || imagesOf(focus)[0]?.thumb;
+  const stageGallery = [
+    ...imagesOf(focus).slice(1, 5).map((a) => ({ url: a.url || a.thumb || '', thumb: a.thumb || a.url || '', title: a.title, video: false })),
+    ...videosOf(focus).slice(0, 2).map((v) => ({ url: v.url || '', thumb: v.thumb || '', title: v.title, video: true })),
+  ].filter((m) => m.thumb);
+  const stageCurrents: StageCurrent[] = ghosts.map((l) => {
+    const pf = prefetch.current[slugify(l.label)];
+    return { lead: l, ready: !!pf && pf !== 'loading', epiphany: epiphanyCount(l.label, loops) };
+  });
 
   // minimap — a tiny overview of the whole sprawl so you stay oriented
   const pts = [...positions.entries()];
@@ -355,6 +424,8 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
           .fm-breathe { animation: fm-breathe 6s ease-in-out infinite; }
           @keyframes fm-rise { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
           .fm-rise { animation: fm-rise .45s cubic-bezier(.2,.8,.2,1) both; }
+          @keyframes ku-kb { from { transform: scale(1.06) translate(0,0) } to { transform: scale(1.16) translate(-2%, -2%) } }
+          .ku-kb { animation: ku-kb 22s ease-in-out infinite alternate; }
         `}</style>
         <div className="absolute inset-0 cursor-grab active:cursor-grabbing" onWheel={onWheel} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           style={{ background: `radial-gradient(1400px 900px at 50% 45%, ${hex}10, transparent 65%), radial-gradient(circle at 50% 50%, #0c0a14, #060509 82%) #060509` }}>
@@ -363,6 +434,18 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
         </div>
 
         <div className="pointer-events-none absolute left-3 top-3 z-10 text-[11px] text-forge-dim/70">drag to roam · scroll to zoom out & see your whole rabbit hole · click any node</div>
+
+        {/* OPEN QUESTIONS — the embers. Named gaps you haven't chased; each is one click from closing. */}
+        {loops.length > 0 && (
+          <div className="absolute left-3 top-9 z-10 w-60 space-y-1">
+            <div className="flex items-center gap-1 text-[9px] uppercase tracking-wide text-amber-300/70"><Flame size={9} /> open questions · {loops.length}</div>
+            {loops.slice(0, 4).map((l) => (
+              <button key={l.id} onClick={() => dive({ label: l.text, kind: 'question' })}
+                className="block w-full truncate rounded-lg border border-amber-400/25 bg-amber-400/5 px-2 py-1 text-left text-[10px] text-amber-100/80 backdrop-blur transition-colors hover:border-amber-400/50 hover:text-amber-50"
+                title={l.text}>{l.text}</button>
+            ))}
+          </div>
+        )}
         {err && <div className="absolute left-1/2 top-3 z-20 max-w-md -translate-x-1/2 rounded-lg border border-forge-err/40 bg-forge-err/15 px-3 py-1.5 text-center text-[11px] text-forge-err">{err}</div>}
         <button onClick={fit} className="absolute right-3 top-3 z-10 rounded-lg border border-forge-border bg-forge-panel/80 p-1.5 text-forge-dim hover:text-forge-ink" title="Recenter"><Maximize2 size={14} /></button>
         <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-lg border border-forge-border bg-forge-panel/70 px-2 py-1 text-[10px] text-forge-dim">{graph.clusters.length} ideas explored</div>
@@ -375,7 +458,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
               const onPath = c.id === focus.id || c.parentId === focus.id;
               return <path key={`e-${c.id}`} className={onPath ? 'fm-flow' : ''} d={edgePath(a.x, a.y, b.x, b.y)} fill="none" stroke={KIND_HEX[c.kind]} strokeWidth={onPath ? 2 : 1} strokeOpacity={onPath ? 0.6 : 0.2} strokeLinecap="round" />;
             })}
-            {ghosts.map((l, i) => { const t = -Math.PI / 2 + (i / Math.max(1, ghosts.length)) * Math.PI * 2; const gx = focusPos.x + 430 * Math.cos(t), gy = focusPos.y + 430 * Math.sin(t); return <path key={`ge-${i}`} className="fm-flow" d={edgePath(focusPos.x, focusPos.y, gx, gy)} fill="none" stroke={LEAD_HEX[l.kind]} strokeWidth={1.2} strokeOpacity={0.32} strokeDasharray="2 6" />; })}
+            {ghosts.map((l, i) => { const t = -Math.PI / 2 + (i / Math.max(1, ghosts.length)) * Math.PI * 2; const gx = focusPos.x + 480 * Math.cos(t), gy = focusPos.y + 480 * Math.sin(t); return <path key={`ge-${i}`} className="fm-flow" d={edgePath(focusPos.x, focusPos.y, gx, gy)} fill="none" stroke={LEAD_HEX[l.kind]} strokeWidth={1.2} strokeOpacity={0.32} strokeDasharray="2 6" />; })}
             {!compact && halo.map((m, i) => { const p = haloPos(i); return <path key={`me-${i}`} d={edgePath(focusPos.x, focusPos.y, p.x, p.y)} fill="none" stroke={hex} strokeWidth={1} strokeOpacity={0.22} strokeDasharray="1 6" />; })}
           </svg>
 
@@ -408,21 +491,50 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
 
           {ghosts.map((l, i) => {
             const t = -Math.PI / 2 + (i / Math.max(1, ghosts.length)) * Math.PI * 2;
-            const gx = focusPos.x + 430 * Math.cos(t), gy = focusPos.y + 430 * Math.sin(t);
+            const gx = focusPos.x + 480 * Math.cos(t), gy = focusPos.y + 480 * Math.sin(t);
             const pf = prefetch.current[slugify(l.label)]; const ready = pf && pf !== 'loading';
             const lhex = LEAD_HEX[l.kind]; const LIcon = LEAD_ICON[l.kind];
+            const ep = epiphanyCount(l.label, loops); // touching ≥2 open loops = an epiphany lure
             return (
-              <div key={`g-${i}`} className="fm-node pointer-events-auto absolute" style={{ left: gx, top: gy, width: 172, transform: 'translate(-50%, -50%)', zIndex: 20 }}>
-                <button onClick={() => dive(l)} title={l.label} className="group flex w-full items-center gap-1.5 rounded-full border bg-forge-panel/80 px-3 py-2 text-left backdrop-blur transition-all hover:scale-105"
-                  style={{ borderColor: ready ? `${lhex}66` : `${lhex}30`, boxShadow: ready ? `0 0 18px -8px ${lhex}` : 'none' }}>
-                  <LIcon size={12} style={{ color: lhex }} className="shrink-0" />
-                  <span className="line-clamp-2 text-[11px] text-forge-dim group-hover:text-forge-ink">{l.label}</span>
-                  {ready ? <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: lhex }} /> : pf === 'loading' ? <Loader2 size={10} className="ml-auto animate-spin text-forge-dim/50" /> : null}
+              <div key={`g-${i}`} className="fm-node pointer-events-auto absolute" style={{ left: gx, top: gy, width: 196, transform: 'translate(-50%, -50%)', zIndex: 20 }}>
+                <button onClick={() => dive(l)} title={ready ? 'Garvis is holding this answer' : l.label}
+                  className="group w-full rounded-2xl border bg-forge-panel/85 px-3 py-2 text-left backdrop-blur transition-all hover:scale-105"
+                  style={{
+                    borderColor: ep >= 2 ? '#fbbf2488' : ready ? `${lhex}77` : `${lhex}30`,
+                    boxShadow: ep >= 2 ? '0 0 26px -8px #fbbf24' : ready ? `0 0 22px -8px ${lhex}` : 'none',
+                  }}>
+                  <span className="flex items-center gap-1.5">
+                    <LIcon size={12} style={{ color: lhex }} className="shrink-0" />
+                    <span className="line-clamp-2 text-[11px] font-medium text-forge-ink/90 group-hover:text-forge-ink">{l.label}</span>
+                    {ready ? <Lock size={9} className="ml-auto shrink-0" style={{ color: lhex }} /> : pf === 'loading' ? <Loader2 size={10} className="ml-auto shrink-0 animate-spin text-forge-dim/50" /> : null}
+                  </span>
+                  {l.tease && <span className="mt-0.5 line-clamp-2 block text-[10px] italic leading-snug text-forge-dim/75">{l.tease}</span>}
+                  {ep >= 2 && <span className="mt-1 inline-flex items-center gap-1 text-[9px] font-semibold text-amber-300"><Flame size={9} /> touches {ep} of your open questions</span>}
                 </button>
               </div>
             );
           })}
         </div>
+
+        {/* ============ THE SCENE — the full-canvas idea you're standing in (map is the zoom-out) ============ */}
+        {!mapMode && (
+          <div className="absolute inset-0 z-30">
+            <SceneStage
+              focus={focus} scene={sceneOf(focus)} composing={loading.answer} partial={streamText} hex={hex}
+              trail={stageTrail} heroUrl={stageHero} gallery={stageGallery} currents={stageCurrents}
+              onGuess={(i) => setGraph(recordSceneGuess(graph, focus.id, i))}
+              onDive={(l) => dive(l)}
+              onOpenMedia={(m) => setViewer({ kind: m.video ? 'video' : 'image', url: m.url, title: m.title || focus.title })}
+              onConstellation={() => setMapMode(true)}
+            />
+          </div>
+        )}
+        {/* zoomed OUT to the constellation — one tap back into the idea you were standing in */}
+        {mapMode && (
+          <button onClick={() => setMapMode(false)} className="absolute left-1/2 top-3 z-40 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-forge-ember/50 bg-forge-panel/90 px-3 py-1.5 text-[11px] font-medium text-forge-ember backdrop-blur transition-colors hover:bg-forge-ember/15">
+            <ArrowLeft size={12} /> back to {focus.title.slice(0, 40)}
+          </button>
+        )}
 
         {/* GARVIS IS NOTICING — proactive, peripheral, calm. Surfaces unprompted insights about your universe. */}
         {(notices.length > 0 || noticing) && (
@@ -455,15 +567,28 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
           </div>
         )}
 
-        {/* Garvis's read of your cognitive state + the one move that fits it (behavior, not a widget) */}
-        {(mind?.state || suggestion) && (
-          <div className="absolute bottom-[68px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-2">
-            {mind?.state && <span className="rounded-full border border-forge-border bg-forge-panel/80 px-2 py-0.5 text-[10px] text-forge-dim backdrop-blur">Garvis sees you <span className="text-forge-ember">{mind.state}</span></span>}
+        {/* Garvis's read of your cognitive state + the one move that fits it (behavior, not a widget).
+            Floats ABOVE the scene (z-40); the ambient "state" chip is map-only to keep the scene clean. */}
+        {((mind?.state && mapMode) || suggestion || nudge) && (
+          <div className="absolute bottom-[176px] left-1/2 z-40 flex max-w-[92%] -translate-x-1/2 flex-wrap items-center justify-center gap-2">
+            {mind?.state && mapMode && <span className="rounded-full border border-forge-border bg-forge-panel/80 px-2 py-0.5 text-[10px] text-forge-dim backdrop-blur">Garvis sees you <span className="text-forge-ember">{mind.state}</span></span>}
             {suggestion && <button onClick={() => actSuggestion(suggestion)} className="inline-flex items-center gap-1 rounded-full border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-0.5 text-[10px] font-medium text-forge-ember backdrop-blur transition-colors hover:bg-forge-ember/20">{suggestion.label} <ArrowRight size={10} /></button>}
+            {nudge && (
+              <button onClick={() => { setNudge(null); dive(nudge); }} className="fm-rise inline-flex max-w-[420px] items-center gap-1 truncate rounded-full border border-forge-border bg-forge-panel/85 px-2.5 py-0.5 text-[10px] text-forge-dim backdrop-blur transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
+                this one's mostly mapped — <span className="truncate font-medium text-forge-ember">{nudge.label}</span> <ArrowRight size={10} className="shrink-0" />
+              </button>
+            )}
           </div>
         )}
 
-        <form onSubmit={(e) => { e.preventDefault(); think(); }} className="absolute bottom-4 left-1/2 z-20 flex w-[min(540px,92%)] -translate-x-1/2 items-center gap-2 rounded-2xl border border-forge-border bg-forge-panel/85 p-2 shadow-2xl backdrop-blur">
+        {/* the anticipation, caught in the act — shown only when the arrival really was pre-composed */}
+        {whisper && (
+          <div className="fm-rise pointer-events-none absolute bottom-[220px] left-1/2 z-40 -translate-x-1/2 rounded-full border border-forge-ember/40 bg-forge-panel/90 px-3 py-1 text-[11px] text-forge-ember backdrop-blur">
+            <Sparkles size={11} className="mr-1 inline" /> had this one ready for you
+          </div>
+        )}
+
+        <form onSubmit={(e) => { e.preventDefault(); think(); }} className="absolute bottom-4 left-1/2 z-40 flex w-[min(540px,92%)] -translate-x-1/2 items-center gap-2 rounded-2xl border border-forge-border bg-forge-panel/90 p-2 shadow-2xl backdrop-blur">
           <Sparkles size={15} className="ml-1 shrink-0 text-forge-ember" />
           <input value={thought} onChange={(e) => setThought(e.target.value)} placeholder="think out loud — “wait, what about…”" className="flex-1 bg-transparent text-sm text-forge-ink outline-none placeholder:text-forge-dim/55" />
           {thinking ? <Loader2 size={16} className="mr-1 shrink-0 animate-spin text-forge-dim" /> : <button type="submit" disabled={!thought.trim()} className="shrink-0 rounded-lg p-1 text-forge-dim hover:text-forge-ember disabled:opacity-40"><ArrowRight size={16} /></button>}

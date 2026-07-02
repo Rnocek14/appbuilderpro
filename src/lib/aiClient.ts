@@ -23,9 +23,10 @@ import { PREFS_PATH, prefsContext } from './preferences';
 import { MAIN_THREAD_ID, threadOf } from './threads';
 import { previewContext } from './previewRuntime';
 import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
-import { PREFERENCE_DISTILL_SYSTEM } from './prompts';
+import { PREFERENCE_DISTILL_SYSTEM, DIRECTIONS_SYSTEM, directionPickPrompt, singleDirectionPrompt, filesPromptChunk } from './prompts';
+import { parseProtocol } from '../../supabase/functions/_shared/streamparse';
 import { recordUsage } from './usage';
-import { agenticEdit, agenticVerifyAndFix } from './agent/edit';
+import { agenticEdit, agenticVerifyAndFix, generationCompileGate } from './agent/edit';
 import { agentAvailable } from './agent/loop';
 
 interface Usage { inputTokens: number; outputTokens: number }
@@ -108,6 +109,7 @@ export interface GenerateResult { generationId: string }
 export type EditEvent =
   | { type: 'start' }
   | { type: 'explanation'; text: string }
+  | { type: 'activity'; text: string } // live agent tool feed ("Reading src/App.tsx", "Type-checking")
   | { type: 'question'; text: string }
   | { type: 'file-start'; path: string }
   | { type: 'file-done'; path: string }
@@ -139,6 +141,9 @@ export interface EditResult {
 
 export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   if (DIRECT) return directGenerate(projectId, prompt, planContext);
+  // Cloud mode (no browser key): orchestrate CLIENT-side in short relay calls — the edge
+  // generate-app worker has a hard wall-clock that kills big builds mid-stream.
+  if (!resolveAI().ready) return chunkedCloudGenerate(projectId, prompt, planContext);
   const { data, error } = await supabase.functions.invoke('generate-app', {
     body: { projectId, prompt, planContext },
   });
@@ -495,11 +500,109 @@ async function readFnError(error: unknown): Promise<string> {
 
 interface RawResult { text: string; inputTokens: number; outputTokens: number }
 
-export async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192): Promise<RawResult> {
+export interface DesignDirection {
+  archetype: string; name: string; risk: string; accentHue: number;
+  headingFont: string; bodyFont: string; brief: string; preview_html: string;
+}
+
+// Normalize preview HTML defensively: strip markdown fences, and wrap bare fragments in a
+// real document (a fragment in srcdoc renders, but with browser default margins/fonts).
+function cleanPreviewHtml(h: string): string {
+  let s = h.trim().replace(/^```(?:html)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  if (!/<html[\s>]/i.test(s)) {
+    s = `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">${s}</body></html>`;
+  }
+  return s;
+}
+
+const DIRECTION_FALLBACK_PICKS = [
+  { archetype: 'ENTERPRISE CLARITY', risk: 'safe' },
+  { archetype: 'MIDNIGHT PRO TOOL', risk: 'opinionated' },
+  { archetype: 'EDITORIAL BROADSHEET', risk: 'bold' },
+];
+
+/**
+ * Pre-build DESIGN DIRECTIONS: 3 committed, maximally-distinct visual identities, FAN-OUT style —
+ * one tiny archetype-pick call, then one direction per parallel call. Each call is small (fits the
+ * edge relay's time limits, unlike one giant 3-preview response), previews arrive progressively
+ * via onDirection, and per-call archetype assignment beats a batched call on diversity.
+ */
+export async function generateDesignDirections(
+  prompt: string, onDirection?: (d: DesignDirection) => void,
+): Promise<DesignDirection[]> {
+  // Stage 1 — pick the 3 archetypes (fast, tiny; falls back to a spanning default trio).
+  let picks = DIRECTION_FALLBACK_PICKS;
+  try {
+    const raw = await rawComplete([
+      { role: 'system', content: DIRECTIONS_SYSTEM },
+      { role: 'user', content: directionPickPrompt(prompt) },
+    ], 600, { fast: true });
+    const parsed = await parseJsonWithRepair<{ picks?: { archetype?: string; risk?: string }[] }>(raw.text);
+    const got = (parsed?.picks ?? [])
+      .filter((p) => p && typeof p.archetype === 'string' && p.archetype.length > 2)
+      .map((p) => ({ archetype: p.archetype as string, risk: (p.risk === 'opinionated' || p.risk === 'bold') ? p.risk : 'safe' }));
+    if (got.length >= 3) picks = got.slice(0, 3);
+  } catch { /* fall back to the default trio */ }
+
+  // Stage 2 — one direction per call, in parallel; a single bad/slow direction never kills the set.
+  const out: DesignDirection[] = [];
+  await Promise.all(picks.map(async (p) => {
+    try {
+      // Fast tier: previews are simple archetype-driven HTML — the cheap model renders them
+      // 3-4x sooner, and the ARCHETYPE SPEC (not model taste) carries the design quality.
+      const raw = await rawComplete([
+        { role: 'system', content: DIRECTIONS_SYSTEM },
+        { role: 'user', content: singleDirectionPrompt(prompt, p, picks) },
+      ], 3200, { fast: true });
+      const parsed = await parseJsonWithRepair<{ direction?: DesignDirection; directions?: DesignDirection[] }>(raw.text);
+      // Accept BOTH shapes — the system prompt's batched contract sometimes wins over the
+      // per-call "one direction" instruction; discarding those results = blank picker.
+      const d = parsed?.direction ?? (Array.isArray(parsed?.directions) ? parsed.directions[0] : undefined);
+      if (d && typeof d.preview_html === 'string' && d.preview_html.length > 200 && Number.isFinite(Number(d.accentHue))) {
+        const dir: DesignDirection = {
+          ...d,
+          archetype: d.archetype || p.archetype,
+          risk: d.risk || p.risk,
+          preview_html: cleanPreviewHtml(d.preview_html),
+        };
+        out.push(dir);
+        onDirection?.(dir);
+      }
+    } catch { /* one direction failing is fine — the picker works with 2 */ }
+  }));
+  return out;
+}
+
+/** One-shot completion via FableForge Cloud (the agent-turn relay) — used whenever the user has
+ * no browser API key, so every AI feature works out of the box on the operator's metered key. */
+async function cloudComplete(messages: { role: string; content: string }[], maxTokens: number, fast = false): Promise<RawResult> {
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
+  const rest = messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content }));
+  const { data, error } = await supabase.functions.invoke('agent-turn', {
+    body: { system, messages: rest, tools: [], maxTokens, fast },
+  });
+  if (error) throw new Error(`FableForge Cloud AI: ${error.message}`);
+  const d = data as {
+    content?: { type: string; text?: string }[];
+    usage?: { input_tokens?: number; output_tokens?: number };
+    error?: string;
+  } | null;
+  if (d?.error) throw new Error(d.error);
+  const text = (d?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
+  if (!text) throw new Error('FableForge Cloud AI returned no text.');
+  const inputTokens = d?.usage?.input_tokens ?? 0;
+  const outputTokens = d?.usage?.output_tokens ?? 0;
+  recordUsage({ provider: 'anthropic', model: 'cloud', inputTokens, outputTokens });
+  return { text, inputTokens, outputTokens };
+}
+
+export async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192, opts: { fast?: boolean } = {}): Promise<RawResult> {
   const ai = resolveAI();
   const label = providerInfo(ai.provider).label;
   if (!ai.ready) {
-    throw new Error(`No API key set for ${label}. Add one in the model picker (or switch provider).`);
+    // FableForge Cloud fallback: no browser key → relay through the agent-turn edge proxy
+    // (operator key held server-side, metered by credits). Users never have to paste a key.
+    return cloudComplete(messages, maxTokens, opts.fast ?? false);
   }
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -965,8 +1068,18 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
       // regex-fix passes when the agent isn't available (non-Anthropic provider).
       await mark('validate', 'running');
       let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s) found` : 'clean');
-      if (qaErrors.length) {
+      // UNCONDITIONAL COMPILE GATE — run the real compiler on EVERY generation (booting it
+      // headlessly when the preview isn't open), not only when static checks fail. This is what
+      // makes "generated" mean "compiles", instead of "hopefully compiles".
+      let tsErrors: number | null = null;
+      if (!qaErrors.length) {
+        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+      }
+      await mark('validate', 'done',
+        qaErrors.length ? `${qaErrors.length} issue(s) found`
+          : tsErrors ? `${tsErrors} type error(s) found`
+          : tsErrors === 0 ? 'verified — compiles clean' : 'clean');
+      if (qaErrors.length || tsErrors) {
         await mark('fix', 'running');
         try {
           if (agentAvailable()) {
@@ -979,11 +1092,16 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           }
         } catch { /* best-effort — report whatever remains below */ }
         qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-        await mark('fix', 'done', qaErrors.length ? `${qaErrors.length} unresolved` : 'fixed');
+        if (tsErrors && agentAvailable()) {
+          // Recount after the agentic repair (the container is warm, so this is a quick tsc).
+          try { tsErrors = await generationCompileGate(projectId); } catch { /* keep the last count */ }
+        }
+        const remaining = qaErrors.length + (tsErrors ?? 0);
+        await mark('fix', 'done', remaining ? `${remaining} unresolved` : 'fixed');
       } else {
         await mark('fix', 'done');
       }
-      const unresolved = qaErrors.length;
+      const unresolved = qaErrors.length + (tsErrors ?? 0);
 
       await mark('summarize', 'running');
       const summaryId = await insertAiMessage({
@@ -995,7 +1113,7 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
             : '') +
           ` Open the preview to try it, then keep iterating in chat.` +
           (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
-          (unresolved ? `\n\n⚠️ ${unresolved} static issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
+          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
         files_changed: appFiles.map((f) => f.path),
         thread_id: MAIN_THREAD_ID,
       });
@@ -1009,6 +1127,242 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
         status: 'succeeded', finished_at: new Date().toISOString(),
         input_tokens: bpRaw.inputTokens,
         output_tokens: bpRaw.outputTokens,
+        summary: `Generated ${total} files`,
+      }).eq('id', genId);
+    } catch (err) {
+      await supabase.from('projects').update({ status: 'error' }).eq('id', projectId);
+      await supabase.from('project_generations').update({
+        status: 'failed', error: err instanceof Error ? err.message : String(err), finished_at: new Date().toISOString(),
+      }).eq('id', genId);
+    }
+  })();
+
+  return { generationId: genId };
+}
+
+/**
+ * CHUNKED CLOUD GENERATION — for users with NO browser API key. The edge generate-app worker has
+ * a hard wall-clock (~400s) that kills big builds mid-stream (truncated files, missing pages).
+ * Here the CLIENT orchestrates (no time ceiling) and the relay (agent-turn via cloudComplete)
+ * only ever runs SHORT calls:
+ *   blueprint → schema → SHELL (contracts: types/db/api + App.tsx + layout, one bounded call)
+ *   → PAGES in parallel (each call compiles against the verbatim contracts)
+ *   → manifest diff (every routed page must exist; one retry per missing) → static QA → summary.
+ * Deep compile verify + agentic repair run AFTER via ProjectWorkspace's post-generation effect —
+ * not duplicated here.
+ */
+async function chunkedCloudGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user!.id;
+
+  const { data: gen } = await supabase
+    .from('project_generations')
+    .insert({ project_id: projectId, user_id: userId, prompt, kind: 'create', status: 'running' })
+    .select().single();
+  if (!gen) throw new Error('Could not start generation (could not create the generation record).');
+  const genId = gen.id;
+
+  const stages: { stage: string; status: 'running' | 'done'; started_at: string; finished_at?: string; note?: string }[] = [];
+  const mark = async (stage: string, status: 'running' | 'done', note?: string) => {
+    const now = new Date().toISOString();
+    const found = stages.find((s) => s.stage === stage);
+    if (found) { found.status = status; if (status === 'done') found.finished_at = now; if (note) found.note = note; }
+    else stages.push({ stage, status, started_at: now, ...(note ? { note } : {}) });
+    await supabase.from('project_generations').update({ stages, current_stage: stage }).eq('id', genId);
+  };
+
+  // run in background so the UI can subscribe immediately
+  (async () => {
+    try {
+      await mark('interpret', 'done');
+
+      await mark('blueprint', 'running');
+      const bpUserPrompt = planContext
+        ? `${prompt}\n\nThe user reviewed and approved this plan — follow it:\n${planContext}`
+        : prompt;
+      const bpRaw = await rawComplete([
+        { role: 'system', content: GENERATE_SYSTEM },
+        { role: 'user', content: blueprintPrompt(bpUserPrompt) },
+      ]);
+      let usageIn = bpRaw.inputTokens, usageOut = bpRaw.outputTokens;
+      const track = (r: RawResult): RawResult => { usageIn += r.inputTokens; usageOut += r.outputTokens; return r; };
+      const blueprint = await parseJsonWithRepair<Record<string, unknown>>(bpRaw.text);
+      await supabase.from('app_blueprints').insert({ project_id: projectId, ...blueprint });
+      await supabase.from('projects').update({
+        name: (blueprint.app_name as string) ?? 'Untitled app',
+        description: (blueprint.description as string) ?? null,
+        status: 'generating',
+      }).eq('id', projectId);
+      await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
+
+      // INTEGRATION MANIFEST — same derivation as directGenerate (drives the secret popup + deploy).
+      const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
+        ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
+        : [];
+      const requiredSecrets: { env: string; service: string; purpose: string; status: 'missing' }[] = [];
+      for (const it of integrations) {
+        const service = typeof it.service === 'string' ? it.service : '';
+        const purpose = typeof it.purpose === 'string' ? it.purpose : '';
+        const secrets = Array.isArray(it.secrets) ? it.secrets : [];
+        for (const s of secrets) if (typeof s === 'string' && s.trim()) requiredSecrets.push({ env: s.trim(), service, purpose, status: 'missing' });
+      }
+      const secretEnvs = [...new Set(requiredSecrets.map((s) => s.env))];
+      const manifestSecrets = secretEnvs.map((env) => requiredSecrets.find((s) => s.env === env)!);
+      const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
+      const hasIntegrations = integrations.length > 0;
+
+      await mark('schema', 'running');
+      let backendFiles = 0;
+      let hasBackend = false;
+      let backendNote = 'no backend needed';
+      try {
+        const { tables } = await generateBackend(projectId, JSON.stringify(blueprint));
+        if (tables) { backendFiles = 3; hasBackend = true; backendNote = `${tables} tables + RLS + auth`; }
+      } catch (e) {
+        backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
+      }
+      await mark('schema', 'done', backendNote);
+
+      if (hasIntegrations && !hasBackend) {
+        await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+        await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+      }
+
+      await mark('file_tree', 'running');
+      for (const f of SCAFFOLD_FILES) {
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
+      const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
+      const accentHue = Number(design?.accentHue);
+      if (Number.isFinite(accentHue)) {
+        const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForHue(accentHue, headingFont), updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
+
+      const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
+      const written = new Map<string, string>();
+      const upsertFiles = async (changes: { path: string; content: string }[]) => {
+        for (const f of changes) {
+          if (!f.path || !f.content.trim() || reserved.has(f.path) || f.path.startsWith('/src/components/ui/')) continue;
+          await supabase.from('project_files').upsert(
+            { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
+            { onConflict: 'project_id,path' },
+          );
+          written.set(f.path, f.content);
+        }
+      };
+
+      // 1) SHELL — contracts first: one bounded call that always fits the relay. Pages are
+      // generated against these exact contracts next, so cross-file drift can't happen.
+      await mark('file_tree', 'running', 'contracts + shell');
+      const bpJson = JSON.stringify(blueprint);
+      const shellRaw = track(await rawComplete([
+        { role: 'system', content: GENERATE_FILES_STREAM },
+        { role: 'user', content: filesPromptStream(bpJson, hasBackend, hasIntegrations) +
+          '\n\nTHIS CALL — CONTRACTS + SHELL ONLY: emit /src/lib types + db.ts' +
+          (hasIntegrations ? ' + api.ts' : '') +
+          ', /src/App.tsx (ALL routes, pages lazy-loaded), shared layout components (shell/nav/footer)' +
+          (hasIntegrations ? ', and the /supabase/functions/* edge functions' : '') +
+          '. Do NOT emit /src/pages/* in this call — each page is generated next against these exact contracts, so App.tsx MAY route to pages not yet emitted (this call only). End with §END.' },
+      ], 12000));
+      await upsertFiles(parseProtocol(shellRaw.text).changes);
+      const appTsx = written.get('/src/App.tsx') ?? '';
+      if (!appTsx) throw new Error('The model produced no App.tsx in the shell pass.');
+
+      // 2) PAGE LIST — App.tsx's own ./pages imports are the authoritative manifest.
+      const pagePaths = new Set<string>();
+      const addSpec = (spec: string) => {
+        if (!spec.startsWith('./pages/')) return;
+        let p = '/src/' + spec.slice(2);
+        if (!/\.(t|j)sx?$/.test(p)) p += '.tsx';
+        pagePaths.add(p);
+      };
+      for (const m of appTsx.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) addSpec(m[1]);
+      for (const m of appTsx.matchAll(/(?:^|\n)\s*import[^'"\n]*from\s*['"]([^'"]+)['"]/g)) addSpec(m[1]);
+
+      // 3) CONTRACTS CONTEXT — the verbatim shell every page call compiles against (capped).
+      const contractsContext = [...written.entries()]
+        .filter(([p]) => p.startsWith('/src/'))
+        .map(([p, c]) => `--- ${p} ---\n${c}`)
+        .join('\n\n').slice(0, 60000);
+
+      // 4) PAGES — parallel, max 4 in flight; each is a short bounded call.
+      const pageList = [...pagePaths].filter((p) => !written.has(p));
+      await mark('file_tree', 'running', `${pageList.length} pages, 4 in parallel`);
+      const genPage = async (pagePath: string): Promise<void> => {
+        const r = track(await rawComplete([
+          { role: 'system', content: GENERATE_FILES_STREAM },
+          { role: 'user', content: filesPromptChunk(bpJson, pagePath, contractsContext, hasBackend, hasIntegrations) },
+        ], 6000));
+        const parsed = parseProtocol(r.text);
+        if (!parsed.changes.some((c) => c.path === pagePath && c.content.trim())) {
+          throw new Error(`page ${pagePath} was not emitted`);
+        }
+        await upsertFiles(parsed.changes);
+        await mark('file_tree', 'running', pagePath.split('/').pop());
+      };
+      for (let i = 0; i < pageList.length; i += 4) {
+        await Promise.all(pageList.slice(i, i + 4).map((p) => genPage(p).catch(() => undefined)));
+      }
+      // 5) MANIFEST DIFF — every routed page must exist; one serial retry per missing page.
+      for (const p of pageList.filter((x) => !written.has(x))) {
+        await mark('file_tree', 'running', `retrying ${p.split('/').pop()}`);
+        await genPage(p).catch(() => undefined);
+      }
+      const stillMissing = pageList.filter((x) => !written.has(x));
+      if (!written.size) throw new Error('The model produced no source files.');
+
+      if (hasIntegrations) {
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path: '/supabase/.fableforge/secrets.json',
+            content: JSON.stringify({ secrets: manifestSecrets, integrations }, null, 2) + '\n', updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
+      const total = SCAFFOLD_FILES.length + written.size + backendFiles;
+      await mark('file_tree', 'done', `${total} files`);
+      for (const s of ['frontend', 'backend', 'auth_logic', 'styling'] as const) {
+        await mark(s, 'done');
+      }
+
+      // VALIDATE — static QA only here; the deep compile + agentic repair run right after this
+      // generation finishes, via ProjectWorkspace's post-generation verify effect.
+      await mark('validate', 'running');
+      const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s) found` : 'clean');
+      await mark('fix', 'done', qaErrors.length ? 'handing to the post-build repair' : undefined);
+      const unresolved = qaErrors.length;
+
+      await mark('summarize', 'running');
+      const genAi = resolveAI();
+      const summaryId = await insertAiMessage({
+        project_id: projectId, user_id: userId, generation_id: genId,
+        role: 'assistant',
+        content: `Generated ${total} files for ${blueprint.app_name}.` +
+          (hasBackend
+            ? ` It's full-stack: a Supabase backend (${backendNote}) lives at /supabase/migrations/0001_init.sql and the app talks to it through /src/lib/db.ts. Run that SQL in Supabase, then use "Supabase" in the header to connect — it runs on localStorage until you do.`
+            : '') +
+          ` Open the preview to try it, then keep iterating in chat.` +
+          (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
+          (stillMissing.length ? `\n\n⚠️ ${stillMissing.length} page(s) could not be generated (${stillMissing.map((p) => p.split('/').pop()).join(', ')}) — ask me in chat to add them.` : '') +
+          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) found — I'm verifying and repairing the build now.` : ''),
+        files_changed: [...written.keys()],
+        thread_id: MAIN_THREAD_ID,
+      });
+      recordUsage({ provider: genAi.provider, model: genAi.model, inputTokens: usageIn, outputTokens: usageOut, messageId: summaryId });
+      await mark('summarize', 'done');
+
+      await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
+      await supabase.from('project_generations').update({
+        status: 'succeeded', finished_at: new Date().toISOString(),
+        input_tokens: usageIn,
+        output_tokens: usageOut,
         summary: `Generated ${total} files`,
       }).eq('id', genId);
     } catch (err) {

@@ -8,7 +8,8 @@
 // Provider-agnostic: reasons via _shared/ai.ts complete() (AI_PROVIDER / AI_MODEL), same as garvis-brain.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, corsHeaders, parseJson, type AIMessage } from '../_shared/ai.ts';
+import { complete, corsHeaders, parseJson, modelForPlan, type AIMessage } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 
 interface ShortScriptInput {
   topic: string;
@@ -66,6 +67,15 @@ Deno.serve(async (req) => {
   const { data: { user } } = await authClient.auth.getUser();
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  try {
+    await checkCredits(admin, user.id, 'short_script');
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
+    throw e;
+  }
+  const m = modelForPlan(await getUserPlan(admin, user.id));
+
   let input: ShortScriptInput;
   try {
     input = await req.json();
@@ -81,10 +91,14 @@ Deno.serve(async (req) => {
 
   let result;
   try {
-    result = await complete(messages, { maxTokens: 1800 });
+    result = await complete(messages, { maxTokens: 1800, provider: m.provider, model: m.model });
   } catch (e) {
     return json({ error: `model error: ${e instanceof Error ? e.message : String(e)}` }, 502);
   }
+  await spendCredits(admin, user.id, {
+    costUsd: result.costUsd, kind: 'short_script', provider: m.provider, model: m.model,
+    inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+  });
 
   let parsed: Record<string, unknown> = {};
   try {

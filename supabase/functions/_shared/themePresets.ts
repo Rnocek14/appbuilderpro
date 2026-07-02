@@ -140,6 +140,22 @@ h1,h2,h3 { line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
 ::-webkit-scrollbar-track { background: transparent; }
 .tabular-nums, [data-metric] { font-variant-numeric: tabular-nums; }
+/* Composed entrances: put .stagger on a list/grid container and its children cascade in.
+   Delays are capped so long lists never feel slow. */
+@keyframes stagger-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.stagger > * { opacity: 0; animation: stagger-in 0.45s cubic-bezier(0.16,1,0.3,1) forwards; }
+.stagger > *:nth-child(1) { animation-delay: 0.04s; }
+.stagger > *:nth-child(2) { animation-delay: 0.08s; }
+.stagger > *:nth-child(3) { animation-delay: 0.12s; }
+.stagger > *:nth-child(4) { animation-delay: 0.16s; }
+.stagger > *:nth-child(5) { animation-delay: 0.2s; }
+.stagger > *:nth-child(6) { animation-delay: 0.24s; }
+.stagger > *:nth-child(7) { animation-delay: 0.28s; }
+.stagger > *:nth-child(8) { animation-delay: 0.32s; }
+.stagger > *:nth-child(n+9) { animation-delay: 0.36s; }
+/* Hover lift for interactive/linked cards — transform+shadow only (compositor-friendly). */
+.card-lift { transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s cubic-bezier(0.16,1,0.3,1), border-color 0.2s; }
+.card-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px -8px hsl(var(--foreground) / 0.14); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

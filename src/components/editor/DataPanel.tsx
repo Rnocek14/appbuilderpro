@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Database, Play, X, Loader2, ChevronLeft, ChevronRight, TableProperties, Trash2,
-  KeyRound, Users, FolderOpen, FunctionSquare, Archive, Plus,
+  KeyRound, Users, FolderOpen, FunctionSquare, Archive, Plus, ScrollText,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { fnError } from '../../hooks/useConnections';
@@ -15,15 +15,23 @@ type Row = Record<string, unknown>;
 const LIMIT = 50;
 const cell = (v: unknown) => v === null ? '∅' : typeof v === 'object' ? JSON.stringify(v) : String(v);
 
-type Tab = 'data' | 'secrets' | 'auth' | 'storage' | 'functions' | 'backups';
+type Tab = 'data' | 'secrets' | 'auth' | 'storage' | 'functions' | 'logs' | 'backups';
 const TABS: { id: Tab; label: string; icon: typeof Database }[] = [
   { id: 'data', label: 'Data', icon: Database },
   { id: 'secrets', label: 'Secrets', icon: KeyRound },
   { id: 'auth', label: 'Auth', icon: Users },
   { id: 'storage', label: 'Storage', icon: FolderOpen },
   { id: 'functions', label: 'Functions', icon: FunctionSquare },
+  { id: 'logs', label: 'Logs', icon: ScrollText },
   { id: 'backups', label: 'Backups', icon: Archive },
 ];
+
+type LogKind = 'invocations' | 'console' | 'errors';
+const LOG_COLUMNS: Record<LogKind, string[]> = {
+  invocations: ['timestamp', 'status_code', 'method', 'url', 'execution_time_ms'],
+  console: ['timestamp', 'level', 'event_type', 'event_message'],
+  errors: ['timestamp', 'level', 'event_type', 'event_message'],
+};
 
 function Grid({ columns, rows }: { columns: string[]; rows: Row[] }) {
   if (!rows.length) return <p className="p-4 text-xs text-forge-dim">No rows.</p>;
@@ -59,6 +67,9 @@ export function DataPanel({ projectId, onClose }: { projectId: string; onClose: 
   const [objects, setObjects] = useState<Row[]>([]);
   const [functions, setFunctions] = useState<Row[]>([]);
   const [backups, setBackups] = useState<Row[]>([]);
+  // logs tab — polled live while open
+  const [logRows, setLogRows] = useState<Row[]>([]);
+  const [logKind, setLogKind] = useState<LogKind>('invocations');
 
   const invoke = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke<Record<string, unknown> & { error?: string }>('db-console', { body: { projectId, ...body } });
@@ -104,6 +115,20 @@ export function DataPanel({ projectId, onClose }: { projectId: string; onClose: 
   const delSecret = async (nm: string) => guard(async () => { await invoke({ action: 'secret_delete', name: nm }); const d = await invoke({ action: 'secrets_list' }); setSecrets((d.secrets as { name: string }[]) ?? []); });
 
   const openBucket = async (b: string) => guard(async () => { const d = await invoke({ action: 'storage_objects', bucket: b }); setObjects((d.rows as Row[]) ?? []); setActiveBucket(b); });
+
+  // --- logs tab: fetch via the project-logs proxy, poll every 5s while the tab is open ---
+  const loadLogs = useCallback(async () => {
+    const { data, error } = await supabase.functions.invoke<{ rows?: Row[]; error?: string }>('project-logs', { body: { projectId, kind: logKind } });
+    if (error) throw new Error(await fnError(error));
+    if (data?.error) throw new Error(data.error);
+    setLogRows(data?.rows ?? []);
+  }, [projectId, logKind]);
+  useEffect(() => {
+    if (tab !== 'logs') return;
+    void guard(loadLogs);
+    const t = window.setInterval(() => { void loadLogs().catch(() => undefined); }, 5000);
+    return () => window.clearInterval(t);
+  }, [tab, logKind, loadLogs, guard]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-forge-panel">
@@ -250,6 +275,27 @@ export function DataPanel({ projectId, onClose }: { projectId: string; onClose: 
       )}
 
       {/* ---------- BACKUPS ---------- */}
+      {tab === 'logs' && (
+        <div className="min-h-0 flex-1 overflow-auto panel-scroll p-3">
+          <div className="mb-2 flex items-center gap-1.5">
+            {(['invocations', 'console', 'errors'] as LogKind[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setLogKind(k)}
+                aria-pressed={logKind === k}
+                className={`rounded-full border px-2.5 py-1 text-[11px] capitalize transition-colors ${logKind === k ? 'border-forge-ember bg-forge-ember/15 text-forge-ink' : 'border-forge-border text-forge-dim hover:text-forge-ink'}`}
+              >
+                {k}
+              </button>
+            ))}
+            <span className="ml-auto text-[10px] text-forge-dim">Live — refreshes every 5s · last 24h</span>
+          </div>
+          <Grid columns={LOG_COLUMNS[logKind]} rows={logRows} />
+          {logRows.length === 0 && !loading && <p className="mt-2 text-xs text-forge-dim">No {logKind} in the last 24 hours. Deployed functions log here as they run.</p>}
+        </div>
+      )}
+
       {tab === 'backups' && (
         <div className="min-h-0 flex-1 overflow-auto panel-scroll p-3">
           <p className="mb-2 text-[11px] text-forge-dim">Database backups ({backups.length}).</p>

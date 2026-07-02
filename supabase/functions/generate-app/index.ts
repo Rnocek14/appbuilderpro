@@ -7,12 +7,13 @@
 // canonical modules — no more divergent Sandpack prompt. Progress streams to project_generations.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { complete, completeStream, parseJson, corsHeaders, getProviderConfig, type AIMessage } from '../_shared/ai.ts';
+import { complete, completeStream, parseJson, corsHeaders, modelForPlan, type AIMessage } from '../_shared/ai.ts';
 import {
   GENERATE_SYSTEM, GENERATE_FILES_STREAM, EDIT_SYSTEM_STREAM,
   blueprintPrompt, filesPromptStream, SCHEMA_SYSTEM, schemaPrompt,
 } from '../_shared/prompts.ts';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from '../_shared/scaffold.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { buildIndexCssForHue } from '../_shared/themePresets.ts';
 import { validateProject, issuesToFixRequest } from '../_shared/qa.ts';
 import { parseProtocol } from '../_shared/streamparse.ts';
@@ -71,11 +72,13 @@ Deno.serve(async (req) => {
     .from('projects').select('id, owner_id, name').eq('id', projectId).single();
   if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
 
-  const { data: profile } = await supabaseAdmin
-    .from('profiles').select('plan, monthly_generation_limit').eq('id', user.id).single();
-  const { data: used } = await supabaseAdmin.rpc('generations_this_month', { uid: user.id });
-  if ((used ?? 0) >= (profile?.monthly_generation_limit ?? 10)) {
-    return json({ error: 'Monthly generation limit reached. Upgrade to Pro for more.' }, 429);
+  // CREDIT GATE — a full app build is the most expensive action; reject up front if the balance
+  // can't cover it (replaces the old generation-count limit with the unified credit balance).
+  try {
+    await checkCredits(supabaseAdmin, user.id, 'generation');
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
+    throw e;
   }
 
   const { data: gen, error: genErr } = await supabaseAdmin
@@ -100,6 +103,7 @@ Deno.serve(async (req) => {
 
 async function runPipeline(db: SupabaseClient, genId: string, projectId: string, userId: string, prompt: string, planContext?: string) {
   let totalIn = 0, totalOut = 0, totalCost = 0;
+  const m = modelForPlan(await getUserPlan(db, userId)); // free → cheap model; paid → operator model
   const stageLog: { stage: Stage; status: string; started_at: string; finished_at?: string; note?: string }[] = [];
 
   const mark = async (stage: Stage, status: 'running' | 'done', note?: string) => {
@@ -113,7 +117,7 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
     }).eq('id', genId);
   };
   const ask = async (messages: AIMessage[], maxTokens = 8192) => {
-    const r = await complete(messages, { maxTokens });
+    const r = await complete(messages, { maxTokens, provider: m.provider, model: m.model });
     totalIn += r.inputTokens; totalOut += r.outputTokens; totalCost += r.costUsd;
     return r.text;
   };
@@ -121,7 +125,7 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
   // max_tokens risks the provider's stream-required threshold + socket timeouts (mirrors the client,
   // which streams this step). Also avoids withRetry replaying the most expensive call on a transient error.
   const askStream = async (messages: AIMessage[], maxTokens: number) => {
-    const r = await completeStream(messages, { maxTokens }, () => {});
+    const r = await completeStream(messages, { maxTokens, provider: m.provider, model: m.model }, () => {});
     totalIn += r.inputTokens; totalOut += r.outputTokens; totalCost += r.costUsd;
     return r.text;
   };
@@ -263,10 +267,9 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
     project_id: projectId, user_id: userId, generation_id: genId,
     role: 'assistant', content: summary, files_changed: appFiles.map((f) => f.path),
   });
-  await db.from('usage_events').insert({
-    user_id: userId, project_id: projectId, event_type: 'generation',
-    provider: getProviderConfig().provider, model: getProviderConfig().model,
-    input_tokens: totalIn, output_tokens: totalOut, cost_usd: totalCost,
+  await spendCredits(db, userId, {
+    costUsd: totalCost, kind: 'generation', provider: m.provider, model: m.model,
+    inputTokens: totalIn, outputTokens: totalOut, projectId,
   });
   await db.from('projects').update({ status: 'ready', updated_at: new Date().toISOString() }).eq('id', projectId);
   await db.from('project_generations').update({

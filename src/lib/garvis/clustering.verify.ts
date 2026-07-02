@@ -21,6 +21,10 @@ import {
   deriveMaturity,
   pressure,
   addChild,
+  parseScene,
+  extractSceneField,
+  sceneArtifact,
+  sceneOf,
   type Cluster,
   type ClusterGraph,
 } from './clustering';
@@ -246,6 +250,55 @@ check('maturity: idle → dormant', deriveMaturity({ ideas: 4, children: 0, arti
   check('stats orphans (isolated root, no child, no edge)', s.orphans === 1);
   check('stats avgSalience', Math.abs(s.avgSalience - 0.5) < 1e-9);
 }
+
+// --- THE SCENE (the curiosity loop) ---
+{
+  const good = parseScene({
+    prime: 'The queen looks like a ruler.', gap: 'So who actually runs the hive?',
+    options: ['The queen', 'Simple worker rules', 'Random chance'], answerIndex: 1,
+    beats: ['Nobody runs it — it self-organizes.', 'And that changes what "intelligence" means.'],
+    regap: 'Is a hive more like a brain or a city?',
+    currents: [{ label: 'Do bees vote?', kind: 'question', tease: 'the answer looks like democracy' }, { label: 'Swarm robotics', kind: 'tangent' }],
+  });
+  check('parseScene returns a scene', !!good);
+  check('scene keeps the named gap', good?.gap === 'So who actually runs the hive?');
+  check('scene keeps 2 beats', good?.beats.length === 2);
+  check('scene answerIndex preserved', good?.answerIndex === 1);
+  check('scene current carries its tease', good?.currents[0].tease === 'the answer looks like democracy');
+  check('scene tangent kind preserved', good?.currents[1].kind === 'tangent');
+  check('scene answerIndex clamped to options range', parseScene({ gap: 'q', beats: ['b'], options: ['a', 'b'], answerIndex: 9 })?.answerIndex === 1);
+  check('scene without gap → null', parseScene({ beats: ['b'] }) === null);
+  check('scene without beats → null', parseScene({ gap: 'q' }) === null);
+  check('parseScene of garbage → null', parseScene('nope' as never) === null);
+  check('scene defaults recipe to reveal', good?.recipe === 'reveal');
+}
+// --- scene recipes (the art-direction layer) ---
+{
+  const flip = parseScene({ recipe: 'flip', gap: 'g', beats: ['b'], myth: 'The queen rules.', truth: 'The workers do.' });
+  check('flip recipe kept when myth+truth present', flip?.recipe === 'flip' && flip?.truth === 'The workers do.');
+  const flipBad = parseScene({ recipe: 'flip', gap: 'g', beats: ['b'] });
+  check('flip with no myth/truth falls back to reveal', flipBad?.recipe === 'reveal');
+  const big = parseScene({ recipe: 'bigNumber', gap: 'g', beats: ['b'], bigValue: '200,000', bigUnit: 'bee-flights per jar' });
+  check('bigNumber recipe kept when bigValue present', big?.recipe === 'bigNumber' && big?.bigValue === '200,000');
+  const bigBad = parseScene({ recipe: 'bigNumber', gap: 'g', beats: ['b'] });
+  check('bigNumber with no bigValue falls back to reveal', bigBad?.recipe === 'reveal');
+  check('mystery recipe passes through', parseScene({ recipe: 'mystery', gap: 'g', beats: ['b'] })?.recipe === 'mystery');
+  check('unknown recipe → reveal', parseScene({ recipe: 'explosion', gap: 'g', beats: ['b'] })?.recipe === 'reveal');
+}
+// scene round-trips through its artifact (persists via universe sync)
+{
+  const scene = parseScene({ gap: 'why?', beats: ['because.'], options: ['a', 'b', 'c'], answerIndex: 2, regap: 'then what?', currents: [], prime: 'p' })!;
+  const art = sceneArtifact({ ...scene, guessed: 2 });
+  const c: Cluster = { id: 'x', parentId: null, title: 'X', summary: '', kind: 'topic', salience: 0.5, maturity: 'spark', turnRefs: [], artifacts: [art] };
+  const rt = sceneOf(c);
+  check('sceneOf reads the scene artifact back', rt?.gap === 'why?' && rt?.answerIndex === 2);
+  check('scene guess survives the round trip', rt?.guessed === 2);
+}
+// progressive field extraction from a partial JSON stream (first-paint)
+check('extractSceneField pulls prime from a partial stream', extractSceneField('{"prime":"The queen looks like a ru', 'prime') === 'The queen looks like a ru');
+check('extractSceneField pulls gap once it starts', extractSceneField('{"prime":"p","gap":"So who runs it', 'gap') === 'So who runs it');
+check('extractSceneField returns empty before the field appears', extractSceneField('{"prime":"p"', 'gap') === '');
+check('extractSceneField unescapes a quote', extractSceneField('{"gap":"she said \\"hi\\"', 'gap').includes('"'));
 
 console.log(`\nclustering.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} clustering check(s) failed`);

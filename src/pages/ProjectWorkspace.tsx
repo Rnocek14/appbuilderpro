@@ -4,7 +4,7 @@ import { ArrowLeft, Code2, MessageSquare, Rocket, Globe, Brain, Map, Upload, Com
 import { AppShell } from '../components/layout/AppShell';
 import { FileTree } from '../components/editor/FileTree';
 import { CodeEditorPane } from '../components/editor/CodeEditorPane';
-import { PreviewPane, type Device } from '../components/editor/PreviewPane';
+import { PreviewPane, type Device, type SelectedElement } from '../components/editor/PreviewPane';
 import { WebContainerPane } from '../components/editor/WebContainerPane';
 import { SearchPanel } from '../components/editor/SearchPanel';
 import { DataPanel } from '../components/editor/DataPanel';
@@ -15,6 +15,9 @@ import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/usePr
 import { useProjectSecrets } from '../hooks/useProjectSecrets';
 import { useConnections, fnError } from '../hooks/useConnections';
 import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, revertChangeSet, applyPendingEdit, type EditEvent } from '../lib/aiClient';
+import { agenticVerifyAndFix } from '../lib/agent/edit';
+import { agentAvailable } from '../lib/agent/loop';
+import { resolveAI } from '../lib/aiConfig';
 import { DiffModal } from '../components/editor/DiffModal';
 import type { PendingEdit } from '../lib/pendingEdit';
 import { captureScreenshot, getPreviewSnapshot } from '../lib/previewRuntime';
@@ -196,7 +199,9 @@ export default function ProjectWorkspace() {
   const [autoLog, setAutoLog] = useState<AutopilotEvent[]>([]);
   const autoStopRef = useRef(false);
   // Live edit progress while the assistant streams its response.
-  const [stream, setStream] = useState<{ explanation: string; files: { path: string; done: boolean }[] } | null>(null);
+  const [stream, setStream] = useState<{ explanation: string; files: { path: string; done: boolean }[]; activity?: string[] } | null>(null);
+  // Element the user picked in the preview's Select mode — precise context for the next chat message.
+  const [selection, setSelection] = useState<SelectedElement | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -260,18 +265,75 @@ export default function ProjectWorkspace() {
 
   const onStreamEvent = useCallback((e: EditEvent) => {
     switch (e.type) {
-      case 'start': setStream({ explanation: '', files: [] }); break;
+      case 'start': setStream({ explanation: '', files: [], activity: [] }); break;
       case 'explanation':
-      case 'question': setStream((s) => ({ explanation: e.text, files: s?.files ?? [] })); break;
+      case 'question': setStream((s) => ({ explanation: e.text, files: s?.files ?? [], activity: s?.activity ?? [] })); break;
+      // The agent's live tool feed ("Reading src/App.tsx", "Type-checking") — its own lane, so
+      // it never overwrites the streamed explanation. Deduped consecutive, capped at 40.
+      case 'activity': setStream((s) => {
+        const activity = s?.activity ?? [];
+        if (activity[activity.length - 1] === e.text) return s ?? { explanation: '', files: [], activity };
+        return { explanation: s?.explanation ?? '', files: s?.files ?? [], activity: [...activity.slice(-39), e.text] };
+      }); break;
       case 'file-start': setStream((s) => {
         const files = s?.files ?? [];
         if (files.some((f) => f.path === e.path)) return s;
-        return { explanation: s?.explanation ?? '', files: [...files, { path: e.path, done: false }] };
+        return { explanation: s?.explanation ?? '', files: [...files, { path: e.path, done: false }], activity: s?.activity ?? [] };
       }); break;
       case 'file-done': setStream((s) => s && ({ ...s, files: s.files.map((f) => f.path === e.path ? { ...f, done: true } : f) })); break;
       case 'done': setStream(null); break;
     }
   }, []);
+
+  // STALL WATCHDOG — a server-side generation can be killed by the edge wall-clock limit on very
+  // large builds, leaving the record 'running' forever ("stuck on drafting the blueprint"). If no
+  // stage progress happens for 4 minutes, mark it failed so the user gets a clear retry path
+  // instead of an eternal spinner.
+  const stallRef = useRef<{ sig: string; at: number }>({ sig: '', at: Date.now() });
+  useEffect(() => {
+    if (!activeGeneration || (activeGeneration.status !== 'running' && activeGeneration.status !== 'queued')) return;
+    const iv = window.setInterval(() => {
+      const sig = activeGeneration.id + '|' + activeGeneration.current_stage + '|' + JSON.stringify(activeGeneration.stages ?? []);
+      if (sig !== stallRef.current.sig) { stallRef.current = { sig, at: Date.now() }; return; }
+      if (Date.now() - stallRef.current.at < 240_000) return;
+      void supabase.from('project_generations').update({
+        status: 'failed',
+        error: 'The build stalled server-side — very large apps can exceed the server time limit. Retry with the same prompt (it often succeeds), split the ask into "generate the core, then add features in chat", or add a browser API key in the model picker for unlimited-length builds.',
+        finished_at: new Date().toISOString(),
+      }).eq('id', activeGeneration.id).then(() => refreshGens());
+    }, 30_000);
+    return () => window.clearInterval(iv);
+  }, [activeGeneration, refreshGens]);
+
+  // EDGE-GENERATION VERIFY — cloud-mode generations run in the edge function, where the real
+  // compile gate can't exist (no WebContainer server-side). The moment a generation finishes,
+  // run the SAME deep verify + agentic repair the DIRECT path gets, so "generated" means
+  // "verified" for every user, not just those with a browser API key.
+  const lastGenId = useRef<string | null>(null);
+  const verifiedGenId = useRef<string | null>(null);
+  useEffect(() => {
+    if (activeGeneration) { lastGenId.current = activeGeneration.id; return; }
+    const genId = lastGenId.current;
+    if (!id || !genId || verifiedGenId.current === genId) return;
+    verifiedGenId.current = genId;
+    const ai = resolveAI();
+    if (ai.direct && ai.ready) return; // the DIRECT pipeline already verified in-line
+    if (!agentAvailable() || busy) return;
+    void (async () => {
+      setBusy(true);
+      onStreamEvent({ type: 'start' });
+      onStreamEvent({ type: 'activity', text: 'Verifying the build with the real compiler…' });
+      try {
+        // Fresh builds get a PERSISTENT repair budget — finishing with known issues is the
+        // "worse than Lovable" failure mode; 24 steps ≈ read/fix/re-check ~8 files.
+        await agenticVerifyAndFix(id, { maxSteps: 24, onActivity: (l) => onStreamEvent({ type: 'activity', text: l }) });
+      } catch { /* best-effort — residual issues surface in the Types chip */ }
+      onStreamEvent({ type: 'done' });
+      refreshFiles();
+      setBusy(false);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGeneration, id]);
 
   // Approve the proposed plan: clear it and send a follow-up the model recognizes as
   // approval. Implementation plans (with file hints) route to an edit; analysis/audit
@@ -994,6 +1056,8 @@ export default function ProjectWorkspace() {
                 defaultPlanFirst={isImported}
                 defaultReviewEdits={isImported}
                 onRevert={handleRevert}
+                selection={selection}
+                onClearSelection={() => setSelection(null)}
               />
             ) : (
               <CodeEditorPane
@@ -1061,9 +1125,9 @@ export default function ProjectWorkspace() {
             )}
             <div className="min-h-0 flex-1">
               {useWebContainer ? (
-                <WebContainerPane files={files} projectId={id!} onFixError={handleFixError} onHealTypes={healTypeErrors} />
+                <WebContainerPane files={files} projectId={id!} onFixError={handleFixError} onHealTypes={healTypeErrors} aiBusy={busy} />
               ) : (
-                <PreviewPane files={liveFiles} onFixError={handleFixError} device={device} showConsole={showConsole} />
+                <PreviewPane files={liveFiles} onFixError={handleFixError} device={device} showConsole={showConsole} busy={busy} onSelectElement={(sel) => { setSelection(sel); setTab('chat'); }} />
               )}
             </div>
           </div>

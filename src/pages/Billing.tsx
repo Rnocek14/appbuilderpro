@@ -28,14 +28,26 @@ export default function Billing() {
   const cost = events.reduce((s, e) => s + Number(e.cost_usd), 0);
   const limit = profile?.monthly_generation_limit ?? 10;
 
-  const upgrade = async () => {
-    // INTEGRATION: Stripe Checkout.
-    // 1. Create an edge function `create-checkout-session` using STRIPE_SECRET_KEY.
-    // 2. supabase.functions.invoke('create-checkout-session') → window.location = session.url
-    // 3. Handle the `checkout.session.completed` webhook to upsert `subscriptions`
-    //    and bump profiles.plan / monthly_generation_limit.
-    toast('info', 'Stripe is not connected on this instance. See README → Billing to wire Checkout in ~20 lines.');
+  // Stripe Checkout / customer portal — server-side sessions via edge functions; the
+  // stripe-webhook function mirrors subscription state back into profiles.plan.
+  const [billingBusy, setBillingBusy] = useState(false);
+  const invokeBilling = async (fn: 'create-checkout' | 'customer-portal', body: Record<string, unknown>) => {
+    setBillingBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke(fn, { body: { ...body, returnUrl: window.location.origin } });
+      const url = (data as { url?: string; error?: string } | null)?.url;
+      const errMsg = error?.message ?? (data as { error?: string } | null)?.error;
+      if (url) { window.location.href = url; return; }
+      toast('error', errMsg ?? 'Billing is not configured on this instance (set the Stripe secrets and deploy the billing functions).');
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not start billing.');
+    } finally {
+      setBillingBusy(false);
+    }
   };
+  const upgrade = () => void invokeBilling('create-checkout', { kind: 'subscription' });
+  const buyCredits = () => void invokeBilling('create-checkout', { kind: 'credits' });
+  const managePlan = () => void invokeBilling('customer-portal', {});
 
   return (
     <AppShell>
@@ -60,9 +72,12 @@ export default function Billing() {
                   : 'No payment method on file — this instance runs in stub mode until Stripe is connected.'}
               </p>
             </div>
-            {profile?.plan === 'free' && (
-              <Button onClick={upgrade}><Zap size={14} /> Upgrade to Pro</Button>
-            )}
+            <div className="flex items-center gap-2">
+              {profile?.plan === 'free'
+                ? <Button onClick={upgrade} loading={billingBusy}><Zap size={14} /> Upgrade to Pro</Button>
+                : <Button variant="outline" onClick={managePlan} loading={billingBusy}>Manage plan</Button>}
+              <Button variant="ghost" onClick={buyCredits} disabled={billingBusy} title="One-time credit top-up">Buy credits</Button>
+            </div>
           </div>
         </Card>
 

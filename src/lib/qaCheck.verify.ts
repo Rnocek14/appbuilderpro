@@ -86,5 +86,63 @@ check('css import is ignored', !has(
    { path: '/src/styles.css', content: `body{}` }],
   'does not export'));
 
+// 12) RLS lint: table without RLS → error; RLS without policy → warning; both present → clean
+const app = { path: '/src/App.tsx', content: `export default function App(){return null}` };
+check('table without RLS is flagged', has(
+  [app, { path: '/supabase/migrations/0001_init.sql', content: `create table posts (id uuid primary key);` }],
+  'without ROW LEVEL SECURITY'));
+check('RLS without policy is a warning', run(
+  [app, { path: '/supabase/migrations/0001_init.sql', content: `create table posts (id uuid primary key);\nalter table posts enable row level security;` }],
+).some((i) => i.severity === 'warning' && i.message.includes('no CREATE POLICY')));
+check('RLS + policy is clean', !has(
+  [app, { path: '/supabase/migrations/0001_init.sql', content: `create table posts (id uuid primary key);\nalter table posts enable row level security;\ncreate policy "own posts" on posts for all using (auth.uid() = user_id);` }],
+  'ROW LEVEL SECURITY'));
+check('commented-out create table is ignored', !has(
+  [app, { path: '/supabase/migrations/0001_init.sql', content: `-- create table posts (id uuid primary key);\nselect 1;` }],
+  'ROW LEVEL SECURITY'));
+check('non-public schema is ignored', !has(
+  [app, { path: '/supabase/migrations/0001_init.sql', content: `create table cron.job_extra (id int);` }],
+  'ROW LEVEL SECURITY'));
+check('public-prefixed table without RLS is flagged', has(
+  [app, { path: '/supabase/migrations/0001_init.sql', content: `create table public.items (id uuid primary key);` }],
+  'without ROW LEVEL SECURITY'));
+check('if-not-exists + quoted table resolves', has(
+  [app, { path: '/supabase/migrations/0001_init.sql', content: `create table if not exists "orders" (id uuid primary key);` }],
+  'without ROW LEVEL SECURITY'));
+check('non-migration sql is not linted', !has(
+  [app, { path: '/notes/schema.sql', content: `create table posts (id uuid primary key);` }],
+  'ROW LEVEL SECURITY'));
+
+// 13) HashRouter anchor + catch-all checks
+check('in-page anchor is flagged', has(
+  [{ path: '/src/pages/Privacy.tsx', content: `export default function P(){return <a href="#data-we-collect">Data</a>}` }, app],
+  'breaks HashRouter routing'));
+check('hash-route link is not flagged', !has(
+  [{ path: '/src/pages/Nav.tsx', content: `export default function N(){return <a href="#/pricing">Pricing</a>}` }, app],
+  'breaks HashRouter routing'));
+check('missing catch-all is a warning', run(
+  [{ path: '/src/App.tsx', content: `import {Routes,Route} from 'react-router-dom';\nexport default function App(){return <Routes><Route path="/" element={<div/>} /></Routes>}` }],
+).some((i) => i.severity === 'warning' && i.message.includes('catch-all')));
+check('catch-all present is clean', !has(
+  [{ path: '/src/App.tsx', content: `import {Routes,Route} from 'react-router-dom';\nexport default function App(){return <Routes><Route path="/" element={<div/>} /><Route path="*" element={<div/>} /></Routes>}` }],
+  'catch-all'));
+
+// 14) dynamic import (React.lazy route) to a missing file → flagged; to an existing file → clean
+check('lazy dynamic import of missing page is flagged', has(
+  [{ path: '/src/App.tsx', content: `import { lazy } from 'react';\nconst Landing = lazy(() => import('./pages/Landing'));\nexport default function App(){return null}` }],
+  "Import does not resolve: './pages/Landing'"));
+check('lazy dynamic import of existing page is clean', !has(
+  [{ path: '/src/App.tsx', content: `import { lazy } from 'react';\nconst Landing = lazy(() => import('./pages/Landing'));\nexport default function App(){return null}` },
+   { path: '/src/pages/Landing.tsx', content: `export default function Landing(){return null}` }],
+  'does not resolve'));
+
+// 15) truncated file (unbalanced braces) → flagged; balanced file → clean
+check('truncated file is flagged', has(
+  [{ path: '/src/components/NewsCard.tsx', content: `export function NewsCard(){\n  return (\n    <div>\n      <div>\n        {items.map((i) => {\n` }],
+  'truncated or malformed'));
+check('balanced file is clean', !has(
+  [{ path: '/src/components/Ok.tsx', content: `export function Ok(){ const s = "{"; return <div>{s}</div>; }` }],
+  'truncated or malformed'));
+
 console.log(`\nqaCheck.verify: ${pass} passed, ${fail} failed`);
 if (fail) throw new Error(`${fail} check(s) failed`);

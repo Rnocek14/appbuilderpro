@@ -146,13 +146,16 @@ import ReactDOM from 'react-dom/client';
 import { HashRouter } from 'react-router-dom';
 import App from './App';
 import { ToastProvider } from './context/ToastContext';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 import './index.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <HashRouter>
       <ToastProvider>
-        <App />
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
       </ToastProvider>
     </HashRouter>
   </React.StrictMode>,
@@ -218,6 +221,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 h1,h2,h3 { line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; }
+/* Composed entrances: put .stagger on a list/grid container and its children cascade in.
+   Delays are capped so long lists never feel slow. */
+@keyframes stagger-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.stagger > * { opacity: 0; animation: stagger-in 0.45s cubic-bezier(0.16,1,0.3,1) forwards; }
+.stagger > *:nth-child(1) { animation-delay: 0.04s; }
+.stagger > *:nth-child(2) { animation-delay: 0.08s; }
+.stagger > *:nth-child(3) { animation-delay: 0.12s; }
+.stagger > *:nth-child(4) { animation-delay: 0.16s; }
+.stagger > *:nth-child(5) { animation-delay: 0.2s; }
+.stagger > *:nth-child(6) { animation-delay: 0.24s; }
+.stagger > *:nth-child(7) { animation-delay: 0.28s; }
+.stagger > *:nth-child(8) { animation-delay: 0.32s; }
+.stagger > *:nth-child(n+9) { animation-delay: 0.36s; }
+/* Hover lift for interactive/linked cards — transform+shadow only (compositor-friendly). */
+.card-lift { transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s cubic-bezier(0.16,1,0.3,1), border-color 0.2s; }
+.card-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px -8px hsl(var(--foreground) / 0.14); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -471,6 +490,619 @@ export function EmptyState({ icon, title, description, action }: { icon?: ReactN
 }
 `;
 
+const TABS_TSX = `import { createContext, useContext, useId, useRef, useState, type HTMLAttributes, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { cn } from '../../lib/utils';
+
+// Accessible tabs (WAI-ARIA pattern): ArrowLeft/Right + Home/End move between tabs, panels are
+// labelled by their tab. Controlled (value + onValueChange) or uncontrolled (defaultValue).
+interface TabsCtxValue { value: string; setValue: (v: string) => void; baseId: string }
+const TabsCtx = createContext<TabsCtxValue | null>(null);
+
+function useTabs(component: string): TabsCtxValue {
+  const ctx = useContext(TabsCtx);
+  if (!ctx) throw new Error(component + ' must be used inside <Tabs>');
+  return ctx;
+}
+const slug = (v: string) => v.replace(/[^a-zA-Z0-9_-]/g, '-');
+
+export function Tabs({ value, defaultValue, onValueChange, className, children }: {
+  value?: string; defaultValue?: string; onValueChange?: (value: string) => void; className?: string; children: ReactNode;
+}) {
+  const [inner, setInner] = useState(defaultValue ?? '');
+  const baseId = useId();
+  const current = value !== undefined ? value : inner;
+  const setValue = (v: string) => { if (value === undefined) setInner(v); onValueChange?.(v); };
+  return <TabsCtx.Provider value={{ value: current, setValue, baseId }}><div className={className}>{children}</div></TabsCtx.Provider>;
+}
+
+export function TabsList({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  const ref = useRef<HTMLDivElement>(null);
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    const tabs = Array.from(ref.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)') ?? []);
+    if (tabs.length === 0) return;
+    const i = tabs.indexOf(document.activeElement as HTMLButtonElement);
+    let next = i;
+    if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+    if (e.key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End') next = tabs.length - 1;
+    e.preventDefault();
+    tabs[next]?.focus();
+    tabs[next]?.click();
+  };
+  return <div ref={ref} role="tablist" onKeyDown={onKeyDown} className={cn('inline-flex items-center gap-1 rounded-lg bg-muted p-1', className)} {...props} />;
+}
+
+export function TabsTrigger({ value, className, children }: { value: string; className?: string; children: ReactNode }) {
+  const ctx = useTabs('TabsTrigger');
+  const active = ctx.value === value;
+  return (
+    <button
+      type="button"
+      role="tab"
+      id={ctx.baseId + '-tab-' + slug(value)}
+      aria-selected={active}
+      aria-controls={ctx.baseId + '-panel-' + slug(value)}
+      tabIndex={active ? 0 : -1}
+      onClick={() => ctx.setValue(value)}
+      className={cn(
+        'rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function TabsContent({ value, className, children }: { value: string; className?: string; children: ReactNode }) {
+  const ctx = useTabs('TabsContent');
+  if (ctx.value !== value) return null;
+  return (
+    <div
+      role="tabpanel"
+      id={ctx.baseId + '-panel-' + slug(value)}
+      aria-labelledby={ctx.baseId + '-tab-' + slug(value)}
+      tabIndex={0}
+      className={cn('mt-4 animate-fade-in focus:outline-none', className)}
+    >
+      {children}
+    </div>
+  );
+}
+`;
+
+const DROPDOWN_TSX = `import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { cn } from '../../lib/utils';
+
+// Accessible dropdown menu: click-outside + Escape close, ArrowUp/Down/Home/End move through
+// items, Enter/Space activate, selecting closes. Pass any element (usually a <Button>) as trigger.
+export function Dropdown({ trigger, align = 'start', className, children }: {
+  trigger: ReactNode; align?: 'start' | 'end'; className?: string; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    const first = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])');
+    first?.focus();
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      setOpen(false);
+      rootRef.current?.querySelector<HTMLElement>('button, [tabindex]')?.focus();
+      return;
+    }
+    if (!open || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
+    if (items.length === 0) return;
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    let next = 0;
+    if (e.key === 'ArrowDown') next = i < 0 ? 0 : (i + 1) % items.length;
+    if (e.key === 'ArrowUp') next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+    if (e.key === 'End') next = items.length - 1;
+    e.preventDefault();
+    items[next]?.focus();
+  };
+
+  return (
+    <div ref={rootRef} className="relative inline-flex" onKeyDown={onKeyDown}>
+      <span className="inline-flex" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
+        {trigger}
+      </span>
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          onClick={() => setOpen(false)}
+          className={cn(
+            'absolute top-full z-50 mt-1.5 min-w-[180px] animate-scale-in rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg',
+            align === 'end' ? 'right-0 origin-top-right' : 'left-0 origin-top-left',
+            className,
+          )}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function DropdownItem({ onSelect, icon, danger, disabled, className, children }: {
+  onSelect?: () => void; icon?: ReactNode; danger?: boolean; disabled?: boolean; className?: string; children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors focus:outline-none focus-visible:bg-accent',
+        danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground hover:bg-accent',
+        disabled && 'pointer-events-none opacity-50',
+        className,
+      )}
+    >
+      {icon && <span className="shrink-0 text-muted-foreground [&>svg]:h-4 [&>svg]:w-4">{icon}</span>}
+      {children}
+    </button>
+  );
+}
+
+export function DropdownSeparator() {
+  return <div role="separator" className="my-1 h-px bg-border" />;
+}
+
+export function DropdownLabel({ children }: { children: ReactNode }) {
+  return <div className="px-2.5 py-1.5 text-xs font-medium text-muted-foreground">{children}</div>;
+}
+`;
+
+const POPOVER_TSX = `import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { cn } from '../../lib/utils';
+
+// Lightweight non-modal popover anchored to its trigger: click to open, click-outside or Escape
+// to close. Use for filters, pickers, and small forms attached to a control.
+export function Popover({ trigger, align = 'start', side = 'bottom', className, children }: {
+  trigger: ReactNode; align?: 'start' | 'end'; side?: 'top' | 'bottom'; className?: string; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative inline-flex">
+      <span className="inline-flex" onClick={() => setOpen((o) => !o)} aria-haspopup="dialog" aria-expanded={open}>{trigger}</span>
+      {open && (
+        <div
+          role="dialog"
+          className={cn(
+            'absolute z-50 min-w-[240px] animate-scale-in rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-lg',
+            side === 'bottom' ? 'top-full mt-1.5' : 'bottom-full mb-1.5',
+            align === 'end' ? 'right-0' : 'left-0',
+            className,
+          )}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+`;
+
+const TOOLTIP_TSX = `import { useId, useRef, useState, type ReactNode } from 'react';
+import { cn } from '../../lib/utils';
+
+// Text tooltip on hover/focus (300ms hover delay, instant on keyboard focus). For icon-only
+// buttons, ALSO give the button an aria-label.
+export function Tooltip({ label, side = 'top', className, children }: {
+  label: string; side?: 'top' | 'bottom'; className?: string; children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  const id = useId();
+  const show = (delay: number) => { window.clearTimeout(timer.current); timer.current = window.setTimeout(() => setOpen(true), delay); };
+  const hide = () => { window.clearTimeout(timer.current); setOpen(false); };
+  return (
+    <span
+      className="relative inline-flex"
+      onMouseEnter={() => show(300)}
+      onMouseLeave={hide}
+      onFocus={() => show(0)}
+      onBlur={hide}
+      aria-describedby={open ? id : undefined}
+    >
+      {children}
+      {open && (
+        <span
+          role="tooltip"
+          id={id}
+          className={cn(
+            'pointer-events-none absolute left-1/2 z-50 -translate-x-1/2 animate-fade-in whitespace-nowrap rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background shadow-md',
+            side === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5',
+            className,
+          )}
+        >
+          {label}
+        </span>
+      )}
+    </span>
+  );
+}
+`;
+
+const COMBOBOX_TSX = `import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Check, ChevronsUpDown } from 'lucide-react';
+import { cn } from '../../lib/utils';
+
+export interface ComboboxOption { value: string; label: string }
+
+// Searchable select (combobox pattern): type to filter, ArrowUp/Down to highlight, Enter to pick,
+// Escape closes. Use instead of <Select> when there are more than ~8 options.
+export function Combobox({ options, value, onChange, placeholder = 'Search…', emptyMessage = 'No results', className }: {
+  options: ComboboxOption[]; value?: string; onChange: (value: string) => void;
+  placeholder?: string; emptyMessage?: string; className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlight, setHighlight] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const selected = options.find((o) => o.value === value);
+  const filtered = useMemo(
+    () => options.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase())),
+    [options, query],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) { setOpen(false); setQuery(''); } };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const pick = (v: string) => { onChange(v); setOpen(false); setQuery(''); };
+
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') { setOpen(false); setQuery(''); return; }
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter')) { setOpen(true); return; }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((h) => Math.min(h + 1, filtered.length - 1)); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)); }
+    if (e.key === 'Enter' && filtered[highlight]) { e.preventDefault(); pick(filtered[highlight].value); }
+  };
+
+  return (
+    <div ref={rootRef} className={cn('relative', className)}>
+      <div className="relative">
+        <input
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          value={open ? query : (selected?.label ?? '')}
+          placeholder={selected ? selected.label : placeholder}
+          onChange={(e) => { setQuery(e.target.value); setHighlight(0); if (!open) setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
+          className="h-10 w-full rounded-lg border border-input bg-background px-3 pr-9 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <ChevronsUpDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      </div>
+      {open && (
+        <ul id={listId} role="listbox" className="absolute z-50 mt-1.5 max-h-60 w-full animate-scale-in overflow-auto rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+          {filtered.length === 0 && <li className="px-2.5 py-2 text-sm text-muted-foreground">{emptyMessage}</li>}
+          {filtered.map((o, i) => (
+            <li
+              key={o.value}
+              role="option"
+              aria-selected={o.value === value}
+              onMouseDown={(e) => { e.preventDefault(); pick(o.value); }}
+              onMouseEnter={() => setHighlight(i)}
+              className={cn('flex cursor-pointer items-center justify-between rounded-md px-2.5 py-2 text-sm', i === highlight ? 'bg-accent text-accent-foreground' : 'text-foreground')}
+            >
+              {o.label}
+              {o.value === value && <Check className="h-4 w-4 text-primary" />}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+`;
+
+const ALERT_TSX = `import type { ReactNode } from 'react';
+import { Info, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { cn } from '../../lib/utils';
+
+type Tone = 'info' | 'success' | 'warning' | 'danger';
+const toneBox: Record<Tone, string> = {
+  info: 'border-blue-500/30 bg-blue-500/10 text-blue-800 dark:text-blue-200',
+  success: 'border-green-500/30 bg-green-500/10 text-green-800 dark:text-green-200',
+  warning: 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+  danger: 'border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-200',
+};
+
+// Persistent inline notice (unlike a toast). Use for connection status, warnings, setup nudges.
+export function Alert({ tone = 'info', title, children, className }: {
+  tone?: Tone; title?: string; children?: ReactNode; className?: string;
+}) {
+  const Icon = tone === 'success' ? CheckCircle2 : tone === 'warning' ? AlertTriangle : tone === 'danger' ? XCircle : Info;
+  return (
+    <div role="alert" className={cn('flex gap-3 rounded-lg border p-4 text-sm', toneBox[tone], className)}>
+      <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+      <div className="min-w-0">
+        {title && <p className="font-medium">{title}</p>}
+        {children && <div className={title ? 'mt-1 opacity-90' : undefined}>{children}</div>}
+      </div>
+    </div>
+  );
+}
+`;
+
+const FORMFIELD_TSX = `import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
+import { cn } from '../../lib/utils';
+
+// Standard form row: label + control + hint/error with aria wiring. Pass ONE control (Input,
+// Textarea, Select, Combobox) as the child — it receives id / aria-invalid / aria-describedby.
+export function FormField({ label, hint, error, required, className, children }: {
+  label: string; hint?: string; error?: string; required?: boolean; className?: string; children: ReactNode;
+}) {
+  const id = useId();
+  const descId = id + '-desc';
+  const control = isValidElement(children)
+    ? cloneElement(children as ReactElement<Record<string, unknown>>, {
+        id,
+        'aria-invalid': error ? true : undefined,
+        'aria-describedby': error || hint ? descId : undefined,
+      })
+    : children;
+  return (
+    <div className={cn('space-y-1.5', className)}>
+      <label htmlFor={id} className="block text-sm font-medium text-foreground">
+        {label}
+        {required && <span className="text-destructive"> *</span>}
+      </label>
+      {control}
+      {(error || hint) && (
+        <p id={descId} className={cn('text-sm', error ? 'text-destructive' : 'text-muted-foreground')}>{error ?? hint}</p>
+      )}
+    </div>
+  );
+}
+`;
+
+const PAGINATION_TSX = `import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { cn } from '../../lib/utils';
+
+function pageWindow(page: number, pageCount: number): (number | '…')[] {
+  if (pageCount <= 7) return Array.from({ length: pageCount }, (_, i) => i + 1);
+  const pages: (number | '…')[] = [1];
+  if (page > 3) pages.push('…');
+  for (let p = Math.max(2, page - 1); p <= Math.min(pageCount - 1, page + 1); p++) pages.push(p);
+  if (page < pageCount - 2) pages.push('…');
+  pages.push(pageCount);
+  return pages;
+}
+
+export function Pagination({ page, pageCount, onPageChange, className }: {
+  page: number; pageCount: number; onPageChange: (page: number) => void; className?: string;
+}) {
+  if (pageCount <= 1) return null;
+  const btn = 'inline-flex h-9 min-w-[36px] items-center justify-center rounded-lg px-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50';
+  return (
+    <nav aria-label="Pagination" className={cn('flex items-center gap-1', className)}>
+      <button type="button" aria-label="Previous page" disabled={page <= 1} onClick={() => onPageChange(page - 1)} className={cn(btn, 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+      {pageWindow(page, pageCount).map((p, i) =>
+        p === '…' ? (
+          <span key={'gap-' + i} className="px-1.5 text-sm text-muted-foreground">…</span>
+        ) : (
+          <button
+            key={p}
+            type="button"
+            aria-current={p === page ? 'page' : undefined}
+            onClick={() => onPageChange(p)}
+            className={cn(btn, p === page ? 'bg-primary text-primary-foreground' : 'text-foreground hover:bg-accent')}
+          >
+            {p}
+          </button>
+        ),
+      )}
+      <button type="button" aria-label="Next page" disabled={page >= pageCount} onClick={() => onPageChange(page + 1)} className={cn(btn, 'text-muted-foreground hover:bg-accent hover:text-foreground')}>
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    </nav>
+  );
+}
+`;
+
+const TABLE_TSX = `import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react';
+import { cn } from '../../lib/utils';
+
+// Styled data table per the design system: muted header, hover rows, comfortable density.
+// Right-align numeric columns with className="text-right tabular-nums".
+export function Table({ className, ...props }: HTMLAttributes<HTMLTableElement>) {
+  return (
+    <div className="w-full overflow-x-auto rounded-xl border border-border">
+      <table className={cn('w-full caption-bottom text-sm', className)} {...props} />
+    </div>
+  );
+}
+export function TableHeader({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
+  return <thead className={cn('bg-muted/50', className)} {...props} />;
+}
+export function TableBody({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
+  return <tbody className={cn('divide-y divide-border', className)} {...props} />;
+}
+export function TableRow({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
+  return <tr className={cn('transition-colors hover:bg-muted/50', className)} {...props} />;
+}
+export function TableHead({ className, ...props }: ThHTMLAttributes<HTMLTableCellElement>) {
+  return <th className={cn('h-10 px-4 text-left align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground', className)} {...props} />;
+}
+export function TableCell({ className, ...props }: TdHTMLAttributes<HTMLTableCellElement>) {
+  return <td className={cn('px-4 py-3 align-middle', className)} {...props} />;
+}
+`;
+
+const SCROLL_TS = `import { useEffect, useRef, useState } from 'react';
+
+/**
+ * True once the element scrolls into view (stays true by default) — drives reveal-on-scroll.
+ * Pass { once: false } to toggle off again when it leaves (e.g. for repeating effects).
+ */
+export function useInView<T extends HTMLElement>(opts?: { once?: boolean; margin?: string }) {
+  const ref = useRef<T | null>(null);
+  const [inView, setInView] = useState(false);
+  const once = opts?.once !== false;
+  const margin = opts?.margin ?? '0px 0px -10% 0px';
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') { setInView(true); return; }
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { setInView(true); if (once) io.disconnect(); }
+      else if (!once) setInView(false);
+    }, { rootMargin: margin });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [once, margin]);
+  return { ref, inView };
+}
+
+/**
+ * 0 -> 1 progress of an element travelling through the viewport — the engine for scroll-LINKED
+ * motion (Apple-style scrubbed scenes). Attach ref to a tall wrapper (e.g. h-[200vh]) containing
+ * a sticky stage (sticky top-0 h-screen), then map progress onto transforms:
+ *   const { ref, progress } = useScrollProgress<HTMLDivElement>();
+ *   <div ref={ref} className="relative h-[200vh]">
+ *     <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
+ *       <img style={{ transform: 'scale(' + (0.6 + progress * 0.4) + ') rotate(' + (progress * 12 - 6) + 'deg)', opacity: Math.min(1, progress * 2) }} … />
+ *     </div>
+ *   </div>
+ * rAF-throttled; transform/opacity only (compositor-friendly). Honor reduced motion: the global
+ * CSS rule kills transitions, and you can gate scrubbed scenes on matchMedia('(prefers-reduced-motion: reduce)').
+ */
+export function useScrollProgress<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [progress, setProgress] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let raf = 0;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      const vh = window.innerHeight || 1;
+      const total = r.height + vh;
+      setProgress(Math.min(1, Math.max(0, (vh - r.top) / total)));
+    };
+    const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(update); };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, []);
+  return { ref, progress };
+}
+`;
+
+const REVEAL_TSX = `import type { ReactNode } from 'react';
+import { useInView } from '../../lib/scroll';
+import { cn } from '../../lib/utils';
+
+/**
+ * Scroll-reveal wrapper: children fade + slide in the first time they enter the viewport.
+ * Stagger siblings with increasing delay: <Reveal delay={0}/>, <Reveal delay={80}/>, …
+ */
+export function Reveal({ children, delay = 0, y = 16, className }: {
+  children: ReactNode; delay?: number; y?: number; className?: string;
+}) {
+  const { ref, inView } = useInView<HTMLDivElement>();
+  return (
+    <div
+      ref={ref}
+      style={{ transitionDelay: delay + 'ms', transform: inView ? 'none' : 'translateY(' + y + 'px)' }}
+      className={cn(
+        'transition-all duration-700 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]',
+        inView ? 'opacity-100' : 'opacity-0',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+`;
+
+const ERRORBOUNDARY_TSX = `import { Component, type ErrorInfo, type ReactNode } from 'react';
+
+/**
+ * Root error boundary: a crash anywhere in the app renders a designed recovery panel instead of
+ * a blank white screen — and reports the error so the platform's auto-fix can engage. Wraps <App/>
+ * in main.tsx; add extra <ErrorBoundary> around individual routes for finer isolation if needed.
+ */
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('App crashed:', error, info.componentStack);
+    try {
+      window.parent?.postMessage({ __ff: true, type: 'error', message: 'React crash: ' + (error?.message || String(error)) + '\\n' + (info?.componentStack || '') }, '*');
+    } catch { /* not in the preview iframe — fine */ }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-background p-6">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm">
+            <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10 text-destructive">!</div>
+            <h1 className="text-lg font-semibold tracking-tight text-foreground">Something went wrong</h1>
+            <p className="mt-1 break-words text-sm text-muted-foreground">{this.state.error.message}</p>
+            <button
+              onClick={() => { this.setState({ error: null }); window.location.hash = '#/'; }}
+              className="mt-4 inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              Back to home
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+`;
+
 // Theme hook — dark mode via a `.dark` class on <html>, persisted to localStorage and
 // defaulting to the OS preference. A pre-paint script in index.html applies it before render
 // to avoid a flash; this hook keeps React in sync and exposes a toggle.
@@ -534,6 +1166,17 @@ export * from './Spinner';
 export * from './Modal';
 export * from './EmptyState';
 export * from './ThemeToggle';
+export * from './Tabs';
+export * from './Dropdown';
+export * from './Popover';
+export * from './Tooltip';
+export * from './Combobox';
+export * from './Alert';
+export * from './FormField';
+export * from './Pagination';
+export * from './Table';
+export * from './Reveal';
+export * from './ErrorBoundary';
 `;
 
 const KIT: ScaffoldFile[] = [
@@ -549,6 +1192,18 @@ const KIT: ScaffoldFile[] = [
   { path: '/src/components/ui/Modal.tsx', content: MODAL_TSX },
   { path: '/src/components/ui/EmptyState.tsx', content: EMPTYSTATE_TSX },
   { path: '/src/components/ui/ThemeToggle.tsx', content: THEMETOGGLE_TSX },
+  { path: '/src/components/ui/Tabs.tsx', content: TABS_TSX },
+  { path: '/src/components/ui/Dropdown.tsx', content: DROPDOWN_TSX },
+  { path: '/src/components/ui/Popover.tsx', content: POPOVER_TSX },
+  { path: '/src/components/ui/Tooltip.tsx', content: TOOLTIP_TSX },
+  { path: '/src/components/ui/Combobox.tsx', content: COMBOBOX_TSX },
+  { path: '/src/components/ui/Alert.tsx', content: ALERT_TSX },
+  { path: '/src/components/ui/FormField.tsx', content: FORMFIELD_TSX },
+  { path: '/src/components/ui/Pagination.tsx', content: PAGINATION_TSX },
+  { path: '/src/components/ui/Table.tsx', content: TABLE_TSX },
+  { path: '/src/components/ui/Reveal.tsx', content: REVEAL_TSX },
+  { path: '/src/components/ui/ErrorBoundary.tsx', content: ERRORBOUNDARY_TSX },
+  { path: '/src/lib/scroll.ts', content: SCROLL_TS },
   { path: '/src/components/ui/index.ts', content: UI_INDEX_TS },
 ];
 
@@ -559,6 +1214,8 @@ const BASE: ScaffoldFile[] = [
   { path: '/tsconfig.json', content: TSCONFIG },
   { path: '/index.html', content: INDEX_HTML },
   { path: '/src/main.tsx', content: MAIN_TSX },
+  // Vite's client types — without this, `import.meta.env` fails to type-check in every app.
+  { path: '/src/vite-env.d.ts', content: '/// <reference types="vite/client" />\n' },
 ];
 const BASE_PATHS = new Set(BASE.map((f) => f.path));
 
