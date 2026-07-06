@@ -7,7 +7,7 @@
 // answer → reveal hard → open the next gap. Currents ring the bottom as the pull forward.)
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, Compass, HelpCircle, Loader2, Lock, Sparkles, Flame, Play } from 'lucide-react';
+import { ArrowRight, BookOpen, Compass, Hammer, HelpCircle, Loader2, Lock, Sparkles, Flame, Play } from 'lucide-react';
 import type { Cluster, Lead, LeadKind, Scene } from '../../lib/garvis/clustering';
 
 export interface StageCurrent { lead: Lead; ready: boolean; epiphany: number }
@@ -26,9 +26,12 @@ interface Props {
   onDive: (lead: Lead) => void;
   onOpenMedia: (m: { url: string; title: string; video?: boolean }) => void;
   onConstellation: () => void;
+  onDetails?: () => void;
+  onBuild?: () => void;
 }
 
-const LEAD_HEX: Record<LeadKind, string> = { dig: '#e9a23b', question: '#38bdf8', tangent: '#a78bfa' };
+// harmonized with GalaxyView — warm dig, one cool question-blue, one violet tangent
+const LEAD_HEX: Record<LeadKind, string> = { dig: '#F2A44D', question: '#5AA9E6', tangent: '#B98CE0' };
 
 // pull the numeric part out of "200,000" / "~1.4 billion" for the count-up (keeps prefix/suffix)
 function splitNumber(v: string): { pre: string; num: number; post: string } | null {
@@ -37,6 +40,28 @@ function splitNumber(v: string): { pre: string; num: number; post: string } | nu
   const num = parseFloat(m[2].replace(/,/g, ''));
   if (!Number.isFinite(num)) return null;
   return { pre: m[1], num, post: m[3] };
+}
+
+// Ambient media strip flanking the question text on wide screens — quiet, dimmed, hover to full.
+function SideMedia({ items, side, onOpen }: {
+  items: { url: string; thumb: string; title: string; video?: boolean }[];
+  side: 'left' | 'right';
+  onOpen: (m: { url: string; title: string; video?: boolean }) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <div className={`pointer-events-none absolute top-1/2 z-20 hidden -translate-y-1/2 flex-col gap-3 lg:flex ${side === 'left' ? 'left-4 xl:left-8' : 'right-4 xl:right-8'}`}>
+      {items.map((m, i) => (
+        <button key={i} onClick={() => onOpen(m)} title={m.title}
+          className="stg-in pointer-events-auto group relative h-28 w-40 overflow-hidden rounded-2xl border border-white/12 bg-black/30 shadow-2xl backdrop-blur transition-transform hover:scale-[1.06] xl:h-32 xl:w-48"
+          style={{ animationDelay: `${300 + i * 130}ms` }}>
+          <img src={m.thumb} alt="" loading="lazy" className="h-full w-full object-cover opacity-75 transition-opacity group-hover:opacity-100" />
+          {m.video && <span className="absolute inset-0 flex items-center justify-center bg-black/30"><Play size={20} className="text-white/90" /></span>}
+          {m.title && <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent px-2 pb-1 pt-4 text-[10px] text-white/80">{m.title}</span>}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function CountUp({ value, hex }: { value: string; hex: string }) {
@@ -62,7 +87,7 @@ function CountUp({ value, hex }: { value: string; hex: string }) {
   return <span style={{ color: hex, textShadow: `0 0 40px ${hex}88` }}>{parsed.pre}{shown}{parsed.post}</span>;
 }
 
-export default function SceneStage({ focus, scene, composing, partial, hex, trail, heroUrl, gallery, currents, onGuess, onDive, onOpenMedia, onConstellation }: Props) {
+export default function SceneStage({ focus, scene, composing, partial, hex, trail, heroUrl, gallery, currents, onGuess, onDive, onOpenMedia, onConstellation, onDetails, onBuild }: Props) {
   const revealed = !!scene && scene.guessed !== undefined;
   const recipe = scene?.recipe ?? 'reveal';
   const mystery = recipe === 'mystery';
@@ -99,24 +124,41 @@ export default function SceneStage({ focus, scene, composing, partial, hex, trai
         @keyframes stg-in { from { opacity:0; transform:scale(.94); filter:blur(10px) } to { opacity:1; transform:none; filter:blur(0) } }
         @keyframes stg-flash { 0% { opacity:0 } 22% { opacity:.65 } 100% { opacity:0 } }
         @keyframes stg-drift { 0%,100% { transform:translateY(0) } 50% { transform:translateY(-10px) } }
+        /* one easing across the whole product — the forge signature curve (matches tailwind.config) */
         .stg-kb { animation: stg-kb 26s ease-in-out infinite alternate; }
-        .stg-rise { animation: stg-rise .55s cubic-bezier(.2,.8,.2,1) both; }
-        .stg-in { animation: stg-in .6s cubic-bezier(.2,.9,.24,1) both; }
+        .stg-rise { animation: stg-rise .55s cubic-bezier(0.22,1,0.36,1) both; }
+        .stg-in { animation: stg-in .6s cubic-bezier(0.22,1,0.36,1) both; }
         .stg-drift { animation: stg-drift 7s ease-in-out infinite; }
         .stg-strike { position:relative; }
         .stg-strike::after { content:''; position:absolute; left:0; top:52%; height:3px; width:100%; background:currentColor; transform:scaleX(0); transform-origin:left; animation: stg-strk .5s .1s ease-out forwards; }
         @keyframes stg-strk { to { transform:scaleX(1) } }
+        /* film grain — subtle, desaturated fractal noise; overlay-blended so it textures the backdrop
+           (kills the flat digital look) without touching text legibility. */
+        .stg-grain { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E"); background-size: 140px 140px; opacity: .07; mix-blend-mode: overlay; }
       `}</style>
 
-      {/* ---- HERO: the idea has a face, and a mood ---- */}
+      {/* ---- HERO: the idea has a face, and a mood. The source photo is color-GRADED into the forge
+           palette (duotone lean) so any image — good or ugly, warm or cold — reads as one cohesive,
+           cinematic world, and the graded dark guarantees the text stays legible on top. ---- */}
       <div className="pointer-events-none absolute inset-0">
-        {heroUrl
-          ? <img src={heroUrl} alt="" className="stg-kb h-full w-full object-cover" style={{ opacity: mystery ? 0.16 : revealed ? 0.5 : 0.42 }} />
-          : <div className="h-full w-full" style={{ background: `radial-gradient(1200px 700px at 30% 25%, ${hex}44, transparent 70%)` }} />}
-        {/* living color wash + cinematic vignette + legibility floor */}
+        {heroUrl ? (
+          <>
+            <img src={heroUrl} alt="" className="stg-kb h-full w-full object-cover" style={{ opacity: mystery ? 0.2 : revealed ? 0.72 : 0.6 }} />
+            {/* crush the shadows into the deep blue-black base */}
+            <div className="absolute inset-0" style={{ background: '#0C0E13', mixBlendMode: 'multiply', opacity: 0.5 }} />
+            {/* tint the midtones/highlights toward the idea's color — the duotone lean */}
+            <div className="absolute inset-0" style={{ background: `linear-gradient(140deg, ${hex} 0%, #0C0E13 82%)`, mixBlendMode: 'overlay', opacity: 0.6 }} />
+          </>
+        ) : (
+          <div className="h-full w-full" style={{ background: `radial-gradient(1200px 700px at 30% 25%, ${hex}44, transparent 70%)` }} />
+        )}
+        {/* living color wash + cinematic vignette + legibility floor (stronger at the bottom, where
+            the bottom-anchored content lives) */}
         <div className="absolute inset-0" style={{ background: `radial-gradient(1100px 800px at 22% 30%, ${hex}22, transparent 60%)` }} />
-        <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 120% at 50% 40%, transparent 45%, rgba(6,5,9,0.82) 100%)' }} />
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(6,5,9,0.96) 8%, rgba(6,5,9,0.55) 42%, rgba(6,5,9,0.32) 70%, rgba(6,5,9,0.6))' }} />
+        <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 120% at 50% 40%, transparent 40%, rgba(6,5,9,0.85) 100%)' }} />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(6,5,9,0.97) 12%, rgba(6,5,9,0.72) 38%, rgba(6,5,9,0.34) 66%, rgba(6,5,9,0.55))' }} />
+        {/* film grain, on top of the grade — the cheap "expensive" trick */}
+        <div className="stg-grain absolute inset-0" />
       </div>
 
       {/* the reveal punch — a one-shot flash of the idea's color */}
@@ -132,11 +174,40 @@ export default function SceneStage({ focus, scene, composing, partial, hex, trai
             {trail.map((t, i) => <span key={i} className="truncate">{i > 0 && <span className="mx-1 text-white/25">·</span>}{t}</span>)}
           </div>
         )}
+        {(onBuild || onDetails) && (
+          <div className="ml-auto flex items-center gap-2">
+            {onBuild && (
+              <button onClick={onBuild} title="Turn this idea into an app"
+                className="inline-flex items-center gap-1.5 rounded-full border border-forge-ember/50 bg-forge-ember/15 px-3 py-1.5 text-[11px] font-semibold text-forge-ember backdrop-blur transition-all hover:-translate-y-0.5 hover:bg-forge-ember/25" style={{ boxShadow: '0 0 22px -8px #FF8A3D' }}>
+                <Hammer size={12} /> Build this
+              </button>
+            )}
+            {onDetails && (
+              <button onClick={onDetails} className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/30 px-3 py-1.5 text-[11px] font-medium text-white/70 backdrop-blur transition-colors hover:border-white/40 hover:text-white">
+                <BookOpen size={12} /> details
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* ---- CENTER STAGE: scrolls if a reveal runs long ---- */}
-      <div className="panel-scroll absolute inset-0 z-10 flex flex-col justify-end overflow-y-auto px-6 pb-40 pt-24 sm:px-12">
-        <div className="mx-auto w-full max-w-3xl">
+      {/* ---- SIDE MEDIA RAILS: during the QUESTION (and while composing), real photos/videos flank
+           the text so the gap feels alive instead of a bare quiz. The reveal has its own inline
+           gallery, so these are gap/composing-only to avoid showing the same media twice. Wide
+           screens only — on narrow the text column needs the full width. ---- */}
+      {(composing || (scene && !revealed)) && gallery.length > 0 && (
+        <>
+          <SideMedia items={gallery.filter((_, i) => i % 2 === 0).slice(0, 3)} side="left" onOpen={onOpenMedia} />
+          <SideMedia items={gallery.filter((_, i) => i % 2 === 1).slice(0, 3)} side="right" onOpen={onOpenMedia} />
+        </>
+      )}
+
+      {/* ---- CENTER STAGE: bottom-anchored, but scrolls cleanly when a reveal runs long.
+           `mt-auto` (not `justify-end`) bottom-aligns short content yet collapses to 0 when content
+           overflows — so tall reveals scroll from the top instead of stacking on themselves. The big
+           bottom padding clears the currents rail so text never lands under it. ---- */}
+      <div className="panel-scroll absolute inset-0 z-10 flex flex-col overflow-y-auto px-6 pt-24 sm:px-12" style={{ paddingBottom: currents.length ? 260 : 128 }}>
+        <div className="mx-auto mt-auto w-full max-w-3xl">
 
           {/* COMPOSING — the gap materializes as big type, not a spinner */}
           {composing && !scene && (
@@ -145,11 +216,14 @@ export default function SceneStage({ focus, scene, composing, partial, hex, trai
               : <div className="flex items-center gap-2 text-sm text-white/60"><Loader2 size={15} className="animate-spin" /> Garvis is walking into this idea…</div>
           )}
 
-          {/* LEGACY — no scene, show the prose room */}
+          {/* LEGACY — no scene, show the prose room. One voice: the summary is the lede only when the
+              understanding doesn't already open with it (they're often the same model sentence twice). */}
           {legacy && (
             <div className="stg-rise">
               <h1 className="font-display text-4xl font-semibold leading-tight text-white">{focus.title}</h1>
-              {focus.summary && <p className="mt-3 text-lg text-white/85">{focus.summary}</p>}
+              {focus.summary && !(understanding?.detail ?? '').startsWith(focus.summary.slice(0, 40)) && (
+                <p className="mt-3 text-lg text-white/85">{focus.summary}</p>
+              )}
               {understanding?.detail && <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-white/65">{understanding.detail}</p>}
             </div>
           )}
@@ -239,8 +313,10 @@ export default function SceneStage({ focus, scene, composing, partial, hex, trai
         </div>
       </div>
 
-      {/* ---- CURRENTS RAIL: where this pulls you — glowing lures. Sits above the think-out-loud bar. ---- */}
-      {currents.length > 0 && (
+      {/* ---- CURRENTS RAIL: where this pulls you — glowing lures. Sits above the think-out-loud bar.
+           Held back until the reveal: while the gap is open the guess IS the room (rabbit-hole doctrine —
+           the next doors open only after this one). ---- */}
+      {currents.length > 0 && (!scene || revealed) && (
         <div className="absolute inset-x-0 bottom-[68px] z-20 px-4 pb-2 pt-10" style={{ background: 'linear-gradient(to top, rgba(6,5,9,0.92) 40%, transparent)' }}>
           <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10px] uppercase tracking-[0.2em] text-white/40">
             <span className="h-1 w-1 rounded-full" style={{ background: hex }} /> where your curiosity is pulling you

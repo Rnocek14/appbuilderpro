@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sparkles, LayoutDashboard, Users, Store, MessageSquare,
-  GraduationCap, Home, Briefcase, ShieldCheck, ClipboardList, type LucideIcon,
+  GraduationCap, Home, Briefcase, ShieldCheck, ClipboardList, Compass, type LucideIcon,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useProjects } from '../hooks/useProjectData';
@@ -12,6 +12,7 @@ import { useToast } from '../context/ToastContext';
 import { Button, Card } from '../components/ui';
 import { ModelPicker } from '../components/ModelPicker';
 import { PlanCard } from '../components/PlanCard';
+import { saveBrain } from '../lib/projectBrain';
 import { TEMPLATES } from '../data/templates';
 import { cn } from '../lib/utils';
 import type { EditPlan } from '../types';
@@ -31,9 +32,40 @@ const ICONS: Record<string, LucideIcon> = {
 
 export default function NewProject() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { createProject } = useProjects();
   const { toast } = useToast();
   const [prompt, setPrompt] = useState('');
+  const [seeded, setSeeded] = useState(false);
+  // The full compiled build brief (reasoning thread + branches + research) from the Explorer. Too big
+  // for a URL, so it rides in localStorage; written to the project Brain on build so it persists into
+  // every future edit, and folded into the first generation so the app is built FROM the exploration.
+  const briefRef = useRef('');
+
+  // On mount: a "Build this" handoff arrives as ?from=constellation with a brief in localStorage; a
+  // lighter handoff (or legacy) arrives as ?idea=. Consume once, then clear so a refresh stays clean.
+  useEffect(() => {
+    if (searchParams.get('from') === 'constellation') {
+      try {
+        const raw = localStorage.getItem('ff:build-brief');
+        if (raw) {
+          const b = JSON.parse(raw) as { prompt?: string; brief?: string };
+          localStorage.removeItem('ff:build-brief');
+          if (b.prompt) setPrompt(b.prompt);
+          briefRef.current = b.brief ?? '';
+          setSeeded(true);
+          return;
+        }
+      } catch { /* fall through to ?idea= */ }
+    }
+    const idea = searchParams.get('idea')?.slice(0, 2000) ?? '';
+    if (idea) { setPrompt(idea); setSeeded(true); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Prepend the compiled exploration brief (if any) to a generation's context. */
+  const genCtx = (base?: string): string | undefined =>
+    [briefRef.current, base].filter(Boolean).join('\n\n---\n\n') || undefined;
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Plan-first: when on, we propose a plan to approve before generating any files.
@@ -72,6 +104,10 @@ export default function NewProject() {
       const project = await createProject(text.slice(0, 60), selected ?? undefined);
       if (!project) throw new Error('Could not create the project. Check your Supabase connection.');
 
+      // Persist the exploration brief into the project Brain — it now informs every future edit,
+      // so you never have to re-explain the rabbit hole you built this from.
+      if (briefRef.current) { try { await saveBrain(project.id, briefRef.current); } catch { /* best-effort */ } }
+
       if (planFirst) {
         // Propose a plan first — generate nothing yet.
         const { plan } = await draftGenerationPlan(text);
@@ -105,7 +141,7 @@ export default function NewProject() {
         // Couldn't produce directions (edge mode / provider error) — build without blocking.
         setBusy(true);
         try {
-          await startGeneration(project.id, text);
+          await startGeneration(project.id, text, genCtx());
           navigate(`/project/${project.id}`);
         } catch (err) {
           toast('error', err instanceof Error ? err.message : 'Generation could not start.');
@@ -124,7 +160,7 @@ export default function NewProject() {
     skippedRef.current = d == null; // a Skip cancels any in-flight direction generation
     setBusy(true);
     try {
-      await startGeneration(directionProjectId, prompt.trim(), d ? directionContext(d) : undefined);
+      await startGeneration(directionProjectId, prompt.trim(), genCtx(d ? directionContext(d) : undefined));
       navigate(`/project/${directionProjectId}`);
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Generation could not start.');
@@ -137,7 +173,7 @@ export default function NewProject() {
     if (!planProjectId || !plan) return;
     setBusy(true);
     try {
-      await startGeneration(planProjectId, prompt.trim(), planToText(plan));
+      await startGeneration(planProjectId, prompt.trim(), genCtx(planToText(plan)));
       navigate(`/project/${planProjectId}`);
     } catch (err) {
       toast('error', err instanceof Error ? err.message : 'Generation could not start.');
@@ -149,7 +185,11 @@ export default function NewProject() {
     <AppShell>
       <div className="mx-auto max-w-3xl">
         <h1 className="font-display text-xl font-semibold">What should we forge?</h1>
-        <p className="mt-1 text-sm text-forge-dim">Describe the app in plain language, or heat up a template and adjust it.</p>
+        {seeded ? (
+          <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-forge-ember"><Compass size={14} /> {briefRef.current ? 'Carried over from your exploration — your research, thread & variations came with it.' : 'Carried over from your exploration — shape it into an app.'}</p>
+        ) : (
+          <p className="mt-1 text-sm text-forge-dim">Describe the app in plain language, or heat up a template and adjust it.</p>
+        )}
 
         <Card className="mt-5 p-4">
           <textarea

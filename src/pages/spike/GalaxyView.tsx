@@ -7,6 +7,7 @@
 // zoom out and see how far you wandered. Drift by clicking a node, a glowing current, or thinking out loud.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Sparkles, ArrowRight, ArrowLeft, ExternalLink, Maximize2, Layers, HelpCircle, Shuffle, Wand2, Clapperboard, Play, Loader2, Paperclip, GitBranch,
   Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Link2, Image as ImageIcon, FileText, Lightbulb, Repeat2, X, Flame, Lock,
@@ -17,11 +18,16 @@ import {
 } from '../../lib/garvis/clustering';
 import { composeScene, recordSceneGuess, streamOverview, fetchLeads, expandCluster, gatherWikiMedia, gatherDiscover, gatherVideos, findBridge, investigate, observe, reframe, updateMind, composeProspect, interpretThought, discoverAvailable, type Prospect, type Bridge, type Notice } from '../../lib/garvis/clusteringRun';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
+import { compileBuildBrief } from '../../lib/garvis/buildBrief';
 import { serperRelated, serperAvailable, youTubeId } from '../../lib/garvis/discover';
 import { addLoopPure, closeLoopsPure, epiphanyCount, newLoop, readLoops, writeLoops, type OpenLoop } from '../../lib/garvis/loops';
 import SceneStage, { type StageCurrent } from './SceneStage';
 
-const MIND_HEX = '#a78bfa'; // the violet of Garvis's mind — where your thinking is heading
+// HARMONIZED PALETTE — warm ember family dominates (topic/idea/project/artifact differ by
+// weight, not hue), with exactly two disciplined cool accents that each carry real meaning:
+// question = cool blue (an open loop), investigation/mind = one violet (a deep dive). No neon
+// rainbow fighting the forge brand.
+const MIND_HEX = '#B98CE0'; // the single violet of Garvis's mind — matches investigation + tangent
 type ViewerItem = { kind: 'image' | 'video' | 'link'; url: string; title: string };
 
 const STAGE_W = 4000, STAGE_H = 4000, CX = STAGE_W / 2, CY = STAGE_H / 2;
@@ -29,7 +35,8 @@ const RING = 360;
 const PREFETCH_N = 3;
 
 const KIND_HEX: Record<ClusterKind, string> = {
-  topic: '#e9a23b', question: '#38bdf8', idea: '#f59e0b', investigation: '#a78bfa', artifact: '#34d399', project: '#fbbf24',
+  topic: '#F2A44D', idea: '#FFC061', project: '#E5631F', artifact: '#E0B36A', // warm family, by weight
+  question: '#5AA9E6', investigation: '#B98CE0', // the two meaningful cool accents
 };
 const KIND_ICON: Record<ClusterKind, typeof Sparkles> = {
   topic: Sparkles, question: CircleHelp, idea: Sparkles, investigation: Telescope, artifact: BookOpen, project: FolderKanban,
@@ -38,7 +45,7 @@ const MATURITY_LABEL: Record<ClusterMaturity, string> = {
   spark: 'spark', growing: 'growing', mature: 'mature', building: 'building', finished: 'done', dormant: 'dormant', archived: 'archived',
 };
 const LEAD_ICON: Record<LeadKind, typeof ArrowRight> = { dig: ArrowRight, question: HelpCircle, tangent: Shuffle };
-const LEAD_HEX: Record<LeadKind, string> = { dig: '#e9a23b', question: '#38bdf8', tangent: '#a78bfa' };
+const LEAD_HEX: Record<LeadKind, string> = { dig: '#F2A44D', question: '#5AA9E6', tangent: '#B98CE0' };
 const leadToKind = (k: LeadKind): ClusterKind => (k === 'question' ? 'question' : k === 'tangent' ? 'idea' : 'topic');
 
 const imagesOf = (c: Cluster) => c.artifacts.filter((a) => a.kind === 'image' && (a.thumb || a.url));
@@ -84,6 +91,7 @@ interface Props {
 }
 
 export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCost, worldKey = 'local' }: Props) {
+  const navigate = useNavigate();
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(0.85);
   const [busy, setBusy] = useState<string | null>(null);
@@ -106,6 +114,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   const [whisper, setWhisper] = useState(false);      // "had this one ready for you"
   const [nudge, setNudge] = useState<Lead | null>(null); // patch-leaving: the richer vein
   const [mapMode, setMapMode] = useState(false);      // zoomed out to the constellation vs. in the scene
+  const [showPanel, setShowPanel] = useState(false);  // scene-mode depth drawer (details on demand)
   const drag = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
   const leadsCache = useRef<Record<string, Lead[]>>({});
   const leadsRef = useRef<Lead[]>([]);
@@ -140,7 +149,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
     if (!focus) return;
     const id = focus.id;
     const c0 = byId.get(id)!;
-    setLeads(leadsCache.current[id] ?? sceneOf(c0)?.currents ?? []); setBridge(null); setStreamText(''); setSuggestion(null); setViewer(null); setNudge(null);
+    setLeads(leadsCache.current[id] ?? sceneOf(c0)?.currents ?? []); setBridge(null); setStreamText(''); setSuggestion(null); setViewer(null); setNudge(null); setShowPanel(false);
     let cancelled = false;
     const trail = parent ? [parent.title] : [];
     const needAnswer = !c0.artifacts.some((a) => a.id === 'scene') && !c0.artifacts.some((a) => a.id === 'understanding');
@@ -179,16 +188,34 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
         } catch (e) { if (!cancelled) setErr(e instanceof Error ? e.message : 'Could not compose this idea — try again in a moment.'); }
         finally { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); }
       }
+      // Slow gathers (Serper/Wikipedia/YouTube) finish long after the user may have guessed or dived.
+      // Writing their whole result graph back would clobber that state (the guess-then-snap-back bug),
+      // so merge only the NEW artifacts for this cluster into the LIVE graph.
+      const adoptMedia = (res: ClusterGraph) => {
+        const upd = res.clusters.find((c) => c.id === id);
+        if (!upd) return;
+        const live = liveRef.current.graph;
+        let changed = false;
+        const merged = live.clusters.map((c) => {
+          if (c.id !== id) return c;
+          const have = new Set(c.artifacts.map((a) => a.id));
+          const fresh = upd.artifacts.filter((a) => !have.has(a.id));
+          if (!fresh.length) return c;
+          changed = true;
+          return { ...c, artifacts: [...c.artifacts, ...fresh] };
+        });
+        if (changed) { g = { ...live, clusters: merged }; setGraph(g); }
+      };
       if (needMedia && !cancelled) {
         try {
           let got = false;
-          if (discoverAvailable()) { const r = await gatherDiscover(g, id); if (!cancelled && r.found) { g = r.graph; setGraph(g); if (r.costUsd) onCost?.(r.costUsd); got = true; } }
-          if (!got && !cancelled) { const w = await gatherWikiMedia(g, id); if (!cancelled && w.found) { g = w.graph; setGraph(g); } }
+          if (discoverAvailable()) { const r = await gatherDiscover(g, id); if (!cancelled && r.found) { adoptMedia(r.graph); if (r.costUsd) onCost?.(r.costUsd); got = true; } }
+          if (!got && !cancelled) { const w = await gatherWikiMedia(g, id); if (!cancelled && w.found) adoptMedia(w.graph); }
         } catch { /* best-effort */ }
         finally { if (!cancelled) setLoading((l) => ({ ...l, media: false })); }
       }
       if (needVideo && !cancelled) {
-        try { const r = await gatherVideos(g, id); if (!cancelled && r.found) { g = r.graph; setGraph(g); } } catch { /* best-effort */ }
+        try { const r = await gatherVideos(g, id); if (!cancelled && r.found) adoptMedia(r.graph); } catch { /* best-effort */ }
         finally { if (!cancelled) setLoading((l) => ({ ...l, video: false })); }
       }
     })();
@@ -272,7 +299,20 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
 
   if (!focus) return <p className="p-6 text-sm text-forge-dim">Name a curiosity to begin.</p>;
 
-  const travel = (id: string) => { setMapMode(false); if (id !== focus.id) { setFocusId(id); setBridge(null); } };
+  // DIVE-AS-TRAVEL — a transition isn't a hard cut. Navigation happens immediately (the known-good
+  // batched path), while two things make it read as MOTION THROUGH SPACE: (1) the map camera glides to
+  // the destination node — set here for existing nodes, and the focus-change effect handles fresh dive
+  // children once the layout recomputes; the .fm-stage's own .6s transform transition animates it.
+  // (2) the scene wrapper is keyed by focus.id, so each new idea REMOUNTS and blooms in via ku-warp-in
+  // (arrives from far — scale-up + deblur + fade). Reduced-motion users get an instant swap (index.css
+  // zeroes animation durations globally).
+  const travel = (id: string) => {
+    if (id === focus.id && !mapMode) return;
+    setMapMode(false);
+    const target = positions.get(id);
+    if (target) setPan({ x: -(target.x - CX) * scale, y: -(target.y - CY) * scale });
+    if (id !== focus.id) { setFocusId(id); setBridge(null); }
+  };
   const dive = (lead: Lead) => {
     recordPick(lead.kind);
     const { graph: g2, id } = addChild(graph, focus.id, { title: lead.label, kind: leadToKind(lead.kind) });
@@ -351,10 +391,24 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   };
   refreshRef.current = refreshMind;
 
+  // THE DOOR TO WORK MODE — compile the whole exploration (this idea + the reasoning thread that led
+  // here + the branches/variations + gathered research/sources + the open questions I'm still chasing)
+  // into a structured brief, so a rabbit hole becomes a fully-briefed build instead of a thin seed I'd
+  // have to re-explain. The brief is too big for a URL, so it rides in localStorage; NewProject writes
+  // it into the project Brain (persists into every future edit) and feeds it into the first generation.
+  const buildThis = () => {
+    const compiled = compileBuildBrief(graph, focus.id, { openQuestions: leads.map((l) => l.label) });
+    if (!compiled) return;
+    try { localStorage.setItem('ff:build-brief', JSON.stringify(compiled)); } catch { /* falls back to prompt-only seed */ }
+    navigate('/new?from=constellation');
+  };
+
   const onWheel = (e: React.WheelEvent) => { e.preventDefault(); setScale((s) => Math.min(1.8, Math.max(0.16, s * (1 - e.deltaY * 0.0012)))); };
   const onDown = (e: React.MouseEvent) => { drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, moved: false }; };
   const onMove = (e: React.MouseEvent) => { if (drag.current) { if (Math.abs(e.clientX - drag.current.x) + Math.abs(e.clientY - drag.current.y) > 3) drag.current.moved = true; setPan({ x: drag.current.px + (e.clientX - drag.current.x), y: drag.current.py + (e.clientY - drag.current.y) }); } };
-  const onUp = () => { drag.current = null; };
+  // Release AFTER the click event fires — node onClick guards check drag.current.moved, so a drag
+  // that ends on a card must not read as a click (grab-anywhere panning starts on cards too now).
+  const onUp = () => { const d = drag.current; if (!d) return; window.setTimeout(() => { if (drag.current === d) drag.current = null; }, 0); };
   const fit = () => { const p = positions.get(focus.id); setScale(0.85); if (p) setPan({ x: -(p.x - CX) * 0.85, y: -(p.y - CY) * 0.85 }); };
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -372,7 +426,10 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   { let cur = focus.parentId; let g = 0; while (cur && g++ < 64) { activeIds.add(cur); cur = byId.get(cur)?.parentId ?? null; } }
   for (const c of graph.clusters) if (c.parentId === focus.id) activeIds.add(c.id);
   const focusChildSlugs = new Set((childrenByParent.get(focus.id) ?? []).map((c) => slugify(c.title)));
-  const ghosts = leads.filter((l) => !focusChildSlugs.has(slugify(l.label))).slice(0, 8);
+  // Ghost leads ring the hub. Fewer of them, pushed further out than the child cards + media halo,
+  // so the rings can't collide. The tease/epiphany detail lives in the scene rail, NOT on the map.
+  const ghosts = leads.filter((l) => !focusChildSlugs.has(slugify(l.label))).slice(0, 6);
+  const GHOST_R = 640;
 
   // GARVIS'S MIND, made visible — ideas that match where the thinking is heading (intent + next directions)
   // softly brighten and gain a violet aura. No words; the map just leans toward what's alive.
@@ -426,6 +483,10 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
           .fm-rise { animation: fm-rise .45s cubic-bezier(.2,.8,.2,1) both; }
           @keyframes ku-kb { from { transform: scale(1.06) translate(0,0) } to { transform: scale(1.16) translate(-2%, -2%) } }
           .ku-kb { animation: ku-kb 22s ease-in-out infinite alternate; }
+          /* dive-as-travel: each new idea ARRIVES — blooms up from far (scale-up + deblur + fade) as
+             the map camera glides to its node, so a dive reads as motion through space, not a cut. */
+          @keyframes ku-warp-in { from { opacity:0; transform:scale(.9); filter:blur(9px) } to { opacity:1; transform:scale(1); filter:blur(0) } }
+          .ku-warp-in { animation: ku-warp-in .66s cubic-bezier(.22,1,.36,1) both; transform-origin:center; will-change:transform,opacity,filter; }
         `}</style>
         <div className="absolute inset-0 cursor-grab active:cursor-grabbing" onWheel={onWheel} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
           style={{ background: `radial-gradient(1400px 900px at 50% 45%, ${hex}10, transparent 65%), radial-gradient(circle at 50% 50%, #0c0a14, #060509 82%) #060509` }}>
@@ -450,7 +511,8 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
         <button onClick={fit} className="absolute right-3 top-3 z-10 rounded-lg border border-forge-border bg-forge-panel/80 p-1.5 text-forge-dim hover:text-forge-ink" title="Recenter"><Maximize2 size={14} /></button>
         <div className="pointer-events-none absolute bottom-3 right-3 z-10 rounded-lg border border-forge-border bg-forge-panel/70 px-2 py-1 text-[10px] text-forge-dim">{graph.clusters.length} ideas explored</div>
 
-        <div className="fm-stage pointer-events-none absolute" style={{ left: '50%', top: '50%', width: STAGE_W, height: STAGE_H, marginLeft: -CX, marginTop: -CY, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: 'center', transition: drag.current ? 'none' : undefined }}>
+        <div className="fm-stage absolute cursor-grab active:cursor-grabbing" onWheel={onWheel} onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+          style={{ left: '50%', top: '50%', width: STAGE_W, height: STAGE_H, marginLeft: -CX, marginTop: -CY, transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: 'center', transition: drag.current ? 'none' : undefined }}>
           <div className="fm-breathe pointer-events-none absolute rounded-full" style={{ left: focusPos.x, top: focusPos.y, width: 620, height: 620, background: `radial-gradient(circle, ${hex}1c, transparent 60%)` }} />
           <svg width={STAGE_W} height={STAGE_H} className="absolute inset-0" style={{ overflow: 'visible' }}>
             {graph.clusters.filter((c) => c.parentId && positions.get(c.id) && positions.get(c.parentId!)).map((c) => {
@@ -458,7 +520,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
               const onPath = c.id === focus.id || c.parentId === focus.id;
               return <path key={`e-${c.id}`} className={onPath ? 'fm-flow' : ''} d={edgePath(a.x, a.y, b.x, b.y)} fill="none" stroke={KIND_HEX[c.kind]} strokeWidth={onPath ? 2 : 1} strokeOpacity={onPath ? 0.6 : 0.2} strokeLinecap="round" />;
             })}
-            {ghosts.map((l, i) => { const t = -Math.PI / 2 + (i / Math.max(1, ghosts.length)) * Math.PI * 2; const gx = focusPos.x + 480 * Math.cos(t), gy = focusPos.y + 480 * Math.sin(t); return <path key={`ge-${i}`} className="fm-flow" d={edgePath(focusPos.x, focusPos.y, gx, gy)} fill="none" stroke={LEAD_HEX[l.kind]} strokeWidth={1.2} strokeOpacity={0.32} strokeDasharray="2 6" />; })}
+            {ghosts.map((l, i) => { const t = -Math.PI / 2 + (i / Math.max(1, ghosts.length)) * Math.PI * 2; const gx = focusPos.x + GHOST_R * Math.cos(t), gy = focusPos.y + GHOST_R * Math.sin(t); return <path key={`ge-${i}`} className="fm-flow" d={edgePath(focusPos.x, focusPos.y, gx, gy)} fill="none" stroke={LEAD_HEX[l.kind]} strokeWidth={1.2} strokeOpacity={0.32} strokeDasharray="2 6" />; })}
             {!compact && halo.map((m, i) => { const p = haloPos(i); return <path key={`me-${i}`} d={edgePath(focusPos.x, focusPos.y, p.x, p.y)} fill="none" stroke={hex} strokeWidth={1} strokeOpacity={0.22} strokeDasharray="1 6" />; })}
           </svg>
 
@@ -491,25 +553,23 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
 
           {ghosts.map((l, i) => {
             const t = -Math.PI / 2 + (i / Math.max(1, ghosts.length)) * Math.PI * 2;
-            const gx = focusPos.x + 480 * Math.cos(t), gy = focusPos.y + 480 * Math.sin(t);
+            const gx = focusPos.x + GHOST_R * Math.cos(t), gy = focusPos.y + GHOST_R * Math.sin(t);
             const pf = prefetch.current[slugify(l.label)]; const ready = pf && pf !== 'loading';
             const lhex = LEAD_HEX[l.kind]; const LIcon = LEAD_ICON[l.kind];
             const ep = epiphanyCount(l.label, loops); // touching ≥2 open loops = an epiphany lure
+            // Compact one-line lure on the map: icon + label, glow carries the "ready"/"epiphany"
+            // signal. No tease, no epiphany sentence — that detail belongs in the scene, not the map.
             return (
-              <div key={`g-${i}`} className="fm-node pointer-events-auto absolute" style={{ left: gx, top: gy, width: 196, transform: 'translate(-50%, -50%)', zIndex: 20 }}>
-                <button onClick={() => dive(l)} title={ready ? 'Garvis is holding this answer' : l.label}
-                  className="group w-full rounded-2xl border bg-forge-panel/85 px-3 py-2 text-left backdrop-blur transition-all hover:scale-105"
+              <div key={`g-${i}`} className="fm-node pointer-events-auto absolute" style={{ left: gx, top: gy, width: 184, transform: 'translate(-50%, -50%)', zIndex: 20 }}>
+                <button onClick={() => { if (!drag.current?.moved) dive(l); }} title={l.tease || (ready ? 'Garvis is holding this answer' : l.label)}
+                  className="group flex w-full items-center gap-1.5 rounded-full border bg-forge-panel/85 px-3 py-1.5 text-left backdrop-blur transition-all hover:scale-105"
                   style={{
                     borderColor: ep >= 2 ? '#fbbf2488' : ready ? `${lhex}77` : `${lhex}30`,
                     boxShadow: ep >= 2 ? '0 0 26px -8px #fbbf24' : ready ? `0 0 22px -8px ${lhex}` : 'none',
                   }}>
-                  <span className="flex items-center gap-1.5">
-                    <LIcon size={12} style={{ color: lhex }} className="shrink-0" />
-                    <span className="line-clamp-2 text-[11px] font-medium text-forge-ink/90 group-hover:text-forge-ink">{l.label}</span>
-                    {ready ? <Lock size={9} className="ml-auto shrink-0" style={{ color: lhex }} /> : pf === 'loading' ? <Loader2 size={10} className="ml-auto shrink-0 animate-spin text-forge-dim/50" /> : null}
-                  </span>
-                  {l.tease && <span className="mt-0.5 line-clamp-2 block text-[10px] italic leading-snug text-forge-dim/75">{l.tease}</span>}
-                  {ep >= 2 && <span className="mt-1 inline-flex items-center gap-1 text-[9px] font-semibold text-amber-300"><Flame size={9} /> touches {ep} of your open questions</span>}
+                  {ep >= 2 ? <Flame size={12} className="shrink-0 text-amber-300" /> : <LIcon size={12} style={{ color: lhex }} className="shrink-0" />}
+                  <span className="truncate text-[11px] font-medium text-forge-ink/90 group-hover:text-forge-ink">{l.label}</span>
+                  {ready ? <Lock size={9} className="ml-auto shrink-0" style={{ color: lhex }} /> : pf === 'loading' ? <Loader2 size={10} className="ml-auto shrink-0 animate-spin text-forge-dim/50" /> : null}
                 </button>
               </div>
             );
@@ -518,7 +578,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
 
         {/* ============ THE SCENE — the full-canvas idea you're standing in (map is the zoom-out) ============ */}
         {!mapMode && (
-          <div className="absolute inset-0 z-30">
+          <div key={focus.id} className="absolute inset-0 z-30 ku-warp-in">
             <SceneStage
               focus={focus} scene={sceneOf(focus)} composing={loading.answer} partial={streamText} hex={hex}
               trail={stageTrail} heroUrl={stageHero} gallery={stageGallery} currents={stageCurrents}
@@ -526,7 +586,27 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
               onDive={(l) => dive(l)}
               onOpenMedia={(m) => setViewer({ kind: m.video ? 'video' : 'image', url: m.url, title: m.title || focus.title })}
               onConstellation={() => setMapMode(true)}
+              onDetails={() => setShowPanel(true)}
+              onBuild={buildThis}
             />
+          </div>
+        )}
+        {/* scene-mode depth drawer — the panel appears only when asked for, then gets out of the way */}
+        {!mapMode && showPanel && (
+          <div className="fm-rise absolute bottom-3 right-3 top-3 z-40 shadow-2xl" style={{ width: Math.min(panelW, 420) }}>
+            <button onClick={() => setShowPanel(false)} className="absolute right-3 top-3 z-50 rounded-lg border border-forge-border bg-forge-panel/90 p-1 text-forge-dim hover:text-forge-ink" title="Close"><X size={13} /></button>
+            <DetailPanel focus={focus} hex={hex} loading={loading} busy={busy} connections={connections} bridge={bridge} byId={byId} width={Math.min(panelW, 420)} streamText={streamText}
+              onOpen={setViewer} onTravel={travel} onExpand={expand}
+              onVideos={() => run('vid', () => gatherVideos(graph, focus.id))}
+              onSurprise={surprise} onInvestigate={runInvestigation} />
+          </div>
+        )}
+        {/* MEDIA VIEWER — center stage, over everything: images/videos open big, in place */}
+        {viewer && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onClick={() => setViewer(null)}>
+            <div className="relative h-full max-h-[680px] w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
+              <Viewer item={viewer} hex={hex} onClose={() => setViewer(null)} />
+            </div>
           </div>
         )}
         {/* zoomed OUT to the constellation — one tap back into the idea you were standing in */}
@@ -595,17 +675,18 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
         </form>
       </div>
 
-      {/* drag to resize the detail panel */}
-      <div onMouseDown={startResize} className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center" title="Drag to resize">
-        <div className="h-16 w-1 rounded-full bg-forge-border transition-colors group-hover:bg-forge-ember/60" />
-      </div>
-
-      {/* ---------- THE DETAIL PANEL (depth) ---------- */}
-      <DetailPanel focus={focus} hex={hex} loading={loading} busy={busy} connections={connections} bridge={bridge} byId={byId} width={panelW} streamText={streamText}
-        viewer={viewer} onOpen={setViewer} onCloseViewer={() => setViewer(null)}
-        onTravel={travel} onExpand={expand}
-        onVideos={() => run('vid', () => gatherVideos(graph, focus.id))}
-        onSurprise={surprise} onInvestigate={runInvestigation} />
+      {/* ---------- THE DETAIL PANEL (depth) — constellation only; in the scene it's the on-demand drawer ---------- */}
+      {mapMode && (
+        <>
+          <div onMouseDown={startResize} className="group flex w-2 shrink-0 cursor-col-resize items-center justify-center" title="Drag to resize">
+            <div className="h-16 w-1 rounded-full bg-forge-border transition-colors group-hover:bg-forge-ember/60" />
+          </div>
+          <DetailPanel focus={focus} hex={hex} loading={loading} busy={busy} connections={connections} bridge={bridge} byId={byId} width={panelW} streamText={streamText}
+            onOpen={setViewer} onTravel={travel} onExpand={expand}
+            onVideos={() => run('vid', () => gatherVideos(graph, focus.id))}
+            onSurprise={surprise} onInvestigate={runInvestigation} />
+        </>
+      )}
     </div>
   );
 }
@@ -614,7 +695,6 @@ function MapNode({ c, isFocus, compact, kids, onClick }: { c: Cluster; isFocus: 
   const hex = KIND_HEX[c.kind];
   const Icon = KIND_ICON[c.kind];
   const thumb = firstImage(c);
-  const bullets = kids.slice(0, 3).map((k) => k.title);
   const arts = c.artifacts.length;
   const vids = videosOf(c).length;
   if (compact) {
@@ -635,13 +715,9 @@ function MapNode({ c, isFocus, compact, kids, onClick }: { c: Cluster; isFocus: 
           <Icon size={13} style={{ color: hex }} className="shrink-0" />
           <span className={`truncate font-semibold text-forge-ink ${isFocus ? 'text-sm' : 'text-xs'}`} style={{ opacity: 0.65 + 0.35 * c.salience }}>{c.title}</span>
         </div>
-        {isFocus && c.summary ? (
-          <p className="mt-1 line-clamp-2 text-[11px] text-forge-dim">{c.summary}</p>
-        ) : bullets.length ? (
-          <ul className="mt-1 space-y-0.5">{bullets.map((b, i) => <li key={i} className="flex items-start gap-1 text-[10px] text-forge-dim"><span className="mt-[3px] h-1 w-1 shrink-0 rounded-full" style={{ background: `${hex}aa` }} /><span className="truncate">{b}</span></li>)}</ul>
-        ) : c.summary ? (
-          <p className="mt-0.5 line-clamp-2 text-[10px] text-forge-dim">{c.summary}</p>
-        ) : null}
+        {/* summary only — a node never lists its children's titles (those are their own cards on the
+            map; repeating them here was the duplicate-text clutter). */}
+        {c.summary && <p className={`mt-1 line-clamp-2 text-forge-dim ${isFocus ? 'text-[11px]' : 'text-[10px]'}`}>{c.summary}</p>}
         {(arts > 0 || kids.length > 0) && (
           <div className="mt-1.5 flex items-center gap-2 text-[9px] text-forge-dim/70">
             {arts > 0 && <span className="inline-flex items-center gap-0.5"><Paperclip size={9} />{arts}</span>}
@@ -654,10 +730,10 @@ function MapNode({ c, isFocus, compact, kids, onClick }: { c: Cluster; isFocus: 
   );
 }
 
-function DetailPanel({ focus, hex, loading, busy, connections, bridge, byId, width, streamText, viewer, onOpen, onCloseViewer, onTravel, onExpand, onVideos, onSurprise, onInvestigate }: {
+function DetailPanel({ focus, hex, loading, busy, connections, bridge, byId, width, streamText, onOpen, onTravel, onExpand, onVideos, onSurprise, onInvestigate }: {
   focus: Cluster; hex: string; loading: { answer: boolean; media: boolean; video: boolean }; busy: string | null;
   connections: UniverseConnection[]; bridge: Bridge | null; byId: Map<string, Cluster>; width: number; streamText: string;
-  viewer: ViewerItem | null; onOpen: (v: ViewerItem) => void; onCloseViewer: () => void;
+  onOpen: (v: ViewerItem) => void;
   onTravel: (id: string) => void; onExpand: (m: ExpandMode) => void; onVideos: () => void; onSurprise: () => void; onInvestigate: () => void;
 }) {
   const Icon = KIND_ICON[focus.kind];
@@ -666,8 +742,7 @@ function DetailPanel({ focus, hex, loading, busy, connections, bridge, byId, wid
   const links = linksOf(focus);
   const understanding = understandingOf(focus);
   return (
-    <aside className="relative shrink-0 overflow-y-auto rounded-2xl border border-forge-border bg-forge-panel panel-scroll" style={{ width }}>
-      {viewer && <Viewer item={viewer} hex={hex} onClose={onCloseViewer} />}
+    <aside className="relative h-full shrink-0 overflow-y-auto rounded-2xl border border-forge-border bg-forge-panel panel-scroll" style={{ width }}>
       {images[0] ? <img src={images[0].thumb || images[0].url} alt="" className="h-32 w-full object-cover" /> : loading.media ? <div className="h-32 w-full animate-pulse" style={{ background: `linear-gradient(${hex}18,#0c0a14)` }} /> : null}
       <div className="p-4">
         <div className="flex items-center gap-2">
