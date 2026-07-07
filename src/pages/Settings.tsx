@@ -59,15 +59,31 @@ function AIProviderCard() {
               <Input
                 id="ai-model"
                 value={model}
-                list="ai-model-list"
                 onChange={(e) => setModel(provider, e.target.value)}
                 placeholder={info.defaultModel}
+                title="Or type any model id the provider supports"
                 className="font-mono"
               />
-              <datalist id="ai-model-list">
-                {info.models.map((m) => <option key={m} value={m} />)}
-              </datalist>
             </div>
+          </div>
+
+          {/* Always-visible preset chips — the old datalist hid every option that didn't match the
+              current value, so newly added models were invisible until the box was cleared. */}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {info.models.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setModel(provider, m)}
+                className={
+                  m === model
+                    ? 'rounded-full border border-forge-ember bg-forge-ember/10 px-2.5 py-1 font-mono text-[11px] text-forge-ember'
+                    : 'rounded-full border border-forge-border px-2.5 py-1 font-mono text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink'
+                }
+              >
+                {m}
+              </button>
+            ))}
           </div>
 
           <p className="mt-2 text-xs text-forge-dim">{info.blurb}</p>

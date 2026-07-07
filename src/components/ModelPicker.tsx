@@ -76,16 +76,32 @@ export function ModelPicker({ open, onToggle }: { open: boolean; onToggle: (open
             </select>
 
             <label className="mb-1 mt-3 block text-[10px] uppercase tracking-wide text-forge-dim">Model</label>
+            {/* Always-visible preset chips — a datalist here hid every option that didn't match the
+                current value, so new models (e.g. Fable 5) were invisible until you cleared the box. */}
+            <div className="mb-1.5 flex flex-wrap gap-1">
+              {info.models.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setModel(provider, m)}
+                  className={cn(
+                    'rounded-full border px-2 py-0.5 font-mono text-[10px] transition-colors',
+                    m === model
+                      ? 'border-forge-ember bg-forge-ember/10 text-forge-ember'
+                      : 'border-forge-border text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink',
+                  )}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
             <input
               value={model}
-              list={`models-${provider}`}
               onChange={(e) => setModel(provider, e.target.value)}
               placeholder={info.defaultModel}
+              title="Or type any model id the provider supports"
               className="w-full rounded-lg border border-forge-border bg-forge-panel px-2 py-1.5 font-mono text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
             />
-            <datalist id={`models-${provider}`}>
-              {info.models.map((m) => <option key={m} value={m} />)}
-            </datalist>
 
             {info.needsKey && (
               <>
