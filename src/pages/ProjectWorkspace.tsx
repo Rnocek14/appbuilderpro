@@ -14,7 +14,7 @@ import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
 import { useProjectSecrets } from '../hooks/useProjectSecrets';
 import { useConnections, fnError } from '../hooks/useConnections';
-import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, revertChangeSet, applyPendingEdit, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, revertChangeSet, applyPendingEdit, createMissingModules, type EditEvent } from '../lib/aiClient';
 import { agenticVerifyAndFix } from '../lib/agent/edit';
 import { agentAvailable } from '../lib/agent/loop';
 import { resolveAI } from '../lib/aiConfig';
@@ -589,6 +589,20 @@ export default function ProjectWorkspace() {
     let issues = await runQA(id);
     let errs = issues.filter((i) => i.severity === 'error');
     const hadErrors = errs.length;
+    // Missing files first, deterministically: one dedicated generation per file, in parallel.
+    // (An edit that rewrites App.tsx to route to pages it never emitted is the worst failure —
+    // asking one bounded fix stream to write them all is exactly what fails to converge.)
+    if (errs.length) {
+      try {
+        const made = await createMissingModules(id);
+        if (made.length) {
+          toast('info', `Created ${made.length} missing file${made.length === 1 ? '' : 's'} the app imports…`);
+          await refreshFiles();
+          issues = await runQA(id);
+          errs = issues.filter((i) => i.severity === 'error');
+        }
+      } catch { /* best-effort — the QA loop below still runs */ }
+    }
     for (let pass = 1; pass <= 2 && errs.length; pass++) {
       toast('info', `Found ${errs.length} issue${errs.length === 1 ? '' : 's'} — auto-fixing…`);
       await sendEdit(id, issuesToFixRequest(errs), undefined, onStreamEvent, false, undefined, activeThreadId, false);

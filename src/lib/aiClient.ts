@@ -19,6 +19,8 @@ import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
 import { runQA, issuesToFixRequest, type QAIssue } from './projectQA';
+import { missingLocalModules, looksTruncated } from './qaCheck';
+import { MISSING_FILE_SYSTEM, missingFilePrompt } from './prompts';
 import { PREFS_PATH, prefsContext } from './preferences';
 import { MAIN_THREAD_ID, threadOf } from './threads';
 import { previewContext } from './previewRuntime';
@@ -901,7 +903,11 @@ async function qaFixPass(projectId: string, issues: QAIssue[]): Promise<void> {
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: fixUsage.inputTokens, outputTokens: fixUsage.outputTokens });
   const result = parser.end();
   if (result.action !== 'edit') return;
-  const { safeChanges, safeDeletions } = applyEditGuardrail(appFiles, fixMsg, '', result.changes, result.deletions);
+  let fixChanges = result.changes;
+  if (fixUsage.stopReason === 'max_tokens' && fixChanges.length && looksTruncated(fixChanges[fixChanges.length - 1].content)) {
+    fixChanges = fixChanges.slice(0, -1); // never persist a half-written file
+  }
+  const { safeChanges, safeDeletions } = applyEditGuardrail(appFiles, fixMsg, '', fixChanges, result.deletions);
   for (const c of safeChanges) {
     await supabase.from('project_files').upsert(
       { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
@@ -913,6 +919,45 @@ async function qaFixPass(projectId: string, issues: QAIssue[]): Promise<void> {
       .update({ deleted_at: new Date().toISOString() })
       .eq('project_id', projectId).eq('path', path);
   }
+}
+
+/**
+ * SELF-HEAL for the worst generated-app failure: imports that point at files which DON'T EXIST
+ * (the model rewrote App.tsx to route to pages it never emitted — Vite dies on the first one).
+ * Each missing file gets its OWN dedicated model call, all in parallel — one bounded fix stream
+ * asked to write N whole pages is exactly what fails to converge. Non-code targets (css/json)
+ * are stubbed deterministically with no model call. Returns the paths created.
+ */
+export async function createMissingModules(projectId: string, opts?: { onFile?: (path: string) => void }): Promise<string[]> {
+  const { data: files } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const appFiles = ((files ?? []) as { path: string; content: string }[]).filter((f) => !isMetaFile(f.path));
+  const missing = missingLocalModules(appFiles).slice(0, 12);
+  if (!missing.length) return [];
+  const byPath = new Map(appFiles.map((f) => [f.path, f.content]));
+  const tree = appFiles.map((f) => f.path).sort().join('\n');
+  const written: string[] = [];
+  await Promise.all(missing.map(async (m) => {
+    try {
+      if (!/\.(t|j)sx?$/.test(m.path)) {
+        await writeProjectFile(projectId, m.path, m.path.endsWith('.json') ? '{}\n' : '');
+        written.push(m.path); opts?.onFile?.(m.path);
+        return;
+      }
+      const importers = m.importers.slice(0, 2).map((i) =>
+        `--- ${i.path} imports it as:\n${i.lines.join('\n')}\n--- ${i.path} contents:\n${(byPath.get(i.path) ?? '').slice(0, 6000)}`).join('\n\n');
+      const r = await rawComplete([
+        { role: 'system', content: MISSING_FILE_SYSTEM },
+        { role: 'user', content: missingFilePrompt(m.path, importers, tree) },
+      ], 8000);
+      const content = r.text.replace(/^```[a-z]*\r?\n?/i, '').replace(/\r?\n?```\s*$/, '').trim();
+      if (!content || looksTruncated(content)) return; // never persist half a file
+      await writeProjectFile(projectId, m.path, content + '\n');
+      written.push(m.path); opts?.onFile?.(m.path);
+    } catch { /* one file failing shouldn't sink the healing pass */ }
+  }));
+  return written;
 }
 
 async function directGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
@@ -1037,9 +1082,14 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
       // The UI kit under /src/components/ui/ is authoritative (scaffold-provided). Drop ANY model
       // file there — a model-emitted ui/index.tsx alongside the scaffold's index.ts caused the
       // duplicate-component / visual-drift bug the audit flagged.
-      const appFiles = parser.end().changes.filter(
+      let appFiles = parser.end().changes.filter(
         (f) => f.path && f.content.trim() && !reserved.has(f.path) && !f.path.startsWith('/src/components/ui/'),
       );
+      // A max_tokens-cut stream leaves its LAST file half-written — don't persist half a file;
+      // the validate step's missing-module heal recreates it whole.
+      if (genUsage.stopReason === 'max_tokens' && appFiles.length && looksTruncated(appFiles[appFiles.length - 1].content)) {
+        appFiles = appFiles.slice(0, -1);
+      }
       if (!appFiles.length) throw new Error('The model produced no source files.');
       for (const f of appFiles) {
         await supabase.from('project_files').upsert(
@@ -1069,6 +1119,14 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
       // regex-fix passes when the agent isn't available (non-Anthropic provider).
       await mark('validate', 'running');
       let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+      // Files that simply DON'T EXIST are created directly first — one dedicated call per file,
+      // in parallel — so the repair agent's budget goes to real fixes, not bulk page-writing.
+      if (qaErrors.length) {
+        try {
+          const made = await createMissingModules(projectId, { onFile: (p) => void mark('validate', 'running', `creating ${p.split('/').pop()}`) });
+          if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        } catch { /* best-effort */ }
+      }
       // UNCONDITIONAL COMPILE GATE — run the real compiler on EVERY generation (booting it
       // headlessly when the preview isn't open), not only when static checks fail. This is what
       // makes "generated" mean "compiles", instead of "hopefully compiles".
@@ -1866,9 +1924,15 @@ async function directEditStream(
     return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
+  // A max_tokens-cut stream leaves its LAST file half-written — drop it rather than persist half
+  // a file (the post-edit checks recreate the whole file via the missing-module heal).
+  let modelChanges = result.changes;
+  if (streamUsage.stopReason === 'max_tokens' && modelChanges.length && looksTruncated(modelChanges[modelChanges.length - 1].content)) {
+    modelChanges = modelChanges.slice(0, -1);
+  }
   // Safe-edit guardrail BEFORE writing: drop edits to existing files the model couldn't see.
   const { safeChanges, safeDeletions, blocked } = applyEditGuardrail(
-    appFiles, message, previewError ?? '', result.changes, result.deletions,
+    appFiles, message, previewError ?? '', modelChanges, result.deletions,
   );
 
   // Review-before-write: when on, do NOT write — return the change set for the user to diff + approve.

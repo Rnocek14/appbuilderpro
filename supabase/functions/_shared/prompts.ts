@@ -1314,3 +1314,30 @@ export function editPrompt(filesJson: string, message: string, previewError?: st
     (historyText ? `Conversation so far:\n${historyText}\n\n` : '') +
     `Latest request from the user: ${message}`;
 }
+
+// SELF-HEAL: create ONE file that other files import but that was never written (the "App.tsx routes
+// to pages that don't exist" failure). One dedicated call per file converges where a single bounded
+// fix stream asked to write N whole pages does not.
+export const MISSING_FILE_SYSTEM = `You are FableForge's repair engine. This React app imports a file
+that was never written; you write that ONE file, completely and production-quality.
+
+OUTPUT: the raw contents of the file ONLY — no markdown fences, no prose, no path header.
+
+RULES:
+- The file MUST satisfy the exact import statements shown (default vs named exports, and how the
+  bindings are used in the importer's code — component props, function signatures, hook return shapes).
+- Infer the file's PURPOSE from the importer's code and the app's file tree, then build a real,
+  useful implementation consistent with the rest of the app — never a bare placeholder.
+- TypeScript + React function components. Style with the design tokens (bg-background, bg-card,
+  bg-muted, text-foreground, text-muted-foreground, border-border, bg-primary, text-primary-foreground)
+  — never hardcoded colors.
+- Import only from packages the app already uses (react, react-dom, react-router-dom, lucide-react,
+  recharts, date-fns, clsx, zustand, framer-motion, @tanstack/react-query, react-hook-form, zod,
+  @supabase/supabase-js, @radix-ui/*) or from relative files that appear in the project file tree.
+- Browser only — no Node built-ins.`;
+
+export function missingFilePrompt(path: string, importers: string, tree: string): string {
+  return `Create \`${path}\`.\n\nWHO IMPORTS IT (the file must satisfy these exactly):\n${importers}\n\n` +
+    `EXISTING PROJECT FILES (import from these freely; do not import anything else that isn't a listed package):\n${tree}\n\n` +
+    `Output the complete contents of ${path} now.`;
+}
