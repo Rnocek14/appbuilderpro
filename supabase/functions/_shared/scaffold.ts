@@ -1062,6 +1062,110 @@ export function Reveal({ children, delay = 0, y = 16, className }: {
 }
 `;
 
+// Advanced scroll/motion primitives — the "expensive site" moves (pinned scrub scenes, parallax,
+// count-ups, marquees) as guaranteed-working components, so the model COMPOSES them instead of
+// hand-rolling scroll math (hand-rolled versions were the top source of broken landing pages).
+const MOTION_TSX = `import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useInView, useScrollProgress } from '../../lib/scroll';
+import { cn } from '../../lib/utils';
+
+const reducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * ScrollScene — the Apple move, prebuilt: a pinned full-screen stage scrubbed by scroll.
+ * Renders a tall wrapper (default 200vh) with a sticky stage inside; the render-prop receives
+ * progress 0->1 — map it onto transform/opacity ONLY. Reduced-motion users get the final state.
+ *
+ *   <ScrollScene>
+ *     {(p) => <img src={shot} style={{ transform: 'scale(' + (0.6 + p * 0.4) + ')', opacity: Math.min(1, p * 2) }} />}
+ *   </ScrollScene>
+ */
+export function ScrollScene({ children, height = '200vh', className }: {
+  children: (progress: number) => ReactNode;
+  height?: string;
+  className?: string;
+}) {
+  const { ref, progress } = useScrollProgress<HTMLDivElement>();
+  const [reduced] = useState(reducedMotion);
+  if (reduced) return <div className={className}>{children(1)}</div>;
+  return (
+    <div ref={ref} className={cn('relative', className)} style={{ height }}>
+      <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
+        {children(progress)}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Parallax — a layer that drifts as it travels through the viewport (compose 2-3 at different
+ * speeds for depth). speed -1..1: negative drifts against scroll (backgrounds), positive with it.
+ */
+export function Parallax({ children, speed = 0.3, className }: {
+  children: ReactNode; speed?: number; className?: string;
+}) {
+  const { ref, progress } = useScrollProgress<HTMLDivElement>();
+  const y = (progress - 0.5) * -2 * speed * 100;
+  const style: CSSProperties = reducedMotion() ? {} : { transform: 'translate3d(0, ' + y.toFixed(1) + 'px, 0)' };
+  return <div ref={ref} className={className} style={style}>{children}</div>;
+}
+
+/**
+ * CountUp — a stat that counts up the first time it scrolls into view (eased, locale-formatted,
+ * steady digits). <CountUp value={12500} suffix="+" /> · <CountUp value={99.9} decimals={1} suffix="%" />
+ */
+export function CountUp({ value, duration = 1400, prefix = '', suffix = '', decimals = 0, className }: {
+  value: number; duration?: number; prefix?: string; suffix?: string; decimals?: number; className?: string;
+}) {
+  const { ref, inView } = useInView<HTMLSpanElement>();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!inView) return;
+    if (reducedMotion()) { setN(value); return; }
+    const start = performance.now();
+    let raf = 0;
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - start) / duration);
+      setN(value * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [inView, value, duration]);
+  const shown = n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return <span ref={ref} className={cn('tabular-nums', className)}>{prefix}{shown}{suffix}</span>;
+}
+
+/**
+ * Marquee — an infinite horizontal strip (logo walls, testimonials, tickers). Seamless loop with
+ * edge fade, pauses on hover; reduced-motion renders the items statically. speed = seconds/loop.
+ */
+export function Marquee({ children, speed = 40, reverse = false, className }: {
+  children: ReactNode; speed?: number; reverse?: boolean; className?: string;
+}) {
+  if (reducedMotion()) {
+    return <div className={cn('flex flex-wrap items-center gap-10 overflow-hidden', className)}>{children}</div>;
+  }
+  const mask = 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)';
+  return (
+    <div className={cn('group flex overflow-hidden', className)} style={{ maskImage: mask, WebkitMaskImage: mask }}>
+      {[0, 1].map((i) => (
+        <div
+          key={i}
+          aria-hidden={i === 1}
+          className="flex shrink-0 items-center gap-10 pr-10 [animation:ui-marquee_linear_infinite] group-hover:[animation-play-state:paused]"
+          style={{ animationDuration: speed + 's', animationDirection: reverse ? 'reverse' : 'normal' }}
+        >
+          {children}
+        </div>
+      ))}
+      <style>{'@keyframes ui-marquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }'}</style>
+    </div>
+  );
+}
+`;
+
 const ERRORBOUNDARY_TSX = `import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 /**
@@ -1183,6 +1287,7 @@ export * from './FormField';
 export * from './Pagination';
 export * from './Table';
 export * from './Reveal';
+export * from './Motion';
 export * from './ErrorBoundary';
 `;
 
@@ -1209,6 +1314,7 @@ const KIT: ScaffoldFile[] = [
   { path: '/src/components/ui/Pagination.tsx', content: PAGINATION_TSX },
   { path: '/src/components/ui/Table.tsx', content: TABLE_TSX },
   { path: '/src/components/ui/Reveal.tsx', content: REVEAL_TSX },
+  { path: '/src/components/ui/Motion.tsx', content: MOTION_TSX },
   { path: '/src/components/ui/ErrorBoundary.tsx', content: ERRORBOUNDARY_TSX },
   { path: '/src/lib/scroll.ts', content: SCROLL_TS },
   { path: '/src/components/ui/index.ts', content: UI_INDEX_TS },

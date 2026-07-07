@@ -501,7 +501,7 @@ async function readFnError(error: unknown): Promise<string> {
 // Direct mode (local dev)
 // ----------------------------------------------------------------
 
-interface RawResult { text: string; inputTokens: number; outputTokens: number }
+interface RawResult { text: string; inputTokens: number; outputTokens: number; stopReason?: string }
 
 export interface DesignDirection {
   archetype: string; name: string; risk: string; accentHue: number;
@@ -564,12 +564,13 @@ export async function generateDesignDirections(
   const out: DesignDirection[] = [];
   await Promise.all(picks.map(async (p) => {
     try {
-      // Fast tier: previews are simple archetype-driven HTML — the cheap model renders them
-      // 3-4x sooner, and the ARCHETYPE SPEC (not model taste) carries the design quality.
+      // MAIN model (not the fast tier): the previews are what the user judges the product by,
+      // and the main model's taste gap on layout/typography is visible even in a thumbnail.
+      // Quality > speed here by explicit product decision.
       const raw = await rawComplete([
         { role: 'system', content: DIRECTIONS_SYSTEM },
         { role: 'user', content: singleDirectionPrompt(prompt, p, picks) },
-      ], 3200, { fast: true });
+      ], 4000);
       const parsed = await parseJsonWithRepair<{ direction?: DesignDirection; directions?: DesignDirection[] }>(raw.text);
       // Accept BOTH shapes — the system prompt's batched contract sometimes wins over the
       // per-call "one direction" instruction; discarding those results = blank picker.
@@ -601,6 +602,7 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   const d = data as {
     content?: { type: string; text?: string }[];
     usage?: { input_tokens?: number; output_tokens?: number };
+    stop_reason?: string;
     error?: string;
   } | null;
   if (d?.error) throw new Error(d.error);
@@ -609,7 +611,7 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   const inputTokens = d?.usage?.input_tokens ?? 0;
   const outputTokens = d?.usage?.output_tokens ?? 0;
   recordUsage({ provider: 'anthropic', model: 'cloud', inputTokens, outputTokens });
-  return { text, inputTokens, outputTokens };
+  return { text, inputTokens, outputTokens, stopReason: d?.stop_reason };
 }
 
 export async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192, opts: { fast?: boolean } = {}): Promise<RawResult> {
@@ -645,6 +647,7 @@ export async function rawComplete(messages: { role: string; content: string }[],
           text: data.content.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n'),
           inputTokens,
           outputTokens,
+          stopReason: typeof data.stop_reason === 'string' ? data.stop_reason : undefined,
         };
       }
       // OpenAI-compatible providers (openai, xai/Grok, gemini, openrouter, local).
@@ -658,10 +661,12 @@ export async function rawComplete(messages: { role: string; content: string }[],
       const inputTokens = data.usage?.prompt_tokens ?? 0;
       const outputTokens = data.usage?.completion_tokens ?? 0;
       recordUsage({ provider: ai.provider, model, inputTokens, outputTokens });
+      const fr = data.choices?.[0]?.finish_reason;
       return {
         text: data.choices?.[0]?.message?.content ?? '',
         inputTokens,
         outputTokens,
+        stopReason: fr === 'length' ? 'max_tokens' : (typeof fr === 'string' ? fr : undefined),
       };
     } catch (err) {
       if (attempt === 2) throw err;
@@ -1124,7 +1129,13 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           (hasIntegrations ? ', and the /supabase/functions/* edge functions' : '') +
           '. Do NOT emit /src/pages/* in this call — each page is generated next against these exact contracts, so App.tsx MAY route to pages not yet emitted (this call only). End with §END.' },
       ], 12000));
-      await upsertFiles(parseProtocol(shellRaw.text).changes);
+      let shellChanges = parseProtocol(shellRaw.text).changes;
+      // A max_tokens-cut call leaves its LAST file half-written — never persist half a file
+      // (the missing-module heal in the validate stage recreates it whole).
+      if (shellRaw.stopReason === 'max_tokens' && shellChanges.length && looksTruncated(shellChanges[shellChanges.length - 1].content)) {
+        shellChanges = shellChanges.slice(0, -1);
+      }
+      await upsertFiles(shellChanges);
       const appTsx = written.get('/src/App.tsx') ?? '';
       if (!appTsx) throw new Error('The model produced no App.tsx in the shell pass.');
 
@@ -1151,15 +1162,22 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
       const pageList = [...pagePaths].filter((p) => !written.has(p));
       await mark('file_tree', 'running', `${pageList.length} pages, ${inFlight} in parallel`);
       const genPage = async (pagePath: string): Promise<void> => {
+        // 9000 tokens/page (was 6000): landing pages with a signature scroll scene + full sections
+        // are big, and quality > speed is the explicit product call. Truncation guards still apply.
         const r = track(await rawComplete([
           { role: 'system', content: GENERATE_FILES_STREAM },
           { role: 'user', content: filesPromptChunk(bpJson, pagePath, contractsContext, hasBackend, hasIntegrations) },
-        ], 6000));
-        const parsed = parseProtocol(r.text);
-        if (!parsed.changes.some((c) => c.path === pagePath && c.content.trim())) {
+        ], 9000));
+        let changes = parseProtocol(r.text).changes;
+        // Drop a max_tokens-cut tail file (a page emits its own small components after itself —
+        // a half-written trailing component is worse than a missing one, which the heal recreates).
+        if (r.stopReason === 'max_tokens' && changes.length && looksTruncated(changes[changes.length - 1].content)) {
+          changes = changes.slice(0, -1);
+        }
+        if (!changes.some((c) => c.path === pagePath && c.content.trim())) {
           throw new Error(`page ${pagePath} was not emitted`);
         }
-        await upsertFiles(parsed.changes);
+        await upsertFiles(changes);
         await mark('file_tree', 'running', pagePath.split('/').pop());
       };
       {

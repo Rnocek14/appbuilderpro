@@ -97,20 +97,19 @@ SCROLL STORYTELLING (marketing/landing surfaces — the single biggest "expensiv
 - Baseline: content REVEALS as you scroll. Wrap sections/cards in the kit's <Reveal> (IntersectionObserver
   fade+slide, stagger siblings with delay={0|80|160}), or put class "stagger" on grids that are visible
   on load. A long static page with everything already rendered reads as cheap.
-- ONE scroll-SCRUBBED scene per page (the Apple move — the product rotates/assembles as you scroll):
-  the kit's useScrollProgress gives 0→1 progress — const { ref, progress } = useScrollProgress<HTMLDivElement>()
-  (no arguments; object destructure); the pattern is a tall wrapper (h-[200vh] or
-  h-[300vh], ref goes HERE) containing a pinned stage (sticky top-0 h-screen overflow-hidden flex items-center)
-  whose content maps progress onto transforms — scale from 0.6→1, rotate in, translate layers at
-  different rates (parallax), fade captions in at progress thresholds, count numbers up
-  (Math.round(progress * 12000)). Great subjects: the product screenshot assembling, a phone/device
-  tilting upright, before→after morphs, a headline that pins while proof points scroll past.
+- SIGNATURE MOMENT (required on every marketing LANDING page where the domain plausibly fits): ONE
+  scroll-scrubbed scene, built with the kit's <ScrollScene> — NOT hand-rolled scroll math:
+    <ScrollScene>{(p) => <div style={{ transform: 'scale(' + (0.6 + p * 0.4) + ') rotate(' + (p * 8 - 4) + 'deg)', opacity: Math.min(1, p * 2) }}>…the stage…</div>}</ScrollScene>
+  Map p onto: the product/screenshot assembling or tilting upright, before→after morphs, a headline
+  that pins while proof points fade in at thresholds (p > 0.3, p > 0.6), layered art via nested
+  <Parallax speed={±0.2..0.5}> for depth. Pair it with <CountUp> stats and a <Marquee> logo/quote
+  strip — three kit moves that together read "designed by an expensive studio".
 - For spring physics or scroll-velocity effects use framer-motion from the CDN (motion.div +
-  useScroll/useTransform/whileInView) — it composes fine with the kit.
+  useScroll/useTransform/whileInView) — it composes fine with the kit. For anything simpler, the
+  kit components above are ALWAYS the first choice (they handle reduced-motion and pinning for you).
 - RESTRAINT: one pinned scene per page, reveals everywhere else; transform/opacity ONLY (never
   scroll-jack or animate layout); content must exist in the DOM regardless of scroll (SEO/a11y);
-  reduced-motion users get the content statically (the global CSS rule collapses transitions — for
-  scrubbed scenes check matchMedia('(prefers-reduced-motion: reduce)') and render the final state).
+  reduced-motion users get the content statically (the kit components handle this themselves).
 - App/dashboard views get NONE of this — scroll effects are for marketing surfaces only.
 
 STATES & DETAILS
@@ -130,6 +129,9 @@ IDENTITY & ANTI-SLOP — the difference between "intentional product" and "gener
   in a colored box as the logo — that's the #1 "prototype" tell.
 - COPY is specific to the domain — real feature names, realistic numbers, sensible dates. Never
   "Welcome back, User!", lorem ipsum, "✨ Powered by AI" badges, or rocket/sparkle clichés.
+- COPY STRINGS use DOUBLE QUOTES in code: prose text is full of apostrophes ("you'll", "world's"),
+  and an apostrophe inside a single-quoted string is a SYNTAX ERROR — the #1 copy-related build
+  breaker. 'single quotes' only for identifier-like strings that can never contain an apostrophe.
 - EMPTY STATES: compose them — an icon in a soft tinted circle (bg-muted/bg-primary/10), a real
   heading, a sentence of guidance, and a primary CTA. Never a bare centered icon.
 - ACCESSIBLE OVERLAYS: the kit provides accessible Tabs, Dropdown, Popover, Tooltip, Modal, and
@@ -719,6 +721,15 @@ The EXACT APIs:
 - FormField: label, error?, hint?, required? — wraps exactly ONE input child (it injects id/aria).
 - Pagination: page, pageCount, onPageChange. Table family: styling only (normal table markup).
 - Reveal: delay? (ms), y?, className — scroll-reveal wrapper for marketing sections.
+- MOTION components (pre-built and guaranteed to work — COMPOSE these for the "expensive site"
+  moves instead of hand-rolling scroll math):
+    <ScrollScene height="200vh">{(p) => (…stage content, map p (0→1) onto transform/opacity…)}</ScrollScene>
+      — the pinned scrubbed scene (sticky stage + reduced-motion handled for you). The child is a
+      RENDER PROP receiving progress.
+    <Parallax speed={0.3}>…</Parallax> — a layer drifting through the viewport; -1..1, negative =
+      background drift; compose 2-3 layers at different speeds for depth.
+    <CountUp value={12500} suffix="+" decimals={0} prefix="$" /> — a stat that counts up on scroll-in.
+    <Marquee speed={40} reverse?>…logos/quotes…</Marquee> — seamless infinite strip, hover-pauses.
 - Toasts: const { toast } = useToast() (from ../context/ToastContext); toast('Saved', 'success').
 - /src/lib/scroll.ts — EXACT signatures. These are NOT react-intersection-observer and NOT
   framer-motion; their call shapes WILL NOT type-check here:
