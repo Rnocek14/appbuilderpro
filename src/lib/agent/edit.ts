@@ -154,8 +154,26 @@ export async function agenticVerifyAndFix(
   ].join('\n');
 
   const ai = resolveAI();
-  const result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true });
+  let result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true });
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+
+  // RELENTLESS: a fresh build that ships with known issues is the worst possible look. Keep
+  // granting fresh step budget while the agent is still MAKING PROGRESS (touching new files —
+  // ctx.changed/deleted are cumulative, so growth = progress), up to 3 extra rounds.
+  let prevTouched = result.changed.length + result.deleted.length;
+  for (let round = 0; round < 3 && result.verified === false; round++) {
+    opts?.onActivity?.(`still failing — repair round ${round + 2}…`);
+    const cont = await runAgent({
+      system: AGENT_BUILD_SYSTEM,
+      userContent: 'Your previous pass ended with verification still FAILING. Continue the repair: call run_typecheck, fix EVERY remaining error (truncated/malformed files must be rewritten COMPLETELY), and do not stop until it reports clean.',
+      ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true,
+    });
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens });
+    result = cont;
+    const touched = result.changed.length + result.deleted.length;
+    if (touched === prevTouched) break; // stalled — no new files touched; more budget won't help
+    prevTouched = touched;
+  }
   return { verified: result.verified, changed: result.changed, deleted: result.deleted };
 }
 
@@ -256,9 +274,11 @@ export async function agenticEdit(
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
 
   // RELENTLESS REPAIR: never end a turn mid-surgery. If verification was still failing when the
-  // step budget ran out, continue with fresh budget (up to 2 rounds) — the ctx (files, changed
-  // sets) carries over, so each round resumes exactly where the last stopped.
-  for (let round = 0; round < 2 && result.verified === false && (result.changed.length || result.deleted.length); round++) {
+  // step budget ran out, continue with fresh budget while the agent is still MAKING PROGRESS
+  // (ctx.changed/deleted are cumulative — growth = new files touched), up to 4 rounds. Only a
+  // genuinely stalled repair (a full round that touched nothing new) gives up.
+  let prevTouched = result.changed.length + result.deleted.length;
+  for (let round = 0; round < 4 && result.verified === false && (result.changed.length || result.deleted.length); round++) {
     onEvent?.({ type: 'activity', text: `Verification still failing — repair round ${round + 2}…` });
     const cont = await runAgent({
       system: AGENT_BUILD_SYSTEM,
@@ -270,6 +290,9 @@ export async function agenticEdit(
     });
     recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens });
     result = { ...cont, text: cont.text || result.text };
+    const touched = result.changed.length + result.deleted.length;
+    if (touched === prevTouched) break; // stalled — no new files touched this round
+    prevTouched = touched;
   }
 
   const changed = result.changed;

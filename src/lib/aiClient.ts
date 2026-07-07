@@ -142,10 +142,11 @@ export interface EditResult {
 // ----------------------------------------------------------------
 
 export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
-  if (DIRECT) return directGenerate(projectId, prompt, planContext);
-  // Cloud mode (no browser key): orchestrate CLIENT-side in short relay calls — the edge
-  // generate-app worker has a hard wall-clock that kills big builds mid-stream.
-  if (!resolveAI().ready) return chunkedCloudGenerate(projectId, prompt, planContext);
+  // ONE client-orchestrated pipeline for both direct (browser key) and cloud users: chunked short
+  // calls — shell first, then every page in PARALLEL, schema concurrent, verify + repair inline.
+  // Direct mode used to run a single serial 32k-token stream: the slowest possible shape, and one
+  // truncation could silently cost the whole tail of the app.
+  if (DIRECT || !resolveAI().ready) return chunkedGenerate(projectId, prompt, planContext);
   const { data, error } = await supabase.functions.invoke('generate-app', {
     body: { projectId, prompt, planContext },
   });
@@ -960,257 +961,19 @@ export async function createMissingModules(projectId: string, opts?: { onFile?: 
   return written;
 }
 
-async function directGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
-  const { data: auth } = await supabase.auth.getUser();
-  const userId = auth.user!.id;
-
-  const { data: gen } = await supabase
-    .from('project_generations')
-    .insert({ project_id: projectId, user_id: userId, prompt, kind: 'create', status: 'running' })
-    .select().single();
-
-  if (!gen) throw new Error('Could not start generation (could not create the generation record).');
-  const genId = gen.id;
-
-  // Drive the forge-progress bar from the client. Each update is picked up by the
-  // workspace via Realtime, so the user sees real movement instead of a frozen 0/11.
-  const stages: { stage: string; status: 'running' | 'done'; started_at: string; finished_at?: string; note?: string }[] = [];
-  const mark = async (stage: string, status: 'running' | 'done', note?: string) => {
-    const now = new Date().toISOString();
-    const found = stages.find((s) => s.stage === stage);
-    if (found) { found.status = status; if (status === 'done') found.finished_at = now; if (note) found.note = note; }
-    else stages.push({ stage, status, started_at: now, ...(note ? { note } : {}) });
-    await supabase.from('project_generations').update({ stages, current_stage: stage }).eq('id', genId);
-  };
-
-  // run in background so the UI can subscribe immediately
-  (async () => {
-    try {
-      await mark('interpret', 'done');
-
-      await mark('blueprint', 'running');
-      // If the user approved a plan up front, fold it into the blueprint request so the
-      // generated app follows what they signed off on.
-      const bpUserPrompt = planContext
-        ? `${prompt}\n\nThe user reviewed and approved this plan — follow it:\n${planContext}`
-        : prompt;
-      const bpRaw = await rawComplete([
-        { role: 'system', content: GENERATE_SYSTEM },
-        { role: 'user', content: blueprintPrompt(bpUserPrompt) },
-      ]);
-      const blueprint = await parseJsonWithRepair<Record<string, unknown>>(bpRaw.text);
-      await supabase.from('app_blueprints').insert({ project_id: projectId, ...blueprint });
-      await supabase.from('projects').update({
-        name: (blueprint.app_name as string) ?? 'Untitled app',
-        description: (blueprint.description as string) ?? null,
-        status: 'generating',
-      }).eq('id', projectId);
-      await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
-
-      // INTEGRATION MANIFEST — read the blueprint's declared server-side integrations and the secret
-      // keys they need. This drives edge-function generation and the secret-request popup (Phase 6).
-      const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
-        ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
-        : [];
-      const requiredSecrets: { env: string; service: string; purpose: string; status: 'missing' }[] = [];
-      for (const it of integrations) {
-        const service = typeof it.service === 'string' ? it.service : '';
-        const purpose = typeof it.purpose === 'string' ? it.purpose : '';
-        const secrets = Array.isArray(it.secrets) ? it.secrets : [];
-        for (const s of secrets) if (typeof s === 'string' && s.trim()) requiredSecrets.push({ env: s.trim(), service, purpose, status: 'missing' });
-      }
-      const secretEnvs = [...new Set(requiredSecrets.map((s) => s.env))];
-      const manifestSecrets = secretEnvs.map((env) => requiredSecrets.find((s) => s.env === env)!);
-      const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
-      const hasIntegrations = integrations.length > 0;
-
-      // Backend FIRST, so the file generator can wire the app to it. Additive & resilient:
-      // a failure here never fails the whole generation — the app falls back to localStorage.
-      await mark('schema', 'running');
-      let backendFiles = 0;
-      let hasBackend = false;
-      let backendNote = 'no backend needed';
-      try {
-        const { tables } = await generateBackend(projectId, JSON.stringify(blueprint));
-        if (tables) { backendFiles = 3; hasBackend = true; backendNote = `${tables} tables + RLS + auth`; }
-      } catch (e) {
-        backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
-      }
-      await mark('schema', 'done', backendNote);
-
-      // Integrations invoke edge functions through the Supabase client, so /src/lib/supabaseClient.ts
-      // (and .env.example) must exist even when the app has no database tables of its own — otherwise
-      // /src/lib/api.ts's import would not resolve.
-      if (hasIntegrations && !hasBackend) {
-        await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
-        await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
-      }
-
-      await mark('file_tree', 'running');
-      // Seed the fixed Vite/TS scaffold first so the project can boot as its source streams in.
-      for (const f of SCAFFOLD_FILES) {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      // Give the app a distinctive, domain-appropriate palette (the blueprint picks an accent hue)
-      // instead of the default slate — this is the biggest single lever for "looks intentional,
-      // not generic AI output". Falls back to the scaffold default if no hue was chosen.
-      const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
-      const accentHue = Number(design?.accentHue);
-      if (Number.isFinite(accentHue)) {
-        const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForHue(accentHue, headingFont), updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      // Stream the source files (§FILE protocol). hasBackend tells the model to route data through
-      // /src/lib/db.ts against Supabase (with a localStorage fallback) instead of plain localStorage.
-      const parser = makeStreamParser((e) => {
-        if (e.type === 'file-start') void mark('file_tree', 'running', e.path.split('/').pop());
-      });
-      const genAi = resolveAI();
-      let genUsage: Usage = { inputTokens: 0, outputTokens: 0 };
-      await streamComplete([
-        { role: 'system', content: GENERATE_FILES_STREAM },
-        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint), hasBackend, hasIntegrations) },
-      ], 32000, (delta) => parser.push(delta), undefined, (u) => { genUsage = u; });
-      // Never let a model-emitted file clobber the fixed scaffold or the generated backend files.
-      const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
-      // The UI kit under /src/components/ui/ is authoritative (scaffold-provided). Drop ANY model
-      // file there — a model-emitted ui/index.tsx alongside the scaffold's index.ts caused the
-      // duplicate-component / visual-drift bug the audit flagged.
-      let appFiles = parser.end().changes.filter(
-        (f) => f.path && f.content.trim() && !reserved.has(f.path) && !f.path.startsWith('/src/components/ui/'),
-      );
-      // A max_tokens-cut stream leaves its LAST file half-written — don't persist half a file;
-      // the validate step's missing-module heal recreates it whole.
-      if (genUsage.stopReason === 'max_tokens' && appFiles.length && looksTruncated(appFiles[appFiles.length - 1].content)) {
-        appFiles = appFiles.slice(0, -1);
-      }
-      if (!appFiles.length) throw new Error('The model produced no source files.');
-      for (const f of appFiles) {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      // Write the secret manifest so the studio can prompt the user for the keys (the secret popup)
-      // and the deploy step knows what to push to Supabase Function Secrets. Deterministic — derived
-      // from the blueprint, not the model's free-text output.
-      if (hasIntegrations) {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/supabase/.fableforge/secrets.json',
-            content: JSON.stringify({ secrets: manifestSecrets, integrations }, null, 2) + '\n', updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      const total = SCAFFOLD_FILES.length + appFiles.length + backendFiles;
-      await mark('file_tree', 'done', `${total} files`);
-      for (const s of ['frontend', 'backend', 'auth_logic', 'styling'] as const) {
-        await mark(s, 'done');
-      }
-
-      // VERIFY + FIX — the app just streamed in one pass; now make "generated" mean "works". Run the
-      // checks and, if anything's wrong, hand off to the AGENTIC repair loop (reads the failing files,
-      // researches if unsure, fixes the root cause, re-checks until clean). Falls back to the classic
-      // regex-fix passes when the agent isn't available (non-Anthropic provider).
-      await mark('validate', 'running');
-      let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-      // Files that simply DON'T EXIST are created directly first — one dedicated call per file,
-      // in parallel — so the repair agent's budget goes to real fixes, not bulk page-writing.
-      if (qaErrors.length) {
-        try {
-          const made = await createMissingModules(projectId, { onFile: (p) => void mark('validate', 'running', `creating ${p.split('/').pop()}`) });
-          if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-        } catch { /* best-effort */ }
-      }
-      // UNCONDITIONAL COMPILE GATE — run the real compiler on EVERY generation (booting it
-      // headlessly when the preview isn't open), not only when static checks fail. This is what
-      // makes "generated" mean "compiles", instead of "hopefully compiles".
-      let tsErrors: number | null = null;
-      if (!qaErrors.length) {
-        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
-      }
-      await mark('validate', 'done',
-        qaErrors.length ? `${qaErrors.length} issue(s) found`
-          : tsErrors ? `${tsErrors} type error(s) found`
-          : tsErrors === 0 ? 'verified — compiles clean' : 'clean');
-      if (qaErrors.length || tsErrors) {
-        await mark('fix', 'running');
-        try {
-          if (agentAvailable()) {
-            await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });
-          } else {
-            for (let attempt = 0; attempt < 2 && qaErrors.length; attempt++) {
-              try { await qaFixPass(projectId, qaErrors); } catch { break; }
-              qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-            }
-          }
-        } catch { /* best-effort — report whatever remains below */ }
-        qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-        if (tsErrors && agentAvailable()) {
-          // Recount after the agentic repair (the container is warm, so this is a quick tsc).
-          try { tsErrors = await generationCompileGate(projectId); } catch { /* keep the last count */ }
-        }
-        const remaining = qaErrors.length + (tsErrors ?? 0);
-        await mark('fix', 'done', remaining ? `${remaining} unresolved` : 'fixed');
-      } else {
-        await mark('fix', 'done');
-      }
-      const unresolved = qaErrors.length + (tsErrors ?? 0);
-
-      await mark('summarize', 'running');
-      const summaryId = await insertAiMessage({
-        project_id: projectId, user_id: userId, generation_id: genId,
-        role: 'assistant',
-        content: `Generated ${total} files for ${blueprint.app_name}.` +
-          (hasBackend
-            ? ` It's full-stack: a Supabase backend (${backendNote}) lives at /supabase/migrations/0001_init.sql and the app talks to it through /src/lib/db.ts. Run that SQL in Supabase, then use "Supabase" in the header to connect — it runs on localStorage until you do.`
-            : '') +
-          ` Open the preview to try it, then keep iterating in chat.` +
-          (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
-          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
-        files_changed: appFiles.map((f) => f.path),
-        thread_id: MAIN_THREAD_ID,
-      });
-      // The file-generation stream is the big cost; attribute it to the summary message.
-      // (The blueprint rawComplete call already recorded its own usage to the ledger.)
-      recordUsage({ provider: genAi.provider, model: genAi.model, inputTokens: genUsage.inputTokens, outputTokens: genUsage.outputTokens, messageId: summaryId });
-      await mark('summarize', 'done');
-
-      await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
-      await supabase.from('project_generations').update({
-        status: 'succeeded', finished_at: new Date().toISOString(),
-        input_tokens: bpRaw.inputTokens,
-        output_tokens: bpRaw.outputTokens,
-        summary: `Generated ${total} files`,
-      }).eq('id', genId);
-    } catch (err) {
-      await supabase.from('projects').update({ status: 'error' }).eq('id', projectId);
-      await supabase.from('project_generations').update({
-        status: 'failed', error: err instanceof Error ? err.message : String(err), finished_at: new Date().toISOString(),
-      }).eq('id', genId);
-    }
-  })();
-
-  return { generationId: genId };
-}
-
 /**
- * CHUNKED CLOUD GENERATION — for users with NO browser API key. The edge generate-app worker has
- * a hard wall-clock (~400s) that kills big builds mid-stream (truncated files, missing pages).
- * Here the CLIENT orchestrates (no time ceiling) and the relay (agent-turn via cloudComplete)
- * only ever runs SHORT calls:
- *   blueprint → schema → SHELL (contracts: types/db/api + App.tsx + layout, one bounded call)
- *   → PAGES in parallel (each call compiles against the verbatim contracts)
- *   → manifest diff (every routed page must exist; one retry per missing) → static QA → summary.
- * Deep compile verify + agentic repair run AFTER via ProjectWorkspace's post-generation effect —
- * not duplicated here.
+ * THE BUILD PIPELINE — client-orchestrated chunked generation for BOTH direct (browser key) and
+ * cloud (relay) users. Every model call is SHORT and most run in PARALLEL, which is what makes
+ * builds fast AND immune to the one-giant-stream truncation failure (direct mode used to be a
+ * single serial 32k-token stream):
+ *   blueprint → [schema CONCURRENT with everything below]
+ *   → SHELL (contracts: types/db/api + App.tsx + layout, one bounded call)
+ *   → PAGES in a sliding parallel pool (each call compiles against the verbatim contracts)
+ *   → manifest diff (every routed page must exist; one retry per missing)
+ *   → VERIFY + FIX inline: missing-module heal → real compile gate → agentic repair.
+ * rawComplete routes each call to the browser key (direct) or the metered agent-turn relay (cloud).
  */
-async function chunkedCloudGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
+async function chunkedGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
 
@@ -1254,7 +1017,8 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
       }).eq('id', projectId);
       await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
 
-      // INTEGRATION MANIFEST — same derivation as directGenerate (drives the secret popup + deploy).
+      // INTEGRATION MANIFEST — read the blueprint's declared server-side integrations and the
+      // secret keys they need (drives the secret-request popup + deploy).
       const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
         ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
         : [];
@@ -1270,17 +1034,23 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
       const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
       const hasIntegrations = integrations.length > 0;
 
-      await mark('schema', 'running');
-      let backendFiles = 0;
-      let hasBackend = false;
-      let backendNote = 'no backend needed';
+      // SCHEMA IN PARALLEL — whether the app HAS a backend is decided by the blueprint itself
+      // (does it declare tables?), so the SQL generation runs CONCURRENTLY with the shell and
+      // pages instead of blocking them (~30s off the critical path). If the SQL call later fails,
+      // db.ts's localStorage fallback keeps the app working and the client stub is written below.
+      let declaredTables = 0;
       try {
-        const { tables } = await generateBackend(projectId, JSON.stringify(blueprint));
-        if (tables) { backendFiles = 3; hasBackend = true; backendNote = `${tables} tables + RLS + auth`; }
-      } catch (e) {
-        backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
-      }
-      await mark('schema', 'done', backendNote);
+        declaredTables = ((blueprint as { database_schema?: { tables?: unknown[] } }).database_schema?.tables?.length ?? 0);
+      } catch { declaredTables = 0; }
+      const hasBackend = declaredTables > 0;
+      let backendFiles = 0;
+      let backendNote = 'no backend needed';
+      await mark('schema', hasBackend ? 'running' : 'done', hasBackend ? `${declaredTables} tables (concurrent)` : backendNote);
+      const schemaPromise: Promise<void> = hasBackend
+        ? generateBackend(projectId, JSON.stringify(blueprint))
+            .then(({ tables }) => { if (tables) { backendFiles = 3; backendNote = `${tables} tables + RLS + auth`; } })
+            .catch((e) => { backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')'; })
+        : Promise.resolve();
 
       if (hasIntegrations && !hasBackend) {
         await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
@@ -1351,9 +1121,11 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
         .map(([p, c]) => `--- ${p} ---\n${c}`)
         .join('\n\n').slice(0, 60000);
 
-      // 4) PAGES — parallel, max 4 in flight; each is a short bounded call.
+      // 4) PAGES — a SLIDING parallel pool (not batches: a slow page never holds up the next).
+      // Direct mode (browser key) tolerates more parallelism than the metered relay.
+      const inFlight = DIRECT && resolveAI().ready ? 6 : 4;
       const pageList = [...pagePaths].filter((p) => !written.has(p));
-      await mark('file_tree', 'running', `${pageList.length} pages, 4 in parallel`);
+      await mark('file_tree', 'running', `${pageList.length} pages, ${inFlight} in parallel`);
       const genPage = async (pagePath: string): Promise<void> => {
         const r = track(await rawComplete([
           { role: 'system', content: GENERATE_FILES_STREAM },
@@ -1366,8 +1138,10 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
         await upsertFiles(parsed.changes);
         await mark('file_tree', 'running', pagePath.split('/').pop());
       };
-      for (let i = 0; i < pageList.length; i += 4) {
-        await Promise.all(pageList.slice(i, i + 4).map((p) => genPage(p).catch(() => undefined)));
+      {
+        const queue = [...pageList];
+        const worker = async () => { for (let p = queue.shift(); p; p = queue.shift()) await genPage(p).catch(() => undefined); };
+        await Promise.all(Array.from({ length: Math.min(inFlight, queue.length) }, worker));
       }
       // 5) MANIFEST DIFF — every routed page must exist; one serial retry per missing page.
       for (const p of pageList.filter((x) => !written.has(x))) {
@@ -1384,19 +1158,66 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
           { onConflict: 'project_id,path' },
         );
       }
-      const total = SCAFFOLD_FILES.length + written.size + backendFiles;
-      await mark('file_tree', 'done', `${total} files`);
+      await mark('file_tree', 'done', `${SCAFFOLD_FILES.length + written.size} files`);
       for (const s of ['frontend', 'backend', 'auth_logic', 'styling'] as const) {
         await mark(s, 'done');
       }
 
-      // VALIDATE — static QA only here; the deep compile + agentic repair run right after this
-      // generation finishes, via ProjectWorkspace's post-generation verify effect.
+      // Join the concurrent schema work before verifying (its files are part of what's checked).
+      // If the SQL call failed after the shell was built Supabase-backed, write the client stub so
+      // db.ts's imports resolve — the app runs on localStorage until a backend is connected.
+      await schemaPromise;
+      if (hasBackend && !backendFiles) {
+        await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+        await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+      }
+      await mark('schema', 'done', backendNote);
+      const total = SCAFFOLD_FILES.length + written.size + backendFiles;
+
+      // VERIFY + FIX — inline for BOTH direct and cloud builds ("generated" must mean "works"):
+      // 1) files that don't exist are created directly (one dedicated call per file, in parallel);
+      // 2) the real compiler runs on every build (booted headlessly when the preview is closed);
+      // 3) anything left goes to the agentic repair loop (reads the failing files, fixes the root
+      //    cause, re-checks until clean), falling back to the classic fix pass off-Anthropic.
       await mark('validate', 'running');
-      const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s) found` : 'clean');
-      await mark('fix', 'done', qaErrors.length ? 'handing to the post-build repair' : undefined);
-      const unresolved = qaErrors.length;
+      let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+      if (qaErrors.length) {
+        try {
+          const made = await createMissingModules(projectId, { onFile: (p) => void mark('validate', 'running', `creating ${p.split('/').pop()}`) });
+          if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        } catch { /* best-effort */ }
+      }
+      let tsErrors: number | null = null;
+      if (!qaErrors.length) {
+        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+      }
+      await mark('validate', 'done',
+        qaErrors.length ? `${qaErrors.length} issue(s) found`
+          : tsErrors ? `${tsErrors} type error(s) found`
+          : tsErrors === 0 ? 'verified — compiles clean' : 'clean');
+      if (qaErrors.length || tsErrors) {
+        await mark('fix', 'running');
+        try {
+          if (agentAvailable()) {
+            await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });
+          } else {
+            for (let attempt = 0; attempt < 2 && qaErrors.length; attempt++) {
+              try { await qaFixPass(projectId, qaErrors); } catch { break; }
+              qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+            }
+          }
+        } catch { /* best-effort — report whatever remains below */ }
+        qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        if (tsErrors && agentAvailable()) {
+          // Recount after the agentic repair (the container is warm, so this is a quick tsc).
+          try { tsErrors = await generationCompileGate(projectId); } catch { /* keep the last count */ }
+        }
+        const remaining = qaErrors.length + (tsErrors ?? 0);
+        await mark('fix', 'done', remaining ? `${remaining} unresolved` : 'fixed');
+      } else {
+        await mark('fix', 'done');
+      }
+      const unresolved = qaErrors.length + (tsErrors ?? 0);
 
       await mark('summarize', 'running');
       const genAi = resolveAI();
@@ -1410,7 +1231,7 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
           ` Open the preview to try it, then keep iterating in chat.` +
           (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
           (stillMissing.length ? `\n\n⚠️ ${stillMissing.length} page(s) could not be generated (${stillMissing.map((p) => p.split('/').pop()).join(', ')}) — ask me in chat to add them.` : '') +
-          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) found — I'm verifying and repairing the build now.` : ''),
+          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
         files_changed: [...written.keys()],
         thread_id: MAIN_THREAD_ID,
       });
