@@ -8,6 +8,7 @@ import { rawComplete } from '../lib/aiClient';
 import { COMMANDER_SYSTEM, buildCommanderUser, parseCommand } from '../lib/garvis/commander';
 import { usePortfolio } from './usePortfolio';
 import { useMissions } from './useMissions';
+import { useMind } from './useMind';
 
 export interface ChatMessage {
   id: string;
@@ -19,6 +20,7 @@ export interface ChatMessage {
 export function useCommander() {
   const { apps } = usePortfolio();
   const missionsApi = useMissions();
+  const { mindContext, emit: emitMindEvent } = useMind();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [thinking, setThinking] = useState(false);
 
@@ -47,12 +49,13 @@ export function useCommander() {
 
       const r = await rawComplete([
         { role: 'system', content: COMMANDER_SYSTEM },
-        { role: 'user', content: buildCommanderUser(text, snapshot, history) },
+        { role: 'user', content: buildCommanderUser(text, snapshot, history, mindContext()) },
       ], 1000);
       const cmd = parseCommand(r.text);
 
       if (cmd.kind === 'reply') {
         push({ role: 'garvis', text: cmd.text });
+        emitMindEvent({ event_type: 'commander_exchange', subject: `Asked: "${text.slice(0, 160)}" → replied`, source: 'commander' });
         return;
       }
 
@@ -60,12 +63,19 @@ export function useCommander() {
       const appId = cmd.app ? (apps.find((a) => a.name.toLowerCase() === cmd.app!.toLowerCase())?.id ?? null) : null;
       const missionId = await missionsApi.planMission({ objective: cmd.objective, subject: cmd.subject, appId });
       push({ role: 'garvis', text: cmd.preface, missionId: missionId ?? undefined });
+      emitMindEvent({
+        event_type: 'mission_planned',
+        subject: `Mission: ${cmd.objective.slice(0, 200)}`,
+        source: 'commander',
+        app_id: appId,
+        payload: { subject: cmd.subject },
+      });
     } catch (e) {
       push({ role: 'garvis', text: `I hit a snag: ${e instanceof Error ? e.message : 'something went wrong'}.` });
     } finally {
       setThinking(false);
     }
-  }, [apps, messages, missionsApi, thinking]);
+  }, [apps, messages, missionsApi, thinking, mindContext, emitMindEvent]);
 
   return {
     messages,

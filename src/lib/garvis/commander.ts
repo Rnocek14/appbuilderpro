@@ -29,11 +29,17 @@ OUTPUT exactly one JSON object, no prose, no fences:
 {"kind":"reply","text":"…"}
 {"kind":"mission","preface":"…","objective":"…","subject":"…","app":"<exact portfolio app name or null>"}`;
 
-export function buildCommanderUser(message: string, portfolioSnapshot: string, history: { role: 'user' | 'garvis'; text: string }[]): string {
+export function buildCommanderUser(
+  message: string,
+  portfolioSnapshot: string,
+  history: { role: 'user' | 'garvis'; text: string }[],
+  mindContext = '', // compiled record digest (useMind.mindContext); '' = record empty, inject nothing
+): string {
   const hist = history.length
     ? history.slice(-6).map((h) => `${h.role === 'user' ? 'FOUNDER' : 'GARVIS'}: ${h.text}`).join('\n')
     : '(no prior turns)';
   return [
+    ...(mindContext ? [mindContext, ''] : []),
     `PORTFOLIO:\n${portfolioSnapshot || '(empty — no apps yet)'}`,
     '',
     `RECENT CONVERSATION:\n${hist}`,
