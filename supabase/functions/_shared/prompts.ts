@@ -48,6 +48,10 @@ COLOR
 - MAX ONE gradient per view, and only on a marketing/hero surface — never on buttons, cards, or app
   chrome; gradient text on at most one element per page. The indigo/purple-gradient-everywhere look
   is the #1 "AI slop" signature — the app has its own bespoke palette; use it.
+- COLOR-FORWARD IDENTITIES (playful/brutalist/dopamine archetypes): on MARKETING surfaces, solid
+  saturated section fields (a butter-yellow band, a full-bleed primary block) ARE the identity —
+  the neutral-90% rule governs app/dashboard registers and quiet archetypes, not these. Still
+  tokens-only, still flat solids (not gradients), and app views stay disciplined.
 
 TYPE
 - One type scale, used consistently: text-xs (labels) → text-sm (app-UI body) → text-base (marketing
@@ -122,6 +126,30 @@ STATES & DETAILS
 - Tables: use the kit <Table> family (muted uppercase header, hover rows, right-aligned tabular
   numbers via className="text-right tabular-nums").
 - ~4.5:1 text contrast in both light and dark. One font + one display font, one accent, one radius.
+
+SIGNATURE DEVICES — commit to the 2-3 declared in the blueprint's design.signatures (never all of
+them; devices repeated consistently = authored, devices scattered = generated). The kit CSS ships
+every one of these ready to use:
+- grain: class "grain" on the hero / a dark band / any full-bleed section — film-grain texture is
+  the fastest "not a template" cue. Costs one class.
+- marquee: <div className="marquee"><div className="marquee-track">…content repeated TWICE…</div></div>
+  — logo strips, testimonial ribbons, keyword bands. Pauses on hover; static under reduced-motion.
+- oversized-numerals: the ONE key stat/price at class "text-display" scale (display font +
+  clamp(2.75rem→6.5rem)) with tabular-nums — an editorial power move on any data-adjacent site.
+- outline-type: class "text-outline" on ONE display word in a headline (hollow stroke type) —
+  editorial/brutalist punch. Pair a filled word with an outlined one.
+- bg-texture: class "bg-dots" (archival/maker feel) or "bg-ruled" (engineered/spec-sheet feel) on
+  one section — texture beats another flat gray band.
+- underline-draw: nav + footer links with class "underline-draw" — the line draws in on hover;
+  quiet but reads hand-finished.
+- sticky-chapters: numbered section labels (01 / 02 / 03, mono or eyebrow style) in a sticky side
+  column while content scrolls past — Swiss/editorial page architecture.
+- horizontal-strip: ONE overflow-x-auto snap-x snap-mandatory strip (product cards, screenshots,
+  gallery) instead of yet another grid.
+- kinetic-hero: hero headline words wrapped in spans inside a .stagger container so the title
+  cascades in word-by-word on load.
+- giant-footer: the footer as a designed sign-off — wordmark at text-display scale, underline-draw
+  links, generous py-24. The most-skipped, highest-signal surface on the page.
 
 IDENTITY & ANTI-SLOP — the difference between "intentional product" and "generic AI output":
 - LOGO/BRAND: build a real wordmark/lockup — the styled app name (font-bold tracking-tight, maybe a
@@ -739,12 +767,18 @@ ${COMPLIANCE_GUIDE}
 ${FEATURE_COMPLETENESS}
 
 GENERATION SPECIFICS:
-- A bespoke, domain-fit PALETTE and a characterful display FONT are ALREADY written into
-  /src/index.css from the blueprint's design (accentHue + headingFont). Do NOT emit /src/index.css,
-  do NOT redefine :root/.dark, and do NOT invent hex colors — just use the semantic tokens. Headings
-  (h1-h6) and any element with class "font-display" automatically get the display font; use real
-  heading tags (or font-display) for titles so the personality shows. Honor design.vibe and build
-  design.logo as a real wordmark in the header.
+- The blueprint's ENTIRE design bundle is ALREADY compiled into /src/index.css: palette (accent hue/
+  sat/light + mode background), BOTH fonts (headings + body auto-loaded), radius, border weight, and
+  shadow character. Do NOT emit /src/index.css, do NOT redefine :root/.dark, and do NOT invent hex
+  colors — just use the semantic tokens and the identity shows through everywhere. Headings (h1-h6)
+  and class "font-display" get the display font automatically.
+- COMMIT to the blueprint's design.archetype in structure too: paper/editorial archetypes use
+  hairline rules instead of card boxes; brutalist uses border-2 + .shadow-hard on cards/buttons;
+  dark pro-tool keeps ONE neon accent surgical; playful uses tinted section fields. And USE the
+  design.signatures devices (the kit classes exist — grain, marquee, text-display, text-outline,
+  bg-dots/bg-ruled, underline-draw…) in the marketing surfaces — they are the app's personality and
+  skipping them ships a generic site. Honor design.vibe and build design.logo as a real wordmark in
+  the header.
 - NEVER create files under /src/components/ui/ — the UI kit is provided (Button, Card, Input, …).
   Import from '../components/ui'. Emitting your own ui/index.tsx causes duplicate, conflicting
   components and visual drift.
@@ -1206,24 +1240,49 @@ Respond with ONLY JSON matching:
  "integrations": [{"service": str, "purpose": str, "secrets": [str], "edgeFunctions": [{"name": str, "purpose": str}], "needsWebhook": bool, "needsCron": bool}],
  "deployment_notes": str,
  "design": {
-   "accentHue": int,
-   "headingFont": str,
+   "archetype": str,
+   "accentHue": int, "accentSat": int, "accentLight": int,
+   "headingFont": str, "bodyFont": str,
+   "mode": "light|paper|tinted|dark",
+   "surfaceSat": int, "radius": number,
+   "borders": "hairline|standard|bold",
+   "shadows": "soft|hard|none",
+   "signatures": [str],
    "vibe": str,
    "logo": str
  }}
 
-For "design", give the app a real visual identity (this is what makes it look intentionally designed,
-not generic):
-- accentHue: an HSL hue 0-359 chosen to fit the app's DOMAIN and mood — e.g. fresh green ~150 for
-  food/health/grocery, teal ~175 for wellness, blue ~215 for finance/productivity, indigo ~245 or
-  violet ~270 for creative/AI tools, warm orange ~28 for social/community, rose ~345 for lifestyle.
-  Pick something distinctive — NOT a default navy/slate.
-- headingFont: ONE Google Font name with character for headings (this is a top "looks designed"
-  signal — all-Inter looks generic). Pick to fit the vibe, e.g. "Space Grotesk", "Sora", "Outfit",
-  "Plus Jakarta Sans", "Bricolage Grotesque", "Sora", "Manrope", "Fraunces" (editorial/serif),
-  "Spline Sans". It's auto-loaded and applied to headings; body stays Inter, data uses mono.
-- vibe: one line describing the intended look & feel (e.g. "fresh, organic, friendly — rounded cards,
-  airy spacing, leafy green accents").
+For "design", COMMIT to one complete visual identity — a coherent bundle, not defaults. Every key
+below lands directly in the shipped CSS tokens, so choose them like an art director. If a DESIGN
+DIRECTION was provided in the context, translate it FAITHFULLY into these keys; otherwise pick the
+archetype yourself — the safe clean-SaaS look is the CONVERGED AI aesthetic, so only choose it when
+the domain truly demands it:
+- archetype: name the bundle you're committing to, e.g. "editorial broadsheet" (paper bg, serif
+  display, hairline rules, radius 0), "luxury boutique" (bone/espresso, extreme whitespace, radius 0),
+  "neobrutalist playground" (bold borders, hard shadows, unblended brights), "midnight pro tool"
+  (mode dark, one surgical neon accent, mono data), "organic calm" (warm cream, radius 1.25+, sage/
+  terracotta), "enterprise clarity", "playful pop" (tinted fields, pill radius, springy), "swiss
+  archive" (monochrome + signal red, ruled, radius 0).
+- accentHue 0-359 / accentSat 0-100 / accentLight 25-65: the accent as real HSL — muted editorial
+  oxblood (~15, 55, 38), surgical neon lime (~80, 85, 55), luxury gold (~42, 45, 48), signal red
+  (~5, 85, 50)… fit the DOMAIN and archetype; never default navy/slate, never indigo/purple-by-habit.
+- headingFont + bodyFont: a PAIRING with character (both auto-loaded). Display serifs: "Fraunces",
+  "Newsreader", "Young Serif", "Gloock", "Instrument Serif". Grotesques: "Space Grotesk", "Bricolage
+  Grotesque", "Archivo", "Anton", "Schibsted Grotesk", "Sora", "Outfit". Bodies: "Figtree", "Hanken
+  Grotesk", "Onest", "Plus Jakarta Sans", "Manrope", "Newsreader" (editorial). Inter as headingFont
+  is BANNED (the #1 generic tell); body may be Inter only for dense pro tools.
+- mode: light (clean white) / paper (warm near-merged surfaces, structure from rules) / tinted
+  (colored field, white cards) / dark (committed dark identity — dashboards/dev/media lean here).
+- surfaceSat 0-40 (how hue-tinted neutrals are), radius in rem (0 editorial/brutalist/swiss …
+  0.625 default … 1.25-1.5 organic/playful pills), borders (hairline = rules-not-boxes, bold =
+  drawn/printed ink lines), shadows (soft default, hard = brutalist offset blocks, none = flat).
+- signatures: EXACTLY 2-3 device names from: "grain", "marquee", "oversized-numerals",
+  "outline-type", "bg-texture", "underline-draw", "sticky-chapters", "horizontal-strip",
+  "kinetic-hero", "giant-footer" — chosen to fit the archetype (brutalist → marquee + outline-type;
+  editorial → sticky-chapters + oversized-numerals + grain; luxury → underline-draw + giant-footer).
+  These are the app's personality moves; the file generator MUST use them.
+- vibe: one line restating the bundle (e.g. "inky editorial broadsheet — Fraunces display on warm
+  paper, oxblood accent, hairline rules, grain hero").
 - logo: a concrete wordmark/lockup concept (styled app name + an optional simple custom mark) — NOT a
   generic Lucide-icon-in-a-colored-box.
 

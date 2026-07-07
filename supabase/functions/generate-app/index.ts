@@ -14,7 +14,7 @@ import {
 } from '../_shared/prompts.ts';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from '../_shared/scaffold.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
-import { buildIndexCssForHue } from '../_shared/themePresets.ts';
+import { buildIndexCssForDesign, parseDesignSpec } from '../_shared/themePresets.ts';
 import { validateProject, issuesToFixRequest } from '../_shared/qa.ts';
 import { parseProtocol } from '../_shared/streamparse.ts';
 
@@ -206,11 +206,11 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
   // ---- seed the fixed scaffold + per-app palette ----
   await mark('file_tree', 'running');
   for (const f of SCAFFOLD_FILES) await writeFile(f.path, f.content);
-  const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
-  const accentHue = Number(design?.accentHue);
-  if (Number.isFinite(accentHue)) {
-    const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
-    await writeFile('/src/index.css', buildIndexCssForHue(accentHue, headingFont));
+  // The blueprint's FULL design bundle (mode, fonts, radius, borders, shadows) compiles to tokens —
+  // flattening it to hue+font was the "every app looks the same" leak.
+  const designSpec = parseDesignSpec(blueprint.design);
+  if (designSpec) {
+    await writeFile('/src/index.css', buildIndexCssForDesign(designSpec));
   }
 
   // ---- app source (§FILE protocol) + edge functions for integrations ----
