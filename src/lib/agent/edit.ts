@@ -7,7 +7,7 @@
 import { diffLines } from 'diff';
 import { supabase } from '../supabase';
 import { resolveAI } from '../aiConfig';
-import { recordUsage } from '../usage';
+import { recordUsage, tagUsageSince, estimateCost } from '../usage';
 import { AGENT_BUILD_SYSTEM } from '../prompts';
 import { runQA, issuesToFixRequest } from '../projectQA';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
@@ -187,6 +187,7 @@ export async function agenticEdit(
   onEvent?: (e: EditEvent) => void, image?: string, threadId: string = MAIN_THREAD_ID,
   signal?: AbortSignal,
 ): Promise<EditResult> {
+  const startedAt = Date.now(); // usage recorded during this turn is tagged to the message below
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
 
@@ -264,6 +265,7 @@ export async function agenticEdit(
   };
 
   const ai = resolveAI();
+  let turnIn = 0, turnOut = 0; // whole-turn token totals (initial run + repair rounds)
   let result = await runAgent({
     system: AGENT_BUILD_SYSTEM,
     userContent,
@@ -271,6 +273,7 @@ export async function agenticEdit(
     signal,
     onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
   });
+  turnIn += result.usage.inputTokens; turnOut += result.usage.outputTokens;
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
 
   // RELENTLESS REPAIR: never end a turn mid-surgery. If verification was still failing when the
@@ -288,6 +291,7 @@ export async function agenticEdit(
       maxSteps: 12,
       onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
     });
+    turnIn += cont.usage.inputTokens; turnOut += cont.usage.outputTokens;
     recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens });
     result = { ...cont, text: cont.text || result.text };
     const touched = result.changed.length + result.deleted.length;
@@ -316,7 +320,19 @@ export async function agenticEdit(
     content: explanation, files_changed: changed, thread_id: threadId,
     changes: messageChanges.length ? messageChanges : null,
   });
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: 0, outputTokens: 0, messageId: id });
+  // Attribute this turn's model calls (initial run + repair rounds) to the message so the chat's
+  // cost chip shows. (The old zero-token recordUsage here was a no-op — recordUsage skips 0/0.)
+  if (id) tagUsageSince(id, startedAt);
+  // Direct-mode usage event: the browser made the calls, so the client must log the 'edit' event
+  // the monthly generation counter + Billing history read from (edge mode logs server-side).
+  if (didEdit) {
+    void supabase.from('usage_events').insert({
+      user_id: userId, project_id: projectId, event_type: 'edit',
+      provider: ai.provider, model: ai.model,
+      input_tokens: turnIn, output_tokens: turnOut,
+      cost_usd: Math.round(estimateCost(ai.provider, ai.model, turnIn, turnOut) * 1e5) / 1e5,
+    }).then(() => {}, () => { /* best-effort — needs the app_0019 insert policy */ });
+  }
 
   onEvent?.({ type: 'done' });
   return {

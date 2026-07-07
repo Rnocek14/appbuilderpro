@@ -27,7 +27,7 @@ import { previewContext } from './previewRuntime';
 import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
 import { PREFERENCE_DISTILL_SYSTEM, DIRECTIONS_SYSTEM, directionPickPrompt, singleDirectionPrompt, filesPromptChunk } from './prompts';
 import { parseProtocol } from '../../supabase/functions/_shared/streamparse';
-import { recordUsage } from './usage';
+import { recordUsage, tagUsageSince, estimateCost } from './usage';
 import { agenticEdit, agenticVerifyAndFix, generationCompileGate } from './agent/edit';
 import { agentAvailable } from './agent/loop';
 
@@ -1018,6 +1018,7 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
 
   // run in background so the UI can subscribe immediately
   (async () => {
+    const startedAt = Date.now(); // ledger records from here get tagged to the summary message
     try {
       await mark('interpret', 'done');
 
@@ -1282,7 +1283,18 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
         files_changed: [...written.keys()],
         thread_id: MAIN_THREAD_ID,
       });
-      recordUsage({ provider: genAi.provider, model: genAi.model, inputTokens: usageIn, outputTokens: usageOut, messageId: summaryId });
+      // Every model call above already recorded itself to the spend ledger (rawComplete does it
+      // internally) — recording the aggregate again would DOUBLE the totals. Instead, tag those
+      // records to the summary message so the chat shows the build's real total cost.
+      if (summaryId) tagUsageSince(summaryId, startedAt);
+      // Direct-mode usage event: the browser made the calls, so the client must log the
+      // 'generation' event the monthly counter + Billing history read from.
+      void supabase.from('usage_events').insert({
+        user_id: userId, project_id: projectId, event_type: 'generation',
+        provider: genAi.provider, model: genAi.model,
+        input_tokens: usageIn, output_tokens: usageOut,
+        cost_usd: Math.round(estimateCost(genAi.provider, genAi.model, usageIn, usageOut) * 1e5) / 1e5,
+      }).then(() => {}, () => { /* best-effort — needs the app_0019 insert policy */ });
       await mark('summarize', 'done');
 
       await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);

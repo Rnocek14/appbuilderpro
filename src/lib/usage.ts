@@ -131,6 +131,24 @@ export function costForMessage(messageId: string): number | undefined {
   return matches.reduce((s, r) => s + r.cost, 0);
 }
 
+/**
+ * Attribute every not-yet-attributed ledger record since `sinceTs` to a message — used by flows
+ * that make MANY model calls before the assistant message exists (the agent loop, the chunked
+ * generation pipeline). Recording per call keeps totals accurate; tagging afterwards is what makes
+ * the per-message cost chip show the turn's REAL total instead of nothing (or a double count).
+ * Returns the total cost tagged. (If an unrelated call lands in the window it gets folded in —
+ * acceptable for a spend gauge.)
+ */
+export function tagUsageSince(messageId: string, sinceTs: number): number {
+  const records = readLedger();
+  let tagged = 0;
+  for (const r of records) {
+    if (r.ts >= sinceTs && !r.messageId) { r.messageId = messageId; tagged += r.cost; }
+  }
+  if (tagged > 0) writeLedger(records);
+  return tagged;
+}
+
 export function clearUsage(): void {
   writeLedger([]);
 }

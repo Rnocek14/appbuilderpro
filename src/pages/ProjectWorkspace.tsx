@@ -316,6 +316,7 @@ export default function ProjectWorkspace() {
     const genId = lastGenId.current;
     if (!id || !genId || verifiedGenId.current === genId) return;
     verifiedGenId.current = genId;
+    void refreshProfile(); // a generation just finished — update the monthly X/limit counter
     const ai = resolveAI();
     if (ai.direct || !ai.ready) return; // client-orchestrated pipelines verified in-line
     if (!agentAvailable() || busy) return;
