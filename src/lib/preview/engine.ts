@@ -341,6 +341,49 @@ export async function submitPublishRequest(args: { previewSiteId: string; name: 
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
+// ---------------------------------------------------------------------------
+// Engagement tracking — the validation instrument (view / engaged / return)
+// ---------------------------------------------------------------------------
+
+/** Stable per-browser visitor id so repeat visits show as RETURNS, not new views. */
+function visitorId(): string {
+  try {
+    let v = localStorage.getItem('pv:visitor');
+    if (!v) { v = Math.random().toString(36).slice(2, 12); localStorage.setItem('pv:visitor', v); }
+    return v;
+  } catch { return 'anon'; }
+}
+
+/** Fire-and-forget event from the PUBLIC preview pages (anon insert). Deduped per session so a
+ *  re-render doesn't inflate counts; a NEW browser session on the same site logs again (a return). */
+export function recordPreviewEvent(previewSiteId: string, event: 'view' | 'engaged' | 'report_view' | 'claim_open'): void {
+  try {
+    const key = `pv:${event}:${previewSiteId}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, '1');
+  } catch { /* private mode — log anyway */ }
+  void supabase.from('preview_events').insert({ preview_site_id: previewSiteId, event, visitor: visitorId() })
+    .then(() => {}, () => { /* best-effort — analytics never breaks the preview */ });
+}
+
+export interface PreviewStats { views: number; engaged: number; returns: number; reportViews: number }
+
+/** Per-site engagement rollup for the admin list. */
+export async function getPreviewStats(): Promise<Record<string, PreviewStats>> {
+  const { data } = await supabase.from('preview_events').select('preview_site_id, event, visitor').limit(5000);
+  const out: Record<string, PreviewStats> = {};
+  const seenVisitors: Record<string, Set<string>> = {};
+  for (const r of (data ?? []) as { preview_site_id: string; event: string; visitor: string }[]) {
+    const s = (out[r.preview_site_id] ??= { views: 0, engaged: 0, returns: 0, reportViews: 0 });
+    if (r.event === 'view') {
+      const seen = (seenVisitors[r.preview_site_id] ??= new Set());
+      if (seen.has(r.visitor)) s.returns++; else { seen.add(r.visitor); s.views++; }
+    } else if (r.event === 'engaged') s.engaged++;
+    else if (r.event === 'report_view') s.reportViews++;
+  }
+  return out;
+}
+
 export interface PublishRequestRow {
   id: string; preview_site_id: string; name: string; contact: string; message: string; created_at: string;
 }

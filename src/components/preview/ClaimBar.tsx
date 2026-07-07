@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { X, ArrowRight, Check, FileText } from 'lucide-react';
-import { submitPublishRequest } from '../../lib/preview/engine';
+import { submitPublishRequest, recordPreviewEvent } from '../../lib/preview/engine';
 
 export function ClaimBar({ previewSiteId, businessName, slug, price = '$299' }: {
   previewSiteId: string; businessName: string; slug: string; price?: string;
@@ -45,7 +45,7 @@ export function ClaimBar({ previewSiteId, businessName, slug, price = '$299' }: 
               <FileText size={13} /> Why we rebuilt it
             </a>
             <button
-              onClick={() => setOpen(true)}
+              onClick={() => { recordPreviewEvent(previewSiteId, 'claim_open'); setOpen(true); }}
               className="inline-flex items-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] px-5 py-2.5 text-sm font-semibold text-[hsl(var(--pi))] shadow-lg transition-transform hover:-translate-y-0.5"
             >
               Claim this website — {price} <ArrowRight size={14} />

@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { getPreviewSite, type PreviewSiteRow } from '../lib/preview/engine';
+import { getPreviewSite, recordPreviewEvent, type PreviewSiteRow } from '../lib/preview/engine';
 import { PreviewSiteRenderer } from '../components/preview/PreviewSiteRenderer';
 import { ClaimBar } from '../components/preview/ClaimBar';
 
@@ -17,6 +17,15 @@ export default function PreviewSite({ shot = false }: { shot?: boolean }) {
     if (!slug) { setRow(null); return; }
     void getPreviewSite(slug).then((r) => setRow(r));
   }, [slug]);
+
+  // Engagement signal for validation: a view on arrival, an "engaged" mark after 45s of dwell.
+  // (Screenshot renders don't count.)
+  useEffect(() => {
+    if (shot || !row || row === 'loading') return;
+    recordPreviewEvent(row.id, 'view');
+    const t = window.setTimeout(() => recordPreviewEvent(row.id, 'engaged'), 45_000);
+    return () => window.clearTimeout(t);
+  }, [row, shot]);
 
   // Concept previews must never rank for the business's own name.
   useEffect(() => {

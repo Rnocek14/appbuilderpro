@@ -9,7 +9,7 @@ import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card, Badge, EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
-import { ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor, listPublishRequests, type PreviewSiteRow, type PublishRequestRow } from '../lib/preview/engine';
+import { ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor, listPublishRequests, getPreviewStats, type PreviewSiteRow, type PublishRequestRow, type PreviewStats } from '../lib/preview/engine';
 import { DEMO_PROFILES } from '../lib/preview/demoProfiles';
 
 export default function PreviewEngine() {
@@ -18,11 +18,13 @@ export default function PreviewEngine() {
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<PreviewSiteRow[]>([]);
   const [requests, setRequests] = useState<(PublishRequestRow & { business_name?: string; slug?: string })[]>([]);
+  const [stats, setStats] = useState<Record<string, PreviewStats>>({});
   const [regenId, setRegenId] = useState<string | null>(null);
 
   const refresh = async () => {
     setRows(await listPreviewSites());
     setRequests(await listPublishRequests());
+    setStats(await getPreviewStats());
   };
   useEffect(() => { void refresh(); }, []);
 
@@ -130,7 +132,17 @@ export default function PreviewEngine() {
                     {r.audit && <Badge tone={r.audit.score < 55 ? 'err' : 'warn'}>audit {r.audit.score}/100</Badge>}
                     {r.critique && <Badge tone={r.critique.feels_like_my_business >= 8 ? 'ok' : 'warn'}>owner {r.critique.feels_like_my_business}/10</Badge>}
                   </div>
-                  <p className="mt-0.5 truncate font-mono text-[11px] text-forge-dim">/preview-site/{r.slug}</p>
+                  <p className="mt-0.5 truncate font-mono text-[11px] text-forge-dim">
+                    /preview-site/{r.slug}
+                    {stats[r.id] && (stats[r.id].views > 0 || stats[r.id].returns > 0) && (
+                      <span className="ml-2 text-forge-ember">
+                        {stats[r.id].views} view{stats[r.id].views === 1 ? '' : 's'}
+                        {stats[r.id].engaged > 0 && ` · ${stats[r.id].engaged} engaged`}
+                        {stats[r.id].returns > 0 && ` · ${stats[r.id].returns} return${stats[r.id].returns === 1 ? '' : 's'}`}
+                        {stats[r.id].reportViews > 0 && ` · ${stats[r.id].reportViews} report`}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Link to={`/preview-site/${r.slug}`} target="_blank" title="Open preview"

@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AlertTriangle, Check, ArrowRight } from 'lucide-react';
-import { getPreviewSite, type PreviewSiteRow } from '../lib/preview/engine';
+import { getPreviewSite, recordPreviewEvent, type PreviewSiteRow } from '../lib/preview/engine';
 import { fallbackAudit } from '../lib/preview/strategy';
 import { parseBusinessProfile } from '../lib/preview/spec';
 
@@ -19,6 +19,10 @@ export default function PreviewReport() {
     if (!slug) { setRow(null); return; }
     void getPreviewSite(slug).then(setRow);
   }, [slug]);
+
+  useEffect(() => {
+    if (row && row !== 'loading') recordPreviewEvent(row.id, 'report_view');
+  }, [row]);
 
   useEffect(() => {
     const meta = document.createElement('meta');
