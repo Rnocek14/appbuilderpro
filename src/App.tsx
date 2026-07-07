@@ -12,6 +12,7 @@ import Garvis from './pages/Garvis';
 import Marketing from './pages/Marketing';
 import Missions from './pages/Missions';
 import Command from './pages/Command';
+import Mind from './pages/Mind';
 import Opportunities from './pages/Opportunities';
 import MissionControl from './pages/MissionControl';
 import NewProject from './pages/NewProject';
@@ -50,6 +51,7 @@ export default function App() {
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/garvis" element={<Protected><Garvis /></Protected>} />
               <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
+              <Route path="/garvis/mind" element={<Protected><Mind /></Protected>} />
               <Route path="/garvis/control" element={<Protected><MissionControl /></Protected>} />
               <Route path="/garvis/marketing" element={<Protected><Marketing /></Protected>} />
               <Route path="/garvis/missions" element={<Protected><Missions /></Protected>} />

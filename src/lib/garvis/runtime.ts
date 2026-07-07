@@ -11,6 +11,7 @@ import { supabase } from '../supabase';
 import type { AgentRun, GarvisCheckpoint } from '../../types';
 import { toolsFor } from './tools';
 import { executeTool } from './executeTool';
+import { recordMindEvent } from './mindStore';
 import type { GarvisMessage, GarvisMode, GarvisToolContext, RunOptions } from './types';
 
 const LEASE_MS = 10 * 60 * 1000;
@@ -61,6 +62,14 @@ export async function runGarvisTask(run: AgentRun, opts: RunOptions): Promise<vo
       const msg = e instanceof Error ? e.message : String(e);
       await persist(run.id, { status: 'failed', error: msg.slice(0, 500), finished_at: new Date().toISOString(), lease_until: null });
       emit({ runId: run.id, step, phase: mode, status: 'error', detail: msg });
+      // Failures are first-class evidence — append to the record (fire-and-forget, never blocks).
+      void recordMindEvent(run.owner_id, {
+        event_type: 'agent_run_failed',
+        subject: `Run failed: ${run.title} — ${msg.slice(0, 140)}`,
+        source: 'agent_run',
+        app_id: run.app_id,
+        payload: { run_id: run.id, mode },
+      });
       return;
     }
 
@@ -90,6 +99,14 @@ export async function runGarvisTask(run: AgentRun, opts: RunOptions): Promise<vo
         lease_until: null,
       });
       emit({ runId: run.id, step, phase: mode, status: 'finished', detail: decision.output });
+      // Append the outcome to the record (fire-and-forget, never blocks the run).
+      void recordMindEvent(run.owner_id, {
+        event_type: 'agent_run_finished',
+        subject: `Run finished: ${run.title}${decision.recommendation ? ` — rec: ${decision.recommendation.slice(0, 120)}` : ''}`,
+        source: 'agent_run',
+        app_id: run.app_id,
+        payload: { run_id: run.id, mode, spent_usd: spent },
+      });
       return;
     }
 
