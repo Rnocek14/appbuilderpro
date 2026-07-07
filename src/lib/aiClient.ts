@@ -623,6 +623,10 @@ export async function rawComplete(messages: { role: string; content: string }[],
     return cloudComplete(messages, maxTokens, opts.fast ?? false);
   }
   const model = opts.fast ? ai.fastModel : ai.model;
+  // Claude Fable 5 can decline a request via safety classifiers (stop_reason "refusal", empty
+  // content — occasionally a false positive on benign work). Opt into server-side fallbacks so a
+  // declined call is transparently re-served by Opus 4.8 inside the same request.
+  const fableFallback = /^claude-(fable|mythos)/.test(model);
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       if (ai.provider === 'anthropic') {
@@ -635,8 +639,9 @@ export async function rawComplete(messages: { role: string; content: string }[],
             'x-api-key': ai.key,
             'anthropic-version': '2023-06-01',
             'anthropic-dangerous-direct-browser-access': 'true',
+            ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
           },
-          body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest }),
+          body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest, ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}) }),
         }, label);
         if (!res.ok) throw await httpError(res, label);
         const data = await res.json();
@@ -1468,6 +1473,9 @@ export async function streamComplete(
         }
       }
     }
+    // Fable/Mythos: opt into server-side fallbacks so a safety-classifier decline is re-served
+    // by Opus 4.8 on the same stream instead of ending as an empty response.
+    const fableFallback = /^claude-(fable|mythos)/.test(model);
     const res = await connectProvider('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal,
@@ -1476,8 +1484,9 @@ export async function streamComplete(
         'x-api-key': ai.key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
+        ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
       },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest, stream: true }),
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest, stream: true, ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}) }),
     }, label);
     if (!res.body) throw new Error(`${label} returned an empty response.`);
     await readSSE(res.body, (data) => {

@@ -48,6 +48,8 @@ async function callModel(
 ): Promise<ModelResponse> {
   const ai = resolveAI();
   if (ai.direct && ai.provider === 'anthropic' && ai.key) {
+    // Fable/Mythos: opt into server-side fallbacks (safety-classifier declines re-served by Opus 4.8).
+    const fableFallback = /^claude-(fable|mythos)/.test(ai.model);
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal,
@@ -56,8 +58,9 @@ async function callModel(
         'x-api-key': ai.key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
+        ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
       },
-      body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, tools, messages }),
+      body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, tools, messages, ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}) }),
     });
     if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
     return (await res.json()) as ModelResponse;

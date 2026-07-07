@@ -14,7 +14,8 @@ import type { Provider } from './aiConfig';
 // fall back to DEFAULT_PRICE; local models are free.
 const PRICING: Record<string, { in: number; out: number }> = {
   // Anthropic
-  'claude-opus-4-8': { in: 15, out: 75 },
+  'claude-fable-5': { in: 10, out: 50 },
+  'claude-opus-4-8': { in: 5, out: 25 },
   'claude-sonnet-4-6': { in: 3, out: 15 },
   'claude-haiku-4-5-20251001': { in: 1, out: 5 },
   // OpenAI
