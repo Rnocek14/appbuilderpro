@@ -24,6 +24,8 @@ import Pricing from './pages/Pricing';
 import Billing from './pages/Billing';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import ClusterSpike from './pages/spike/ClusterSpike';
+import PreviewEngine from './pages/PreviewEngine';
+import PreviewSite from './pages/PreviewSite';
 
 function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: boolean }) {
   const { session, profile, loading } = useAuth();
@@ -64,6 +66,10 @@ export default function App() {
               <Route path="/billing" element={<Protected><Billing /></Protected>} />
               <Route path="/admin" element={<Protected adminOnly><AdminDashboard /></Protected>} />
               <Route path="/spike/clusters" element={<Protected><ClusterSpike /></Protected>} />
+              <Route path="/business-preview-engine" element={<Protected><PreviewEngine /></Protected>} />
+              {/* PUBLIC — the link business owners open from the outreach email (no login). */}
+              <Route path="/preview-site/:slug" element={<PreviewSite />} />
+              <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </ToastProvider>

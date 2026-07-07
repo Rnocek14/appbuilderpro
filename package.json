@@ -28,7 +28,8 @@
     "verify:universe": "tsx src/lib/garvis/universe.verify.ts",
     "verify:loops": "tsx src/lib/garvis/loops.verify.ts",
     "verify:buildbrief": "tsx src/lib/garvis/buildBrief.verify.ts",
-    "verify:qa": "tsx src/lib/qaCheck.verify.ts"
+    "verify:qa": "tsx src/lib/qaCheck.verify.ts",
+    "verify:preview": "tsx src/lib/preview/spec.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

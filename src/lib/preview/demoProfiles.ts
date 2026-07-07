@@ -1,0 +1,98 @@
+// src/lib/preview/demoProfiles.ts
+// Three realistic demo Business Profiles — one per launch recipe — for driving the preview
+// engine without a scraper. Photos are Unsplash (safe to show in previews); usage flags are
+// set the way a compliant scraper would set them.
+
+const unsplash = (id: string) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=1600&q=80`;
+
+export const DEMO_PROFILES: Record<string, unknown>[] = [
+  {
+    business_name: "Joe's Roofing",
+    industry: 'Roofing',
+    location: 'Lake Geneva, WI',
+    phone: '(262) 555-0143',
+    email: 'joe@joesroofing.example',
+    website: 'http://joesroofing-old.example',
+    hours: 'Mon–Fri 7am–6pm · Sat 8am–2pm',
+    services: ['Roof repair', 'Roof replacement', 'Storm damage repair', 'Gutter installation', 'Roof inspections', 'Emergency tarping'],
+    photos: [
+      { url: unsplash('photo-1632759145351-1d592919f522'), alt: 'New asphalt shingle roof', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1622993295842-d945a48f7062'), alt: 'Roofer at work', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1600585154340-be6161a56a0c'), alt: 'Finished home exterior', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1600607687939-ce8a6c25118c'), alt: 'Home exterior detail', source_type: 'demo', can_use_in_preview: true },
+    ],
+    reviews_summary: 'Customers repeatedly mention fast storm response, spotless cleanup, and honest pricing.',
+    review_snippets: [
+      { author: 'Dana M.', rating: 5, text: 'Hail took out half our roof — Joe had a crew out the next morning and the new roof done in two days. Spotless yard after.', source_type: 'google', can_use_in_preview: true },
+      { author: 'Rick T.', rating: 5, text: 'Three quotes, Joe was the only one who climbed up and actually showed me photos. Fair price, zero surprises.', source_type: 'google', can_use_in_preview: true },
+      { author: 'S. Alvarez', rating: 5, text: 'They handled the insurance paperwork for our storm claim. Would have been lost without them.', source_type: 'google', can_use_in_preview: true },
+    ],
+    google_rating: 4.9,
+    review_count: 87,
+    description: 'Family-owned roofing company serving Walworth County for 18 years.',
+    current_website_score: 38,
+    issues: ['not mobile friendly', 'no quote form', 'design last updated 2011'],
+    service_area: ['Lake Geneva', 'Elkhorn', 'Delavan', 'Williams Bay', 'Fontana', 'Burlington'],
+    brand_style: 'local, trustworthy, family-owned',
+    seo_keywords: ['roof repair lake geneva', 'storm damage roofing walworth county', 'roof replacement lake geneva wi'],
+    recommended_site_type: 'contractor_lead_gen',
+  },
+  {
+    business_name: 'Luna Trattoria',
+    industry: 'Italian Restaurant',
+    location: '412 Main St, Asheville, NC',
+    phone: '(828) 555-0177',
+    email: 'ciao@lunatrattoria.example',
+    hours: { 'Tue–Thu': '5–10pm', 'Fri–Sat': '5–11pm', Sunday: '4–9pm', Monday: 'Closed' },
+    services: ['Handmade pasta', 'Wood-fired pizza', 'Regional wine list', 'Private dining', 'Weekend brunch', 'Catering'],
+    photos: [
+      { url: unsplash('photo-1533777324565-a040eb52facd'), alt: 'Fresh pasta plate', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1414235077428-338989a2e8c0'), alt: 'Dining room at dusk', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1574071318508-1cdbab80d002'), alt: 'Wood-fired pizza', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1510812431401-41d2bd2722f3'), alt: 'Wine pour', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1481833761820-0509d3217039'), alt: 'Chef at the pass', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1424847651672-bf20a4b0982b'), alt: 'Table setting', source_type: 'demo', can_use_in_preview: true },
+    ],
+    reviews_summary: 'Guests rave about the cacio e pepe, the candle-lit patio, and servers who treat regulars like family.',
+    review_snippets: [
+      { author: 'Priya K.', rating: 5, text: 'The cacio e pepe is the best thing I have eaten in Asheville, full stop. Book the patio at sunset.', source_type: 'google', can_use_in_preview: true },
+      { author: 'Tom W.', rating: 5, text: 'Anniversary dinner — they brought out a candle dessert unprompted. Service like this barely exists anymore.', source_type: 'google', can_use_in_preview: true },
+    ],
+    google_rating: 4.7,
+    review_count: 312,
+    description: 'A neighborhood trattoria making pasta by hand every morning, with a Southern-Italian wine list and a patio under string lights.',
+    current_website_score: 45,
+    issues: ['menu is a scanned PDF', 'no reservation link', 'not mobile friendly'],
+    brand_style: 'warm, romantic, unpretentious',
+    seo_keywords: ['italian restaurant asheville', 'handmade pasta asheville', 'best date night restaurant asheville'],
+    recommended_site_type: 'restaurant',
+  },
+  {
+    business_name: 'Glow Aesthetics Studio',
+    industry: 'Med Spa',
+    location: 'Scottsdale, AZ',
+    phone: '(480) 555-0122',
+    email: 'hello@glowaesthetics.example',
+    hours: 'Tue–Sat 9am–6pm',
+    services: ['HydraFacial', 'Botox & fillers', 'Microneedling', 'Laser hair removal', 'Chemical peels', 'LED light therapy'],
+    photos: [
+      { url: unsplash('photo-1560750588-73207b1ef5b8'), alt: 'Treatment room', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1570172619644-dfd03ed5d881'), alt: 'Facial treatment', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1596178065887-1198b6148b2b'), alt: 'Spa products', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1540555700478-4be289fbecef'), alt: 'Relaxation area', source_type: 'demo', can_use_in_preview: true },
+    ],
+    reviews_summary: 'Clients highlight natural-looking results, a spotless studio, and zero pressure to over-treat.',
+    review_snippets: [
+      { author: 'Melissa R.', rating: 5, text: 'First med spa where I did not feel upsold. My injector talked me OUT of a treatment I did not need.', source_type: 'google', can_use_in_preview: true },
+      { author: 'Jordan B.', rating: 5, text: 'The HydraFacial glow is real. Booked my next three appointments before leaving.', source_type: 'google', can_use_in_preview: true },
+    ],
+    google_rating: 4.8,
+    review_count: 143,
+    description: 'A boutique med spa focused on natural results, led by nurse injectors with 10+ years of experience.',
+    current_website_score: 41,
+    issues: ['no online booking', 'services listed without prices or descriptions', 'slow load'],
+    brand_style: 'calm, luxurious, medical-grade but approachable',
+    seo_keywords: ['med spa scottsdale', 'botox scottsdale az', 'hydrafacial scottsdale'],
+    recommended_site_type: 'salon_spa',
+  },
+];
