@@ -14,7 +14,7 @@ import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_
 import { contextPayload, applyEditGuardrail } from './contextBudget';
 import { buildPendingFiles, type PendingEdit } from './pendingEdit';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS, THEME_FOUNDATION, UI_INDEX_THEMETOGGLE_EXPORT } from './scaffold';
-import { buildIndexCss, buildIndexCssForHue, getPreset } from './themePresets';
+import { buildIndexCss, buildIndexCssForDesign, parseDesignSpec, getPreset } from './themePresets';
 import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
@@ -1008,15 +1008,13 @@ async function directGenerate(projectId: string, prompt: string, planContext?: s
           { onConflict: 'project_id,path' },
         );
       }
-      // Give the app a distinctive, domain-appropriate palette (the blueprint picks an accent hue)
-      // instead of the default slate — this is the biggest single lever for "looks intentional,
-      // not generic AI output". Falls back to the scaffold default if no hue was chosen.
-      const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
-      const accentHue = Number(design?.accentHue);
-      if (Number.isFinite(accentHue)) {
-        const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
+      // Compile the blueprint's FULL design bundle (mode, fonts, radius, borders, shadows) into
+      // /src/index.css — flattening it to hue+font was the "every app looks the same" leak.
+      // Falls back to the scaffold default if the blueprint declared no design.
+      const designSpec = parseDesignSpec(blueprint.design);
+      if (designSpec) {
         await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForHue(accentHue, headingFont), updated_by_ai: true },
+          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForDesign(designSpec), updated_by_ai: true },
           { onConflict: 'project_id,path' },
         );
       }
@@ -1235,12 +1233,10 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
           { onConflict: 'project_id,path' },
         );
       }
-      const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
-      const accentHue = Number(design?.accentHue);
-      if (Number.isFinite(accentHue)) {
-        const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
+      const designSpec = parseDesignSpec(blueprint.design);
+      if (designSpec) {
         await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForHue(accentHue, headingFont), updated_by_ai: true },
+          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForDesign(designSpec), updated_by_ai: true },
           { onConflict: 'project_id,path' },
         );
       }

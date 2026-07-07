@@ -5,7 +5,7 @@ import { MissionTasks } from '../components/garvis/MissionTasks';
 import { Markdown } from '../components/Markdown';
 import { useCommander } from '../hooks/useCommander';
 import { useOpportunities } from '../hooks/useOpportunities';
-import { Badge, Button, Spinner } from '../components/ui';
+import { Badge, Button, Ember, Spinner } from '../components/ui';
 import type { ChatMessage } from '../hooks/useCommander';
 import type { GarvisMission, GarvisTask } from '../types';
 
@@ -117,7 +117,13 @@ export default function Command() {
             </div>
           ))}
 
-          {thinking && <div className="flex justify-start"><div className="rounded-2xl rounded-tl-sm border border-forge-border bg-forge-panel px-3.5 py-2.5"><Spinner label="Garvis is thinking…" /></div></div>}
+          {thinking && (
+            <div className="flex justify-start">
+              <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm border border-forge-border bg-forge-panel px-3.5 py-2.5 text-sm text-forge-dim">
+                <Ember size={15} /> Garvis is thinking…
+              </div>
+            </div>
+          )}
           <div ref={endRef} />
         </div>
 
