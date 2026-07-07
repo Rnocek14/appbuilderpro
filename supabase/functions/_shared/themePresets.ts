@@ -173,24 +173,91 @@ export function buildIndexCss(presetId: string): string {
 }
 
 /**
- * Build a cohesive /src/index.css from ANY accent hue (0–359) — used at generation time so each
- * new app gets a distinctive, domain-appropriate palette instead of the default slate. The neutral
- * surfaces are tinted toward the hue and the accent is derived from it, so the whole app feels
- * intentionally branded rather than generic.
+ * The full DESIGN BUNDLE a chosen direction (or the blueprint) commits to. Every field maps to a
+ * deterministic token — this is what makes a picked direction actually HAPPEN instead of being
+ * flattened into "same white app, different accent" (only hue+headingFont used to survive).
  */
-export function buildIndexCssForHue(hue: number, headingFont?: string): string {
-  const h = (((hue % 360) + 360) % 360);
-  const base = assembleCss(makePalette({
+export interface AppDesign {
+  /** Accent hue 0–359 (the one primary color). */
+  accentHue?: number;
+  /** Google Font for headings (display personality). */
+  headingFont?: string;
+  /** Google Font for body text (default Inter). */
+  bodyFont?: string;
+  /** Corner radius in px: 0 sharp editorial/brutalist … 10 default … 24 soft organic. */
+  radius?: number;
+  /** Which theme the app OPENS in — 'dark' for midnight/pro-tool directions. */
+  mode?: 'light' | 'dark';
+  /** Light-mode surface tint (the "paper"): hue 0-359, saturation 0-40, lightness 90-100.
+   *  Warm cream ≈ {37, 30, 96}; cool near-white ≈ {215, 15, 98}. Defaults to the accent hue. */
+  bgHue?: number;
+  bgSat?: number;
+  bgLight?: number;
+}
+
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+const validFont = (f?: string): string => {
+  const fam = (f ?? '').trim();
+  return fam && /^[a-zA-Z0-9 ]{2,40}$/.test(fam) ? fam : '';
+};
+
+/**
+ * Build a cohesive /src/index.css from a full design bundle — used at generation time so each app
+ * gets a REAL identity: paper tint, radius, both fonts, and its opening theme, not just an accent.
+ */
+export function buildIndexCssForDesign(design: AppDesign): string {
+  const accent = Number.isFinite(Number(design.accentHue)) ? (((Number(design.accentHue) % 360) + 360) % 360) : 215;
+  const bgHue = Number.isFinite(Number(design.bgHue)) ? (((Number(design.bgHue) % 360) + 360) % 360) : accent;
+  const bgSat = Number.isFinite(Number(design.bgSat)) ? clamp(Number(design.bgSat), 0, 40) : 26;
+  const bgLight = Number.isFinite(Number(design.bgLight)) ? clamp(Number(design.bgLight), 90, 100) : 97.5;
+
+  const pal = makePalette({
     id: 'custom', name: 'Custom', swatch: ['#eee', '#888'],
-    hue: h, sat: 26,
-    primaryLight: [h, 68, 45], primaryDark: [h, 62, 60],
-  }));
-  const fam = (headingFont ?? '').trim();
-  if (!fam || !/^[a-zA-Z0-9 ]{2,40}$/.test(fam)) return base; // no/invalid font → Inter only
-  // A characterful display font for headings is the single biggest "designed, not generic" signal.
-  const url = `https://fonts.googleapis.com/css2?family=${fam.replace(/ /g, '+')}:wght@500;600;700&display=swap`;
-  return `@import url('${url}');\n${base}
-:root { --font-display: "${fam}", Inter, ui-sans-serif, system-ui, sans-serif; }
+    hue: bgHue, sat: bgSat,
+    primaryLight: [accent, 68, 45], primaryDark: [accent, 62, 60],
+  });
+  // Shift the whole light-surface ladder with the paper tint so a warm-cream or bone direction
+  // keeps its contrast structure (card floats above bg, borders stay visible).
+  const delta = 97.5 - bgLight;
+  pal.light['--background'] = t(bgHue, bgSat, bgLight);
+  pal.light['--card'] = t(bgHue, bgSat * 0.5, clamp(bgLight + 2.5, 90, 100));
+  pal.light['--popover'] = pal.light['--card'];
+  pal.light['--secondary'] = t(bgHue, bgSat, clamp(95.5 - delta, 80, 100));
+  pal.light['--muted'] = t(bgHue, bgSat, clamp(95 - delta, 80, 100));
+  pal.light['--accent'] = t(bgHue, bgSat, clamp(93 - delta, 80, 100));
+  pal.light['--border'] = t(bgHue, bgSat, clamp(89 - delta, 74, 96));
+  pal.light['--input'] = pal.light['--border'];
+
+  const radiusPx = Number.isFinite(Number(design.radius)) ? clamp(Number(design.radius), 0, 28) : 10;
+  pal.light['--radius'] = `${radiusPx / 16}rem`; // full precision — round() would turn 0.625 into 0.6
+  if (design.mode === 'dark') pal.light['--default-theme'] = 'dark'; // read by the scaffold's getTheme()
+
+  let css = assembleCss(pal);
+
+  // Fonts: one @import for both families; headings get the display font, body gets --font-sans
+  // (the scaffold Tailwind config maps font-sans onto it, so utilities follow too).
+  const heading = validFont(design.headingFont);
+  const body = validFont(design.bodyFont);
+  const families = [...new Set([heading, body].filter(Boolean))]
+    .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;600;700`).join('&');
+  if (families) css = `@import url('https://fonts.googleapis.com/css2?${families}&display=swap');\n${css}`;
+  if (heading) {
+    css += `:root { --font-display: "${heading}", Inter, ui-sans-serif, system-ui, sans-serif; }
 h1,h2,h3,h4,h5,h6,.font-display { font-family: var(--font-display); }
 `;
+  }
+  if (body) {
+    css += `:root { --font-sans: "${body}", Inter, ui-sans-serif, system-ui, sans-serif; }
+body { font-family: var(--font-sans); }
+`;
+  }
+  return css;
+}
+
+/**
+ * Back-compat wrapper: a palette from just an accent hue (+ optional heading font). Prefer
+ * buildIndexCssForDesign for anything blueprint-driven.
+ */
+export function buildIndexCssForHue(hue: number, headingFont?: string): string {
+  return buildIndexCssForDesign({ accentHue: hue, headingFont });
 }

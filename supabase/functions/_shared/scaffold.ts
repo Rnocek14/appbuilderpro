@@ -95,8 +95,11 @@ const INDEX_HTML = `<!doctype html>
             popover: { DEFAULT: 'hsl(var(--popover))', foreground: 'hsl(var(--popover-foreground))' },
             card: { DEFAULT: 'hsl(var(--card))', foreground: 'hsl(var(--card-foreground))' },
           },
-          borderRadius: { lg: 'var(--radius)', md: 'calc(var(--radius) - 2px)', sm: 'calc(var(--radius) - 4px)' },
-          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+          // The FULL radius scale rides the token so a sharp (0px) or soft (24px) design identity
+          // actually reaches the cards (rounded-xl/2xl are what cards use — without this mapping
+          // they'd stay at Tailwind's fixed defaults and every app would have identical corners).
+          borderRadius: { sm: 'calc(var(--radius) - 4px)', md: 'calc(var(--radius) - 2px)', lg: 'var(--radius)', xl: 'calc(var(--radius) + 4px)', '2xl': 'calc(var(--radius) + 8px)' },
+          fontFamily: { sans: ['var(--font-sans, Inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
           // Motion utilities — CDN Tailwind has no tailwindcss-animate plugin, so we define the
           // keyframes shadcn/Radix components rely on (accordion, overlay enter/exit) plus a small
           // set of reusable entrances. This is what gives generated apps Lovable-tier polish.
@@ -1114,6 +1117,10 @@ export function getTheme(): Theme {
   try {
     const stored = localStorage.getItem('theme');
     if (stored === 'light' || stored === 'dark') return stored;
+    // The app's design can declare which theme it OPENS in (--default-theme in index.css) —
+    // dark-first directions (pro tools, midnight) boot dark without waiting for a user toggle.
+    const def = getComputedStyle(document.documentElement).getPropertyValue('--default-theme').trim();
+    if (def === 'light' || def === 'dark') return def;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   } catch {
     return 'light';

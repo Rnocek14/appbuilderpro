@@ -86,15 +86,33 @@ export default function NewProject() {
   const [directions, setDirections] = useState<DesignDirection[]>([]);
   const [directionProjectId, setDirectionProjectId] = useState<string | null>(null);
   const [directionsLoading, setDirectionsLoading] = useState(false);
+  const [directionsExpected, setDirectionsExpected] = useState(3);
   const skippedRef = useRef(false);
 
-  /** Serialize the chosen direction into context the blueprint must follow exactly. */
+  /** Serialize the chosen direction into context the blueprint must follow exactly — INCLUDING the
+   *  deterministic token bundle (radius/mode/paper tint), so the pick actually happens in the app. */
   const directionContext = (d: DesignDirection): string => [
     `DESIGN DIRECTION — the user chose "${d.name}" (${d.archetype}, ${d.risk}). Follow it EXACTLY:`,
     d.brief,
-    `Set the blueprint's design.accentHue to ${Math.round(d.accentHue)} and design.headingFont to "${d.headingFont}".`,
-    `Body font: ${d.bodyFont}. Make design.vibe restate this direction. Every page commits to this bundle — its palette strategy, radius, surface logic, layout archetype, and motion character.`,
+    `Set the blueprint's design fields verbatim: accentHue=${Math.round(d.accentHue)}, headingFont="${d.headingFont}", bodyFont="${d.bodyFont}"` +
+      (Number.isFinite(Number(d.radius)) ? `, radius=${Math.round(Number(d.radius))}` : '') +
+      (d.mode === 'dark' || d.mode === 'light' ? `, mode="${d.mode}"` : '') +
+      (Number.isFinite(Number(d.bgHue)) ? `, bgHue=${Math.round(Number(d.bgHue))}, bgSat=${Math.round(Number(d.bgSat ?? 26))}, bgLight=${Math.round(Number(d.bgLight ?? 97))}` : '') + '.',
+    `Make design.vibe restate this direction. Every page commits to this bundle — its palette strategy, radius, surface logic, layout archetype, and motion character.`,
   ].join('\n');
+
+  // "Show me 3 more" — reroll with the already-shown archetypes excluded, appended to the grid.
+  const moreDirections = async () => {
+    if (directionsLoading || !directionProjectId) return;
+    setDirectionsExpected(directions.length + 3);
+    setDirectionsLoading(true);
+    try {
+      await generateDesignDirections(prompt.trim(), (d) => {
+        if (!skippedRef.current) setDirections((prev) => [...prev, d]);
+      }, { exclude: directions.map((d) => d.archetype) });
+    } catch { /* whatever landed stays; the picker still works */ }
+    finally { if (!skippedRef.current) setDirectionsLoading(false); }
+  };
 
   const forge = async () => {
     const text = prompt.trim();
@@ -231,9 +249,11 @@ export default function NewProject() {
             <DirectionPicker
               directions={directions}
               loading={directionsLoading}
+              expected={directionsExpected}
               busy={busy}
               onPick={(d) => void buildWithDirection(d)}
               onSkip={() => void buildWithDirection(null)}
+              onMore={() => void moreDirections()}
             />
           </div>
         )}

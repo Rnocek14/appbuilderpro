@@ -14,7 +14,7 @@ import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_
 import { contextPayload, applyEditGuardrail } from './contextBudget';
 import { buildPendingFiles, type PendingEdit } from './pendingEdit';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS, THEME_FOUNDATION, UI_INDEX_THEMETOGGLE_EXPORT } from './scaffold';
-import { buildIndexCss, buildIndexCssForHue, getPreset } from './themePresets';
+import { buildIndexCss, buildIndexCssForDesign, getPreset } from './themePresets';
 import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
@@ -506,6 +506,8 @@ interface RawResult { text: string; inputTokens: number; outputTokens: number }
 export interface DesignDirection {
   archetype: string; name: string; risk: string; accentHue: number;
   headingFont: string; bodyFont: string; brief: string; preview_html: string;
+  /** Deterministic token bundle — applied to the app's index.css so the direction actually happens. */
+  radius?: number; mode?: 'light' | 'dark'; bgHue?: number; bgSat?: number; bgLight?: number;
 }
 
 // Normalize preview HTML defensively: strip markdown fences, and wrap bare fragments in a
@@ -518,10 +520,17 @@ function cleanPreviewHtml(h: string): string {
   return s;
 }
 
+// Spanning fallback order — enough entries that a "3 more" reroll still has archetypes to draw
+// from when the pick call fails.
 const DIRECTION_FALLBACK_PICKS = [
   { archetype: 'ENTERPRISE CLARITY', risk: 'safe' },
   { archetype: 'MIDNIGHT PRO TOOL', risk: 'opinionated' },
   { archetype: 'EDITORIAL BROADSHEET', risk: 'bold' },
+  { archetype: 'ORGANIC CALM', risk: 'safe' },
+  { archetype: 'PLAYFUL POP', risk: 'opinionated' },
+  { archetype: 'NEOBRUTALIST PLAYGROUND', risk: 'bold' },
+  { archetype: 'LUXURY BOUTIQUE', risk: 'opinionated' },
+  { archetype: 'SWISS ARCHIVE', risk: 'bold' },
 ];
 
 /**
@@ -531,18 +540,22 @@ const DIRECTION_FALLBACK_PICKS = [
  * via onDirection, and per-call archetype assignment beats a batched call on diversity.
  */
 export async function generateDesignDirections(
-  prompt: string, onDirection?: (d: DesignDirection) => void,
+  prompt: string, onDirection?: (d: DesignDirection) => void, opts?: { exclude?: string[] },
 ): Promise<DesignDirection[]> {
   // Stage 1 — pick the 3 archetypes (fast, tiny; falls back to a spanning default trio).
-  let picks = DIRECTION_FALLBACK_PICKS;
+  // `exclude` powers the "show me 3 more" reroll: archetypes already shown aren't re-picked.
+  const exclude = (opts?.exclude ?? []).map((a) => a.toUpperCase());
+  let picks = DIRECTION_FALLBACK_PICKS.filter((p) => !exclude.includes(p.archetype)).slice(0, 3);
+  if (picks.length < 3) picks = DIRECTION_FALLBACK_PICKS.slice(0, 3);
   try {
     const raw = await rawComplete([
       { role: 'system', content: DIRECTIONS_SYSTEM },
-      { role: 'user', content: directionPickPrompt(prompt) },
+      { role: 'user', content: directionPickPrompt(prompt, opts?.exclude) },
     ], 600, { fast: true });
     const parsed = await parseJsonWithRepair<{ picks?: { archetype?: string; risk?: string }[] }>(raw.text);
     const got = (parsed?.picks ?? [])
       .filter((p) => p && typeof p.archetype === 'string' && p.archetype.length > 2)
+      .filter((p) => !exclude.includes((p.archetype as string).toUpperCase()))
       .map((p) => ({ archetype: p.archetype as string, risk: (p.risk === 'opinionated' || p.risk === 'bold') ? p.risk : 'safe' }));
     if (got.length >= 3) picks = got.slice(0, 3);
   } catch { /* fall back to the default trio */ }
@@ -1064,12 +1077,23 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           { onConflict: 'project_id,path' },
         );
       }
-      const design = blueprint.design as { accentHue?: unknown; headingFont?: unknown } | undefined;
-      const accentHue = Number(design?.accentHue);
-      if (Number.isFinite(accentHue)) {
-        const headingFont = typeof design?.headingFont === 'string' ? design.headingFont : undefined;
+      // Apply the blueprint's FULL design bundle to the token file — palette + paper tint +
+      // radius + both fonts + the theme it opens in. This is what makes a chosen direction
+      // actually happen instead of being flattened into "white app, different accent".
+      const design = blueprint.design as Record<string, unknown> | undefined;
+      if (design && Number.isFinite(Number(design.accentHue))) {
+        const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
+        const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
+        const css = buildIndexCssForDesign({
+          accentHue: num(design.accentHue),
+          headingFont: str(design.headingFont),
+          bodyFont: str(design.bodyFont),
+          radius: num(design.radius),
+          mode: design.mode === 'dark' ? 'dark' : 'light',
+          bgHue: num(design.bgHue), bgSat: num(design.bgSat), bgLight: num(design.bgLight),
+        });
         await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForHue(accentHue, headingFont), updated_by_ai: true },
+          { project_id: projectId, path: '/src/index.css', content: css, updated_by_ai: true },
           { onConflict: 'project_id,path' },
         );
       }

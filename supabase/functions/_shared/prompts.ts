@@ -98,8 +98,9 @@ SCROLL STORYTELLING (marketing/landing surfaces — the single biggest "expensiv
   fade+slide, stagger siblings with delay={0|80|160}), or put class "stagger" on grids that are visible
   on load. A long static page with everything already rendered reads as cheap.
 - ONE scroll-SCRUBBED scene per page (the Apple move — the product rotates/assembles as you scroll):
-  the kit's useScrollProgress hook gives 0→1 progress; the pattern is a tall wrapper (h-[200vh] or
-  h-[300vh]) containing a pinned stage (sticky top-0 h-screen overflow-hidden flex items-center)
+  the kit's useScrollProgress gives 0→1 progress — const { ref, progress } = useScrollProgress<HTMLDivElement>()
+  (no arguments; object destructure); the pattern is a tall wrapper (h-[200vh] or
+  h-[300vh], ref goes HERE) containing a pinned stage (sticky top-0 h-screen overflow-hidden flex items-center)
   whose content maps progress onto transforms — scale from 0.6→1, rotate in, translate layers at
   different rates (parallax), fade captions in at progress thresholds, count numbers up
   (Math.round(progress * 12000)). Great subjects: the product screenshot assembling, a phone/device
@@ -559,10 +560,16 @@ PREVIEW HTML (per direction — one self-contained file):
   numbers ("$1,284.50", "12 this week") — placeholder text is forbidden.
 - Include one :hover state so the direction's motion character shows.
 
-OUTPUT — ONLY JSON, no prose, no fences. When the request asks for ONE direction, output
-{"direction":{...one object...}}; when it asks for the full set, output:
+OUTPUT — ONLY JSON, no prose, no fences. Every numeric field is applied DETERMINISTICALLY to the
+app's design tokens, so commit to the archetype's real values (a brutalist direction with radius 10
+is a lie). When the request asks for ONE direction, output {"direction":{...one object...}};
+when it asks for the full set, output:
 {"directions":[{"archetype":str,"name":str(2-3 words,evocative),"risk":"safe|opinionated|bold",
 "accentHue":int(0-359),"headingFont":str(Google Font),"bodyFont":str(Google Font),
+"radius":int(px: 0-2 sharp, 8-10 modern, 16-24 soft — per the archetype),
+"mode":"light"|"dark"(which theme the app OPENS in — dark for midnight/pro archetypes),
+"bgHue":int(0-359),"bgSat":int(0-40),"bgLight":int(90-100)(the light-mode paper tint — warm cream
+≈ 37/30/96, bone ≈ 40/20/95, cool white ≈ 215/15/98; commit to the archetype's paper),
 "brief":str(2-3 sentences: the bundle — palette strategy, radius, surface/border logic, layout
 archetype, motion character; concrete, with hex values),"preview_html":str(the complete HTML)}]}`;
 
@@ -573,13 +580,16 @@ export function directionsPrompt(userPrompt: string): string {
 // Fan-out variant: one tiny archetype-selection call, then one direction per call (parallel).
 // Each call is small enough for the edge relay's time limits, previews stream in one by one,
 // and per-call archetype assignment beats one batched call on diversity (models converge).
-export function directionPickPrompt(userPrompt: string): string {
-  return `The app about to be built:\n"""${userPrompt}"""\n\nPick the 3 archetypes for this app per the selection logic (best-fit safe, plausible-adjacent opinionated, deliberately-contrarian bold). Output ONLY: {"picks":[{"archetype":str(exact archetype name),"risk":"safe"|"opinionated"|"bold"}]} — no previews, no prose.`;
+export function directionPickPrompt(userPrompt: string, exclude: string[] = []): string {
+  const excl = exclude.length
+    ? `\nAlready shown to the user (do NOT pick any of these): ${exclude.join(', ')}. Pick 3 DIFFERENT archetypes that still span safe→bold for this app.`
+    : '';
+  return `The app about to be built:\n"""${userPrompt}"""\n${excl}\nPick the 3 archetypes for this app per the selection logic (best-fit safe, plausible-adjacent opinionated, deliberately-contrarian bold). Output ONLY: {"picks":[{"archetype":str(exact archetype name),"risk":"safe"|"opinionated"|"bold"}]} — no previews, no prose.`;
 }
 
 export function singleDirectionPrompt(userPrompt: string, pick: { archetype: string; risk: string }, all: { archetype: string }[]): string {
   const others = all.filter((a) => a.archetype !== pick.archetype).map((a) => a.archetype).join(' and ') || 'two other archetypes';
-  return `The app about to be built:\n"""${userPrompt}"""\n\nGenerate exactly ONE design direction: archetype ${pick.archetype} (risk: ${pick.risk}). Sibling directions (${others}) are being generated separately — obey the distinctness rules relative to them (your background value, display-type class, and layout archetype must differ from what they would use). Output ONLY: {"direction":{"archetype":str,"name":str,"risk":str,"accentHue":int,"headingFont":str,"bodyFont":str,"brief":str,"preview_html":str}} — no prose, no markdown fences.`;
+  return `The app about to be built:\n"""${userPrompt}"""\n\nGenerate exactly ONE design direction: archetype ${pick.archetype} (risk: ${pick.risk}). Sibling directions (${others}) are being generated separately — obey the distinctness rules relative to them (your background value, display-type class, and layout archetype must differ from what they would use). Output ONLY: {"direction":{"archetype":str,"name":str,"risk":str,"accentHue":int,"headingFont":str,"bodyFont":str,"radius":int,"mode":"light"|"dark","bgHue":int,"bgSat":int,"bgLight":int,"brief":str,"preview_html":str}} — no prose, no markdown fences.`;
 }
 
 // PRODUCT SELF-KNOWLEDGE — the chat lives inside the FableForge studio and must know the product
@@ -710,7 +720,13 @@ The EXACT APIs:
 - Pagination: page, pageCount, onPageChange. Table family: styling only (normal table markup).
 - Reveal: delay? (ms), y?, className — scroll-reveal wrapper for marketing sections.
 - Toasts: const { toast } = useToast() (from ../context/ToastContext); toast('Saved', 'success').
-- /src/lib/scroll.ts: useInView + useScrollProgress (see SCROLL STORYTELLING). /src/lib/utils: cn().
+- /src/lib/scroll.ts — EXACT signatures. These are NOT react-intersection-observer and NOT
+  framer-motion; their call shapes WILL NOT type-check here:
+    const { ref, inView } = useInView<HTMLDivElement>();            // returns an OBJECT — never [ref, inView]
+    const { ref, progress } = useScrollProgress<HTMLDivElement>();  // takes NO arguments — never useScrollProgress(ref)
+  useInView opts: { once?: boolean; margin?: string }. useScrollProgress: attach ref to the TALL
+  wrapper (h-[200vh]); progress is a number 0→1 — read it in style={{ transform: … }}.
+- /src/lib/utils: cn().
 Reach for these FIRST: Tabs for sectioned views, Dropdown for row menus, Combobox for long selects,
 FormField on every form row, Table for data grids, Alert for persistent notices, Tooltip on
 icon-only buttons, Reveal on marketing sections.
@@ -739,12 +755,14 @@ ${COMPLIANCE_GUIDE}
 ${FEATURE_COMPLETENESS}
 
 GENERATION SPECIFICS:
-- A bespoke, domain-fit PALETTE and a characterful display FONT are ALREADY written into
-  /src/index.css from the blueprint's design (accentHue + headingFont). Do NOT emit /src/index.css,
-  do NOT redefine :root/.dark, and do NOT invent hex colors — just use the semantic tokens. Headings
-  (h1-h6) and any element with class "font-display" automatically get the display font; use real
-  heading tags (or font-display) for titles so the personality shows. Honor design.vibe and build
-  design.logo as a real wordmark in the header.
+- The app's WHOLE design identity is ALREADY written into /src/index.css from the blueprint's
+  design: palette (accent + tinted paper background), BOTH fonts, corner radius, and the theme it
+  opens in (design.mode). Do NOT emit /src/index.css, do NOT redefine :root/.dark, and do NOT
+  invent hex colors — just use the semantic tokens and the identity shows up everywhere
+  automatically. Headings (h1-h6) and .font-display get the display font; use real heading tags so
+  the personality shows. Honor design.vibe's surface/layout/motion character in HOW you compose
+  pages (border weight, density, motion restraint) and build design.logo as a real wordmark in the
+  header.
 - NEVER create files under /src/components/ui/ — the UI kit is provided (Button, Card, Input, …).
   Import from '../components/ui'. Emitting your own ui/index.tsx causes duplicate, conflicting
   components and visual drift.
@@ -1208,20 +1226,34 @@ Respond with ONLY JSON matching:
  "design": {
    "accentHue": int,
    "headingFont": str,
+   "bodyFont": str,
+   "radius": int,
+   "mode": "light"|"dark",
+   "bgHue": int, "bgSat": int, "bgLight": int,
    "vibe": str,
    "logo": str
  }}
 
 For "design", give the app a real visual identity (this is what makes it look intentionally designed,
-not generic):
+not generic). EVERY field below is applied DETERMINISTICALLY to the app's design tokens — commit to a
+coherent bundle, it will actually happen:
 - accentHue: an HSL hue 0-359 chosen to fit the app's DOMAIN and mood — e.g. fresh green ~150 for
   food/health/grocery, teal ~175 for wellness, blue ~215 for finance/productivity, indigo ~245 or
   violet ~270 for creative/AI tools, warm orange ~28 for social/community, rose ~345 for lifestyle.
   Pick something distinctive — NOT a default navy/slate.
 - headingFont: ONE Google Font name with character for headings (this is a top "looks designed"
   signal — all-Inter looks generic). Pick to fit the vibe, e.g. "Space Grotesk", "Sora", "Outfit",
-  "Plus Jakarta Sans", "Bricolage Grotesque", "Sora", "Manrope", "Fraunces" (editorial/serif),
-  "Spline Sans". It's auto-loaded and applied to headings; body stays Inter, data uses mono.
+  "Plus Jakarta Sans", "Bricolage Grotesque", "Manrope", "Fraunces" (editorial/serif),
+  "Spline Sans". It's auto-loaded and applied to headings.
+- bodyFont: the body Google Font — pair it with the heading ("Inter" is fine when nothing fits better;
+  editorial directions might use "Newsreader"/"Source Serif 4", friendly ones "Figtree"/"Onest").
+- radius: corner radius in px — 0-2 sharp editorial/brutalist/luxury, 8-10 modern default,
+  16-24 soft/organic/playful. Pick what the identity demands, not always 10.
+- mode: which theme the app OPENS in — "dark" for pro tools / dev dashboards / midnight identities
+  (dark-first often reads most intentional there), else "light".
+- bgHue/bgSat/bgLight: the light-mode "paper" tint — hue 0-359, sat 0-40, lightness 90-100. Warm
+  cream ≈ 37/30/96, bone ≈ 40/20/95, cool near-white ≈ 215/15/98, plain white ≈ anything/0/100.
+  A tinted paper (not default white) is a strong identity move for editorial/organic/luxury apps.
 - vibe: one line describing the intended look & feel (e.g. "fresh, organic, friendly — rounded cards,
   airy spacing, leafy green accents").
 - logo: a concrete wordmark/lockup concept (styled app name + an optional simple custom mark) — NOT a
