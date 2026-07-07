@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getPreviewSite, type PreviewSiteRow } from '../lib/preview/engine';
 import { PreviewSiteRenderer } from '../components/preview/PreviewSiteRenderer';
+import { ClaimBar } from '../components/preview/ClaimBar';
 
 export default function PreviewSite({ shot = false }: { shot?: boolean }) {
   const { slug } = useParams<{ slug: string }>();
@@ -37,5 +38,11 @@ export default function PreviewSite({ shot = false }: { shot?: boolean }) {
       </div>
     );
   }
-  return <PreviewSiteRenderer spec={row.spec} shot={shot} />;
+  return (
+    <>
+      <PreviewSiteRenderer spec={row.spec} shot={shot} />
+      {/* The purchase-intent path: a preview with no way to say "yes" converts at zero. */}
+      {!shot && <ClaimBar previewSiteId={row.id} businessName={row.business_name} slug={row.slug} />}
+    </>
+  );
 }

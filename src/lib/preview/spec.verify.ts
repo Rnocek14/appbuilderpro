@@ -95,5 +95,36 @@ check('unknown industry falls back to contractor', pickRecipe({ ...ROOFER, indus
 check('previewSlug strips punctuation', previewSlug("Joe's Roofing & Sons!") === 'joes-roofing-sons');
 check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ type, props: {} })), 'Quote').length <= 6);
 
+// ---------------------------------------------------------------------------
+// Business-intelligence layer (strategy / audit / critique normalizers)
+// ---------------------------------------------------------------------------
+{
+  const { fallbackStrategy, normalizeStrategy, fallbackAudit, normalizeAudit, gradeFor, normalizeCritique, critiqueWarrantsRefine } =
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    await import('./strategy');
+
+  const fs = fallbackStrategy(ROOFER);
+  check('strategy fallback is complete', !!fs.positioning && !!fs.hero_strategy && fs.trust_builders.length > 0);
+  check('strategy fallback grounds proof in profile', fs.differentiators[0].includes('4.8'));
+  const ns = normalizeStrategy({ positioning: 'The storm-response roofers of Walworth County.', differentiators: ['24h storm response'] }, ROOFER);
+  check('strategy normalize keeps model fields', ns.positioning.includes('storm-response') && ns.differentiators[0] === '24h storm response');
+  check('strategy normalize patches missing fields from fallback', ns.trust_builders.length > 0 && ns.offer_strategy.length > 0);
+  check('strategy normalize survives garbage', normalizeStrategy('junk', ROOFER).positioning === fs.positioning);
+
+  const fa = fallbackAudit({ ...ROOFER, website: 'http://old.example', current_website_score: 38 });
+  check('audit fallback carries profile score + grade', fa.score === 38 && fa.grade === 'F' && fa.problems.length > 0);
+  check('audit no-website profile scores low', fallbackAudit({ ...ROOFER, website: undefined, current_website_score: undefined }).score === 15);
+  check('gradeFor bands', gradeFor(92) === 'A' && gradeFor(72) === 'C' && gradeFor(10) === 'F');
+  const na = normalizeAudit({ score: 250, problems: [{ issue: 'not mobile friendly' }], gains: ['More quote requests'] }, ROOFER);
+  check('audit normalize clamps score + fills impact', na.score === 100 && na.problems[0].impact.length > 10);
+  check('audit normalize keeps model gains', na.gains[0] === 'More quote requests');
+
+  const crit = normalizeCritique({ would_buy: false, feels_like_my_business: 4, issues: [{ section: 'hero', problem: 'Generic headline', fix: 'Name the storm-response specialty' }] });
+  check('critique normalize parses issues', crit.issues.length === 1 && !crit.would_buy);
+  check('bad critique warrants refine', critiqueWarrantsRefine(crit));
+  check('clean critique skips refine', !critiqueWarrantsRefine(normalizeCritique({ would_buy: true, feels_like_my_business: 9, issues: [] })));
+  check('critique normalize survives garbage', normalizeCritique(null).feels_like_my_business === 7);
+}
+
 console.log(`\npreview-spec.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} check(s) failed`);

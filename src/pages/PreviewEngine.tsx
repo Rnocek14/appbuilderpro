@@ -5,11 +5,11 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera } from 'lucide-react';
+import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card, Badge, EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
-import { ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor, type PreviewSiteRow } from '../lib/preview/engine';
+import { ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor, listPublishRequests, type PreviewSiteRow, type PublishRequestRow } from '../lib/preview/engine';
 import { DEMO_PROFILES } from '../lib/preview/demoProfiles';
 
 export default function PreviewEngine() {
@@ -17,9 +17,13 @@ export default function PreviewEngine() {
   const [json, setJson] = useState('');
   const [busy, setBusy] = useState(false);
   const [rows, setRows] = useState<PreviewSiteRow[]>([]);
+  const [requests, setRequests] = useState<(PublishRequestRow & { business_name?: string; slug?: string })[]>([]);
   const [regenId, setRegenId] = useState<string | null>(null);
 
-  const refresh = async () => setRows(await listPreviewSites());
+  const refresh = async () => {
+    setRows(await listPreviewSites());
+    setRequests(await listPublishRequests());
+  };
   useEffect(() => { void refresh(); }, []);
 
   const generate = async () => {
@@ -89,6 +93,27 @@ export default function PreviewEngine() {
           </div>
         </Card>
 
+        {requests.length > 0 && (
+          <>
+            <h2 className="mt-8 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-forge-ember"><Inbox size={12} /> Interested owners ({requests.length})</h2>
+            <div className="mt-3 space-y-2">
+              {requests.map((q) => (
+                <Card key={q.id} className="flex flex-wrap items-center gap-3 border-forge-ember/40 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-forge-ink">{q.name} <span className="text-forge-dim">wants</span> {q.business_name ?? 'a preview'}</p>
+                    <p className="mt-0.5 font-mono text-xs text-forge-dim">{q.contact}{q.message ? ` — “${q.message}”` : ''}</p>
+                  </div>
+                  {q.slug && (
+                    <Link to={`/preview-site/${q.slug}`} target="_blank" className="rounded-lg border border-forge-border p-2 text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink">
+                      <ExternalLink size={14} />
+                    </Link>
+                  )}
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+
         <h2 className="mt-8 text-xs font-medium uppercase tracking-wide text-forge-dim">Generated previews</h2>
         {rows.length === 0 ? (
           <div className="mt-3"><EmptyState icon={<Globe size={20} />} title="No previews yet" body="Load a demo profile above and hit Generate." /></div>
@@ -102,6 +127,8 @@ export default function PreviewEngine() {
                     <Badge tone="dim">{r.industry}</Badge>
                     <Badge tone={r.spec_source === 'ai' ? 'ok' : 'warn'}>{r.spec_source}</Badge>
                     <Badge tone="ember">{r.status}</Badge>
+                    {r.audit && <Badge tone={r.audit.score < 55 ? 'err' : 'warn'}>audit {r.audit.score}/100</Badge>}
+                    {r.critique && <Badge tone={r.critique.feels_like_my_business >= 8 ? 'ok' : 'warn'}>owner {r.critique.feels_like_my_business}/10</Badge>}
                   </div>
                   <p className="mt-0.5 truncate font-mono text-[11px] text-forge-dim">/preview-site/{r.slug}</p>
                 </div>
@@ -113,6 +140,10 @@ export default function PreviewEngine() {
                   <Link to={`/preview-site/${r.slug}/email-shot`} target="_blank" title="Email screenshot view"
                     className="rounded-lg border border-forge-border p-2 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
                     <Camera size={14} />
+                  </Link>
+                  <Link to={`/preview-site/${r.slug}/report`} target="_blank" title="Audit report (what the owner sees)"
+                    className="rounded-lg border border-forge-border p-2 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
+                    <FileText size={14} />
                   </Link>
                   <button onClick={() => copyLink(r.slug)} title="Copy preview link"
                     className="rounded-lg border border-forge-border p-2 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">

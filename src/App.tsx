@@ -26,6 +26,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import ClusterSpike from './pages/spike/ClusterSpike';
 import PreviewEngine from './pages/PreviewEngine';
 import PreviewSite from './pages/PreviewSite';
+import PreviewReport from './pages/PreviewReport';
 
 function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: boolean }) {
   const { session, profile, loading } = useAuth();
@@ -70,6 +71,7 @@ export default function App() {
               {/* PUBLIC — the link business owners open from the outreach email (no login). */}
               <Route path="/preview-site/:slug" element={<PreviewSite />} />
               <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />
+              <Route path="/preview-site/:slug/report" element={<PreviewReport />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </ToastProvider>

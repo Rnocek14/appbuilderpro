@@ -12,6 +12,10 @@ import {
   usablePhotos, usableReviews, SECTION_TYPES, RECIPES,
   type BusinessProfile, type SiteSpec,
 } from './spec';
+import {
+  fallbackStrategy, normalizeStrategy, fallbackAudit, normalizeAudit, normalizeCritique,
+  critiqueWarrantsRefine, type WebsiteStrategy, type AuditReport, type OwnerCritique,
+} from './strategy';
 
 function extractJson<T>(raw: string): T {
   const clean = raw.replace(/```json|```/g, '').trim();
@@ -76,13 +80,48 @@ Return:
  "footer": {"line": str}}`;
 }
 
-/** Model → validated SiteSpec. Falls back to the deterministic assembly on ANY failure, so the
- *  engine always produces a complete site (the no-key/dev path uses the same fallback). */
-export async function generateSiteSpec(profile: BusinessProfile): Promise<{ spec: SiteSpec; source: 'ai' | 'fallback' }> {
+// ---------------------------------------------------------------------------
+// The intelligence chain: strategy → spec → owner critique → refine → audit
+// ---------------------------------------------------------------------------
+
+const STRATEGY_SYSTEM = `You are a senior marketing strategist at an elite local-business agency.
+Given a business profile, produce the MARKETING BRIEF a website must execute: who actually buys,
+what would make them pick THIS business, what the hero must communicate in 3 seconds, which proof
+elements to lead with, and which hesitations the copy must pre-empt. Ground everything in the
+profile — never invent facts, awards, or claims. Be specific to this trade and town, never generic.
+Output ONLY JSON:
+{"positioning": str, "ideal_customer": str, "tone": str, "hero_strategy": str,
+ "differentiators": [str], "trust_builders": [str], "objections": [str],
+ "offer_strategy": str, "photo_strategy": str, "color_rationale": str, "local_keywords": [str]}`;
+
+/** The marketing brief the spec executes. Deterministic fallback on any failure. */
+export async function deriveStrategy(profile: BusinessProfile): Promise<WebsiteStrategy> {
+  try {
+    const r = await rawComplete([
+      { role: 'system', content: STRATEGY_SYSTEM },
+      { role: 'user', content: JSON.stringify(profile, null, 1) },
+    ], 1800);
+    return normalizeStrategy(extractJson(r.text), profile);
+  } catch {
+    return fallbackStrategy(profile);
+  }
+}
+
+/** Model → validated SiteSpec, EXECUTING the strategy (and optionally an owner critique — the
+ *  refine pass). Falls back to the deterministic assembly on ANY failure. */
+export async function generateSiteSpec(
+  profile: BusinessProfile, strategy?: WebsiteStrategy, critique?: OwnerCritique,
+): Promise<{ spec: SiteSpec; source: 'ai' | 'fallback' }> {
+  const strategyBlock = strategy
+    ? `\n\nMARKETING STRATEGY — the spec must EXECUTE this brief (hero follows hero_strategy, copy speaks to ideal_customer in the given tone, trust_builders surfaced, objections pre-empted):\n${JSON.stringify(strategy, null, 1)}`
+    : '';
+  const critiqueBlock = critique?.issues.length
+    ? `\n\nOWNER CRITIQUE OF THE PREVIOUS DRAFT — fix every issue in this revision:\n${critique.issues.map((i) => `- [${i.section}] ${i.problem} → ${i.fix}`).join('\n')}${critique.weakest_part ? `\nWeakest part overall: ${critique.weakest_part}` : ''}`
+    : '';
   try {
     const r = await rawComplete([
       { role: 'system', content: SPEC_SYSTEM },
-      { role: 'user', content: specPrompt(profile) },
+      { role: 'user', content: specPrompt(profile) + strategyBlock + critiqueBlock },
     ], 8000);
     const spec = normalizeSpec(extractJson(r.text), profile);
     spec.nav = navFor(spec.sections, pickRecipe(profile).cta);
@@ -92,9 +131,59 @@ export async function generateSiteSpec(profile: BusinessProfile): Promise<{ spec
   }
 }
 
+const CRITIQUE_SYSTEM = `You ARE the owner of this business — busy, skeptical, protective of your
+reputation, allergic to marketing fluff. An agency you never hired just sent you this website spec
+they built for you. React honestly:
+- Would you pay $299 to publish it?
+- Does it feel like YOUR business or a template with your name pasted in?
+- What's factually off, generically written, or missing that you'd notice immediately?
+Judge the COPY and CHOICES (headlines, claims, section order, tone) — not the technology.
+Output ONLY JSON:
+{"would_buy": bool, "feels_like_my_business": int(1-10), "weakest_part": str,
+ "issues": [{"section": str, "problem": str, "fix": str}]}`;
+
+/** Owner-simulation review of a spec. Fails soft to a clean critique (no refine pass). */
+export async function critiqueSpec(profile: BusinessProfile, spec: SiteSpec): Promise<OwnerCritique> {
+  try {
+    const r = await rawComplete([
+      { role: 'system', content: CRITIQUE_SYSTEM },
+      { role: 'user', content: `YOUR BUSINESS (ground truth):\n${JSON.stringify({ ...profile, photos: undefined }, null, 1)}\n\nTHE WEBSITE THEY BUILT (spec):\n${JSON.stringify({ tagline: spec.tagline, theme: { tone: spec.theme.tone }, sections: spec.sections.map((s) => ({ type: s.type, props: s.props })), seo: spec.seo }, null, 1)}` },
+    ], 1500);
+    return normalizeCritique(extractJson(r.text));
+  } catch {
+    return { would_buy: true, feels_like_my_business: 8, weakest_part: '', issues: [] };
+  }
+}
+
+const AUDIT_SYSTEM = `You write website audit reports for small-business owners — plain English,
+zero jargon, zero hype. Every problem gets an IMPACT in owner language (lost leads, lost trust,
+lost rankings — never "suboptimal viewport meta"). Ground problems in the observed issues given;
+add at most 2 universally-true gaps (e.g. no online quote path) if clearly applicable. Honest tone:
+respectful of the business, direct about the website. Output ONLY JSON:
+{"score": int(0-100, their CURRENT site), "headline": str,
+ "problems": [{"issue": str, "impact": str}], "gains": [str], "summary": str}`;
+
+/** The before/after value framing shown to the owner. Deterministic fallback on failure. */
+export async function generateAudit(profile: BusinessProfile): Promise<AuditReport> {
+  try {
+    const r = await rawComplete([
+      { role: 'system', content: AUDIT_SYSTEM },
+      { role: 'user', content: JSON.stringify({
+        business_name: profile.business_name, industry: profile.industry, location: profile.location,
+        website: profile.website ?? 'NONE FOUND', current_website_score: profile.current_website_score,
+        observed_issues: profile.issues ?? [], google_rating: profile.google_rating, review_count: profile.review_count,
+      }, null, 1) },
+    ], 1500);
+    return normalizeAudit(extractJson(r.text), profile);
+  } catch {
+    return fallbackAudit(profile);
+  }
+}
+
 /** The outreach email body for this preview — stored on the row so the future email automation
- *  just reads it (per the pipeline contract: preview URL + screenshot + business name + pitch). */
-export async function generatePitch(profile: BusinessProfile, previewUrl: string): Promise<string> {
+ *  just reads it (per the pipeline contract: preview URL + screenshot + business name + pitch).
+ *  Audit-aware: the strongest cold emails name ONE specific observed problem, then show the fix. */
+export async function generatePitch(profile: BusinessProfile, previewUrl: string, audit?: AuditReport): Promise<string> {
   const fallback = `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
 I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
@@ -107,7 +196,7 @@ If you like it, publishing it takes a day. No obligation either way.`;
   try {
     const r = await rawComplete([
       { role: 'system', content: 'You write short, human cold-outreach emails for a web agency that BUILDS the website before pitching it. 90-130 words, plain text, no subject line, no placeholders like [Name], no hype adjectives, one link only, friendly and specific to the business. Mention one concrete observed issue only if provided. End with a no-pressure close.' },
-      { role: 'user', content: `Business: ${profile.business_name} (${profile.industry}${profile.location ? `, ${profile.location}` : ''}). Observed issues: ${profile.issues?.slice(0, 3).join('; ') || 'n/a'}. Preview link to include verbatim: ${previewUrl}` },
+      { role: 'user', content: `Business: ${profile.business_name} (${profile.industry}${profile.location ? `, ${profile.location}` : ''}). Observed issues: ${(audit?.problems.slice(0, 3).map((p) => p.issue) ?? profile.issues?.slice(0, 3) ?? []).join('; ') || 'n/a'}.${audit ? ` Their current site scores ${audit.score}/100.` : ''} Preview link to include verbatim: ${previewUrl}` },
     ], 500);
     return r.text.trim() || fallback;
   } catch {
@@ -129,6 +218,9 @@ export interface PreviewSiteRow {
   status: string;
   spec_source: string;
   profile_id: string | null;
+  strategy: WebsiteStrategy | null;
+  critique: OwnerCritique | null;
+  audit: AuditReport | null;
   created_at: string;
 }
 
@@ -163,7 +255,21 @@ export async function ingestBusinessProfile(raw: unknown): Promise<
   }).select('id').single();
   if (pErr) return { ok: false, errors: [`Could not save profile: ${pErr.message}`] };
 
-  const { spec, source } = await generateSiteSpec(profile);
+  // THE INTELLIGENCE CHAIN — strategist → generator → simulated owner → (refine) → auditor.
+  // Audit runs concurrently with the spec work (it only reads the profile). Every stage fails
+  // soft, so a complete site always comes out.
+  const auditPromise = generateAudit(profile);
+  const strategy = await deriveStrategy(profile);
+  let { spec, source } = await generateSiteSpec(profile, strategy);
+  let critique: OwnerCritique | null = null;
+  if (source === 'ai') {
+    critique = await critiqueSpec(profile, spec);
+    if (critiqueWarrantsRefine(critique)) {
+      const refined = await generateSiteSpec(profile, strategy, critique);
+      if (refined.source === 'ai') spec = refined.spec; // keep the draft if the refine call failed
+    }
+  }
+  const audit = await auditPromise;
 
   // unique slug: joes-roofing, joes-roofing-2, …
   const base = previewSlug(profile.business_name);
@@ -174,7 +280,7 @@ export async function ingestBusinessProfile(raw: unknown): Promise<
     slug = `${base}-${i}`;
   }
 
-  const pitch = await generatePitch(profile, previewUrlFor(slug));
+  const pitch = await generatePitch(profile, previewUrlFor(slug), audit);
   const { data: row, error: sErr } = await supabase.from('preview_sites').insert({
     user_id: userId,
     profile_id: (profileRow as { id: string }).id,
@@ -183,6 +289,9 @@ export async function ingestBusinessProfile(raw: unknown): Promise<
     industry: profile.industry,
     spec,
     pitch,
+    strategy,
+    critique,
+    audit,
     spec_source: source,
     status: 'preview',
   }).select('*').single();
@@ -191,17 +300,59 @@ export async function ingestBusinessProfile(raw: unknown): Promise<
   return { ok: true, row: row as PreviewSiteRow, previewUrl: previewUrlFor(slug), specSource: source };
 }
 
-/** Regenerate the spec (and pitch) for an existing preview from its stored profile. */
+/** Regenerate everything (strategy → spec → critique/refine → audit → pitch) from the stored profile. */
 export async function regeneratePreviewSite(id: string): Promise<{ ok: boolean; error?: string }> {
   const { data: site } = await supabase.from('preview_sites').select('id, slug, profile_id').eq('id', id).single();
   if (!site) return { ok: false, error: 'Preview not found.' };
   const { data: prof } = await supabase.from('business_profiles').select('profile').eq('id', (site as { profile_id: string }).profile_id).single();
   const parsed = parseBusinessProfile((prof as { profile: unknown } | null)?.profile);
   if (!parsed.profile) return { ok: false, error: 'Stored profile is invalid.' };
-  const { spec, source } = await generateSiteSpec(parsed.profile);
-  const pitch = await generatePitch(parsed.profile, previewUrlFor((site as { slug: string }).slug));
-  const { error } = await supabase.from('preview_sites').update({ spec, pitch, spec_source: source }).eq('id', id);
+  const profile = parsed.profile;
+  const auditPromise = generateAudit(profile);
+  const strategy = await deriveStrategy(profile);
+  let { spec, source } = await generateSiteSpec(profile, strategy);
+  let critique: OwnerCritique | null = null;
+  if (source === 'ai') {
+    critique = await critiqueSpec(profile, spec);
+    if (critiqueWarrantsRefine(critique)) {
+      const refined = await generateSiteSpec(profile, strategy, critique);
+      if (refined.source === 'ai') spec = refined.spec;
+    }
+  }
+  const audit = await auditPromise;
+  const pitch = await generatePitch(profile, previewUrlFor((site as { slug: string }).slug), audit);
+  const { error } = await supabase.from('preview_sites').update({ spec, pitch, strategy, critique, audit, spec_source: source }).eq('id', id);
   return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Purchase intent — the "yes" button on public previews
+// ---------------------------------------------------------------------------
+
+/** An interested owner clicked "Claim this website" on the PUBLIC preview — no login, so this
+ *  insert runs as anon (RLS allows insert-only). The agency sees these in the admin list. */
+export async function submitPublishRequest(args: { previewSiteId: string; name: string; contact: string; message?: string }): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from('publish_requests').insert({
+    preview_site_id: args.previewSiteId,
+    name: args.name.trim().slice(0, 120),
+    contact: args.contact.trim().slice(0, 200),
+    message: (args.message ?? '').trim().slice(0, 2000),
+  });
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export interface PublishRequestRow {
+  id: string; preview_site_id: string; name: string; contact: string; message: string; created_at: string;
+}
+
+export async function listPublishRequests(): Promise<(PublishRequestRow & { business_name?: string; slug?: string })[]> {
+  const { data } = await supabase
+    .from('publish_requests')
+    .select('*, preview_sites(business_name, slug)')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  return ((data ?? []) as (PublishRequestRow & { preview_sites?: { business_name: string; slug: string } })[])
+    .map((r) => ({ ...r, business_name: r.preview_sites?.business_name, slug: r.preview_sites?.slug }));
 }
 
 /** Public fetch for the no-login preview route — matches by slug first, then id. */
