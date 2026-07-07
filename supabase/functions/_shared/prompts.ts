@@ -11,7 +11,8 @@ export const PLATFORM_CONSTRAINTS = `PLATFORM CONSTRAINTS — this app runs in F
 runtime. Respect these absolutely; never recommend, plan, or make changes that violate them:
 - Packages load on demand from a CDN (esm.sh) — you may import ANY browser-compatible npm package:
   e.g. @radix-ui/react-* primitives, class-variance-authority, tailwind-merge, framer-motion,
-  zustand, @tanstack/react-query, react-hook-form, zod, plus the always-present react, react-dom,
+  gsap (+ gsap/ScrollTrigger), lenis, zustand, @tanstack/react-query, react-hook-form, zod, plus
+  the always-present react, react-dom,
   react-router-dom, lucide-react, recharts, @supabase/supabase-js, date-fns, clsx. AVOID packages
   that need a Node/build step (server-only or build-time-only tooling, Node built-ins) — the runtime
   loads ES modules in the browser with no bundler/PostCSS.
@@ -104,9 +105,17 @@ SCROLL STORYTELLING (marketing/landing surfaces — the single biggest "expensiv
   that pins while proof points fade in at thresholds (p > 0.3, p > 0.6), layered art via nested
   <Parallax speed={±0.2..0.5}> for depth. Pair it with <CountUp> stats and a <Marquee> logo/quote
   strip — three kit moves that together read "designed by an expensive studio".
+- THE SIGNATURE STACK (what separates award-tier from template-tier — compose, don't pile up):
+  hero = Aurora (dark surface) OR full-bleed photo + TextReveal headline + ONE Magnetic CTA;
+  one ScrollScene OR StickyStack moment mid-page; ImageReveal on every gallery/editorial image;
+  TiltCard on the feature/pricing grid; CountUp stats; a Marquee proof strip. Reveal everything
+  else with <Reveal>. Restraint rule: each move appears ONCE per page in its strongest spot.
 - For spring physics or scroll-velocity effects use framer-motion from the CDN (motion.div +
-  useScroll/useTransform/whileInView) — it composes fine with the kit. For anything simpler, the
-  kit components above are ALWAYS the first choice (they handle reduced-motion and pinning for you).
+  useScroll/useTransform/whileInView) — it composes fine with the kit. For bespoke scroll
+  choreography beyond the kit (scrubbed timelines, horizontal sections), gsap + ScrollTrigger and
+  lenis (smooth scroll) load fine from the CDN — register plugins once in the page, and still
+  honor reduced-motion. For anything simpler, the kit components above are ALWAYS the first
+  choice (they handle reduced-motion and pinning for you).
 - RESTRAINT: one pinned scene per page, reveals everywhere else; transform/opacity ONLY (never
   scroll-jack or animate layout); content must exist in the DOM regardless of scroll (SEO/a11y);
   reduced-motion users get the content statically (the kit components handle this themselves).
@@ -730,6 +739,20 @@ The EXACT APIs:
       background drift; compose 2-3 layers at different speeds for depth.
     <CountUp value={12500} suffix="+" decimals={0} prefix="$" /> — a stat that counts up on scroll-in.
     <Marquee speed={40} reverse?>…logos/quotes…</Marquee> — seamless infinite strip, hover-pauses.
+    <TextReveal as="h1" text="The headline." className="…display classes…" rotate? delay? /> — display
+      type revealing word-by-word from behind a clip line (rotate = 3D ribbon flip). THE standard
+      treatment for hero + section headlines on marketing surfaces; body text never uses it.
+    <TiltCard max={10} glare?>…card…</TiltCard> — pointer-tracked 3D tilt + moving glare for
+      feature/product/pricing cards.
+    <StickyStack items={[<CardA/>, <CardB/>, <CardC/>]} top? gap? /> — cards pin and stack over each
+      other on scroll (each item needs its own SOLID bg + border or the stack reads as a mess).
+    <Aurora hues={[222, 285, 165]} intensity={0.3} /> — drifting blurred color field (the shader
+      look, zero WebGL risk); place absolute inside a relative overflow-hidden section, best on
+      dark surfaces under a TextReveal.
+    <Spotlight>…section content…</Spotlight> — cursor-following glow (rides the primary token).
+    <Magnetic><Button…/></Magnetic> — the CTA leans toward the cursor. ONE per view, the primary CTA.
+    <ImageReveal src alt direction? delay? className="aspect-…" /> — clip-path wipe + settle-scale
+      on scroll-in; use instead of bare <img> in galleries/editorial rows.
 - Toasts: const { toast } = useToast() (from ../context/ToastContext); toast('Saved', 'success').
 - /src/lib/scroll.ts — EXACT signatures. These are NOT react-intersection-observer and NOT
   framer-motion; their call shapes WILL NOT type-check here:

@@ -22,6 +22,7 @@ const ALLOWED_TS = new Set([
   '@supabase/supabase-js', 'date-fns', 'clsx',
   'class-variance-authority', 'tailwind-merge', 'framer-motion', 'zustand',
   '@tanstack/react-query', 'react-hook-form', 'zod',
+  'gsap', 'lenis', // bespoke scroll choreography (ScrollTrigger timelines, smooth scroll)
 ]);
 const ALLOWED_JS = new Set(['react']);
 
