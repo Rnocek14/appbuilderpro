@@ -47,6 +47,19 @@ export default {
           '0%, 100%': { opacity: '0.55' },
           '50%': { opacity: '1' }
         },
+        // The working indicator: a coal breathing — oxygen hits (bright, bloomed glow), then it
+        // cools back toward ash. Slow and asymmetric on purpose; a smolder, not a blink.
+        smolder: {
+          '0%, 100%': { opacity: '0.45', filter: 'brightness(0.7) saturate(0.7) drop-shadow(0 0 1px rgba(255,138,61,0.15))' },
+          '42%': { opacity: '1', filter: 'brightness(1.35) saturate(1.3) drop-shadow(0 0 7px rgba(255,138,61,0.6))' },
+          '58%': { opacity: '0.95', filter: 'brightness(1.15) saturate(1.15) drop-shadow(0 0 4px rgba(255,138,61,0.4))' }
+        },
+        // Ash sparks lifting off the coal — rise, drift, cool to nothing.
+        ashRise: {
+          '0%': { opacity: '0', transform: 'translateY(1px) translateX(0) scale(0.6)' },
+          '18%': { opacity: '0.9' },
+          '100%': { opacity: '0', transform: 'translateY(-13px) translateX(var(--ash-drift, 2px)) scale(0.25)' }
+        },
         fadeInUp: {
           '0%': { opacity: '0', transform: 'translateY(8px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' }
@@ -61,6 +74,8 @@ export default {
       },
       animation: {
         emberPulse: 'emberPulse 1.8s ease-in-out infinite',
+        smolder: 'smolder 2.6s ease-in-out infinite',
+        ashRise: 'ashRise 2.2s linear infinite',
         fadeInUp: 'fadeInUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both',
         scaleIn: 'scaleIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both',
         shimmer: 'shimmer 1.6s infinite'

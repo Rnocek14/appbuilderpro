@@ -1,5 +1,5 @@
-import { type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
-import { Loader2 } from 'lucide-react';
+import { type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react';
+import { Flame, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 // ---------------- Button ----------------
@@ -114,6 +114,21 @@ export function Spinner({ label }: { label?: string }) {
       <Loader2 size={16} className="animate-spin text-forge-ember" />
       {label ?? 'Loading…'}
     </div>
+  );
+}
+
+// ---------------- Ember ----------------
+// The brand working-indicator: a smoldering coal. The flame breathes — brightens as oxygen hits,
+// cools back toward ash — while spark motes lift off and fade. Replaces generic spinners anywhere
+// the forge is actually working. Static (dim flame, no sparks) under prefers-reduced-motion.
+export function Ember({ size = 15, className }: { size?: number; className?: string }) {
+  return (
+    <span className={cn('relative inline-flex shrink-0', className)} role="status" aria-label="Working">
+      <Flame size={size} className="animate-smolder text-forge-ember motion-reduce:animate-none motion-reduce:opacity-60" />
+      <span aria-hidden className="absolute -top-1 left-[55%] h-[3px] w-[3px] rounded-full bg-forge-heat animate-ashRise motion-reduce:hidden" style={{ '--ash-drift': '3px' } as CSSProperties} />
+      <span aria-hidden className="absolute -top-0.5 left-[20%] h-[2px] w-[2px] rounded-full bg-forge-ember/90 animate-ashRise [animation-delay:0.8s] motion-reduce:hidden" style={{ '--ash-drift': '-2px' } as CSSProperties} />
+      <span aria-hidden className="absolute top-0 left-[80%] h-[2px] w-[2px] rounded-full bg-forge-ember/70 animate-ashRise [animation-delay:1.5s] motion-reduce:hidden" style={{ '--ash-drift': '4px' } as CSSProperties} />
+    </span>
   );
 }
 
