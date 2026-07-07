@@ -31,6 +31,9 @@ export interface ProviderInfo {
   models: string[];
   /** Default model for this provider. */
   defaultModel: string;
+  /** Cheap/fast model for small structural calls (routing, leads, classification). Mirrors the
+   * edge functions' `fast: true` convention (agent-turn / modelForPlan's cheap tier). */
+  fastModel?: string;
   /**
    * REST base for OpenAI-compatible providers (everything except Anthropic, which uses its
    * own Messages API). xAI (Grok) and Gemini both expose OpenAI-compatible /chat/completions
@@ -53,6 +56,7 @@ export const PROVIDERS: ProviderInfo[] = [
     needsKey: true,
     models: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
     defaultModel: 'claude-sonnet-4-6',
+    fastModel: 'claude-haiku-4-5-20251001',
   },
   {
     id: 'openai',
@@ -63,6 +67,7 @@ export const PROVIDERS: ProviderInfo[] = [
     needsKey: true,
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini'],
     defaultModel: 'gpt-4o',
+    fastModel: 'gpt-4o-mini',
     openAIBase: 'https://api.openai.com/v1',
   },
   {
@@ -74,6 +79,7 @@ export const PROVIDERS: ProviderInfo[] = [
     needsKey: true,
     models: ['grok-4', 'grok-3', 'grok-3-mini', 'grok-2-latest', 'grok-2-vision-latest'],
     defaultModel: 'grok-3',
+    fastModel: 'grok-3-mini',
     openAIBase: 'https://api.x.ai/v1',
   },
   {
@@ -85,6 +91,7 @@ export const PROVIDERS: ProviderInfo[] = [
     needsKey: true,
     models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
     defaultModel: 'gemini-2.0-flash',
+    fastModel: 'gemini-2.0-flash',
     openAIBase: 'https://generativelanguage.googleapis.com/v1beta/openai',
   },
   {
@@ -96,6 +103,7 @@ export const PROVIDERS: ProviderInfo[] = [
     needsKey: true,
     models: ['anthropic/claude-sonnet-4.5', 'openai/gpt-4o', 'google/gemini-2.0-flash-001', 'x-ai/grok-3'],
     defaultModel: 'anthropic/claude-sonnet-4.5',
+    fastModel: 'anthropic/claude-3.5-haiku',
     openAIBase: 'https://openrouter.ai/api/v1',
   },
   {
@@ -191,6 +199,8 @@ export interface ResolvedAI {
   direct: boolean;
   provider: Provider;
   model: string;
+  /** Cheap/fast model for `fast: true` calls (falls back to the selected model). */
+  fastModel: string;
   key: string;
   /** OpenAI-compatible REST base (undefined for Anthropic). */
   openAIBase?: string;
@@ -206,10 +216,12 @@ export function resolveAI(): ResolvedAI {
   const provider = getProvider();
   const info = providerInfo(provider);
   const key = getKey(provider);
+  const model = getModel(provider);
   return {
     direct: DIRECT,
     provider,
-    model: getModel(provider),
+    model,
+    fastModel: info.fastModel ?? model,
     key,
     openAIBase: info.openAIBase,
     ready: info.needsKey ? !!key : true,

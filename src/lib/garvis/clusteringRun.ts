@@ -23,7 +23,9 @@ import {
   SCENE_SYSTEM,
   buildSceneUser,
   parseScene,
-  extractSceneField,
+  extractScenePartial,
+  repairTruncatedJson,
+  type ScenePhase,
   sceneArtifact,
   sceneOf,
   SCENE_ARTIFACT_ID,
@@ -250,30 +252,35 @@ export interface SceneResult { graph: ClusterGraph; scene: Scene | null; leads: 
  * for the detail panel), summary = prime, trajectory = regap (the forward-looking line).
  */
 export async function composeScene(
-  graph: ClusterGraph, focusId: string, trail: string[] = [], onPartial?: (text: string) => void,
+  graph: ClusterGraph, focusId: string, trail: string[] = [], onPartial?: (text: string, phase: ScenePhase) => void,
 ): Promise<SceneResult> {
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return { graph, scene: null, leads: [], costUsd: 0 };
   let usd = 0;
+  let stop: string | undefined;
   let raw = '';
   try {
     raw = await exploreStream(
       [{ role: 'system', content: SCENE_SYSTEM }, { role: 'user', content: buildSceneUser(focus, trail) }],
-      1400,
+      2200,
       (t) => {
         if (!onPartial) return;
-        const gap = extractSceneField(t, 'gap');
-        const prime = extractSceneField(t, 'prime');
-        const best = gap || prime;
-        if (best) onPartial(best);
+        const p = extractScenePartial(t);
+        if (p.text || p.phase) onPartial(p.text, p.phase);
       },
-      (u) => { usd = u.costUsd; },
+      (u) => { usd = u.costUsd; stop = u.stopReason; },
     );
   } catch {
     return { graph, scene: null, leads: [], costUsd: usd };
   }
   let scene: Scene | null = null;
   try { scene = parseScene(extractJson(raw)); } catch { scene = null; }
+  if (!scene) {
+    // salvage: a truncated/malformed stream usually still holds a complete prime/gap/options/beats
+    // prefix — repair the tail and re-parse before paying for a whole second compose.
+    try { scene = parseScene(JSON.parse(repairTruncatedJson(raw))); } catch { scene = null; }
+  }
+  if (stop === 'max_tokens') console.warn(`[garvis] scene for "${focus.title}" hit max_tokens; salvage ${scene ? 'succeeded' : 'failed'}`);
   if (!scene) return { graph, scene: null, leads: [], costUsd: usd };
   const understanding: Artifact = {
     id: 'understanding', kind: 'research', title: `Understanding: ${focus.title}`,
@@ -314,7 +321,7 @@ export function recordSceneGuess(graph: ClusterGraph, focusId: string, guessed: 
 export async function fetchLeads(graph: ClusterGraph, focusId: string, trail: string[]): Promise<LeadsResult> {
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return { graph, leads: [], costUsd: 0 };
-  const r = await exploreComplete([{ role: 'system', content: LEADS_SYSTEM }, { role: 'user', content: buildLeadUser(focus, trail) }], 600);
+  const r = await exploreComplete([{ role: 'system', content: LEADS_SYSTEM }, { role: 'user', content: buildLeadUser(focus, trail) }], 600, { fast: true });
   const costUsd = r.costUsd;
   let parsed: { trajectory?: string; leads?: { label?: string; kind?: string }[] } = {};
   try { parsed = extractJson(r.text); } catch { return { graph, leads: [], costUsd }; }
@@ -340,6 +347,7 @@ export async function exploreLeads(graph: ClusterGraph, focusId: string, trail: 
       { role: 'user', content: buildLeadUser(focus, trail) },
     ],
     700,
+    { fast: true },
   );
   const costUsd = r.costUsd;
   let parsed: { takeaway?: string; overview?: string; why?: string; trajectory?: string; leads?: { label?: string; kind?: string }[] } = {};
@@ -437,6 +445,7 @@ export async function interpretThought(graph: ClusterGraph, focusId: string, utt
       { role: 'user', content: buildThinkUser(focus, children.map((c) => c.title), utterance) },
     ],
     450,
+    { fast: true },
   );
   const costUsd = r.costUsd;
   let parsed: { target?: string; title?: string; kind?: string; state?: string; suggestion?: { label?: string; action?: string } } = {};
@@ -487,7 +496,7 @@ export async function findBridge(graph: ClusterGraph, focusId: string): Promise<
   const cands = universeConnections(graph, focusId, { limit: 18, min: 0.12 });
   const pool = (cands.length ? cands.map((c) => graph.clusters.find((x) => x.id === c.id)!).filter(Boolean) : graph.clusters.filter((c) => c.id !== focusId)).slice(0, 20);
   if (!pool.length) return null;
-  const r = await exploreComplete([{ role: 'system', content: BRIDGE_SYSTEM }, { role: 'user', content: buildBridgeUser(focus, pool.map((c) => c.title)) }], 220);
+  const r = await exploreComplete([{ role: 'system', content: BRIDGE_SYSTEM }, { role: 'user', content: buildBridgeUser(focus, pool.map((c) => c.title)) }], 220, { fast: true });
   const costUsd = r.costUsd;
   let parsed: { title?: string; why?: string } = {};
   try { parsed = extractJson(r.text); } catch { return null; }
@@ -560,7 +569,7 @@ export async function investigate(graph: ClusterGraph, focusId: string, onProgre
 export async function updateMind(graph: ClusterGraph, focusId: string, path: string[], recent: string[]): Promise<{ mind: GarvisMind; costUsd: number } | null> {
   const focus = graph.clusters.find((c) => c.id === focusId);
   if (!focus) return null;
-  const r = await exploreComplete([{ role: 'system', content: MIND_SYSTEM }, { role: 'user', content: buildMindUser(path, recent, focus.title) }], 400);
+  const r = await exploreComplete([{ role: 'system', content: MIND_SYSTEM }, { role: 'user', content: buildMindUser(path, recent, focus.title) }], 400, { fast: true });
   const costUsd = r.costUsd;
   let p: { intent?: string; state?: string; nextDirections?: string[]; anomaly?: string; confidence?: number } = {};
   try { p = extractJson(r.text); } catch { return null; }
@@ -586,7 +595,7 @@ const nid = () => `n_${Math.random().toString(36).slice(2, 9)}`;
 async function detectTheme(graph: ClusterGraph): Promise<Notice | null> {
   const titles = graph.clusters.map((c) => c.title);
   if (titles.length < 5) return null;
-  const r = await exploreComplete([{ role: 'system', content: THEME_SYSTEM }, { role: 'user', content: buildThemeUser(titles) }], 300);
+  const r = await exploreComplete([{ role: 'system', content: THEME_SYSTEM }, { role: 'user', content: buildThemeUser(titles) }], 300, { fast: true });
   const costUsd = r.costUsd;
   let p: { theme?: string; members?: string[] } = {};
   try { p = extractJson(r.text); } catch { return null; }

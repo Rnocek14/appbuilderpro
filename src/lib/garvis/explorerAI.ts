@@ -16,7 +16,10 @@ import { resolveAI } from '../aiConfig';
 import { estimateCostUsd } from './directBrain';
 
 export interface ExploreResult { text: string; inputTokens: number; outputTokens: number; costUsd: number }
-export interface ExploreUsage { inputTokens: number; outputTokens: number; costUsd: number }
+export interface ExploreUsage { inputTokens: number; outputTokens: number; costUsd: number; stopReason?: string }
+/** `fast: true` routes to the cheap/fast model tier (haiku-class) — for small structural calls
+ * (think/leads/mind/bridge/theme) where latency matters more than prose quality. */
+export interface ExploreOpts { fast?: boolean }
 
 type Msg = { role: string; content: string };
 
@@ -64,12 +67,12 @@ async function edgeError(res: Response): Promise<Error> {
   return new Error(body?.error ?? `Explorer call failed (${res.status})`);
 }
 
-export async function exploreComplete(messages: Msg[], maxTokens = 800): Promise<ExploreResult> {
+export async function exploreComplete(messages: Msg[], maxTokens = 800, opts: ExploreOpts = {}): Promise<ExploreResult> {
   if (edgeCandidate()) {
     const auth = await authHeader();
     if (auth) {
       try {
-        const res = await callEdge({ messages, maxTokens }, auth);
+        const res = await callEdge({ messages, maxTokens, fast: opts.fast }, auth);
         if (!res.ok) throw await edgeError(res); // 402 out-of-credits etc. surface to the UI as-is
         const data = await res.json() as ExploreResult;
         return {
@@ -87,18 +90,18 @@ export async function exploreComplete(messages: Msg[], maxTokens = 800): Promise
   if (!directReady()) {
     throw new Error('Sign in to explore (server AI), or add your own API key in Settings for local mode.');
   }
-  const r = await rawComplete(messages, maxTokens);
+  const r = await rawComplete(messages, maxTokens, { fast: opts.fast });
   return { ...r, costUsd: estimateCostUsd(r.inputTokens, r.outputTokens) };
 }
 
 export async function exploreStream(
-  messages: Msg[], maxTokens: number, onDelta: (fullText: string) => void, onUsage?: (u: ExploreUsage) => void,
+  messages: Msg[], maxTokens: number, onDelta: (fullText: string) => void, onUsage?: (u: ExploreUsage) => void, opts: ExploreOpts = {},
 ): Promise<string> {
   if (edgeCandidate()) {
     const auth = await authHeader();
     if (auth) {
       try {
-        const res = await callEdge({ messages, maxTokens, stream: true }, auth);
+        const res = await callEdge({ messages, maxTokens, stream: true, fast: opts.fast }, auth);
         if (!res.ok) throw await edgeError(res);
         if (!res.body) throw new Error('Explorer stream returned no body.');
         let full = '';
@@ -126,7 +129,9 @@ export async function exploreStream(
     messages, maxTokens,
     (d) => { acc += d; onDelta(acc); },
     undefined,
-    (u) => onUsage?.({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, costUsd: estimateCostUsd(u.inputTokens, u.outputTokens) }),
+    (u) => onUsage?.({ inputTokens: u.inputTokens, outputTokens: u.outputTokens, costUsd: estimateCostUsd(u.inputTokens, u.outputTokens), stopReason: u.stopReason }),
+    undefined,
+    { fast: opts.fast },
   );
 }
 

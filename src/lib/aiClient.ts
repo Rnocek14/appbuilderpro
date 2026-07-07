@@ -29,7 +29,7 @@ import { recordUsage } from './usage';
 import { agenticEdit, agenticVerifyAndFix, generationCompileGate } from './agent/edit';
 import { agentAvailable } from './agent/loop';
 
-interface Usage { inputTokens: number; outputTokens: number }
+interface Usage { inputTokens: number; outputTokens: number; stopReason?: string }
 interface AIMessageRow { role: string; content: string; thread_id?: string | null }
 
 export type { Provider };
@@ -604,6 +604,7 @@ export async function rawComplete(messages: { role: string; content: string }[],
     // (operator key held server-side, metered by credits). Users never have to paste a key.
     return cloudComplete(messages, maxTokens, opts.fast ?? false);
   }
+  const model = opts.fast ? ai.fastModel : ai.model;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       if (ai.provider === 'anthropic') {
@@ -617,13 +618,13 @@ export async function rawComplete(messages: { role: string; content: string }[],
             'anthropic-version': '2023-06-01',
             'anthropic-dangerous-direct-browser-access': 'true',
           },
-          body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest }),
+          body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest }),
         }, label);
         if (!res.ok) throw await httpError(res, label);
         const data = await res.json();
         const inputTokens = data.usage?.input_tokens ?? 0;
         const outputTokens = data.usage?.output_tokens ?? 0;
-        recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
+        recordUsage({ provider: ai.provider, model, inputTokens, outputTokens });
         return {
           text: data.content.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n'),
           inputTokens,
@@ -634,13 +635,13 @@ export async function rawComplete(messages: { role: string; content: string }[],
       const res = await providerFetch(`${ai.openAIBase}/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
-        body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages }),
+        body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
       }, label);
       if (!res.ok) throw await httpError(res, label);
       const data = await res.json();
       const inputTokens = data.usage?.prompt_tokens ?? 0;
       const outputTokens = data.usage?.completion_tokens ?? 0;
-      recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
+      recordUsage({ provider: ai.provider, model, inputTokens, outputTokens });
       return {
         text: data.choices?.[0]?.message?.content ?? '',
         inputTokens,
@@ -1505,12 +1506,15 @@ function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type
 }
 
 /** Stream a completion, calling onDelta with each text chunk as it arrives. An optional
- * `image` (data URL) is attached to the last user message so vision models can see it. */
+ * `image` (data URL) is attached to the last user message so vision models can see it.
+ * `opts.fast` routes to the provider's cheap/fast model (small structural calls). onUsage's
+ * `stopReason` is 'max_tokens' when the reply was truncated by the token cap. */
 export async function streamComplete(
   messages: { role: string; content: string }[], maxTokens: number, onDelta: (t: string) => void,
-  image?: string, onUsage?: (u: Usage) => void, signal?: AbortSignal,
+  image?: string, onUsage?: (u: Usage) => void, signal?: AbortSignal, opts: { fast?: boolean } = {},
 ): Promise<string> {
   const ai = resolveAI();
+  const model = opts.fast ? ai.fastModel : ai.model;
   const label = providerInfo(ai.provider).label;
   if (!ai.ready) {
     throw new Error(`No API key set for ${label}. Add one in the model picker (or switch provider).`);
@@ -1552,19 +1556,20 @@ export async function streamComplete(
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest, stream: true }),
+      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest, stream: true }),
     }, label);
     if (!res.body) throw new Error(`${label} returned an empty response.`);
     await readSSE(res.body, (data) => {
       if (data === '[DONE]') return;
-      let evt: { type?: string; delta?: { type?: string; text?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number } }; usage?: { output_tokens?: number } };
+      let evt: { type?: string; delta?: { type?: string; text?: string; stop_reason?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number } }; usage?: { output_tokens?: number } };
       try { evt = JSON.parse(data); } catch { return; }
       if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta.text) {
         full += evt.delta.text; onDelta(evt.delta.text);
       } else if (evt.type === 'message_start' && evt.message?.usage) {
         usage.inputTokens = evt.message.usage.input_tokens ?? 0; sawUsage = true;
-      } else if (evt.type === 'message_delta' && evt.usage?.output_tokens != null) {
-        usage.outputTokens = evt.usage.output_tokens; sawUsage = true; // cumulative
+      } else if (evt.type === 'message_delta') {
+        if (evt.usage?.output_tokens != null) { usage.outputTokens = evt.usage.output_tokens; sawUsage = true; } // cumulative
+        if (evt.delta?.stop_reason) usage.stopReason = evt.delta.stop_reason;
       }
     });
     finishUsage();
@@ -1578,15 +1583,17 @@ export async function streamComplete(
     method: 'POST',
     signal,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
-    body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
   }, label);
   if (!res.body) throw new Error(`${label} returned an empty response.`);
   await readSSE(res.body, (data) => {
     if (data === '[DONE]') return;
-    let evt: { choices?: { delta?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    let evt: { choices?: { delta?: { content?: string }; finish_reason?: string | null }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
     try { evt = JSON.parse(data); } catch { return; }
     const delta = evt.choices?.[0]?.delta?.content;
     if (delta) { full += delta; onDelta(delta); }
+    const fr = evt.choices?.[0]?.finish_reason;
+    if (fr) usage.stopReason = fr === 'length' ? 'max_tokens' : fr; // normalized to Anthropic's name
     if (evt.usage) {
       usage.inputTokens = evt.usage.prompt_tokens ?? 0;
       usage.outputTokens = evt.usage.completion_tokens ?? 0;
