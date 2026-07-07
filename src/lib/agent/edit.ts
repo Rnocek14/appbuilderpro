@@ -155,7 +155,7 @@ export async function agenticVerifyAndFix(
 
   const ai = resolveAI();
   let result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true });
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, cacheCreation: result.usage.cacheCreation, cacheRead: result.usage.cacheRead });
 
   // RELENTLESS: a fresh build that ships with known issues is the worst possible look. Keep
   // granting fresh step budget while the agent is still MAKING PROGRESS (touching new files —
@@ -168,7 +168,7 @@ export async function agenticVerifyAndFix(
       userContent: 'Your previous pass ended with verification still FAILING. Continue the repair: call run_typecheck, fix EVERY remaining error (truncated/malformed files must be rewritten COMPLETELY), and do not stop until it reports clean.',
       ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true,
     });
-    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens });
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens, cacheCreation: cont.usage.cacheCreation, cacheRead: cont.usage.cacheRead });
     result = cont;
     const touched = result.changed.length + result.deleted.length;
     if (touched === prevTouched) break; // stalled — no new files touched; more budget won't help
@@ -274,7 +274,7 @@ export async function agenticEdit(
     onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
   });
   turnIn += result.usage.inputTokens; turnOut += result.usage.outputTokens;
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, cacheCreation: result.usage.cacheCreation, cacheRead: result.usage.cacheRead });
 
   // RELENTLESS REPAIR: never end a turn mid-surgery. If verification was still failing when the
   // step budget ran out, continue with fresh budget while the agent is still MAKING PROGRESS
@@ -292,7 +292,7 @@ export async function agenticEdit(
       onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
     });
     turnIn += cont.usage.inputTokens; turnOut += cont.usage.outputTokens;
-    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens });
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens, cacheCreation: cont.usage.cacheCreation, cacheRead: cont.usage.cacheRead });
     result = { ...cont, text: cont.text || result.text };
     const touched = result.changed.length + result.deleted.length;
     if (touched === prevTouched) break; // stalled — no new files touched this round

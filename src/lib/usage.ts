@@ -49,10 +49,16 @@ function priceFor(provider: Provider, model: string): { in: number; out: number 
   return DEFAULT_PRICE;
 }
 
-/** Estimated USD cost of a single call. */
-export function estimateCost(provider: Provider, model: string, inputTokens: number, outputTokens: number): number {
+/** Estimated USD cost of a single call. Cache-aware: with prompt caching, the API bills cached
+ *  prefix reads at ~0.1× and cache writes at 1.25× the input rate — and `input_tokens` excludes
+ *  both, so pricing input alone would misreport once caching is on. */
+export function estimateCost(
+  provider: Provider, model: string, inputTokens: number, outputTokens: number,
+  cache?: { creation?: number; read?: number },
+): number {
   const p = priceFor(provider, model);
-  return (inputTokens / 1_000_000) * p.in + (outputTokens / 1_000_000) * p.out;
+  const cachedIn = (cache?.creation ?? 0) * 1.25 + (cache?.read ?? 0) * 0.1;
+  return ((inputTokens + cachedIn) / 1_000_000) * p.in + (outputTokens / 1_000_000) * p.out;
 }
 
 export interface UsageRecord {
@@ -61,6 +67,8 @@ export interface UsageRecord {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cacheCreation?: number;
+  cacheRead?: number;
   cost: number;
   /** The ai_messages row this call produced, when it maps to a chat message. */
   messageId?: string;
@@ -90,13 +98,14 @@ function writeLedger(records: UsageRecord[]): void {
 
 /** Record a call and return its estimated cost. Skips no-op (0-token) calls. */
 export function recordUsage(args: {
-  provider: Provider; model: string; inputTokens: number; outputTokens: number; messageId?: string;
+  provider: Provider; model: string; inputTokens: number; outputTokens: number;
+  cacheCreation?: number; cacheRead?: number; messageId?: string;
 }): number {
-  const { provider, model, inputTokens, outputTokens, messageId } = args;
-  if (!inputTokens && !outputTokens) return 0;
-  const cost = estimateCost(provider, model, inputTokens, outputTokens);
+  const { provider, model, inputTokens, outputTokens, cacheCreation, cacheRead, messageId } = args;
+  if (!inputTokens && !outputTokens && !cacheCreation && !cacheRead) return 0;
+  const cost = estimateCost(provider, model, inputTokens, outputTokens, { creation: cacheCreation, read: cacheRead });
   const records = readLedger();
-  records.push({ ts: Date.now(), provider, model, inputTokens, outputTokens, cost, messageId });
+  records.push({ ts: Date.now(), provider, model, inputTokens, outputTokens, cacheCreation, cacheRead, cost, messageId });
   writeLedger(records);
   return cost;
 }

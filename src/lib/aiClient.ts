@@ -31,7 +31,7 @@ import { recordUsage, tagUsageSince, estimateCost } from './usage';
 import { agenticEdit, agenticVerifyAndFix, generationCompileGate } from './agent/edit';
 import { agentAvailable } from './agent/loop';
 
-interface Usage { inputTokens: number; outputTokens: number; stopReason?: string }
+interface Usage { inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
 interface AIMessageRow { role: string; content: string; thread_id?: string | null }
 
 export type { Provider };
@@ -501,7 +501,7 @@ async function readFnError(error: unknown): Promise<string> {
 // Direct mode (local dev)
 // ----------------------------------------------------------------
 
-interface RawResult { text: string; inputTokens: number; outputTokens: number; stopReason?: string }
+interface RawResult { text: string; inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
 
 export interface DesignDirection {
   archetype: string; name: string; risk: string; accentHue: number;
@@ -601,7 +601,7 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   if (error) throw new Error(`FableForge Cloud AI: ${error.message}`);
   const d = data as {
     content?: { type: string; text?: string }[];
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
     stop_reason?: string;
     error?: string;
   } | null;
@@ -610,8 +610,10 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   if (!text) throw new Error('FableForge Cloud AI returned no text.');
   const inputTokens = d?.usage?.input_tokens ?? 0;
   const outputTokens = d?.usage?.output_tokens ?? 0;
-  recordUsage({ provider: 'anthropic', model: 'cloud', inputTokens, outputTokens });
-  return { text, inputTokens, outputTokens, stopReason: d?.stop_reason };
+  const cacheCreation = d?.usage?.cache_creation_input_tokens ?? 0;
+  const cacheRead = d?.usage?.cache_read_input_tokens ?? 0;
+  recordUsage({ provider: 'anthropic', model: 'cloud', inputTokens, outputTokens, cacheCreation, cacheRead });
+  return { text, inputTokens, outputTokens, cacheCreation, cacheRead, stopReason: d?.stop_reason };
 }
 
 export async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192, opts: { fast?: boolean } = {}): Promise<RawResult> {
@@ -641,17 +643,29 @@ export async function rawComplete(messages: { role: string; content: string }[],
             'anthropic-dangerous-direct-browser-access': 'true',
             ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
           },
-          body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest, ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}) }),
+          // System prompt as a CACHED block: the builder's system prompts are huge (~10-15k tokens)
+          // and identical across every call in a build (shell, each page, every repair step) — a
+          // cache read bills at ~0.1× input. This was the root of $12 builds on premium models.
+          body: JSON.stringify({
+            model, max_tokens: maxTokens,
+            ...(system ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] } : {}),
+            messages: rest,
+            ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}),
+          }),
         }, label);
         if (!res.ok) throw await httpError(res, label);
         const data = await res.json();
         const inputTokens = data.usage?.input_tokens ?? 0;
         const outputTokens = data.usage?.output_tokens ?? 0;
-        recordUsage({ provider: ai.provider, model, inputTokens, outputTokens });
+        const cacheCreation = data.usage?.cache_creation_input_tokens ?? 0;
+        const cacheRead = data.usage?.cache_read_input_tokens ?? 0;
+        recordUsage({ provider: ai.provider, model, inputTokens, outputTokens, cacheCreation, cacheRead });
         return {
           text: data.content.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n'),
           inputTokens,
           outputTokens,
+          cacheCreation,
+          cacheRead,
           stopReason: typeof data.stop_reason === 'string' ? data.stop_reason : undefined,
         };
       }
@@ -924,7 +938,7 @@ async function qaFixPass(projectId: string, issues: QAIssue[]): Promise<void> {
     { role: 'system', content: EDIT_SYSTEM_STREAM },
     { role: 'user', content: editPrompt(contextPayload(appFiles, fixMsg, ''), fixMsg) },
   ], 16000, (d) => parser.push(d), undefined, (u) => { fixUsage = u; });
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: fixUsage.inputTokens, outputTokens: fixUsage.outputTokens });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: fixUsage.inputTokens, outputTokens: fixUsage.outputTokens, cacheCreation: fixUsage.cacheCreation, cacheRead: fixUsage.cacheRead });
   const result = parser.end();
   if (result.action !== 'edit') return;
   let fixChanges = result.changes;
@@ -1498,17 +1512,26 @@ export async function streamComplete(
         'anthropic-dangerous-direct-browser-access': 'true',
         ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
       },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest, stream: true, ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}) }),
+      // Cached system block — see rawComplete: identical giant system prompts across a build's
+      // calls read from cache at ~0.1× input price.
+      body: JSON.stringify({
+        model, max_tokens: maxTokens,
+        ...(system ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] } : {}),
+        messages: rest, stream: true,
+        ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}),
+      }),
     }, label);
     if (!res.body) throw new Error(`${label} returned an empty response.`);
     await readSSE(res.body, (data) => {
       if (data === '[DONE]') return;
-      let evt: { type?: string; delta?: { type?: string; text?: string; stop_reason?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number } }; usage?: { output_tokens?: number } };
+      let evt: { type?: string; delta?: { type?: string; text?: string; stop_reason?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } }; usage?: { output_tokens?: number } };
       try { evt = JSON.parse(data); } catch { return; }
       if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta.text) {
         full += evt.delta.text; onDelta(evt.delta.text);
       } else if (evt.type === 'message_start' && evt.message?.usage) {
         usage.inputTokens = evt.message.usage.input_tokens ?? 0; sawUsage = true;
+        usage.cacheCreation = evt.message.usage.cache_creation_input_tokens ?? 0;
+        usage.cacheRead = evt.message.usage.cache_read_input_tokens ?? 0;
       } else if (evt.type === 'message_delta') {
         if (evt.usage?.output_tokens != null) { usage.outputTokens = evt.usage.output_tokens; sawUsage = true; } // cumulative
         if (evt.delta?.stop_reason) usage.stopReason = evt.delta.stop_reason;
@@ -1772,7 +1795,7 @@ async function directEditStream(
   const result = parser.end();
   // Attribute this turn's token cost to the assistant message we're about to insert.
   const logCost = (messageId?: string) =>
-    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: streamUsage.inputTokens, outputTokens: streamUsage.outputTokens, messageId });
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: streamUsage.inputTokens, outputTokens: streamUsage.outputTokens, cacheCreation: streamUsage.cacheCreation, cacheRead: streamUsage.cacheRead, messageId });
 
   if (result.action === 'ask' && result.question) {
     const id = await insertAiMessage({
