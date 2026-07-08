@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "db:push": "supabase db push",
-    "functions:deploy": "supabase functions deploy generate-app chat-edit garvis-brain garvis-short-script garvis-worker explorer-turn discover-media fetch-url ingest-profile claim-submit",
+    "functions:deploy": "supabase functions deploy generate-app chat-edit garvis-brain garvis-short-script garvis-worker explorer-turn discover-media fetch-url ingest-profile claim-submit shot-worker",
     "verify:knowledge": "tsx src/lib/garvis/knowledge.verify.ts",
     "verify:objective": "tsx src/lib/garvis/objective.verify.ts",
     "verify:profiles": "tsx src/lib/garvis/profiles.verify.ts",
