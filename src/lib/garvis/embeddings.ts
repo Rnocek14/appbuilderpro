@@ -1,30 +1,38 @@
 // src/lib/garvis/embeddings.ts
-// Best-effort text embeddings for MEANING-based cluster matching — the production-grade upgrade over
-// lexical title similarity for two jobs: entity resolution (snap "info paradox" onto "information
-// paradox" even with no shared spelling) and "similar ideas" surfacing across the universe.
+// Text embeddings for MEANING-based cluster matching — two jobs: entity resolution (snap "info
+// paradox" onto "information paradox" even with no shared spelling) and "similar ideas" surfacing.
 //
-// OpenAI-compatible providers only. Returns null when the active provider has no embeddings endpoint
-// (e.g. Anthropic), so every caller MUST fall back to the lexical path in clustering.ts. This keeps
-// the feature progressive: better with an embeddings-capable key, still correct without one.
+// KEY-SAFE BY DEFAULT: this now calls the `embed-worker` edge function, which holds the embeddings
+// key SERVER-SIDE (Deno.env). The raw key never ships in the browser bundle. Only when the app is
+// explicitly run in DIRECT mode (VITE_AI_DIRECT=true, dev-only) does it fall back to calling the
+// provider directly with the local key — matching how the rest of aiClient behaves in dev.
+//
+// Returns null when embeddings are unavailable (no server key AND no direct key), so every caller
+// MUST fall back to the lexical path in clustering.ts. Progressive: better with a key, correct without.
 
+import { supabase } from '../supabase';
 import { resolveAI } from '../aiConfig';
 import type { Provider } from '../aiConfig';
 
-// Conservative: only providers whose /embeddings endpoint + model id we're confident about.
+// Conservative: only providers whose /embeddings endpoint + model id we're confident about (DIRECT mode).
 const EMBED_MODEL: Partial<Record<Provider, string>> = {
   openai: 'text-embedding-3-small',
   gemini: 'text-embedding-004',
   local: 'nomic-embed-text',
 };
 
-export function embeddingsAvailable(): boolean {
+function directAvailable(): boolean {
   const ai = resolveAI();
-  return !!ai.openAIBase && !!EMBED_MODEL[ai.provider] && ai.ready;
+  return ai.direct && !!ai.openAIBase && !!EMBED_MODEL[ai.provider] && ai.ready;
 }
 
-/** Embed a batch of strings. Returns one vector per input, or null if unsupported/failed. */
-export async function embedTexts(texts: string[]): Promise<number[][] | null> {
-  if (!texts.length) return [];
+/** Embeddings are available if the server-side worker can be reached OR a direct dev key is set. */
+export function embeddingsAvailable(): boolean {
+  return Boolean(supabase) || directAvailable();
+}
+
+/** Direct provider call — dev/DIRECT-mode only. */
+async function embedDirect(texts: string[]): Promise<number[][] | null> {
   const ai = resolveAI();
   const model = EMBED_MODEL[ai.provider];
   if (!ai.openAIBase || !model) return null;
@@ -41,6 +49,29 @@ export async function embedTexts(texts: string[]): Promise<number[][] | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Embed a batch of strings. Returns one vector per input, or null if unsupported/failed.
+ * Prefers the server-side worker (key-safe); falls back to the direct provider call only in DIRECT mode.
+ */
+export async function embedTexts(texts: string[]): Promise<number[][] | null> {
+  if (!texts.length) return [];
+
+  // Server-side path (default, key-safe).
+  try {
+    const { data, error } = await supabase.functions.invoke('embed-worker', { body: { texts } });
+    if (!error && data) {
+      const vecs = (data as { vectors?: number[][] | null }).vectors;
+      if (Array.isArray(vecs) && vecs.length === texts.length) return vecs;
+      // vectors === null means embeddings aren't configured server-side; try direct as a dev fallback.
+    }
+  } catch {
+    // network/edge unavailable — fall through to direct (dev) or null.
+  }
+
+  if (directAvailable()) return embedDirect(texts);
+  return null;
 }
 
 /** Cosine similarity in [-1,1] (≈[0,1] for embeddings). Pure. */

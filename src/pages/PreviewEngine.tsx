@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox, KeyRound, Plus } from 'lucide-react';
+import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox, KeyRound, Plus, Send } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card, Badge, EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -15,6 +15,7 @@ import {
   listIngestTokens, createIngestToken, revokeIngestToken,
   type PreviewSiteRow, type PublishRequestRow, type PreviewStats, type IngestToken,
 } from '../lib/preview/engine';
+import { queuePitch, lookupProfileEmail } from '../lib/garvis/outreach';
 import { DEMO_PROFILES } from '../lib/preview/demoProfiles';
 import { supabaseUrl } from '../lib/supabase';
 
@@ -29,6 +30,7 @@ export default function PreviewEngine() {
   const [requests, setRequests] = useState<(PublishRequestRow & { business_name?: string; slug?: string })[]>([]);
   const [stats, setStats] = useState<Record<string, PreviewStats>>({});
   const [regenId, setRegenId] = useState<string | null>(null);
+  const [queuingId, setQueuingId] = useState<string | null>(null);
   const [tokens, setTokens] = useState<IngestToken[]>([]);
   const [tokensOpen, setTokensOpen] = useState(false);
 
@@ -79,6 +81,30 @@ export default function PreviewEngine() {
   const remove = async (id: string) => { await deletePreviewSite(id); await refresh(); };
   const copyLink = (slug: string) => { void navigator.clipboard.writeText(previewUrlFor(slug)); toast('success', 'Preview link copied.'); };
   const copyPitch = (pitch: string) => { void navigator.clipboard.writeText(pitch); toast('success', 'Pitch email copied.'); };
+
+  // Turn a generated pitch into a real, approval-gated outreach message (replaces copy-to-clipboard).
+  const queueSend = async (r: PreviewSiteRow) => {
+    try {
+      const prefill = (await lookupProfileEmail(r.profile_id)) ?? '';
+      const to = window.prompt(`Send this pitch to which email?\n\nGarvis will draft the message and put it in the Approvals queue — nothing sends until you approve it.`, prefill);
+      if (!to) return;
+      setQueuingId(r.id);
+      await queuePitch({
+        previewSiteId: r.id,
+        businessProfileId: r.profile_id,
+        businessName: r.business_name,
+        industry: r.industry,
+        pitch: r.pitch,
+        previewUrl: previewUrlFor(r.slug),
+        toEmail: to,
+      });
+      toast('success', 'Queued for approval. Review it in Approvals → send when ready.');
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not queue the pitch.');
+    } finally {
+      setQueuingId(null);
+    }
+  };
 
   return (
     <AppShell>
@@ -239,6 +265,11 @@ export default function PreviewEngine() {
                   <button onClick={() => copyPitch(r.pitch)} title="Copy pitch email"
                     className="rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
                     Pitch
+                  </button>
+                  <button onClick={() => void queueSend(r)} disabled={queuingId === r.id} title="Queue this pitch for approval + send"
+                    className="flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-50">
+                    {queuingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    Queue
                   </button>
                   <button onClick={() => void regen(r.id)} disabled={regenId === r.id} title="Regenerate spec + pitch"
                     className="rounded-lg border border-forge-border p-2 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">

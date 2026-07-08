@@ -519,6 +519,37 @@ spine of everything else.*
 
 ---
 
+## 10a. Sprint 1 — SHIPPED on this branch
+
+The next sprint above (§10) is implemented on `claude/garvis-system-architecture-d4cfog`. What landed:
+
+- **Security (item 1):** `apply-migration` authz was already closed in a prior commit (owner check
+  present); verified and noted in `docs/legendary-roadmap.md` (8b marked done).
+- **Persistent brain (items 2–5):** migration `app_0021_brain_vector.sql` (pgvector `embeddings`
+  vector(1536) + HNSW cosine, `documents`, `insights`, `match_embeddings()` RPC, private `documents`
+  storage bucket, owner-scoped RLS). Edge functions `embed-worker` (persist + vectors modes, server-side
+  key) and `ingest-document` (summarize → embed → classify → propose a home + "Garvis noticed…"
+  insights). Client `src/lib/garvis/embeddings.ts` rewired to call `embed-worker` (key never ships in
+  the bundle; DIRECT-mode dev fallback preserved). New surface `src/pages/Brain.tsx` (`/garvis/brain`):
+  drag-drop intake, proposal card, insights feed, file-into-world.
+- **Execution spine (item 7):** migration `app_0022_execution.sql` (`approvals` = the one queue,
+  `execution_runs` = the one ledger). Client `src/lib/garvis/execution.ts` + `src/pages/Approvals.tsx`
+  (`/garvis/approvals`). Every outward action routes through an approval; every connector call is logged.
+- **Outreach engine (items 8–9):** migration `app_0023_outreach.sql` (outreach_settings with the
+  kill switch/cap/warmup/CAN-SPAM gates, contacts, outreach_campaigns, outreach_messages, replies,
+  suppression — all owner-scoped, ported/generalized from swift-prep-pros). Edge functions `send-email`
+  (THE one send path: approval + suppression + cap + warmup gates → Resend → ledger + mind_event),
+  `resend-webhook` (Svix-verified delivery/bounce → suppression), `resend-inbound` (reply → classify →
+  stop sequence), `outreach-followups` (cron → drafts → approval, never auto-sends). PreviewEngine's
+  pitch is now **"Queue send"** → drafted message + approval (was copy-to-clipboard),
+  via `src/lib/garvis/outreach.ts`.
+
+Verified: `tsc --noEmit` clean, `vite build` green, verify suites pass. Not runnable here (no live
+Supabase/Resend/embeddings keys): apply the three migrations, deploy the six functions
+(`npm run functions:deploy` + `npm run functions:deploy:webhooks`), and set `RESEND_API_KEY` /
+`EMBEDDINGS_API_KEY` (or `OPENAI_API_KEY`) / `RESEND_WEBHOOK_SECRET` / `INBOUND_SECRET` / `CRON_SECRET`
+as edge secrets to light it up.
+
 ## 11. Constraint compliance notes
 
 Approval-before-send/post/deploy/charge → `approvals` is the single enforcement point.
