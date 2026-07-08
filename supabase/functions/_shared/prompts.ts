@@ -161,6 +161,11 @@ SCROLL-SCRUBBED NARRATIVE — the signature "cinematic" effect (a scene transfor
   effect with NO pre-rendered frames. Best when the domain earns 3D and the build is deployed.
 
 IMAGERY — great visuals are half of "expensive"; ship REAL images, chosen honestly:
+- FIRST PRIORITY — PROJECT ASSETS: when the context contains a "PROJECT ASSETS" block, those are the
+  user's OWN images (uploaded or migrated from their old site, already hosted at public URLs). Use
+  them before ANY stock source — heroes, ScrollScenes, galleries, about pages — matched by their alt
+  text, and write real alt attributes. The user gave you their real photos; wasting them on stock is
+  a failure.
 - Real photos, no key, reliable + CORS-safe: Unsplash direct CDN when you know a valid id
   (https://images.unsplash.com/photo-<id>?auto=format&fit=crop&w=1600&q=80), else Lorem Picsum by
   deterministic seed (https://picsum.photos/seed/<keyword>/1600/900) for real photographic texture.

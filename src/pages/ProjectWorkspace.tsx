@@ -32,6 +32,7 @@ import { Badge, Button, Input, Modal } from '../components/ui';
 import { getBrain, saveBrain, getMap, getRoadmap, getIdeation, saveDoc, listDocs, getDoc, DEFAULT_BRAIN, isMetaFile, type BrainDoc } from '../lib/projectBrain';
 import { cn } from '../lib/utils';
 import { ThemeModal } from '../components/ThemeModal';
+import { AssetsModal } from '../components/AssetsModal';
 import { getThreads, createThread, renameThread, deleteThread, getActiveThread, setActiveThread, threadsEnabled, threadOf, MAIN_THREAD_ID, type Thread } from '../lib/threads';
 import type { Project, Deployment, EditPlan, ProjectFile } from '../types';
 
@@ -109,6 +110,7 @@ export default function ProjectWorkspace() {
   };
   // Supabase connection (stored in the project's /.env so the preview + app use it).
   const [connectOpen, setConnectOpen] = useState(false);
+  const [assetsOpen, setAssetsOpen] = useState(false);
 
   // Integration secrets — the keys the app's edge functions need (the secret popup, Phase 6).
   const { required: reqSecrets, integrations: backendIntegrations, missing: missingSecrets, values: secretValues, deployed: deployedSecrets, setSecret, markDeployed } = useProjectSecrets(id, files);
@@ -1059,6 +1061,7 @@ export default function ProjectWorkspace() {
                 onRevert={handleRevert}
                 selection={selection}
                 onClearSelection={() => setSelection(null)}
+                onOpenAssets={() => setAssetsOpen(true)}
               />
             ) : (
               <CodeEditorPane
@@ -1519,6 +1522,8 @@ export default function ProjectWorkspace() {
         onConvert={setupTheme}
         onPolish={polishDesign}
       />
+
+      <AssetsModal projectId={id ?? ''} open={assetsOpen} onClose={() => setAssetsOpen(false)} />
 
       <Modal open={deployOpen} onClose={() => setDeployOpen(false)} title="Your app's cloud">
         {/* DATABASE — the most-asked "where do I set this up" — front and center. */}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe, Camera, X, Brain, Undo2, Eye, Paperclip, Square, Copy, RefreshCw, Link2 } from 'lucide-react';
+import { Send, Flame, FileCode2, CircleCheck, CircleDashed, CircleX, ClipboardList, Globe, Camera, X, Brain, Undo2, Eye, Paperclip, Square, Copy, RefreshCw, Link2, Image as ImageIcon } from 'lucide-react';
 import { extractUrls, fetchLinks, withLinkContext, splitLinkContext, hostOf, LINK_CONTEXT_MARKER } from '../../lib/linkContext';
 import { MousePointerClick, ChevronDown } from 'lucide-react';
 import { diffLines } from 'diff';
@@ -158,6 +158,8 @@ interface Props {
   /** Element picked via the preview's Select mode — attached to the next message as precise context. */
   selection?: SelectedElement | null;
   onClearSelection?: () => void;
+  /** Open the project asset library (upload / harvest images that builds will use). */
+  onOpenAssets?: () => void;
 }
 
 /** Signature element: the forging strip — stages heat up as the agent works, each with its time. */
@@ -203,7 +205,7 @@ function ForgeProgress({ gen }: { gen: Generation }) {
   );
 }
 
-export function ChatPanel({ projectId, messages, activeGeneration, lastGeneration = null, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection }: Props) {
+export function ChatPanel({ projectId, messages, activeGeneration, lastGeneration = null, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection, onOpenAssets }: Props) {
   const [input, setInput] = useState('');
   // The "Remember a preference" panel + a seed taken from the most recent user message, so
   // correcting something then clicking Remember pre-fills what you just said.
@@ -712,6 +714,16 @@ export function ChatPanel({ projectId, messages, activeGeneration, lastGeneratio
             >
               {shooting ? <CircleDashed size={13} className="animate-spin" /> : <Camera size={13} />}
             </button>
+            {onOpenAssets && (
+              <button
+                type="button"
+                onClick={onOpenAssets}
+                title="Assets — upload photos or import them from an old site; builds use them automatically"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-forge-border text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+              >
+                <ImageIcon size={13} />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setRememberOpen(true)}
