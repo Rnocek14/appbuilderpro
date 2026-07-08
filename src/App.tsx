@@ -25,6 +25,8 @@ import Pricing from './pages/Pricing';
 import Billing from './pages/Billing';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import ClusterSpike from './pages/spike/ClusterSpike';
+import Brain from './pages/Brain';
+import Approvals from './pages/Approvals';
 import PreviewEngine from './pages/PreviewEngine';
 import PreviewSite from './pages/PreviewSite';
 import PreviewReport from './pages/PreviewReport';
@@ -59,6 +61,8 @@ export default function App() {
               <Route path="/garvis/marketing" element={<Protected><Marketing /></Protected>} />
               <Route path="/garvis/missions" element={<Protected><Missions /></Protected>} />
               <Route path="/garvis/opportunities" element={<Protected><Opportunities /></Protected>} />
+              <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
+              <Route path="/garvis/approvals" element={<Protected><Approvals /></Protected>} />
               <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
               <Route path="/new" element={<Protected><NewProject /></Protected>} />
               <Route path="/import" element={<Protected><ImportProject /></Protected>} />

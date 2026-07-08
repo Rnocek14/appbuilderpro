@@ -43,8 +43,9 @@ build runs → returns an https URL that loads the app.
   with `pgsodium`/Vault. `deploy-backend` reads them server-side at deploy time. The client only ever
   holds a key transiently in the input until "Save" posts it to a `set-secret` edge function (auth+owner
   guarded). Update `useProjectSecrets` to reflect set/deployed state from the server, not localStorage.
-- **8b apply-migration authz:** add the same `auth.getUser()` + project-ownership check `deploy-backend`
-  now has (it's the same confused-deputy gap on the full-scope Management token). Quick + `deno check`able.
+- **8b apply-migration authz:** ✅ DONE — `apply-migration/index.ts` now carries the same
+  `auth.getUser()` + `projects.owner_id === user.id` ownership check `deploy-backend` has (see the AUTHZ
+  block at the top of the handler). The confused-deputy gap on the full-scope Management token is closed.
 - **8c Verify the Management-API deploy** (`/functions/deploy` multipart shape, `/secrets`) against a live
   project; adjust field names if the API differs. Add a `config.toml` setting verify_jwt per function.
 **Files:** `supabase/functions/{apply-migration,deploy-backend,set-secret}/index.ts`, a Vault migration,
