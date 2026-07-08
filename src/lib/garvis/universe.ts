@@ -15,7 +15,7 @@
 
 import { supabase, supabaseConfigured } from '../supabase';
 import type { ClusterGraph } from './clustering';
-import { graphToRows, rowsToGraph, isWorldUuid, type ClusterRow, type EdgeRow, type ArtifactRow } from './universeMap';
+import { graphToRows, rowsToGraph, isWorldUuid, deletableStaleClusters, type ClusterRow, type EdgeRow, type ArtifactRow } from './universeMap';
 
 export { graphToRows, rowsToGraph, isWorldUuid, type ClusterRow, type EdgeRow, type ArtifactRow };
 
@@ -194,7 +194,7 @@ export async function syncUniverse(u: Universe): Promise<string | null> {
     }
 
     // 2. reuse existing row ids so saves UPDATE instead of duplicating
-    const { data: exClusters } = await supabase.from('knowledge_clusters').select('id, slug').eq('world_id', worldId);
+    const { data: exClusters } = await supabase.from('knowledge_clusters').select('id, slug, charter').eq('world_id', worldId);
     const ids = new Map<string, string>((exClusters ?? []).map((r) => [r.slug as string, r.id as string]));
     const exClusterIds = (exClusters ?? []).map((r) => r.id as string);
     if (exClusterIds.length) {
@@ -222,9 +222,13 @@ export async function syncUniverse(u: Universe): Promise<string | null> {
       await supabase.from('knowledge_clusters')
         .upsert(withParent, { onConflict: 'world_id,slug' });
     }
-    // drop clusters whose thread was folded away (dedupe) — cascade cleans their edges/artifacts
-    const keepClusterIds = rows.clusters.map((c) => c.id);
-    const stale = exClusterIds.filter((id) => !keepClusterIds.includes(id));
+    // drop clusters whose thread was folded away (dedupe) — cascade cleans their edges/artifacts.
+    // GUARD: chartered clusters are production areas that may exist only server-side (instantiated
+    // webs, studios); they are NEVER stale-deleted by a thought-graph sync (deletableStaleClusters).
+    const stale = deletableStaleClusters(
+      (exClusters ?? []).map((r) => ({ id: r.id as string, charter: (r as { charter?: unknown }).charter ?? null })),
+      rows.clusters.map((c) => c.id),
+    );
     if (stale.length) await supabase.from('knowledge_clusters').delete().in('id', stale);
 
     // 4. edges have no client identity — replace the set (small)

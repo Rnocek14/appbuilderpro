@@ -346,3 +346,47 @@ carry). Planet click deep-links into the web with `?area=<slug>` so the transiti
 exactly that production area. Entry points: WorkWeb header "System" and an orbit button per
 web on the index. **Next: P3 — the Universe altitude** (all systems in one sky, gravity
 lifecycle from cluster maturity, the capability nebulae at full scale).
+
+**P3 — SHIPPED on this branch (the Universe altitude — the x-ray, not decoration):**
+`/garvis/universe` renders every world in one sky under the owner's own ruling: *"The Universe
+is not navigation decoration. It is the x-ray of Garvis's living memory across all worlds."*
+
+- **bodies** = `knowledge_worlds`. **Band = structural commitment**: worlds with chartered
+  production areas ride the inner band (systems), worlds with thought-mass the middle
+  (growing), empty worlds the outer rim (sparks). A world moves bands only when its rows do.
+  Size = counted mass (clusters + artifacts, log-scaled); the hover names the exact counts.
+- **light** = the persisted momentum label from `world_intelligence` — never recomputed as an
+  opinion at this altitude. A world never observed renders dim with "never observed," it does
+  not glow on faith.
+- **position is identity, never similarity** — bearing is the world-id hash, and the legend
+  says so. Relatedness is a DRAWN FILAMENT or it isn't claimed: filaments come from `insights`
+  whose refs resolve (documents → world, clusters → world, artifacts → cluster → world) to two
+  or more DIFFERENT worlds, deduped per pair keeping the strongest, each carrying its measured
+  cosine score. Single-world insights and refs to unknown worlds draw nothing.
+- **comets** = the same `loadRankedMoves` output as the waking moment and the System altitude
+  (one engine, three altitudes), attached to the world their key/route names; owner-global
+  moves (the approvals queue) are listed in the panel, not staged in the sky.
+- **time = the scrubber replays `mind_events`** — the only honest time travel. At instant T,
+  a world's glow is the count of its world-tagged events in the trailing 7 days; untagged
+  events light nothing. Scrubbing into the past DIMS momentum light, because momentum history
+  isn't persisted and the sky refuses to pretend otherwise. The panel shows the record inside
+  the window. (This is the round-3 time scrubber, shipped early because it was a query.)
+- **no fake movement**: bodies don't drift; the only animation is the activity pulse at "now,"
+  off under prefers-reduced-motion.
+
+Pure core `universeView.ts` (24-check verify: determinism, structural bands, identity-stable
+positions under world addition, cross-world-only filaments, comet attachment, exact scrubber
+window math); impure `universeViewRun.ts` (bounded queries — where a bound truncates, the sky
+undercounts rather than invents). Entry points: Work Webs header and the System altitude
+header. System bodies click through to their System altitude; sparks open a fact panel
+("no production areas yet") with the path to charter one.
+
+**Also shipped with P3 — the syncUniverse guard (the documented landmine, closed):**
+`deletableStaleClusters` (pure, verified) now filters every stale-delete in `syncUniverse` —
+a cluster with a charter is NEVER deleted by a thought-graph sync, because production areas
+can exist only server-side (instantiated webs, studio output) and deletion would cascade away
+their artifacts, versions, and files. The universe only grows; commitments are never
+collateral damage. This unblocks lazy web instantiation whenever we want it.
+
+**The presentation track is complete.** Waking Moment (P1) → System Altitude (P2) → Universe
+(P3), all three altitudes over the same rows, one Next Move engine, no theater anywhere.

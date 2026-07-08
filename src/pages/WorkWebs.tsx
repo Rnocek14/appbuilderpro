@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus, Orbit } from 'lucide-react';
+import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus, Orbit, Telescope } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Spinner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -52,6 +52,11 @@ export default function WorkWebs() {
             <h1 className="text-xl font-semibold text-forge-ink">Work Webs</h1>
             <p className="text-sm text-forge-dim">A mission isn't a checklist — it's a living territory. Every area is a workspace with its own tools.</p>
           </div>
+          <button
+            onClick={() => navigate('/garvis/universe')}
+            title="Universe altitude — every world in one sky, the x-ray of Garvis's living memory"
+            className="ml-auto flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+          ><Telescope size={13} /> Universe</button>
         </div>
 
         {/* Existing webs */}

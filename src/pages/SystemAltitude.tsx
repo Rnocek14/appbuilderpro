@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Orbit, Waypoints } from 'lucide-react';
+import { ArrowLeft, Orbit, Waypoints, Telescope } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Spinner } from '../components/ui';
 import { cn } from '../lib/utils';
@@ -96,6 +96,11 @@ export default function SystemAltitude() {
                 style={{ color: momentumHex }}
               >{star.momentum.label}</span>
             )}
+            <Link
+              to="/garvis/universe"
+              title="Universe altitude — every world in one sky"
+              className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+            ><Telescope size={13} /> Universe</Link>
             <Link
               to={`/garvis/webs/${worldId}`}
               className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"

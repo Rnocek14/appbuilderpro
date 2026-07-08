@@ -36,7 +36,8 @@
     "verify:clusterchat": "tsx src/lib/garvis/clusterChat.verify.ts",
     "verify:nextmove": "tsx src/lib/garvis/nextMove.verify.ts",
     "verify:worldintel": "tsx src/lib/garvis/worldIntel.verify.ts",
-    "verify:systemview": "tsx src/lib/garvis/systemView.verify.ts"
+    "verify:systemview": "tsx src/lib/garvis/systemView.verify.ts",
+    "verify:universeview": "tsx src/lib/garvis/universeView.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
