@@ -133,11 +133,11 @@ export function Ember({ size = 15, className }: { size?: number; className?: str
 }
 
 // ---------------- Modal ----------------
-export function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: ReactNode }) {
+export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'lg' }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeInUp [animation-duration:0.18s]" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
-      <div className="w-full max-w-md rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen p-5 shadow-lift animate-scaleIn" onClick={(e) => e.stopPropagation()}>
+      <div className={cn('w-full rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen p-5 shadow-lift animate-scaleIn', size === 'lg' ? 'max-w-3xl' : 'max-w-md')} onClick={(e) => e.stopPropagation()}>
         <h2 className="mb-4 font-display text-lg font-semibold tracking-tight">{title}</h2>
         {children}
       </div>

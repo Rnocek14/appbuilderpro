@@ -10,12 +10,14 @@
 export const PLATFORM_CONSTRAINTS = `PLATFORM CONSTRAINTS — this app runs in FableForge's in-browser
 runtime. Respect these absolutely; never recommend, plan, or make changes that violate them:
 - Packages load on demand from a CDN (esm.sh) — you may import ANY browser-compatible npm package:
-  e.g. @radix-ui/react-* primitives, class-variance-authority, tailwind-merge, framer-motion,
-  gsap (+ gsap/ScrollTrigger), lenis, zustand, @tanstack/react-query, react-hook-form, zod, plus
-  the always-present react, react-dom,
-  react-router-dom, lucide-react, recharts, @supabase/supabase-js, date-fns, clsx. AVOID packages
-  that need a Node/build step (server-only or build-time-only tooling, Node built-ins) — the runtime
-  loads ES modules in the browser with no bundler/PostCSS.
+  e.g. @radix-ui/react-* primitives, class-variance-authority, tailwind-merge, zustand,
+  @tanstack/react-query, react-hook-form, zod, plus the always-present react, react-dom,
+  react-router-dom, lucide-react, recharts, @supabase/supabase-js, date-fns, clsx. The advanced-motion
+  stack is PINNED (compatible versions guaranteed in the preview): framer-motion, gsap
+  (+ gsap/ScrollTrigger), lenis, three, @react-three/fiber, @react-three/drei — prefer these for
+  heavy motion so the preview never breaks on a version drift. AVOID packages that need a Node/build
+  step (server-only or build-time-only tooling, Node built-ins) — the runtime loads ES modules in
+  the browser with no bundler/PostCSS.
 - Styling is Tailwind via CDN (no tailwind.config/PostCSS build). A full shadcn/ui design-token
   system is already set up: token values in /src/index.css (:root + .dark) and the classes mapped
   in the inline Tailwind config. Apps should style with semantic tokens (bg-background, bg-card,
@@ -124,6 +126,68 @@ SCROLL STORYTELLING (marketing/landing surfaces — the single biggest "expensiv
   scroll-jack or animate layout); content must exist in the DOM regardless of scroll (SEO/a11y);
   reduced-motion users get the content statically (the kit components handle this themselves).
 - App/dashboard views get NONE of this — scroll effects are for marketing surfaces only.
+
+ADVANCED MOTION — the "award-site" toolkit (marketing/landing/portfolio surfaces). The winning
+sites pick ONE hard idea and execute it cleanly — a single object with real weight, one drivable
+scene — rather than stacking effects. Choose 1-2 signature interactions per page; the kit ships them
+all so you never hand-roll listeners:
+- SMOOTH SCROLL: wrap the marketing page ONCE in <SmoothScroll> (kit, Lenis-backed) — inertial
+  scrolling is the invisible foundation that makes every other scroll effect feel premium. Never wrap
+  app/dashboard/auth routes in it.
+- MAGNETIC controls: the hero CTA (and nav logo) get useMagnetic() — they ease toward the cursor and
+  spring back. The single most-recognized "designed" micro-interaction. Keep travel small.
+- PARALLAX depth: layer 2-4 elements with useParallax(speed) at different speeds (hero background
+  shape slow, foreground card fast) for real depth on scroll.
+- TILT cards: feature/pricing/gallery cards get useTilt() + style={{transformStyle:'preserve-3d'}},
+  inner layers on translateZ — they rotate toward the cursor with parallax depth.
+- CURSOR-REACTIVE surface: useMousePosition() → drive a radial-gradient spotlight/glow that follows
+  the cursor across a dark hero (background: radial-gradient at \`\${x*100}% \${y*100}%\`).
+- KINETIC HEADLINES: <TextReveal text="…" className="text-display" /> rises the hero headline in
+  word-by-word (accessible — full text stays readable). Pair with the .stagger container for the
+  subhead + CTA cascading after.
+- SCROLL-VELOCITY: useScrollVelocity() → skewY/scaleY a gallery or heading while flinging, settling
+  at rest — the "liquid" feel. Subtle (cap the skew).
+- 3D (only when the domain earns it — product/portfolio/creative, and ideally the deployed build):
+  @react-three/fiber + drei are pinned and available. A single <Canvas> with one well-lit mesh that
+  reacts to scroll/pointer beats a busy scene. Always render a static poster/fallback for reduced
+  motion and first paint; keep it to ONE marketing surface.
+- RESTRAINT (non-negotiable): transform/opacity/filter only; everything degrades to static content
+  under prefers-reduced-motion (the kit hooks already bail — don't undo that); never block reading or
+  scrolling on an effect; disable magnetic/tilt on coarse pointers (the hooks do). One hero moment +
+  quiet reveals reads far more expensive than five competing effects.
+
+SCROLL-SCRUBBED NARRATIVE — the signature "cinematic" effect (a scene transforms AS you scroll: ocean
+→ yacht → interior; product rotating into its UI; ingredient → molecule → field). Two kit routes:
+- <ScrollScenes scenes={[{image,eyebrow,title,caption}, …]} />: full-bleed real PHOTOS that cross-fade
+  and slow-zoom as you scroll through them, captions rising in. This is the achievable version for
+  almost every app — a handful of great hero photos, no rendered sequence needed. REACH FOR THIS FIRST.
+- <ScrollSequence frames={[…]} /> or src="/frames/name_{i}.jpg" count={120}: the literal Apple/AirPods
+  frame-player — a rendered image SEQUENCE (a turntable render, a video exported to frames) painted to
+  a canvas and scrubbed by scroll. Use ONLY when a real frame sequence is available (user-provided
+  assets, or a deployed build with an exported render) — do not fabricate frame URLs that won't exist.
+- The PROCEDURAL alternative to a bespoke sequence: a single @react-three/fiber model that rotates/
+  moves with scroll (drive it from useScrollProgress) — gets the "object turning into its display"
+  effect with NO pre-rendered frames. Best when the domain earns 3D and the build is deployed.
+
+IMAGERY — great visuals are half of "expensive"; ship REAL images, chosen honestly:
+- FIRST PRIORITY — PROJECT ASSETS: when the context contains a "PROJECT ASSETS" block, those are the
+  user's OWN images (uploaded or migrated from their old site, already hosted at public URLs). Use
+  them before ANY stock source — heroes, ScrollScenes, galleries, about pages — matched by their alt
+  text, and write real alt attributes. The user gave you their real photos; wasting them on stock is
+  a failure.
+- Real photos, no key, reliable + CORS-safe: Unsplash direct CDN when you know a valid id
+  (https://images.unsplash.com/photo-<id>?auto=format&fit=crop&w=1600&q=80), else Lorem Picsum by
+  deterministic seed (https://picsum.photos/seed/<keyword>/1600/900) for real photographic texture.
+- Topic-matched real photos on demand: the Unsplash or Pexels API via a Supabase EDGE FUNCTION holding
+  the user's free API key (never in the browser) — plan it as an integration when the app needs
+  keyword-driven imagery (galleries, listings, editorial). Return url + alt + photographer credit.
+- AI-generated bespoke imagery (hero art, product shots): an edge function calling an image model
+  (the user supplies the key) — plan as an integration; note it costs per image.
+- In the live PREVIEW specifically, network <img> can be slow/blocked — always give images a solid
+  token-colored background behind them and real alt text so the layout holds before/without the fetch;
+  for the preview thumbnail surfaces prefer CSS gradient/pattern art over network images.
+- NEVER ship gray placeholder boxes or broken-image icons as "hero art" — a bold CSS gradient-mesh or
+  a duotone-filtered real photo beats an empty rectangle every time.
 
 STATES & DETAILS
 - Standardize sizes: h-10 buttons/inputs (h-9 sm), lucide-react icons h-4 w-4 inline / h-5 w-5
@@ -783,6 +847,13 @@ The EXACT APIs:
     <Magnetic><Button…/></Magnetic> — the CTA leans toward the cursor. ONE per view, the primary CTA.
     <ImageReveal src alt direction? delay? className="aspect-…" /> — clip-path wipe + settle-scale
       on scroll-in; use instead of bare <img> in galleries/editorial rows.
+    <SmoothScroll>…</SmoothScroll> — wrap a MARKETING page once for inertial (Lenis) scroll; never
+      app/auth routes.
+    <ScrollScenes scenes={[{image,eyebrow,title,caption},…]} /> — pinned full-bleed PHOTO narrative:
+      scenes cross-fade + slow-zoom as you scroll, captions rising (ocean → yacht → interior with a
+      handful of real photos). Reach for this when the story is told in photographs.
+    <ScrollSequence frames={[…]} /> or src="/frames/name_{i}.jpg" count={120} — the literal
+      Apple-style frame player (canvas scrubbed by scroll). ONLY with a real frame sequence.
 - Toasts: const { toast } = useToast() (from ../context/ToastContext); toast('Saved', 'success').
 - /src/lib/scroll.ts — EXACT signatures. These are NOT react-intersection-observer and NOT
   framer-motion; their call shapes WILL NOT type-check here:
@@ -790,6 +861,8 @@ The EXACT APIs:
     const { ref, progress } = useScrollProgress<HTMLDivElement>();  // takes NO arguments — never useScrollProgress(ref)
   useInView opts: { once?: boolean; margin?: string }. useScrollProgress: attach ref to the TALL
   wrapper (h-[200vh]); progress is a number 0→1 — read it in style={{ transform: … }}.
+- /src/lib/interactions.ts — lower-level hooks when a component doesn't fit: useMagnetic, useParallax,
+  useTilt, useMousePosition, useScrollVelocity, useReveal (marketing surfaces only).
 - /src/lib/utils: cn().
 Reach for these FIRST: Tabs for sectioned views, Dropdown for row menus, Combobox for long selects,
 FormField on every form row, Table for data grids, Alert for persistent notices, Tooltip on

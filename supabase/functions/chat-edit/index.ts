@@ -99,9 +99,18 @@ Deno.serve(async (req) => {
   }
   const m = modelForPlan(await getUserPlan(admin, user.id)); // free → cheap model
 
-  const { data: files } = await admin
+  const { data: allFiles } = await admin
     .from('project_files').select('path, content')
     .eq('project_id', projectId).is('deleted_at', null);
+  // Meta files (/.fableforge/) are CONTEXT, not editable source — pull them out and inject the
+  // brain + asset manifest as prominent blocks (parity with the client edit paths), so the model
+  // never treats them as app files and never misses the user's own images.
+  const files = (allFiles ?? []).filter((f) => !f.path.startsWith('/.fableforge/'));
+  const brainMd = (allFiles ?? []).find((f) => f.path === '/.fableforge/brain.md')?.content?.trim() ?? '';
+  const assetsMd = (allFiles ?? []).find((f) => f.path === '/.fableforge/assets.md')?.content?.trim() ?? '';
+  const metaBlocks =
+    (brainMd ? `PROJECT BRAIN — the app's vision, goals, and decisions. Honor these:\n${brainMd}\n\n` : '') +
+    (assetsMd ? `${assetsMd}\n\n` : '');
   const { data: history } = await admin
     .from('ai_messages').select('role, content')
     .eq('project_id', projectId).order('created_at', { ascending: false }).limit(8);
@@ -120,7 +129,8 @@ Deno.serve(async (req) => {
         const result = await completeStream([
           { role: 'system', content: SYSTEM },
           { role: 'user', content:
-            `Current files:\n${contextPayload(files ?? [], message, previewError ?? '')}\n\n` +
+            metaBlocks +
+            `Current files:\n${contextPayload(files, message, previewError ?? '')}\n\n` +
             `Recent conversation (newest first):\n${JSON.stringify(history ?? [])}\n\n` +
             (previewError ? `Current preview error to fix:\n${previewError}\n\n` : '') +
             `Change request: ${message}` +

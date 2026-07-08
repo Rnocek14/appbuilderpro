@@ -27,11 +27,19 @@ const PACKAGE_JSON = `{
     "recharts": "^2.13.0",
     "@supabase/supabase-js": "^2.45.4",
     "date-fns": "^4.1.0",
-    "clsx": "^2.1.1"
+    "clsx": "^2.1.1",
+    "framer-motion": "^11.11.17",
+    "gsap": "^3.12.5",
+    "lenis": "^1.1.14",
+    "three": "^0.169.0",
+    "@react-three/fiber": "^8.17.10",
+    "@react-three/drei": "^9.114.3"
   },
+  "//deps": "framer-motion/gsap/lenis/three/@react-three power the advanced-motion kit (src/lib/interactions.ts, SmoothScroll, Scene3D). Versions match the preview import-map pins.",
   "devDependencies": {
     "@types/react": "^18.3.10",
     "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.169.0",
     "@vitejs/plugin-react": "^4.3.2",
     "typescript": "^5.6.2",
     "vite": "^5.4.8"
@@ -1062,6 +1070,149 @@ export function Reveal({ children, delay = 0, y = 16, className }: {
 }
 `;
 
+// The ADVANCED-MOTION kit — the "wow" primitives. Zero-dependency, rAF-throttled, pointer/coarse and
+// reduced-motion aware, transform/opacity only (compositor-friendly). This is what lets a generated
+// marketing page feel authored (magnetic buttons, parallax layers, tilt cards, cursor-follow,
+// scroll-velocity skew, word-by-word text reveals) WITHOUT the model hand-rolling brittle listeners.
+const INTERACTIONS_TS = `import { useEffect, useRef, useState } from 'react';
+
+const reduce = () =>
+  typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fine = () =>
+  typeof matchMedia === 'undefined' || matchMedia('(pointer: fine)').matches;
+
+/**
+ * MAGNETIC — the element eases toward the cursor while hovered, springs back on leave. The signature
+ * "premium button". Attach the ref to a button/link; keep the travel small (strength 0.2-0.4).
+ *   const ref = useMagnetic<HTMLButtonElement>();
+ *   <button ref={ref} className="...">Get started</button>
+ */
+export function useMagnetic<T extends HTMLElement>(strength = 0.3) {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || reduce() || !fine()) return;
+    let raf = 0;
+    const move = (e: MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      const x = (e.clientX - (r.left + r.width / 2)) * strength;
+      const y = (e.clientY - (r.top + r.height / 2)) * strength;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => { el.style.transform = \`translate(\${x}px, \${y}px)\`; });
+    };
+    const reset = () => { cancelAnimationFrame(raf); el.style.transform = 'translate(0,0)'; };
+    el.style.transition = 'transform 0.35s cubic-bezier(0.16,1,0.3,1)';
+    el.addEventListener('mousemove', move);
+    el.addEventListener('mouseleave', reset);
+    return () => { el.removeEventListener('mousemove', move); el.removeEventListener('mouseleave', reset); cancelAnimationFrame(raf); };
+  }, [strength]);
+  return ref;
+}
+
+/**
+ * PARALLAX — the element drifts vertically as the page scrolls past it (speed +down / -up, ~-0.3..0.3).
+ * Layer several at different speeds for depth. Attach to anything already positioned in normal flow.
+ */
+export function useParallax<T extends HTMLElement>(speed = 0.2) {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || reduce()) return;
+    let raf = 0;
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      const mid = r.top + r.height / 2 - (window.innerHeight || 1) / 2;
+      el.style.transform = \`translate3d(0, \${(-mid * speed).toFixed(1)}px, 0)\`;
+    };
+    const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(update); };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => { window.removeEventListener('scroll', onScroll); window.removeEventListener('resize', onScroll); cancelAnimationFrame(raf); };
+  }, [speed]);
+  return ref;
+}
+
+/**
+ * TILT — a card rotates in 3D toward the cursor (glare-free, GPU-cheap). Give the element
+ * style={{ transformStyle: 'preserve-3d' }} and put inner layers on translateZ for real depth.
+ */
+export function useTilt<T extends HTMLElement>(max = 10) {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || reduce() || !fine()) return;
+    let raf = 0;
+    const move = (e: MouseEvent) => {
+      const r = el.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width - 0.5;
+      const py = (e.clientY - r.top) / r.height - 0.5;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => { el.style.transform = \`perspective(800px) rotateY(\${px * max}deg) rotateX(\${-py * max}deg)\`; });
+    };
+    const reset = () => { cancelAnimationFrame(raf); el.style.transform = 'perspective(800px) rotateY(0) rotateX(0)'; };
+    el.style.transition = 'transform 0.3s cubic-bezier(0.16,1,0.3,1)';
+    el.addEventListener('mousemove', move);
+    el.addEventListener('mouseleave', reset);
+    return () => { el.removeEventListener('mousemove', move); el.removeEventListener('mouseleave', reset); cancelAnimationFrame(raf); };
+  }, [max]);
+  return ref;
+}
+
+/** Normalized pointer position 0..1 for the whole window — drive a cursor-follow glow, gradient, spotlight. */
+export function useMousePosition() {
+  const [pos, setPos] = useState({ x: 0.5, y: 0.5 });
+  useEffect(() => {
+    if (!fine()) return;
+    let raf = 0;
+    const move = (e: MouseEvent) => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setPos({ x: e.clientX / (window.innerWidth || 1), y: e.clientY / (window.innerHeight || 1) }));
+    };
+    window.addEventListener('mousemove', move);
+    return () => { window.removeEventListener('mousemove', move); cancelAnimationFrame(raf); };
+  }, []);
+  return pos;
+}
+
+/** Scroll velocity (px/frame, smoothed) — skew/stretch elements while flinging, settle at rest. */
+export function useScrollVelocity() {
+  const [v, setV] = useState(0);
+  useEffect(() => {
+    if (reduce()) return;
+    let last = window.scrollY, cur = 0, raf = 0;
+    const tick = () => {
+      const now = window.scrollY;
+      cur += ((now - last) - cur) * 0.2;
+      last = now;
+      setV(Math.max(-40, Math.min(40, cur)));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return v;
+}
+
+/**
+ * TEXT REVEAL — split a line into words that rise + fade in, staggered, the first time it enters
+ * view. The kinetic-headline move, done accessibly (the full text stays selectable/readable).
+ *   <TextReveal text="Build things that feel alive" className="text-display" />
+ */
+export function useReveal<T extends HTMLElement>(margin = '-10% 0px') {
+  const ref = useRef<T | null>(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') { setShown(true); return; }
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setShown(true); io.disconnect(); } }, { rootMargin: margin });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [margin]);
+  return { ref, shown };
+}
+`;
+
 // Advanced scroll/motion primitives — the "expensive site" moves (pinned scrub scenes, parallax,
 // count-ups, marquees) as guaranteed-working components, so the model COMPOSES them instead of
 // hand-rolling scroll math (hand-rolled versions were the top source of broken landing pages).
@@ -1372,6 +1523,150 @@ export function ImageReveal({ src, alt = '', className, direction = 'up', delay 
 }
 `;
 
+// SCROLL SEQUENCE — the literal "Apple AirPods" technique: a sequence of images painted to a canvas,
+// frame index driven by scroll. THIS is the yacht ocean->hull->interior / corn->DNA->field / sunglasses-
+// rotating effect. Feed it a rendered image sequence (a turntable render, a video exported to frames);
+// it preloads, pins, and scrubs. Reduced-motion + first-paint show a single poster frame.
+const SCROLLSEQUENCE_TSX = `import { useEffect, useRef, useState } from 'react';
+
+/**
+ * <ScrollSequence frames={[...urls]} height="300vh" />  — or  src="/frames/yacht_{i}.jpg" count={120}.
+ * The taller the height, the slower/longer the scrub. Provide 60-180 frames for smoothness.
+ */
+export function ScrollSequence({ frames, src, count, height = '300vh', className, poster }: {
+  frames?: string[]; src?: string; count?: number; height?: string; className?: string; poster?: number;
+}) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imgsRef = useRef<HTMLImageElement[]>([]);
+  const [loaded, setLoaded] = useState(0);
+
+  const urls = frames ?? (src && count ? Array.from({ length: count }, (_, i) => src.replace('{i}', String(i + 1))) : []);
+  const total = urls.length;
+  const posterIdx = poster ?? 0;
+
+  useEffect(() => {
+    let alive = true;
+    const imgs = urls.map((u) => { const im = new Image(); im.src = u; im.onload = () => { if (alive) setLoaded((n) => n + 1); }; return im; });
+    imgsRef.current = imgs;
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current, wrap = wrapRef.current;
+    if (!canvas || !wrap || !total) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const reduce = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const paint = (idx: number) => {
+      const im = imgsRef.current[Math.max(0, Math.min(total - 1, idx))];
+      if (!im || !im.complete || !im.naturalWidth) return;
+      const cw = canvas.width, ch = canvas.height;
+      const scale = Math.max(cw / im.naturalWidth, ch / im.naturalHeight);
+      const w = im.naturalWidth * scale, h = im.naturalHeight * scale;
+      ctx.clearRect(0, 0, cw, ch);
+      ctx.drawImage(im, (cw - w) / 2, (ch - h) / 2, w, h);
+    };
+    const resize = () => {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = canvas.clientWidth * dpr; canvas.height = canvas.clientHeight * dpr;
+      paint(reduce ? posterIdx : current);
+    };
+    let current = posterIdx, raf = 0;
+    const update = () => {
+      if (reduce) return;
+      const r = wrap.getBoundingClientRect();
+      const p = Math.min(1, Math.max(0, -r.top / (r.height - (window.innerHeight || 1))));
+      const idx = Math.round(p * (total - 1));
+      if (idx !== current) { current = idx; paint(idx); }
+    };
+    const onScroll = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(update); };
+    resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('resize', resize); window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total, loaded]);
+
+  if (!total) return null;
+  return (
+    <div ref={wrapRef} style={{ height }} className={className}>
+      <div className="sticky top-0 h-screen w-full overflow-hidden">
+        <canvas ref={canvasRef} className="h-full w-full" />
+        {loaded < total && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+            Loading… {Math.round((loaded / total) * 100)}%
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+`;
+
+// SCROLL SCENES — the photo-narrative version (no rendered sequence needed): full-bleed scenes that
+// cross-fade + slow-zoom as you scroll through them, with captions rising in. ocean photo -> yacht photo
+// -> interior photo. Achievable with a HANDFUL of real hero photos instead of hundreds of frames.
+const SCROLLSCENES_TSX = `import { useScrollProgress } from '../../lib/scroll';
+
+interface Scene { image: string; eyebrow?: string; title?: string; caption?: string; }
+
+/** <ScrollScenes scenes={[{image,title,caption}, …]} /> — pinned cross-fading, slow-zooming scenes. */
+export function ScrollScenes({ scenes, className }: { scenes: Scene[]; className?: string }) {
+  const { ref, progress } = useScrollProgress<HTMLDivElement>();
+  const n = scenes.length || 1;
+  return (
+    <div ref={ref} style={{ height: (n * 100) + 'vh' }} className={className}>
+      <div className="sticky top-0 h-screen w-full overflow-hidden bg-background">
+        {scenes.map((s, i) => {
+          const center = (i + 0.5) / n;
+          const dist = Math.abs(progress - center);
+          const opacity = Math.max(0, 1 - dist * n * 1.15);
+          const scale = 1.12 - Math.min(0.12, dist * n * 0.12);
+          const active = opacity > 0.55;
+          return (
+            <div key={i} className="absolute inset-0" style={{ opacity }}>
+              <div className="h-full w-full bg-cover bg-center" style={{ backgroundImage: 'url(' + s.image + ')', transform: 'scale(' + scale.toFixed(3) + ')' }} />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-black/20" />
+              {(s.title || s.caption) && (
+                <div className="absolute inset-x-0 bottom-0 p-8 sm:p-16 text-white">
+                  <div style={{ transform: active ? 'translateY(0)' : 'translateY(24px)', opacity: active ? 1 : 0, transition: 'transform 0.6s cubic-bezier(0.16,1,0.3,1), opacity 0.6s' }}>
+                    {s.eyebrow && <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-white/70">{s.eyebrow}</p>}
+                    {s.title && <h2 className="font-display text-4xl font-bold sm:text-6xl">{s.title}</h2>}
+                    {s.caption && <p className="mt-3 max-w-xl text-white/80">{s.caption}</p>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+`;
+
+// SMOOTH SCROLL — Lenis provider. Buttery inertial scrolling is the invisible foundation under every
+// award-site feel; wrap the app (or a marketing page) in it once. Gracefully no-ops for reduced-motion.
+const SMOOTHSCROLL_TSX = `import { useEffect, type ReactNode } from 'react';
+import Lenis from 'lenis';
+
+/** Wrap a page/app once: <SmoothScroll><Routes/></SmoothScroll>. Inertial scroll, rAF-driven. */
+export function SmoothScroll({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    if (typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const lenis = new Lenis({ duration: 1.1, smoothWheel: true });
+    let raf = 0;
+    const loop = (t: number) => { lenis.raf(t); raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => { cancelAnimationFrame(raf); lenis.destroy(); };
+  }, []);
+  return <>{children}</>;
+}
+`;
+
 const ERRORBOUNDARY_TSX = `import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 /**
@@ -1494,6 +1789,9 @@ export * from './Pagination';
 export * from './Table';
 export * from './Reveal';
 export * from './Motion';
+export * from './SmoothScroll';
+export * from './ScrollSequence';
+export * from './ScrollScenes';
 export * from './ErrorBoundary';
 `;
 
@@ -1521,8 +1819,12 @@ const KIT: ScaffoldFile[] = [
   { path: '/src/components/ui/Table.tsx', content: TABLE_TSX },
   { path: '/src/components/ui/Reveal.tsx', content: REVEAL_TSX },
   { path: '/src/components/ui/Motion.tsx', content: MOTION_TSX },
+  { path: '/src/components/ui/SmoothScroll.tsx', content: SMOOTHSCROLL_TSX },
+  { path: '/src/components/ui/ScrollSequence.tsx', content: SCROLLSEQUENCE_TSX },
+  { path: '/src/components/ui/ScrollScenes.tsx', content: SCROLLSCENES_TSX },
   { path: '/src/components/ui/ErrorBoundary.tsx', content: ERRORBOUNDARY_TSX },
   { path: '/src/lib/scroll.ts', content: SCROLL_TS },
+  { path: '/src/lib/interactions.ts', content: INTERACTIONS_TS },
   { path: '/src/components/ui/index.ts', content: UI_INDEX_TS },
 ];
 

@@ -11,6 +11,7 @@ export const BRAIN_PATH = '/.fableforge/brain.md';
 export const MAP_PATH = '/.fableforge/project-map.md';
 export const ROADMAP_PATH = '/.fableforge/roadmap.md';
 export const IDEATION_PATH = '/.fableforge/ideation.md';
+export const ASSETS_PATH = '/.fableforge/assets.md';
 /** Files under this prefix are project metadata, not app source. */
 export const META_PREFIX = '/.fableforge/';
 

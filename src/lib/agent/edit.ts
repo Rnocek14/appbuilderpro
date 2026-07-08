@@ -10,7 +10,7 @@ import { resolveAI } from '../aiConfig';
 import { recordUsage, tagUsageSince, estimateCost } from '../usage';
 import { AGENT_BUILD_SYSTEM } from '../prompts';
 import { runQA, issuesToFixRequest } from '../projectQA';
-import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
+import { ASSETS_PATH, BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
 import { PREFS_PATH, prefsContext } from '../preferences';
 import { previewContext } from '../previewRuntime';
 import { MAIN_THREAD_ID, threadOf } from '../threads';
@@ -203,6 +203,7 @@ export async function agenticEdit(
   const brain = all.find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const map = all.find((f) => f.path === MAP_PATH)?.content ?? '';
   const roadmap = all.find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const assetsMd = all.find((f) => f.path === ASSETS_PATH)?.content?.trim() ?? '';
   const prefs = all.find((f) => f.path === PREFS_PATH)?.content ?? '';
 
   const { data: history } = await supabase
@@ -220,7 +221,7 @@ export async function agenticEdit(
   // Build the opening turn: context + the file TREE (not contents — the agent pulls what it needs).
   const tree = [...files.keys()].sort().join('\n') || '(empty project)';
   const preamble = [
-    brainContext(brain), mapContext(map), roadmapContext(roadmap), prefsContext(prefs),
+    brainContext(brain), mapContext(map), roadmapContext(roadmap), assetsMd, prefsContext(prefs),
     previewContext(),
     historyText ? `RECENT CONVERSATION:\n${historyText}` : '',
     `PROJECT FILES (call read_file to see any of these):\n${tree}`,

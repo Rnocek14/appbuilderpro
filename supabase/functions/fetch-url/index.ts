@@ -4,6 +4,11 @@
 // injection into the model's context. Browser can't do this itself (CORS), and doing it here
 // keeps a single hardened fetch path (SSRF guard, size/time caps).
 //
+// Also the ASSET-HARVEST endpoint (same hardened fetch path, so one SSRF guard covers all):
+//   mode 'images' — extract the image URLs from a page (migrating photos off an old site).
+//   mode 'save'   — download ONE image and copy it into the user's project-assets storage +
+//                   manifest row, so it survives the source site going away.
+//
 // Deploy: npx supabase functions deploy fetch-url
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -57,6 +62,50 @@ function extractText(html: string): { title: string; description: string; text: 
   return { title, description, text };
 }
 
+// ---------------------------------------------------------------------------
+// Asset harvest
+// ---------------------------------------------------------------------------
+
+const MAX_IMAGES = 60;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+// Skip obvious non-content images (pixels, spacers, tiny icons) by URL fingerprint.
+const IMG_SKIP = /pixel|spacer|blank\.|1x1|favicon|tracking|badge|\.svg(\?|$)/i;
+
+/** Extract likely-content image URLs (+alt) from a page's HTML, absolutized against the page. */
+function extractImages(html: string, base: string): { url: string; alt: string }[] {
+  const found = new Map<string, string>();
+  const add = (raw: string | undefined, alt = '') => {
+    if (!raw) return;
+    const candidate = raw.trim().split(/\s+/)[0]; // first srcset entry
+    if (!candidate || candidate.startsWith('data:')) return;
+    try {
+      const abs = new URL(candidate, base);
+      if (!isAllowed(abs) || IMG_SKIP.test(abs.href)) return;
+      if (!found.has(abs.href)) found.set(abs.href, alt);
+    } catch { /* unparseable src — skip */ }
+  };
+  // og:image first — it's the page's chosen hero.
+  add(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i.exec(html)?.[1]
+    ?? /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i.exec(html)?.[1], 'page hero');
+  for (const m of html.matchAll(/<img\b[^>]*>/gi)) {
+    const tag = m[0];
+    const alt = decodeEntities(/\balt=["']([^"']*)["']/i.exec(tag)?.[1] ?? '');
+    add(/\bsrcset=["']([^"']+)["']/i.exec(tag)?.[1], alt);
+    add(/\bsrc=["']([^"']+)["']/i.exec(tag)?.[1], alt);
+    add(/\bdata-src=["']([^"']+)["']/i.exec(tag)?.[1], alt); // lazy-load libraries
+  }
+  for (const m of html.matchAll(/<source\b[^>]*srcset=["']([^"']+)["']/gi)) add(m[1]);
+  for (const m of html.matchAll(/background(?:-image)?\s*:\s*url\((['"]?)([^'")]+)\1\)/gi)) add(m[2]);
+  return [...found].slice(0, MAX_IMAGES).map(([url, alt]) => ({ url, alt }));
+}
+
+/** Filename for a saved copy: keep the source basename, sanitized, uniqued by timestamp. */
+function assetFileName(u: URL): string {
+  const base = (u.pathname.split('/').pop() || 'image').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  const named = /\.[a-z0-9]{2,5}$/i.test(base) ? base : `${base}.jpg`;
+  return `${Date.now()}-${named}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const json = (b: unknown, status = 200) =>
@@ -72,11 +121,43 @@ Deno.serve(async (req) => {
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
-    const { url: raw } = (await req.json().catch(() => ({}))) as { url?: string };
+    const { url: raw, mode, projectId } = (await req.json().catch(() => ({}))) as
+      { url?: string; mode?: 'text' | 'images' | 'save'; projectId?: string };
     if (!raw) return json({ error: 'url is required' }, 400);
     let url: URL;
     try { url = new URL(raw); } catch { return json({ error: 'Invalid URL' }, 400); }
     if (!isAllowed(url)) return json({ error: 'This URL cannot be fetched.' }, 400);
+
+    // ---- mode 'save': copy ONE image into the user's project-assets storage + manifest ----
+    if (mode === 'save') {
+      if (!projectId) return json({ error: 'projectId is required' }, 400);
+      const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+      const { data: proj } = await admin.from('projects').select('id, owner_id').eq('id', projectId).single();
+      if (!proj || proj.owner_id !== user.id) return json({ error: 'Project not found.' }, 404);
+
+      const ac0 = new AbortController();
+      const t0 = setTimeout(() => ac0.abort(), 20_000);
+      let img: Response;
+      try {
+        img = await fetch(url.href, { signal: ac0.signal, redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+      } finally { clearTimeout(t0); }
+      if (!img.ok) return json({ error: `The image returned ${img.status}.` }, 200);
+      const ctype = img.headers.get('content-type') ?? '';
+      if (!ctype.startsWith('image/')) return json({ error: 'That URL is not an image.' }, 200);
+      const bytes = new Uint8Array(await img.arrayBuffer());
+      if (bytes.byteLength > MAX_IMAGE_BYTES) return json({ error: 'Image is larger than 8MB.' }, 200);
+
+      const path = `${user.id}/${projectId}/${assetFileName(url)}`;
+      const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: ctype, upsert: false });
+      if (up.error) return json({ error: up.error.message }, 200);
+      const publicUrl = admin.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
+      const name = path.split('/').pop()!;
+      const { data: row, error: insErr } = await admin.from('project_assets')
+        .insert({ owner_id: user.id, project_id: projectId, name, url: publicUrl, alt: '', source: 'harvest' })
+        .select('*').single();
+      if (insErr) return json({ error: insErr.message }, 200);
+      return json({ asset: row });
+    }
 
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 15_000);
@@ -95,6 +176,13 @@ Deno.serve(async (req) => {
 
     const type = res.headers.get('content-type') ?? '';
     const bodyRaw = (await res.text()).slice(0, MAX_BODY);
+
+    // ---- mode 'images': list the page's likely-content images for the harvest picker ----
+    if (mode === 'images') {
+      if (!/html/.test(type)) return json({ images: [], url: res.url || url.href });
+      return json({ images: extractImages(bodyRaw, res.url || url.href), url: res.url || url.href });
+    }
+
     if (/json|text\/plain|csv|xml/.test(type) && !/html/.test(type)) {
       // Raw data responses (APIs, feeds, files) pass through as-is, capped.
       return json({ url: res.url || url.href, title: url.hostname, description: '', text: bodyRaw.slice(0, MAX_TEXT), contentType: type });

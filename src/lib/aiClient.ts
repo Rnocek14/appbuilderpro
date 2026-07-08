@@ -17,7 +17,7 @@ import { SCAFFOLD_FILES, SCAFFOLD_PATHS, THEME_FOUNDATION, UI_INDEX_THEMETOGGLE_
 import { buildIndexCss, buildIndexCssForDesign, parseDesignSpec, getPreset } from './themePresets';
 import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
-import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
+import { ASSETS_PATH, BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
 import { runQA, issuesToFixRequest, type QAIssue } from './projectQA';
 import { missingLocalModules, looksTruncated } from './qaCheck';
 import { MISSING_FILE_SYSTEM, missingFilePrompt } from './prompts';
@@ -1345,6 +1345,7 @@ async function directEdit(projectId: string, message: string, previewError?: str
   const brainNs = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const mapNs = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const roadmapNs = (files ?? []).find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const assetsNs = (files ?? []).find((f) => f.path === ASSETS_PATH)?.content?.trim() ?? '';
   const prefsNs = (files ?? []).find((f) => f.path === PREFS_PATH)?.content ?? '';
   const appFilesNs = (files ?? []).filter((f) => !isMetaFile(f.path));
   const debugNs = previewError
@@ -1352,7 +1353,7 @@ async function directEdit(projectId: string, message: string, previewError?: str
     : '';
   const raw = await rawComplete([
     { role: 'system', content: EDIT_SYSTEM },
-    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + roadmapContext(roadmapNs) + prefsContext(prefsNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) + previewContext() + debugNs },
+    { role: 'user', content: brainContext(brainNs) + mapContext(mapNs) + roadmapContext(roadmapNs) + (assetsNs ? assetsNs + '\n\n' : '') + prefsContext(prefsNs) + editPrompt(contextPayload(appFilesNs, message, previewError ?? ''), message, previewError, historyText) + previewContext() + debugNs },
   ], 16000);
   const parsed = await parseJsonWithRepair<{
     action?: string; explanation?: string; question?: string; options?: string[];
@@ -1778,13 +1779,14 @@ async function directEditStream(
   const brain = (files ?? []).find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const map = (files ?? []).find((f) => f.path === MAP_PATH)?.content ?? '';
   const roadmap = (files ?? []).find((f) => f.path === ROADMAP_PATH)?.content ?? '';
+  const assetsMd = (files ?? []).find((f) => f.path === ASSETS_PATH)?.content?.trim() ?? '';
   const prefs = (files ?? []).find((f) => f.path === PREFS_PATH)?.content ?? '';
   const appFiles = (files ?? []).filter((f) => !isMetaFile(f.path));
   const ai = resolveAI();
   let streamUsage: Usage = { inputTokens: 0, outputTokens: 0 };
   await streamComplete([
     { role: 'system', content: EDIT_SYSTEM_STREAM },
-    { role: 'user', content: brainContext(brain) + mapContext(map) + roadmapContext(roadmap) + prefsContext(prefs) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + previewContext() + planDirective + debugDirective },
+    { role: 'user', content: brainContext(brain) + mapContext(map) + roadmapContext(roadmap) + (assetsMd ? assetsMd + '\n\n' : '') + prefsContext(prefs) + editPrompt(contextPayload(appFiles, message, previewError ?? ''), message, previewError, historyText) + previewContext() + planDirective + debugDirective },
   ], 16000, (delta) => parser.push(delta), image, (u) => { streamUsage = u; }, signal);
   const result = parser.end();
   // Attribute this turn's token cost to the assistant message we're about to insert.
