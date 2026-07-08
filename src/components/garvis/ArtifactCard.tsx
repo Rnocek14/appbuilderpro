@@ -3,7 +3,7 @@
 // version pills reveal a diff against the current version and let you restore an older one (which is
 // itself a new version, so nothing is ever lost).
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FileText, History, RotateCcw, Loader2 } from 'lucide-react';
 import { Badge } from '../ui';
 import { cn } from '../../lib/utils';
@@ -17,9 +17,19 @@ export function ArtifactCard({ artifact, onChanged }: { artifact: StudioArtifact
   const [diffAgainst, setDiffAgainst] = useState<ArtifactVersion | null>(null);
   const [restoring, setRestoring] = useState(false);
 
+  // Invalidate all cached version state whenever the artifact changes (a revise/restore bumps
+  // revision and creates a new snapshot) — otherwise the pill list is stale and an open diff would
+  // silently recompute against a new "current".
+  useEffect(() => {
+    setVersions(null);
+    setShowVersions(false);
+    setDiffAgainst(null);
+  }, [artifact.revision]);
+
   const loadVersions = useCallback(async () => {
     if (versions) { setShowVersions((s) => !s); return; }
-    try { setVersions(await listVersions(artifact.id)); setShowVersions(true); } catch { setVersions([]); }
+    // On failure leave versions null (not []) so the button retries instead of caching a dead state.
+    try { setVersions(await listVersions(artifact.id)); setShowVersions(true); } catch { setVersions(null); }
   }, [artifact.id, versions]);
 
   const restore = async (v: ArtifactVersion) => {

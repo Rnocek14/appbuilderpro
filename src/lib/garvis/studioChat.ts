@@ -8,7 +8,7 @@ import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
 import { createArtifact, reviseArtifact, listClusterArtifacts, listClusterFiles, getBrandKit, listStudioMessages, saveStudioMessage } from './artifacts';
 import {
-  STUDIO_SYSTEM, compileStudioContext, parseStudioDecision, describeDecision,
+  STUDIO_SYSTEM, compileStudioContext, parseStudioDecision,
   type StudioContextInput, type StudioDecision, type StudioTurn,
 } from './clusterChat';
 import type { Charter, WorkTool } from './workweb';
@@ -84,7 +84,9 @@ export async function runStudioTurn(clusterId: string, ctx: StudioContextInput, 
   const decision = parseStudioDecision(raw);
   const result = await executeDecision(clusterId, decision);
 
-  await saveStudioMessage(clusterId, 'garvis', describeDecision(decision), decision, costUsd);
+  // Persist the SAME text the user saw (result.reply), not describeDecision — the revise-fallback
+  // path produces reply text that differs from the raw note, and the transcript must match the bubble.
+  await saveStudioMessage(clusterId, 'garvis', result.reply, decision, costUsd);
   return { decision, ...result, costUsd };
 }
 
@@ -103,8 +105,10 @@ async function executeDecision(clusterId: string, decision: StudioDecision): Pro
 
     case 'revise_artifact': {
       // Find the artifact by slug within this cluster; revise (the DB trigger snapshots v-prev).
+      // Match id too: loadStudioContext advertises slug-less artifacts by their uuid, so the model
+      // may return the uuid as "slug" — matching only raw slug would miss them and duplicate.
       const arts = await listClusterArtifacts(clusterId);
-      const target = arts.find((a) => a.slug === decision.slug);
+      const target = arts.find((a) => a.slug === decision.slug || a.id === decision.slug);
       if (!target) {
         // Slug didn't match — fall back to creating it so the work isn't lost.
         await createArtifact({ clusterId, slug: decision.slug, kind: 'doc', title: decision.title ?? decision.slug, detail: decision.detail });

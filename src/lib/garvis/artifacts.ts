@@ -52,8 +52,9 @@ export async function listVersions(artifactId: string): Promise<ArtifactVersion[
   return (data ?? []) as ArtifactVersion[];
 }
 
-/** Revise an artifact — the trigger snapshots the old content and bumps revision. */
-export async function reviseArtifact(artifactId: string, patch: { title?: string; detail: string; source?: string }): Promise<void> {
+/** Revise an artifact — the trigger snapshots the old content and bumps revision. detail may be null
+ *  so a restore of a version with no detail preserves NULL instead of rewriting it as ''. */
+export async function reviseArtifact(artifactId: string, patch: { title?: string; detail: string | null; source?: string }): Promise<void> {
   const { error } = await supabase.from('knowledge_artifacts').update({
     detail: patch.detail,
     ...(patch.title ? { title: patch.title } : {}),
@@ -64,7 +65,7 @@ export async function reviseArtifact(artifactId: string, patch: { title?: string
 
 /** Restore an old version — itself a revision, so the pre-restore state is preserved too. */
 export async function restoreVersion(artifactId: string, version: ArtifactVersion): Promise<void> {
-  await reviseArtifact(artifactId, { title: version.title, detail: version.detail ?? '', source: 'restore' });
+  await reviseArtifact(artifactId, { title: version.title, detail: version.detail, source: 'restore' });
 }
 
 /** Create a new artifact in a cluster with a stable, collision-safe slug. */
