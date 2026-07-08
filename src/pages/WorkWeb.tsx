@@ -17,6 +17,7 @@ import { ARCHETYPES, type CharterStatus, type WorkTool } from '../lib/garvis/wor
 import { templateById } from '../lib/garvis/workweb';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, type StudioArtifact, type ClusterFile } from '../lib/garvis/artifacts';
+import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 
@@ -38,6 +39,31 @@ export default function WorkWeb() {
   const [busyTool, setBusyTool] = useState<string | null>(null);
   const [uploadFor, setUploadFor] = useState<WebCluster | null>(null);
   const [queueFor, setQueueFor] = useState<WebCluster | null>(null);
+  const [intel, setIntel] = useState<WorldIntelligenceRow | null>(null);
+  const [reflecting, setReflecting] = useState(false);
+
+  // The heartbeat updates when observed: refresh the deterministic Living State on open, then read.
+  useEffect(() => {
+    let live = true;
+    void refreshWorldIntelligence(worldId)
+      .then(() => getWorldIntelligence(worldId))
+      .then((row) => { if (live) setIntel(row); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [worldId]);
+
+  const doReflect = async () => {
+    setReflecting(true);
+    try {
+      const r = await reflectOnWorld(worldId);
+      toast(r.ok ? 'success' : 'info', r.message);
+      if (r.ok) setIntel(await getWorldIntelligence(worldId));
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Reflection failed.');
+    } finally {
+      setReflecting(false);
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -126,6 +152,22 @@ export default function WorkWeb() {
           <Waypoints size={20} className="text-forge-ember" />
           <h1 className="text-xl font-semibold text-forge-ink">{web.title}</h1>
           <div className="ml-auto flex items-center gap-2">
+            {intel?.state?.momentum && (
+              <span
+                title={`${intel.state.momentum.evidence} — derived from counts, never an opinion`}
+                className={cn(
+                  'rounded-lg border px-2.5 py-1 text-xs font-medium',
+                  intel.state.momentum.label === 'surging' ? 'border-forge-ember/50 text-forge-ember'
+                  : intel.state.momentum.label === 'steady' ? 'border-forge-ok/40 text-forge-ok'
+                  : 'border-forge-border text-forge-dim',
+                )}
+              >{intel.state.momentum.label}</span>
+            )}
+            <button
+              onClick={() => void doReflect()} disabled={reflecting}
+              title="Garvis reviews this world's record — what was tried, what the evidence says, what should change. Evidence-gated: lessons without proof are dropped."
+              className="rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-50"
+            >{reflecting ? 'reflecting…' : 'Reflect'}</button>
             <StatChip label="artifacts" value={web.rollup.artifacts} />
             <StatChip label="waiting" value={web.rollup.pendingApprovals} tone="warn" />
             <StatChip label="sent" value={web.rollup.messagesSent} />

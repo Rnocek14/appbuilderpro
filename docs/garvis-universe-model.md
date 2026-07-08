@@ -261,9 +261,51 @@ door (replacing the old text greeting — two greetings is a notification center
   → compounding intelligence. Every AI starts every morning at zero; Garvis starts at yesterday.
   Every feature is judged by whether it creates momentum.
 
-**Next: Sprint M (memory quality) before P2** — the mornings are now bounded by memory quality.
-Scope: world/mission summaries (compiled, budget-bounded, stored on `knowledge_worlds.mind`),
-digest-grade artifact summaries, near-duplicate suppression in insights, retrieval ranking
-(recency × salience × similarity), and why-this-matters generation for ingested documents — each
-feeding the waking moment per Rule 6. Then P2 (the System altitude) inherits a star that actually
-knows its objective, campaigns, warm leads, and discoveries.
+**Round-6 refinements (adopted — Sprint M expanded from "memory quality" to "Living Memory"):**
+- **Living State, not just stored documents.** Each world carries a compiled understanding —
+  objective, strategy, blockers, risks, momentum, open questions — where every item is an
+  `{text, evidence}` pair. An item without evidence does not exist. Momentum is a DERIVED label
+  (surging/steady/slowing/dormant) computed from counted signals (sends, replies, events,
+  artifacts), never an opinion.
+- **Implications, not just events.** Memory that only records what happened is a logbook.
+  Understanding = "what does this mean for the mission?" Implications enter only through the
+  Reflection engine, and only with evidence attached.
+- **Every world has a heartbeat** — six standing questions asked of its state on every refresh:
+  What changed? What does it mean? What's blocked? What's the risk? What's the next move? What
+  don't we know yet? The last one feeds `open_questions`, which surface in the waking moment.
+- **The Reflection engine** — a deliberate learning pass (due when a world has real activity,
+  ≥5 events AND >7 days since last reflection; never on a dead world). It runs through the same
+  `cluster-chat` seam under a strict contract: JSON only, every item carries evidence, items
+  without evidence are DELETED by the parser, never invent numbers. Its output merges into the
+  world's implications and open questions and lands as a `mind_events` note — reflection itself
+  is on the record.
+- **The Morning Test (Rule 6, operationalized):** *Garvis starts every morning with a better
+  understanding of yesterday.* Not just "the waking moment got smarter" — the UNDERSTANDING
+  persisted. If a feature's output isn't queryable the next morning, it didn't happen.
+
+**Sprint M — SHIPPED on this branch (World Intelligence + Living State + Reflection):**
+- `supabase/migrations/app_0027_world_intelligence.sql` — `world_intelligence`, one row per world
+  (unique world_id): `state` (Living State jsonb), `implications`, `open_questions`,
+  `recommendation`, `reflection`, `signals`, `last_reflected_at`. Owner-scoped RLS.
+- `src/lib/garvis/worldIntel.ts` (pure, 25-check verify) — `compileLivingState`, `momentumFrom`
+  (counted-signal label + evidence string), `heartbeat` (the six questions), `parseReflection`
+  (the evidence gate), `reflectionDue`, `buildReflectionContext` (byte-budgeted).
+- `src/lib/garvis/worldIntelRun.ts` (impure) — `gather` counts ONLY events tagged with the
+  world's id (undercounting is honest; guessing is not), `refreshWorldIntelligence` upserts the
+  deterministic state on every world open, `reflectOnWorld` runs the AI pass through cluster-chat.
+- Waking moment integration per Rule 6: two new move kinds — `reflection_due` (value 45; "worth
+  a reflection — N events since the last one") and `intel_stale` (value 30; a world moving on
+  aged research). Both carry structural/measured bases like every other move.
+- WorkWeb header: momentum chip (tooltip declares it derived from counts) + Reflect button;
+  intelligence refreshes on every world open, so the row is never older than the last visit.
+
+**Deferred from the Sprint M lock (honest scorekeeping):** retrieval ranking
+(recency × salience × similarity), insight near-duplicate suppression, why-this-matters at
+ingest time, and digest-grade artifact summaries. Each is additive to the shipped spine and
+none blocks P2.
+
+**The locked roadmap:** Sprint M — Living Memory (this) → **P2 System Altitude** (the orbital
+view over real rows: planets from chartered clusters, comets from the Next Move engine, the
+nebula ring from the capability registry) → **P3 Universe** (the full sky). Order is fixed;
+each altitude inherits a star that actually knows its objective, campaigns, warm leads, and
+discoveries.

@@ -18,6 +18,8 @@ const KIND_DOT: Record<NextMove['kind'], string> = {
   natural_next: 'bg-forge-ember',
   blocking_empty: 'bg-forge-warn',
   insight_connection: 'bg-[#B98CE0]',
+  reflection_due: 'bg-[#B98CE0]',
+  intel_stale: 'bg-forge-warn',
 };
 
 export function WakingMoment({ name }: { name: string }) {

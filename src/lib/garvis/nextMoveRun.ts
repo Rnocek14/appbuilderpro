@@ -6,9 +6,10 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
-  type NextMove, type Dismissals, type AwayLine, type FloorIn,
+  collectNaturalNext, collectWorldIntel, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn,
 } from './nextMove';
+import { reflectionDue } from './worldIntel';
 import { parseCharter } from './workweb';
 
 const KEY_LAST_SEEN = 'ff:waking:last-seen';
@@ -99,6 +100,7 @@ export async function loadWakingDigest(name: string): Promise<WakingDigest> {
   const worldIds = [...new Set(clusters.map((c) => c.world_id as string))];
   const floors: FloorIn[] = [];
   const artsByWorld = new Map<string, number>();
+  const titleOfWorld = new Map<string, string>();
   if (worldIds.length) {
     const [{ count: contactCount }, { data: kits }, { data: worlds }, { data: arts }] = await Promise.all([
       supabase.from('contacts').select('id', { count: 'exact', head: true }),
@@ -108,6 +110,7 @@ export async function loadWakingDigest(name: string): Promise<WakingDigest> {
     ]);
     const kitWorlds = new Set((kits ?? []).map((k) => k.world_id as string));
     const titleByWorld = new Map((worlds ?? []).map((w) => [w.id as string, w.title as string]));
+    for (const [k, v] of titleByWorld) titleOfWorld.set(k, v);
     const artCount = new Map<string, number>();
     const worldByCluster = new Map(clusters.map((c) => [c.id as string, c.world_id as string]));
     for (const a of arts ?? []) {
@@ -144,7 +147,37 @@ export async function loadWakingDigest(name: string): Promise<WakingDigest> {
     };
   });
 
+  // World intelligence (Sprint M): reflection nudges + stale-intel risks, from the persisted rows.
+  const intelMoves: WorldIntelIn[] = [];
+  if (worldIds.length) {
+    const { data: intel } = await supabase.from('world_intelligence')
+      .select('world_id, last_reflected_at, signals, open_questions').in('world_id', worldIds);
+    const eventsByWorld = new Map<string, number>();
+    for (const e of events) {
+      const p = (e as { payload?: Record<string, unknown> | null }).payload;
+      const wid = p && typeof p.world_id === 'string' ? p.world_id : null;
+      if (wid && now.getTime() - new Date(e.occurred_at as string).getTime() < 7 * 24 * 3_600_000) {
+        eventsByWorld.set(wid, (eventsByWorld.get(wid) ?? 0) + 1);
+      }
+    }
+    for (const row of intel ?? []) {
+      const wid = row.world_id as string;
+      const signals = (row.signals as { intelAgeDays?: number | null } | null) ?? {};
+      const ev7 = eventsByWorld.get(wid) ?? 0;
+      intelMoves.push({
+        worldId: wid,
+        worldTitle: titleOfWorld.get(wid) ?? 'A mission',
+        reflectionDueNow: reflectionDue((row.last_reflected_at as string | null) ?? null, ev7, now),
+        events7d: ev7,
+        intelAgeDays: signals.intelAgeDays ?? null,
+        topOpenQuestion: ((row.open_questions as string[] | null) ?? [])[0] ?? null,
+        asOf: now.toISOString(),
+      });
+    }
+  }
+
   const moves = rankMoves([
+    ...collectWorldIntel(intelMoves),
     ...collectReplies(replies.map((r) => ({
       id: r.id as string, from_address: r.from_address as string | null, subject: r.subject as string | null,
       classification: r.classification as string, received_at: r.received_at as string,

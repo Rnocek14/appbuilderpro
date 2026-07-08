@@ -6,7 +6,7 @@
 
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals,
 } from './nextMove';
 
@@ -125,6 +125,26 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   ], null);
   check('weave: different campaigns never get connected (narrative is a join, not a guess)',
     !unwoven.some((l) => l.text.startsWith('That send worked —')));
+}
+
+// 6. Sprint M: world intelligence feeds the morning (Rule 6 made literal).
+{
+  const rows = collectWorldIntel([
+    { worldId: 'w1', worldTitle: 'Mom Real Estate', reflectionDueNow: true, events7d: 9, intelAgeDays: 21, topOpenQuestion: 'Lakefront or move-up sellers?', asOf: hoursAgo(0) },
+    { worldId: 'w2', worldTitle: 'Quiet World', reflectionDueNow: false, events7d: 1, intelAgeDays: 3, topOpenQuestion: null, asOf: hoursAgo(0) },
+  ]);
+  check('reflection-due surfaces with the counted event evidence + open question', (() => {
+    const r = rows.find((m) => m.key === 'reflect:w1');
+    return !!r && r.why.includes('9 recorded events') && r.why.includes('Lakefront or move-up');
+  })());
+  check('stale intel surfaces with its age as evidence', (() => {
+    const r = rows.find((m) => m.key === 'intel:w1');
+    return !!r && r.title.includes('21 days old');
+  })());
+  check('a quiet, fresh world produces no intelligence moves', !rows.some((m) => m.key.endsWith('w2')));
+  const mk2 = (kind: NextMove['kind'], key: string): NextMove => ({ key, kind, title: key, why: 'w', action: { label: 'l', route: '/' }, score: 0, bornAt: hoursAgo(2) });
+  const order = rankMoves([mk2('reflection_due', 'ref'), mk2('reply_unanswered', 'rep'), mk2('intel_stale', 'int'), mk2('insight_connection', 'ins')], NOW);
+  check('ranking: reply > reflection > insight > stale-intel', order.map((m) => m.key).join(',') === 'rep,ref,ins,int', order.map((m) => m.key).join(','));
 }
 
 console.log(`\nnextMove.verify: ${passed} passed, ${failed} failed`);

@@ -24,7 +24,9 @@ export type MoveKind =
   | 'followup_staged'    // curated drafts ready to queue
   | 'natural_next'       // a play finished; nothing queued from its outputs
   | 'blocking_empty'     // structural floor: an empty area blocks a live one (needs no history)
-  | 'insight_connection';// "Garvis noticed" — the brain found a link
+  | 'insight_connection' // "Garvis noticed" — the brain found a link
+  | 'reflection_due'     // enough happened in a world that a reflection would teach something
+  | 'intel_stale';       // the world's research is old enough to mislead
 
 export interface NextMove {
   key: string;                 // stable identity for dedupe + dismissal
@@ -152,6 +154,43 @@ export function collectFloor(rows: FloorIn[]): NextMove[] {
   return out;
 }
 
+export interface WorldIntelIn {
+  worldId: string; worldTitle: string;
+  reflectionDueNow: boolean; events7d: number;
+  intelAgeDays: number | null;
+  topOpenQuestion: string | null;
+  asOf: string;
+}
+
+/** Rule 6 made literal: the intelligence layer feeds the morning. */
+export function collectWorldIntel(rows: WorldIntelIn[]): NextMove[] {
+  const out: NextMove[] = [];
+  for (const w of rows) {
+    if (w.reflectionDueNow) {
+      out.push({
+        key: `reflect:${w.worldId}`,
+        kind: 'reflection_due',
+        title: `${w.worldTitle}: a week's worth of work is worth a reflection`,
+        why: `${w.events7d} recorded events since the last reflection${w.topOpenQuestion ? ` — and one question is still open: "${short(w.topOpenQuestion, 80)}"` : ''}. Lessons compound only if they're written down.`,
+        action: { label: 'Reflect now', route: `/garvis/webs/${w.worldId}` },
+        score: 0, bornAt: w.asOf,
+        expected: { text: 'A reflection turns this week\'s record into next week\'s strategy.', basis: 'structural' },
+      });
+    }
+    if (w.intelAgeDays != null && w.intelAgeDays > 14) {
+      out.push({
+        key: `intel:${w.worldId}`,
+        kind: 'intel_stale',
+        title: `${w.worldTitle}: the market intel is ${Math.round(w.intelAgeDays)} days old`,
+        why: `Campaigns are quoting research from ${Math.round(w.intelAgeDays)} days ago. Decisions age with their data.`,
+        action: { label: 'Refresh the research', route: `/garvis/webs/${w.worldId}` },
+        score: 0, bornAt: w.asOf,
+      });
+    }
+  }
+  return out;
+}
+
 export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
   return rows
     .filter((m) => m.artifactCount > 0 && m.sendsQueued === 0)
@@ -176,7 +215,9 @@ const BASE_VALUE: Record<MoveKind, number> = {
   natural_next: 60,
   followup_staged: 55,
   blocking_empty: 50,
+  reflection_due: 45,      // learning compounds — but a warm reply still comes first
   insight_connection: 40,
+  intel_stale: 30,
 };
 
 const HOUR = 3_600_000;
