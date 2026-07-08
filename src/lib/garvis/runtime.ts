@@ -4,8 +4,9 @@
 // agent_runs row, and enforcing a hard budget cap. This is the job-worker pattern generalized to
 // the portfolio. It carries NO reasoning of its own — the model seam decides what to do.
 //
-// Runs client-side (supervised, like src/lib/autopilot.ts), which fits this app's direct mode. An
-// unattended edge variant (Deno + cron + service-role claim) is the documented follow-up.
+// Runs client-side (supervised, like src/lib/autopilot.ts), which fits this app's direct mode.
+// The UNATTENDED variant exists: supabase/functions/garvis-worker (Deno + service-role claim via
+// claim_next_agent_run_service + optional pg_cron tick) — queued runs execute laptop-closed.
 
 import { supabase } from '../supabase';
 import type { AgentRun, GarvisCheckpoint } from '../../types';
