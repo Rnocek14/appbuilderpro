@@ -228,5 +228,19 @@ nearly free because `mind_events` is append-only and everything is timestamped; 
 a system. Ships as **P4** of the presentation track. Honest mass/health confirmed as already in
 the physics table. Six-scale astronomy taxonomy declined — three altitudes suffice.
 
+**Round-4 refinements (adopted):**
+- **Rule 3 broadened:** every pixel represents STATE — usually a table, sometimes derived; never
+  "it looks neat." A planet grows because artifacts:182 / connections:318, not because CSS says so.
+- **Rule 5 added:** every transition reduces FRICTION, not adds delight. If it animates, it must
+  make understanding easier.
+- **Every waking line answers "why should I care?"** Not "market changed" but "lakefront inventory
+  fell — this strengthens your seller campaign." The why carries evidence from the rows.
+- **The optimization target, named:** *Garvis optimizes intellectual momentum.* Explorer, Work,
+  the studios, the Next Move engine, the waking moment — all exist to keep the user moving.
+  Anything that doesn't serve momentum doesn't ship.
+
 **Status ruling:** the philosophy has converged. Further vision rounds risk decoration. The next
-unit of work is P1 (the waking moment) in the real app, against real rows.
+unit of work is P1 (the waking moment) in the real app, against real rows. **P1 SHIPPED on this
+branch:** `src/lib/garvis/nextMove.ts` (pure collectors/ranker/digest, 27-check verify),
+`nextMoveRun.ts` (row fetch, last-seen, dismissals), `WakingMoment.tsx` mounted as Command's front
+door (replacing the old text greeting — two greetings is a notification center, not a partner).
