@@ -12,6 +12,7 @@ import { Markdown } from '../Markdown';
 import { ModelPicker } from '../ModelPicker';
 import { RememberModal } from '../RememberModal';
 import { ThreadSwitcher } from './ThreadSwitcher';
+import { Embers } from './Embers';
 import type { Thread } from '../../lib/threads';
 import { captureScreenshot } from '../../lib/previewRuntime';
 import { costForMessage, subscribeUsage, formatUSD } from '../../lib/usage';
@@ -162,22 +163,24 @@ interface Props {
   onOpenAssets?: () => void;
 }
 
-/** Signature element: the forging strip — stages heat up as the agent works, each with its time. */
+/** Signature element: the forging strip — stages heat up as the agent works (each with its time),
+ *  smoldering embers rising through the card while the forge is hot. */
 function ForgeProgress({ gen }: { gen: Generation }) {
   const stages = gen.stages ?? [];
   const elapsed = useElapsedSec(gen.created_at);
   const running = stages.find((s) => s.status === 'running');
   const runningFor = useElapsedSec(running?.started_at ?? null);
   return (
-    <div className="rounded-xl border border-forge-ember/30 bg-forge-raised p-3 shadow-ember">
-      <div className="flex items-center gap-2">
+    <div className="relative overflow-hidden rounded-xl border border-forge-ember/30 bg-forge-raised p-3 shadow-ember">
+      <Embers className="opacity-70" />
+      <div className="relative flex items-center gap-2">
         <Ember size={15} />
         <span className="font-display text-sm font-medium">Forging your app</span>
         <span className="ml-auto font-mono text-[11px] text-forge-dim" title="Elapsed · stages done">
           {elapsed != null && `${fmtDur(elapsed)} · `}{stages.filter((s) => s.status === 'done').length}/{Object.keys(STAGE_LABELS).length}
         </span>
       </div>
-      <ul className="mt-2 space-y-1">
+      <ul className="relative mt-2 space-y-1">
         {Object.entries(STAGE_LABELS).map(([key, label]) => {
           const entry = stages.find((s) => s.stage === key);
           const state = entry?.status === 'done' ? 'done' : entry ? 'running' : 'pending';

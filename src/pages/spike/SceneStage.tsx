@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowRight, BookOpen, Compass, Hammer, HelpCircle, Loader2, Lock, Sparkles, Flame, Play } from 'lucide-react';
-import type { Cluster, Lead, LeadKind, Scene } from '../../lib/garvis/clustering';
+import type { Cluster, Lead, LeadKind, Scene, ScenePhase } from '../../lib/garvis/clustering';
 
 export interface StageCurrent { lead: Lead; ready: boolean; epiphany: number }
 
@@ -17,6 +17,8 @@ interface Props {
   scene: Scene | null;
   composing: boolean;
   partial: string;
+  /** which part of the scene is streaming right now — narrates progress after the gap paints */
+  partialPhase?: ScenePhase;
   hex: string;
   trail: string[];
   heroUrl?: string;
@@ -32,6 +34,14 @@ interface Props {
 
 // harmonized with GalaxyView — warm dig, one cool question-blue, one violet tangent
 const LEAD_HEX: Record<LeadKind, string> = { dig: '#F2A44D', question: '#5AA9E6', tangent: '#B98CE0' };
+
+// Spoiler-free narration for what's composing behind the visible gap text — keeps the stage
+// visibly alive through the long invisible tail (options/beats/currents) of the scene stream.
+const PHASE_LINE: Record<string, string> = {
+  guesses: 'shaping your guesses…',
+  reveal: 'sealing the answer…',
+  currents: 'scouting where this leads next…',
+};
 
 // pull the numeric part out of "200,000" / "~1.4 billion" for the count-up (keeps prefix/suffix)
 function splitNumber(v: string): { pre: string; num: number; post: string } | null {
@@ -87,7 +97,7 @@ function CountUp({ value, hex }: { value: string; hex: string }) {
   return <span style={{ color: hex, textShadow: `0 0 40px ${hex}88` }}>{parsed.pre}{shown}{parsed.post}</span>;
 }
 
-export default function SceneStage({ focus, scene, composing, partial, hex, trail, heroUrl, gallery, currents, onGuess, onDive, onOpenMedia, onConstellation, onDetails, onBuild }: Props) {
+export default function SceneStage({ focus, scene, composing, partial, partialPhase, hex, trail, heroUrl, gallery, currents, onGuess, onDive, onOpenMedia, onConstellation, onDetails, onBuild }: Props) {
   const revealed = !!scene && scene.guessed !== undefined;
   const recipe = scene?.recipe ?? 'reveal';
   const mystery = recipe === 'mystery';
@@ -209,10 +219,17 @@ export default function SceneStage({ focus, scene, composing, partial, hex, trai
       <div className="panel-scroll absolute inset-0 z-10 flex flex-col overflow-y-auto px-6 pt-24 sm:px-12" style={{ paddingBottom: currents.length ? 260 : 128 }}>
         <div className="mx-auto mt-auto w-full max-w-3xl">
 
-          {/* COMPOSING — the gap materializes as big type, not a spinner */}
+          {/* COMPOSING — the gap materializes as big type, not a spinner. Once the gap has fully
+              painted, the stream keeps composing invisibly (options/beats/currents), so a phase
+              line narrates that progress — otherwise the frozen cursor reads as a stalled answer. */}
           {composing && !scene && (
             partial
-              ? <p className="stg-rise font-display text-3xl font-semibold leading-tight text-white sm:text-4xl">{partial}<span className="ml-1 inline-block h-7 w-1.5 animate-pulse align-middle" style={{ background: hex }} /></p>
+              ? <div>
+                  <p className="stg-rise font-display text-3xl font-semibold leading-tight text-white sm:text-4xl">{partial}<span className="ml-1 inline-block h-7 w-1.5 animate-pulse align-middle" style={{ background: hex }} /></p>
+                  {partialPhase && PHASE_LINE[partialPhase] && (
+                    <p className="mt-4 flex items-center gap-2 text-sm text-white/55"><Loader2 size={13} className="animate-spin" /> {PHASE_LINE[partialPhase]}</p>
+                  )}
+                </div>
               : <div className="flex items-center gap-2 text-sm text-white/60"><Loader2 size={15} className="animate-spin" /> Garvis is walking into this idea…</div>
           )}
 

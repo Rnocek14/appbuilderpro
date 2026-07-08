@@ -23,6 +23,8 @@ import {
   addChild,
   parseScene,
   extractSceneField,
+  extractScenePartial,
+  repairTruncatedJson,
   sceneArtifact,
   sceneOf,
   type Cluster,
@@ -299,6 +301,39 @@ check('extractSceneField pulls prime from a partial stream', extractSceneField('
 check('extractSceneField pulls gap once it starts', extractSceneField('{"prime":"p","gap":"So who runs it', 'gap') === 'So who runs it');
 check('extractSceneField returns empty before the field appears', extractSceneField('{"prime":"p"', 'gap') === '');
 check('extractSceneField unescapes a quote', extractSceneField('{"gap":"she said \\"hi\\"', 'gap').includes('"'));
+
+// extractScenePartial — text + which part of the stream is composing (narrates the invisible tail)
+{
+  const early = extractScenePartial('{"recipe":"reveal","prime":"p","gap":"So who runs it');
+  check('scenePartial: gap phase while gap streams', early.text === 'So who runs it' && early.phase === 'gap');
+  const opts = extractScenePartial('{"prime":"p","gap":"g?","options":["a","b');
+  check('scenePartial: guesses phase once options start', opts.text === 'g?' && opts.phase === 'guesses');
+  const beats = extractScenePartial('{"prime":"p","gap":"g?","options":["a","b","c"],"answerIndex":1,"beats":["truth is');
+  check('scenePartial: reveal phase once beats start', beats.phase === 'reveal');
+  const curr = extractScenePartial('{"gap":"g?","beats":["b"],"regap":"r?","currents":[{"label":"next');
+  check('scenePartial: currents phase at the tail', curr.phase === 'currents');
+  check('scenePartial: empty before anything paints', extractScenePartial('{"recipe":"rev').phase === '');
+}
+
+// repairTruncatedJson — a max_tokens-cut stream still salvages its complete prefix
+{
+  const midString = '{"prime":"p","gap":"why?","options":["a","b","c"],"answerIndex":0,"beats":["the truth.","and it goes deep';
+  const s1 = parseScene(JSON.parse(repairTruncatedJson(midString)));
+  check('repair: mid-string cut parses to a scene', s1?.gap === 'why?' && s1?.beats.length === 2);
+  const danglingKey = '{"gap":"why?","beats":["b1","b2"],"rega';
+  const s2 = parseScene(JSON.parse(repairTruncatedJson(danglingKey)));
+  check('repair: dangling half-key is dropped', s2?.beats.length === 2);
+  const danglingColon = '{"gap":"why?","beats":["b"],"regap":';
+  const s3 = parseScene(JSON.parse(repairTruncatedJson(danglingColon)));
+  check('repair: dangling key-colon is dropped', s3?.gap === 'why?');
+  const midObject = '{"gap":"g?","beats":["b"],"currents":[{"label":"next thought","kind":"di';
+  const s4 = parseScene(JSON.parse(repairTruncatedJson(midObject)));
+  check('repair: cut inside a currents object keeps the label', s4?.currents[0]?.label === 'next thought');
+  const r5 = repairTruncatedJson('{"gap":"she said \\"hi\\" and then\\');
+  check('repair: trailing escape is dropped cleanly', (JSON.parse(r5) as { gap: string }).gap.includes('hi'));
+  const complete = '{"gap":"g?","beats":["b"]}';
+  check('repair: already-valid JSON passes through', JSON.stringify(JSON.parse(repairTruncatedJson(complete))) === JSON.stringify(JSON.parse(complete)));
+}
 
 console.log(`\nclustering.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} clustering check(s) failed`);

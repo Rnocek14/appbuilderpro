@@ -12,7 +12,7 @@ import { AGENT_TOOLS, executeAgentTool, type AgentToolContext } from './tools';
 
 /** One block of Anthropic message content (text / tool_use / server tool blocks). */
 interface Block { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }
-interface ModelResponse { content: Block[]; stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number }; error?: unknown }
+interface ModelResponse { content: Block[]; stop_reason?: string; usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }; error?: unknown }
 
 export interface AgentEvent {
   /** The model's latest visible reasoning/summary text (replace-in-place, like a stream). */
@@ -25,7 +25,7 @@ export interface AgentRunResult {
   text: string;
   changed: string[];
   deleted: string[];
-  usage: { inputTokens: number; outputTokens: number };
+  usage: { inputTokens: number; outputTokens: number; cacheCreation: number; cacheRead: number };
   steps: number;
   /** True if the last run_typecheck came back clean; null if the agent never ran it. */
   verified: boolean | null;
@@ -48,6 +48,8 @@ async function callModel(
 ): Promise<ModelResponse> {
   const ai = resolveAI();
   if (ai.direct && ai.provider === 'anthropic' && ai.key) {
+    // Fable/Mythos: opt into server-side fallbacks (safety-classifier declines re-served by Opus 4.8).
+    const fableFallback = /^claude-(fable|mythos)/.test(ai.model);
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal,
@@ -56,8 +58,19 @@ async function callModel(
         'x-api-key': ai.key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
+        ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
       },
-      body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, tools, messages }),
+      // PROMPT CACHING — the agent loop is the token hog: every step re-sends the whole growing
+      // conversation. Caching the system block + the conversation prefix (top-level auto-cache
+      // marks the last block) turns each step's re-read into ~0.1× input price. This was the
+      // single biggest cause of expensive builds on premium models.
+      body: JSON.stringify({
+        model: ai.model, max_tokens: maxTokens,
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+        tools, messages,
+        cache_control: { type: 'ephemeral' },
+        ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}),
+      }),
     });
     if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`);
     return (await res.json()) as ModelResponse;
@@ -102,7 +115,7 @@ export async function runAgent(opts: {
   if (opts.webSearch !== false) tools.push(WEB_SEARCH_TOOL);
 
   const messages: { role: string; content: unknown }[] = [{ role: 'user', content: opts.userContent }];
-  const usage = { inputTokens: 0, outputTokens: 0 };
+  const usage = { inputTokens: 0, outputTokens: 0, cacheCreation: 0, cacheRead: 0 };
   let finalText = '';
   let verified: boolean | null = null;
   let steps = 0;
@@ -112,6 +125,8 @@ export async function runAgent(opts: {
     const resp = await callModel(opts.system, messages, tools, maxTokens, opts.signal);
     usage.inputTokens += resp.usage?.input_tokens ?? 0;
     usage.outputTokens += resp.usage?.output_tokens ?? 0;
+    usage.cacheCreation += resp.usage?.cache_creation_input_tokens ?? 0;
+    usage.cacheRead += resp.usage?.cache_read_input_tokens ?? 0;
 
     const blocks = Array.isArray(resp.content) ? resp.content : [];
     const textPieces = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text as string);

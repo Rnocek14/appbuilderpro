@@ -881,6 +881,54 @@ export function extractSceneField(partial: string, field: 'prime' | 'gap'): stri
   try { return JSON.parse(`"${m[1]}"`) as string; } catch { return m[1]; }
 }
 
+/**
+ * Which part of the scene JSON is currently streaming. The gap/prime paint in the first seconds,
+ * but the bulk of the scene (options, beats, currents) streams AFTER them — without this the
+ * on-screen text freezes mid-compose and reads as a stalled answer. Order mirrors SCENE_SYSTEM.
+ * Phase labels stay spoiler-free: the beats themselves are never surfaced pre-guess.
+ */
+export type ScenePhase = '' | 'gap' | 'guesses' | 'reveal' | 'currents';
+export function extractScenePartial(partial: string): { text: string; phase: ScenePhase } {
+  const gap = extractSceneField(partial, 'gap');
+  const text = gap || extractSceneField(partial, 'prime');
+  const phase: ScenePhase = /"currents"\s*:/.test(partial) ? 'currents'
+    : /"(beats|regap|myth|truth|bigValue)"\s*:/.test(partial) ? 'reveal'
+    : /"(options|answerIndex)"\s*:/.test(partial) ? 'guesses'
+    : text ? 'gap' : '';
+  return { text, phase };
+}
+
+/**
+ * Repair a JSON stream cut off mid-flight (max_tokens truncation): terminate an open string, drop a
+ * dangling half-written key/value, and close every open brace/bracket. The result parses whenever
+ * the complete prefix held whole values — so a truncated scene salvages its prime/gap/options/beats
+ * instead of forcing a second full compose. Pure; best-effort (returns its input if there's no '{').
+ */
+export function repairTruncatedJson(raw: string): string {
+  const start = raw.indexOf('{');
+  if (start === -1) return raw;
+  let s = raw.slice(start);
+  let inStr = false, esc = false;
+  const stack: string[] = [];
+  for (const ch of s) {
+    if (esc) { esc = false; continue; }
+    if (inStr) { if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') inStr = true;
+    else if (ch === '{' || ch === '[') stack.push(ch);
+    else if (ch === '}' || ch === ']') stack.pop();
+  }
+  if (esc) s = s.slice(0, -1); // dangling escape can't be closed — drop it
+  if (inStr) s += '"';
+  if (stack[stack.length - 1] === '{') {
+    // inside an object a trailing lone key ("k" / "k":) is invalid — strip back to the last value
+    s = s.replace(/,\s*(?:"(?:[^"\\]|\\.)*"\s*:?\s*)?$/, '').replace(/\{\s*"(?:[^"\\]|\\.)*"\s*:?\s*$/, '{');
+  } else {
+    s = s.replace(/,\s*$/, ''); // inside an array a closed string IS a value — only a bare comma dangles
+  }
+  for (let i = stack.length - 1; i >= 0; i--) s += stack[i] === '{' ? '}' : ']';
+  return s;
+}
+
 export const SCENE_SYSTEM = `You are GARVIS, a brilliant thinking partner walking someone INTO an idea.
 You never deliver an encyclopedia answer — you engineer a CURIOSITY LOOP and you ART-DIRECT it. Voice:
 a brilliant friend three steps ahead; vivid, concrete, a little sly; zero academic tone; no hedging.

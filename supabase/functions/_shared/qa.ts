@@ -22,6 +22,7 @@ const ALLOWED_TS = new Set([
   '@supabase/supabase-js', 'date-fns', 'clsx',
   'class-variance-authority', 'tailwind-merge', 'framer-motion', 'zustand',
   '@tanstack/react-query', 'react-hook-form', 'zod',
+  'gsap', 'lenis', // bespoke scroll choreography (ScrollTrigger timelines, smooth scroll)
 ]);
 const ALLOWED_JS = new Set(['react']);
 
@@ -208,17 +209,29 @@ export function validateProject(files: { path: string; content: string }[]): QAI
   return issues;
 }
 
+/** Unbalanced-brace count (strings/comments stripped first). Positive = unclosed '{'. */
+function braceDelta(content: string): number {
+  const src = content
+    .replace(/`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  let d = 0;
+  for (const ch of src) { if (ch === '{') d++; else if (ch === '}') d--; }
+  return d;
+}
+
+/** Whether a source file looks cut off mid-stream (|brace delta| >= 2 to avoid noise). Used by the
+ *  edit/generate streams to DROP a max_tokens-truncated tail file instead of persisting half a file. */
+export function looksTruncated(content: string): boolean {
+  return Math.abs(braceDelta(content)) >= 2;
+}
+
 /** Unbalanced-brace detector (strings/comments stripped first; |delta| >= 2 to avoid noise). */
 function truncationIssues(files: { path: string; content: string }[]): QAIssue[] {
   const out: QAIssue[] = [];
   for (const f of files) {
     if (!CODE_RE.test(f.path)) continue;
-    const src = f.content
-      .replace(/`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, '""')
-      .replace(/\/\/[^\n]*/g, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '');
-    let d = 0;
-    for (const ch of src) { if (ch === '{') d++; else if (ch === '}') d--; }
+    const d = braceDelta(f.content);
     if (Math.abs(d) >= 2) {
       out.push({
         path: f.path, severity: 'error',
@@ -332,6 +345,48 @@ function deadLinkIssues(files: { path: string; content: string }[]): QAIssue[] {
     out.push({ path: l.file, severity: 'error', message: `Link/navigate to '${t}' has no matching <Route> — the navigation is dead. Add the route + its page, or fix the link.` });
   }
   return out;
+}
+
+export interface MissingModule {
+  /** The project path the file should be created at (extension inferred). */
+  path: string;
+  /** Who imports it and the exact import lines — tells a generator what the file must export. */
+  importers: { path: string; lines: string[] }[];
+}
+
+/**
+ * Local imports that point at files which DON'T EXIST — the worst generated-app failure (the model
+ * rewrote App.tsx to route to pages it never emitted; Vite dies on the first one). Returned as
+ * concrete target paths so a repair pass can create each file directly with a dedicated call,
+ * instead of asking one bounded fix stream to write N whole pages (which is what fails to converge).
+ * Pure. Extension inference: an explicit extension is kept; otherwise .tsx for TS projects (a
+ * superset that also holds plain code), .js for legacy JS-runtime projects.
+ */
+export function missingLocalModules(files: { path: string; content: string }[]): MissingModule[] {
+  const fileSet = new Set(files.map((f) => f.path));
+  const isTs = [...fileSet].some((p) => p.endsWith('.tsx') || p.endsWith('.ts'));
+  const byTarget = new Map<string, MissingModule>();
+  for (const f of files) {
+    if (!CODE_RE.test(f.path)) continue;
+    for (const spec of parseSpecifiers(f.content)) {
+      if (!(spec.startsWith('.') || spec.startsWith('/'))) continue;
+      if (resolves(f.path, spec, fileSet)) continue;
+      const dir = f.path.slice(0, f.path.lastIndexOf('/'));
+      const base = spec.startsWith('/') ? normalize(spec) : normalize(`${dir}/${spec}`);
+      const target = /\.[a-z]+$/i.test(base) ? base : base + (isTs ? '.tsx' : '.js');
+      let m = byTarget.get(target);
+      if (!m) { m = { path: target, importers: [] }; byTarget.set(target, m); }
+      let imp = m.importers.find((i) => i.path === f.path);
+      if (!imp) { imp = { path: f.path, lines: [] }; m.importers.push(imp); }
+      for (const line of f.content.split('\n')) {
+        if (line.includes(`'${spec}'`) || line.includes(`"${spec}"`)) {
+          const t = line.trim();
+          if (t && !imp.lines.includes(t)) imp.lines.push(t);
+        }
+      }
+    }
+  }
+  return [...byTarget.values()];
 }
 
 /** A compact message describing the issues, for handing to the assistant to fix. */

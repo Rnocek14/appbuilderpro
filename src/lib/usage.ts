@@ -14,7 +14,8 @@ import type { Provider } from './aiConfig';
 // fall back to DEFAULT_PRICE; local models are free.
 const PRICING: Record<string, { in: number; out: number }> = {
   // Anthropic
-  'claude-opus-4-8': { in: 15, out: 75 },
+  'claude-fable-5': { in: 10, out: 50 },
+  'claude-opus-4-8': { in: 5, out: 25 },
   'claude-sonnet-4-6': { in: 3, out: 15 },
   'claude-haiku-4-5-20251001': { in: 1, out: 5 },
   // OpenAI
@@ -48,10 +49,16 @@ function priceFor(provider: Provider, model: string): { in: number; out: number 
   return DEFAULT_PRICE;
 }
 
-/** Estimated USD cost of a single call. */
-export function estimateCost(provider: Provider, model: string, inputTokens: number, outputTokens: number): number {
+/** Estimated USD cost of a single call. Cache-aware: with prompt caching, the API bills cached
+ *  prefix reads at ~0.1× and cache writes at 1.25× the input rate — and `input_tokens` excludes
+ *  both, so pricing input alone would misreport once caching is on. */
+export function estimateCost(
+  provider: Provider, model: string, inputTokens: number, outputTokens: number,
+  cache?: { creation?: number; read?: number },
+): number {
   const p = priceFor(provider, model);
-  return (inputTokens / 1_000_000) * p.in + (outputTokens / 1_000_000) * p.out;
+  const cachedIn = (cache?.creation ?? 0) * 1.25 + (cache?.read ?? 0) * 0.1;
+  return ((inputTokens + cachedIn) / 1_000_000) * p.in + (outputTokens / 1_000_000) * p.out;
 }
 
 export interface UsageRecord {
@@ -60,6 +67,8 @@ export interface UsageRecord {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  cacheCreation?: number;
+  cacheRead?: number;
   cost: number;
   /** The ai_messages row this call produced, when it maps to a chat message. */
   messageId?: string;
@@ -89,13 +98,14 @@ function writeLedger(records: UsageRecord[]): void {
 
 /** Record a call and return its estimated cost. Skips no-op (0-token) calls. */
 export function recordUsage(args: {
-  provider: Provider; model: string; inputTokens: number; outputTokens: number; messageId?: string;
+  provider: Provider; model: string; inputTokens: number; outputTokens: number;
+  cacheCreation?: number; cacheRead?: number; messageId?: string;
 }): number {
-  const { provider, model, inputTokens, outputTokens, messageId } = args;
-  if (!inputTokens && !outputTokens) return 0;
-  const cost = estimateCost(provider, model, inputTokens, outputTokens);
+  const { provider, model, inputTokens, outputTokens, cacheCreation, cacheRead, messageId } = args;
+  if (!inputTokens && !outputTokens && !cacheCreation && !cacheRead) return 0;
+  const cost = estimateCost(provider, model, inputTokens, outputTokens, { creation: cacheCreation, read: cacheRead });
   const records = readLedger();
-  records.push({ ts: Date.now(), provider, model, inputTokens, outputTokens, cost, messageId });
+  records.push({ ts: Date.now(), provider, model, inputTokens, outputTokens, cacheCreation, cacheRead, cost, messageId });
   writeLedger(records);
   return cost;
 }
@@ -128,6 +138,24 @@ export function costForMessage(messageId: string): number | undefined {
   const matches = readLedger().filter((r) => r.messageId === messageId);
   if (!matches.length) return undefined;
   return matches.reduce((s, r) => s + r.cost, 0);
+}
+
+/**
+ * Attribute every not-yet-attributed ledger record since `sinceTs` to a message — used by flows
+ * that make MANY model calls before the assistant message exists (the agent loop, the chunked
+ * generation pipeline). Recording per call keeps totals accurate; tagging afterwards is what makes
+ * the per-message cost chip show the turn's REAL total instead of nothing (or a double count).
+ * Returns the total cost tagged. (If an unrelated call lands in the window it gets folded in —
+ * acceptable for a spend gauge.)
+ */
+export function tagUsageSince(messageId: string, sinceTs: number): number {
+  const records = readLedger();
+  let tagged = 0;
+  for (const r of records) {
+    if (r.ts >= sinceTs && !r.messageId) { r.messageId = messageId; tagged += r.cost; }
+  }
+  if (tagged > 0) writeLedger(records);
+  return tagged;
 }
 
 export function clearUsage(): void {

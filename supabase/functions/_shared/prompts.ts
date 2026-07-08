@@ -13,10 +13,11 @@ runtime. Respect these absolutely; never recommend, plan, or make changes that v
   e.g. @radix-ui/react-* primitives, class-variance-authority, tailwind-merge, zustand,
   @tanstack/react-query, react-hook-form, zod, plus the always-present react, react-dom,
   react-router-dom, lucide-react, recharts, @supabase/supabase-js, date-fns, clsx. The advanced-motion
-  stack is PINNED (compatible versions guaranteed in the preview): framer-motion, gsap, lenis, three,
-  @react-three/fiber, @react-three/drei — prefer these for heavy motion so the preview never breaks on
-  a version drift. AVOID packages that need a Node/build step (server-only or build-time-only tooling,
-  Node built-ins) — the runtime loads ES modules in the browser with no bundler/PostCSS.
+  stack is PINNED (compatible versions guaranteed in the preview): framer-motion, gsap
+  (+ gsap/ScrollTrigger), lenis, three, @react-three/fiber, @react-three/drei — prefer these for
+  heavy motion so the preview never breaks on a version drift. AVOID packages that need a Node/build
+  step (server-only or build-time-only tooling, Node built-ins) — the runtime loads ES modules in
+  the browser with no bundler/PostCSS.
 - Styling is Tailwind via CDN (no tailwind.config/PostCSS build). A full shadcn/ui design-token
   system is already set up: token values in /src/index.css (:root + .dark) and the classes mapped
   in the inline Tailwind config. Apps should style with semantic tokens (bg-background, bg-card,
@@ -103,19 +104,27 @@ SCROLL STORYTELLING (marketing/landing surfaces — the single biggest "expensiv
 - Baseline: content REVEALS as you scroll. Wrap sections/cards in the kit's <Reveal> (IntersectionObserver
   fade+slide, stagger siblings with delay={0|80|160}), or put class "stagger" on grids that are visible
   on load. A long static page with everything already rendered reads as cheap.
-- ONE scroll-SCRUBBED scene per page (the Apple move — the product rotates/assembles as you scroll):
-  the kit's useScrollProgress hook gives 0→1 progress; the pattern is a tall wrapper (h-[200vh] or
-  h-[300vh]) containing a pinned stage (sticky top-0 h-screen overflow-hidden flex items-center)
-  whose content maps progress onto transforms — scale from 0.6→1, rotate in, translate layers at
-  different rates (parallax), fade captions in at progress thresholds, count numbers up
-  (Math.round(progress * 12000)). Great subjects: the product screenshot assembling, a phone/device
-  tilting upright, before→after morphs, a headline that pins while proof points scroll past.
+- SIGNATURE MOMENT (required on every marketing LANDING page where the domain plausibly fits): ONE
+  scroll-scrubbed scene, built with the kit's <ScrollScene> — NOT hand-rolled scroll math:
+    <ScrollScene>{(p) => <div style={{ transform: 'scale(' + (0.6 + p * 0.4) + ') rotate(' + (p * 8 - 4) + 'deg)', opacity: Math.min(1, p * 2) }}>…the stage…</div>}</ScrollScene>
+  Map p onto: the product/screenshot assembling or tilting upright, before→after morphs, a headline
+  that pins while proof points fade in at thresholds (p > 0.3, p > 0.6), layered art via nested
+  <Parallax speed={±0.2..0.5}> for depth. Pair it with <CountUp> stats and a <Marquee> logo/quote
+  strip — three kit moves that together read "designed by an expensive studio".
+- THE SIGNATURE STACK (what separates award-tier from template-tier — compose, don't pile up):
+  hero = Aurora (dark surface) OR full-bleed photo + TextReveal headline + ONE Magnetic CTA;
+  one ScrollScene OR StickyStack moment mid-page; ImageReveal on every gallery/editorial image;
+  TiltCard on the feature/pricing grid; CountUp stats; a Marquee proof strip. Reveal everything
+  else with <Reveal>. Restraint rule: each move appears ONCE per page in its strongest spot.
 - For spring physics or scroll-velocity effects use framer-motion from the CDN (motion.div +
-  useScroll/useTransform/whileInView) — it composes fine with the kit.
+  useScroll/useTransform/whileInView) — it composes fine with the kit. For bespoke scroll
+  choreography beyond the kit (scrubbed timelines, horizontal sections), gsap + ScrollTrigger and
+  lenis (smooth scroll) load fine from the CDN — register plugins once in the page, and still
+  honor reduced-motion. For anything simpler, the kit components above are ALWAYS the first
+  choice (they handle reduced-motion and pinning for you).
 - RESTRAINT: one pinned scene per page, reveals everywhere else; transform/opacity ONLY (never
   scroll-jack or animate layout); content must exist in the DOM regardless of scroll (SEO/a11y);
-  reduced-motion users get the content statically (the global CSS rule collapses transitions — for
-  scrubbed scenes check matchMedia('(prefers-reduced-motion: reduce)') and render the final state).
+  reduced-motion users get the content statically (the kit components handle this themselves).
 - App/dashboard views get NONE of this — scroll effects are for marketing surfaces only.
 
 ADVANCED MOTION — the "award-site" toolkit (marketing/landing/portfolio surfaces). The winning
@@ -221,6 +230,9 @@ IDENTITY & ANTI-SLOP — the difference between "intentional product" and "gener
   in a colored box as the logo — that's the #1 "prototype" tell.
 - COPY is specific to the domain — real feature names, realistic numbers, sensible dates. Never
   "Welcome back, User!", lorem ipsum, "✨ Powered by AI" badges, or rocket/sparkle clichés.
+- COPY STRINGS use DOUBLE QUOTES in code: prose text is full of apostrophes ("you'll", "world's"),
+  and an apostrophe inside a single-quoted string is a SYNTAX ERROR — the #1 copy-related build
+  breaker. 'single quotes' only for identifier-like strings that can never contain an apostrophe.
 - EMPTY STATES: compose them — an icon in a soft tinted circle (bg-muted/bg-primary/10), a real
   heading, a sentence of guidance, and a primary CTA. Never a bare centered icon.
 - ACCESSIBLE OVERLAYS: the kit provides accessible Tabs, Dropdown, Popover, Tooltip, Modal, and
@@ -651,10 +663,18 @@ PREVIEW HTML (per direction — one self-contained file):
   numbers ("$1,284.50", "12 this week") — placeholder text is forbidden.
 - Include one :hover state so the direction's motion character shows.
 
-OUTPUT — ONLY JSON, no prose, no fences. When the request asks for ONE direction, output
-{"direction":{...one object...}}; when it asks for the full set, output:
+OUTPUT — ONLY JSON, no prose, no fences. Every numeric field is applied DETERMINISTICALLY to the
+app's design tokens, so commit to the archetype's real values (a brutalist direction with radius 10
+is a lie). When the request asks for ONE direction, output {"direction":{...one object...}};
+when it asks for the full set, output:
 {"directions":[{"archetype":str,"name":str(2-3 words,evocative),"risk":"safe|opinionated|bold",
-"accentHue":int(0-359),"headingFont":str(Google Font),"bodyFont":str(Google Font),
+"accentHue":int(0-359),"accentSat":int(0-100),"accentLight":int(25-65),
+"headingFont":str(Google Font),"bodyFont":str(Google Font),
+"mode":"light|paper|tinted|dark"(the background character — paper for editorial/organic, tinted for
+playful fields, dark for midnight/pro archetypes),
+"surfaceSat":int(0-40, how hue-tinted the neutrals are),
+"radius":number(rem: 0 sharp editorial/brutalist/swiss … 0.625 modern … 1.25-1.5 pills — per the archetype),
+"borders":"hairline|standard|bold","shadows":"soft|hard|none",
 "brief":str(2-3 sentences: the bundle — palette strategy, radius, surface/border logic, layout
 archetype, motion character; concrete, with hex values),"preview_html":str(the complete HTML)}]}`;
 
@@ -665,13 +685,16 @@ export function directionsPrompt(userPrompt: string): string {
 // Fan-out variant: one tiny archetype-selection call, then one direction per call (parallel).
 // Each call is small enough for the edge relay's time limits, previews stream in one by one,
 // and per-call archetype assignment beats one batched call on diversity (models converge).
-export function directionPickPrompt(userPrompt: string): string {
-  return `The app about to be built:\n"""${userPrompt}"""\n\nPick the 3 archetypes for this app per the selection logic (best-fit safe, plausible-adjacent opinionated, deliberately-contrarian bold). Output ONLY: {"picks":[{"archetype":str(exact archetype name),"risk":"safe"|"opinionated"|"bold"}]} — no previews, no prose.`;
+export function directionPickPrompt(userPrompt: string, exclude: string[] = []): string {
+  const excl = exclude.length
+    ? `\nAlready shown to the user (do NOT pick any of these): ${exclude.join(', ')}. Pick 3 DIFFERENT archetypes that still span safe→bold for this app.`
+    : '';
+  return `The app about to be built:\n"""${userPrompt}"""\n${excl}\nPick the 3 archetypes for this app per the selection logic (best-fit safe, plausible-adjacent opinionated, deliberately-contrarian bold). Output ONLY: {"picks":[{"archetype":str(exact archetype name),"risk":"safe"|"opinionated"|"bold"}]} — no previews, no prose.`;
 }
 
 export function singleDirectionPrompt(userPrompt: string, pick: { archetype: string; risk: string }, all: { archetype: string }[]): string {
   const others = all.filter((a) => a.archetype !== pick.archetype).map((a) => a.archetype).join(' and ') || 'two other archetypes';
-  return `The app about to be built:\n"""${userPrompt}"""\n\nGenerate exactly ONE design direction: archetype ${pick.archetype} (risk: ${pick.risk}). Sibling directions (${others}) are being generated separately — obey the distinctness rules relative to them (your background value, display-type class, and layout archetype must differ from what they would use). Output ONLY: {"direction":{"archetype":str,"name":str,"risk":str,"accentHue":int,"headingFont":str,"bodyFont":str,"brief":str,"preview_html":str}} — no prose, no markdown fences.`;
+  return `The app about to be built:\n"""${userPrompt}"""\n\nGenerate exactly ONE design direction: archetype ${pick.archetype} (risk: ${pick.risk}). Sibling directions (${others}) are being generated separately — obey the distinctness rules relative to them (your background value, display-type class, and layout archetype must differ from what they would use). Output ONLY: {"direction":{"archetype":str,"name":str,"risk":str,"accentHue":int,"accentSat":int,"accentLight":int,"headingFont":str,"bodyFont":str,"mode":"light|paper|tinted|dark","surfaceSat":int,"radius":number(rem),"borders":"hairline|standard|bold","shadows":"soft|hard|none","brief":str,"preview_html":str}} — no prose, no markdown fences.`;
 }
 
 // PRODUCT SELF-KNOWLEDGE — the chat lives inside the FableForge studio and must know the product
@@ -801,12 +824,46 @@ The EXACT APIs:
 - FormField: label, error?, hint?, required? — wraps exactly ONE input child (it injects id/aria).
 - Pagination: page, pageCount, onPageChange. Table family: styling only (normal table markup).
 - Reveal: delay? (ms), y?, className — scroll-reveal wrapper for marketing sections.
-- TextReveal: text, className?, stagger?, as? — kinetic word-by-word headline (accessible).
-- SmoothScroll: wrap a MARKETING page once for inertial (Lenis) scroll — never app/auth routes.
+- MOTION components (pre-built and guaranteed to work — COMPOSE these for the "expensive site"
+  moves instead of hand-rolling scroll math):
+    <ScrollScene height="200vh">{(p) => (…stage content, map p (0→1) onto transform/opacity…)}</ScrollScene>
+      — the pinned scrubbed scene (sticky stage + reduced-motion handled for you). The child is a
+      RENDER PROP receiving progress.
+    <Parallax speed={0.3}>…</Parallax> — a layer drifting through the viewport; -1..1, negative =
+      background drift; compose 2-3 layers at different speeds for depth.
+    <CountUp value={12500} suffix="+" decimals={0} prefix="$" /> — a stat that counts up on scroll-in.
+    <Marquee speed={40} reverse?>…logos/quotes…</Marquee> — seamless infinite strip, hover-pauses.
+    <TextReveal as="h1" text="The headline." className="…display classes…" rotate? delay? /> — display
+      type revealing word-by-word from behind a clip line (rotate = 3D ribbon flip). THE standard
+      treatment for hero + section headlines on marketing surfaces; body text never uses it.
+    <TiltCard max={10} glare?>…card…</TiltCard> — pointer-tracked 3D tilt + moving glare for
+      feature/product/pricing cards.
+    <StickyStack items={[<CardA/>, <CardB/>, <CardC/>]} top? gap? /> — cards pin and stack over each
+      other on scroll (each item needs its own SOLID bg + border or the stack reads as a mess).
+    <Aurora hues={[222, 285, 165]} intensity={0.3} /> — drifting blurred color field (the shader
+      look, zero WebGL risk); place absolute inside a relative overflow-hidden section, best on
+      dark surfaces under a TextReveal.
+    <Spotlight>…section content…</Spotlight> — cursor-following glow (rides the primary token).
+    <Magnetic><Button…/></Magnetic> — the CTA leans toward the cursor. ONE per view, the primary CTA.
+    <ImageReveal src alt direction? delay? className="aspect-…" /> — clip-path wipe + settle-scale
+      on scroll-in; use instead of bare <img> in galleries/editorial rows.
+    <SmoothScroll>…</SmoothScroll> — wrap a MARKETING page once for inertial (Lenis) scroll; never
+      app/auth routes.
+    <ScrollScenes scenes={[{image,eyebrow,title,caption},…]} /> — pinned full-bleed PHOTO narrative:
+      scenes cross-fade + slow-zoom as you scroll, captions rising (ocean → yacht → interior with a
+      handful of real photos). Reach for this when the story is told in photographs.
+    <ScrollSequence frames={[…]} /> or src="/frames/name_{i}.jpg" count={120} — the literal
+      Apple-style frame player (canvas scrubbed by scroll). ONLY with a real frame sequence.
 - Toasts: const { toast } = useToast() (from ../context/ToastContext); toast('Saved', 'success').
-- /src/lib/scroll.ts: useInView + useScrollProgress (see SCROLL STORYTELLING). /src/lib/utils: cn().
-- /src/lib/interactions.ts (see ADVANCED MOTION): useMagnetic, useParallax, useTilt, useMousePosition,
-  useScrollVelocity, useReveal — the award-site interaction hooks (marketing surfaces only).
+- /src/lib/scroll.ts — EXACT signatures. These are NOT react-intersection-observer and NOT
+  framer-motion; their call shapes WILL NOT type-check here:
+    const { ref, inView } = useInView<HTMLDivElement>();            // returns an OBJECT — never [ref, inView]
+    const { ref, progress } = useScrollProgress<HTMLDivElement>();  // takes NO arguments — never useScrollProgress(ref)
+  useInView opts: { once?: boolean; margin?: string }. useScrollProgress: attach ref to the TALL
+  wrapper (h-[200vh]); progress is a number 0→1 — read it in style={{ transform: … }}.
+- /src/lib/interactions.ts — lower-level hooks when a component doesn't fit: useMagnetic, useParallax,
+  useTilt, useMousePosition, useScrollVelocity, useReveal (marketing surfaces only).
+- /src/lib/utils: cn().
 Reach for these FIRST: Tabs for sectioned views, Dropdown for row menus, Combobox for long selects,
 FormField on every form row, Table for data grids, Alert for persistent notices, Tooltip on
 icon-only buttons, Reveal on marketing sections.
@@ -1320,6 +1377,7 @@ Respond with ONLY JSON matching:
    "logo": str
  }}
 
+
 For "design", COMMIT to one complete visual identity — a coherent bundle, not defaults. Every key
 below lands directly in the shipped CSS tokens, so choose them like an art director. If a DESIGN
 DIRECTION was provided in the context, translate it FAITHFULLY into these keys; otherwise pick the
@@ -1351,6 +1409,7 @@ the domain truly demands it:
   These are the app's personality moves; the file generator MUST use them.
 - vibe: one line restating the bundle (e.g. "inky editorial broadsheet — Fraunces display on warm
   paper, oxblood accent, hairline rules, grain hero").
+
 - logo: a concrete wordmark/lockup concept (styled app name + an optional simple custom mark) — NOT a
   generic Lucide-icon-in-a-colored-box.
 
@@ -1440,4 +1499,31 @@ export function editPrompt(filesJson: string, message: string, previewError?: st
     (previewError ? `Current preview error to fix:\n${previewError}\n\n` : '') +
     (historyText ? `Conversation so far:\n${historyText}\n\n` : '') +
     `Latest request from the user: ${message}`;
+}
+
+// SELF-HEAL: create ONE file that other files import but that was never written (the "App.tsx routes
+// to pages that don't exist" failure). One dedicated call per file converges where a single bounded
+// fix stream asked to write N whole pages does not.
+export const MISSING_FILE_SYSTEM = `You are FableForge's repair engine. This React app imports a file
+that was never written; you write that ONE file, completely and production-quality.
+
+OUTPUT: the raw contents of the file ONLY — no markdown fences, no prose, no path header.
+
+RULES:
+- The file MUST satisfy the exact import statements shown (default vs named exports, and how the
+  bindings are used in the importer's code — component props, function signatures, hook return shapes).
+- Infer the file's PURPOSE from the importer's code and the app's file tree, then build a real,
+  useful implementation consistent with the rest of the app — never a bare placeholder.
+- TypeScript + React function components. Style with the design tokens (bg-background, bg-card,
+  bg-muted, text-foreground, text-muted-foreground, border-border, bg-primary, text-primary-foreground)
+  — never hardcoded colors.
+- Import only from packages the app already uses (react, react-dom, react-router-dom, lucide-react,
+  recharts, date-fns, clsx, zustand, framer-motion, @tanstack/react-query, react-hook-form, zod,
+  @supabase/supabase-js, @radix-ui/*) or from relative files that appear in the project file tree.
+- Browser only — no Node built-ins.`;
+
+export function missingFilePrompt(path: string, importers: string, tree: string): string {
+  return `Create \`${path}\`.\n\nWHO IMPORTS IT (the file must satisfy these exactly):\n${importers}\n\n` +
+    `EXISTING PROJECT FILES (import from these freely; do not import anything else that isn't a listed package):\n${tree}\n\n` +
+    `Output the complete contents of ${path} now.`;
 }
