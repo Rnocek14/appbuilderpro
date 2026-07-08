@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, FolderOpen, Plus, CreditCard, Settings as SettingsIcon } from 'lucide-react';
+import { Search, FolderOpen, Plus, CreditCard, Settings as SettingsIcon, Sparkles, Waypoints, Telescope, BrainCircuit, ShieldCheck } from 'lucide-react';
 import { useProjects } from '../hooks/useProjectData';
 import { cn } from '../lib/utils';
 
@@ -38,6 +38,11 @@ export function CommandPalette({ open, onClose }: Props) {
   const items = useMemo(() => {
     const commands = [
       { id: 'new', label: 'New project', icon: Plus, run: () => navigate('/new') },
+      { id: 'garvis-command', label: 'Garvis: Command (waking moment)', icon: Sparkles, run: () => navigate('/garvis/command') },
+      { id: 'garvis-webs', label: 'Garvis: Work Webs', icon: Waypoints, run: () => navigate('/garvis/webs') },
+      { id: 'garvis-universe', label: 'Garvis: Universe', icon: Telescope, run: () => navigate('/garvis/universe') },
+      { id: 'garvis-brain', label: 'Garvis: Brain', icon: BrainCircuit, run: () => navigate('/garvis/brain') },
+      { id: 'garvis-approvals', label: 'Garvis: Approvals', icon: ShieldCheck, run: () => navigate('/garvis/approvals') },
       { id: 'billing', label: 'Open billing', icon: CreditCard, run: () => navigate('/billing') },
       { id: 'settings', label: 'Open settings', icon: SettingsIcon, run: () => navigate('/settings') },
     ];

@@ -41,15 +41,25 @@ export function WakingMoment({ name }: { name: string }) {
     setDigest((d) => (d ? { ...d, moves: d.moves.filter((m) => m.key !== key) } : d));
   }, []);
 
-  if (!digest) return null;
+  if (!digest) return null; // loading (or load failed) — the chat never waits on the front door
   const { greeting, awayLines, moves } = digest;
-  if (!awayLines.length && !moves.length) return null;
+  // A quiet morning is a FACT worth stating, not a reason to vanish: zero moves means zero
+  // replies waiting, nothing blocked, nothing new — say so instead of rendering nothing.
+  const quiet = !awayLines.length && !moves.length;
 
   const shown = showAll ? moves : moves.slice(0, 3);
 
   return (
     <div className="mb-4 rounded-2xl border border-forge-border bg-forge-panel/60 p-5">
       <p className="font-display text-lg font-semibold text-forge-ink">{greeting}</p>
+
+      {quiet && (
+        <p className="mt-1 text-sm text-forge-dim">
+          All quiet — no replies waiting, nothing blocked, nothing new since you last looked.{' '}
+          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your webs</button>
+          {' '}to push something forward.
+        </p>
+      )}
 
       {awayLines.length > 0 && (
         <div className="mt-1">

@@ -14,9 +14,10 @@ import { Badge, Spinner, Modal, Button } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../lib/utils';
 import { ARCHETYPES, type CharterStatus, type WorkTool } from '../lib/garvis/workweb';
-import { templateById } from '../lib/garvis/workweb';
+import { templateForWeb } from '../lib/garvis/workweb';
+import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
-import { listClusterArtifacts, listClusterFiles, uploadClusterFile, type StudioArtifact, type ClusterFile } from '../lib/garvis/artifacts';
+import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
@@ -39,6 +40,7 @@ export default function WorkWeb() {
   const [busyTool, setBusyTool] = useState<string | null>(null);
   const [uploadFor, setUploadFor] = useState<WebCluster | null>(null);
   const [queueFor, setQueueFor] = useState<WebCluster | null>(null);
+  const [showContacts, setShowContacts] = useState(false);
   const [intel, setIntel] = useState<WorldIntelligenceRow | null>(null);
   const [reflecting, setReflecting] = useState(false);
 
@@ -94,10 +96,11 @@ export default function WorkWeb() {
 
   const selectedCluster = useMemo(() => web?.clusters.find((c) => c.slug === selected) ?? null, [web, selected]);
 
-  // The first play declared by this web's template (matched by title → template).
+  // The first play declared by this web's template — resolved by STRUCTURE (slug signature),
+  // not by title, so renaming the world never silently kills the Run-the-play button.
   const templatePlay = useMemo(() => {
     if (!web) return null;
-    const t = templateById(web.title === 'Mom Real Estate Marketing' ? 'mom-real-estate' : web.title === 'App Launch' ? 'app-launch' : '');
+    const t = templateForWeb(web.clusters.map((c) => c.slug));
     return t?.playIds[0] ?? null;
   }, [web]);
 
@@ -118,7 +121,7 @@ export default function WorkWeb() {
   const doTool = async (cluster: WebCluster, tool: WorkTool) => {
     // View tools navigate; action tools run.
     if (tool.id === 'open-approvals') { navigate('/garvis/approvals'); return; }
-    if (tool.id === 'view-contacts') { navigate('/garvis/approvals'); toast('info', 'Contacts live in the outreach data — a dedicated view is coming.'); return; }
+    if (tool.id === 'view-contacts') { setShowContacts(true); return; }
     if (tool.id === 'import-docs') { navigate('/garvis/brain'); return; }
     if (tool.id === 'view-results') { setSelected(cluster.slug); return; }
     if (tool.id === 'upload-list') { setUploadFor(cluster); return; }
@@ -241,6 +244,9 @@ export default function WorkWeb() {
         </div>
       </div>
 
+      {/* Contacts — the real view behind the "View contacts" tool */}
+      {showContacts && <ContactsModal onClose={() => setShowContacts(false)} />}
+
       {/* Upload list modal */}
       {uploadFor && (
         <UploadListModal
@@ -337,6 +343,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <Link to="/garvis/approvals" className="mt-3 flex items-center gap-1.5 rounded-lg border border-forge-warn/40 bg-forge-warn/10 px-3 py-2 text-xs text-forge-warn">
           <ShieldCheck size={14} /> {cluster.pendingApprovals} action{cluster.pendingApprovals === 1 ? '' : 's'} waiting for approval <ChevronRight size={13} />
         </Link>
+      )}
+
+      {/* Brand kit — the vault's real workspace. This is where "Set up the brand" lands:
+          the kit feeds the studio chat voice and clears the brand-empty blocker. */}
+      {cluster.charter?.archetype === 'vault' && (
+        <BrandKitPanel worldId={worldId} onSaved={onChanged} />
       )}
 
       {/* Tools */}
@@ -445,6 +457,146 @@ function QueueModal({ cluster, onClose, onDone }: { cluster: WebCluster; onClose
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
         <Button onClick={async () => { setBusy(true); try { await onDone(email, name); } finally { setBusy(false); } }} loading={busy} disabled={!email.trim()}>Queue for approval</Button>
       </div>
+    </Modal>
+  );
+}
+
+function BrandKitPanel({ worldId, onSaved }: { worldId: string; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [kit, setKit] = useState<BrandKit | null | undefined>(undefined); // undefined = loading
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+  const [tone, setTone] = useState('');
+  const [palette, setPalette] = useState('');
+  const [fonts, setFonts] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [compliance, setCompliance] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    getBrandKit(worldId)
+      .then((k) => {
+        if (!live) return;
+        setKit(k);
+        setName(k?.name ?? '');
+        setTone(k?.tone ?? '');
+        setPalette((k?.palette ?? []).join(', '));
+        setFonts((k?.fonts ?? []).join(', '));
+        setLogoUrl(k?.logo_url ?? '');
+        setCompliance(k?.compliance_line ?? '');
+        setEditing(!k); // no kit yet → open the form straight away
+      })
+      .catch(() => { if (live) setKit(null); });
+    return () => { live = false; };
+  }, [worldId]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const csv = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
+      await saveBrandKit(worldId, {
+        name: name.trim() || 'Brand kit',
+        tone: tone.trim() || undefined,
+        palette: csv(palette),
+        fonts: csv(fonts),
+        logo_url: logoUrl.trim() || undefined,
+        compliance_line: compliance.trim() || undefined,
+      });
+      const fresh = await getBrandKit(worldId);
+      setKit(fresh);
+      setEditing(false);
+      toast('success', 'Brand kit saved — the studios write in this voice now.');
+      onSaved();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not save the brand kit.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (kit === undefined) return <div className="mt-4"><Spinner label="Loading brand kit…" /></div>;
+
+  const field = 'mt-1 w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink';
+  const label = 'mt-3 block text-xs font-medium text-forge-dim';
+
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-semibold text-forge-ink">Brand kit</h3>
+        {!editing && kit && (
+          <button onClick={() => setEditing(true)} className="ml-auto rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink">Edit</button>
+        )}
+      </div>
+      {!editing && kit ? (
+        <dl className="mt-2 space-y-1.5 text-sm">
+          <div><dt className="inline text-forge-dim">Name: </dt><dd className="inline text-forge-ink/90">{kit.name}</dd></div>
+          {kit.tone && <div><dt className="inline text-forge-dim">Tone: </dt><dd className="inline text-forge-ink/90">{kit.tone}</dd></div>}
+          {(kit.palette ?? []).length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <dt className="text-forge-dim">Palette:</dt>
+              {(kit.palette ?? []).map((c) => (
+                <span key={c} className="inline-flex items-center gap-1 text-xs text-forge-ink/80">
+                  <span className="inline-block h-3 w-3 rounded-sm border border-forge-border" style={{ background: c }} />{c}
+                </span>
+              ))}
+            </div>
+          )}
+          {(kit.fonts ?? []).length > 0 && <div><dt className="inline text-forge-dim">Fonts: </dt><dd className="inline text-forge-ink/90">{(kit.fonts ?? []).join(', ')}</dd></div>}
+          {kit.compliance_line && <div><dt className="inline text-forge-dim">Compliance: </dt><dd className="inline text-forge-ink/90">{kit.compliance_line}</dd></div>}
+          <p className="pt-1 text-xs text-forge-dim/70">The studio chat writes in this voice; generators inherit it as it spreads.</p>
+        </dl>
+      ) : (
+        <div>
+          <p className="mt-1 text-xs text-forge-dim">Give the studios a voice — until a kit exists, "brand vault is empty" blocks this world.</p>
+          <label className={label}>Brand name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="@properties — Jane Nocek" className={field} /></label>
+          <label className={label}>Tone<textarea value={tone} onChange={(e) => setTone(e.target.value)} rows={2} placeholder="Warm, local, confident. Lake Geneva expertise without the hard sell." className={field} /></label>
+          <label className={label}>Palette (comma-separated hex)<input value={palette} onChange={(e) => setPalette(e.target.value)} placeholder="#123B5C, #C9A227, #F5F1E8" className={field} /></label>
+          <label className={label}>Fonts (comma-separated)<input value={fonts} onChange={(e) => setFonts(e.target.value)} placeholder="Playfair Display, Inter" className={field} /></label>
+          <label className={label}>Logo URL<input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" className={field} /></label>
+          <label className={label}>Compliance line<input value={compliance} onChange={(e) => setCompliance(e.target.value)} placeholder="Jane Nocek · @properties · Licensed in WI" className={field} /></label>
+          <div className="mt-3 flex justify-end gap-2">
+            {kit && <Button variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>}
+            <Button onClick={() => void save()} loading={saving} disabled={!name.trim()}>Save brand kit</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContactsModal({ onClose }: { onClose: () => void }) {
+  const [rows, setRows] = useState<ContactRow[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    listContacts().then((r) => { if (live) setRows(r); }).catch(() => { if (live) setRows([]); });
+    return () => { live = false; };
+  }, []);
+  const bad = new Set(['unsubscribed', 'bounced', 'complained', 'invalid']);
+  return (
+    <Modal open onClose={onClose} title="Contacts — everyone you can reach">
+      {!rows ? (
+        <Spinner label="Loading contacts…" />
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-forge-dim">No contacts yet — upload a list (CSV) in an audience area to build your reach.</p>
+      ) : (
+        <div className="max-h-96 overflow-y-auto">
+          <p className="mb-2 text-xs text-forge-dim">
+            {rows.length} contact{rows.length === 1 ? '' : 's'} on record{rows.length >= 200 ? ' (showing the newest 200)' : ''}
+          </p>
+          <ul className="space-y-1">
+            {rows.map((c) => (
+              <li key={c.id} className="flex items-center gap-2 rounded-lg border border-forge-border px-3 py-1.5 text-sm">
+                <span className="min-w-0 flex-1 truncate text-forge-ink/90">{c.full_name || c.email}</span>
+                {c.full_name && <span className="hidden truncate text-xs text-forge-dim sm:block">{c.email}</span>}
+                <span className={cn('shrink-0 text-[10px] uppercase tracking-wide', bad.has(c.email_status) ? 'text-forge-warn' : 'text-forge-dim/70')}>
+                  {c.email_status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </Modal>
   );
 }

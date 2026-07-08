@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
@@ -26,14 +26,17 @@ const navSections = [
     ],
   },
   {
+    // Command leads — the waking moment is the product's front door; the altitude stack
+    // (Work Webs → System → Universe) follows; the legacy portfolio pages trail.
     title: 'Garvis',
     items: [
-      { to: '/garvis', label: 'Overview', icon: Boxes, end: true },
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
       { to: '/garvis/webs', label: 'Work Webs', icon: Waypoints },
-      { to: '/garvis/mind', label: 'Mind', icon: Brain },
+      { to: '/garvis/universe', label: 'Universe', icon: Telescope },
       { to: '/garvis/brain', label: 'Brain', icon: BrainCircuit },
       { to: '/garvis/approvals', label: 'Approvals', icon: ShieldCheck },
+      { to: '/garvis', label: 'Overview', icon: Boxes, end: true },
+      { to: '/garvis/mind', label: 'Mind', icon: Brain },
       { to: '/garvis/control', label: 'Mission Control', icon: Activity },
       { to: '/garvis/missions', label: 'Missions', icon: Rocket },
       { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },

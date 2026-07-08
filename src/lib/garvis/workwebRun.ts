@@ -129,6 +129,16 @@ export interface LoadedWeb {
 }
 
 /** A web = any world that has at least one chartered cluster. */
+export interface ContactRow { id: string; full_name: string | null; email: string; email_status: string; created_at: string }
+
+/** Everyone this operator can reach — the audience behind every list upload and queue tool. */
+export async function listContacts(limit = 200): Promise<ContactRow[]> {
+  const { data } = await supabase.from('contacts')
+    .select('id, full_name, email, email_status, created_at')
+    .order('created_at', { ascending: false }).limit(limit);
+  return (data ?? []) as ContactRow[];
+}
+
 export async function listWebs(): Promise<WebSummary[]> {
   const worlds = await listUniverseWorlds();
   const out: WebSummary[] = [];
@@ -365,8 +375,9 @@ export async function runTool(
       const rows = parsed.contacts.map((ct) => ({
         owner_id: uid, full_name: ct.name, email: ct.email, email_status: 'unknown' as const, is_primary: false,
       }));
-      // Upsert on (owner_id, email) — re-uploading a list or overlapping with an already-known
-      // contact updates rather than duplicating (uq_contacts_owner_email, app_0025).
+      // Upsert on (owner_id, email) with ignoreDuplicates: an already-known contact is SKIPPED,
+      // never overwritten — updating here would reset email_status (including 'unsubscribed')
+      // back to 'unknown', silently re-arming sends to someone who opted out.
       const { error } = await supabase.from('contacts').upsert(rows, { onConflict: 'owner_id,email', ignoreDuplicates: true });
       if (error) return { ok: false, message: `Could not save contacts: ${error.message}` };
       await recordMindEvent(uid, { event_type: 'artifact_imported', source: 'workweb', subject: `Imported ${rows.length} contacts into ${cluster.title}`, payload: { world_id: worldId } });
@@ -382,9 +393,16 @@ export async function runTool(
       return { ok: true, message: 'First email queued for approval. The two follow-ups are saved as drafts to send when you\'re ready.', approvalId };
     }
 
-    default:
-      // view tools (view-contacts, open-approvals, import-docs, view-results) are handled by the UI (navigation).
+    case 'view-contacts':
+    case 'open-approvals':
+    case 'import-docs':
+    case 'view-results':
+      // View tools are handled by the UI (navigation / modal) — reaching the executor is a no-op.
       return { ok: true, message: '' };
+
+    default:
+      // An unregistered id reaching the executor is a BUG, not a success — say so.
+      return { ok: false, message: `Unknown tool "${toolId}" — not implemented in the executor.` };
   }
 }
 
@@ -428,13 +446,28 @@ async function queueSequenceStep0(
     campaignId = (camp as { id: string }).id;
   }
 
-  // If a step-0 draft already exists for this campaign, don't queue a duplicate opener.
-  const { data: existingMsg } = await supabase.from('outreach_messages')
-    .select('id').eq('campaign_id', campaignId).eq('sequence_step', 0).in('status', ['draft', 'approved', 'scheduled', 'sent']).maybeSingle();
-  if (existingMsg) {
+  // If a step-0 message already exists for this campaign, never draft a duplicate opener. The
+  // pending-approval lookup is scoped to THAT message (payload->>message_id) — a pending send
+  // belonging to some other campaign must never satisfy this check.
+  const { data: existingMsgs } = await supabase.from('outreach_messages')
+    .select('id, status, subject, body_text').eq('campaign_id', campaignId).eq('sequence_step', 0)
+    .in('status', ['draft', 'approved', 'scheduled', 'sent']).limit(5);
+  const existing = (existingMsgs ?? [])[0] as { id: string; status: string; subject: string | null; body_text: string | null } | undefined;
+  if (existing) {
+    if (existing.status === 'sent') throw new Error('The opener for this recipient was already sent — the follow-up drafts are next.');
     const { data: openA } = await supabase.from('approvals')
-      .select('id').eq('kind', 'send_email').eq('status', 'pending').maybeSingle();
-    if (openA) return (openA as { id: string }).id;
+      .select('id').eq('kind', 'send_email').eq('status', 'pending')
+      .eq('payload->>message_id', existing.id).limit(1);
+    if (openA?.length) return (openA[0] as { id: string }).id;
+    // The draft exists but its approval is gone (rejected / expired / failed mid-queue):
+    // re-queue the SAME message instead of drafting a duplicate.
+    return enqueueApproval({
+      kind: 'send_email',
+      title: `${play.title} → ${to} (touch 1, re-queued)`,
+      preview: `${existing.subject ?? ''}\n\n${existing.body_text ?? ''}`,
+      payload: { message_id: existing.id, campaign_id: campaignId },
+      requestedBy: 'worker',
+    });
   }
 
   const firstName = name?.split(/\s+/)[0] ?? 'there';

@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
 
     // The approval is the authority to send. Verify it: owned by caller, correct kind, approved.
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status, payload').eq('id', approval_id).single();
+      .select('id, owner_id, kind, status, payload, result').eq('id', approval_id).single();
     if (!approval || approval.owner_id !== user.id) return json({ error: 'Approval not found' }, 404);
     if (approval.kind !== 'send_email') return json({ error: 'Approval is not a send_email.' }, 400);
     if (approval.status !== 'approved') return json({ error: `Approval is ${approval.status}, not approved.` }, 409);
@@ -70,12 +70,29 @@ Deno.serve(async (req) => {
     if (!msg || msg.owner_id !== user.id) return json({ error: 'Message not found' }, 404);
     if (msg.sent_at || msg.status === 'sent') return json({ error: 'Message already sent.' }, 409);
 
+    const priorResult = (approval.result as Record<string, unknown> | null) ?? {};
+
+    // Atomic claim (double-send guard): stamp send_claimed_at on the approval ONLY where it is
+    // still unclaimed — the WHERE is evaluated atomically per row, so two concurrent calls with
+    // the same approval cannot both pass; the loser matches zero rows and stops here. block()
+    // and the failure path release the claim so a legitimate retry stays possible.
+    const { data: claimRows, error: claimErr } = await admin.from('approvals')
+      .update({ result: { ...priorResult, send_claimed_at: new Date().toISOString() } })
+      .eq('id', approval_id).eq('status', 'approved').is('result->>send_claimed_at', null)
+      .select('id');
+    if (claimErr || !claimRows?.length) return json({ error: 'This send is already in flight (or was already claimed).' }, 409);
+    const releaseClaim = (extra: Record<string, unknown> = {}) =>
+      admin.from('approvals').update({ result: { ...priorResult, ...extra, send_claimed_at: null } }).eq('id', approval_id);
+
     const ledger = (row: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: user.id, approval_id, connector: 'resend', action: 'send_email', ...row });
     const block = async (reason: string): Promise<Response> => {
       await admin.from('outreach_messages').update({ status: 'blocked' }).eq('id', messageId);
       await ledger({ status: 'skipped', request: { message_id: messageId }, error: reason });
-      await admin.from('approvals').update({ status: 'rejected', result: { blocked: reason } }).eq('id', approval_id);
+      // Record integrity: the human's decision STAYS on the record — the approval remains
+      // 'approved'; the gate outcome lives in result.blocked (+ the ledger row above).
+      // Overwriting status to 'rejected' would erase who decided what.
+      await releaseClaim({ blocked: reason, blocked_at: new Date().toISOString() });
       return json({ ok: false, error: reason }, 422);
     };
 
@@ -102,10 +119,16 @@ Deno.serve(async (req) => {
       if (st === 'invalid' || st === 'complained') return block(`Contact email marked ${st}.`);
     }
 
-    // suppression (email + domain), owner-scoped
+    // suppression (email + domain), owner-scoped. Two exact-match queries — no string-built
+    // .or() filter, so a crafted address can't corrupt it and a double match can't error out.
+    // Any lookup error BLOCKS the send: the suppression list fails closed, never open.
     const domain = to.split('@')[1] ?? '';
-    const { data: supp } = await admin.from('suppression')
-      .select('id, reason').eq('owner_id', user.id).or(`email.eq.${to},domain.eq.${domain}`).maybeSingle();
+    const [suppEmail, suppDomain] = await Promise.all([
+      admin.from('suppression').select('reason').eq('owner_id', user.id).eq('email', to).limit(1),
+      admin.from('suppression').select('reason').eq('owner_id', user.id).eq('domain', domain).limit(1),
+    ]);
+    if (suppEmail.error || suppDomain.error) return block('Suppression list could not be checked — refusing to send.');
+    const supp = suppEmail.data?.[0] ?? suppDomain.data?.[0];
     if (supp) return block(`Recipient is on your suppression list (${supp.reason}).`);
 
     // campaign state
@@ -139,7 +162,11 @@ Deno.serve(async (req) => {
     // ----- compose + send -----
     const unsub = settings.unsubscribe_url_template?.trim()
       || `mailto:${settings.from_email}?subject=unsubscribe&body=Please%20remove%20${encodeURIComponent(to)}`;
-    const footer = `\n\n--\n${settings.company_name ?? ''}\n${settings.physical_address}`;
+    // CAN-SPAM requires a clear, conspicuous opt-out IN THE BODY — headers alone aren't enough.
+    const optOut = settings.unsubscribe_url_template?.trim()
+      ? `To stop receiving these emails, visit ${settings.unsubscribe_url_template.trim()} or reply "unsubscribe".`
+      : 'To stop receiving these emails, reply "unsubscribe".';
+    const footer = `\n\n--\n${settings.company_name ?? ''}\n${settings.physical_address}\n${optOut}`;
     const finalText = (msg.body_text ?? '') + footer;
     const bodyHtml = paragraphsToHtml(msg.body_text ?? '') + paragraphsToHtml(footer);
 
@@ -162,6 +189,7 @@ Deno.serve(async (req) => {
       const txt = await res.text().catch(() => '');
       await admin.from('outreach_messages').update({ status: 'failed' }).eq('id', messageId);
       await ledger({ status: 'failed', request: { to, subject: msg.subject }, response: { status: res.status, body: txt.slice(0, 500) }, error: `resend ${res.status}` });
+      await releaseClaim({ failed: `resend ${res.status}` }); // a retry after a provider error stays possible
       return json({ ok: false, error: `Resend error ${res.status}: ${txt.slice(0, 300)}` }, 502);
     }
     const out = await res.json().catch(() => ({}));
@@ -179,7 +207,8 @@ Deno.serve(async (req) => {
     }
 
     await ledger({ status: 'ok', request: { to, subject: msg.subject }, response: { resend_id: resendId } });
-    await admin.from('approvals').update({ status: 'approved', result: { resend_id: resendId, sent_at: sentAt } }).eq('id', approval_id);
+    // status is already 'approved' (checked at entry) — only the outcome lands in result.
+    await admin.from('approvals').update({ result: { ...priorResult, resend_id: resendId, sent_at: sentAt } }).eq('id', approval_id);
     await admin.from('mind_events').insert({
       owner_id: user.id, source: 'execution', event_type: 'email_sent',
       subject: `Sent "${(msg.subject ?? '').slice(0, 120)}" to ${to}`,

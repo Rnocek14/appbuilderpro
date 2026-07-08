@@ -48,7 +48,9 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
   const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ] = await Promise.all([
     supabase.from('approvals').select('id, kind, title, created_at').eq('status', 'pending').limit(50),
     supabase.from('replies').select('id, from_address, subject, classification, received_at, campaign_id').order('received_at', { ascending: false }).limit(25),
-    supabase.from('mind_events').select('event_type, subject, occurred_at, payload').order('occurred_at', { ascending: false }).limit(60),
+    // 120 matches worldIntelRun.gather — the waking nudge and the world page must count the
+    // same record, or the two disagree about whether a reflection is due.
+    supabase.from('mind_events').select('event_type, subject, occurred_at, payload').order('occurred_at', { ascending: false }).limit(120),
     supabase.from('insights').select('id, title, body, score, created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(10),
     supabase.from('outreach_campaigns').select('id, world_id, state, sequence_stopped').limit(200),
     supabase.from('knowledge_clusters').select('id, world_id, title, charter').not('charter', 'is', null).limit(300),
@@ -81,11 +83,21 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
       if (!byCamp.has(cid)) byCamp.set(cid, []);
       byCamp.get(cid)!.push({ step: m.sequence_step as number, status: m.status as string, to: m.to_address as string | null, created: m.created_at as string });
     }
+    // A reply is "handled" only by a touch created AFTER it arrived — a follow-up staged before
+    // they replied was written blind and must not silence the warm-reply move.
+    const latestReplyByCampaign = new Map<string, string>();
+    for (const r of replies) {
+      const cid = r.campaign_id as string | null;
+      if (!cid) continue;
+      const at = r.received_at as string;
+      const prev = latestReplyByCampaign.get(cid);
+      if (!prev || at > prev) latestReplyByCampaign.set(cid, at);
+    }
     for (const cid of replyCampaigns) {
       const rows = byCamp.get(cid) ?? [];
-      nextTouchByCampaign.set(cid, rows.some((m) => m.step > 0 && ['draft', 'approved', 'scheduled', 'sent'].includes(m.status) &&
-        // a draft counts as "handled" only if it was created AFTER the reply — approximated by existence; keep simple v1
-        true));
+      const replyAt = latestReplyByCampaign.get(cid) ?? '';
+      nextTouchByCampaign.set(cid, rows.some((m) =>
+        m.step > 0 && ['draft', 'approved', 'scheduled', 'sent'].includes(m.status) && m.created > replyAt));
     }
     for (const cid of sentCampaignIds) {
       const drafts = (byCamp.get(cid) ?? []).filter((m) => m.step > 0 && m.status === 'draft');
