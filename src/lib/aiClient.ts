@@ -14,7 +14,7 @@ import { GENERATE_SYSTEM, GENERATE_FILES_STREAM, GENERATE_PLAN_SYSTEM, RESEARCH_
 import { contextPayload, applyEditGuardrail } from './contextBudget';
 import { buildPendingFiles, type PendingEdit } from './pendingEdit';
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS, THEME_FOUNDATION, UI_INDEX_THEMETOGGLE_EXPORT } from './scaffold';
-import { buildIndexCss, buildIndexCssForDesign, getPreset } from './themePresets';
+import { buildIndexCss, buildIndexCssForDesign, parseDesignSpec, getPreset } from './themePresets';
 import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
@@ -506,8 +506,12 @@ interface RawResult { text: string; inputTokens: number; outputTokens: number; c
 export interface DesignDirection {
   archetype: string; name: string; risk: string; accentHue: number;
   headingFont: string; bodyFont: string; brief: string; preview_html: string;
-  /** Deterministic token bundle — applied to the app's index.css so the direction actually happens. */
-  radius?: number; mode?: 'light' | 'dark'; bgHue?: number; bgSat?: number; bgLight?: number;
+  /** Deterministic token bundle (DesignSpec vocabulary) — compiled into the app's index.css so
+   *  the chosen direction actually happens. */
+  accentSat?: number; accentLight?: number;
+  mode?: 'light' | 'paper' | 'tinted' | 'dark';
+  surfaceSat?: number; radius?: number; // rem
+  borders?: 'hairline' | 'standard' | 'bold'; shadows?: 'soft' | 'hard' | 'none';
 }
 
 // Normalize preview HTML defensively: strip markdown fences, and wrap bare fragments in a
@@ -1102,23 +1106,13 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           { onConflict: 'project_id,path' },
         );
       }
-      // Apply the blueprint's FULL design bundle to the token file — palette + paper tint +
-      // radius + both fonts + the theme it opens in. This is what makes a chosen direction
-      // actually happen instead of being flattened into "white app, different accent".
-      const design = blueprint.design as Record<string, unknown> | undefined;
-      if (design && Number.isFinite(Number(design.accentHue))) {
-        const str = (v: unknown) => (typeof v === 'string' ? v : undefined);
-        const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
-        const css = buildIndexCssForDesign({
-          accentHue: num(design.accentHue),
-          headingFont: str(design.headingFont),
-          bodyFont: str(design.bodyFont),
-          radius: num(design.radius),
-          mode: design.mode === 'dark' ? 'dark' : 'light',
-          bgHue: num(design.bgHue), bgSat: num(design.bgSat), bgLight: num(design.bgLight),
-        });
+      // Compile the blueprint's FULL design bundle (mode, fonts, radius, borders, shadows) into
+      // /src/index.css — flattening it to hue+font was the "every app looks the same" leak.
+      // Falls back to the scaffold default if the blueprint declared no design.
+      const designSpec = parseDesignSpec(blueprint.design);
+      if (designSpec) {
         await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/src/index.css', content: css, updated_by_ai: true },
+          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForDesign(designSpec), updated_by_ai: true },
           { onConflict: 'project_id,path' },
         );
       }

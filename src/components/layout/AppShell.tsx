@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
@@ -17,6 +17,7 @@ const navSections = [
     items: [
       { to: '/garvis', label: 'Overview', icon: Boxes, end: true },
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
+      { to: '/garvis/mind', label: 'Mind', icon: Brain },
       { to: '/garvis/control', label: 'Mission Control', icon: Activity },
       { to: '/garvis/missions', label: 'Missions', icon: Rocket },
       { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },

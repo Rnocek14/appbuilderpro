@@ -6,7 +6,7 @@ import { diffLines } from 'diff';
 import type { SelectedElement } from '../editor/PreviewPane';
 import type { AIMessage, Generation, EditPlan } from '../../types';
 import { cn } from '../../lib/utils';
-import { Button } from '../ui';
+import { Button, Ember } from '../ui';
 import { PlanCard } from '../PlanCard';
 import { Markdown } from '../Markdown';
 import { ModelPicker } from '../ModelPicker';
@@ -98,10 +98,37 @@ function relTime(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+/** "42s" / "2m 05s" — durations shown while (and after) the forge works. */
+function fmtDur(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+/** Live elapsed seconds since an ISO timestamp — ticks once a second while mounted. */
+function useElapsedSec(startIso: string | null): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!startIso) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [startIso]);
+  if (!startIso) return null;
+  return Math.max(0, (now - new Date(startIso).getTime()) / 1000);
+}
+
+/** Completed-stage duration ("12s"), from the stage entry's own timestamps. */
+function stageDur(e: { started_at: string; finished_at?: string }): string | null {
+  if (!e.finished_at) return null;
+  const s = (new Date(e.finished_at).getTime() - new Date(e.started_at).getTime()) / 1000;
+  return s >= 1 ? fmtDur(s) : null;
+}
+
 interface Props {
   projectId: string;
   messages: AIMessage[];
   activeGeneration: Generation | null;
+  /** Most recent generation regardless of status — drives the "forged in Xs" / failure notes. */
+  lastGeneration?: Generation | null;
   busy: boolean;
   /** Conversation threads + controls (shown in the header in place of "Assistant"). */
   threads: Thread[];
@@ -134,40 +161,52 @@ interface Props {
   onClearSelection?: () => void;
 }
 
-/** Signature element: the forging strip — stages heat up as the agent works, with smoldering
- *  embers rising through the card while the forge is hot. */
+/** Signature element: the forging strip — stages heat up as the agent works (each with its time),
+ *  smoldering embers rising through the card while the forge is hot. */
 function ForgeProgress({ gen }: { gen: Generation }) {
   const stages = gen.stages ?? [];
+  const elapsed = useElapsedSec(gen.created_at);
+  const running = stages.find((s) => s.status === 'running');
+  const runningFor = useElapsedSec(running?.started_at ?? null);
   return (
     <div className="relative overflow-hidden rounded-xl border border-forge-ember/30 bg-forge-raised p-3 shadow-ember">
       <Embers className="opacity-70" />
       <div className="relative flex items-center gap-2">
-        <Flame size={15} className="animate-emberPulse text-forge-ember" />
+        <Ember size={15} />
         <span className="font-display text-sm font-medium">Forging your app</span>
-        <span className="ml-auto font-mono text-[11px] text-forge-dim">
-          {stages.filter((s) => s.status === 'done').length}/{Object.keys(STAGE_LABELS).length}
+        <span className="ml-auto font-mono text-[11px] text-forge-dim" title="Elapsed · stages done">
+          {elapsed != null && `${fmtDur(elapsed)} · `}{stages.filter((s) => s.status === 'done').length}/{Object.keys(STAGE_LABELS).length}
         </span>
       </div>
       <ul className="relative mt-2 space-y-1">
         {Object.entries(STAGE_LABELS).map(([key, label]) => {
           const entry = stages.find((s) => s.stage === key);
           const state = entry?.status === 'done' ? 'done' : entry ? 'running' : 'pending';
+          const time = entry?.status === 'done' ? stageDur(entry) : state === 'running' && runningFor != null && runningFor >= 3 ? fmtDur(runningFor) : null;
           return (
             <li key={key} className="flex items-center gap-2 text-xs">
               {state === 'done' && <CircleCheck size={13} className="text-forge-ok" />}
-              {state === 'running' && <CircleDashed size={13} className="animate-spin text-forge-ember" />}
+              {state === 'running' && <Ember size={13} />}
               {state === 'pending' && <CircleDashed size={13} className="text-forge-border" />}
               <span className={cn(state === 'pending' ? 'text-forge-dim/60' : 'text-forge-ink')}>{label}</span>
-              {entry?.note && <span className="ml-auto truncate text-[10px] text-forge-dim">{entry.note}</span>}
+              <span className="ml-auto flex min-w-0 items-center gap-1.5">
+                {entry?.note && <span className="truncate text-[10px] text-forge-dim">{entry.note}</span>}
+                {time && <span className={cn('shrink-0 font-mono text-[10px]', state === 'running' ? 'text-forge-ember/80' : 'text-forge-dim/60')}>{time}</span>}
+              </span>
             </li>
           );
         })}
       </ul>
+      {elapsed != null && elapsed > 75 && (
+        <p className="mt-2 border-t border-forge-border pt-2 text-[10px] text-forge-dim/70">
+          Full builds usually take a few minutes — every stage that finishes is already saved, so nothing is lost if you step away.
+        </p>
+      )}
     </div>
   );
 }
 
-export function ChatPanel({ projectId, messages, activeGeneration, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection }: Props) {
+export function ChatPanel({ projectId, messages, activeGeneration, lastGeneration = null, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection }: Props) {
   const [input, setInput] = useState('');
   // The "Remember a preference" panel + a seed taken from the most recent user message, so
   // correcting something then clicking Remember pre-fills what you just said.
@@ -186,6 +225,10 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // When the current turn started — drives the elapsed timers on the working indicators.
+  const [busyStart, setBusyStart] = useState<string | null>(null);
+  useEffect(() => { setBusyStart(busy ? new Date().toISOString() : null); }, [busy]);
+  const busyFor = useElapsedSec(busyStart);
   // Whether the message list is scrolled near the bottom — gates auto-scroll so reading back isn't fought.
   const [atBottom, setAtBottom] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -429,15 +472,26 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
         )}
         {busy && !activeGeneration && !stream && (
           <div className="flex items-center gap-2 rounded-xl border border-forge-border bg-forge-raised px-3 py-2 text-xs text-forge-dim">
-            <CircleDashed size={13} className="animate-spin text-forge-ember" />
-            <span>Thinking through your request…</span>
+            <Ember size={14} />
+            <span>
+              {busyFor != null && busyFor > 30
+                ? 'Still at it — bigger requests take a little longer…'
+                : busyFor != null && busyFor > 10
+                  ? 'Reading the project and working out the change…'
+                  : 'Thinking through your request…'}
+            </span>
+            {busyFor != null && busyFor >= 3 && <span className="ml-auto font-mono text-[11px] text-forge-dim/70">{fmtDur(busyFor)}</span>}
           </div>
         )}
         {stream && (
           <div className="rounded-xl border border-forge-ember/30 bg-forge-raised p-3 shadow-ember">
             <div className="flex items-center gap-2">
-              <Flame size={15} className="animate-emberPulse text-forge-ember" />
+              <Ember size={15} />
               <span className="font-display text-sm font-medium">Working on it</span>
+              <span className="ml-auto font-mono text-[11px] text-forge-dim" title="Elapsed · files written">
+                {busyFor != null && busyFor >= 3 && fmtDur(busyFor)}
+                {stream.files.length > 0 && ` · ${stream.files.filter((f) => f.done).length}/${stream.files.length} files`}
+              </span>
             </div>
             {stream.explanation && (
               <Markdown content={stream.explanation} className="mt-1.5 text-forge-dim" />
@@ -461,21 +515,39 @@ export function ChatPanel({ projectId, messages, activeGeneration, busy, threads
                   <li key={f.path} className="flex items-center gap-2 text-xs">
                     {f.done
                       ? <CircleCheck size={13} className="text-forge-ok" />
-                      : <CircleDashed size={13} className="animate-spin text-forge-ember" />}
+                      : <Ember size={13} />}
                     <span className="font-mono text-forge-ink">{f.path}</span>
+                    {!f.done && <span className="text-[10px] text-forge-ember/70">writing…</span>}
                   </li>
                 ))}
               </ul>
             )}
+            {busyFor != null && busyFor > 75 && (
+              <p className="mt-2 border-t border-forge-border pt-2 text-[10px] text-forge-dim/70">
+                Files land as they finish — the preview refreshes with each one. You can queue your next message meanwhile.
+              </p>
+            )}
           </div>
         )}
         {plan && !busy && <PlanCard plan={plan} onApprove={onApprovePlan} />}
-        {activeGeneration?.status === 'failed' && (
+        {/* Completion receipt: how long the last forge took (+ what it cost), shown briefly after it lands. */}
+        {!busy && !activeGeneration && lastGeneration?.status === 'succeeded' && lastGeneration.finished_at
+          && Date.now() - new Date(lastGeneration.finished_at).getTime() < 10 * 60_000 && (
+          <div className="flex items-center gap-2 px-1 text-[11px] text-forge-dim/80">
+            <CircleCheck size={12} className="text-forge-ok" />
+            <span>
+              Forged in {fmtDur((new Date(lastGeneration.finished_at).getTime() - new Date(lastGeneration.created_at).getTime()) / 1000)}
+              {lastGeneration.cost_usd > 0 && <span className="font-mono"> · ~${lastGeneration.cost_usd.toFixed(2)}</span>}
+            </span>
+          </div>
+        )}
+        {/* activeGeneration only covers running/queued, so failures must key off the LATEST generation. */}
+        {!busy && !activeGeneration && lastGeneration?.status === 'failed' && (
           <div className="flex items-start gap-2 rounded-xl border border-forge-err/40 bg-forge-raised p-3 text-xs">
             <CircleX size={14} className="mt-0.5 shrink-0 text-forge-err" />
             <div>
               <p className="font-medium text-forge-err">Generation failed</p>
-              <p className="mt-0.5 text-forge-dim">{activeGeneration.error ?? 'Unknown error.'} Try again with a simpler prompt.</p>
+              <p className="mt-0.5 text-forge-dim">{lastGeneration.error ?? 'Unknown error.'} Try again with a simpler prompt.</p>
             </div>
           </div>
         )}

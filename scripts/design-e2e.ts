@@ -17,7 +17,7 @@ import {
 } from '../supabase/functions/_shared/prompts';
 import { parseProtocol } from '../supabase/functions/_shared/streamparse';
 import { SCAFFOLD_FILES } from '../supabase/functions/_shared/scaffold';
-import { buildIndexCssForDesign, type AppDesign } from '../supabase/functions/_shared/themePresets';
+import { buildIndexCssForDesign, parseDesignSpec } from '../supabase/functions/_shared/themePresets';
 import { validateProject } from '../supabase/functions/_shared/qa';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,30 +73,27 @@ async function main() {
   const direction = extractJson<{ direction?: Record<string, unknown>; directions?: Record<string, unknown>[] }>(dRaw);
   const d = (direction.direction ?? direction.directions?.[0] ?? {}) as Record<string, unknown>;
   fs.writeFileSync(path.join(OUT, 'direction-preview.html'), String(d.preview_html ?? ''));
-  check('direction has token bundle (radius/mode/bg)', Number.isFinite(Number(d.radius)) && (d.mode === 'light' || d.mode === 'dark') && Number.isFinite(Number(d.bgLight)),
-    `radius=${d.radius} mode=${d.mode} bg=${d.bgHue}/${d.bgSat}/${d.bgLight} fonts=${d.headingFont}+${d.bodyFont}`);
+  check('direction has token bundle (radius/mode)', Number.isFinite(Number(d.radius)) && typeof d.mode === 'string',
+    `radius=${d.radius}rem mode=${d.mode} borders=${d.borders} shadows=${d.shadows} fonts=${d.headingFont}+${d.bodyFont}`);
   check('direction preview is substantial html', String(d.preview_html ?? '').length > 1500, `${String(d.preview_html ?? '').length} chars`);
 
   console.log('\n[2/6] BLUEPRINT (with the chosen direction)…');
   const directionCtx = [
     `DESIGN DIRECTION — the user chose "${d.name}" (${d.archetype}, ${d.risk}). Follow it EXACTLY:`,
     String(d.brief ?? ''),
-    `Set the blueprint's design fields verbatim: accentHue=${d.accentHue}, headingFont="${d.headingFont}", bodyFont="${d.bodyFont}", radius=${d.radius}, mode="${d.mode}", bgHue=${d.bgHue}, bgSat=${d.bgSat}, bgLight=${d.bgLight}.`,
+    `Set the blueprint's design fields verbatim: archetype="${d.archetype}", accentHue=${d.accentHue}, accentSat=${d.accentSat}, accentLight=${d.accentLight}, headingFont="${d.headingFont}", bodyFont="${d.bodyFont}", mode="${d.mode}", surfaceSat=${d.surfaceSat}, radius=${d.radius}, borders="${d.borders}", shadows="${d.shadows}".`,
   ].join('\n');
   const bpRaw = await complete(GENERATE_SYSTEM, blueprintPrompt(`${SAMPLE_PROMPT}\n\n${directionCtx}`), 8192);
   const blueprint = extractJson<Record<string, unknown>>(bpRaw);
-  const design = (blueprint.design ?? {}) as AppDesign & Record<string, unknown>;
-  check('blueprint carries the full design bundle',
-    Number.isFinite(Number(design.accentHue)) && Number.isFinite(Number(design.radius)) && typeof design.bodyFont === 'string' && Number.isFinite(Number(design.bgLight)),
-    `hue=${design.accentHue} radius=${design.radius} mode=${design.mode} bg=${design.bgHue}/${design.bgSat}/${design.bgLight}`);
-  check('blueprint kept the direction radius', Math.abs(Number(design.radius) - Number(d.radius)) <= 4, `${design.radius} vs ${d.radius}`);
+  const design = parseDesignSpec(blueprint.design);
+  check('blueprint carries a parseable design bundle', design != null,
+    design ? `hue=${design.accentHue} radius=${design.radius} mode=${design.mode} borders=${design.borders}` : 'parseDesignSpec returned null');
+  check('blueprint kept the direction radius', design != null && Math.abs(Number(design.radius ?? 0.625) - Number(d.radius)) <= 0.25, `${design?.radius} vs ${d.radius}`);
 
   console.log('\n[3/6] TOKENS (deterministic index.css)…');
-  const css = buildIndexCssForDesign(design);
-  const radiusRem = `${Math.min(28, Math.max(0, Number(design.radius))) / 16}rem`;
-  check('index.css applies the radius', css.includes(`--radius: ${radiusRem}`), radiusRem);
-  check('index.css applies the paper tint', css.includes(`--background: ${Math.round(Number(design.bgHue))}`) || Number(design.bgSat) === 0, css.match(/--background: [^;]+/)?.[0]);
-  check('index.css loads both fonts', (!design.headingFont || css.includes('--font-display')) && (!design.bodyFont || css.includes('--font-sans')));
+  const css = design ? buildIndexCssForDesign(design) : '';
+  check('index.css applies the radius', design != null && css.includes(`--radius: ${Math.min(1.5, Math.max(0, Number(design.radius ?? 0.625)))}rem`), `${design?.radius}rem`);
+  check('index.css loads the display font', !design?.headingFont || css.includes('--font-display'));
 
   console.log('\n[4/6] SHELL (contracts + App.tsx + layout)…');
   const bpJson = JSON.stringify(blueprint);

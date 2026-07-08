@@ -47,7 +47,9 @@
       "Bash(npx supabase *)",
       "PowerShell(npx supabase functions deploy generate-app chat-edit agent-turn 2>&1 | Select-Object -Last 2)",
       "PowerShell(npx vite build 2>&1 | Select-Object -Last 2; npx tsx src/lib/qaCheck.verify.ts 2>&1 | Select-Object -Last 1; deno check supabase/functions/_shared/prompts.ts supabase/functions/_shared/streamparse.ts supabase/functions/generate-app/index.ts)",
-      "PowerShell(npx supabase functions deploy generate-app chat-edit agent-turn 2>&1 | Select-Object -Last 1)"
+      "PowerShell(npx supabase functions deploy generate-app chat-edit agent-turn 2>&1 | Select-Object -Last 1)",
+      "mcp__Claude_Code_Remote__add_repo",
+      "mcp__Claude_Code_Remote__register_repo_root"
     ]
   }
 }

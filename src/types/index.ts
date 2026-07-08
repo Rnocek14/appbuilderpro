@@ -444,6 +444,65 @@ export interface GarvisAppProfile {
   updated_at: string;
 }
 
+// ---- Intelligence core (app_0019): the owned record the rented reasoner works over ----
+
+/** One append-only entry in the mind's event log. Immutable; corrections are new events. */
+export interface MindEvent {
+  id: string;
+  owner_id: string;
+  app_id: string | null;
+  source: string;      // commander | agent_run | workspace | import | user
+  event_type: string;  // typed contract lives in lib/garvis/mind.ts
+  subject: string;     // one-line summary — data, never instructions
+  payload: Record<string, unknown>;
+  occurred_at: string;
+  created_at: string;
+}
+
+export type BeliefStatus = 'active' | 'retired';
+
+/** An evidence-COUNTED assertion: confidence is derived from linked events, never invented. */
+export interface MindBelief {
+  id: string;
+  owner_id: string;
+  statement: string;
+  scope: string; // portfolio | app name | domain
+  supporting_event_ids: string[];
+  contradicting_event_ids: string[];
+  status: BeliefStatus;
+  review_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A decision-journal entry: decision + prediction now, outcome later. Outcomes = learning. */
+export interface MindDecision {
+  id: string;
+  owner_id: string;
+  app_id: string | null;
+  decision: string;
+  reasoning: string | null;
+  prediction: string | null;
+  outcome: string | null;    // null = still open
+  outcome_hit: boolean | null;
+  decided_at: string;
+  outcome_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type IdentitySlot = 'goals' | 'values' | 'priorities' | 'voice';
+
+/** One human-edited identity document (goals/values/priorities/voice). Never machine-written. */
+export interface MindIdentityDoc {
+  id: string;
+  owner_id: string;
+  slot: IdentitySlot;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
 /** A sourced assertion: claim (title/body) + provenance (source/run_id) + confidence. */
 export interface GarvisKnowledge {
   id: string;

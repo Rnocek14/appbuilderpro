@@ -19,6 +19,12 @@ export { diagnosticModel } from './diagnosticModel';
 export { brainModel } from './brainModel';
 
 export { selectApproved, buildKnowledgeDigest, normalizeShortScript } from './knowledge';
+export {
+  MIND_EVENT_TYPES, MIN_EVIDENCE, normalizeMindEvent, beliefEvidence, attachEvidence,
+  isBeliefStale, isDecisionOpen, decisionHitRate, compileMindContext,
+} from './mind';
+export type { MindEventType, MindEventInput, NormalizedMindEvent, BeliefVerdict, BeliefEvidence, MindContextInput } from './mind';
+export { recordMindEvent } from './mindStore';
 export { selectActiveGoals, selectApprovedCapabilities, buildGoalsDigest, buildCapabilitiesDigest } from './objective';
 export {
   buildProfilesDigest, buildProfileUser, parseProfileResponse, isProfileEmpty, isProfileStale, PROFILE_SYSTEM,

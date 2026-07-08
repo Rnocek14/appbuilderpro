@@ -118,14 +118,44 @@ function emit(selector: string, vars: Tokens): string {
   return `${selector} {\n${lines}\n}`;
 }
 
-function assembleCss(pal: { light: Tokens; dark: Tokens }): string {
+// SIGNATURE-DEVICE utilities — the personality toolkit every generated app ships with. All
+// token-driven (they recolor with the theme) and compositor-friendly. The DESIGN_GUIDE teaches the
+// model when to reach for each; an app that uses 2-3 of these stops reading as "AI template".
+const PERSONALITY_CSS = `/* ---- signature devices (see DESIGN guide: pick 2-3, never all) ---- */
+/* Film-grain texture overlay — put class "grain" on a hero / dark band / full-bleed section. */
+.grain { position: relative; isolation: isolate; }
+.grain::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.055;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+/* Infinite marquee — <div class="marquee"><div class="marquee-track"> content ×2 </div></div>. */
+.marquee { overflow: hidden; }
+.marquee-track { display: flex; gap: 3rem; width: max-content; animation: marquee-scroll 32s linear infinite; }
+.marquee:hover .marquee-track { animation-play-state: paused; }
+@keyframes marquee-scroll { to { transform: translateX(-50%); } }
+/* Oversized display type for hero headlines / giant stats / footer wordmarks. */
+.text-display { font-family: var(--font-display, inherit); font-size: clamp(2.75rem, 8vw, 6.5rem); line-height: 0.98; letter-spacing: -0.03em; font-weight: 700; }
+/* Hollow outline type — ONE display word for editorial/brutalist punch. */
+.text-outline { -webkit-text-stroke: 2px hsl(var(--foreground)); color: transparent; }
+/* Section textures — archival dots / engineered ruled lines. */
+.bg-dots { background-image: radial-gradient(hsl(var(--foreground) / 0.09) 1px, transparent 1px); background-size: 22px 22px; }
+.bg-ruled { background-image: repeating-linear-gradient(to bottom, transparent, transparent 31px, hsl(var(--border)) 31px, hsl(var(--border)) 32px); }
+/* Link underline that draws in on hover (nav/footer links). */
+.underline-draw { background-image: linear-gradient(currentColor, currentColor); background-size: 0% 1.5px; background-repeat: no-repeat; background-position: left 100%; transition: background-size 0.25s cubic-bezier(0.16,1,0.3,1); }
+.underline-draw:hover { background-size: 100% 1.5px; }
+/* Hard offset block shadow (neobrutalist surfaces — pair with a 2px border). */
+.shadow-hard { box-shadow: 4px 4px 0 hsl(var(--foreground)); }
+.shadow-hard-primary { box-shadow: 4px 4px 0 hsl(var(--primary)); }
+`;
+
+function assembleCss(pal: { light: Tokens; dark: Tokens }, bodyStack = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'): string {
   return `${emit(':root', pal.light)}
 ${emit('.dark', pal.dark)}
 * { box-sizing: border-box; border-color: hsl(var(--border)); }
 html, body, #root { height: 100%; }
 body {
   margin: 0;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: ${bodyStack};
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   -webkit-font-smoothing: antialiased;
@@ -156,13 +186,14 @@ h1,h2,h3 { line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; }
 /* Hover lift for interactive/linked cards — transform+shadow only (compositor-friendly). */
 .card-lift { transition: transform 0.2s cubic-bezier(0.16,1,0.3,1), box-shadow 0.2s cubic-bezier(0.16,1,0.3,1), border-color 0.2s; }
 .card-lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px -8px hsl(var(--foreground) / 0.14); }
-@media (prefers-reduced-motion: reduce) {
+${PERSONALITY_CSS}@media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  .marquee-track { animation: none !important; }
 }
 `;
 }
@@ -172,91 +203,151 @@ export function buildIndexCss(presetId: string): string {
   return assembleCss(PALETTES[presetId] ?? PALETTES.slate);
 }
 
-/**
- * The full DESIGN BUNDLE a chosen direction (or the blueprint) commits to. Every field maps to a
- * deterministic token — this is what makes a picked direction actually HAPPEN instead of being
- * flattened into "same white app, different accent" (only hue+headingFont used to survive).
- */
-export interface AppDesign {
-  /** Accent hue 0–359 (the one primary color). */
-  accentHue?: number;
-  /** Google Font for headings (display personality). */
+// ---------------------------------------------------------------------------
+// DESIGN SPEC — the full identity contract from the blueprint's `design` object. This is what lets
+// a chosen archetype SURVIVE into the shipped CSS: background character, surface saturation, radius,
+// border weight, shadow style, and both fonts all land in tokens instead of being flattened to
+// "one hue + Inter". (The flattening was the single biggest "every app looks the same AI" leak.)
+// ---------------------------------------------------------------------------
+
+export interface DesignSpec {
+  accentHue: number;
+  /** Accent chroma/lightness — lets muted editorial accents and vivid pop accents both exist. */
+  accentSat?: number;   // 0-100, default 68
+  accentLight?: number; // 25-65, default 45
   headingFont?: string;
-  /** Google Font for body text (default Inter). */
   bodyFont?: string;
-  /** Corner radius in px: 0 sharp editorial/brutalist … 10 default … 24 soft organic. */
-  radius?: number;
-  /** Which theme the app OPENS in — 'dark' for midnight/pro-tool directions. */
-  mode?: 'light' | 'dark';
-  /** Light-mode surface tint (the "paper"): hue 0-359, saturation 0-40, lightness 90-100.
-   *  Warm cream ≈ {37, 30, 96}; cool near-white ≈ {215, 15, 98}. Defaults to the accent hue. */
-  bgHue?: number;
-  bgSat?: number;
-  bgLight?: number;
+  /** Background character: clean white / warm paper / colored field / committed dark. */
+  mode?: 'light' | 'paper' | 'tinted' | 'dark';
+  /** How hue-tinted the neutral surfaces are (0 = pure gray, 40 = strongly tinted). */
+  surfaceSat?: number;  // default 26
+  /** Corner radius in rem: 0 (editorial/brutalist) … 1.5 (playful pills). */
+  radius?: number;      // default 0.625
+  borders?: 'hairline' | 'standard' | 'bold';
+  shadows?: 'soft' | 'hard' | 'none';
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
-const validFont = (f?: string): string => {
-  const fam = (f ?? '').trim();
-  return fam && /^[a-zA-Z0-9 ]{2,40}$/.test(fam) ? fam : '';
-};
+const FONT_RE = /^[a-zA-Z0-9 ]{2,40}$/;
 
-/**
- * Build a cohesive /src/index.css from a full design bundle — used at generation time so each app
- * gets a REAL identity: paper tint, radius, both fonts, and its opening theme, not just an accent.
- */
-export function buildIndexCssForDesign(design: AppDesign): string {
-  const accent = Number.isFinite(Number(design.accentHue)) ? (((Number(design.accentHue) % 360) + 360) % 360) : 215;
-  const bgHue = Number.isFinite(Number(design.bgHue)) ? (((Number(design.bgHue) % 360) + 360) % 360) : accent;
-  const bgSat = Number.isFinite(Number(design.bgSat)) ? clamp(Number(design.bgSat), 0, 40) : 26;
-  const bgLight = Number.isFinite(Number(design.bgLight)) ? clamp(Number(design.bgLight), 90, 100) : 97.5;
+// Google Fonts families that ship ONE static weight — requesting wght axes for these returns
+// HTTP 400 and the @import dies silently. Browsers synthesize heavier weights acceptably.
+const SINGLE_WEIGHT_FONTS = new Set([
+  'Anton', 'Archivo Black', 'Gloock', 'Young Serif', 'Instrument Serif', 'Abril Fatface',
+  'Bebas Neue', 'Alfa Slab One', 'Righteous', 'Shrikhand', 'Special Elite', 'Monoton',
+]);
 
+/** Tolerant reader: blueprint `design` JSON (unknown shape) → a validated DesignSpec, or null. */
+export function parseDesignSpec(design: unknown): DesignSpec | null {
+  const d = (design ?? {}) as Record<string, unknown>;
+  const hue = Number(d.accentHue);
+  if (!Number.isFinite(hue)) return null;
+  const str = (v: unknown) => (typeof v === 'string' && FONT_RE.test(v.trim()) ? v.trim() : undefined);
+  const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
+  const oneOf = <T extends string>(v: unknown, opts: readonly T[]): T | undefined =>
+    typeof v === 'string' && (opts as readonly string[]).includes(v) ? (v as T) : undefined;
+  return {
+    accentHue: hue,
+    accentSat: num(d.accentSat),
+    accentLight: num(d.accentLight),
+    headingFont: str(d.headingFont),
+    bodyFont: str(d.bodyFont),
+    mode: oneOf(d.mode, ['light', 'paper', 'tinted', 'dark'] as const),
+    surfaceSat: num(d.surfaceSat),
+    radius: num(d.radius),
+    borders: oneOf(d.borders, ['hairline', 'standard', 'bold'] as const),
+    shadows: oneOf(d.shadows, ['soft', 'hard', 'none'] as const),
+  };
+}
+
+/** Derive the light+dark palettes for a spec — the mode/saturation/border knobs land here. */
+function makeSpecPalette(spec: DesignSpec): { light: Tokens; dark: Tokens } {
+  const h = (((spec.accentHue % 360) + 360) % 360);
+  const s = clamp(spec.surfaceSat ?? 26, 0, 40);
+  const aS = clamp(spec.accentSat ?? 68, 0, 100);
+  const aL = clamp(spec.accentLight ?? 45, 25, 65);
   const pal = makePalette({
     id: 'custom', name: 'Custom', swatch: ['#eee', '#888'],
-    hue: bgHue, sat: bgSat,
-    primaryLight: [accent, 68, 45], primaryDark: [accent, 62, 60],
+    hue: h, sat: s,
+    primaryLight: [h, aS, aL], primaryDark: [h, Math.max(aS - 6, 0), clamp(aL + 15, 40, 72)],
   });
-  // Shift the whole light-surface ladder with the paper tint so a warm-cream or bone direction
-  // keeps its contrast structure (card floats above bg, borders stay visible).
-  const delta = 97.5 - bgLight;
-  pal.light['--background'] = t(bgHue, bgSat, bgLight);
-  pal.light['--card'] = t(bgHue, bgSat * 0.5, clamp(bgLight + 2.5, 90, 100));
-  pal.light['--popover'] = pal.light['--card'];
-  pal.light['--secondary'] = t(bgHue, bgSat, clamp(95.5 - delta, 80, 100));
-  pal.light['--muted'] = t(bgHue, bgSat, clamp(95 - delta, 80, 100));
-  pal.light['--accent'] = t(bgHue, bgSat, clamp(93 - delta, 80, 100));
-  pal.light['--border'] = t(bgHue, bgSat, clamp(89 - delta, 74, 96));
-  pal.light['--input'] = pal.light['--border'];
-
-  const radiusPx = Number.isFinite(Number(design.radius)) ? clamp(Number(design.radius), 0, 28) : 10;
-  pal.light['--radius'] = `${radiusPx / 16}rem`; // full precision — round() would turn 0.625 into 0.6
-  if (design.mode === 'dark') pal.light['--default-theme'] = 'dark'; // read by the scaffold's getTheme()
-
-  let css = assembleCss(pal);
-
-  // Fonts: one @import for both families; headings get the display font, body gets --font-sans
-  // (the scaffold Tailwind config maps font-sans onto it, so utilities follow too).
-  const heading = validFont(design.headingFont);
-  const body = validFont(design.bodyFont);
-  const families = [...new Set([heading, body].filter(Boolean))]
-    .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;600;700`).join('&');
-  if (families) css = `@import url('https://fonts.googleapis.com/css2?${families}&display=swap');\n${css}`;
-  if (heading) {
-    css += `:root { --font-display: "${heading}", Inter, ui-sans-serif, system-ui, sans-serif; }
-h1,h2,h3,h4,h5,h6,.font-display { font-family: var(--font-display); }
-`;
+  const mode = spec.mode ?? 'light';
+  if (mode === 'paper') {
+    // Warm paper: bg and cards nearly merge — structure comes from hairline rules, not boxes.
+    pal.light['--background'] = t(h, Math.max(s, 14), 96.5);
+    pal.light['--card'] = t(h, Math.max(s, 12), 98.5);
+    pal.light['--popover'] = t(h, Math.max(s, 12), 98.5);
+    pal.light['--muted'] = t(h, Math.max(s, 14), 93.5);
+  } else if (mode === 'tinted') {
+    // A visibly colored field with white cards floating on it.
+    pal.light['--background'] = t(h, clamp(s + 12, 16, 44), 93);
+    pal.light['--card'] = t(h, s * 0.4, 99.5);
+    pal.light['--popover'] = t(h, s * 0.4, 99.5);
+    pal.light['--border'] = t(h, clamp(s + 8, 12, 40), 85);
+    pal.light['--input'] = t(h, clamp(s + 8, 12, 40), 85);
   }
-  if (body) {
-    css += `:root { --font-sans: "${body}", Inter, ui-sans-serif, system-ui, sans-serif; }
-body { font-family: var(--font-sans); }
-`;
+  const borders = spec.borders ?? 'standard';
+  if (borders === 'hairline') {
+    pal.light['--border'] = t(h, s, 92.5); pal.light['--input'] = t(h, s, 92.5);
+    pal.dark['--border'] = t(h, s, 15); pal.dark['--input'] = t(h, s, 15);
+  } else if (borders === 'bold') {
+    // Near-ink borders: even at 1px the UI reads drawn/printed; pair with border-2 + .shadow-hard.
+    pal.light['--border'] = t(h, Math.min(s + 8, 30), 24); pal.light['--input'] = t(h, Math.min(s + 8, 30), 24);
+    pal.dark['--border'] = t(h, 12, 78); pal.dark['--input'] = t(h, 12, 78);
   }
-  return css;
+  const radius = clamp(spec.radius ?? 0.625, 0, 1.5);
+  pal.light['--radius'] = `${radius}rem`;
+  return pal;
 }
 
 /**
- * Back-compat wrapper: a palette from just an accent hue (+ optional heading font). Prefer
- * buildIndexCssForDesign for anything blueprint-driven.
+ * Build /src/index.css from a full DesignSpec — the archetype's whole bundle survives: background
+ * character, both fonts, radius, borders, shadow style, and the signature-device utilities.
+ */
+export function buildIndexCssForDesign(spec: DesignSpec): string {
+  const pal = makeSpecPalette(spec);
+  // Committed-dark identity: the dark palette IS the app (both :root and .dark), matching
+  // archetypes like Midnight Pro Tool where light mode would break the brand.
+  if (spec.mode === 'dark') pal.light = { ...pal.dark, '--radius': pal.light['--radius'] };
+
+  const heading = spec.headingFont && FONT_RE.test(spec.headingFont) ? spec.headingFont : undefined;
+  const body = spec.bodyFont && FONT_RE.test(spec.bodyFont) && spec.bodyFont !== heading ? spec.bodyFont : undefined;
+  const bodyStack = body
+    ? `"${body}", Inter, ui-sans-serif, system-ui, sans-serif`
+    : 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
+
+  // One @import PER family (a bad request for one family must not kill the other), and no weight
+  // axis for single-weight display faces — the css2 API hard-errors on unavailable weights.
+  const fontUrl = (fam: string, weights: string) => {
+    const axis = SINGLE_WEIGHT_FONTS.has(fam) ? '' : `:wght@${weights}`;
+    return `@import url('https://fonts.googleapis.com/css2?family=${fam.replace(/ /g, '+')}${axis}&display=swap');\n`;
+  };
+  const importLine =
+    (heading ? fontUrl(heading, '500;600;700;800') : '') +
+    (body ? fontUrl(body, '400;500;600') : '');
+
+  const fontRules = heading
+    ? `:root { --font-display: "${heading}", ${bodyStack}; }
+h1,h2,h3,h4,h5,h6,.font-display { font-family: var(--font-display); }
+`
+    : '';
+
+  // Shadow character: hard = brutalist offset blocks (card-lift snaps instead of floating);
+  // none = flat archetypes where hover feedback is border/color only.
+  const shadowRules = spec.shadows === 'hard'
+    ? `.card-lift:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 hsl(var(--foreground)); }
+`
+    : spec.shadows === 'none'
+      ? `.card-lift:hover { transform: none; box-shadow: none; border-color: hsl(var(--foreground) / 0.35); }
+`
+      : '';
+
+  return `${importLine}${assembleCss(pal, bodyStack)}${fontRules}${shadowRules}`;
+}
+
+/**
+ * Back-compat wrapper: build /src/index.css from just an accent hue (+ optional heading font) —
+ * the pre-DesignSpec contract. New callers should pass the full spec via buildIndexCssForDesign.
  */
 export function buildIndexCssForHue(hue: number, headingFont?: string): string {
   return buildIndexCssForDesign({ accentHue: hue, headingFont });

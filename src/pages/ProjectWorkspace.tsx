@@ -94,7 +94,7 @@ export default function ProjectWorkspace() {
   const { session, refreshProfile } = useAuth();
   const [project, setProject] = useState<Project | null>(null);
   const { files, loading: filesLoading, loadError, saveFile, createFile, renameFile, deleteFile, getVersions, refresh: refreshFiles } = useProjectFiles(id);
-  const { active: activeGeneration, refresh: refreshGens } = useGenerations(id);
+  const { generations, active: activeGeneration, refresh: refreshGens } = useGenerations(id);
   const { messages } = useChatMessages(id);
 
   const [tab, setTab] = useState<MiddleTab>('chat');
@@ -1061,6 +1061,7 @@ export default function ProjectWorkspace() {
                 projectId={id ?? ''}
                 messages={messages.filter((m) => threadOf(m.thread_id) === activeThreadId)}
                 activeGeneration={activeGeneration}
+                lastGeneration={generations[0] ?? null}
                 busy={busy}
                 threads={threads}
                 activeThreadId={activeThreadId}

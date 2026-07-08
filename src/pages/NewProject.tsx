@@ -94,10 +94,15 @@ export default function NewProject() {
   const directionContext = (d: DesignDirection): string => [
     `DESIGN DIRECTION — the user chose "${d.name}" (${d.archetype}, ${d.risk}). Follow it EXACTLY:`,
     d.brief,
-    `Set the blueprint's design fields verbatim: accentHue=${Math.round(d.accentHue)}, headingFont="${d.headingFont}", bodyFont="${d.bodyFont}"` +
-      (Number.isFinite(Number(d.radius)) ? `, radius=${Math.round(Number(d.radius))}` : '') +
-      (d.mode === 'dark' || d.mode === 'light' ? `, mode="${d.mode}"` : '') +
-      (Number.isFinite(Number(d.bgHue)) ? `, bgHue=${Math.round(Number(d.bgHue))}, bgSat=${Math.round(Number(d.bgSat ?? 26))}, bgLight=${Math.round(Number(d.bgLight ?? 97))}` : '') + '.',
+    `Set the blueprint's design fields verbatim: archetype="${d.archetype}", accentHue=${Math.round(d.accentHue)}` +
+      (Number.isFinite(Number(d.accentSat)) ? `, accentSat=${Math.round(Number(d.accentSat))}` : '') +
+      (Number.isFinite(Number(d.accentLight)) ? `, accentLight=${Math.round(Number(d.accentLight))}` : '') +
+      `, headingFont="${d.headingFont}", bodyFont="${d.bodyFont}"` +
+      (d.mode ? `, mode="${d.mode}"` : '') +
+      (Number.isFinite(Number(d.surfaceSat)) ? `, surfaceSat=${Math.round(Number(d.surfaceSat))}` : '') +
+      (Number.isFinite(Number(d.radius)) ? `, radius=${Number(d.radius)} (rem)` : '') +
+      (d.borders ? `, borders="${d.borders}"` : '') +
+      (d.shadows ? `, shadows="${d.shadows}"` : '') + '.',
     `Make design.vibe restate this direction. Every page commits to this bundle — its palette strategy, radius, surface logic, layout archetype, and motion character.`,
   ].join('\n');
 
