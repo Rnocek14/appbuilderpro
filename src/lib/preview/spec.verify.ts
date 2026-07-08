@@ -50,7 +50,8 @@ check('roofer matches contractor recipe', pickRecipe(ROOFER).id === 'contractor_
 check('restaurant keyword matches restaurant recipe', pickRecipe({ ...ROOFER, industry: 'Pizzeria' }).id === 'restaurant');
 check('spa keyword matches salon recipe', pickRecipe({ ...ROOFER, industry: 'Med Spa' }).id === 'salon_spa');
 check('recommended_site_type wins over industry', pickRecipe({ ...ROOFER, industry: 'Pizzeria', recommended_site_type: 'contractor_lead_gen' }).id === 'contractor_lead_gen');
-check('unknown industry falls back to contractor', pickRecipe({ ...ROOFER, industry: 'Quantum Bakery Consulting'.replace('Bakery', 'Widget') }).id === 'contractor_lead_gen');
+// "Consulting" used to fall through to contractor; the expanded catalog now routes it properly.
+check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, industry: 'Quantum Widget Consulting' }).id === 'legal_professional');
 
 // fallback assembly
 {
@@ -124,6 +125,31 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   check('bad critique warrants refine', critiqueWarrantsRefine(crit));
   check('clean critique skips refine', !critiqueWarrantsRefine(normalizeCritique({ would_buy: true, feels_like_my_business: 9, issues: [] })));
   check('critique normalize survives garbage', normalizeCritique(null).feels_like_my_business === 7);
+}
+
+// ---------------------------------------------------------------------------
+// Recipe coverage + variant plumbing (the "many industries" expansion)
+// ---------------------------------------------------------------------------
+{
+  check('recipe catalog covers 11+ industries', RECIPES.length >= 11);
+  check('every recipe has a full valid theme', RECIPES.every((r) =>
+    /%/.test(r.theme.primary) && !!r.theme.displayFont && !!r.theme.bodyFont && r.sections[0] === 'hero'));
+  const cases: [string, string][] = [
+    ['auto repair shop', 'auto_services'], ['family dentist', 'dental_medical'],
+    ['personal injury law firm', 'legal_professional'], ['real estate broker', 'real_estate'],
+    ['crossfit gym', 'fitness'], ['flower boutique', 'retail_boutique'],
+    ['dog grooming', 'pet_care'], ['wedding photography studio', 'photography_events'],
+  ];
+  for (const [industry, expected] of cases) {
+    check(`pickRecipe("${industry}") → ${expected}`,
+      pickRecipe({ business_name: 'X', industry, services: ['a'], photos: [] }).id === expected);
+  }
+  check('unknown industry still falls back to contractor',
+    pickRecipe({ business_name: 'X', industry: 'zeppelin polishing', services: ['a'], photos: [] }).id === 'contractor_lead_gen');
+
+  // variant survives normalization (the renderer dispatches on it — dropping it kills layouts)
+  const withVariant = normalizeSpec({ sections: [{ type: 'hero', variant: 'split', props: { heading: 'Hi' } }] }, ROOFER);
+  check('normalizeSpec preserves section variant', withVariant.sections[0].variant === 'split');
 }
 
 console.log(`\npreview-spec.verify: ${passed} passed, ${failed} failed`);

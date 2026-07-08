@@ -11,6 +11,18 @@ export interface JobEvent {
   appUrl?: string;
 }
 
+/** Post a plain text notification to the user's webhook (Discord/Slack auto-format, JSON otherwise). */
+export async function notifyText(webhookUrl: string | null | undefined, text: string): Promise<void> {
+  if (!webhookUrl) return;
+  let body: unknown;
+  if (webhookUrl.includes('discord.com/api/webhooks')) body = { content: text.slice(0, 1900) };
+  else if (webhookUrl.includes('hooks.slack.com')) body = { text };
+  else body = { text };
+  try {
+    await fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch { /* notification failures must never break the flow */ }
+}
+
 export async function notify(webhookUrl: string | null | undefined, e: JobEvent): Promise<void> {
   if (!webhookUrl) return;
   const emojiMap = { 'job.completed': '✅', 'job.failed': '❌', 'job.paused': '⏸️', 'job.waiting_approval': '❓' };

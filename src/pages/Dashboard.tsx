@@ -53,12 +53,38 @@ export default function Dashboard() {
             {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
           </div>
         ) : visible.length === 0 ? (
-          <EmptyState
-            icon={<Hammer size={28} />}
-            title={query ? 'No matches' : showArchived ? 'No archived projects' : 'The forge is cold'}
-            body={query ? `Nothing matches “${query}”. Try a different name.` : showArchived ? 'Projects you archive will wait here.' : 'Describe your first app and watch it take shape — blueprint, files, live preview.'}
-            action={!query && !showArchived ? <Link to="/new"><Button><Plus size={15} /> Forge your first app</Button></Link> : undefined}
-          />
+          query || showArchived ? (
+            <EmptyState
+              icon={<Hammer size={28} />}
+              title={query ? 'No matches' : 'No archived projects'}
+              body={query ? `Nothing matches “${query}”. Try a different name.` : 'Projects you archive will wait here.'}
+            />
+          ) : (
+            // First run: not a dead end — the three steps from cold forge to shipped site.
+            <div className="mx-auto max-w-xl">
+              <EmptyState
+                icon={<Hammer size={28} />}
+                title="The forge is cold — let's fix that"
+                body="Three steps from idea to a live site:"
+                action={<Link to="/new"><Button><Plus size={15} /> Forge your first app</Button></Link>}
+              />
+              <ol className="mt-6 space-y-3">
+                {[
+                  { n: '1', title: 'Describe it', body: 'One sentence is enough — you\'ll pick from three distinct design directions before anything is built.' },
+                  { n: '2', title: 'Shape it in chat', body: 'Every change is a message. Attach screenshots, pick elements in the preview, add your own photos via “Use my own photos”.' },
+                  { n: '3', title: 'Ship it', body: 'Deploy from the workspace when it feels right. Nothing you generate is wasted — every version is kept.' },
+                ].map((s) => (
+                  <li key={s.n} className="flex gap-3 rounded-xl border border-forge-border bg-forge-panel/40 p-4">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-forge-ember/15 font-mono text-sm font-semibold text-forge-ember">{s.n}</span>
+                    <div>
+                      <p className="text-sm font-medium text-forge-ink">{s.title}</p>
+                      <p className="mt-0.5 text-xs text-forge-dim">{s.body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )
         ) : (
           <div className="grid gap-3 stagger sm:grid-cols-2 lg:grid-cols-3">
             {visible.map((p) => (

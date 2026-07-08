@@ -80,13 +80,53 @@ function Stars({ rating = 5 }: { rating?: number }) {
 // Sections
 // ---------------------------------------------------------------------------
 
-export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?: string; secondaryCta?: string; image?: string; rating?: number; reviewCount?: number }) {
+export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?: string; secondaryCta?: string; image?: string; rating?: number; reviewCount?: number; variant?: string }) {
   const hasImage = !!p.image;
+
+  // SPLIT variant — content on the page paper, photo in a framed panel on the right. Reads
+  // editorial/professional (legal, medical, real estate); the model or recipe picks it.
+  if (p.variant === 'split' && hasImage) {
+    return (
+      <section id="hero" className="relative isolate overflow-hidden">
+        <div className="mx-auto grid w-full max-w-6xl items-center gap-10 px-5 py-16 sm:px-8 sm:py-24 lg:grid-cols-[1.1fr_1fr]">
+          <Reveal>
+            {p.eyebrow && <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--p))]">{p.eyebrow}</p>}
+            <h1 className="pv-display text-4xl font-semibold leading-[1.05] tracking-tight text-[hsl(var(--ink))] sm:text-6xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+            {p.sub && <p className="mt-5 max-w-xl text-lg leading-relaxed text-[hsl(var(--mut))]">{p.sub}</p>}
+            <div className="mt-8 flex flex-wrap items-center gap-3">
+              {p.cta && <Cta label={p.cta} />}
+              {p.secondaryCta && (
+                <a href={`tel:${p.secondaryCta.replace(/[^\d+]/g, '')}`}
+                  className="inline-flex items-center gap-2 rounded-[var(--r)] border border-[hsl(var(--bor))] px-6 py-3 text-sm font-semibold text-[hsl(var(--ink))] transition-colors hover:bg-[hsl(var(--card))]">
+                  <Phone size={15} /> {p.secondaryCta}
+                </a>
+              )}
+            </div>
+            {p.rating != null && (
+              <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--bor))] bg-[hsl(var(--card))] px-3.5 py-1.5 text-sm text-[hsl(var(--ink))]">
+                <Stars rating={p.rating} />
+                <span className="font-semibold">{p.rating.toFixed(1)}</span>
+                {p.reviewCount != null && <span className="text-[hsl(var(--mut))]">({p.reviewCount} reviews)</span>}
+              </div>
+            )}
+          </Reveal>
+          <Reveal delay={120}>
+            <div className="relative overflow-hidden rounded-[calc(var(--r)*1.5)] border border-[hsl(var(--bor))] shadow-2xl">
+              <img src={p.image} alt="" className="aspect-[4/5] w-full object-cover sm:aspect-[4/4.4]" />
+              <div className="absolute inset-0 ring-1 ring-inset ring-black/10" />
+            </div>
+          </Reveal>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section id="hero" className="relative isolate overflow-hidden">
       {hasImage
         ? <>
-            <img src={p.image} alt="" className="absolute inset-0 -z-10 h-full w-full object-cover" />
+            {/* pv-kenburns: an 18s slow zoom — the single frame reads as cinema, not a stock jpeg. */}
+            <img src={p.image} alt="" className="pv-kenburns absolute inset-0 -z-10 h-full w-full object-cover" />
             <div className="absolute inset-0 -z-10 bg-gradient-to-r from-black/80 via-black/55 to-black/25" />
           </>
         : <div className="absolute inset-0 -z-10 bg-gradient-to-br from-[hsl(var(--p))] via-[hsl(var(--p)/0.85)] to-[hsl(var(--ink))]" />}

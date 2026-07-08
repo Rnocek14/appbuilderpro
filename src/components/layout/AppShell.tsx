@@ -6,12 +6,25 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
+import { usePreviewClaims } from '../../hooks/usePreviewClaims';
 import { cn } from '../../lib/utils';
 import { CommandPalette } from '../CommandPalette';
 
 // Grouped nav — one labeled section per job so the sidebar reads at a glance instead of as one long
-// list. "Garvis" = the portfolio OS (overview is the home/hub), "Build" = the app builder, then Account.
+// list. BUILD leads (it's the product a new user came for); Garvis (the portfolio OS) follows;
+// Labs is admin-only. Onboarding finding: the first screen must answer "where do I build?" instantly.
 const navSections = [
+  {
+    title: 'Build',
+    items: [
+      { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
+      { to: '/new', label: 'New project', icon: Plus },
+      { to: '/import', label: 'Import', icon: FolderDown },
+      { to: '/autopilot', label: 'Autopilot', icon: Bot },
+      { to: '/inbox', label: 'Inbox', icon: InboxIcon },
+      { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
+    ],
+  },
   {
     title: 'Garvis',
     items: [
@@ -25,35 +38,25 @@ const navSections = [
     ],
   },
   {
-    title: 'Build',
-    items: [
-      { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
-      { to: '/new', label: 'New project', icon: Plus },
-      { to: '/import', label: 'Import', icon: FolderDown },
-      { to: '/autopilot', label: 'Autopilot', icon: Bot },
-      { to: '/inbox', label: 'Inbox', icon: InboxIcon },
-      { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
-    ],
-  },
-  {
     title: 'Account',
     items: [
       { to: '/billing', label: 'Billing', icon: CreditCard },
       { to: '/settings', label: 'Settings', icon: Settings },
     ],
   },
-  {
-    title: 'Labs',
-    items: [
-      { to: '/spike/clusters', label: 'Cluster spike', icon: FlaskConical }, // TEMP dev-only gate; remove later
-    ],
-  },
 ];
+
+// Admin-only experiments — a 900-line spike should not be one click from Billing for everyone.
+const labsSection = {
+  title: 'Labs',
+  items: [{ to: '/spike/clusters', label: 'Cluster spike', icon: FlaskConical }],
+};
 
 export function AppShell({ children, fullBleed }: { children: ReactNode; fullBleed?: boolean }) {
   const { profile, usageThisMonth, signOut } = useAuth();
   const navigate = useNavigate();
   const { pendingCount } = useInbox();
+  const { newCount: claimCount } = usePreviewClaims();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Desktop sidebar collapse (slim icon rail), persisted across sessions.
@@ -123,7 +126,7 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
       </button>
 
       <nav className={cn('flex-1 space-y-3 overflow-y-auto panel-scroll', collapsed ? 'px-2' : 'px-3')} aria-label="Main">
-        {navSections.map((section, si) => (
+        {[...navSections, ...(profile?.role === 'admin' ? [labsSection] : [])].map((section, si) => (
           <div key={section.title} className="space-y-0.5">
             {collapsed
               ? si > 0 && <div className="mx-2 mb-2 border-t border-forge-border" />
@@ -145,6 +148,15 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
                   ) : (
                     <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg">
                       {pendingCount}
+                    </span>
+                  )
+                )}
+                {to === '/business-preview-engine' && claimCount > 0 && (
+                  collapsed ? (
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ok" aria-label={`${claimCount} new claims`} />
+                  ) : (
+                    <span className="ml-auto rounded-full bg-forge-ok px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="New claim requests">
+                      {claimCount}
                     </span>
                   )
                 )}
