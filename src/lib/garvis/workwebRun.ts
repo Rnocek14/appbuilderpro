@@ -86,8 +86,14 @@ export async function instantiateWeb(templateId: string): Promise<WebSummary> {
 
   const { graph, charters } = templateToGraph(t);
   const universe: Universe = newUniverse(t.title, graph, t.nodes[0]?.slug ?? null);
-  const worldId = await syncUniverse(universe);
-  if (!worldId) throw new Error('Could not save the web (are you signed in?).');
+  // syncUniverse returns null if another universe sync is mid-flight (its in-flight guard). That's
+  // transient, not a real failure — retry once after a beat before giving up.
+  let worldId = await syncUniverse(universe);
+  if (!worldId) {
+    await new Promise((r) => setTimeout(r, 400));
+    worldId = await syncUniverse(universe);
+  }
+  if (!worldId) throw new Error('Could not save the web right now — another sync was in progress. Try again in a moment.');
 
   await persistCharters(worldId, charters);
   await recordMindEvent(uid, {
@@ -356,7 +362,9 @@ export async function runTool(
       const rows = parsed.contacts.map((ct) => ({
         owner_id: uid, full_name: ct.name, email: ct.email, email_status: 'unknown' as const, is_primary: false,
       }));
-      const { error } = await supabase.from('contacts').insert(rows);
+      // Upsert on (owner_id, email) — re-uploading a list or overlapping with an already-known
+      // contact updates rather than duplicating (uq_contacts_owner_email, app_0025).
+      const { error } = await supabase.from('contacts').upsert(rows, { onConflict: 'owner_id,email', ignoreDuplicates: true });
       if (error) return { ok: false, message: `Could not save contacts: ${error.message}` };
       await recordMindEvent(uid, { event_type: 'artifact_imported', source: 'workweb', subject: `Imported ${rows.length} contacts into ${cluster.title}`, payload: { world_id: worldId } });
       return { ok: true, message: `Imported ${rows.length} contact${rows.length === 1 ? '' : 's'}${parsed.skipped ? ` (${parsed.skipped} skipped)` : ''}.` };
@@ -384,32 +392,53 @@ function matchPlayForCluster(slug: string): Play | null {
 }
 
 /** Create the step-0 outreach message + approval for a sequence, bound to the web. Later steps are
- *  handled by the existing outreach-followups cron (which drafts bumps into the approval queue). */
+ *  handled by the existing outreach-followups cron (which drafts bumps into the approval queue).
+ *  Idempotent-ish: reuses the contact (upsert on owner+email) and reuses an already-pending campaign
+ *  for the same (world, contact) so double-clicks don't queue the same first-touch twice. Every
+ *  insert is error-checked so a failure surfaces instead of propagating null ids into the approval. */
 async function queueSequenceStep0(
   ownerId: string, worldId: string, cluster: WebCluster, play: Play, to: string, name: string | null,
 ): Promise<string> {
-  // contact (dedupe by email under this owner)
-  let contactId: string | null = null;
-  const { data: existing } = await supabase.from('contacts').select('id').eq('owner_id', ownerId).eq('email', to).maybeSingle();
-  if (existing) contactId = (existing as { id: string }).id;
-  else {
-    const { data: c } = await supabase.from('contacts').insert({ owner_id: ownerId, email: to, full_name: name, email_status: 'unknown', is_primary: true }).select('id').single();
-    contactId = (c as { id: string } | null)?.id ?? null;
+  void cluster;
+  // Contact: atomic upsert on (owner_id, email) — app_0025 constraint makes this race-free.
+  const { data: c, error: cErr } = await supabase.from('contacts')
+    .upsert({ owner_id: ownerId, email: to, full_name: name, email_status: 'unknown', is_primary: true }, { onConflict: 'owner_id,email' })
+    .select('id').single();
+  if (cErr || !c) throw new Error(`Could not save the contact: ${cErr?.message ?? 'unknown error'}`);
+  const contactId = (c as { id: string }).id;
+
+  // Reuse an already-pending campaign for this recipient in this web (double-click / retry safety).
+  let campaignId: string;
+  const { data: openCamp } = await supabase.from('outreach_campaigns')
+    .select('id').eq('owner_id', ownerId).eq('world_id', worldId).eq('contact_id', contactId).eq('state', 'pending_approval').maybeSingle();
+  if (openCamp) {
+    campaignId = (openCamp as { id: string }).id;
+  } else {
+    const { data: camp, error: campErr } = await supabase.from('outreach_campaigns').insert({
+      owner_id: ownerId, world_id: worldId, contact_id: contactId,
+      kind: 'cold_site_pitch', state: 'pending_approval',
+    }).select('id').single();
+    if (campErr || !camp) throw new Error(`Could not start the campaign: ${campErr?.message ?? 'unknown error'}`);
+    campaignId = (camp as { id: string }).id;
   }
 
-  const { data: camp } = await supabase.from('outreach_campaigns').insert({
-    owner_id: ownerId, world_id: worldId, contact_id: contactId,
-    kind: 'cold_site_pitch', state: 'pending_approval',
-  }).select('id').single();
-  const campaignId = (camp as { id: string } | null)?.id ?? null;
+  // If a step-0 draft already exists for this campaign, don't queue a duplicate opener.
+  const { data: existingMsg } = await supabase.from('outreach_messages')
+    .select('id').eq('campaign_id', campaignId).eq('sequence_step', 0).in('status', ['draft', 'approved', 'scheduled', 'sent']).maybeSingle();
+  if (existingMsg) {
+    const { data: openA } = await supabase.from('approvals')
+      .select('id').eq('kind', 'send_email').eq('status', 'pending').maybeSingle();
+    if (openA) return (openA as { id: string }).id;
+  }
 
   const seq0 = play.emailSequence(DEFAULT_LAKE_GENEVA_CONTEXT)[0];
   const body = seq0.body.replace(/\{\{first_name\}\}/g, name?.split(/\s+/)[0] ?? 'there');
-  const { data: msg } = await supabase.from('outreach_messages').insert({
+  const { data: msg, error: mErr } = await supabase.from('outreach_messages').insert({
     owner_id: ownerId, campaign_id: campaignId, contact_id: contactId,
     sequence_step: 0, subject: seq0.subject, body_text: body, to_address: to, status: 'draft',
   }).select('id').single();
-  const messageId = (msg as { id: string } | null)?.id ?? null;
+  if (mErr || !msg) throw new Error(`Could not draft the email: ${mErr?.message ?? 'unknown error'}`);
+  const messageId = (msg as { id: string }).id;
 
   return enqueueApproval({
     kind: 'send_email',
