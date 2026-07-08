@@ -27,6 +27,8 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import ClusterSpike from './pages/spike/ClusterSpike';
 import Brain from './pages/Brain';
 import Approvals from './pages/Approvals';
+import WorkWebs from './pages/WorkWebs';
+import WorkWeb from './pages/WorkWeb';
 import PreviewEngine from './pages/PreviewEngine';
 import PreviewSite from './pages/PreviewSite';
 import PreviewReport from './pages/PreviewReport';
@@ -63,6 +65,8 @@ export default function App() {
               <Route path="/garvis/opportunities" element={<Protected><Opportunities /></Protected>} />
               <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
               <Route path="/garvis/approvals" element={<Protected><Approvals /></Protected>} />
+              <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
+              <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
               <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
               <Route path="/new" element={<Protected><NewProject /></Protected>} />
               <Route path="/import" element={<Protected><ImportProject /></Protected>} />

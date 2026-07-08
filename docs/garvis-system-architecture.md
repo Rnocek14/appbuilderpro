@@ -550,6 +550,61 @@ Supabase/Resend/embeddings keys): apply the three migrations, deploy the six fun
 `EMBEDDINGS_API_KEY` (or `OPENAI_API_KEY`) / `RESEND_WEBHOOK_SECRET` / `INBOUND_SECRET` / `CRON_SECRET`
 as edge secrets to light it up.
 
+## 10b. Phase 5 — Work Webs (SHIPPED on this branch)
+
+The insight that generalizes the whole system: **a mission is not a checklist — it is a living work
+web.** A mission is a TERRITORY (a knowledge world). The territory decomposes into PRODUCTION AREAS
+(clusters). Each production area is three things at once — a *thought* (it lives in the knowledge
+graph), a *workspace* (it has tools), and a *ledger* (its outputs and results accumulate on it).
+Diving into "Direct Mail" is not opening a note; it's entering a production area that knows it can
+generate a postcard, upload a mailing list, draft a follow-up sequence, and queue a send for approval.
+
+**This is domain-agnostic by construction.** It is not a real-estate feature — real estate is the
+first *template*. Seven ARCHETYPES form the deep structure and cover every domain:
+
+| Archetype | What it is for | Example tools |
+|---|---|---|
+| **Intel** | Knowing — research, strategy, angles | Research this, Synthesize angle, Import docs |
+| **Audience** | Who — lists, segments, targets | Upload list (CSV), View contacts |
+| **Studio** | Making — copy, creative, scripts, pages | Generate postcard / social / video script / landing / email seq |
+| **Launch** | Acting — send, print, publish, deploy | Queue send… (→ Approvals), Open approvals |
+| **Loop** | Following up — sequences, CRM, automation | Generate follow-up sequence, Queue to contact |
+| **Ledger** | Learning — sent, responses, results, ROI | View results (rolled up from the execution ledger) |
+| **Vault** | Holding — brand, assets, source documents | Add to vault (→ Brain) |
+
+Flavors (`direct_mail`, `email`, `social`, `video`, `landing`, `market`, `brand`, `crm`, `lists`)
+specialize only *which* concrete tools a Studio/Launch/Loop area shows. **Adding a domain = adding a
+template + maybe a flavor row — never a new subsystem.** The App Launch template ships alongside Mom
+Real Estate to prove it: the same seven archetypes run a software launch.
+
+**What landed (all verified — `verify:workweb` 33/33, `tsc` clean, `vite build` green):**
+
+- **Model** (`app_0024_work_web.sql`): one `charter` jsonb column on `knowledge_clusters`
+  (`{archetype, flavor, status, refs[]}`) — a plain thought and an execution area are the same row,
+  so an idea *becomes* a production area without moving. Plus `world_id` bindings on `garvis_missions`
+  (a mission is a campaign *through* a territory; the territory persists across missions) and
+  `outreach_campaigns` (outreach rolls up to its web's Ledger).
+- **Pure core** (`src/lib/garvis/workweb.ts` + `plays.ts`, both `.verify.ts`-guarded): archetypes,
+  the `(archetype, flavor) → tools` registry (single source of truth), web TEMPLATES, and PLAYS.
+  A play is a deterministic campaign (works with **zero AI keys** — house fail-soft pattern) that AI
+  *enriches* when a key exists. The first play, **Lakefront Seller**, is real work:
+  research → angle → postcard (2 variants) → 3-touch email sequence → landing outline → 3 social
+  posts → 30-second video script — each artifact landing in its correct cluster.
+- **Impure runner** (`workwebRun.ts`): `instantiateWeb` (template → world + chartered cluster tree
+  via the existing universe sync), `runPlay` (deterministic + AI-enrich, artifacts upserted by slug,
+  mission bound to the world), `runTool` (per-area tools; generators write artifacts, `queue-sequence`
+  enqueues an **approval**, `upload-list` parses CSV → contacts).
+- **UI** (`/garvis/webs`): the gallery + the living web view — production areas as a connected tree
+  with live status dots, and a chartered workspace panel (tools row, artifacts, results, approval
+  links). Forge/ember design system; "Run the play" fills the whole territory at once.
+
+**Acceptance test (met):** "Create a Lake Geneva lakefront seller campaign" → create the Mom Real
+Estate web → Run the play → research + angle + postcard + email sequence + landing + social + video
+land in their areas → Queue send from the Direct Mail follow-up area → the email waits in the
+**Approval queue** → approving it runs `send-email` → the send hits the **execution ledger**. The
+full arc — *research → angle → assets → approval queue → execution log* — runs end to end, and the
+same machine runs an app launch or any future territory.
+
 ## 11. Constraint compliance notes
 
 Approval-before-send/post/deploy/charge → `approvals` is the single enforcement point.
