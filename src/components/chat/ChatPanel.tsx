@@ -582,6 +582,15 @@ export function ChatPanel({ projectId, messages, activeGeneration, lastGeneratio
         {/* Suggestions — only while the box is empty, in one tidy scroll row, so the bar stays calm. */}
         {!input.trim() && !busy && askOptions.length === 0 && (
           <div className="mb-2 flex gap-1.5 overflow-x-auto pb-0.5 panel-scroll">
+            {onOpenAssets && (
+              <button
+                onClick={onOpenAssets}
+                title="Upload photos or import them from your old site — builds use them automatically"
+                className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-forge-ember/40 bg-forge-ember/10 px-2.5 py-1 text-[11px] text-forge-ink transition-colors hover:bg-forge-ember/20"
+              >
+                <ImageIcon size={11} /> Use my own photos
+              </button>
+            )}
             {QUICK_ACTIONS.map((a) => (
               <button
                 key={a}

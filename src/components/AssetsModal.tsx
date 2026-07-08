@@ -93,7 +93,7 @@ export function AssetsModal({ projectId, open, onClose }: { projectId: string; o
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="Project assets">
+    <Modal open={open} onClose={onClose} title="Project assets" size="lg">
       <div className="max-h-[70vh] space-y-4 overflow-y-auto panel-scroll pr-1">
         <p className="text-xs text-forge-dim">
           Your real images beat stock every time. Upload photos or import them from an existing site —
