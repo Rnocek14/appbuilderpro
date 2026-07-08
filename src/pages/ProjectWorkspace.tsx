@@ -14,7 +14,7 @@ import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
 import { useProjectSecrets } from '../hooks/useProjectSecrets';
 import { useConnections, fnError } from '../hooks/useConnections';
-import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, revertChangeSet, applyPendingEdit, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, revertChangeSet, applyPendingEdit, createMissingModules, type EditEvent } from '../lib/aiClient';
 import { agenticVerifyAndFix } from '../lib/agent/edit';
 import { agentAvailable } from '../lib/agent/loop';
 import { resolveAI } from '../lib/aiConfig';
@@ -305,10 +305,10 @@ export default function ProjectWorkspace() {
     return () => window.clearInterval(iv);
   }, [activeGeneration, refreshGens]);
 
-  // EDGE-GENERATION VERIFY — cloud-mode generations run in the edge function, where the real
-  // compile gate can't exist (no WebContainer server-side). The moment a generation finishes,
-  // run the SAME deep verify + agentic repair the DIRECT path gets, so "generated" means
-  // "verified" for every user, not just those with a browser API key.
+  // EDGE-GENERATION VERIFY — generations that ran in the edge function (non-direct, browser key
+  // present) have no compile gate server-side (no WebContainer). The moment one finishes, run the
+  // same deep verify + agentic repair here. Client-orchestrated builds (direct OR cloud chunked)
+  // already verified inline in chunkedGenerate, so they're skipped.
   const lastGenId = useRef<string | null>(null);
   const verifiedGenId = useRef<string | null>(null);
   useEffect(() => {
@@ -316,8 +316,9 @@ export default function ProjectWorkspace() {
     const genId = lastGenId.current;
     if (!id || !genId || verifiedGenId.current === genId) return;
     verifiedGenId.current = genId;
+    void refreshProfile(); // a generation just finished — update the monthly X/limit counter
     const ai = resolveAI();
-    if (ai.direct && ai.ready) return; // the DIRECT pipeline already verified in-line
+    if (ai.direct || !ai.ready) return; // client-orchestrated pipelines verified in-line
     if (!agentAvailable() || busy) return;
     void (async () => {
       setBusy(true);
@@ -589,12 +590,30 @@ export default function ProjectWorkspace() {
     let issues = await runQA(id);
     let errs = issues.filter((i) => i.severity === 'error');
     const hadErrors = errs.length;
-    for (let pass = 1; pass <= 2 && errs.length; pass++) {
+    // Missing files first, deterministically: one dedicated generation per file, in parallel.
+    // (An edit that rewrites App.tsx to route to pages it never emitted is the worst failure —
+    // asking one bounded fix stream to write them all is exactly what fails to converge.)
+    if (errs.length) {
+      try {
+        const made = await createMissingModules(id);
+        if (made.length) {
+          toast('info', `Created ${made.length} missing file${made.length === 1 ? '' : 's'} the app imports…`);
+          await refreshFiles();
+          issues = await runQA(id);
+          errs = issues.filter((i) => i.severity === 'error');
+        }
+      } catch { /* best-effort — the QA loop below still runs */ }
+    }
+    // Progress-gated, not fixed-count: keep fixing while each pass actually reduces the error
+    // count; a pass that fixed nothing won't fix it on repeat, so stop burning turns there.
+    for (let pass = 1; pass <= 3 && errs.length; pass++) {
       toast('info', `Found ${errs.length} issue${errs.length === 1 ? '' : 's'} — auto-fixing…`);
+      const before = errs.length;
       await sendEdit(id, issuesToFixRequest(errs), undefined, onStreamEvent, false, undefined, activeThreadId, false);
       await refreshFiles();
       issues = await runQA(id);
       errs = issues.filter((i) => i.severity === 'error');
+      if (errs.length >= before) break; // stalled
     }
     if (errs.length) {
       setQaIssues(issues);
@@ -631,16 +650,19 @@ export default function ProjectWorkspace() {
     return runTypecheck(id);
   };
 
-  // Bounded self-heal against real type errors — same pattern as the static-QA loop above.
+  // Self-heal against real type errors — progress-gated like the static-QA loop: keep going
+  // while each pass reduces the error count (up to 5), stop the moment a pass fixes nothing.
   const healTypeErrors = async (diags: TsDiag[]) => {
     if (!id || !diags.length) return;
     let remaining = diags;
-    for (let pass = 1; pass <= 2 && remaining.length; pass++) {
+    for (let pass = 1; pass <= 5 && remaining.length; pass++) {
       toast('info', `Found ${remaining.length} type error${remaining.length === 1 ? '' : 's'} — auto-fixing…`);
+      const before = remaining.length;
       const msg = issuesToFixRequest(remaining.map((d) => ({ path: d.path, severity: 'error' as const, message: `Type error (line ${d.line}): ${d.message}` })));
       await sendEdit(id, msg, undefined, onStreamEvent, false, undefined, activeThreadId, false);
       await refreshFiles();
       remaining = await recheckTypes();
+      if (remaining.length >= before) break; // stalled — repeating the same request won't converge
     }
     if (remaining.length) toast('error', `Couldn't auto-fix ${remaining.length} type error${remaining.length === 1 ? '' : 's'} — see the Types panel.`);
     else toast('success', 'Type-check clean — the app compiles.');

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Brain,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
@@ -32,6 +32,7 @@ const navSections = [
       { to: '/import', label: 'Import', icon: FolderDown },
       { to: '/autopilot', label: 'Autopilot', icon: Bot },
       { to: '/inbox', label: 'Inbox', icon: InboxIcon },
+      { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],
   },
   {

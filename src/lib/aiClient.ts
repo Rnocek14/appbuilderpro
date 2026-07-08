@@ -19,17 +19,19 @@ import { tokenizeColors } from './tokenize';
 import type { EditPlan } from '../types';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, saveMap, saveRoadmap, saveIdeation, isMetaFile } from './projectBrain';
 import { runQA, issuesToFixRequest, type QAIssue } from './projectQA';
+import { missingLocalModules, looksTruncated } from './qaCheck';
+import { MISSING_FILE_SYSTEM, missingFilePrompt } from './prompts';
 import { PREFS_PATH, prefsContext } from './preferences';
 import { MAIN_THREAD_ID, threadOf } from './threads';
 import { previewContext } from './previewRuntime';
 import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
 import { PREFERENCE_DISTILL_SYSTEM, DIRECTIONS_SYSTEM, directionPickPrompt, singleDirectionPrompt, filesPromptChunk } from './prompts';
 import { parseProtocol } from '../../supabase/functions/_shared/streamparse';
-import { recordUsage } from './usage';
+import { recordUsage, tagUsageSince, estimateCost } from './usage';
 import { agenticEdit, agenticVerifyAndFix, generationCompileGate } from './agent/edit';
 import { agentAvailable } from './agent/loop';
 
-interface Usage { inputTokens: number; outputTokens: number }
+interface Usage { inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
 interface AIMessageRow { role: string; content: string; thread_id?: string | null }
 
 export type { Provider };
@@ -140,10 +142,11 @@ export interface EditResult {
 // ----------------------------------------------------------------
 
 export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
-  if (DIRECT) return directGenerate(projectId, prompt, planContext);
-  // Cloud mode (no browser key): orchestrate CLIENT-side in short relay calls — the edge
-  // generate-app worker has a hard wall-clock that kills big builds mid-stream.
-  if (!resolveAI().ready) return chunkedCloudGenerate(projectId, prompt, planContext);
+  // ONE client-orchestrated pipeline for both direct (browser key) and cloud users: chunked short
+  // calls — shell first, then every page in PARALLEL, schema concurrent, verify + repair inline.
+  // Direct mode used to run a single serial 32k-token stream: the slowest possible shape, and one
+  // truncation could silently cost the whole tail of the app.
+  if (DIRECT || !resolveAI().ready) return chunkedGenerate(projectId, prompt, planContext);
   const { data, error } = await supabase.functions.invoke('generate-app', {
     body: { projectId, prompt, planContext },
   });
@@ -498,11 +501,17 @@ async function readFnError(error: unknown): Promise<string> {
 // Direct mode (local dev)
 // ----------------------------------------------------------------
 
-interface RawResult { text: string; inputTokens: number; outputTokens: number }
+interface RawResult { text: string; inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
 
 export interface DesignDirection {
   archetype: string; name: string; risk: string; accentHue: number;
   headingFont: string; bodyFont: string; brief: string; preview_html: string;
+  /** Deterministic token bundle (DesignSpec vocabulary) — compiled into the app's index.css so
+   *  the chosen direction actually happens. */
+  accentSat?: number; accentLight?: number;
+  mode?: 'light' | 'paper' | 'tinted' | 'dark';
+  surfaceSat?: number; radius?: number; // rem
+  borders?: 'hairline' | 'standard' | 'bold'; shadows?: 'soft' | 'hard' | 'none';
 }
 
 // Normalize preview HTML defensively: strip markdown fences, and wrap bare fragments in a
@@ -515,10 +524,17 @@ function cleanPreviewHtml(h: string): string {
   return s;
 }
 
+// Spanning fallback order — enough entries that a "3 more" reroll still has archetypes to draw
+// from when the pick call fails.
 const DIRECTION_FALLBACK_PICKS = [
   { archetype: 'ENTERPRISE CLARITY', risk: 'safe' },
   { archetype: 'MIDNIGHT PRO TOOL', risk: 'opinionated' },
   { archetype: 'EDITORIAL BROADSHEET', risk: 'bold' },
+  { archetype: 'ORGANIC CALM', risk: 'safe' },
+  { archetype: 'PLAYFUL POP', risk: 'opinionated' },
+  { archetype: 'NEOBRUTALIST PLAYGROUND', risk: 'bold' },
+  { archetype: 'LUXURY BOUTIQUE', risk: 'opinionated' },
+  { archetype: 'SWISS ARCHIVE', risk: 'bold' },
 ];
 
 /**
@@ -528,18 +544,22 @@ const DIRECTION_FALLBACK_PICKS = [
  * via onDirection, and per-call archetype assignment beats a batched call on diversity.
  */
 export async function generateDesignDirections(
-  prompt: string, onDirection?: (d: DesignDirection) => void,
+  prompt: string, onDirection?: (d: DesignDirection) => void, opts?: { exclude?: string[] },
 ): Promise<DesignDirection[]> {
   // Stage 1 — pick the 3 archetypes (fast, tiny; falls back to a spanning default trio).
-  let picks = DIRECTION_FALLBACK_PICKS;
+  // `exclude` powers the "show me 3 more" reroll: archetypes already shown aren't re-picked.
+  const exclude = (opts?.exclude ?? []).map((a) => a.toUpperCase());
+  let picks = DIRECTION_FALLBACK_PICKS.filter((p) => !exclude.includes(p.archetype)).slice(0, 3);
+  if (picks.length < 3) picks = DIRECTION_FALLBACK_PICKS.slice(0, 3);
   try {
     const raw = await rawComplete([
       { role: 'system', content: DIRECTIONS_SYSTEM },
-      { role: 'user', content: directionPickPrompt(prompt) },
+      { role: 'user', content: directionPickPrompt(prompt, opts?.exclude) },
     ], 600, { fast: true });
     const parsed = await parseJsonWithRepair<{ picks?: { archetype?: string; risk?: string }[] }>(raw.text);
     const got = (parsed?.picks ?? [])
       .filter((p) => p && typeof p.archetype === 'string' && p.archetype.length > 2)
+      .filter((p) => !exclude.includes((p.archetype as string).toUpperCase()))
       .map((p) => ({ archetype: p.archetype as string, risk: (p.risk === 'opinionated' || p.risk === 'bold') ? p.risk : 'safe' }));
     if (got.length >= 3) picks = got.slice(0, 3);
   } catch { /* fall back to the default trio */ }
@@ -548,12 +568,13 @@ export async function generateDesignDirections(
   const out: DesignDirection[] = [];
   await Promise.all(picks.map(async (p) => {
     try {
-      // Fast tier: previews are simple archetype-driven HTML — the cheap model renders them
-      // 3-4x sooner, and the ARCHETYPE SPEC (not model taste) carries the design quality.
+      // MAIN model (not the fast tier): the previews are what the user judges the product by,
+      // and the main model's taste gap on layout/typography is visible even in a thumbnail.
+      // Quality > speed here by explicit product decision.
       const raw = await rawComplete([
         { role: 'system', content: DIRECTIONS_SYSTEM },
         { role: 'user', content: singleDirectionPrompt(prompt, p, picks) },
-      ], 3200, { fast: true });
+      ], 4000);
       const parsed = await parseJsonWithRepair<{ direction?: DesignDirection; directions?: DesignDirection[] }>(raw.text);
       // Accept BOTH shapes — the system prompt's batched contract sometimes wins over the
       // per-call "one direction" instruction; discarding those results = blank picker.
@@ -584,7 +605,8 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   if (error) throw new Error(`FableForge Cloud AI: ${error.message}`);
   const d = data as {
     content?: { type: string; text?: string }[];
-    usage?: { input_tokens?: number; output_tokens?: number };
+    usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+    stop_reason?: string;
     error?: string;
   } | null;
   if (d?.error) throw new Error(d.error);
@@ -592,8 +614,10 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   if (!text) throw new Error('FableForge Cloud AI returned no text.');
   const inputTokens = d?.usage?.input_tokens ?? 0;
   const outputTokens = d?.usage?.output_tokens ?? 0;
-  recordUsage({ provider: 'anthropic', model: 'cloud', inputTokens, outputTokens });
-  return { text, inputTokens, outputTokens };
+  const cacheCreation = d?.usage?.cache_creation_input_tokens ?? 0;
+  const cacheRead = d?.usage?.cache_read_input_tokens ?? 0;
+  recordUsage({ provider: 'anthropic', model: 'cloud', inputTokens, outputTokens, cacheCreation, cacheRead });
+  return { text, inputTokens, outputTokens, cacheCreation, cacheRead, stopReason: d?.stop_reason };
 }
 
 export async function rawComplete(messages: { role: string; content: string }[], maxTokens = 8192, opts: { fast?: boolean } = {}): Promise<RawResult> {
@@ -604,6 +628,11 @@ export async function rawComplete(messages: { role: string; content: string }[],
     // (operator key held server-side, metered by credits). Users never have to paste a key.
     return cloudComplete(messages, maxTokens, opts.fast ?? false);
   }
+  const model = opts.fast ? ai.fastModel : ai.model;
+  // Claude Fable 5 can decline a request via safety classifiers (stop_reason "refusal", empty
+  // content — occasionally a false positive on benign work). Opt into server-side fallbacks so a
+  // declined call is transparently re-served by Opus 4.8 inside the same request.
+  const fableFallback = /^claude-(fable|mythos)/.test(model);
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       if (ai.provider === 'anthropic') {
@@ -616,35 +645,51 @@ export async function rawComplete(messages: { role: string; content: string }[],
             'x-api-key': ai.key,
             'anthropic-version': '2023-06-01',
             'anthropic-dangerous-direct-browser-access': 'true',
+            ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
           },
-          body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest }),
+          // System prompt as a CACHED block: the builder's system prompts are huge (~10-15k tokens)
+          // and identical across every call in a build (shell, each page, every repair step) — a
+          // cache read bills at ~0.1× input. This was the root of $12 builds on premium models.
+          body: JSON.stringify({
+            model, max_tokens: maxTokens,
+            ...(system ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] } : {}),
+            messages: rest,
+            ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}),
+          }),
         }, label);
         if (!res.ok) throw await httpError(res, label);
         const data = await res.json();
         const inputTokens = data.usage?.input_tokens ?? 0;
         const outputTokens = data.usage?.output_tokens ?? 0;
-        recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
+        const cacheCreation = data.usage?.cache_creation_input_tokens ?? 0;
+        const cacheRead = data.usage?.cache_read_input_tokens ?? 0;
+        recordUsage({ provider: ai.provider, model, inputTokens, outputTokens, cacheCreation, cacheRead });
         return {
           text: data.content.filter((b: { type: string }) => b.type === 'text').map((b: { text: string }) => b.text).join('\n'),
           inputTokens,
           outputTokens,
+          cacheCreation,
+          cacheRead,
+          stopReason: typeof data.stop_reason === 'string' ? data.stop_reason : undefined,
         };
       }
       // OpenAI-compatible providers (openai, xai/Grok, gemini, openrouter, local).
       const res = await providerFetch(`${ai.openAIBase}/chat/completions`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
-        body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages }),
+        body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
       }, label);
       if (!res.ok) throw await httpError(res, label);
       const data = await res.json();
       const inputTokens = data.usage?.prompt_tokens ?? 0;
       const outputTokens = data.usage?.completion_tokens ?? 0;
-      recordUsage({ provider: ai.provider, model: ai.model, inputTokens, outputTokens });
+      recordUsage({ provider: ai.provider, model, inputTokens, outputTokens });
+      const fr = data.choices?.[0]?.finish_reason;
       return {
         text: data.choices?.[0]?.message?.content ?? '',
         inputTokens,
         outputTokens,
+        stopReason: fr === 'length' ? 'max_tokens' : (typeof fr === 'string' ? fr : undefined),
       };
     } catch (err) {
       if (attempt === 2) throw err;
@@ -897,10 +942,14 @@ async function qaFixPass(projectId: string, issues: QAIssue[]): Promise<void> {
     { role: 'system', content: EDIT_SYSTEM_STREAM },
     { role: 'user', content: editPrompt(contextPayload(appFiles, fixMsg, ''), fixMsg) },
   ], 16000, (d) => parser.push(d), undefined, (u) => { fixUsage = u; });
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: fixUsage.inputTokens, outputTokens: fixUsage.outputTokens });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: fixUsage.inputTokens, outputTokens: fixUsage.outputTokens, cacheCreation: fixUsage.cacheCreation, cacheRead: fixUsage.cacheRead });
   const result = parser.end();
   if (result.action !== 'edit') return;
-  const { safeChanges, safeDeletions } = applyEditGuardrail(appFiles, fixMsg, '', result.changes, result.deletions);
+  let fixChanges = result.changes;
+  if (fixUsage.stopReason === 'max_tokens' && fixChanges.length && looksTruncated(fixChanges[fixChanges.length - 1].content)) {
+    fixChanges = fixChanges.slice(0, -1); // never persist a half-written file
+  }
+  const { safeChanges, safeDeletions } = applyEditGuardrail(appFiles, fixMsg, '', fixChanges, result.deletions);
   for (const c of safeChanges) {
     await supabase.from('project_files').upsert(
       { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
@@ -914,242 +963,58 @@ async function qaFixPass(projectId: string, issues: QAIssue[]): Promise<void> {
   }
 }
 
-async function directGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
-  const { data: auth } = await supabase.auth.getUser();
-  const userId = auth.user!.id;
-
-  const { data: gen } = await supabase
-    .from('project_generations')
-    .insert({ project_id: projectId, user_id: userId, prompt, kind: 'create', status: 'running' })
-    .select().single();
-
-  if (!gen) throw new Error('Could not start generation (could not create the generation record).');
-  const genId = gen.id;
-
-  // Drive the forge-progress bar from the client. Each update is picked up by the
-  // workspace via Realtime, so the user sees real movement instead of a frozen 0/11.
-  const stages: { stage: string; status: 'running' | 'done'; started_at: string; finished_at?: string; note?: string }[] = [];
-  const mark = async (stage: string, status: 'running' | 'done', note?: string) => {
-    const now = new Date().toISOString();
-    const found = stages.find((s) => s.stage === stage);
-    if (found) { found.status = status; if (status === 'done') found.finished_at = now; if (note) found.note = note; }
-    else stages.push({ stage, status, started_at: now, ...(note ? { note } : {}) });
-    await supabase.from('project_generations').update({ stages, current_stage: stage }).eq('id', genId);
-  };
-
-  // run in background so the UI can subscribe immediately
-  (async () => {
+/**
+ * SELF-HEAL for the worst generated-app failure: imports that point at files which DON'T EXIST
+ * (the model rewrote App.tsx to route to pages it never emitted — Vite dies on the first one).
+ * Each missing file gets its OWN dedicated model call, all in parallel — one bounded fix stream
+ * asked to write N whole pages is exactly what fails to converge. Non-code targets (css/json)
+ * are stubbed deterministically with no model call. Returns the paths created.
+ */
+export async function createMissingModules(projectId: string, opts?: { onFile?: (path: string) => void }): Promise<string[]> {
+  const { data: files } = await supabase
+    .from('project_files').select('path, content')
+    .eq('project_id', projectId).is('deleted_at', null);
+  const appFiles = ((files ?? []) as { path: string; content: string }[]).filter((f) => !isMetaFile(f.path));
+  const missing = missingLocalModules(appFiles).slice(0, 12);
+  if (!missing.length) return [];
+  const byPath = new Map(appFiles.map((f) => [f.path, f.content]));
+  const tree = appFiles.map((f) => f.path).sort().join('\n');
+  const written: string[] = [];
+  await Promise.all(missing.map(async (m) => {
     try {
-      await mark('interpret', 'done');
-
-      await mark('blueprint', 'running');
-      // If the user approved a plan up front, fold it into the blueprint request so the
-      // generated app follows what they signed off on.
-      const bpUserPrompt = planContext
-        ? `${prompt}\n\nThe user reviewed and approved this plan — follow it:\n${planContext}`
-        : prompt;
-      const bpRaw = await rawComplete([
-        { role: 'system', content: GENERATE_SYSTEM },
-        { role: 'user', content: blueprintPrompt(bpUserPrompt) },
-      ]);
-      const blueprint = await parseJsonWithRepair<Record<string, unknown>>(bpRaw.text);
-      await supabase.from('app_blueprints').insert({ project_id: projectId, ...blueprint });
-      await supabase.from('projects').update({
-        name: (blueprint.app_name as string) ?? 'Untitled app',
-        description: (blueprint.description as string) ?? null,
-        status: 'generating',
-      }).eq('id', projectId);
-      await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
-
-      // INTEGRATION MANIFEST — read the blueprint's declared server-side integrations and the secret
-      // keys they need. This drives edge-function generation and the secret-request popup (Phase 6).
-      const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
-        ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
-        : [];
-      const requiredSecrets: { env: string; service: string; purpose: string; status: 'missing' }[] = [];
-      for (const it of integrations) {
-        const service = typeof it.service === 'string' ? it.service : '';
-        const purpose = typeof it.purpose === 'string' ? it.purpose : '';
-        const secrets = Array.isArray(it.secrets) ? it.secrets : [];
-        for (const s of secrets) if (typeof s === 'string' && s.trim()) requiredSecrets.push({ env: s.trim(), service, purpose, status: 'missing' });
+      if (!/\.(t|j)sx?$/.test(m.path)) {
+        await writeProjectFile(projectId, m.path, m.path.endsWith('.json') ? '{}\n' : '');
+        written.push(m.path); opts?.onFile?.(m.path);
+        return;
       }
-      const secretEnvs = [...new Set(requiredSecrets.map((s) => s.env))];
-      const manifestSecrets = secretEnvs.map((env) => requiredSecrets.find((s) => s.env === env)!);
-      const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
-      const hasIntegrations = integrations.length > 0;
-
-      // Backend FIRST, so the file generator can wire the app to it. Additive & resilient:
-      // a failure here never fails the whole generation — the app falls back to localStorage.
-      await mark('schema', 'running');
-      let backendFiles = 0;
-      let hasBackend = false;
-      let backendNote = 'no backend needed';
-      try {
-        const { tables } = await generateBackend(projectId, JSON.stringify(blueprint));
-        if (tables) { backendFiles = 3; hasBackend = true; backendNote = `${tables} tables + RLS + auth`; }
-      } catch (e) {
-        backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
-      }
-      await mark('schema', 'done', backendNote);
-
-      // Integrations invoke edge functions through the Supabase client, so /src/lib/supabaseClient.ts
-      // (and .env.example) must exist even when the app has no database tables of its own — otherwise
-      // /src/lib/api.ts's import would not resolve.
-      if (hasIntegrations && !hasBackend) {
-        await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
-        await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
-      }
-
-      await mark('file_tree', 'running');
-      // Seed the fixed Vite/TS scaffold first so the project can boot as its source streams in.
-      for (const f of SCAFFOLD_FILES) {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      // Compile the blueprint's FULL design bundle (mode, fonts, radius, borders, shadows) into
-      // /src/index.css — flattening it to hue+font was the "every app looks the same" leak.
-      // Falls back to the scaffold default if the blueprint declared no design.
-      const designSpec = parseDesignSpec(blueprint.design);
-      if (designSpec) {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/src/index.css', content: buildIndexCssForDesign(designSpec), updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      // Stream the source files (§FILE protocol). hasBackend tells the model to route data through
-      // /src/lib/db.ts against Supabase (with a localStorage fallback) instead of plain localStorage.
-      const parser = makeStreamParser((e) => {
-        if (e.type === 'file-start') void mark('file_tree', 'running', e.path.split('/').pop());
-      });
-      const genAi = resolveAI();
-      let genUsage: Usage = { inputTokens: 0, outputTokens: 0 };
-      await streamComplete([
-        { role: 'system', content: GENERATE_FILES_STREAM },
-        { role: 'user', content: filesPromptStream(JSON.stringify(blueprint), hasBackend, hasIntegrations) },
-      ], 32000, (delta) => parser.push(delta), undefined, (u) => { genUsage = u; });
-      // Never let a model-emitted file clobber the fixed scaffold or the generated backend files.
-      const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
-      // The UI kit under /src/components/ui/ is authoritative (scaffold-provided). Drop ANY model
-      // file there — a model-emitted ui/index.tsx alongside the scaffold's index.ts caused the
-      // duplicate-component / visual-drift bug the audit flagged.
-      const appFiles = parser.end().changes.filter(
-        (f) => f.path && f.content.trim() && !reserved.has(f.path) && !f.path.startsWith('/src/components/ui/'),
-      );
-      if (!appFiles.length) throw new Error('The model produced no source files.');
-      for (const f of appFiles) {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: f.path, content: f.content, updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      // Write the secret manifest so the studio can prompt the user for the keys (the secret popup)
-      // and the deploy step knows what to push to Supabase Function Secrets. Deterministic — derived
-      // from the blueprint, not the model's free-text output.
-      if (hasIntegrations) {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path: '/supabase/.fableforge/secrets.json',
-            content: JSON.stringify({ secrets: manifestSecrets, integrations }, null, 2) + '\n', updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
-      }
-      const total = SCAFFOLD_FILES.length + appFiles.length + backendFiles;
-      await mark('file_tree', 'done', `${total} files`);
-      for (const s of ['frontend', 'backend', 'auth_logic', 'styling'] as const) {
-        await mark(s, 'done');
-      }
-
-      // VERIFY + FIX — the app just streamed in one pass; now make "generated" mean "works". Run the
-      // checks and, if anything's wrong, hand off to the AGENTIC repair loop (reads the failing files,
-      // researches if unsure, fixes the root cause, re-checks until clean). Falls back to the classic
-      // regex-fix passes when the agent isn't available (non-Anthropic provider).
-      await mark('validate', 'running');
-      let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-      // UNCONDITIONAL COMPILE GATE — run the real compiler on EVERY generation (booting it
-      // headlessly when the preview isn't open), not only when static checks fail. This is what
-      // makes "generated" mean "compiles", instead of "hopefully compiles".
-      let tsErrors: number | null = null;
-      if (!qaErrors.length) {
-        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
-      }
-      await mark('validate', 'done',
-        qaErrors.length ? `${qaErrors.length} issue(s) found`
-          : tsErrors ? `${tsErrors} type error(s) found`
-          : tsErrors === 0 ? 'verified — compiles clean' : 'clean');
-      if (qaErrors.length || tsErrors) {
-        await mark('fix', 'running');
-        try {
-          if (agentAvailable()) {
-            await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });
-          } else {
-            for (let attempt = 0; attempt < 2 && qaErrors.length; attempt++) {
-              try { await qaFixPass(projectId, qaErrors); } catch { break; }
-              qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-            }
-          }
-        } catch { /* best-effort — report whatever remains below */ }
-        qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-        if (tsErrors && agentAvailable()) {
-          // Recount after the agentic repair (the container is warm, so this is a quick tsc).
-          try { tsErrors = await generationCompileGate(projectId); } catch { /* keep the last count */ }
-        }
-        const remaining = qaErrors.length + (tsErrors ?? 0);
-        await mark('fix', 'done', remaining ? `${remaining} unresolved` : 'fixed');
-      } else {
-        await mark('fix', 'done');
-      }
-      const unresolved = qaErrors.length + (tsErrors ?? 0);
-
-      await mark('summarize', 'running');
-      const summaryId = await insertAiMessage({
-        project_id: projectId, user_id: userId, generation_id: genId,
-        role: 'assistant',
-        content: `Generated ${total} files for ${blueprint.app_name}.` +
-          (hasBackend
-            ? ` It's full-stack: a Supabase backend (${backendNote}) lives at /supabase/migrations/0001_init.sql and the app talks to it through /src/lib/db.ts. Run that SQL in Supabase, then use "Supabase" in the header to connect — it runs on localStorage until you do.`
-            : '') +
-          ` Open the preview to try it, then keep iterating in chat.` +
-          (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
-          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
-        files_changed: appFiles.map((f) => f.path),
-        thread_id: MAIN_THREAD_ID,
-      });
-      // The file-generation stream is the big cost; attribute it to the summary message.
-      // (The blueprint rawComplete call already recorded its own usage to the ledger.)
-      recordUsage({ provider: genAi.provider, model: genAi.model, inputTokens: genUsage.inputTokens, outputTokens: genUsage.outputTokens, messageId: summaryId });
-      await mark('summarize', 'done');
-
-      await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
-      await supabase.from('project_generations').update({
-        status: 'succeeded', finished_at: new Date().toISOString(),
-        input_tokens: bpRaw.inputTokens,
-        output_tokens: bpRaw.outputTokens,
-        summary: `Generated ${total} files`,
-      }).eq('id', genId);
-    } catch (err) {
-      await supabase.from('projects').update({ status: 'error' }).eq('id', projectId);
-      await supabase.from('project_generations').update({
-        status: 'failed', error: err instanceof Error ? err.message : String(err), finished_at: new Date().toISOString(),
-      }).eq('id', genId);
-    }
-  })();
-
-  return { generationId: genId };
+      const importers = m.importers.slice(0, 2).map((i) =>
+        `--- ${i.path} imports it as:\n${i.lines.join('\n')}\n--- ${i.path} contents:\n${(byPath.get(i.path) ?? '').slice(0, 6000)}`).join('\n\n');
+      const r = await rawComplete([
+        { role: 'system', content: MISSING_FILE_SYSTEM },
+        { role: 'user', content: missingFilePrompt(m.path, importers, tree) },
+      ], 8000);
+      const content = r.text.replace(/^```[a-z]*\r?\n?/i, '').replace(/\r?\n?```\s*$/, '').trim();
+      if (!content || looksTruncated(content)) return; // never persist half a file
+      await writeProjectFile(projectId, m.path, content + '\n');
+      written.push(m.path); opts?.onFile?.(m.path);
+    } catch { /* one file failing shouldn't sink the healing pass */ }
+  }));
+  return written;
 }
 
 /**
- * CHUNKED CLOUD GENERATION — for users with NO browser API key. The edge generate-app worker has
- * a hard wall-clock (~400s) that kills big builds mid-stream (truncated files, missing pages).
- * Here the CLIENT orchestrates (no time ceiling) and the relay (agent-turn via cloudComplete)
- * only ever runs SHORT calls:
- *   blueprint → schema → SHELL (contracts: types/db/api + App.tsx + layout, one bounded call)
- *   → PAGES in parallel (each call compiles against the verbatim contracts)
- *   → manifest diff (every routed page must exist; one retry per missing) → static QA → summary.
- * Deep compile verify + agentic repair run AFTER via ProjectWorkspace's post-generation effect —
- * not duplicated here.
+ * THE BUILD PIPELINE — client-orchestrated chunked generation for BOTH direct (browser key) and
+ * cloud (relay) users. Every model call is SHORT and most run in PARALLEL, which is what makes
+ * builds fast AND immune to the one-giant-stream truncation failure (direct mode used to be a
+ * single serial 32k-token stream):
+ *   blueprint → [schema CONCURRENT with everything below]
+ *   → SHELL (contracts: types/db/api + App.tsx + layout, one bounded call)
+ *   → PAGES in a sliding parallel pool (each call compiles against the verbatim contracts)
+ *   → manifest diff (every routed page must exist; one retry per missing)
+ *   → VERIFY + FIX inline: missing-module heal → real compile gate → agentic repair.
+ * rawComplete routes each call to the browser key (direct) or the metered agent-turn relay (cloud).
  */
-async function chunkedCloudGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
+async function chunkedGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
 
@@ -1171,6 +1036,7 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
 
   // run in background so the UI can subscribe immediately
   (async () => {
+    const startedAt = Date.now(); // ledger records from here get tagged to the summary message
     try {
       await mark('interpret', 'done');
 
@@ -1193,7 +1059,8 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
       }).eq('id', projectId);
       await mark('blueprint', 'done', (blueprint.app_name as string) ?? undefined);
 
-      // INTEGRATION MANIFEST — same derivation as directGenerate (drives the secret popup + deploy).
+      // INTEGRATION MANIFEST — read the blueprint's declared server-side integrations and the
+      // secret keys they need (drives the secret-request popup + deploy).
       const integrations = Array.isArray((blueprint as { integrations?: unknown }).integrations)
         ? ((blueprint as { integrations?: unknown[] }).integrations as Record<string, unknown>[])
         : [];
@@ -1209,17 +1076,23 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
       const secretServices = [...new Set(requiredSecrets.map((s) => s.service).filter(Boolean))];
       const hasIntegrations = integrations.length > 0;
 
-      await mark('schema', 'running');
-      let backendFiles = 0;
-      let hasBackend = false;
-      let backendNote = 'no backend needed';
+      // SCHEMA IN PARALLEL — whether the app HAS a backend is decided by the blueprint itself
+      // (does it declare tables?), so the SQL generation runs CONCURRENTLY with the shell and
+      // pages instead of blocking them (~30s off the critical path). If the SQL call later fails,
+      // db.ts's localStorage fallback keeps the app working and the client stub is written below.
+      let declaredTables = 0;
       try {
-        const { tables } = await generateBackend(projectId, JSON.stringify(blueprint));
-        if (tables) { backendFiles = 3; hasBackend = true; backendNote = `${tables} tables + RLS + auth`; }
-      } catch (e) {
-        backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')';
-      }
-      await mark('schema', 'done', backendNote);
+        declaredTables = ((blueprint as { database_schema?: { tables?: unknown[] } }).database_schema?.tables?.length ?? 0);
+      } catch { declaredTables = 0; }
+      const hasBackend = declaredTables > 0;
+      let backendFiles = 0;
+      let backendNote = 'no backend needed';
+      await mark('schema', hasBackend ? 'running' : 'done', hasBackend ? `${declaredTables} tables (concurrent)` : backendNote);
+      const schemaPromise: Promise<void> = hasBackend
+        ? generateBackend(projectId, JSON.stringify(blueprint))
+            .then(({ tables }) => { if (tables) { backendFiles = 3; backendNote = `${tables} tables + RLS + auth`; } })
+            .catch((e) => { backendNote = 'skipped (' + (e instanceof Error ? e.message : 'error') + ')'; })
+        : Promise.resolve();
 
       if (hasIntegrations && !hasBackend) {
         await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
@@ -1233,6 +1106,9 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
           { onConflict: 'project_id,path' },
         );
       }
+      // Compile the blueprint's FULL design bundle (mode, fonts, radius, borders, shadows) into
+      // /src/index.css — flattening it to hue+font was the "every app looks the same" leak.
+      // Falls back to the scaffold default if the blueprint declared no design.
       const designSpec = parseDesignSpec(blueprint.design);
       if (designSpec) {
         await supabase.from('project_files').upsert(
@@ -1267,7 +1143,13 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
           (hasIntegrations ? ', and the /supabase/functions/* edge functions' : '') +
           '. Do NOT emit /src/pages/* in this call — each page is generated next against these exact contracts, so App.tsx MAY route to pages not yet emitted (this call only). End with §END.' },
       ], 12000));
-      await upsertFiles(parseProtocol(shellRaw.text).changes);
+      let shellChanges = parseProtocol(shellRaw.text).changes;
+      // A max_tokens-cut call leaves its LAST file half-written — never persist half a file
+      // (the missing-module heal in the validate stage recreates it whole).
+      if (shellRaw.stopReason === 'max_tokens' && shellChanges.length && looksTruncated(shellChanges[shellChanges.length - 1].content)) {
+        shellChanges = shellChanges.slice(0, -1);
+      }
+      await upsertFiles(shellChanges);
       const appTsx = written.get('/src/App.tsx') ?? '';
       if (!appTsx) throw new Error('The model produced no App.tsx in the shell pass.');
 
@@ -1288,23 +1170,34 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
         .map(([p, c]) => `--- ${p} ---\n${c}`)
         .join('\n\n').slice(0, 60000);
 
-      // 4) PAGES — parallel, max 4 in flight; each is a short bounded call.
+      // 4) PAGES — a SLIDING parallel pool (not batches: a slow page never holds up the next).
+      // Direct mode (browser key) tolerates more parallelism than the metered relay.
+      const inFlight = DIRECT && resolveAI().ready ? 6 : 4;
       const pageList = [...pagePaths].filter((p) => !written.has(p));
-      await mark('file_tree', 'running', `${pageList.length} pages, 4 in parallel`);
+      await mark('file_tree', 'running', `${pageList.length} pages, ${inFlight} in parallel`);
       const genPage = async (pagePath: string): Promise<void> => {
+        // 9000 tokens/page (was 6000): landing pages with a signature scroll scene + full sections
+        // are big, and quality > speed is the explicit product call. Truncation guards still apply.
         const r = track(await rawComplete([
           { role: 'system', content: GENERATE_FILES_STREAM },
           { role: 'user', content: filesPromptChunk(bpJson, pagePath, contractsContext, hasBackend, hasIntegrations) },
-        ], 6000));
-        const parsed = parseProtocol(r.text);
-        if (!parsed.changes.some((c) => c.path === pagePath && c.content.trim())) {
+        ], 9000));
+        let changes = parseProtocol(r.text).changes;
+        // Drop a max_tokens-cut tail file (a page emits its own small components after itself —
+        // a half-written trailing component is worse than a missing one, which the heal recreates).
+        if (r.stopReason === 'max_tokens' && changes.length && looksTruncated(changes[changes.length - 1].content)) {
+          changes = changes.slice(0, -1);
+        }
+        if (!changes.some((c) => c.path === pagePath && c.content.trim())) {
           throw new Error(`page ${pagePath} was not emitted`);
         }
-        await upsertFiles(parsed.changes);
+        await upsertFiles(changes);
         await mark('file_tree', 'running', pagePath.split('/').pop());
       };
-      for (let i = 0; i < pageList.length; i += 4) {
-        await Promise.all(pageList.slice(i, i + 4).map((p) => genPage(p).catch(() => undefined)));
+      {
+        const queue = [...pageList];
+        const worker = async () => { for (let p = queue.shift(); p; p = queue.shift()) await genPage(p).catch(() => undefined); };
+        await Promise.all(Array.from({ length: Math.min(inFlight, queue.length) }, worker));
       }
       // 5) MANIFEST DIFF — every routed page must exist; one serial retry per missing page.
       for (const p of pageList.filter((x) => !written.has(x))) {
@@ -1321,19 +1214,66 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
           { onConflict: 'project_id,path' },
         );
       }
-      const total = SCAFFOLD_FILES.length + written.size + backendFiles;
-      await mark('file_tree', 'done', `${total} files`);
+      await mark('file_tree', 'done', `${SCAFFOLD_FILES.length + written.size} files`);
       for (const s of ['frontend', 'backend', 'auth_logic', 'styling'] as const) {
         await mark(s, 'done');
       }
 
-      // VALIDATE — static QA only here; the deep compile + agentic repair run right after this
-      // generation finishes, via ProjectWorkspace's post-generation verify effect.
+      // Join the concurrent schema work before verifying (its files are part of what's checked).
+      // If the SQL call failed after the shell was built Supabase-backed, write the client stub so
+      // db.ts's imports resolve — the app runs on localStorage until a backend is connected.
+      await schemaPromise;
+      if (hasBackend && !backendFiles) {
+        await writeProjectFile(projectId, '/src/lib/supabaseClient.ts', GENERATED_SUPABASE_CLIENT);
+        await writeProjectFile(projectId, '/.env.example', GENERATED_ENV_EXAMPLE);
+      }
+      await mark('schema', 'done', backendNote);
+      const total = SCAFFOLD_FILES.length + written.size + backendFiles;
+
+      // VERIFY + FIX — inline for BOTH direct and cloud builds ("generated" must mean "works"):
+      // 1) files that don't exist are created directly (one dedicated call per file, in parallel);
+      // 2) the real compiler runs on every build (booted headlessly when the preview is closed);
+      // 3) anything left goes to the agentic repair loop (reads the failing files, fixes the root
+      //    cause, re-checks until clean), falling back to the classic fix pass off-Anthropic.
       await mark('validate', 'running');
-      const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s) found` : 'clean');
-      await mark('fix', 'done', qaErrors.length ? 'handing to the post-build repair' : undefined);
-      const unresolved = qaErrors.length;
+      let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+      if (qaErrors.length) {
+        try {
+          const made = await createMissingModules(projectId, { onFile: (p) => void mark('validate', 'running', `creating ${p.split('/').pop()}`) });
+          if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        } catch { /* best-effort */ }
+      }
+      let tsErrors: number | null = null;
+      if (!qaErrors.length) {
+        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+      }
+      await mark('validate', 'done',
+        qaErrors.length ? `${qaErrors.length} issue(s) found`
+          : tsErrors ? `${tsErrors} type error(s) found`
+          : tsErrors === 0 ? 'verified — compiles clean' : 'clean');
+      if (qaErrors.length || tsErrors) {
+        await mark('fix', 'running');
+        try {
+          if (agentAvailable()) {
+            await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });
+          } else {
+            for (let attempt = 0; attempt < 2 && qaErrors.length; attempt++) {
+              try { await qaFixPass(projectId, qaErrors); } catch { break; }
+              qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+            }
+          }
+        } catch { /* best-effort — report whatever remains below */ }
+        qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        if (tsErrors && agentAvailable()) {
+          // Recount after the agentic repair (the container is warm, so this is a quick tsc).
+          try { tsErrors = await generationCompileGate(projectId); } catch { /* keep the last count */ }
+        }
+        const remaining = qaErrors.length + (tsErrors ?? 0);
+        await mark('fix', 'done', remaining ? `${remaining} unresolved` : 'fixed');
+      } else {
+        await mark('fix', 'done');
+      }
+      const unresolved = qaErrors.length + (tsErrors ?? 0);
 
       await mark('summarize', 'running');
       const genAi = resolveAI();
@@ -1347,11 +1287,22 @@ async function chunkedCloudGenerate(projectId: string, prompt: string, planConte
           ` Open the preview to try it, then keep iterating in chat.` +
           (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
           (stillMissing.length ? `\n\n⚠️ ${stillMissing.length} page(s) could not be generated (${stillMissing.map((p) => p.split('/').pop()).join(', ')}) — ask me in chat to add them.` : '') +
-          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) found — I'm verifying and repairing the build now.` : ''),
+          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
         files_changed: [...written.keys()],
         thread_id: MAIN_THREAD_ID,
       });
-      recordUsage({ provider: genAi.provider, model: genAi.model, inputTokens: usageIn, outputTokens: usageOut, messageId: summaryId });
+      // Every model call above already recorded itself to the spend ledger (rawComplete does it
+      // internally) — recording the aggregate again would DOUBLE the totals. Instead, tag those
+      // records to the summary message so the chat shows the build's real total cost.
+      if (summaryId) tagUsageSince(summaryId, startedAt);
+      // Direct-mode usage event: the browser made the calls, so the client must log the
+      // 'generation' event the monthly counter + Billing history read from.
+      void supabase.from('usage_events').insert({
+        user_id: userId, project_id: projectId, event_type: 'generation',
+        provider: genAi.provider, model: genAi.model,
+        input_tokens: usageIn, output_tokens: usageOut,
+        cost_usd: Math.round(estimateCost(genAi.provider, genAi.model, usageIn, usageOut) * 1e5) / 1e5,
+      }).then(() => {}, () => { /* best-effort — needs the app_0019 insert policy */ });
       await mark('summarize', 'done');
 
       await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
@@ -1501,12 +1452,15 @@ function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type
 }
 
 /** Stream a completion, calling onDelta with each text chunk as it arrives. An optional
- * `image` (data URL) is attached to the last user message so vision models can see it. */
+ * `image` (data URL) is attached to the last user message so vision models can see it.
+ * `opts.fast` routes to the provider's cheap/fast model (small structural calls). onUsage's
+ * `stopReason` is 'max_tokens' when the reply was truncated by the token cap. */
 export async function streamComplete(
   messages: { role: string; content: string }[], maxTokens: number, onDelta: (t: string) => void,
-  image?: string, onUsage?: (u: Usage) => void, signal?: AbortSignal,
+  image?: string, onUsage?: (u: Usage) => void, signal?: AbortSignal, opts: { fast?: boolean } = {},
 ): Promise<string> {
   const ai = resolveAI();
+  const model = opts.fast ? ai.fastModel : ai.model;
   const label = providerInfo(ai.provider).label;
   if (!ai.ready) {
     throw new Error(`No API key set for ${label}. Add one in the model picker (or switch provider).`);
@@ -1539,6 +1493,9 @@ export async function streamComplete(
         }
       }
     }
+    // Fable/Mythos: opt into server-side fallbacks so a safety-classifier decline is re-served
+    // by Opus 4.8 on the same stream instead of ending as an empty response.
+    const fableFallback = /^claude-(fable|mythos)/.test(model);
     const res = await connectProvider('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal,
@@ -1547,20 +1504,31 @@ export async function streamComplete(
         'x-api-key': ai.key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
+        ...(fableFallback ? { 'anthropic-beta': 'server-side-fallback-2026-06-01' } : {}),
       },
-      body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, system, messages: rest, stream: true }),
+      // Cached system block — see rawComplete: identical giant system prompts across a build's
+      // calls read from cache at ~0.1× input price.
+      body: JSON.stringify({
+        model, max_tokens: maxTokens,
+        ...(system ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] } : {}),
+        messages: rest, stream: true,
+        ...(fableFallback ? { fallbacks: [{ model: 'claude-opus-4-8' }] } : {}),
+      }),
     }, label);
     if (!res.body) throw new Error(`${label} returned an empty response.`);
     await readSSE(res.body, (data) => {
       if (data === '[DONE]') return;
-      let evt: { type?: string; delta?: { type?: string; text?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number } }; usage?: { output_tokens?: number } };
+      let evt: { type?: string; delta?: { type?: string; text?: string; stop_reason?: string }; message?: { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } }; usage?: { output_tokens?: number } };
       try { evt = JSON.parse(data); } catch { return; }
       if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta' && evt.delta.text) {
         full += evt.delta.text; onDelta(evt.delta.text);
       } else if (evt.type === 'message_start' && evt.message?.usage) {
         usage.inputTokens = evt.message.usage.input_tokens ?? 0; sawUsage = true;
-      } else if (evt.type === 'message_delta' && evt.usage?.output_tokens != null) {
-        usage.outputTokens = evt.usage.output_tokens; sawUsage = true; // cumulative
+        usage.cacheCreation = evt.message.usage.cache_creation_input_tokens ?? 0;
+        usage.cacheRead = evt.message.usage.cache_read_input_tokens ?? 0;
+      } else if (evt.type === 'message_delta') {
+        if (evt.usage?.output_tokens != null) { usage.outputTokens = evt.usage.output_tokens; sawUsage = true; } // cumulative
+        if (evt.delta?.stop_reason) usage.stopReason = evt.delta.stop_reason;
       }
     });
     finishUsage();
@@ -1574,15 +1542,17 @@ export async function streamComplete(
     method: 'POST',
     signal,
     headers: { 'content-type': 'application/json', authorization: `Bearer ${ai.key || 'local'}` },
-    body: JSON.stringify({ model: ai.model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
   }, label);
   if (!res.body) throw new Error(`${label} returned an empty response.`);
   await readSSE(res.body, (data) => {
     if (data === '[DONE]') return;
-    let evt: { choices?: { delta?: { content?: string } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
+    let evt: { choices?: { delta?: { content?: string }; finish_reason?: string | null }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
     try { evt = JSON.parse(data); } catch { return; }
     const delta = evt.choices?.[0]?.delta?.content;
     if (delta) { full += delta; onDelta(delta); }
+    const fr = evt.choices?.[0]?.finish_reason;
+    if (fr) usage.stopReason = fr === 'length' ? 'max_tokens' : fr; // normalized to Anthropic's name
     if (evt.usage) {
       usage.inputTokens = evt.usage.prompt_tokens ?? 0;
       usage.outputTokens = evt.usage.completion_tokens ?? 0;
@@ -1819,7 +1789,7 @@ async function directEditStream(
   const result = parser.end();
   // Attribute this turn's token cost to the assistant message we're about to insert.
   const logCost = (messageId?: string) =>
-    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: streamUsage.inputTokens, outputTokens: streamUsage.outputTokens, messageId });
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: streamUsage.inputTokens, outputTokens: streamUsage.outputTokens, cacheCreation: streamUsage.cacheCreation, cacheRead: streamUsage.cacheRead, messageId });
 
   if (result.action === 'ask' && result.question) {
     const id = await insertAiMessage({
@@ -1855,9 +1825,15 @@ async function directEditStream(
     return { action: 'plan', explanation: '', plan, changed: [], deleted: [] };
   }
 
+  // A max_tokens-cut stream leaves its LAST file half-written — drop it rather than persist half
+  // a file (the post-edit checks recreate the whole file via the missing-module heal).
+  let modelChanges = result.changes;
+  if (streamUsage.stopReason === 'max_tokens' && modelChanges.length && looksTruncated(modelChanges[modelChanges.length - 1].content)) {
+    modelChanges = modelChanges.slice(0, -1);
+  }
   // Safe-edit guardrail BEFORE writing: drop edits to existing files the model couldn't see.
   const { safeChanges, safeDeletions, blocked } = applyEditGuardrail(
-    appFiles, message, previewError ?? '', result.changes, result.deletions,
+    appFiles, message, previewError ?? '', modelChanges, result.deletions,
   );
 
   // Review-before-write: when on, do NOT write — return the change set for the user to diff + approve.

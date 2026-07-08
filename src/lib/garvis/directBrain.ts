@@ -128,7 +128,8 @@ function normalize(raw: RawDecision, allowed: Set<string>): BrainResponse {
 export function estimateCostUsd(inTok: number, outTok: number): number {
   const model = resolveAI().model.toLowerCase();
   let inRate = 3, outRate = 15; // claude sonnet default
-  if (model.includes('opus')) { inRate = 15; outRate = 75; }
+  if (model.includes('fable') || model.includes('mythos')) { inRate = 10; outRate = 50; }
+  else if (model.includes('opus')) { inRate = 5; outRate = 25; }
   else if (model.includes('haiku')) { inRate = 0.8; outRate = 4; }
   else if (model.includes('gpt-4o-mini') || model.includes('mini') || model.includes('flash')) { inRate = 0.15; outRate = 0.6; }
   return (inTok * inRate + outTok * outRate) / 1_000_000;

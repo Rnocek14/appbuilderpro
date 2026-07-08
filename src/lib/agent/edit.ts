@@ -7,7 +7,7 @@
 import { diffLines } from 'diff';
 import { supabase } from '../supabase';
 import { resolveAI } from '../aiConfig';
-import { recordUsage } from '../usage';
+import { recordUsage, tagUsageSince, estimateCost } from '../usage';
 import { AGENT_BUILD_SYSTEM } from '../prompts';
 import { runQA, issuesToFixRequest } from '../projectQA';
 import { BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
@@ -154,8 +154,26 @@ export async function agenticVerifyAndFix(
   ].join('\n');
 
   const ai = resolveAI();
-  const result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true });
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+  let result = await runAgent({ system: AGENT_BUILD_SYSTEM, userContent, ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true });
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, cacheCreation: result.usage.cacheCreation, cacheRead: result.usage.cacheRead });
+
+  // RELENTLESS: a fresh build that ships with known issues is the worst possible look. Keep
+  // granting fresh step budget while the agent is still MAKING PROGRESS (touching new files —
+  // ctx.changed/deleted are cumulative, so growth = progress), up to 3 extra rounds.
+  let prevTouched = result.changed.length + result.deleted.length;
+  for (let round = 0; round < 3 && result.verified === false; round++) {
+    opts?.onActivity?.(`still failing — repair round ${round + 2}…`);
+    const cont = await runAgent({
+      system: AGENT_BUILD_SYSTEM,
+      userContent: 'Your previous pass ended with verification still FAILING. Continue the repair: call run_typecheck, fix EVERY remaining error (truncated/malformed files must be rewritten COMPLETELY), and do not stop until it reports clean.',
+      ctx, maxSteps: opts?.maxSteps ?? 12, webSearch: true,
+    });
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens, cacheCreation: cont.usage.cacheCreation, cacheRead: cont.usage.cacheRead });
+    result = cont;
+    const touched = result.changed.length + result.deleted.length;
+    if (touched === prevTouched) break; // stalled — no new files touched; more budget won't help
+    prevTouched = touched;
+  }
   return { verified: result.verified, changed: result.changed, deleted: result.deleted };
 }
 
@@ -169,6 +187,7 @@ export async function agenticEdit(
   onEvent?: (e: EditEvent) => void, image?: string, threadId: string = MAIN_THREAD_ID,
   signal?: AbortSignal,
 ): Promise<EditResult> {
+  const startedAt = Date.now(); // usage recorded during this turn is tagged to the message below
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
 
@@ -246,6 +265,7 @@ export async function agenticEdit(
   };
 
   const ai = resolveAI();
+  let turnIn = 0, turnOut = 0; // whole-turn token totals (initial run + repair rounds)
   let result = await runAgent({
     system: AGENT_BUILD_SYSTEM,
     userContent,
@@ -253,12 +273,15 @@ export async function agenticEdit(
     signal,
     onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
   });
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens });
+  turnIn += result.usage.inputTokens; turnOut += result.usage.outputTokens;
+  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens, cacheCreation: result.usage.cacheCreation, cacheRead: result.usage.cacheRead });
 
   // RELENTLESS REPAIR: never end a turn mid-surgery. If verification was still failing when the
-  // step budget ran out, continue with fresh budget (up to 2 rounds) — the ctx (files, changed
-  // sets) carries over, so each round resumes exactly where the last stopped.
-  for (let round = 0; round < 2 && result.verified === false && (result.changed.length || result.deleted.length); round++) {
+  // step budget ran out, continue with fresh budget while the agent is still MAKING PROGRESS
+  // (ctx.changed/deleted are cumulative — growth = new files touched), up to 4 rounds. Only a
+  // genuinely stalled repair (a full round that touched nothing new) gives up.
+  let prevTouched = result.changed.length + result.deleted.length;
+  for (let round = 0; round < 4 && result.verified === false && (result.changed.length || result.deleted.length); round++) {
     onEvent?.({ type: 'activity', text: `Verification still failing — repair round ${round + 2}…` });
     const cont = await runAgent({
       system: AGENT_BUILD_SYSTEM,
@@ -268,8 +291,12 @@ export async function agenticEdit(
       maxSteps: 12,
       onEvent: (e) => { if (e.text) onEvent?.({ type: 'explanation', text: e.text }); },
     });
-    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens });
+    turnIn += cont.usage.inputTokens; turnOut += cont.usage.outputTokens;
+    recordUsage({ provider: ai.provider, model: ai.model, inputTokens: cont.usage.inputTokens, outputTokens: cont.usage.outputTokens, cacheCreation: cont.usage.cacheCreation, cacheRead: cont.usage.cacheRead });
     result = { ...cont, text: cont.text || result.text };
+    const touched = result.changed.length + result.deleted.length;
+    if (touched === prevTouched) break; // stalled — no new files touched this round
+    prevTouched = touched;
   }
 
   const changed = result.changed;
@@ -293,7 +320,19 @@ export async function agenticEdit(
     content: explanation, files_changed: changed, thread_id: threadId,
     changes: messageChanges.length ? messageChanges : null,
   });
-  recordUsage({ provider: ai.provider, model: ai.model, inputTokens: 0, outputTokens: 0, messageId: id });
+  // Attribute this turn's model calls (initial run + repair rounds) to the message so the chat's
+  // cost chip shows. (The old zero-token recordUsage here was a no-op — recordUsage skips 0/0.)
+  if (id) tagUsageSince(id, startedAt);
+  // Direct-mode usage event: the browser made the calls, so the client must log the 'edit' event
+  // the monthly generation counter + Billing history read from (edge mode logs server-side).
+  if (didEdit) {
+    void supabase.from('usage_events').insert({
+      user_id: userId, project_id: projectId, event_type: 'edit',
+      provider: ai.provider, model: ai.model,
+      input_tokens: turnIn, output_tokens: turnOut,
+      cost_usd: Math.round(estimateCost(ai.provider, ai.model, turnIn, turnOut) * 1e5) / 1e5,
+    }).then(() => {}, () => { /* best-effort — needs the app_0019 insert policy */ });
+  }
 
   onEvent?.({ type: 'done' });
   return {

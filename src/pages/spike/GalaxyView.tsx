@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
   universeConnections, addChild, slugify, titleSimilarity, sceneOf,
-  type ClusterGraph, type Cluster, type ClusterKind, type ClusterMaturity, type Artifact, type ExpandMode, type Lead, type LeadKind, type UniverseConnection, type CuriosityState, type ThinkSuggestion, type GarvisMind,
+  type ClusterGraph, type Cluster, type ClusterKind, type ClusterMaturity, type Artifact, type ExpandMode, type Lead, type LeadKind, type UniverseConnection, type CuriosityState, type ThinkSuggestion, type GarvisMind, type ScenePhase,
 } from '../../lib/garvis/clustering';
 import { composeScene, recordSceneGuess, streamOverview, fetchLeads, expandCluster, gatherWikiMedia, gatherDiscover, gatherVideos, findBridge, investigate, observe, reframe, updateMind, composeProspect, interpretThought, discoverAvailable, type Prospect, type Bridge, type Notice } from '../../lib/garvis/clusteringRun';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
@@ -103,6 +103,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   const [thinking, setThinking] = useState(false);
   const [err, setErr] = useState('');
   const [streamText, setStreamText] = useState('');
+  const [streamPhase, setStreamPhase] = useState<ScenePhase>(''); // which scene part is composing
   const [panelW, setPanelW] = useState(() => { const v = Number(localStorage.getItem('ff:panelw')); return v >= 280 ? Math.min(v, 720) : 360; });
   const [notices, setNotices] = useState<Notice[]>([]);
   const [noticing, setNoticing] = useState(false);
@@ -149,7 +150,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
     if (!focus) return;
     const id = focus.id;
     const c0 = byId.get(id)!;
-    setLeads(leadsCache.current[id] ?? sceneOf(c0)?.currents ?? []); setBridge(null); setStreamText(''); setSuggestion(null); setViewer(null); setNudge(null); setShowPanel(false);
+    setLeads(leadsCache.current[id] ?? sceneOf(c0)?.currents ?? []); setBridge(null); setStreamText(''); setStreamPhase(''); setSuggestion(null); setViewer(null); setNudge(null); setShowPanel(false);
     let cancelled = false;
     const trail = parent ? [parent.title] : [];
     const needAnswer = !c0.artifacts.some((a) => a.id === 'scene') && !c0.artifacts.some((a) => a.id === 'understanding');
@@ -162,9 +163,11 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
       if (needAnswer) {
         let gotLeads: Lead[] = [];
         try {
-          // THE SCENE — one call composes the curiosity loop; the gap paints as it streams
-          const sr = await composeScene(g, id, trail, (t) => { if (!cancelled) setStreamText(t); });
+          // THE SCENE — one call composes the curiosity loop; the gap paints as it streams and the
+          // phase line narrates the invisible tail (options/beats/currents) so it never reads stalled
+          const sr = await composeScene(g, id, trail, (t, phase) => { if (!cancelled) { setStreamText(t); setStreamPhase(phase); } });
           if (cancelled) return;
+          setStreamPhase('');
           if (sr.costUsd) onCost?.(sr.costUsd);
           if (sr.scene) {
             g = sr.graph; setGraph(g); setStreamText('');
@@ -350,6 +353,19 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   const think = async () => {
     const u = thought.trim();
     if (!u || thinking) return;
+    // FAST PATH — a clear question skips the interpret round-trip (dead air before any paint):
+    // open its node NOW so the scene starts composing immediately, and re-read the mind after.
+    // Matches an existing child first so re-asking doesn't spawn a duplicate.
+    if (/\?\s*$/.test(u)) {
+      recentUtter.current = [u, ...recentUtter.current].slice(0, 3);
+      setThought(''); setSuggestion(null);
+      const kids = graph.clusters.filter((c) => c.parentId === focus.id);
+      const match = kids.map((c) => ({ c, s: titleSimilarity(c.title, u) })).sort((a, b) => b.s - a.s)[0];
+      if (match && match.s >= 0.45) travel(match.c.id);
+      else dive({ label: u, kind: 'question' });
+      lastMind.current = 0; void refreshMind();
+      return;
+    }
     setThinking(true);
     try {
       const res = await interpretThought(graph, focus.id, u);
@@ -580,7 +596,7 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
         {!mapMode && (
           <div key={focus.id} className="absolute inset-0 z-30 ku-warp-in">
             <SceneStage
-              focus={focus} scene={sceneOf(focus)} composing={loading.answer} partial={streamText} hex={hex}
+              focus={focus} scene={sceneOf(focus)} composing={loading.answer} partial={streamText} partialPhase={streamPhase} hex={hex}
               trail={stageTrail} heroUrl={stageHero} gallery={stageGallery} currents={stageCurrents}
               onGuess={(i) => setGraph(recordSceneGuess(graph, focus.id, i))}
               onDive={(l) => dive(l)}

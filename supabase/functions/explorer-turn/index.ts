@@ -45,15 +45,16 @@ Deno.serve(async (req) => {
       if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
       throw e;
     }
-    const m = modelForPlan(await getUserPlan(admin, user.id)); // free → cheap model
-
-    const { messages, maxTokens, stream } = (await req.json().catch(() => ({}))) as {
-      messages?: { role?: string; content?: string }[]; maxTokens?: number; stream?: boolean;
+    const { messages, maxTokens, stream, fast } = (await req.json().catch(() => ({}))) as {
+      messages?: { role?: string; content?: string }[]; maxTokens?: number; stream?: boolean; fast?: boolean;
     };
+    // free → cheap model; `fast: true` opts a call INTO the cheap tier (think/leads/mind/bridge —
+    // small structural calls where latency beats prose quality), mirroring agent-turn's convention.
+    const m = modelForPlan(fast ? 'free' : await getUserPlan(admin, user.id));
     if (!Array.isArray(messages) || !messages.length) return json({ error: 'messages[] is required.' }, 400);
     const msgs = messages
-      .filter((x) => typeof x?.role === 'string' && typeof x?.content === 'string')
-      .map((x) => ({ role: x.role as string, content: x.content as string }));
+      .filter((x) => (x?.role === 'system' || x?.role === 'user' || x?.role === 'assistant') && typeof x?.content === 'string')
+      .map((x) => ({ role: x.role as 'system' | 'user' | 'assistant', content: x.content as string }));
     if (!msgs.length) return json({ error: 'messages[] is required.' }, 400);
     const max = Math.min(Math.max(Number(maxTokens) || 800, 100), MAX_TOKENS_CAP);
 

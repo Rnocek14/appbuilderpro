@@ -3,7 +3,7 @@
 // previews (sandboxed iframes — srcdoc + allow-scripts only, never allow-same-origin). The pick
 // becomes generation context the blueprint must follow, so preview ≈ build.
 import { useState } from 'react';
-import { Palette, ArrowRight, SkipForward } from 'lucide-react';
+import { Palette, ArrowRight, SkipForward, RefreshCw } from 'lucide-react';
 import type { DesignDirection } from '../lib/aiClient';
 import { cn } from '../lib/utils';
 import { Button } from './ui';
@@ -14,13 +14,17 @@ const RISK_TONE: Record<string, string> = {
   bold: 'bg-forge-err/15 text-forge-err',
 };
 
-export function DirectionPicker({ directions, onPick, onSkip, busy, loading = false }: {
+export function DirectionPicker({ directions, onPick, onSkip, onMore, busy, loading = false, expected = 3 }: {
   directions: DesignDirection[];
   onPick: (d: DesignDirection) => void;
   onSkip: () => void;
+  /** Reroll: generate 3 MORE directions from archetypes not shown yet (appended to the grid). */
+  onMore?: () => void;
   busy: boolean;
   /** Directions still generating — show skeleton cards; Skip starts the build immediately. */
   loading?: boolean;
+  /** How many cards this round should end with — drives the skeleton count during rerolls. */
+  expected?: number;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
 
@@ -74,7 +78,7 @@ export function DirectionPicker({ directions, onPick, onSkip, busy, loading = fa
           </button>
         ))}
         {/* Skeletons only for the slots still generating — arrived cards replace them one by one. */}
-        {loading && Array.from({ length: Math.max(0, 3 - directions.length) }, (_, i) => (
+        {loading && Array.from({ length: Math.max(0, expected - directions.length) }, (_, i) => (
           <div key={`skeleton-${i}`} className="overflow-hidden rounded-xl border border-forge-border">
             <div className="skeleton h-[240px] w-full" />
             <div className="space-y-2 border-t border-forge-border p-3">
@@ -93,6 +97,16 @@ export function DirectionPicker({ directions, onPick, onSkip, busy, loading = fa
             disabled={busy || selected == null}
           >
             Build with this direction <ArrowRight size={14} />
+          </Button>
+        )}
+        {!loading && onMore && (
+          <Button
+            variant="ghost"
+            onClick={onMore}
+            disabled={busy}
+            title="Generate three more identities from different archetypes"
+          >
+            <RefreshCw size={13} /> Show me 3 more
           </Button>
         )}
         <Button

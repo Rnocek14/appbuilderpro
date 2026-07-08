@@ -1,7 +1,7 @@
 // src/lib/qaCheck.verify.ts
 // Pure-function checks for the cross-file export resolution in validateProject (run with tsx).
 //   npx tsx src/lib/qaCheck.verify.ts
-import { validateProject } from './qaCheck';
+import { validateProject, missingLocalModules, looksTruncated } from './qaCheck';
 
 let pass = 0, fail = 0;
 const check = (name: string, cond: boolean) => { if (cond) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name); } };
@@ -143,6 +143,41 @@ check('truncated file is flagged', has(
 check('balanced file is clean', !has(
   [{ path: '/src/components/Ok.tsx', content: `export function Ok(){ const s = "{"; return <div>{s}</div>; }` }],
   'truncated or malformed'));
+
+// 16) missingLocalModules — concrete target paths for imports of files that don't exist
+{
+  const app = `import { lazy } from 'react';
+import Header from '../components/Header';
+import './missing.css';
+const Landing = lazy(() => import('./pages/LandingPage'));
+const NewProject = lazy(() => import('./pages/NewProjectPage'));
+export default function App(){return null}`;
+  const missing = missingLocalModules([
+    { path: '/src/App.tsx', content: app },
+    { path: '/components/Header.tsx', content: 'export default function Header(){return null}' },
+  ]);
+  const paths = missing.map((m) => m.path).sort();
+  check('missing lazy pages get .tsx target paths',
+    paths.includes('/src/pages/LandingPage.tsx') && paths.includes('/src/pages/NewProjectPage.tsx'));
+  check('missing css keeps its extension', paths.includes('/src/missing.css'));
+  check('resolving import is not reported', !paths.some((p) => p.includes('Header')));
+  const lp = missing.find((m) => m.path === '/src/pages/LandingPage.tsx');
+  check('importer + import line captured', lp?.importers[0]?.path === '/src/App.tsx'
+    && (lp?.importers[0]?.lines[0] ?? '').includes("import('./pages/LandingPage')"));
+}
+// 17) one target imported from two files → single entry with both importers
+{
+  const missing = missingLocalModules([
+    { path: '/src/App.tsx', content: `import Nav from './components/Nav';` },
+    { path: '/src/pages/Home.tsx', content: `import Nav from '../components/Nav';` },
+  ]);
+  check('shared missing module is deduped with both importers',
+    missing.length === 1 && missing[0].importers.length === 2);
+}
+// 18) looksTruncated — the drop-the-half-file gate for max_tokens-cut streams
+check('looksTruncated: cut-off file detected', looksTruncated('export function X(){\n  return (\n    <div>{items.map((i) => {\n'));
+check('looksTruncated: complete file is clean', !looksTruncated('export function X(){ return <div/>; }'));
+check('looksTruncated: braces in strings ignored', !looksTruncated('const s = "{{{{"; export default s;'));
 
 console.log(`\nqaCheck.verify: ${pass} passed, ${fail} failed`);
 if (fail) throw new Error(`${fail} check(s) failed`);

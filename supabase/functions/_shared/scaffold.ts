@@ -95,8 +95,11 @@ const INDEX_HTML = `<!doctype html>
             popover: { DEFAULT: 'hsl(var(--popover))', foreground: 'hsl(var(--popover-foreground))' },
             card: { DEFAULT: 'hsl(var(--card))', foreground: 'hsl(var(--card-foreground))' },
           },
-          borderRadius: { lg: 'var(--radius)', md: 'calc(var(--radius) - 2px)', sm: 'calc(var(--radius) - 4px)' },
-          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+          // The FULL radius scale rides the token so a sharp (0px) or soft (24px) design identity
+          // actually reaches the cards (rounded-xl/2xl are what cards use — without this mapping
+          // they'd stay at Tailwind's fixed defaults and every app would have identical corners).
+          borderRadius: { sm: 'calc(var(--radius) - 4px)', md: 'calc(var(--radius) - 2px)', lg: 'var(--radius)', xl: 'calc(var(--radius) + 4px)', '2xl': 'calc(var(--radius) + 8px)' },
+          fontFamily: { sans: ['var(--font-sans, Inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
           // Motion utilities — CDN Tailwind has no tailwindcss-animate plugin, so we define the
           // keyframes shadcn/Radix components rely on (accordion, overlay enter/exit) plus a small
           // set of reusable entrances. This is what gives generated apps Lovable-tier polish.
@@ -1059,6 +1062,316 @@ export function Reveal({ children, delay = 0, y = 16, className }: {
 }
 `;
 
+// Advanced scroll/motion primitives — the "expensive site" moves (pinned scrub scenes, parallax,
+// count-ups, marquees) as guaranteed-working components, so the model COMPOSES them instead of
+// hand-rolling scroll math (hand-rolled versions were the top source of broken landing pages).
+const MOTION_TSX = `import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useInView, useScrollProgress } from '../../lib/scroll';
+import { cn } from '../../lib/utils';
+
+const reducedMotion = () =>
+  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/**
+ * ScrollScene — the Apple move, prebuilt: a pinned full-screen stage scrubbed by scroll.
+ * Renders a tall wrapper (default 200vh) with a sticky stage inside; the render-prop receives
+ * progress 0->1 — map it onto transform/opacity ONLY. Reduced-motion users get the final state.
+ *
+ *   <ScrollScene>
+ *     {(p) => <img src={shot} style={{ transform: 'scale(' + (0.6 + p * 0.4) + ')', opacity: Math.min(1, p * 2) }} />}
+ *   </ScrollScene>
+ */
+export function ScrollScene({ children, height = '200vh', className }: {
+  children: (progress: number) => ReactNode;
+  height?: string;
+  className?: string;
+}) {
+  const { ref, progress } = useScrollProgress<HTMLDivElement>();
+  const [reduced] = useState(reducedMotion);
+  if (reduced) return <div className={className}>{children(1)}</div>;
+  return (
+    <div ref={ref} className={cn('relative', className)} style={{ height }}>
+      <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
+        {children(progress)}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Parallax — a layer that drifts as it travels through the viewport (compose 2-3 at different
+ * speeds for depth). speed -1..1: negative drifts against scroll (backgrounds), positive with it.
+ */
+export function Parallax({ children, speed = 0.3, className }: {
+  children: ReactNode; speed?: number; className?: string;
+}) {
+  const { ref, progress } = useScrollProgress<HTMLDivElement>();
+  const y = (progress - 0.5) * -2 * speed * 100;
+  const style: CSSProperties = reducedMotion() ? {} : { transform: 'translate3d(0, ' + y.toFixed(1) + 'px, 0)' };
+  return <div ref={ref} className={className} style={style}>{children}</div>;
+}
+
+/**
+ * CountUp — a stat that counts up the first time it scrolls into view (eased, locale-formatted,
+ * steady digits). <CountUp value={12500} suffix="+" /> · <CountUp value={99.9} decimals={1} suffix="%" />
+ */
+export function CountUp({ value, duration = 1400, prefix = '', suffix = '', decimals = 0, className }: {
+  value: number; duration?: number; prefix?: string; suffix?: string; decimals?: number; className?: string;
+}) {
+  const { ref, inView } = useInView<HTMLSpanElement>();
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    if (!inView) return;
+    if (reducedMotion()) { setN(value); return; }
+    const start = performance.now();
+    let raf = 0;
+    const tick = (t: number) => {
+      const p = Math.min(1, (t - start) / duration);
+      setN(value * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [inView, value, duration]);
+  const shown = n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return <span ref={ref} className={cn('tabular-nums', className)}>{prefix}{shown}{suffix}</span>;
+}
+
+/**
+ * Marquee — an infinite horizontal strip (logo walls, testimonials, tickers). Seamless loop with
+ * edge fade, pauses on hover; reduced-motion renders the items statically. speed = seconds/loop.
+ */
+export function Marquee({ children, speed = 40, reverse = false, className }: {
+  children: ReactNode; speed?: number; reverse?: boolean; className?: string;
+}) {
+  if (reducedMotion()) {
+    return <div className={cn('flex flex-wrap items-center gap-10 overflow-hidden', className)}>{children}</div>;
+  }
+  const mask = 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)';
+  return (
+    <div className={cn('group flex overflow-hidden', className)} style={{ maskImage: mask, WebkitMaskImage: mask }}>
+      {[0, 1].map((i) => (
+        <div
+          key={i}
+          aria-hidden={i === 1}
+          className="flex shrink-0 items-center gap-10 pr-10 [animation:ui-marquee_linear_infinite] group-hover:[animation-play-state:paused]"
+          style={{ animationDuration: speed + 's', animationDirection: reverse ? 'reverse' : 'normal' }}
+        >
+          {children}
+        </div>
+      ))}
+      <style>{'@keyframes ui-marquee { from { transform: translateX(0); } to { transform: translateX(-100%); } }'}</style>
+    </div>
+  );
+}
+
+/**
+ * TextReveal — display type revealing word by word from behind a clip line (the award-site
+ * standard for hero headlines). rotate adds a 3D ribbon flip per word. Triggers on scroll-in.
+ *   <TextReveal as="h1" text="Roofing done right." className="text-6xl font-semibold" rotate />
+ */
+export function TextReveal({ text, as = 'h2', className, delay = 0, rotate = false }: {
+  text: string; as?: 'h1' | 'h2' | 'h3' | 'h4' | 'p' | 'div'; className?: string; delay?: number; rotate?: boolean;
+}) {
+  const { ref, inView } = useInView<HTMLSpanElement>();
+  const Tag = as;
+  const shown = reducedMotion() || inView;
+  return (
+    <Tag className={className}>
+      <span ref={ref} className="inline" style={rotate ? { perspective: '800px' } : undefined}>
+        {text.split(' ').map((w, i) => (
+          <span key={i} className="inline-block overflow-hidden pb-[0.08em] align-bottom">
+            <span
+              className="inline-block will-change-transform transition-transform duration-700 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)]"
+              style={{
+                transitionDelay: (delay + i * 60) + 'ms',
+                transform: shown ? 'none' : (rotate ? 'translateY(110%) rotateX(-80deg)' : 'translateY(110%)'),
+                transformOrigin: 'bottom center',
+              }}
+            >
+              {w}{'\\u00A0'}
+            </span>
+          </span>
+        ))}
+      </span>
+    </Tag>
+  );
+}
+
+/**
+ * TiltCard — pointer-tracked 3D tilt with a moving glare highlight (the "premium product card"
+ * move). Wrap any card; keep max modest (8-12deg). Static for reduced-motion users.
+ */
+export function TiltCard({ children, className, max = 10, glare = true }: {
+  children: ReactNode; className?: string; max?: number; glare?: boolean;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [t, setT] = useState({ rx: 0, ry: 0, gx: 50, gy: 50, active: false });
+  const onMove = (e: React.MouseEvent) => {
+    if (reducedMotion()) return;
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const px = (e.clientX - r.left) / r.width;
+    const py = (e.clientY - r.top) / r.height;
+    setT({ rx: (0.5 - py) * max, ry: (px - 0.5) * max, gx: px * 100, gy: py * 100, active: true });
+  };
+  return (
+    <div
+      ref={ref}
+      onMouseMove={onMove}
+      onMouseLeave={() => setT((s) => ({ ...s, rx: 0, ry: 0, active: false }))}
+      className={cn('relative will-change-transform', className)}
+      style={{
+        transform: 'perspective(900px) rotateX(' + t.rx.toFixed(2) + 'deg) rotateY(' + t.ry.toFixed(2) + 'deg)',
+        transition: t.active ? 'transform 80ms linear' : 'transform 500ms cubic-bezier(0.16,1,0.3,1)',
+        transformStyle: 'preserve-3d',
+      }}
+    >
+      {children}
+      {glare && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-[inherit] transition-opacity duration-300"
+          style={{
+            opacity: t.active ? 1 : 0,
+            background: 'radial-gradient(420px circle at ' + t.gx + '% ' + t.gy + '%, rgba(255,255,255,0.16), transparent 55%)',
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * StickyStack — cards pin under the header and stack over each other as you scroll (the
+ * "deck of cards" transition). Each item MUST have its own solid background + border.
+ *   <StickyStack items={[<FeatureCard1/>, <FeatureCard2/>, <FeatureCard3/>]} />
+ */
+export function StickyStack({ items, top = 88, gap = 18, className }: {
+  items: ReactNode[]; top?: number; gap?: number; className?: string;
+}) {
+  return (
+    <div className={className}>
+      {items.map((child, i) => (
+        <div key={i} className="sticky" style={{ top: (top + i * gap) + 'px', zIndex: i + 1, marginBottom: i === items.length - 1 ? 0 : '18vh' }}>
+          {child}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Aurora — a drifting, blurred color field (the shader-look without WebGL risk). Place inside a
+ * relative, overflow-hidden section — pairs best with dark surfaces and a TextReveal on top.
+ *   <section className="relative overflow-hidden bg-background"><Aurora hues={[222, 285, 165]} />…
+ */
+export function Aurora({ hues = [222, 285, 165], intensity = 0.3, className }: {
+  hues?: number[]; intensity?: number; className?: string;
+}) {
+  const still = reducedMotion();
+  return (
+    <div aria-hidden className={cn('pointer-events-none absolute inset-0 overflow-hidden', className)}>
+      {hues.slice(0, 4).map((h, i) => (
+        <div
+          key={i}
+          className="absolute rounded-full"
+          style={{
+            width: '58%', height: '58%',
+            left: (i * 26) + '%', top: (i % 2 === 0 ? -8 : 22) + '%',
+            background: 'radial-gradient(circle, hsl(' + h + ' 85% 60% / ' + intensity + '), transparent 62%)',
+            filter: 'blur(64px)',
+            animation: still ? undefined : 'ui-aurora ' + (17 + i * 6) + 's ease-in-out infinite alternate',
+            animationDelay: still ? undefined : (-i * 7) + 's',
+          }}
+        />
+      ))}
+      <style>{'@keyframes ui-aurora { from { transform: translate3d(-10%, -6%, 0) scale(1); } to { transform: translate3d(12%, 10%, 0) scale(1.22); } }'}</style>
+    </div>
+  );
+}
+
+/**
+ * Spotlight — a cursor-following glow over a section or card grid. Subtle by default; the color
+ * rides the theme's primary token.
+ */
+export function Spotlight({ children, className, size = 620 }: {
+  children: ReactNode; className?: string; size?: number;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState({ x: -9999, y: -9999 });
+  return (
+    <div
+      ref={ref}
+      className={cn('relative', className)}
+      onMouseMove={(e) => {
+        if (reducedMotion()) return;
+        const r = ref.current?.getBoundingClientRect();
+        if (r) setPos({ x: e.clientX - r.left, y: e.clientY - r.top });
+      }}
+      onMouseLeave={() => setPos({ x: -9999, y: -9999 })}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 transition-opacity duration-300"
+        style={{ background: 'radial-gradient(' + size + 'px circle at ' + pos.x + 'px ' + pos.y + 'px, hsl(var(--primary) / 0.10), transparent 60%)' }}
+      />
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Magnetic — the wrapped element leans toward the cursor and springs back (reserve for the ONE
+ * primary CTA; more than that reads gimmicky).
+ */
+export function Magnetic({ children, strength = 0.32, className }: {
+  children: ReactNode; strength?: number; className?: string;
+}) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [d, setD] = useState({ x: 0, y: 0, active: false });
+  return (
+    <span
+      ref={ref}
+      className={cn('inline-block will-change-transform', className)}
+      onMouseMove={(e) => {
+        if (reducedMotion()) return;
+        const r = ref.current?.getBoundingClientRect();
+        if (!r) return;
+        setD({ x: (e.clientX - r.left - r.width / 2) * strength, y: (e.clientY - r.top - r.height / 2) * strength, active: true });
+      }}
+      onMouseLeave={() => setD({ x: 0, y: 0, active: false })}
+      style={{
+        transform: 'translate3d(' + d.x.toFixed(1) + 'px, ' + d.y.toFixed(1) + 'px, 0)',
+        transition: d.active ? 'transform 100ms linear' : 'transform 450ms cubic-bezier(0.34,1.56,0.64,1)',
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * ImageReveal — an image wipes in behind a clip-path and settles from a slight over-scale
+ * (the editorial gallery move). Use in place of a bare <img> on marketing surfaces.
+ */
+export function ImageReveal({ src, alt = '', className, direction = 'up', delay = 0 }: {
+  src: string; alt?: string; className?: string; direction?: 'up' | 'left' | 'right'; delay?: number;
+}) {
+  const { ref, inView } = useInView<HTMLDivElement>();
+  const shown = reducedMotion() || inView;
+  const hidden = direction === 'left' ? 'inset(0 100% 0 0)' : direction === 'right' ? 'inset(0 0 0 100%)' : 'inset(100% 0 0 0)';
+  return (
+    <div ref={ref} className={cn('overflow-hidden', className)}
+      style={{ clipPath: shown ? 'inset(0 0 0 0)' : hidden, transition: 'clip-path 900ms cubic-bezier(0.16,1,0.3,1) ' + delay + 'ms' }}>
+      <img src={src} alt={alt} loading="lazy"
+        className="h-full w-full object-cover will-change-transform"
+        style={{ transform: shown ? 'scale(1)' : 'scale(1.16)', transition: 'transform 1100ms cubic-bezier(0.16,1,0.3,1) ' + delay + 'ms' }} />
+    </div>
+  );
+}
+`;
+
 const ERRORBOUNDARY_TSX = `import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 /**
@@ -1114,6 +1427,10 @@ export function getTheme(): Theme {
   try {
     const stored = localStorage.getItem('theme');
     if (stored === 'light' || stored === 'dark') return stored;
+    // The app's design can declare which theme it OPENS in (--default-theme in index.css) —
+    // dark-first directions (pro tools, midnight) boot dark without waiting for a user toggle.
+    const def = getComputedStyle(document.documentElement).getPropertyValue('--default-theme').trim();
+    if (def === 'light' || def === 'dark') return def;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   } catch {
     return 'light';
@@ -1176,6 +1493,7 @@ export * from './FormField';
 export * from './Pagination';
 export * from './Table';
 export * from './Reveal';
+export * from './Motion';
 export * from './ErrorBoundary';
 `;
 
@@ -1202,6 +1520,7 @@ const KIT: ScaffoldFile[] = [
   { path: '/src/components/ui/Pagination.tsx', content: PAGINATION_TSX },
   { path: '/src/components/ui/Table.tsx', content: TABLE_TSX },
   { path: '/src/components/ui/Reveal.tsx', content: REVEAL_TSX },
+  { path: '/src/components/ui/Motion.tsx', content: MOTION_TSX },
   { path: '/src/components/ui/ErrorBoundary.tsx', content: ERRORBOUNDARY_TSX },
   { path: '/src/lib/scroll.ts', content: SCROLL_TS },
   { path: '/src/components/ui/index.ts', content: UI_INDEX_TS },
