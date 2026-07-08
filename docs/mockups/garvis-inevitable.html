@@ -32,6 +32,27 @@
   .line .hint{font-family:var(--mono);font-size:10px;color:var(--dim);white-space:nowrap}
   .line-note{position:absolute;left:0;right:0;bottom:-22px;text-align:center;font-size:10.5px;color:#5a6074}
 
+  /* altitude label — where the camera is; zoom is the only navigation besides the conversation */
+  .altitude{position:fixed;top:20px;left:24px;z-index:40;font-family:var(--mono);font-size:10px;
+    letter-spacing:.12em;text-transform:uppercase;color:#5a6074}
+
+  /* the waking moment — Garvis speaks first */
+  .waking{width:min(560px,92vw);padding:22px 26px;margin-bottom:34px;text-align:left}
+  .wk-hi{font-family:var(--display);font-size:22px;font-weight:600;letter-spacing:-.015em}
+  .wk-sub{font-size:12px;color:var(--dim);margin:2px 0 12px}
+  .wk-line{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:none;
+    border-top:1px solid var(--border);color:var(--ink);font-size:13px;font-family:var(--body);
+    padding:9px 2px;cursor:pointer;transition:color .2s var(--ease)}
+  .wk-line:hover{color:var(--heat)}
+
+  /* the nebula ring — capability rendered as potential */
+  .nebula{border-top:1px dashed #2a3042;margin:4px 18px 0;padding:12px 0 16px}
+  .nebula .label{margin-bottom:8px;display:block}
+  .neb{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#6a7188;border:1px dashed #3a4054;
+    border-radius:999px;padding:4px 12px;margin:0 6px 6px 0;background:none;cursor:pointer;transition:all .3s var(--ease)}
+  .neb:hover{color:var(--heat);border-color:rgba(255,181,115,.5)}
+  .neb.glowing{color:var(--heat);border-color:rgba(255,181,115,.55);box-shadow:0 0 18px -6px rgba(255,138,61,.5)}
+
   /* whisper — approvals, always one glance away */
   .whisper{position:fixed;top:20px;right:22px;z-index:40;display:flex;align-items:center;gap:7px;
     font-size:12px;color:var(--warn);border:1px solid rgba(250,204,21,.35);border-radius:999px;
@@ -40,7 +61,7 @@
 
   /* ═══ STATE A — THE FIELD ═══ */
   .field{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    gap:8px;transition:opacity .55s var(--ease),transform .55s var(--ease)}
+    gap:8px;padding:60px 16px 120px;overflow:auto;transition:opacity .55s var(--ease),transform .55s var(--ease)}
   body.in-mission .field{opacity:0;transform:scale(1.12);pointer-events:none}
   .field h1{font-family:var(--display);font-weight:600;font-size:clamp(22px,3.4vw,32px);letter-spacing:-.02em;margin:0 0 26px;text-wrap:balance}
   .orbs{display:flex;gap:42px;flex-wrap:wrap;justify-content:center;padding:0 20px}
@@ -150,9 +171,19 @@
   <!-- whisper: the spine, one glance away, everywhere -->
   <button class="whisper" title="Nothing leaves without you. Opens the approvals page.">◆ <span class="n">2</span> waiting for you</button>
 
-  <!-- ═══ THE FIELD ═══ -->
+  <!-- altitude — where the camera is -->
+  <div class="altitude" id="altitude">◦ universe</div>
+
+  <!-- ═══ THE UNIVERSE (the Field) ═══ -->
   <section class="field" id="field">
-    <h1>What are we working on, Riley?</h1>
+    <div class="waking panel">
+      <div class="wk-hi">Good morning, Riley.</div>
+      <div class="wk-sub">While you were away —</div>
+      <button class="wk-line" onclick="enterMission()"><span class="dot ok"></span> Bob Pier replied “interested.” I staged a follow-up draft.</button>
+      <button class="wk-line" onclick="enterMission()"><span class="dot ember"></span> Lakefront inventory dropped again — the scarcity angle got stronger.</button>
+      <button class="wk-line" onclick="enterMission()"><span class="dot ember"></span> The landing page passed 60 visits · 11 valuation requests.</button>
+      <button class="wk-line" onclick="enterMission(); setPosture('execute')"><span class="dot warn"></span> One approval is waiting — nothing goes out without you.</button>
+    </div>
     <div class="orbs">
       <button class="orb" onclick="enterMission()">
         <span class="ball"></span>
@@ -204,6 +235,15 @@
             <div class="area"><div class="t"><span class="dot ok"></span>Market Intel</div><div class="s">fresh · inventory −18%</div></div>
             <div class="area"><div class="t"><span class="dot dim"></span>Email Follow-up</div><div class="s">2 drafts staged</div></div>
             <div class="area"><div class="t"><span class="dot dim"></span>Video</div><div class="s">ghost — market-update strategy</div></div>
+          </div>
+          <!-- the nebula ring: capability rendered as potential — begin one and it condenses -->
+          <div class="nebula">
+            <span class="label">could grow here — unformed until you begin</span>
+            <button class="neb glowing" title="Garvis: this campaign would perform better with a 30-second market video — its moment is now">🎥 Market video · timely</button>
+            <button class="neb">🤖 Automations</button>
+            <button class="neb">🏠 MLS import</button>
+            <button class="neb">📊 Deeper analytics</button>
+            <button class="neb">📱 Social clips</button>
           </div>
         </div>
 
@@ -317,9 +357,11 @@
   }
   seed(); draw(); addEventListener('resize', seed);
 
-  // ── field ⇄ mission: one camera move; the Line never moves ──
-  function enterMission() { document.body.classList.add('in-mission'); }
-  function leaveMission() { document.body.classList.remove('in-mission'); }
+  // ── universe ⇄ system: one camera move; the conversation never moves ──
+  const alt = document.getElementById('altitude');
+  function enterMission() { document.body.classList.add('in-mission'); alt.textContent = '◦ universe · ● system — Grow Mom\'s Business'; }
+  function leaveMission() { document.body.classList.remove('in-mission'); alt.textContent = '● universe'; }
+  alt.textContent = '● universe';
 
   // ── postures: same room, new light. Garvis sets the dial from your words. ──
   function setPosture(p) {
