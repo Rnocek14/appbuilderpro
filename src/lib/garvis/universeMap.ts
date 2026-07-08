@@ -27,6 +27,21 @@ const orUndef = (s: string | null | undefined): string | undefined => (s === nul
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isWorldUuid = (id: string): boolean => UUID_RE.test(id);
 
+/**
+ * Which existing cluster rows may a sync delete? ONLY unchartered ones the local graph no longer
+ * contains. A row with a charter is a PRODUCTION AREA — it may exist only server-side (created by
+ * instantiateWeb / the studios, never seen by this browser's explorer graph), and deleting it
+ * would cascade away its artifacts, versions, and files. The universe only grows; commitments
+ * are never collateral damage of a thought-graph sync.
+ */
+export function deletableStaleClusters(
+  existing: { id: string; charter: unknown }[],
+  keepIds: string[],
+): string[] {
+  const keep = new Set(keepIds);
+  return existing.filter((r) => !keep.has(r.id) && (r.charter === null || r.charter === undefined)).map((r) => r.id);
+}
+
 /** Flatten a graph into DB rows. Pure: no Supabase, no randomness of its own. */
 export function graphToRows(
   graph: ClusterGraph, worldId: string, ownerId: string, idFor: (key: string) => string,

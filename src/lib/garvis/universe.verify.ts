@@ -4,7 +4,7 @@
 // lost: hierarchy, edges, artifacts, salience, maturity, trajectory. Run: npm run verify:universe
 // Mirrors the other garvis *.verify.ts files.
 
-import { graphToRows, rowsToGraph, isWorldUuid } from './universeMap';
+import { graphToRows, rowsToGraph, isWorldUuid, deletableStaleClusters } from './universeMap';
 import type { ClusterGraph } from './clustering';
 
 let passed = 0;
@@ -108,6 +108,19 @@ check('round trip keeps both edges', back.edges.length === 2);
 // --- isWorldUuid (local u_ ids vs server uuids) ---
 check('server uuid recognized', isWorldUuid('a3bb189e-8bf9-3888-9912-ace4e6543002'));
 check('local u_ id rejected', !isWorldUuid('u_x8k2m1q9'));
+
+// --- the sync guard: chartered clusters are never stale-deleted ---
+{
+  const existing = [
+    { id: 'thought-1', charter: null },                                  // plain thought, folded away locally
+    { id: 'area-1', charter: { archetype: 'launch', flavor: 'email' } }, // server-side production area
+    { id: 'thought-2', charter: null },                                  // still present locally
+  ];
+  const stale = deletableStaleClusters(existing, ['thought-2']);
+  check('an unchartered cluster the graph dropped IS deletable', stale.includes('thought-1'));
+  check('a CHARTERED cluster absent from the local graph is NEVER deletable', !stale.includes('area-1'));
+  check('a cluster the graph still contains is kept', !stale.includes('thought-2'));
+}
 
 console.log(`\nuniverse.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} universe check(s) failed`);

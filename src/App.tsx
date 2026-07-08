@@ -29,6 +29,8 @@ import Brain from './pages/Brain';
 import Approvals from './pages/Approvals';
 import WorkWebs from './pages/WorkWebs';
 import WorkWeb from './pages/WorkWeb';
+import SystemAltitude from './pages/SystemAltitude';
+import Universe from './pages/Universe';
 import PreviewEngine from './pages/PreviewEngine';
 import PreviewSite from './pages/PreviewSite';
 import PreviewReport from './pages/PreviewReport';
@@ -67,6 +69,8 @@ export default function App() {
               <Route path="/garvis/approvals" element={<Protected><Approvals /></Protected>} />
               <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
               <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
+              <Route path="/garvis/system/:worldId" element={<Protected><SystemAltitude /></Protected>} />
+              <Route path="/garvis/universe" element={<Protected><Universe /></Protected>} />
               <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
               <Route path="/new" element={<Protected><NewProject /></Protected>} />
               <Route path="/import" element={<Protected><ImportProject /></Protected>} />

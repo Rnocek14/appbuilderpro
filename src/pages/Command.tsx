@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Play, Boxes } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { WakingMoment } from '../components/garvis/WakingMoment';
+import { useAuth } from '../context/AuthContext';
 import { MissionTasks } from '../components/garvis/MissionTasks';
 import { Markdown } from '../components/Markdown';
 import { useCommander } from '../hooks/useCommander';
@@ -37,22 +39,23 @@ function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMissi
 }
 
 export default function Command() {
-  const { messages, thinking, send, postGarvis, missions, tasksByMission, runMission, busyId } = useCommander();
-  const { fresh, loading: oppLoading, scan } = useOpportunities();
+  const { messages, thinking, send, missions, tasksByMission, runMission, busyId } = useCommander();
+  const { loading: oppLoading, scan } = useOpportunities();
+  const { profile } = useAuth();
+  const firstName = (profile?.full_name ?? '').trim().split(/\s+/)[0] || 'there';
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
 
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, thinking, missions, tasksByMission]);
 
-  // Proactive: greet with any opportunities Garvis already found, and (throttled) scan for more.
+  // Proactive: the WakingMoment component above the chat is the greeting now (it reads the real
+  // record — approvals, replies, insights, mind_events — and answers "why should I care" per line).
+  // This effect keeps only the throttled background opportunity scan; the old text greeting is gone
+  // because two greetings is a notification center, not a partner.
   useEffect(() => {
     if (greeted.current || oppLoading) return;
     greeted.current = true;
-    if (fresh.length > 0) {
-      const lines = fresh.slice(0, 5).map((o) => `- **${o.title}** _(${o.type.replace('_', ' ')})_${o.suggested_move ? ` — ${o.suggested_move}` : ''}`).join('\n');
-      postGarvis(`While you were away, I spotted **${fresh.length} opportunit${fresh.length === 1 ? 'y' : 'ies'}** across your portfolio:\n\n${lines}\n\nManage them on the [Opportunities](/garvis/opportunities) page, or just tell me to run any of them.`);
-    }
     try {
       const last = Number(localStorage.getItem('garvis_opp_scan') ?? 0);
       if (Date.now() - last > SCAN_THROTTLE_MS) {
@@ -96,6 +99,7 @@ export default function Command() {
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
+          <WakingMoment name={firstName} />
           {messages.length === 0 && (
             <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-5">
               <div className="mb-3 flex items-center gap-2 text-forge-dim"><Boxes size={16} className="text-forge-ember" /> <span className="text-sm">Try one of these — or just say what's on your mind:</span></div>

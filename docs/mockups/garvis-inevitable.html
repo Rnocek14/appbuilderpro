@@ -1,0 +1,547 @@
+<title>Garvis — The Universe</title>
+<style>
+  /* Forge tokens — Garvis's identity; deliberately single-theme (a dark command-center world). */
+  :root {
+    --bg:#0C0E13; --panel:#12151D; --raised:#1A1E29; --border:#262B3A;
+    --ink:#E8E6E1; --dim:#8B90A0; --ember:#FF8A3D; --deep:#E5631F; --heat:#FFB573;
+    --ok:#4ADE80; --warn:#FACC15; --err:#F87171; --violet:#B98CE0;
+    --ease:cubic-bezier(0.22,1,0.36,1);
+    --display:"Space Grotesk","Avenir Next",system-ui,sans-serif;
+    --body:"Inter",system-ui,-apple-system,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box} html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;overflow:hidden}
+  button{font-family:inherit}
+
+  /* the subconscious — always behind everything */
+  #mind{position:fixed;inset:0;opacity:.5;transition:opacity .8s var(--ease)}
+  body.in-mission #mind{opacity:.18}
+
+  /* warp bloom — one flash when the camera moves */
+  #bloom{position:fixed;inset:0;pointer-events:none;z-index:60;opacity:0;
+    background:radial-gradient(600px 400px at 50% 46%, rgba(255,138,61,.28), transparent 70%)}
+  #bloom.go{animation:bloom .7s var(--ease)}
+  @keyframes bloom{0%{opacity:0}25%{opacity:1}100%{opacity:0}}
+
+  .altitude{position:fixed;top:20px;left:24px;z-index:40;font-family:var(--mono);font-size:10px;
+    letter-spacing:.12em;text-transform:uppercase;color:#5a6074;transition:color .5s var(--ease)}
+  .hintzoom{position:fixed;bottom:110px;left:50%;transform:translateX(-50%);z-index:30;
+    font-size:10px;color:#454b5e;font-family:var(--mono);letter-spacing:.08em;opacity:0;transition:opacity .6s var(--ease)}
+  body.in-mission .hintzoom{opacity:1}
+
+  .whisper{position:fixed;top:20px;right:22px;z-index:40;display:flex;align-items:center;gap:7px;
+    font-size:12px;color:var(--warn);border:1px solid rgba(250,204,21,.35);border-radius:999px;
+    padding:5px 13px;background:rgba(18,21,29,.8);cursor:pointer}
+  .whisper .n{font-weight:700}
+
+  /* ═══ THE LINE — the one constant ═══ */
+  .line-dock{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);width:min(620px,92vw);z-index:50}
+  .line{display:flex;align-items:center;gap:10px;background:rgba(18,21,29,.86);backdrop-filter:blur(8px);
+    border:1px solid var(--border);border-radius:14px;padding:13px 18px;
+    box-shadow:0 0 0 1px rgba(255,138,61,.14),0 14px 44px -16px rgba(255,138,61,.35)}
+  .cursor{width:8px;height:18px;background:var(--ember);border-radius:2px;animation:pulse 1.8s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .line input{flex:1;background:none;border:none;outline:none;color:var(--ink);font-size:15px;font-family:var(--body)}
+  .line input::placeholder{color:#5a6074;transition:opacity .4s var(--ease)}
+  .line .hint{font-family:var(--mono);font-size:10px;color:var(--dim);white-space:nowrap}
+  .line-note{position:absolute;left:0;right:0;bottom:-22px;text-align:center;font-size:10.5px;color:#454b5e}
+
+  /* ═══ ALTITUDE 1 — THE UNIVERSE ═══ */
+  .field{position:absolute;inset:0;transition:opacity .55s var(--ease),transform .55s var(--ease)}
+  body.in-mission .field{opacity:0;transform:scale(1.14);pointer-events:none}
+  #filaments{position:absolute;inset:0;pointer-events:none}
+  #orbspace{position:absolute;inset:0;transition:transform .3s ease-out}
+
+  .waking{position:absolute;top:9vh;left:50%;transform:translateX(-50%);width:min(560px,92vw);
+    background:rgba(18,21,29,.72);border:1px solid var(--border);border-radius:16px;padding:22px 26px;z-index:5}
+  .wk-hi{font-family:var(--display);font-size:22px;font-weight:600;letter-spacing:-.015em}
+  .wk-sub{font-size:12px;color:var(--dim);margin:2px 0 12px}
+  .wk-line{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;border:none;
+    border-top:1px solid var(--border);color:var(--ink);font-size:13px;font-family:var(--body);
+    padding:9px 2px;cursor:pointer;transition:color .2s var(--ease);opacity:0;transform:translateY(6px)}
+  .wk-line.said{animation:speak .5s var(--ease) forwards}
+  @keyframes speak{to{opacity:1;transform:none}}
+  .wk-line:hover{color:var(--heat)}
+
+  .orb{position:absolute;background:none;border:none;color:var(--ink);cursor:pointer;text-align:center;
+    transform:translate(-50%,-50%);transition:filter .3s var(--ease)}
+  .orb:hover{filter:brightness(1.25)} .orb:focus-visible{outline:2px solid var(--heat);outline-offset:4px;border-radius:16px}
+  .orb .ball{border-radius:50%;margin:0 auto 10px;position:relative;
+    background:radial-gradient(circle at 34% 30%, rgba(255,181,115,.9), rgba(255,138,61,.55) 42%, rgba(229,99,31,.18) 75%, transparent);
+    box-shadow:0 0 44px -6px rgba(255,138,61,.5);animation:breathe 5s ease-in-out infinite}
+  @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+  .orb.big .ball{width:92px;height:92px}
+  .orb.mid .ball{width:64px;height:64px}
+  .orb.small .ball{width:38px;height:38px}
+  .orb.calm .ball{background:radial-gradient(circle at 34% 30%, rgba(74,222,128,.75), rgba(74,222,128,.3) 46%, transparent 76%);box-shadow:0 0 36px -8px rgba(74,222,128,.45)}
+  .orb.violet .ball{background:radial-gradient(circle at 34% 30%, rgba(185,140,224,.8), rgba(185,140,224,.28) 48%, transparent 76%);box-shadow:0 0 30px -8px rgba(185,140,224,.4)}
+  .orb.ghost .ball{background:none;border:1.5px dashed #3a4054;box-shadow:none;animation:none}
+  .orb .name{font-family:var(--display);font-size:13.5px;font-weight:600;white-space:nowrap}
+  .orb.small .name{font-size:11.5px;color:var(--dim)}
+  .orb .state{font-size:10.5px;color:var(--dim);margin-top:1px;white-space:nowrap}
+  .orb .state b{color:var(--warn);font-weight:600} .orb.calm .state b{color:var(--ok)}
+
+  /* ═══ ALTITUDE 2 — THE SYSTEM ═══ */
+  .mission{position:absolute;inset:0;padding:64px 22px 130px;max-width:1100px;margin:0 auto;width:100%;
+    opacity:0;transform:scale(.92);pointer-events:none;transition:opacity .55s var(--ease) .1s,transform .55s var(--ease) .1s;
+    display:flex;flex-direction:column;gap:14px;overflow:auto}
+  body.in-mission .mission{opacity:1;transform:none;pointer-events:auto}
+  .mhead{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .back{background:none;border:none;color:var(--dim);font-size:12.5px;cursor:pointer;padding:4px 6px}
+  .back:hover{color:var(--ink)}
+  .mhead h2{font-family:var(--display);font-size:20px;letter-spacing:-.01em;margin:0}
+  .target{font-size:11px;border:1px solid rgba(255,138,61,.4);color:var(--heat);border-radius:999px;padding:2px 10px}
+  .dial{margin-left:auto;display:flex;gap:4px;background:rgba(18,21,29,.7);border:1px solid var(--border);border-radius:999px;padding:4px}
+  .pos{font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);
+    background:none;border:none;border-radius:999px;padding:5px 12px;cursor:pointer;transition:all .3s var(--ease)}
+  .pos:hover{color:var(--ink)}
+  .pos.on{background:linear-gradient(135deg,#FF8A3D,#E5631F);color:#1A0E04;font-weight:700}
+
+  .mbody{display:grid;grid-template-columns:1fr 270px;gap:16px;align-items:start}
+  @media(max-width:900px){.mbody{grid-template-columns:1fr}}
+  .panel{background:rgba(18,21,29,.72);border:1px solid var(--border);border-radius:16px}
+  .costume{display:none;animation:dress .45s var(--ease)}
+  .costume.on{display:block}
+  @keyframes dress{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  .label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--border);color:var(--dim)}
+  .chip.ok{border-color:rgba(74,222,128,.4);color:var(--ok)}
+  .chip.warn{border-color:rgba(250,204,21,.4);color:var(--warn)}
+  .dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .dot.ember{background:var(--ember)} .dot.ok{background:var(--ok)} .dot.warn{background:var(--warn)} .dot.dim{background:#3a4054}
+
+  /* the orbital view — planets really orbit; labels stay upright */
+  .orbital{position:relative;height:330px;overflow:hidden;border-bottom:1px solid var(--border)}
+  .ring{position:absolute;left:50%;top:50%;border:1px dashed rgba(38,43,58,.9);border-radius:50%;transform:translate(-50%,-50%)}
+  .star{position:absolute;left:50%;top:50%;width:74px;height:74px;transform:translate(-50%,-50%);border-radius:50%;
+    background:radial-gradient(circle at 40% 35%, #FFB573, #FF8A3D 45%, rgba(229,99,31,.25) 78%, transparent);
+    box-shadow:0 0 70px -8px rgba(255,138,61,.65);display:flex;align-items:center;justify-content:center;text-align:center}
+  .star span{font-family:var(--display);font-size:9.5px;font-weight:700;color:#1A0E04;line-height:1.15}
+  .orbitwrap{position:absolute;left:50%;top:50%;width:0;height:0;animation:orbit linear infinite}
+  @keyframes orbit{from{transform:rotate(var(--a0))}to{transform:rotate(calc(var(--a0) + 360deg))}}
+  .planet{position:absolute;left:var(--r);top:0;transform:translate(-50%,-50%) rotate(calc(0deg - var(--rot)));
+    animation:counter linear infinite;animation-duration:inherit;cursor:pointer;text-align:center;background:none;border:none;color:var(--ink)}
+  @keyframes counter{from{transform:translate(-50%,-50%) rotate(calc(0deg - var(--a0)))}to{transform:translate(-50%,-50%) rotate(calc(-360deg - var(--a0)))}}
+  .planet .p{border-radius:50%;margin:0 auto 4px}
+  .planet .p.ember{width:22px;height:22px;background:radial-gradient(circle at 35% 30%, #FFB573, #E5631F);box-shadow:0 0 22px -4px rgba(255,138,61,.7)}
+  .planet .p.warn{width:18px;height:18px;background:radial-gradient(circle at 35% 30%, #FDE68A, #b8940e);box-shadow:0 0 18px -4px rgba(250,204,21,.6)}
+  .planet .p.ok{width:16px;height:16px;background:radial-gradient(circle at 35% 30%, #86efac, #15803d)}
+  .planet .p.dim{width:13px;height:13px;background:#3a4054}
+  .planet .nm{font-size:9.5px;color:var(--dim);white-space:nowrap;font-family:var(--mono);letter-spacing:.04em}
+  .planet:hover .nm{color:var(--ink)}
+  /* the comet — the next move arriving */
+  #comet{position:absolute;top:18%;left:-12%;display:flex;align-items:center;gap:0;cursor:pointer;background:none;border:none;padding:6px}
+  #comet .tail{width:90px;height:1.5px;background:linear-gradient(90deg,transparent,rgba(255,181,115,.9))}
+  #comet .head{width:7px;height:7px;border-radius:50%;background:#FFB573;box-shadow:0 0 14px 2px rgba(255,181,115,.8)}
+  #comet.fly{animation:comet 13s linear infinite}
+  @keyframes comet{0%{transform:translate(0,0);opacity:0}4%{opacity:1}38%{transform:translate(52vw,110px);opacity:1}46%{opacity:0}100%{transform:translate(52vw,110px);opacity:0}}
+  .statrow{display:flex;gap:16px;flex-wrap:wrap;padding:14px 18px 6px;font-variant-numeric:tabular-nums}
+  .stat{font-size:12px;color:var(--dim)} .stat b{color:var(--ink);font-size:15px;display:block;font-family:var(--display)}
+  .listlens{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;padding:12px 18px 6px}
+  .area{border:1px solid var(--border);border-radius:11px;padding:9px 12px;cursor:pointer;transition:border-color .25s var(--ease)}
+  .area:hover{border-color:rgba(255,138,61,.5)}
+  .area .t{font-weight:600;font-size:12.5px;display:flex;gap:7px;align-items:center}
+  .area .s{font-size:10.5px;color:var(--dim);margin-top:2px}
+  .area.born{animation:born .8s var(--ease)}
+  @keyframes born{0%{opacity:0;transform:scale(.7);box-shadow:0 0 40px -4px rgba(255,138,61,.8)}100%{opacity:1;transform:none}}
+
+  .nebula{border-top:1px dashed #2a3042;margin:6px 18px 0;padding:12px 0 16px}
+  .nebula .label{margin-bottom:8px;display:block}
+  .neb{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:#6a7188;border:1px dashed #3a4054;
+    border-radius:999px;padding:4px 12px;margin:0 6px 6px 0;background:none;cursor:pointer;transition:all .35s var(--ease)}
+  .neb:hover{color:var(--heat);border-color:rgba(255,181,115,.5)}
+  .neb.glowing{color:var(--heat);border-color:rgba(255,181,115,.55);box-shadow:0 0 18px -6px rgba(255,138,61,.5)}
+  .neb.condensing{border-style:solid;border-color:var(--ember);color:var(--ember);background:rgba(255,138,61,.12);transform:scale(1.06)}
+
+  .studio{padding:18px}
+  .toolrow{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 4px}
+  .tool{font-size:12px;border:1px solid var(--border);color:var(--ink);border-radius:9px;padding:7px 13px;cursor:pointer;background:none}
+  .tool:hover{border-color:rgba(255,138,61,.5)}
+  .tool.hot{border-color:rgba(255,138,61,.5);background:rgba(255,138,61,.08);color:var(--ember)}
+  .artifact{background:rgba(26,30,41,.6);border:1px solid var(--border);border-radius:12px;margin-top:12px}
+  .artifact.flash{animation:born .8s var(--ease)}
+  .artifact .bar{display:flex;align-items:center;gap:9px;padding:10px 14px;font-size:13px}
+  .vpill{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:6px;border:1px solid var(--border);color:var(--dim)}
+  .vpill.cur{border-color:rgba(255,138,61,.5);color:var(--ember)}
+  .artifact .body{border-top:1px solid var(--border);padding:12px 16px;font-size:12.5px;color:var(--dim)}
+  .add{color:var(--ok)} .del{color:var(--err);text-decoration:line-through;opacity:.7}
+  .bubble{max-width:78%;font-size:12.5px;border-radius:12px;padding:8px 13px;margin-top:10px;background:var(--raised);color:var(--dim)}
+  .hat{display:inline-flex;font-family:var(--mono);font-size:9px;letter-spacing:.07em;text-transform:uppercase;color:var(--heat);
+    border:1px solid rgba(255,181,115,.35);border-radius:6px;padding:1px 7px;margin-bottom:5px;cursor:help}
+  .think{padding:18px;display:grid;gap:10px}
+  .fact{border-left:2px solid rgba(255,138,61,.5);padding:2px 0 2px 12px;font-size:13px}
+  .fact .src{font-size:10.5px;color:#5a6074;font-family:var(--mono)}
+  .connection{font-size:12.5px;color:var(--dim);border:1px dashed rgba(185,140,224,.4);border-radius:10px;padding:9px 13px}
+  .connection b{color:var(--violet)}
+  .exec{padding:18px;display:grid;gap:10px}
+  .qrow{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:11px;padding:10px 14px;font-size:13px}
+  .qrow .mini{margin-left:auto;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:8px;cursor:pointer;
+    border:1px solid rgba(255,138,61,.5);background:rgba(255,138,61,.1);color:var(--ember)}
+  .qrow.done{color:var(--dim)}
+
+  .rail{display:flex;flex-direction:column;gap:12px}
+  .rr{padding:14px 16px}
+  .rr.flash{animation:born .8s var(--ease)}
+  .rr .why{font-size:13px;margin:6px 0 10px}
+  .rr .act{font-size:12px;font-weight:600;color:var(--ember);background:rgba(255,138,61,.1);
+    border:1px solid rgba(255,138,61,.4);padding:5px 12px;border-radius:8px;cursor:pointer}
+  .rstat{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);padding:3px 0;font-variant-numeric:tabular-nums}
+  .rstat b{color:var(--ink)}
+
+  @media(prefers-reduced-motion:reduce){
+    .field,.mission,.costume,#mind,.orb .ball,#comet,.orbitwrap,.planet{transition:none!important;animation:none!important}
+    .cursor{animation:none} #bloom.go{animation:none} .wk-line{opacity:1;transform:none}
+  }
+</style>
+
+<canvas id="mind" aria-hidden="true"></canvas>
+<div id="bloom" aria-hidden="true"></div>
+<div class="altitude" id="altitude">● universe</div>
+<div class="hintzoom">scroll up or esc — zoom out to the universe</div>
+<button class="whisper" title="Nothing leaves without you. Opens the approvals page.">◆ <span class="n">2</span> waiting for you</button>
+
+<!-- ═══ THE UNIVERSE ═══ -->
+<section class="field" id="field">
+  <svg id="filaments" aria-hidden="true"></svg>
+  <div id="orbspace">
+    <button class="orb big" style="left:33%;top:62%" data-orb="mom" onclick="enterMission()">
+      <span class="ball"></span>
+      <span class="name">Grow Mom's Business</span>
+      <span class="state"><b>a reply came in</b> · postcard v2 ready</span>
+    </button>
+    <button class="orb mid calm" style="left:64%;top:56%" data-orb="outreach">
+      <span class="ball"></span>
+      <span class="name">Website Outreach</span>
+      <span class="state"><b>2 replies</b> this week</span>
+    </button>
+    <button class="orb small violet" style="left:80%;top:74%" data-orb="stoke">
+      <span class="ball"></span>
+      <span class="name">Stoke</span>
+      <span class="state">quiet · 3 research docs</span>
+    </button>
+    <button class="orb small violet" style="left:16%;top:78%" data-orb="bees">
+      <span class="ball"></span>
+      <span class="name">why hexagons?</span>
+      <span class="state">last night's rabbit hole</span>
+    </button>
+    <button class="orb mid ghost" style="left:49%;top:80%">
+      <span class="ball"></span>
+      <span class="name" style="color:var(--dim)">new world</span>
+      <span class="state">or just say it</span>
+    </button>
+  </div>
+
+  <div class="waking panel" id="waking">
+    <div class="wk-hi" id="greet">Good morning, Riley.</div>
+    <div class="wk-sub">While you were away —</div>
+    <button class="wk-line" onclick="enterMission()"><span class="dot ok"></span> Bob Pier replied “interested.” I staged a follow-up draft.</button>
+    <button class="wk-line" onclick="enterMission(); setPosture('think')"><span class="dot ember"></span> Lakefront inventory dropped again — the scarcity angle got stronger.</button>
+    <button class="wk-line" onclick="enterMission()"><span class="dot ember"></span> The landing page passed 60 visits · 11 valuation requests.</button>
+    <button class="wk-line" onclick="enterMission(); setPosture('execute')"><span class="dot warn"></span> One approval is waiting — nothing goes out without you.</button>
+  </div>
+</section>
+
+<!-- ═══ THE SYSTEM ═══ -->
+<section class="mission" id="mission">
+  <div class="mhead">
+    <button class="back" onclick="leaveMission()">← the universe</button>
+    <h2>Grow Mom's Business</h2>
+    <span class="target">20 new listings by spring</span>
+    <div class="dial" role="tablist" aria-label="Posture — Garvis sets this from your words">
+      <button class="pos" data-p="think" role="tab">Think</button>
+      <button class="pos" data-p="create" role="tab">Create</button>
+      <button class="pos" data-p="execute" role="tab">Execute</button>
+      <button class="pos on" data-p="observe" role="tab">Observe</button>
+    </div>
+  </div>
+
+  <div class="mbody">
+    <div class="panel">
+      <!-- OBSERVE — the system itself: planets really orbit; the comet is the next move arriving -->
+      <div class="costume on" id="c-observe">
+        <div class="orbital" id="orbital">
+          <div class="ring" style="width:190px;height:190px"></div>
+          <div class="ring" style="width:300px;height:300px"></div>
+          <div class="star"><span>20 new<br>listings</span></div>
+          <div class="orbitwrap" style="--a0:20deg;animation-duration:70s">
+            <button class="planet" style="--r:95px;--rot:20deg;--a0:20deg" onclick="setPosture('create')">
+              <span class="p ember"></span><span class="nm">direct mail · working</span>
+            </button>
+          </div>
+          <div class="orbitwrap" style="--a0:140deg;animation-duration:70s">
+            <button class="planet" style="--r:95px;--rot:140deg;--a0:140deg">
+              <span class="p warn"></span><span class="nm">lists · needs you</span>
+            </button>
+          </div>
+          <div class="orbitwrap" style="--a0:250deg;animation-duration:70s">
+            <button class="planet" style="--r:95px;--rot:250deg;--a0:250deg">
+              <span class="p ok"></span><span class="nm">landing · live</span>
+            </button>
+          </div>
+          <div class="orbitwrap" style="--a0:75deg;animation-duration:120s">
+            <button class="planet" style="--r:150px;--rot:75deg;--a0:75deg" onclick="setPosture('think')">
+              <span class="p ok"></span><span class="nm">market intel</span>
+            </button>
+          </div>
+          <div class="orbitwrap" style="--a0:200deg;animation-duration:120s">
+            <button class="planet" style="--r:150px;--rot:200deg;--a0:200deg">
+              <span class="p dim"></span><span class="nm">email · staged</span>
+            </button>
+          </div>
+          <div class="orbitwrap" style="--a0:320deg;animation-duration:120s">
+            <button class="planet" style="--r:150px;--rot:320deg;--a0:320deg">
+              <span class="p dim"></span><span class="nm">crm · quiet</span>
+            </button>
+          </div>
+          <button id="comet" class="fly" title="The next move, arriving" onclick="flashNextMove()">
+            <span class="tail"></span><span class="head"></span>
+          </button>
+        </div>
+        <div class="statrow">
+          <span class="stat"><b>412</b> mailed</span>
+          <span class="stat"><b>63</b> visits</span>
+          <span class="stat"><b>11</b> valuations</span>
+          <span class="stat"><b>2</b> listings</span>
+          <span class="stat" style="margin-left:auto;align-self:center;font-family:var(--mono);font-size:9.5px;letter-spacing:.08em">MAP = OVERVIEW · LIST = NAVIGATION ↓</span>
+        </div>
+        <div class="listlens" id="listlens">
+          <div class="area" onclick="setPosture('create')"><div class="t"><span class="dot ember"></span>Direct Mail</div><div class="s">postcard v2 ready · working</div></div>
+          <div class="area"><div class="t"><span class="dot warn"></span>Mailing Lists</div><div class="s">needs you — upload the CSV</div></div>
+          <div class="area"><div class="t"><span class="dot ok"></span>Landing Page</div><div class="s">live · 63 visits</div></div>
+          <div class="area" onclick="setPosture('think')"><div class="t"><span class="dot ok"></span>Market Intel</div><div class="s">fresh · inventory −18%</div></div>
+          <div class="area"><div class="t"><span class="dot dim"></span>Email Follow-up</div><div class="s">2 drafts staged</div></div>
+          <div class="area"><div class="t"><span class="dot dim"></span>CRM</div><div class="s">quiet</div></div>
+        </div>
+        <div class="nebula">
+          <span class="label">could grow here — unformed until you begin · click one</span>
+          <button class="neb glowing" onclick="condense(this,'Video','market-update film · condensing')" title="Garvis: this campaign would perform better with a 30-second market video — its moment is now">🎥 Market video · timely</button>
+          <button class="neb" onclick="condense(this,'Automations','follow-up loops · condensing')">🤖 Automations</button>
+          <button class="neb" onclick="condense(this,'MLS Import','listings &amp; comps · condensing')">🏠 MLS import</button>
+          <button class="neb" onclick="condense(this,'Analytics','deeper ROI · condensing')">📊 Deeper analytics</button>
+        </div>
+      </div>
+
+      <!-- CREATE -->
+      <div class="costume" id="c-create">
+        <div class="studio">
+          <span class="label">create · direct mail — creative</span>
+          <div class="toolrow">
+            <button class="tool hot">Generate postcard image</button>
+            <button class="tool">Render print PDF</button>
+            <button class="tool">Pick mailing list</button>
+            <button class="tool">Queue send…</button>
+          </div>
+          <div class="artifact" id="postcard">
+            <div class="bar">▪ Postcard A — Know your number
+              <span style="margin-left:auto;display:flex;gap:4px"><span class="vpill">v1</span><span class="vpill cur">v2</span></span>
+            </div>
+            <div class="body">
+              FRONT: <span class="del">Your shoreline has a number. Do you know it?</span><br>
+              FRONT: <span class="add">Quietly, your shoreline appreciated again this year.</span>
+            </div>
+          </div>
+          <div class="bubble"><span class="hat" title="Same Garvis, wearing its copywriter hat for this">◆ copywriter hat</span><br>
+            Rewrote the front as a quiet observation — luxury reads statements, not pitches. v1 kept.</div>
+        </div>
+      </div>
+
+      <!-- THINK -->
+      <div class="costume" id="c-think">
+        <div class="think">
+          <span class="label">think · what we know</span>
+          <div class="fact">Lakefront inventory is down 18% year over year — scarcity is the seller's leverage.
+            <div class="src">market intel · updated today</div></div>
+          <div class="fact">Both postcard runs beat email 3:1 on valuation requests for this audience.
+            <div class="src">your own results · run 3×</div></div>
+          <div class="connection">filament from the universe: this connects to your <b>seller-psychology notes</b> and
+            last night's <b>hexagon rabbit hole</b> — efficient structures win under scarcity. Garvis noticed.</div>
+        </div>
+      </div>
+
+      <!-- EXECUTE -->
+      <div class="costume" id="c-execute">
+        <div class="exec">
+          <span class="label">execute · queued &amp; outbound</span>
+          <div class="qrow">Touch 1 → jane@lakefront.example <span class="chip warn">waiting</span><button class="mini">Approve &amp; send</button></div>
+          <div class="qrow">Print run · 250 postcards · $212 est. <span class="chip warn">waiting</span><button class="mini">Review</button></div>
+          <div class="qrow done">Landing page deployed <span class="chip ok">done · logged</span></div>
+          <div class="qrow done">Touch 1 → 41 recipients <span class="chip ok">sent · 5 replies</span></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="rail">
+      <div class="panel rr" id="nextmove">
+        <span class="label">next move</span>
+        <p class="why"><b>Bob Pier replied “interested.”</b> No next touch queued — strike while it's warm.</p>
+        <button class="act">Draft the follow-up</button>
+      </div>
+      <div class="panel rr">
+        <span class="label">waiting for you · 2</span>
+        <p class="why">1 email · 1 print run — nothing leaves without you.</p>
+        <button class="act" onclick="setPosture('execute')">Review</button>
+      </div>
+      <div class="panel rr">
+        <span class="label">results</span>
+        <div class="rstat"><span>replies</span><b>5</b></div>
+        <div class="rstat"><span>valuations</span><b>11</b></div>
+        <div class="rstat"><span>listings</span><b>2</b></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ═══ THE CONVERSATION — never moves ═══ -->
+<div class="line-dock">
+  <div class="line">
+    <span class="cursor"></span>
+    <input id="theline" placeholder="" aria-label="Talk to Garvis" autofocus>
+    <span class="hint">⌘K · voice</span>
+  </div>
+  <div class="line-note">the conversation is the one constant — the world re-dresses around it</div>
+</div>
+
+<script>
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ── time-aware greeting ──
+  const h = new Date().getHours();
+  document.getElementById('greet').textContent =
+    (h < 5 ? 'Working late, Riley.' : h < 12 ? 'Good morning, Riley.' : h < 18 ? 'Good afternoon, Riley.' : 'Good evening, Riley.');
+
+  // ── Garvis speaks first: the waking lines arrive one by one ──
+  document.querySelectorAll('.wk-line').forEach((el, i) => {
+    if (reduced) { el.classList.add('said'); return; }
+    setTimeout(() => el.classList.add('said'), 500 + i * 480);
+  });
+
+  // ── the subconscious: drifting constellation ──
+  const cv = document.getElementById('mind'), cx = cv.getContext('2d');
+  let pts = [], mouse = { x: .5, y: .5 };
+  function seed() {
+    cv.width = innerWidth * devicePixelRatio; cv.height = innerHeight * devicePixelRatio;
+    cx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    pts = Array.from({ length: 80 }, () => ({
+      x: Math.random() * innerWidth, y: Math.random() * innerHeight,
+      r: Math.random() * 1.6 + .4, a: Math.random() * .35 + .08, z: Math.random() * .8 + .2,
+      vx: (Math.random() - .5) * .08, vy: (Math.random() - .5) * .08,
+    }));
+  }
+  function draw() {
+    cx.clearRect(0, 0, innerWidth, innerHeight);
+    const ox = (mouse.x - .5) * 18, oy = (mouse.y - .5) * 12;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      p.x = (p.x + p.vx + innerWidth) % innerWidth; p.y = (p.y + p.vy + innerHeight) % innerHeight;
+      const px = p.x + ox * p.z, py = p.y + oy * p.z;
+      for (let j = i + 1; j < pts.length; j++) {
+        const q = pts[j], dx = px - (q.x + ox * q.z), dy = py - (q.y + oy * q.z), d = dx * dx + dy * dy;
+        if (d < 110 * 110) { cx.strokeStyle = `rgba(255,138,61,${.05 * (1 - d / 12100)})`; cx.beginPath(); cx.moveTo(px, py); cx.lineTo(q.x + ox * q.z, q.y + oy * q.z); cx.stroke(); }
+      }
+      cx.fillStyle = `rgba(255,181,115,${p.a})`; cx.beginPath(); cx.arc(px, py, p.r, 0, 7); cx.fill();
+    }
+    if (!reduced) requestAnimationFrame(draw);
+  }
+  seed(); draw(); addEventListener('resize', () => { seed(); drawFilaments(); });
+  addEventListener('mousemove', (e) => {
+    mouse = { x: e.clientX / innerWidth, y: e.clientY / innerHeight };
+    if (!reduced) document.getElementById('orbspace').style.transform =
+      `translate(${(mouse.x - .5) * -14}px, ${(mouse.y - .5) * -10}px)`;
+  });
+
+  // ── filaments: real connections between systems, drawn between orb positions ──
+  const FILS = [['mom', 'outreach'], ['stoke', 'bees'], ['mom', 'bees']];
+  function drawFilaments() {
+    const svg = document.getElementById('filaments');
+    svg.setAttribute('viewBox', `0 0 ${innerWidth} ${innerHeight}`);
+    svg.innerHTML = '';
+    for (const [a, b] of FILS) {
+      const ea = document.querySelector(`[data-orb="${a}"] .ball`), eb = document.querySelector(`[data-orb="${b}"] .ball`);
+      if (!ea || !eb) continue;
+      const ra = ea.getBoundingClientRect(), rb = eb.getBoundingClientRect();
+      const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      l.setAttribute('x1', ra.x + ra.width / 2); l.setAttribute('y1', ra.y + ra.height / 2);
+      l.setAttribute('x2', rb.x + rb.width / 2); l.setAttribute('y2', rb.y + rb.height / 2);
+      l.setAttribute('stroke', 'rgba(185,140,224,.16)'); l.setAttribute('stroke-width', '1');
+      l.setAttribute('stroke-dasharray', '3 6');
+      svg.appendChild(l);
+    }
+  }
+  setTimeout(drawFilaments, 80);
+
+  // ── universe ⇄ system: one camera move + a bloom; the conversation never moves ──
+  const alt = document.getElementById('altitude'), bloom = document.getElementById('bloom');
+  function flare() { if (reduced) return; bloom.classList.remove('go'); void bloom.offsetWidth; bloom.classList.add('go'); }
+  function enterMission() { flare(); document.body.classList.add('in-mission'); alt.textContent = '◦ universe · ● system — Grow Mom\'s Business'; }
+  function leaveMission() { flare(); document.body.classList.remove('in-mission'); alt.textContent = '● universe'; setTimeout(drawFilaments, 600); }
+
+  // scroll up (or ESC) inside the system → zoom out to the universe
+  let acc = 0;
+  addEventListener('wheel', (e) => {
+    if (!document.body.classList.contains('in-mission')) return;
+    const m = document.getElementById('mission');
+    if (m.scrollTop > 4) return;                 // only when already at the top
+    acc = e.deltaY < 0 ? acc + (-e.deltaY) : 0;
+    if (acc > 220) { acc = 0; leaveMission(); }
+  }, { passive: true });
+  addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('in-mission')) leaveMission(); });
+
+  // ── postures: same room, new light ──
+  function setPosture(p) {
+    document.querySelectorAll('.pos').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+    document.querySelectorAll('.costume').forEach(c => c.classList.toggle('on', c.id === 'c-' + p));
+  }
+  document.querySelectorAll('.pos').forEach(b => b.addEventListener('click', () => setPosture(b.dataset.p)));
+
+  // ── the comet delivers the next move ──
+  function flashNextMove() {
+    const nm = document.getElementById('nextmove');
+    nm.classList.remove('flash'); void nm.offsetWidth; nm.classList.add('flash');
+    nm.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'nearest' });
+  }
+
+  // ── nebulae condense into planets when begun ──
+  function condense(el, name, sub) {
+    if (el.dataset.done) return;
+    el.dataset.done = '1';
+    el.classList.add('condensing');
+    setTimeout(() => {
+      el.remove();
+      const card = document.createElement('div');
+      card.className = 'area born';
+      card.innerHTML = `<div class="t"><span class="dot ember"></span>${name}</div><div class="s">${sub}</div>`;
+      document.getElementById('listlens').appendChild(card);
+    }, reduced ? 0 : 600);
+  }
+
+  // ── the conversation: rotating placeholder + a tiny intention router ──
+  const line = document.getElementById('theline');
+  const PH = [
+    'try: "mom’s real estate"',
+    'try: "make the postcard more luxury"',
+    'try: "how’s the campaign doing?"',
+    'try: "why do bees build hexagons?"',
+    'try: "what can we do here?"',
+  ];
+  let phi = 0;
+  line.placeholder = PH[0];
+  if (!reduced) setInterval(() => { if (!line.value) { phi = (phi + 1) % PH.length; line.placeholder = PH[phi]; } }, 4000);
+
+  line.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const t = line.value.toLowerCase(); line.value = '';
+    if (/postcard|luxur|copy|design|make/.test(t)) { enterMission(); setPosture('create'); flashArtifact(); return; }
+    if (/send|approve|queue|mail it/.test(t)) { enterMission(); setPosture('execute'); return; }
+    if (/number|result|how.*doing|performance|campaign/.test(t)) { enterMission(); setPosture('observe'); return; }
+    if (/why|bee|hexagon|research|know|market/.test(t)) { enterMission(); setPosture('think'); return; }
+    if (/mom|real estate|listing/.test(t)) { enterMission(); return; }
+    enterMission();
+  });
+  function flashArtifact() {
+    const a = document.getElementById('postcard');
+    a.classList.remove('flash'); void a.offsetWidth; a.classList.add('flash');
+  }
+  alt.textContent = '● universe';
+</script>

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus } from 'lucide-react';
+import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus, Orbit, Telescope } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Spinner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -52,6 +52,11 @@ export default function WorkWebs() {
             <h1 className="text-xl font-semibold text-forge-ink">Work Webs</h1>
             <p className="text-sm text-forge-dim">A mission isn't a checklist — it's a living territory. Every area is a workspace with its own tools.</p>
           </div>
+          <button
+            onClick={() => navigate('/garvis/universe')}
+            title="Universe altitude — every world in one sky, the x-ray of Garvis's living memory"
+            className="ml-auto flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+          ><Telescope size={13} /> Universe</button>
         </div>
 
         {/* Existing webs */}
@@ -63,11 +68,18 @@ export default function WorkWebs() {
           <div className="mb-10 grid gap-3 sm:grid-cols-2">
             {webs.map((w) => (
               <Card key={w.worldId} interactive>
-                <button onClick={() => navigate(`/garvis/webs/${w.worldId}`)} className="flex w-full items-center gap-3 p-4 text-left">
-                  <Waypoints size={18} className="text-forge-ember" />
-                  <span className="flex-1 font-medium text-forge-ink">{w.title}</span>
-                  <ArrowRight size={16} className="text-forge-dim" />
-                </button>
+                <div className="flex w-full items-center gap-3 p-4">
+                  <button onClick={() => navigate(`/garvis/webs/${w.worldId}`)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <Waypoints size={18} className="shrink-0 text-forge-ember" />
+                    <span className="flex-1 truncate font-medium text-forge-ink">{w.title}</span>
+                  </button>
+                  <button
+                    onClick={() => navigate(`/garvis/system/${w.worldId}`)}
+                    title="System altitude — the orbital view of this world"
+                    className="shrink-0 text-forge-dim transition-colors hover:text-forge-ember"
+                  ><Orbit size={16} /></button>
+                  <ArrowRight size={16} className="shrink-0 text-forge-dim" />
+                </div>
               </Card>
             ))}
           </div>
