@@ -34,6 +34,10 @@ export interface NextMove {
   action: { label: string; route: string };
   score: number;               // deterministic; filled by rankMoves
   bornAt: string;              // ISO — drives urgency + decay
+  /** The reasoning layer (round 5): recommendation rationale + expected outcome. `basis` is the
+   *  honesty tag — 'measured' only when it comes from THIS account's rows; 'heuristic' when it's
+   *  domain knowledge (and the UI says so); 'structural' when it's pure dependency logic. */
+  expected?: { text: string; basis: 'measured' | 'heuristic' | 'structural' };
 }
 
 export interface Dismissals { [key: string]: string } // key → ISO timestamp of dismissal
@@ -73,6 +77,7 @@ export function collectReplies(rows: ReplyRowIn[]): NextMove[] {
       action: { label: 'Draft the follow-up', route: r.world_id ? `/garvis/webs/${r.world_id}` : '/garvis/webs' },
       score: 0,
       bornAt: r.received_at,
+      expected: { text: 'Answering today keeps the thread alive — interest decays fast after the first day or two.', basis: 'heuristic' },
     }));
 }
 
@@ -130,6 +135,7 @@ export function collectFloor(rows: FloorIn[]): NextMove[] {
         why: `Work is staged to go out, but there's nobody to send it to yet. One CSV unblocks the whole channel.`,
         action: { label: 'Upload the list', route: `/garvis/webs/${f.worldId}` },
         score: 0, bornAt: f.asOf,
+        expected: { text: 'Unblocks every queued send in this channel at once.', basis: 'structural' },
       });
     }
     if (f.brandEmpty) {
@@ -209,8 +215,27 @@ export function greetingFor(hour: number, name: string): string {
   return `Good evening, ${name}.`;
 }
 
-export interface MindEventIn { event_type: string; subject: string; occurred_at: string }
+export interface MindEventIn { event_type: string; subject: string; occurred_at: string; payload?: Record<string, unknown> | null }
 export interface AwayLine { text: string; occurredAt: string }
+
+/** Narrative weaving (round 5 — observations, not notifications): when a sent email and a reply
+ *  share a REAL campaign_id in their payloads, merge them into one causal observation. Only rows
+ *  that actually connect get connected — narrative is a join, never a guess. */
+function weave(events: MindEventIn[]): MindEventIn[] {
+  const campaignOf = (e: MindEventIn) => (e.payload && typeof e.payload.campaign_id === 'string' ? e.payload.campaign_id : null);
+  const repliedCampaigns = new Set(events.filter((e) => e.event_type === 'reply_received').map(campaignOf).filter(Boolean) as string[]);
+  const out: MindEventIn[] = [];
+  for (const e of events) {
+    const cid = campaignOf(e);
+    if (e.event_type === 'email_sent' && cid && repliedCampaigns.has(cid)) continue; // folded into the reply line
+    if (e.event_type === 'reply_received' && cid && events.some((x) => x.event_type === 'email_sent' && campaignOf(x) === cid)) {
+      out.push({ ...e, subject: `That send worked — ${e.subject}` });
+    } else {
+      out.push(e);
+    }
+  }
+  return out;
+}
 
 // mind_events subjects are already written as human one-liners (that's their design contract) —
 // the digest trusts them and only adds a light frame by type. Unknown types pass through as-is:
@@ -226,12 +251,12 @@ const FRAME: Record<string, (s: string) => string> = {
   note: (s) => s,
 };
 
-/** Compose the "while you were away" lines: newest first, deduped by subject, capped. */
+/** Compose the "while you were away" lines: woven (send→reply joins), newest first, deduped, capped. */
 export function awayLines(events: MindEventIn[], sinceIso: string | null, cap = 4): AwayLine[] {
   const since = sinceIso ? new Date(sinceIso).getTime() : 0;
   const seen = new Set<string>();
   const out: AwayLine[] = [];
-  for (const e of [...events].sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))) {
+  for (const e of weave([...events]).sort((a, b) => (a.occurred_at < b.occurred_at ? 1 : -1))) {
     if (new Date(e.occurred_at).getTime() <= since) continue;
     const subject = e.subject.trim();
     if (!subject || seen.has(subject)) continue;

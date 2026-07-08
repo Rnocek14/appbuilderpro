@@ -104,6 +104,29 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   check('cold-sky line exists for first run', COLD_SKY_LINE.includes('Say anything'));
 }
 
+// 5. Round-5: the reasoning layer is honestly labeled; narrative weaving joins only real rows.
+{
+  const reply = collectReplies([{ id: 'r1', from_address: 'b@x.co', subject: 'yes', classification: 'positive', received_at: hoursAgo(1), world_id: null, has_next_touch: false }])[0];
+  check('reply expected-outcome is labeled heuristic (not our data yet)', reply.expected?.basis === 'heuristic');
+  const floor = collectFloor([{ worldId: 'w', worldTitle: 'W', audienceEmpty: true, brandEmpty: false, launchActive: true, asOf: hoursAgo(0) }])[0];
+  check('structural expectations are labeled structural', floor.expected?.basis === 'structural');
+
+  const woven = awayLines([
+    { event_type: 'email_sent', subject: 'Sent "Touch 1" to jane@lake.example', occurred_at: hoursAgo(9), payload: { campaign_id: 'c1' } },
+    { event_type: 'reply_received', subject: 'positive reply from jane@lake.example', occurred_at: hoursAgo(2), payload: { campaign_id: 'c1' } },
+    { event_type: 'email_sent', subject: 'Sent "Touch 1" to bob@pier.example', occurred_at: hoursAgo(8), payload: { campaign_id: 'c2' } },
+  ], null);
+  check('weave: send+reply on the SAME campaign merge into one causal observation',
+    woven.some((l) => l.text.startsWith('That send worked —')) && !woven.some((l) => l.text.includes('jane@lake.example') && l.text.startsWith('Sent')));
+  check('weave: an unanswered send stays a plain send line', woven.some((l) => l.text === 'Sent "Touch 1" to bob@pier.example'));
+  const unwoven = awayLines([
+    { event_type: 'email_sent', subject: 'Sent "A" to a@x.co', occurred_at: hoursAgo(3), payload: { campaign_id: 'c1' } },
+    { event_type: 'reply_received', subject: 'reply from someone else', occurred_at: hoursAgo(2), payload: { campaign_id: 'OTHER' } },
+  ], null);
+  check('weave: different campaigns never get connected (narrative is a join, not a guess)',
+    !unwoven.some((l) => l.text.startsWith('That send worked —')));
+}
+
 console.log(`\nnextMove.verify: ${passed} passed, ${failed} failed`);
 // Throw (not process.exit) so this file needs no @types/node and tsx still exits non-zero on failure.
 if (failed > 0) throw new Error(`${failed} nextMove check(s) failed`);

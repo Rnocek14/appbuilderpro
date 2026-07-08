@@ -76,6 +76,18 @@ export function WakingMoment({ name }: { name: string }) {
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-medium text-forge-ink">{m.title}</p>
                 <p className="mt-0.5 text-xs text-forge-dim">{m.why}</p>
+                {m.expected && (
+                  <p className="mt-1 flex items-baseline gap-1.5 text-[11px] text-forge-dim/80">
+                    <span
+                      title={m.expected.basis === 'measured' ? 'From your own data' : m.expected.basis === 'heuristic' ? 'Domain knowledge, not your data yet' : 'Follows from how things are wired'}
+                      className={cn(
+                        'rounded border px-1 py-px font-mono text-[8.5px] uppercase tracking-wide',
+                        m.expected.basis === 'measured' ? 'border-forge-ok/40 text-forge-ok' : 'border-forge-border text-forge-dim/70',
+                      )}
+                    >{m.expected.basis}</span>
+                    {m.expected.text}
+                  </p>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button

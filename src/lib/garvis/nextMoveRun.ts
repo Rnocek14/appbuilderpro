@@ -43,7 +43,7 @@ export async function loadWakingDigest(name: string): Promise<WakingDigest> {
   const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ] = await Promise.all([
     supabase.from('approvals').select('id, kind, title, created_at').eq('status', 'pending').limit(50),
     supabase.from('replies').select('id, from_address, subject, classification, received_at, campaign_id').order('received_at', { ascending: false }).limit(25),
-    supabase.from('mind_events').select('event_type, subject, occurred_at').order('occurred_at', { ascending: false }).limit(60),
+    supabase.from('mind_events').select('event_type, subject, occurred_at, payload').order('occurred_at', { ascending: false }).limit(60),
     supabase.from('insights').select('id, title, body, score, created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(10),
     supabase.from('outreach_campaigns').select('id, world_id, state, sequence_stopped').limit(200),
     supabase.from('knowledge_clusters').select('id, world_id, title, charter').not('charter', 'is', null).limit(300),
@@ -158,7 +158,10 @@ export async function loadWakingDigest(name: string): Promise<WakingDigest> {
     ...collectNaturalNext(naturals),
   ], now, readDismissals());
 
-  const lines = awayLines(events.map((e) => ({ event_type: e.event_type as string, subject: e.subject as string, occurred_at: e.occurred_at as string })), lastSeen);
+  const lines = awayLines(events.map((e) => ({
+    event_type: e.event_type as string, subject: e.subject as string, occurred_at: e.occurred_at as string,
+    payload: (e.payload as Record<string, unknown> | null) ?? null,
+  })), lastSeen);
   const coldSky = events.length === 0 && moves.length === 0;
 
   return { greeting: greetingFor(now.getHours(), name), awayLines: coldSky ? [{ text: COLD_SKY_LINE, occurredAt: now.toISOString() }] : lines, coldSky, moves };

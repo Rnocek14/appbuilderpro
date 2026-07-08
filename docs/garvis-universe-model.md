@@ -244,3 +244,26 @@ unit of work is P1 (the waking moment) in the real app, against real rows. **P1 
 branch:** `src/lib/garvis/nextMove.ts` (pure collectors/ranker/digest, 27-check verify),
 `nextMoveRun.ts` (row fetch, last-seen, dismissals), `WakingMoment.tsx` mounted as Command's front
 door (replacing the old text greeting — two greetings is a notification center, not a partner).
+
+**Round-5 refinements (adopted with the honesty filter):**
+- **Observations, not notifications** — via NARRATIVE JOINS only: a send and a reply merge into one
+  causal line ("That send worked — …") exactly when they share a real campaign_id. Narrative is a
+  join, never a guess. ("Opened it three times" was REJECTED: we don't persist open events yet —
+  saying it would be invented intelligence. When open-tracking lands via the Resend webhook + a
+  table, that sentence becomes honest and then it ships.)
+- **The reasoning layer** — moves carry `expected: {text, basis}` where basis ∈ measured (this
+  account's rows) | heuristic (domain knowledge, labeled as such in the UI) | structural
+  (dependency logic). A heuristic never masquerades as a measurement.
+- **Rule 6 (the Garvis-specific standard):** *No feature is complete until it improves the next
+  morning.* If a capability doesn't eventually make the waking moment smarter, it isn't integrated
+  into the operating system yet.
+- **The product equation, pinned:** Knowledge + Memory + Execution + Anticipation = **Momentum**
+  → compounding intelligence. Every AI starts every morning at zero; Garvis starts at yesterday.
+  Every feature is judged by whether it creates momentum.
+
+**Next: Sprint M (memory quality) before P2** — the mornings are now bounded by memory quality.
+Scope: world/mission summaries (compiled, budget-bounded, stored on `knowledge_worlds.mind`),
+digest-grade artifact summaries, near-duplicate suppression in insights, retrieval ranking
+(recency × salience × similarity), and why-this-matters generation for ingested documents — each
+feeding the waking moment per Rule 6. Then P2 (the System altitude) inherits a star that actually
+knows its objective, campaigns, warm leads, and discoveries.
