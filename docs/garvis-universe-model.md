@@ -199,3 +199,34 @@ camera move. This is the single highest-leverage emotional feature in the produc
 The one-sentence product, final form (GPT's phrasing, kept): **Garvis is an AI operating system
 where you express intent, and the right knowledge, tools, people, workflows, and studios emerge
 around that intent automatically.** The universe is what that feels like to stand inside.
+
+---
+
+## 8. Addendum — Visible cognition without theater (the No-Theater Rules)
+
+The round-3 critique asked "how does Garvis visibly think?" The answer must never be simulated
+thinking. Garvis's cognition already leaves a real, timestamped trail; visible cognition is
+RENDERING ROWS AS THEY LAND:
+
+- ingest → embedding → `insights` row crosses threshold → **a filament appears** (real)
+- an agent run executes → the x-ray streams its ACTUAL tool calls (`agent_runs` checkpoints exist)
+- a play runs → planets light in the order steps actually complete
+- the overnight worker acted → on arrival, a ~3s replay of the delta since last seen
+  (`mind_events` diff) — you watch what it DID, recorded, not a simulation
+- Next Move ranking shifts → a comet appears; decay removes it
+
+**The rules (same discipline as "never invented confidence"):**
+1. **Nothing animates unless a row changed.** Every motion maps to a DB event. Motion IS news.
+2. **Nothing blocks on beauty.** The conversation answers immediately; spectacle is ambient or
+   after-the-fact; a "watch it think" x-ray is opt-in, never a loading screen.
+3. **Every pixel is a query.** If the table behind a visual can't be named, it doesn't ship.
+4. **Potential drifts; commitments stay put.** Nebulae may move with relevance (Next Move score);
+   planets — things the user made — never rearrange (spatial memory is sacred).
+
+**Adopted from round 3:** the time scrubber + provenance trail ("where did this idea begin?") —
+nearly free because `mind_events` is append-only and everything is timestamped; it's a query, not
+a system. Ships as **P4** of the presentation track. Honest mass/health confirmed as already in
+the physics table. Six-scale astronomy taxonomy declined — three altitudes suffice.
+
+**Status ruling:** the philosophy has converged. Further vision rounds risk decoration. The next
+unit of work is P1 (the waking moment) in the real app, against real rows.
