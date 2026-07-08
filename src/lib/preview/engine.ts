@@ -56,6 +56,8 @@ SUGGESTED ORDER (adapt, don't slavishly follow): ${recipe.sections.join(' → ')
 
 Section prop shapes (fill ALL copy):
 - hero: { eyebrow, heading, sub, cta, secondaryCta?, image? (one of the photo urls), rating?, reviewCount? }
+  hero also takes "variant":"split" (photo panel beside the copy, on the page paper — pick it for
+  professional/editorial trades: legal, medical, real estate; full-bleed cinematic is the default)
 - trust: { items: [4 short proof points — only claims supported by the profile] }
 - services: { heading, sub, services: [{ name, blurb (specific, 1 sentence) }], cta }
 - about: { heading, body (2-3 sentences, grounded), image? }
@@ -271,14 +273,9 @@ export async function ingestBusinessProfile(raw: unknown): Promise<
   }
   const audit = await auditPromise;
 
-  // unique slug: joes-roofing, joes-roofing-2, …
-  const base = previewSlug(profile.business_name);
-  let slug = base;
-  for (let i = 2; i <= 20; i++) {
-    const { data: clash } = await supabase.from('preview_sites').select('id').eq('slug', slug).maybeSingle();
-    if (!clash) break;
-    slug = `${base}-${i}`;
-  }
+  // Slug = name + a short nonce ("joes-roofing-k3x9p2") — readable in the outreach email, but
+  // pitches aren't enumerable by guessing business names. Nonce also guarantees uniqueness.
+  const slug = `${previewSlug(profile.business_name)}-${Math.random().toString(36).slice(2, 8)}`;
 
   const pitch = await generatePitch(profile, previewUrlFor(slug), audit);
   const { data: row, error: sErr } = await supabase.from('preview_sites').insert({
@@ -329,9 +326,15 @@ export async function regeneratePreviewSite(id: string): Promise<{ ok: boolean; 
 // Purchase intent — the "yes" button on public previews
 // ---------------------------------------------------------------------------
 
-/** An interested owner clicked "Claim this website" on the PUBLIC preview — no login, so this
- *  insert runs as anon (RLS allows insert-only). The agency sees these in the admin list. */
+/** An interested owner clicked "Claim this website" on the PUBLIC preview — no login. Preferred
+ *  path is the claim-submit edge function (inserts AND notifies the agency's webhook — a raised
+ *  hand must never land silently); falls back to the direct anon insert if the function isn't
+ *  deployed yet, so the claim is never lost. */
 export async function submitPublishRequest(args: { previewSiteId: string; name: string; contact: string; message?: string }): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('claim-submit', { body: args });
+    if (!error && (data as { ok?: boolean } | null)?.ok) return { ok: true };
+  } catch { /* fall through to the direct insert */ }
   const { error } = await supabase.from('publish_requests').insert({
     preview_site_id: args.previewSiteId,
     name: args.name.trim().slice(0, 120),
@@ -339,6 +342,39 @@ export async function submitPublishRequest(args: { previewSiteId: string; name: 
     message: (args.message ?? '').trim().slice(0, 2000),
   });
   return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+/** Update a claim's lifecycle state (new → contacted → won/lost) — the CRM seed. */
+export async function setPublishRequestStatus(id: string, status: 'new' | 'contacted' | 'won' | 'lost'): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.from('publish_requests').update({ status }).eq('id', id);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Ingest tokens — API keys for the external scraper → ingest-profile endpoint
+// ---------------------------------------------------------------------------
+
+export interface IngestToken { id: string; token: string; label: string; created_at: string; last_used_at: string | null; revoked_at: string | null }
+
+export async function listIngestTokens(): Promise<IngestToken[]> {
+  const { data } = await supabase.from('ingest_tokens').select('*').order('created_at', { ascending: false });
+  return (data as IngestToken[]) ?? [];
+}
+
+export async function createIngestToken(label = 'scraper'): Promise<IngestToken | null> {
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return null;
+  const bytes = new Uint8Array(30);
+  crypto.getRandomValues(bytes);
+  const token = 'ffi_' + Array.from(bytes, (b) => b.toString(36).padStart(2, '0').slice(0, 1)).join('')
+    + Math.random().toString(36).slice(2, 12);
+  const { data } = await supabase.from('ingest_tokens')
+    .insert({ user_id: auth.user.id, token, label: label.slice(0, 60) }).select('*').single();
+  return (data as IngestToken) ?? null;
+}
+
+export async function revokeIngestToken(id: string): Promise<void> {
+  await supabase.from('ingest_tokens').update({ revoked_at: new Date().toISOString() }).eq('id', id);
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +422,7 @@ export async function getPreviewStats(): Promise<Record<string, PreviewStats>> {
 
 export interface PublishRequestRow {
   id: string; preview_site_id: string; name: string; contact: string; message: string; created_at: string;
+  status: 'new' | 'contacted' | 'won' | 'lost';
 }
 
 export async function listPublishRequests(): Promise<(PublishRequestRow & { business_name?: string; slug?: string })[]> {

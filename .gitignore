@@ -9,3 +9,4 @@ supabase/.temp
 .tmp-kitcheck/
 .design-e2e/
 _pdf_streams.txt
+*.tsbuildinfo

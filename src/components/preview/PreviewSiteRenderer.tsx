@@ -55,6 +55,10 @@ export function PreviewSiteRenderer({ spec, shot = false }: { spec: SiteSpec; sh
       <style>{`
         .pv-site { scroll-behavior: smooth; }
         .pv-site .pv-display, .pv-site h1, .pv-site h2, .pv-site h3 { font-family: "${spec.theme.displayFont}", ${spec.theme.bodyFont}, ui-sans-serif, sans-serif; }
+        .pv-site ::selection { background: hsl(${spec.theme.primary} / 0.25); }
+        @keyframes pv-kenburns { from { transform: scale(1); } to { transform: scale(1.09); } }
+        .pv-site .pv-kenburns { animation: pv-kenburns 18s ease-out forwards; }
+        @media (prefers-reduced-motion: reduce) { .pv-site .pv-kenburns { animation: none; } }
         .pv-shot *, .pv-shot *::before, .pv-shot *::after { transition: none !important; animation: none !important; opacity: 1 !important; transform: none !important; }
       `}</style>
 
@@ -80,7 +84,7 @@ export function PreviewSiteRenderer({ spec, shot = false }: { spec: SiteSpec; sh
         {sections.map((s, i) => {
           // normalizeSpec guarantees the type is registered and props fit the section's shape.
           const C = SECTION_COMPONENTS[s.type] as React.ComponentType<Record<string, unknown>>;
-          return C ? <C key={`${s.type}-${i}`} {...s.props} /> : null;
+          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} /> : null;
         })}
       </main>
 

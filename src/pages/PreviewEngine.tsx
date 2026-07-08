@@ -5,12 +5,21 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox } from 'lucide-react';
+import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox, KeyRound, Plus } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card, Badge, EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
-import { ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor, listPublishRequests, getPreviewStats, type PreviewSiteRow, type PublishRequestRow, type PreviewStats } from '../lib/preview/engine';
+import {
+  ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor,
+  listPublishRequests, getPreviewStats, setPublishRequestStatus,
+  listIngestTokens, createIngestToken, revokeIngestToken,
+  type PreviewSiteRow, type PublishRequestRow, type PreviewStats, type IngestToken,
+} from '../lib/preview/engine';
 import { DEMO_PROFILES } from '../lib/preview/demoProfiles';
+import { supabaseUrl } from '../lib/supabase';
+
+const CLAIM_STATUSES = ['new', 'contacted', 'won', 'lost'] as const;
+const STATUS_TONE: Record<string, 'ember' | 'warn' | 'ok' | 'dim'> = { new: 'ember', contacted: 'warn', won: 'ok', lost: 'dim' };
 
 export default function PreviewEngine() {
   const { toast } = useToast();
@@ -20,13 +29,30 @@ export default function PreviewEngine() {
   const [requests, setRequests] = useState<(PublishRequestRow & { business_name?: string; slug?: string })[]>([]);
   const [stats, setStats] = useState<Record<string, PreviewStats>>({});
   const [regenId, setRegenId] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<IngestToken[]>([]);
+  const [tokensOpen, setTokensOpen] = useState(false);
 
   const refresh = async () => {
     setRows(await listPreviewSites());
     setRequests(await listPublishRequests());
     setStats(await getPreviewStats());
+    setTokens(await listIngestTokens());
   };
   useEffect(() => { void refresh(); }, []);
+
+  const setStatus = async (id: string, status: PublishRequestRow['status']) => {
+    const r = await setPublishRequestStatus(id, status);
+    if (!r.ok) toast('error', r.error ?? 'Could not update.');
+    await refresh();
+  };
+
+  const newToken = async () => {
+    const t = await createIngestToken();
+    if (!t) return toast('error', 'Could not create a token (is the pipeline migration applied?).');
+    void navigator.clipboard?.writeText(t.token);
+    toast('success', 'Token created and copied to clipboard.');
+    await refresh();
+  };
 
   const generate = async () => {
     let raw: unknown;
@@ -97,14 +123,25 @@ export default function PreviewEngine() {
 
         {requests.length > 0 && (
           <>
-            <h2 className="mt-8 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-forge-ember"><Inbox size={12} /> Interested owners ({requests.length})</h2>
+            <h2 className="mt-8 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-forge-ember">
+              <Inbox size={12} /> Claims ({requests.filter((q) => q.status === 'new').length} new · {requests.filter((q) => q.status === 'won').length} won)
+            </h2>
             <div className="mt-3 space-y-2">
               {requests.map((q) => (
-                <Card key={q.id} className="flex flex-wrap items-center gap-3 border-forge-ember/40 p-3">
+                <Card key={q.id} className={`flex flex-wrap items-center gap-3 p-3 ${q.status === 'new' ? 'border-forge-ember/40' : ''}`}>
+                  <Badge tone={STATUS_TONE[q.status] ?? 'dim'}>{q.status}</Badge>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-forge-ink">{q.name} <span className="text-forge-dim">wants</span> {q.business_name ?? 'a preview'}</p>
                     <p className="mt-0.5 font-mono text-xs text-forge-dim">{q.contact}{q.message ? ` — “${q.message}”` : ''}</p>
                   </div>
+                  <select
+                    value={q.status}
+                    onChange={(e) => void setStatus(q.id, e.target.value as PublishRequestRow['status'])}
+                    aria-label="Claim status"
+                    className="rounded-lg border border-forge-border bg-forge-panel px-2 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none"
+                  >
+                    {CLAIM_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
                   {q.slug && (
                     <Link to={`/preview-site/${q.slug}`} target="_blank" className="rounded-lg border border-forge-border p-2 text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink">
                       <ExternalLink size={14} />
@@ -114,6 +151,44 @@ export default function PreviewEngine() {
               ))}
             </div>
           </>
+        )}
+
+        {/* Scraper API — ingest tokens + the exact call the external lead engine makes. */}
+        <h2 className="mt-8 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-forge-dim">
+          <KeyRound size={12} /> Scraper API
+          <button onClick={() => setTokensOpen((v) => !v)} className="ml-1 text-forge-ember hover:underline">{tokensOpen ? 'hide' : 'show'}</button>
+        </h2>
+        {tokensOpen && (
+          <Card className="mt-3 p-4">
+            <p className="text-xs text-forge-dim">
+              Your scraper POSTs Business Profile JSON to the ingest endpoint with a token below — each call creates a
+              live preview URL instantly (recipe spec; hit Regenerate here to run the full AI chain on it).
+            </p>
+            <pre className="mt-2 overflow-x-auto rounded-lg border border-forge-border bg-forge-bg p-3 font-mono text-[10px] leading-relaxed text-forge-dim">
+{`curl -X POST "${supabaseUrl}/functions/v1/ingest-profile" \\
+  -H "content-type: application/json" -H "x-ingest-token: <TOKEN>" \\
+  -d '{"business_name":"Joes Roofing","industry":"roofing","services":["Roof repair"]}'`}
+            </pre>
+            <div className="mt-3 flex items-center gap-2">
+              <Button size="sm" onClick={() => void newToken()}><Plus size={13} /> New token</Button>
+              <span className="text-[11px] text-forge-dim">Tokens are shown once at creation (copied to clipboard) — treat them like passwords.</span>
+            </div>
+            {tokens.length > 0 && (
+              <ul className="mt-3 space-y-1.5">
+                {tokens.map((t) => (
+                  <li key={t.id} className="flex items-center gap-2 text-xs">
+                    <Badge tone={t.revoked_at ? 'dim' : 'ok'}>{t.revoked_at ? 'revoked' : 'active'}</Badge>
+                    <span className="font-mono text-forge-dim">{t.token.slice(0, 8)}…{t.token.slice(-4)}</span>
+                    <span className="text-forge-dim/70">{t.label}</span>
+                    {t.last_used_at && <span className="text-[10px] text-forge-dim/60">last used {new Date(t.last_used_at).toLocaleDateString()}</span>}
+                    {!t.revoked_at && (
+                      <button onClick={() => { void revokeIngestToken(t.id).then(refresh); }} className="ml-auto text-[11px] text-forge-dim hover:text-forge-err">revoke</button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
         )}
 
         <h2 className="mt-8 text-xs font-medium uppercase tracking-wide text-forge-dim">Generated previews</h2>
