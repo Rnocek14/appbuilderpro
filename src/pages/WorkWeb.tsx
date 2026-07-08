@@ -3,10 +3,10 @@
 // chartered WORKSPACE on the right when you dive into one. Each area is a thought + a workspace +
 // a ledger — its tools, artifacts, and results all in one place. Approval-gated by construction.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
-  Waypoints, Loader2, ArrowLeft, Play, Sparkles, Upload, Send, Eye, FileText,
+  Waypoints, Loader2, ArrowLeft, Play, Sparkles, Upload, Send, Eye, FileText, FileImage,
   ShieldCheck, ChevronRight, Circle,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
@@ -16,6 +16,9 @@ import { cn } from '../lib/utils';
 import { ARCHETYPES, type CharterStatus, type WorkTool } from '../lib/garvis/workweb';
 import { templateById } from '../lib/garvis/workweb';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
+import { listClusterArtifacts, listClusterFiles, uploadClusterFile, type StudioArtifact, type ClusterFile } from '../lib/garvis/artifacts';
+import { ArtifactCard } from '../components/garvis/ArtifactCard';
+import { StudioChat } from '../components/garvis/StudioChat';
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -172,9 +175,14 @@ export default function WorkWeb() {
               <div className="flex h-40 items-center justify-center text-forge-dim">Select a production area.</div>
             ) : (
               <Workspace
+                key={selectedCluster.id}
                 cluster={selectedCluster}
+                worldId={worldId}
+                webTitle={web.title}
+                results={{ sent: web.rollup.messagesSent, replies: web.rollup.replies, pendingApprovals: selectedCluster.pendingApprovals }}
                 busyTool={busyTool}
                 onTool={(t) => void doTool(selectedCluster, t)}
+                onChanged={() => void refresh()}
               />
             )}
           </div>
@@ -235,8 +243,34 @@ function StatChip({ label, value, tone }: { label: string; value: number; tone?:
   );
 }
 
-function Workspace({ cluster, busyTool, onTool }: { cluster: WebCluster; busyTool: string | null; onTool: (t: WorkTool) => void }) {
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged }: {
+  cluster: WebCluster; worldId: string; webTitle: string;
+  results: { sent: number; replies: number; pendingApprovals: number };
+  busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
+}) {
+  const { toast } = useToast();
   const meta = cluster.charter ? ARCHETYPES[cluster.charter.archetype] : null;
+  const [artifacts, setArtifacts] = useState<StudioArtifact[]>([]);
+  const [files, setFiles] = useState<ClusterFile[]>([]);
+  const [loadingArts, setLoadingArts] = useState(true);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const [a, f] = await Promise.all([listClusterArtifacts(cluster.id), listClusterFiles(cluster.id)]);
+      setArtifacts(a); setFiles(f);
+    } catch { /* studio still usable without the lists */ } finally { setLoadingArts(false); }
+  }, [cluster.id]);
+
+  useEffect(() => { setLoadingArts(true); void reload(); }, [reload]);
+
+  const bumpChanged = useCallback(() => { void reload(); onChanged(); }, [reload, onChanged]);
+
+  const upload = async (file: File) => {
+    try { await uploadClusterFile(cluster.id, file); toast('success', `Added ${file.name}.`); await reload(); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Upload failed.'); }
+  };
+
   return (
     <div>
       <div className="mb-1 flex items-center gap-2">
@@ -276,26 +310,51 @@ function Workspace({ cluster, busyTool, onTool }: { cluster: WebCluster; busyToo
         })}
       </div>
 
-      {/* Artifacts */}
-      <div className="mt-6">
-        <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-dim">Artifacts</h3>
-        {cluster.artifacts.length === 0 ? (
-          <p className="text-sm text-forge-dim/70">Nothing here yet. Use a tool above — or run the play from the header to fill the whole web at once.</p>
+      {/* Files */}
+      <div className="mt-5">
+        <div className="mb-2 flex items-center gap-2">
+          <h3 className="text-xs font-medium uppercase tracking-wide text-forge-dim">Files</h3>
+          <input ref={fileInput} type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ''; }} />
+          <button onClick={() => fileInput.current?.click()} className="flex items-center gap-1 rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim hover:text-forge-ink">
+            <Upload size={11} /> add
+          </button>
+        </div>
+        {files.length === 0 ? (
+          <p className="text-xs text-forge-dim/60">No files. Add photos, a logo, or a CSV the studio can use.</p>
         ) : (
-          <div className="space-y-2">
-            {cluster.artifacts.map((a) => (
-              <details key={a.id} className="rounded-lg border border-forge-border bg-forge-panel/60">
-                <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-forge-ink">
-                  <FileText size={14} className="text-forge-ember" />
-                  <span className="flex-1">{a.title}</span>
-                  <Badge tone="dim">{a.kind}</Badge>
-                </summary>
-                <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-forge-border px-3 py-2 text-xs text-forge-dim">{a.detail || '—'}</pre>
-              </details>
+          <div className="flex flex-wrap gap-1.5">
+            {files.map((f) => (
+              <a key={f.id} href={f.url} target="_blank" rel="noreferrer"
+                className="flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:text-forge-ink">
+                {f.kind === 'image' ? <FileImage size={11} /> : <FileText size={11} />} {f.name}
+              </a>
             ))}
           </div>
         )}
       </div>
+
+      {/* Artifacts */}
+      <div className="mt-6">
+        <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-dim">Artifacts</h3>
+        {loadingArts ? (
+          <p className="text-sm text-forge-dim/70">Loading…</p>
+        ) : artifacts.length === 0 ? (
+          <p className="text-sm text-forge-dim/70">Nothing here yet. Use a tool above, run the play from the header, or just ask the studio below.</p>
+        ) : (
+          <div className="space-y-2">
+            {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} onChanged={bumpChanged} />)}
+          </div>
+        )}
+      </div>
+
+      {/* The studio chat — the thing that makes this a studio, not a node */}
+      {cluster.charter && (
+        <StudioChat
+          worldId={worldId} webTitle={webTitle} clusterId={cluster.id}
+          cluster={{ title: cluster.title, summary: cluster.summary, charter: cluster.charter }}
+          tools={cluster.tools} results={results} onChanged={bumpChanged}
+        />
+      )}
     </div>
   );
 }

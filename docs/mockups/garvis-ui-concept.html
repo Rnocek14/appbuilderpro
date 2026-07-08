@@ -1,0 +1,420 @@
+<title>Garvis — Interface Concept</title>
+<style>
+  /* ── Forge tokens (Garvis's own system — deliberately single-theme: this is the dark
+        command-center world; light mode is not part of this identity) ─────────────── */
+  :root {
+    --bg: #0C0E13; --panel: #12151D; --raised: #1A1E29; --border: #262B3A;
+    --ink: #E8E6E1; --dim: #8B90A0; --ember: #FF8A3D; --ember-deep: #E5631F;
+    --heat: #FFB573; --ok: #4ADE80; --warn: #FACC15; --err: #F87171;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --display: "Space Grotesk", "Avenir Next", system-ui, sans-serif;
+    --body: "Inter", system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--body); font-size: 15px; line-height: 1.55;
+    background-image: radial-gradient(900px 480px at 50% -12%, rgba(255,138,61,.12), transparent 60%);
+    min-height: 100vh;
+  }
+  .frame { max-width: 1160px; margin: 0 auto; padding: 28px 20px 80px; }
+
+  /* ── header + screen switcher ── */
+  .masthead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 6px; }
+  .masthead h1 { font-family: var(--display); font-size: 21px; letter-spacing: -0.01em; margin: 0; }
+  .masthead .sub { color: var(--dim); font-size: 13px; }
+  .flame { color: var(--ember); }
+  .tabs { display: flex; gap: 8px; margin: 18px 0 22px; flex-wrap: wrap; }
+  .tab {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    padding: 8px 14px; border: 1px solid var(--border); border-radius: 10px;
+    background: transparent; color: var(--dim); cursor: pointer; transition: all .25s var(--ease);
+  }
+  .tab:hover { color: var(--ink); border-color: rgba(255,138,61,.4); }
+  .tab[aria-selected="true"] { color: #1A0E04; background: linear-gradient(135deg, #FF8A3D, #E5631F); border-color: transparent; }
+  .tab:focus-visible, button:focus-visible, .ghostcard:focus-visible { outline: 2px solid var(--heat); outline-offset: 2px; }
+  .screen { display: none; }
+  .screen.on { display: block; animation: rise .5s var(--ease); }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .screen.on { animation: none; } .pulse { animation: none !important; } }
+
+  .note { font-size: 12px; color: var(--dim); border-left: 2px solid rgba(255,138,61,.5); padding: 2px 0 2px 10px; margin: 0 0 18px; max-width: 68ch; }
+
+  /* ── shared bits ── */
+  .label { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--dim); }
+  .chip.ember { border-color: rgba(255,138,61,.5); color: var(--ember); }
+  .chip.ok { border-color: rgba(74,222,128,.4); color: var(--ok); }
+  .chip.warn { border-color: rgba(250,204,21,.4); color: var(--warn); }
+  .btn {
+    font-family: var(--body); font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 10px;
+    border: none; cursor: pointer; background: linear-gradient(135deg, #FF8A3D, #E5631F); color: #1A0E04;
+    transition: transform .2s var(--ease), box-shadow .2s var(--ease);
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 0 0 1px rgba(255,138,61,.3), 0 10px 32px -10px rgba(255,138,61,.4); }
+  .btn.quiet { background: transparent; border: 1px solid var(--border); color: var(--ink); font-weight: 500; }
+  .panel { background: rgba(18,21,29,.72); border: 1px solid var(--border); border-radius: 16px; }
+
+  /* ═══ SCREEN 1 · COMMAND ═══ */
+  .command-stage { display: grid; grid-template-columns: 1fr 320px; gap: 22px; align-items: start; }
+  @media (max-width: 900px) { .command-stage { grid-template-columns: 1fr; } }
+  .hail { padding: 56px 36px 40px; text-align: center; position: relative; overflow: hidden; }
+  .hail::before { content: ""; position: absolute; inset: 0; background: radial-gradient(420px 200px at 50% 0%, rgba(255,138,61,.10), transparent 70%); pointer-events: none; }
+  .hail h2 { font-family: var(--display); font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 22px; text-wrap: balance; }
+  .cmdline {
+    display: flex; align-items: center; gap: 10px; max-width: 560px; margin: 0 auto;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 13px 18px;
+    box-shadow: 0 0 0 1px rgba(255,138,61,.14), 0 14px 44px -18px rgba(255,138,61,.35);
+  }
+  .cmdline .cursor { width: 8px; height: 18px; background: var(--ember); border-radius: 2px; }
+  .pulse { animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .cmdline .ph { color: var(--dim); font-size: 15px; }
+  .cmdline .mic { margin-left: auto; color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  /* always-visible cards — typing is an accelerator, never the only path */
+  .quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 30px; text-align: left; }
+  .qcard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: border-color .25s var(--ease); }
+  .qcard:hover { border-color: rgba(255,138,61,.45); }
+  .qcard .t { font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 7px; }
+  .qcard .d { color: var(--dim); font-size: 11.5px; margin-top: 2px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot.ember { background: var(--ember); } .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.dim { background: #3a4054; }
+  /* next moves rail */
+  .rail { padding: 18px; }
+  .rail h3 { font-family: var(--display); font-size: 14px; margin: 0 0 4px; display: flex; align-items: baseline; gap: 8px; }
+  .rail .seeall { margin-left: auto; font-size: 11px; color: var(--dim); cursor: pointer; }
+  .rail .seeall:hover { color: var(--ink); }
+  .move { border-top: 1px solid var(--border); padding: 13px 2px; }
+  .move:first-of-type { border-top: none; }
+  .move .why { font-size: 13px; margin: 4px 0 8px; }
+  .move .row { display: flex; align-items: center; gap: 8px; }
+  .move .act { font-size: 12px; font-weight: 600; color: var(--ember); background: rgba(255,138,61,.1); border: 1px solid rgba(255,138,61,.4); padding: 5px 12px; border-radius: 8px; cursor: pointer; }
+  .move .later { font-size: 11.5px; color: var(--dim); cursor: pointer; }
+
+  /* ═══ SCREEN 2 · MISSION ═══ */
+  .objective { padding: 30px 32px 26px; }
+  .objective h2 { font-family: var(--display); font-size: 26px; letter-spacing: -0.015em; margin: 6px 0 8px; }
+  .objective .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .strats { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 20px; }
+  .strat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 9px; position: relative; }
+  .strat.reco { border-color: rgba(255,138,61,.55); box-shadow: 0 0 0 1px rgba(255,138,61,.18), 0 16px 40px -20px rgba(255,138,61,.35); }
+  .strat .badge-reco { position: absolute; top: -9px; left: 14px; font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; background: linear-gradient(135deg,#FF8A3D,#E5631F); color: #1A0E04; padding: 2px 8px; border-radius: 6px; }
+  .strat h4 { font-family: var(--display); font-size: 16px; margin: 0; }
+  .strat .why { color: var(--dim); font-size: 13px; flex: 1; }
+  .strat .evidence { font-family: var(--mono); font-size: 11px; color: var(--heat); background: rgba(255,138,61,.07); border: 1px dashed rgba(255,138,61,.3); border-radius: 8px; padding: 6px 10px; }
+  .strat .evidence.none { color: var(--dim); border-color: var(--border); background: transparent; }
+  .strat .adds { font-size: 11px; color: var(--dim); }
+  .ghost-strip { margin-top: 22px; }
+  .ghosts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .ghostcard { border: 1px dashed #3a4054; color: #5a6074; border-radius: 10px; padding: 7px 13px; font-size: 12px; background: transparent; }
+  .ghostcard.lit { border-style: solid; border-color: rgba(255,138,61,.5); color: var(--heat); }
+
+  /* ═══ SCREEN 3 · WEB + STUDIO (focus mode) ═══ */
+  .slimhead { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; margin-bottom: 14px; }
+  .slimhead .back { color: var(--dim); font-size: 12.5px; cursor: pointer; }
+  .slimhead .back:hover { color: var(--ink); }
+  .slimhead .obj { font-family: var(--display); font-size: 14px; font-weight: 600; }
+  .slimhead .chips { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+  .websplit { display: grid; grid-template-columns: 330px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 940px) { .websplit { grid-template-columns: 1fr; } }
+  .orbwrap { padding: 14px 12px 6px; }
+  .orbwrap svg { width: 100%; height: auto; display: block; }
+  .maplegend { display: flex; gap: 12px; flex-wrap: wrap; padding: 8px 6px 12px; font-size: 10.5px; color: var(--dim); }
+  .maplegend span { display: inline-flex; align-items: center; gap: 5px; }
+  .treelist { border-top: 1px solid var(--border); padding: 10px 8px 6px; }
+  .trow { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; font-size: 12.5px; color: var(--dim); cursor: pointer; }
+  .trow:hover { background: var(--raised); color: var(--ink); }
+  .trow.sel { background: rgba(255,138,61,.1); color: var(--ink); }
+  .trow .state { margin-left: auto; font-family: var(--mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+  .studio { padding: 22px 24px; }
+  .studio .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .studio h3 { font-family: var(--display); font-size: 19px; margin: 0; }
+  .studio .purpose { color: var(--dim); font-size: 13px; margin: 4px 0 0; }
+  .toolrow { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 4px; }
+  .tool { font-size: 12px; font-weight: 500; border: 1px solid var(--border); color: var(--ink); border-radius: 9px; padding: 7px 13px; cursor: pointer; background: transparent; transition: border-color .2s var(--ease); }
+  .tool:hover { border-color: rgba(255,138,61,.5); }
+  .tool.hot { border-color: rgba(255,138,61,.5); background: rgba(255,138,61,.08); color: var(--ember); }
+  .artifact { background: rgba(26,30,41,.6); border: 1px solid var(--border); border-radius: 12px; margin-top: 14px; overflow: hidden; }
+  .artifact .bar { display: flex; align-items: center; gap: 9px; padding: 10px 14px; font-size: 13px; }
+  .vpill { font-family: var(--mono); font-size: 9.5px; padding: 2px 7px; border-radius: 6px; border: 1px solid var(--border); color: var(--dim); cursor: pointer; }
+  .vpill.cur { border-color: rgba(255,138,61,.5); color: var(--ember); }
+  .artifact .body { border-top: 1px solid var(--border); padding: 12px 16px; font-size: 12.5px; }
+  .diff-add { color: var(--ok); background: rgba(74,222,128,.07); display: block; }
+  .diff-del { color: var(--err); background: rgba(248,113,113,.06); display: block; text-decoration: line-through; opacity: .7; }
+  .diff-same { color: var(--dim); display: block; }
+  .chatstrip { margin-top: 18px; }
+  .bubble { max-width: 78%; font-size: 12.5px; border-radius: 12px; padding: 8px 13px; margin: 7px 0; }
+  .bubble.user { margin-left: auto; background: rgba(255,138,61,.13); }
+  .bubble.garvis { background: var(--raised); color: var(--dim); }
+  .hat { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; color: var(--heat); border: 1px solid rgba(255,181,115,.35); border-radius: 6px; padding: 1px 7px; margin-bottom: 5px; cursor: help; }
+  .chatline { display: flex; gap: 9px; margin-top: 10px; }
+  .chatline input { flex: 1; background: var(--panel); border: 1px solid var(--border); border-radius: 11px; color: var(--ink); padding: 10px 14px; font-size: 13.5px; font-family: var(--body); }
+  .chatline input::placeholder { color: #5a6074; }
+  .rightrail { display: flex; flex-direction: column; gap: 12px; }
+  .rr { padding: 13px 15px; }
+  .rr .label { display: block; margin-bottom: 7px; }
+  .approvalcard { font-size: 12.5px; }
+  .approvalcard .row { display: flex; gap: 7px; margin-top: 9px; }
+  .mini { font-size: 11.5px; font-weight: 600; padding: 5px 12px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--dim); }
+  .mini.go { border-color: rgba(255,138,61,.5); background: rgba(255,138,61,.1); color: var(--ember); }
+  .stat { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); padding: 3px 0; font-variant-numeric: tabular-nums; }
+  .stat b { color: var(--ink); font-weight: 600; }
+  .websplit-outer { display: grid; grid-template-columns: 1fr 250px; gap: 16px; }
+  @media (max-width: 1100px) { .websplit-outer { grid-template-columns: 1fr; } }
+</style>
+
+<div class="frame">
+  <div class="masthead">
+    <h1><span class="flame">◆</span> Garvis — interface concept</h1>
+    <span class="sub">3 screens · 4 surfaces + 1 anchor · max 3 things ask for attention</span>
+  </div>
+  <p class="note">The laws: one focal point per screen · at most three attention requests · nothing on
+  screen the objective doesn't need — but nothing you ever made is more than a click from visible.
+  Typing is an accelerator, never the only path.</p>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-s="s1">1 · Command</button>
+    <button class="tab" role="tab" aria-selected="false" data-s="s2">2 · Mission — objective first</button>
+    <button class="tab" role="tab" aria-selected="false" data-s="s3">3 · Web + Studio — focus mode</button>
+  </div>
+
+  <!-- ════════ SCREEN 1 · COMMAND ════════ -->
+  <section class="screen on" id="s1">
+    <div class="command-stage">
+      <div class="panel hail">
+        <h2>What are we working on today, Riley?</h2>
+        <div class="cmdline">
+          <span class="cursor pulse"></span>
+          <span class="ph">get my mom more listings&hellip;</span>
+          <span class="mic">⌘K · voice</span>
+        </div>
+        <div class="quick">
+          <div class="qcard"><div class="t"><span class="dot ember"></span> Grow Mom's Business</div><div class="d">mission · 2 strategies live</div></div>
+          <div class="qcard"><div class="t"><span class="dot ok"></span> Website Outreach</div><div class="d">mission · 2 replies this week</div></div>
+          <div class="qcard"><div class="t"><span class="dot dim"></span> Work</div><div class="d">all missions &amp; webs</div></div>
+          <div class="qcard"><div class="t"><span class="dot dim"></span> Brain</div><div class="d">memory · 3 open decisions</div></div>
+          <div class="qcard"><div class="t"><span class="dot dim"></span> Build</div><div class="d">apps &amp; previews</div></div>
+          <div class="qcard"><div class="t"><span class="dot warn"></span> Approvals</div><div class="d">2 waiting for you</div></div>
+        </div>
+      </div>
+
+      <aside class="panel rail">
+        <h3>Next moves <span class="chip ember">3</span> <span class="seeall">see all (7)</span></h3>
+        <div class="move">
+          <span class="chip warn">needs you · 2h</span>
+          <p class="why">The lakefront postcard email to <b>jane@lakefront.example</b> is waiting for your approval.</p>
+          <div class="row"><button class="act">Review &amp; approve</button><span class="later">later</span></div>
+        </div>
+        <div class="move">
+          <span class="chip ok">reply</span>
+          <p class="why"><b>Bob Pier replied "interested"</b> — no next touch is queued. Strike while it's warm.</p>
+          <div class="row"><button class="act">Draft the follow-up</button><span class="later">later</span></div>
+        </div>
+        <div class="move">
+          <span class="chip">blocking</span>
+          <p class="why"><b>Mailing Lists is empty</b> and blocks Print &amp; Send. Upload the lakefront owners CSV.</p>
+          <div class="row"><button class="act">Upload list</button><span class="later">later</span></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ════════ SCREEN 2 · MISSION ════════ -->
+  <section class="screen" id="s2">
+    <div class="panel objective">
+      <span class="label">mission</span>
+      <h2>Grow Mom's Business</h2>
+      <div class="meta">
+        <span class="chip ember">target · 20 new listings by spring</span>
+        <span class="chip">Lake Geneva · @properties</span>
+        <span class="chip ok">2 strategies live</span>
+      </div>
+
+      <div class="strats">
+        <div class="strat reco">
+          <span class="badge-reco">recommended</span>
+          <h4>Lakefront postcard campaign</h4>
+          <p class="why">Luxury sellers respond to private, specific mail. "Know your number" angle → valuation page → call.</p>
+          <div class="evidence">run 3× · 412 mailed · 11 calls · 2 listings</div>
+          <span class="adds">activates: Direct Mail · Mailing Lists · Landing Page</span>
+          <button class="btn">Begin</button>
+        </div>
+        <div class="strat reco">
+          <span class="badge-reco">recommended</span>
+          <h4>Past-client referral push</h4>
+          <p class="why">Warmest audience she has. Personal note + market letter + a reason to forward it.</p>
+          <div class="evidence">run 1× · 38 sent · 6 replies</div>
+          <span class="adds">activates: Email Studio · CRM Follow-Up</span>
+          <button class="btn">Begin</button>
+        </div>
+        <div class="strat">
+          <h4>Market-update video</h4>
+          <p class="why">30-second lakefront market film for social + the newsletter. Builds authority between campaigns.</p>
+          <div class="evidence none">untested — new territory, no track record yet</div>
+          <span class="adds">activates: Video Studio · Social</span>
+          <button class="btn quiet">Begin</button>
+        </div>
+      </div>
+
+      <div class="ghost-strip">
+        <span class="label">the web — grows as strategies begin · ghosts show what each would add</span>
+        <div class="ghosts">
+          <button class="ghostcard lit">Brand ✓</button>
+          <button class="ghostcard lit">Market Intel ✓</button>
+          <button class="ghostcard lit">Direct Mail ●</button>
+          <button class="ghostcard lit">Mailing Lists ●</button>
+          <button class="ghostcard lit">Landing Page ●</button>
+          <button class="ghostcard">Email Studio — referral push</button>
+          <button class="ghostcard">CRM Follow-Up — referral push</button>
+          <button class="ghostcard">Video Studio — market video</button>
+          <button class="ghostcard">Results — activates with first send</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ SCREEN 3 · WEB + STUDIO ════════ -->
+  <section class="screen" id="s3">
+    <div class="panel slimhead">
+      <span class="back">← Grow Mom's Business</span>
+      <span class="obj">Direct Mail · Creative</span>
+      <div class="chips">
+        <span class="chip">12 artifacts</span>
+        <span class="chip warn">1 waiting</span>
+        <span class="chip">41 sent</span>
+        <span class="chip ok">5 replies</span>
+      </div>
+    </div>
+
+    <div class="websplit-outer">
+      <div class="websplit">
+        <!-- left: orbital overview + tree navigation -->
+        <div class="panel orbwrap">
+          <svg viewBox="0 0 300 260" role="img" aria-label="Mission web: production areas orbiting the objective">
+            <defs>
+              <radialGradient id="core" cx="50%" cy="50%">
+                <stop offset="0%" stop-color="#FFB573"/><stop offset="45%" stop-color="#FF8A3D"/><stop offset="100%" stop-color="#E5631F" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+            <circle cx="150" cy="128" r="86" fill="none" stroke="#262B3A" stroke-width="1" stroke-dasharray="2 5"/>
+            <circle cx="150" cy="128" r="46" fill="none" stroke="#262B3A" stroke-width="1" stroke-dasharray="2 5"/>
+            <!-- flows -->
+            <path d="M 106 76 Q 150 128 216 138" stroke="rgba(255,138,61,.35)" stroke-width="1.2" fill="none"/>
+            <path d="M 84 152 Q 150 128 216 138" stroke="rgba(255,138,61,.25)" stroke-width="1.2" fill="none"/>
+            <!-- core -->
+            <circle cx="150" cy="128" r="26" fill="url(#core)" opacity=".9"/>
+            <text x="150" y="125" text-anchor="middle" fill="#1A0E04" font-size="8.5" font-weight="700" font-family="system-ui">20 new</text>
+            <text x="150" y="135" text-anchor="middle" fill="#1A0E04" font-size="8.5" font-weight="700" font-family="system-ui">listings</text>
+            <!-- orbiters: active=ember, waiting=warn halo, dormant=dim, focused=ring -->
+            <g class="pulse"><circle cx="106" cy="76" r="13" fill="#FF8A3D"/></g>
+            <circle cx="106" cy="76" r="17" fill="none" stroke="#FFB573" stroke-width="1.6"/>
+            <text x="106" y="53" text-anchor="middle" fill="#E8E6E1" font-size="8" font-family="system-ui">Direct Mail · working</text>
+            <text x="106" y="101" text-anchor="middle" fill="#8B90A0" font-size="7">+5 areas</text>
+            <circle cx="84" cy="152" r="10" fill="#FACC15" opacity=".85"/>
+            <text x="84" y="176" text-anchor="middle" fill="#FACC15" font-size="7.5" font-family="system-ui">Lists · needs you</text>
+            <circle cx="216" cy="138" r="10" fill="#3a4054"/>
+            <text x="216" y="160" text-anchor="middle" fill="#8B90A0" font-size="7.5">Results · quiet</text>
+            <circle cx="196" cy="72" r="9" fill="#4ADE80" opacity=".8"/>
+            <text x="196" y="52" text-anchor="middle" fill="#4ADE80" font-size="7.5">Landing · done</text>
+            <circle cx="150" cy="222" r="8" fill="none" stroke="#3a4054" stroke-width="1" stroke-dasharray="3 3"/>
+            <text x="150" y="243" text-anchor="middle" fill="#5a6074" font-size="7.5">Video · ghost</text>
+          </svg>
+          <div class="maplegend">
+            <span><span class="dot ember"></span> working</span>
+            <span><span class="dot warn"></span> needs you</span>
+            <span><span class="dot ok"></span> done</span>
+            <span><span class="dot dim"></span> quiet / ghost</span>
+          </div>
+          <div class="treelist">
+            <div class="trow">Brand <span class="state" style="color:var(--ok)">done</span></div>
+            <div class="trow">Market Intel <span class="state" style="color:var(--ok)">done</span></div>
+            <div class="trow">Direct Mail <span class="state" style="color:var(--ember)">working</span></div>
+            <div class="trow sel" style="padding-left:22px">└ Creative <span class="state" style="color:var(--ember)">focus</span></div>
+            <div class="trow" style="padding-left:22px">└ Mailing Lists <span class="state" style="color:var(--warn)">needs you</span></div>
+            <div class="trow" style="padding-left:22px">└ Print &amp; Send <span class="state">quiet</span></div>
+            <div class="trow">Landing Page <span class="state" style="color:var(--ok)">done</span></div>
+            <div class="trow">Results <span class="state">quiet</span></div>
+          </div>
+        </div>
+
+        <!-- center: the studio -->
+        <div class="panel studio">
+          <div class="head">
+            <h3>Creative</h3>
+            <span class="chip ember">Studio · direct mail</span>
+            <span class="chip">making — copy, creative, versions</span>
+          </div>
+          <p class="purpose">Postcard concepts, copy variants, design versions for the lakefront campaign.</p>
+
+          <div class="toolrow">
+            <button class="tool hot">Generate postcard image</button>
+            <button class="tool">Render print PDF</button>
+            <button class="tool">Pick mailing list</button>
+            <button class="tool">Queue send…</button>
+          </div>
+
+          <div class="artifact">
+            <div class="bar">
+              <span style="color:var(--ember)">▪</span> Postcard A — Know your number
+              <span class="chip">post</span>
+              <span style="margin-left:auto; display:flex; gap:4px">
+                <span class="vpill">v1</span><span class="vpill cur">v2 · current</span>
+              </span>
+            </div>
+            <div class="body">
+              <span class="diff-same">FRONT (over a calm dawn shot of the lake):</span>
+              <span class="diff-del">  Your shoreline has a number. Do you know it?</span>
+              <span class="diff-add">  Quietly, your shoreline appreciated again this year.</span>
+              <span class="diff-add">  Most owners are off by six figures — in both directions.</span>
+              <span class="diff-same">BACK: …private valuation, no listing pitch. Just your number.</span>
+            </div>
+          </div>
+
+          <div class="chatstrip">
+            <div class="bubble user">make it more luxury, less salesy</div>
+            <div class="bubble garvis">
+              <span class="hat" title="Same Garvis, wearing its copywriter hat for this">◆ copywriter hat</span><br>
+              Rewrote the front as a quiet observation instead of a question — luxury reads statements,
+              not pitches. Saved as v2; v1 kept. Want the Creative Director's take on the imagery?
+            </div>
+            <div class="chatline">
+              <input placeholder='ask this studio… ("queue this to the lakefront list")'>
+              <button class="btn">↵</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- right rail: only approvals + results ever ask for attention -->
+      <aside class="rightrail">
+        <div class="panel rr approvalcard">
+          <span class="label">waiting for you · 1</span>
+          Touch 1 → <b>jane@lakefront.example</b><br>
+          <span style="color:var(--dim)">"What your Lake Geneva lakefront is worth…"</span>
+          <div class="row"><button class="mini go">Approve &amp; send</button><button class="mini">Open</button></div>
+        </div>
+        <div class="panel rr">
+          <span class="label">results · this campaign</span>
+          <div class="stat"><span>mailed</span><b>412</b></div>
+          <div class="stat"><span>page visits</span><b>63</b></div>
+          <div class="stat"><span>valuations requested</span><b>11</b></div>
+          <div class="stat"><span>listings</span><b>2</b></div>
+        </div>
+        <div class="panel rr">
+          <span class="label">next move</span>
+          <span style="font-size:12.5px">11 valuation requests, 4 not yet called — draft mom's call sheet?</span>
+          <div class="row" style="display:flex;gap:7px;margin-top:9px"><button class="mini go">Do it</button><button class="mini">later</button></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.setAttribute('aria-selected', x === t ? 'true' : 'false'));
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === t.dataset.s));
+  }));
+</script>
