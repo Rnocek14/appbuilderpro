@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Waypoints, Loader2, ArrowLeft, Play, Sparkles, Upload, Send, Eye, FileText, FileImage,
-  ShieldCheck, ChevronRight, Circle,
+  ShieldCheck, ChevronRight, Circle, Orbit,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Badge, Spinner, Modal, Button } from '../components/ui';
@@ -74,9 +74,14 @@ export default function WorkWeb() {
       // webs in place — where selected still holds the OLD web's slug — re-selects correctly instead
       // of landing on a blank pane.
       if (w) {
-        setSelected((prev) => (prev && w.clusters.some((c) => c.slug === prev && c.charter))
-          ? prev
-          : (w.clusters.find((c) => c.charter)?.slug ?? null));
+        // Deep links from the System altitude carry ?area=<slug> — a planet click should land on
+        // exactly that production area, not the default first one.
+        const area = new URLSearchParams(window.location.search).get('area');
+        setSelected((prev) => {
+          if (prev && w.clusters.some((c) => c.slug === prev && c.charter)) return prev;
+          if (area && w.clusters.some((c) => c.slug === area && c.charter)) return area;
+          return w.clusters.find((c) => c.charter)?.slug ?? null;
+        });
       }
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not load this web.');
@@ -152,6 +157,11 @@ export default function WorkWeb() {
           <Waypoints size={20} className="text-forge-ember" />
           <h1 className="text-xl font-semibold text-forge-ink">{web.title}</h1>
           <div className="ml-auto flex items-center gap-2">
+            <Link
+              to={`/garvis/system/${worldId}`}
+              title="System altitude — this world as its solar system: every glow a count, every comet a next move"
+              className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+            ><Orbit size={13} /> System</Link>
             {intel?.state?.momentum && (
               <span
                 title={`${intel.state.momentum.evidence} — derived from counts, never an opinion`}

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus } from 'lucide-react';
+import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus, Orbit } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Spinner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -63,11 +63,18 @@ export default function WorkWebs() {
           <div className="mb-10 grid gap-3 sm:grid-cols-2">
             {webs.map((w) => (
               <Card key={w.worldId} interactive>
-                <button onClick={() => navigate(`/garvis/webs/${w.worldId}`)} className="flex w-full items-center gap-3 p-4 text-left">
-                  <Waypoints size={18} className="text-forge-ember" />
-                  <span className="flex-1 font-medium text-forge-ink">{w.title}</span>
-                  <ArrowRight size={16} className="text-forge-dim" />
-                </button>
+                <div className="flex w-full items-center gap-3 p-4">
+                  <button onClick={() => navigate(`/garvis/webs/${w.worldId}`)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                    <Waypoints size={18} className="shrink-0 text-forge-ember" />
+                    <span className="flex-1 truncate font-medium text-forge-ink">{w.title}</span>
+                  </button>
+                  <button
+                    onClick={() => navigate(`/garvis/system/${w.worldId}`)}
+                    title="System altitude — the orbital view of this world"
+                    className="shrink-0 text-forge-dim transition-colors hover:text-forge-ember"
+                  ><Orbit size={16} /></button>
+                  <ArrowRight size={16} className="shrink-0 text-forge-dim" />
+                </div>
               </Card>
             ))}
           </div>

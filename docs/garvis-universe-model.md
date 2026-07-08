@@ -309,3 +309,40 @@ view over real rows: planets from chartered clusters, comets from the Next Move 
 nebula ring from the capability registry) → **P3 Universe** (the full sky). Order is fixed;
 each altitude inherits a star that actually knows its objective, campaigns, warm leads, and
 discoveries.
+
+**P2 — SHIPPED on this branch (the System Altitude, honest by construction):**
+`/garvis/system/:worldId` renders one world as its solar system, and every element is a row:
+
+- **star** = the world + its Living State: momentum label (counted), corona intensity derived
+  from that label, objective and strategy from `world_intelligence`. No intelligence row →
+  the star says "never observed," it doesn't glow on faith.
+- **planets** = chartered clusters. **Position is a function of identity**: orbit ring =
+  archetype (fixed, semantic — intel innermost, vault outermost), bearing = hash of the
+  cluster's id. Adding or removing other clusters never moves a planet — "commitments stay
+  put" is enforced by the compiler AND by a verify check, not by convention.
+- **moons** = chartered child areas orbiting their chartered parent (Direct Mail's strategy/
+  lists/creative/send/follow-up/results ride around Direct Mail).
+- **planet glow** = counted rows only: artifacts created in the last 7 days (ember) or
+  approvals waiting (warn). No activity → unlit, whatever it "feels" like. Size = log of
+  total artifacts. Every body hover-shows the exact counts that produced its rendering.
+- **comets** = this world's Next Moves — the SAME ranked list the waking moment shows
+  (`loadRankedMoves` extracted from the digest so both altitudes share one engine; the
+  owner-global approvals queue stays at Universe altitude). Tail length = rank. Click = act.
+- **nebulae** = archetypes with no chartered area yet — capability as visible potential,
+  evidence: "no chartered X area in this world yet."
+- **orbit health** = the Living State's blockers and risks passed through VERBATIM (they were
+  built evidence-first; re-deriving them in the view would fork truth), plus the six-question
+  heartbeat and open questions in the cockpit panel.
+- **No-Theater motion:** planets do not revolve — nothing changed, nothing moves. The only
+  animation is a slow pulse on bodies with real activity this week, and it stands down under
+  prefers-reduced-motion. The legend states the contract: "Every glow is a count · hover
+  anything for its evidence · nothing here animates unless a row changed."
+
+Pure core `systemView.ts` (27-check verify: determinism, spatial-memory stability under
+cluster addition, glow honesty, nebula complement, world-scoping); impure `systemViewRun.ts`
+composes loadWeb + refresh-then-read World Intelligence + the shared move engine, adding only
+one query (per-cluster 7-day artifact counts — glow needs timestamps the loaded web doesn't
+carry). Planet click deep-links into the web with `?area=<slug>` so the transition lands on
+exactly that production area. Entry points: WorkWeb header "System" and an orbit button per
+web on the index. **Next: P3 — the Universe altitude** (all systems in one sky, gravity
+lifecycle from cluster maturity, the capability nebulae at full scale).

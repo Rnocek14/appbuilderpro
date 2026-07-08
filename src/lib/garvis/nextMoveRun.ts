@@ -37,10 +37,14 @@ export function markSeen(): void {
   try { localStorage.setItem(KEY_LAST_SEEN, new Date().toISOString()); } catch { /* best-effort */ }
 }
 
-export async function loadWakingDigest(name: string): Promise<WakingDigest> {
-  const now = new Date();
-  const lastSeen = localStorage.getItem(KEY_LAST_SEEN);
+export interface RankedMoves {
+  moves: NextMove[];
+  events: { event_type: string; subject: string; occurred_at: string; payload: Record<string, unknown> | null }[];
+}
 
+/** ONE Next Move engine, two altitudes: the waking moment consumes all of this; the System
+ *  altitude scopes `moves` to its world (comets) via movesForWorld(). Never fork the ranking. */
+export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
   const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ] = await Promise.all([
     supabase.from('approvals').select('id, kind, title, created_at').eq('status', 'pending').limit(50),
     supabase.from('replies').select('id, from_address, subject, classification, received_at, campaign_id').order('received_at', { ascending: false }).limit(25),
@@ -191,10 +195,21 @@ export async function loadWakingDigest(name: string): Promise<WakingDigest> {
     ...collectNaturalNext(naturals),
   ], now, readDismissals());
 
-  const lines = awayLines(events.map((e) => ({
-    event_type: e.event_type as string, subject: e.subject as string, occurred_at: e.occurred_at as string,
-    payload: (e.payload as Record<string, unknown> | null) ?? null,
-  })), lastSeen);
+  return {
+    moves,
+    events: events.map((e) => ({
+      event_type: e.event_type as string, subject: e.subject as string, occurred_at: e.occurred_at as string,
+      payload: (e.payload as Record<string, unknown> | null) ?? null,
+    })),
+  };
+}
+
+export async function loadWakingDigest(name: string): Promise<WakingDigest> {
+  const now = new Date();
+  const lastSeen = localStorage.getItem(KEY_LAST_SEEN);
+  const { moves, events } = await loadRankedMoves(now);
+
+  const lines = awayLines(events, lastSeen);
   const coldSky = events.length === 0 && moves.length === 0;
 
   return { greeting: greetingFor(now.getHours(), name), awayLines: coldSky ? [{ text: COLD_SKY_LINE, occurredAt: now.toISOString() }] : lines, coldSky, moves };
