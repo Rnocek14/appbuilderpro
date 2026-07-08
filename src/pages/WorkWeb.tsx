@@ -40,13 +40,21 @@ export default function WorkWeb() {
     try {
       const w = await loadWeb(worldId);
       setWeb(w);
-      if (w && !selected) setSelected(w.clusters.find((c) => c.charter)?.slug ?? null);
+      // Auto-select the first chartered area when nothing valid is selected. Guarding on "does the
+      // loaded web actually contain the selected slug" (not just "is selected set") means switching
+      // webs in place — where selected still holds the OLD web's slug — re-selects correctly instead
+      // of landing on a blank pane.
+      if (w) {
+        setSelected((prev) => (prev && w.clusters.some((c) => c.slug === prev && c.charter))
+          ? prev
+          : (w.clusters.find((c) => c.charter)?.slug ?? null));
+      }
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not load this web.');
     } finally {
       setLoading(false);
     }
-  }, [worldId, selected, toast]);
+  }, [worldId, toast]);
 
   useEffect(() => { void refresh(); }, [worldId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -179,10 +187,15 @@ export default function WorkWeb() {
           cluster={uploadFor}
           onClose={() => setUploadFor(null)}
           onDone={async (csv) => {
-            const res = await runTool(worldId, uploadFor!, 'upload-list', { csvText: csv });
-            toast(res.ok ? 'success' : 'error', res.message);
-            setUploadFor(null);
-            if (res.ok) await refresh();
+            try {
+              const res = await runTool(worldId, uploadFor!, 'upload-list', { csvText: csv });
+              toast(res.ok ? 'success' : 'error', res.message);
+              if (res.ok) await refresh();
+            } catch (e) {
+              toast('error', e instanceof Error ? e.message : 'Upload failed.');
+            } finally {
+              setUploadFor(null);
+            }
           }}
         />
       )}
@@ -193,10 +206,15 @@ export default function WorkWeb() {
           cluster={queueFor}
           onClose={() => setQueueFor(null)}
           onDone={async (email, name) => {
-            const res = await runTool(worldId, queueFor!, 'queue-sequence', { toEmail: email, contactName: name });
-            toast(res.ok ? 'success' : 'error', res.message);
-            setQueueFor(null);
-            if (res.ok) await refresh();
+            try {
+              const res = await runTool(worldId, queueFor!, 'queue-sequence', { toEmail: email, contactName: name });
+              toast(res.ok ? 'success' : 'error', res.message);
+              if (res.ok) await refresh();
+            } catch (e) {
+              toast('error', e instanceof Error ? e.message : 'Could not queue the email.');
+            } finally {
+              setQueueFor(null);
+            }
           }}
         />
       )}
@@ -295,7 +313,7 @@ function UploadListModal({ cluster, onClose, onDone }: { cluster: WebCluster; on
       />
       <div className="mt-3 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button onClick={async () => { setBusy(true); await onDone(csv); setBusy(false); }} loading={busy} disabled={!csv.trim()}>Import</Button>
+        <Button onClick={async () => { setBusy(true); try { await onDone(csv); } finally { setBusy(false); } }} loading={busy} disabled={!csv.trim()}>Import</Button>
       </div>
     </Modal>
   );
@@ -307,14 +325,14 @@ function QueueModal({ cluster, onClose, onDone }: { cluster: WebCluster; onClose
   const [busy, setBusy] = useState(false);
   return (
     <Modal open onClose={onClose} title={`Queue send — ${cluster.title}`}>
-      <p className="text-sm text-forge-dim">Garvis drafts the first email of the sequence and puts it in <strong className="text-forge-ink">Approvals</strong>. Nothing sends until you approve it.</p>
+      <p className="text-sm text-forge-dim">Garvis queues the <strong className="text-forge-ink">first</strong> email of the sequence in <strong className="text-forge-ink">Approvals</strong> — nothing sends until you approve it. The two curated follow-ups are saved as drafts to send when you're ready.</p>
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Recipient name (optional)"
         className="mt-3 w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink" />
       <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="recipient@example.com" type="email"
         className="mt-2 w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink" />
       <div className="mt-3 flex justify-end gap-2">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button onClick={async () => { setBusy(true); await onDone(email, name); setBusy(false); }} loading={busy} disabled={!email.trim()}>Queue for approval</Button>
+        <Button onClick={async () => { setBusy(true); try { await onDone(email, name); } finally { setBusy(false); } }} loading={busy} disabled={!email.trim()}>Queue for approval</Button>
       </div>
     </Modal>
   );

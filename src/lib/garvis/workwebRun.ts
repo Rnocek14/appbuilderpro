@@ -174,16 +174,19 @@ export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
     sentCount = (msgs ?? []).filter((m) => (m as { status: string }).status === 'sent').length;
     replyCount = (reps ?? []).length;
   }
-  // Pending approvals for this web = pending send_email approvals whose payload.campaign_id is ours.
-  let webPending = 0;
+  // Approvals for this web = send_email approvals whose payload.campaign_id is ours. We keep the REAL
+  // status of each (pending | approved | …) so the rollup reports both "waiting" and "approved"
+  // correctly — a web that sent 5 emails shows approvedActions:5, not 0.
+  const approvalStatuses: string[] = [];
   if (campIds.size) {
-    const { data: pendA } = await supabase.from('approvals').select('payload').eq('status', 'pending').eq('kind', 'send_email');
-    webPending = (pendA ?? []).filter((a) => {
+    const { data: appr } = await supabase.from('approvals')
+      .select('status, payload').eq('kind', 'send_email').in('status', ['pending', 'approved']);
+    for (const a of appr ?? []) {
       const cid = (a as { payload?: { campaign_id?: string } }).payload?.campaign_id;
-      return cid && campIds.has(cid);
-    }).length;
+      if (cid && campIds.has(cid)) approvalStatuses.push((a as { status: string }).status);
+    }
   }
-  const approvalStatuses = Array.from({ length: webPending }, () => 'pending');
+  const webPending = approvalStatuses.filter((s) => s === 'pending').length;
 
   const clusters: WebCluster[] = universe.graph.clusters.map((c) => {
     const meta = bySlug.get(c.id);
@@ -376,7 +379,7 @@ export async function runTool(
       const play = matchPlayForCluster(cluster.slug) ?? playById('lakefront-seller');
       if (!play) return { ok: false, message: 'No sequence is defined for this area yet.' };
       const approvalId = await queueSequenceStep0(uid, worldId, cluster, play, to, args?.contactName ?? null);
-      return { ok: true, message: 'First email queued for approval. Review it in Approvals.', approvalId };
+      return { ok: true, message: 'First email queued for approval. The two follow-ups are saved as drafts to send when you\'re ready.', approvalId };
     }
 
     default:
@@ -391,11 +394,13 @@ function matchPlayForCluster(slug: string): Play | null {
   return null;
 }
 
-/** Create the step-0 outreach message + approval for a sequence, bound to the web. Later steps are
- *  handled by the existing outreach-followups cron (which drafts bumps into the approval queue).
- *  Idempotent-ish: reuses the contact (upsert on owner+email) and reuses an already-pending campaign
- *  for the same (world, contact) so double-clicks don't queue the same first-touch twice. Every
- *  insert is error-checked so a failure surfaces instead of propagating null ids into the approval. */
+/** Queue the FIRST touch of a play's sequence for approval, and save the play's curated follow-up
+ *  touches (steps 1 & 2) as drafts on the same campaign so they carry the PLAY's copy — not the
+ *  generic outreach-followups cron's AI rewrite. The campaign is marked sequence_stopped so that cron
+ *  never auto-drafts off-brand bumps for it; the follow-ups are the user's to send when ready
+ *  (their copy is also visible as artifacts in the follow-up area).
+ *  Idempotent-ish: reuses the contact (upsert on owner+email) and an already-pending campaign for the
+ *  same (world, contact) so double-clicks don't queue the same opener twice. All inserts error-checked. */
 async function queueSequenceStep0(
   ownerId: string, worldId: string, cluster: WebCluster, play: Play, to: string, name: string | null,
 ): Promise<string> {
@@ -408,6 +413,7 @@ async function queueSequenceStep0(
   const contactId = (c as { id: string }).id;
 
   // Reuse an already-pending campaign for this recipient in this web (double-click / retry safety).
+  // sequence_stopped:true keeps the generic follow-up cron away — this play owns its own copy.
   let campaignId: string;
   const { data: openCamp } = await supabase.from('outreach_campaigns')
     .select('id').eq('owner_id', ownerId).eq('world_id', worldId).eq('contact_id', contactId).eq('state', 'pending_approval').maybeSingle();
@@ -416,7 +422,7 @@ async function queueSequenceStep0(
   } else {
     const { data: camp, error: campErr } = await supabase.from('outreach_campaigns').insert({
       owner_id: ownerId, world_id: worldId, contact_id: contactId,
-      kind: 'cold_site_pitch', state: 'pending_approval',
+      kind: 'cold_site_pitch', state: 'pending_approval', sequence_stopped: true,
     }).select('id').single();
     if (campErr || !camp) throw new Error(`Could not start the campaign: ${campErr?.message ?? 'unknown error'}`);
     campaignId = (camp as { id: string }).id;
@@ -431,19 +437,35 @@ async function queueSequenceStep0(
     if (openA) return (openA as { id: string }).id;
   }
 
-  const seq0 = play.emailSequence(DEFAULT_LAKE_GENEVA_CONTEXT)[0];
-  const body = seq0.body.replace(/\{\{first_name\}\}/g, name?.split(/\s+/)[0] ?? 'there');
+  const firstName = name?.split(/\s+/)[0] ?? 'there';
+  const seq = play.emailSequence(DEFAULT_LAKE_GENEVA_CONTEXT).map((e) => ({
+    ...e, body: e.body.replace(/\{\{first_name\}\}/g, firstName),
+  }));
+  const seq0 = seq[0];
   const { data: msg, error: mErr } = await supabase.from('outreach_messages').insert({
     owner_id: ownerId, campaign_id: campaignId, contact_id: contactId,
-    sequence_step: 0, subject: seq0.subject, body_text: body, to_address: to, status: 'draft',
+    sequence_step: 0, subject: seq0.subject, body_text: seq0.body, to_address: to, status: 'draft',
   }).select('id').single();
   if (mErr || !msg) throw new Error(`Could not draft the email: ${mErr?.message ?? 'unknown error'}`);
   const messageId = (msg as { id: string }).id;
 
+  // Save the play's curated follow-up touches (steps 1 & 2) as drafts carrying the PLAY's copy, so
+  // the generic cron never has to invent off-brand bumps. Only step 0 is queued for sending now.
+  for (const e of seq.slice(1)) {
+    const { data: exists } = await supabase.from('outreach_messages')
+      .select('id').eq('campaign_id', campaignId).eq('sequence_step', e.step).maybeSingle();
+    if (!exists) {
+      await supabase.from('outreach_messages').insert({
+        owner_id: ownerId, campaign_id: campaignId, contact_id: contactId,
+        sequence_step: e.step, subject: e.subject, body_text: e.body, to_address: to, status: 'draft',
+      });
+    }
+  }
+
   return enqueueApproval({
     kind: 'send_email',
-    title: `${play.title} → ${to}`,
-    preview: `${seq0.subject}\n\n${body}`,
+    title: `${play.title} → ${to} (touch 1 of ${seq.length})`,
+    preview: `${seq0.subject}\n\n${seq0.body}`,
     payload: { message_id: messageId, campaign_id: campaignId },
     requestedBy: 'worker',
   });
