@@ -19,6 +19,7 @@ import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
+import { buildFromWorld } from '../lib/garvis/buildBridge';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 
@@ -307,6 +308,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
 }) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const meta = cluster.charter ? ARCHETYPES[cluster.charter.archetype] : null;
   const [artifacts, setArtifacts] = useState<StudioArtifact[]>([]);
   const [files, setFiles] = useState<ClusterFile[]>([]);
@@ -349,6 +351,18 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           the kit feeds the studio chat voice and clears the brand-empty blocker. */}
       {cluster.charter?.archetype === 'vault' && (
         <BrandKitPanel worldId={worldId} onSaved={onChanged} />
+      )}
+
+      {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
+          into ONE brief and open the app builder. Real photos, never placeholders. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'landing' && (
+        <button
+          onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
+          className="mt-4 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px"
+          title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
+        >
+          <Sparkles size={15} /> Build the website — with this world's artwork
+        </button>
       )}
 
       {/* Tools */}

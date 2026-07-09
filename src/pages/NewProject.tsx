@@ -5,6 +5,7 @@ import {
   GraduationCap, Home, Briefcase, ShieldCheck, ClipboardList, Compass, type LucideIcon,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { bindProjectToWorld, readWorldHandoff, clearWorldHandoff, type WorldBuildHandoff } from '../lib/garvis/buildBridge';
 import { useProjects } from '../hooks/useProjectData';
 import { startGeneration, draftGenerationPlan, generateDesignDirections, type DesignDirection } from '../lib/aiClient';
 import { DirectionPicker } from '../components/DirectionPicker';
@@ -41,11 +42,13 @@ export default function NewProject() {
   // for a URL, so it rides in localStorage; written to the project Brain on build so it persists into
   // every future edit, and folded into the first generation so the app is built FROM the exploration.
   const briefRef = useRef('');
+  const worldHandoffRef = useRef<WorldBuildHandoff | null>(null);
 
   // On mount: a "Build this" handoff arrives as ?from=constellation with a brief in localStorage; a
   // lighter handoff (or legacy) arrives as ?idea=. Consume once, then clear so a refresh stays clean.
   useEffect(() => {
-    if (searchParams.get('from') === 'constellation') {
+    const from = searchParams.get('from');
+    if (from === 'constellation' || from === 'world') {
       try {
         const raw = localStorage.getItem('ff:build-brief');
         if (raw) {
@@ -53,6 +56,9 @@ export default function NewProject() {
           localStorage.removeItem('ff:build-brief');
           if (b.prompt) setPrompt(b.prompt);
           briefRef.current = b.brief ?? '';
+          // A WORLD build additionally binds after creation: assets copied in, the manifest
+          // written, provenance stamped, and the app tracked back into the world's cluster.
+          if (from === 'world') worldHandoffRef.current = readWorldHandoff();
           setSeeded(true);
           return;
         }
@@ -130,6 +136,13 @@ export default function NewProject() {
       // Persist the exploration brief into the project Brain — it now informs every future edit,
       // so you never have to re-explain the rabbit hole you built this from.
       if (briefRef.current) { try { await saveBrain(project.id, briefRef.current); } catch { /* best-effort */ } }
+
+      // World build: bind the project back to its world (assets, manifest, provenance, artifact).
+      if (worldHandoffRef.current) {
+        try { await bindProjectToWorld(project.id, worldHandoffRef.current); } catch { /* best-effort */ }
+        clearWorldHandoff();
+        worldHandoffRef.current = null;
+      }
 
       if (planFirst) {
         // Propose a plan first — generate nothing yet.
