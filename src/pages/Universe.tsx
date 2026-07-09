@@ -14,7 +14,20 @@ import { AppShell } from '../components/layout/AppShell';
 import { Spinner } from '../components/ui';
 import { cn, timeAgo } from '../lib/utils';
 import { loadUniverseScene } from '../lib/garvis/universeViewRun';
-import { activityAt, BAND_R, BAND_LABEL, type UniverseScene, type WorldBody } from '../lib/garvis/universeView';
+import { activityAt, BAND_R, BAND_LABEL, hash32, type UniverseScene, type WorldBody } from '../lib/garvis/universeView';
+import { loadWorld } from '../lib/garvis/universe';
+
+// A deterministic starfield — pure decoration BY DESIGN (fixed seed, never moves, claims no
+// state); the honest elements sit on top of it. 140 points from a hash, same sky every visit.
+const STARS = Array.from({ length: 140 }, (_, i) => {
+  const h = hash32(`star-${i}`);
+  return {
+    x: h % 600,
+    y: (h >>> 9) % 600,
+    r: 0.4 + ((h >>> 19) % 8) / 10,
+    o: 0.10 + ((h >>> 23) % 28) / 100,
+  };
+});
 
 const CX = 300;
 const SCALE = 272;
@@ -91,17 +104,40 @@ export default function Universe() {
           <span className="text-xs text-forge-dim">
             {scene.bodies.length} world{scene.bodies.length === 1 ? '' : 's'} · {systems} system{systems === 1 ? '' : 's'} · {scene.filaments.length} filament{scene.filaments.length === 1 ? '' : 's'}
           </span>
+          {scene.bodies.length === 0 && (
+            <span className="text-xs text-forge-warn">
+              — an empty sky is honest: no worlds on record yet. <Link to="/garvis/explore" className="text-forge-ember hover:underline">Explore a rabbithole</Link> or <Link to="/garvis/webs" className="text-forge-ember hover:underline">draft a world from intent</Link>.
+            </span>
+          )}
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
           {/* The sky */}
           <div className="relative overflow-hidden rounded-2xl border border-forge-border bg-forge-bg">
             <svg viewBox="0 0 600 600" className="block h-auto w-full" role="img" aria-label="Universe — every world in one sky">
+              <defs>
+                <filter id="u-glow" x="-120%" y="-120%" width="340%" height="340%">
+                  <feGaussianBlur stdDeviation="5" result="b" />
+                  <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                </filter>
+                <radialGradient id="u-vignette">
+                  <stop offset="55%" stopColor="#0C0E13" stopOpacity="0" />
+                  <stop offset="100%" stopColor="#05060A" stopOpacity="0.85" />
+                </radialGradient>
+              </defs>
+
+              {/* The deep field — fixed-seed decoration; every honest element sits above it */}
+              <rect width="600" height="600" fill="#0A0C11" />
+              {STARS.map((s, i) => (
+                <circle key={i} cx={s.x} cy={s.y} r={s.r} fill="#E8E6E1" opacity={s.o} />
+              ))}
+              <rect width="600" height="600" fill="url(#u-vignette)" pointerEvents="none" />
+
               {/* Bands: structural commitment, inner → outer */}
               {( [0, 1, 2] as const ).map((band) => (
                 <g key={band}>
                   <circle cx={CX} cy={CX} r={BAND_R[band] * SCALE} fill="none" stroke="#262B3A" strokeWidth="1" strokeDasharray="2 6" />
-                  <text x={CX} y={CX - BAND_R[band] * SCALE - 5} textAnchor="middle" fontSize="9" fill="#8B90A0" opacity="0.7">{BAND_LABEL[band]}</text>
+                  <text x={CX} y={CX - BAND_R[band] * SCALE - 5} textAnchor="middle" fontSize="8" letterSpacing="2" fill="#8B90A0" opacity="0.75">{BAND_LABEL[band].toUpperCase()}</text>
                 </g>
               ))}
 
@@ -112,7 +148,8 @@ export default function Universe() {
                 return (
                   <g key={f.key}>
                     <title>{`${f.title}\n${f.evidence}`}</title>
-                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#B98CE0" strokeWidth={0.6 + 1.8 * f.score} opacity={0.3 + 0.3 * f.score} />
+                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#B98CE0" strokeWidth={1.4 + 2.6 * f.score} opacity={0.15 + 0.15 * f.score} filter="url(#u-glow)" />
+                    <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#B98CE0" strokeWidth={0.6 + 1.8 * f.score} opacity={0.35 + 0.3 * f.score} />
                   </g>
                 );
               })}
@@ -136,24 +173,30 @@ export default function Universe() {
                 const p = posOf.get(b.id)!;
                 const activity = glow.get(b.id) ?? 0;
                 const fill = b.momentum ? MOMENTUM_HEX[b.momentum.label] : UNOBSERVED_HEX;
+                const open = () => {
+                  if (b.localOnly) { void loadWorld(b.id).then(() => navigate('/garvis/explore')); return; }
+                  if (b.isSystem) { navigate(`/garvis/system/${b.id}`); return; }
+                  setSelected(b);
+                };
                 return (
-                  <g
-                    key={b.id}
-                    className="cursor-pointer"
-                    onClick={() => (b.isSystem ? navigate(`/garvis/system/${b.id}`) : setSelected(b))}
-                  >
-                    <title>{`${b.title} (${BAND_LABEL[b.band]})\n${b.massEvidence}${b.momentum ? `\nmomentum: ${b.momentum.label} (${b.momentum.evidence})` : '\nnever observed — open it once to compile its state'}\n${activity} recorded event${activity === 1 ? '' : 's'} in the 7 days before ${atIso.slice(0, 10)}`}</title>
+                  <g key={b.id} className="cursor-pointer" onClick={open}>
+                    <title>{`${b.title} (${BAND_LABEL[b.band]}${b.localOnly ? ' · local' : ''})\n${b.massEvidence}${b.momentum ? `\nmomentum: ${b.momentum.label} (${b.momentum.evidence})` : b.localOnly ? '\nlocal rabbithole — click to open it in Explore' : '\nnever observed — open it once to compile its state'}\n${activity} recorded event${activity === 1 ? '' : 's'} in the 7 days before ${atIso.slice(0, 10)}`}</title>
                     {activity > 0 && (
                       <circle
                         cx={p.x} cy={p.y} r={b.size + 6 + Math.min(6, activity)}
-                        fill={fill} opacity={Math.min(0.4, 0.1 + 0.05 * activity)}
+                        fill={fill} opacity={Math.min(0.4, 0.1 + 0.05 * activity)} filter="url(#u-glow)"
                         className={isNow && !reduced ? 'animate-pulse' : undefined}
                       />
                     )}
-                    <circle cx={p.x} cy={p.y} r={b.size} fill={fill} opacity={isNow ? (b.momentum ? 0.95 : 0.5) : 0.3} />
-                    {b.isSystem && <circle cx={p.x} cy={p.y} r={b.size + 3} fill="none" stroke={fill} strokeWidth="0.8" opacity="0.5" />}
+                    <circle
+                      cx={p.x} cy={p.y} r={b.size} fill={fill}
+                      opacity={isNow ? (b.momentum ? 0.95 : b.localOnly ? 0.4 : 0.55) : 0.3}
+                      filter={b.momentum ? 'url(#u-glow)' : undefined}
+                    />
+                    {b.isSystem && <circle cx={p.x} cy={p.y} r={b.size + 3.5} fill="none" stroke={fill} strokeWidth="0.9" opacity="0.55" />}
+                    {b.localOnly && <circle cx={p.x} cy={p.y} r={b.size + 3} fill="none" stroke="#8B90A0" strokeWidth="0.7" strokeDasharray="2 3" opacity="0.6" />}
                     {(b.isSystem || showAllLabels) && (
-                      <text x={p.x} y={p.y + b.size + 12} textAnchor="middle" fontSize="10" fill="#8B90A0">{b.title}</text>
+                      <text x={p.x} y={p.y + b.size + 12} textAnchor="middle" fontSize="10" fill={b.isSystem ? '#C9CDD9' : '#8B90A0'}>{b.title}</text>
                     )}
                   </g>
                 );

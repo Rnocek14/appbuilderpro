@@ -6,6 +6,7 @@
 // altitudes); events come from the append-only mind_events record, world-tagged only.
 
 import { supabase } from '../supabase';
+import { listWorlds as listAllWorlds } from './universe';
 import { loadRankedMoves } from './nextMoveRun';
 import {
   compileUniverseScene,
@@ -66,6 +67,27 @@ export async function loadUniverseScene(): Promise<UniverseScene> {
     momentum: momentumByWorld.get(w.id as string) ?? null,
     updated_at: w.updated_at as string,
   }));
+
+  // The universe is ALL the user's worlds — including explorer rabbitholes that live only in
+  // this browser's local store and were never synced. They are real thought; the sky shows them
+  // honestly labeled as local. (listWorlds merges local + cloud metas; we add local-only ones.)
+  try {
+    const metas = await listAllWorlds();
+    const known = new Set(worldsIn.map((w) => w.id));
+    for (const m of metas) {
+      if (m.remote || known.has(m.id)) continue;
+      worldsIn.push({
+        id: m.id,
+        title: m.title,
+        charteredClusters: 0,
+        clusters: m.clusterCount ?? 0,
+        artifacts: 0,
+        momentum: null,
+        updated_at: m.updatedAt,
+        localOnly: true,
+      });
+    }
+  } catch { /* the cloud sky stands on its own */ }
 
   // Insight refs → worlds. Three resolvable subject types; anything else is skipped, never
   // guessed: document → documents.world_id, cluster → the fetch above, artifact → its cluster.

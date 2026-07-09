@@ -36,6 +36,9 @@ export interface UniverseWorldIn {
   artifacts: number;          // made things (work mass)
   momentum: { label: MomentumLabel; evidence: string } | null; // from world_intelligence; null = never observed
   updated_at: string;
+  /** true = lives only in this browser's local store (an explorer rabbithole never synced) —
+   *  drawn honestly as part of the sky, labeled as local. */
+  localOnly?: boolean;
 }
 
 /** An insight whose refs the impure layer resolved to world ids (via documents/clusters). */
@@ -79,6 +82,7 @@ export interface WorldBody {
   r: number;
   size: number;
   isSystem: boolean;
+  localOnly: boolean;
   momentum: { label: MomentumLabel; evidence: string } | null;
   massEvidence: string;       // the hover line: the exact counts behind band and size
   updated_at: string;
@@ -128,6 +132,7 @@ function massEvidence(w: UniverseWorldIn): string {
     `${w.artifacts} artifact${w.artifacts === 1 ? '' : 's'}`,
   ];
   if (w.charteredClusters > 0) parts.unshift(`${w.charteredClusters} chartered area${w.charteredClusters === 1 ? '' : 's'}`);
+  if (w.localOnly) parts.push('local only — open it in Explore to sync');
   return parts.join(', ');
 }
 
@@ -204,6 +209,7 @@ export function compileUniverseScene(input: UniverseSceneInput): UniverseScene {
         angleDeg: angleOf(w.id), r: BAND_R[band],
         size: massOf(w),
         isSystem: band === 0,
+        localOnly: w.localOnly ?? false,
         momentum: w.momentum,
         massEvidence: massEvidence(w),
         updated_at: w.updated_at,

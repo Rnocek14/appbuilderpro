@@ -15,7 +15,7 @@ import { exploreComplete } from './explorerAI';
 import { recordMindEvent } from './mindStore';
 import { enqueueApproval } from './execution';
 import {
-  newUniverse, syncUniverse, loadWorld, listWorlds as listUniverseWorlds,
+  newUniverse, syncUniverseImmediate, loadWorld, listWorlds as listUniverseWorlds,
   type Universe,
 } from './universe';
 import { normalizeGraph, slugify, type ClusterGraph, type Cluster, type Artifact } from './clustering';
@@ -100,14 +100,16 @@ export async function instantiateWeb(templateOrId: WebTemplate | string): Promis
 
   const { graph, charters } = templateToGraph(t);
   const universe: Universe = newUniverse(t.title, graph, t.nodes[0]?.slug ?? null);
-  // syncUniverse returns null if another universe sync is mid-flight (its in-flight guard). That's
-  // transient, not a real failure — retry once after a beat before giving up.
-  let worldId = await syncUniverse(universe);
-  if (!worldId) {
-    await new Promise((r) => setTimeout(r, 400));
-    worldId = await syncUniverse(universe);
+  // A NEW world touches only its own rows, so it bypasses the explorer's one-at-a-time sync
+  // guard entirely (syncUniverseImmediate) — creating a web never waits behind a background
+  // save of some other world. Retries with backoff cover transient network failures.
+  let worldId: string | null = null;
+  for (const wait of [0, 600, 1500]) {
+    if (wait) await new Promise((r) => setTimeout(r, wait));
+    worldId = await syncUniverseImmediate(universe);
+    if (worldId) break;
   }
-  if (!worldId) throw new Error('Could not save the web right now — another sync was in progress. Try again in a moment.');
+  if (!worldId) throw new Error('Could not save the web — check your connection and try again.');
 
   await persistCharters(worldId, charters);
   await recordMindEvent(uid, {

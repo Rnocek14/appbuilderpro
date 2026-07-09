@@ -71,6 +71,7 @@ export default function App() {
               <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
               <Route path="/garvis/system/:worldId" element={<Protected><SystemAltitude /></Protected>} />
               <Route path="/garvis/universe" element={<Protected><Universe /></Protected>} />
+              <Route path="/garvis/explore" element={<Protected><ClusterSpike /></Protected>} />
               <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
               <Route path="/new" element={<Protected><NewProject /></Protected>} />
               <Route path="/import" element={<Protected><ImportProject /></Protected>} />
