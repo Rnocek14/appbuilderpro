@@ -79,7 +79,7 @@ RULES:
 // ---------------------------------------------------------------------------
 
 export interface StudioArtifactCtx { slug: string; kind: string; title: string; detail: string | null; revision: number }
-export interface StudioFileCtx { name: string; kind: string }
+export interface StudioFileCtx { name: string; kind: string; caption?: string | null }
 export interface BrandKitCtx {
   name?: string; tone?: string | null; palette?: string[]; fonts?: string[]; compliance_line?: string | null;
 }
@@ -122,7 +122,7 @@ export function compileStudioContext(input: StudioContextInput, budgetBytes = 70
   }
   if (input.audience) head.push(`AUDIENCE: ${input.audience.lists} list(s), ${input.audience.contacts} contact(s)`);
   if (input.results) head.push(`RESULTS: sent ${input.results.sent}, replies ${input.results.replies}, awaiting approval ${input.results.pendingApprovals}`);
-  if (input.files.length) head.push(`FILES: ${input.files.slice(0, 12).map((f) => f.name).join(', ')}`);
+  if (input.files.length) head.push(`FILES: ${input.files.slice(0, 12).map((f) => f.caption ? `${f.name} — ${f.caption.slice(0, 100)}` : f.name).join(' | ')}`);
 
   const headText = head.join('\n');
   const remaining = Math.max(600, budgetBytes - headText.length - 40);

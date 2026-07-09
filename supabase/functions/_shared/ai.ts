@@ -129,6 +129,81 @@ export async function complete(
   });
 }
 
+export interface VisionImage { mediaType: string; base64: string }
+
+/**
+ * Vision completion: one user turn of text + images (base64). The single seam every edge
+ * function inherits for seeing pixels — Anthropic content blocks or OpenAI-compatible
+ * image_url data URIs. Same retry/pricing discipline as complete().
+ */
+export async function completeVision(
+  system: string,
+  userText: string,
+  images: VisionImage[],
+  opts: { provider?: AIProvider; model?: string; maxTokens?: number } = {},
+): Promise<AIResult> {
+  const cfg = getProviderConfig();
+  const provider = opts.provider ?? cfg.provider;
+  const model = opts.model ?? cfg.model;
+  const maxTokens = opts.maxTokens ?? 1024;
+
+  return withRetry(async () => {
+    if (provider === 'anthropic') {
+      const content = [
+        ...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: im.base64 } })),
+        { type: 'text', text: userText },
+      ];
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '',
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content }] }),
+      });
+      if (!res.ok) throw new Error(`anthropic ${res.status}: ${await res.text()}`);
+      const data = await res.json();
+      const text = (data.content ?? [])
+        .filter((b: { type: string }) => b.type === 'text')
+        .map((b: { text: string }) => b.text)
+        .join('\n');
+      const inTok = data.usage?.input_tokens ?? 0;
+      const outTok = data.usage?.output_tokens ?? 0;
+      return { text, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, inTok, outTok) };
+    }
+
+    // OpenAI-compatible providers (openai / openrouter / local)
+    const base =
+      provider === 'openai' ? 'https://api.openai.com/v1'
+      : provider === 'openrouter' ? 'https://openrouter.ai/api/v1'
+      : (Deno.env.get('LOCAL_AI_BASE_URL') ?? 'http://localhost:11434/v1');
+    const key =
+      provider === 'openai' ? Deno.env.get('OPENAI_API_KEY')
+      : provider === 'openrouter' ? Deno.env.get('OPENROUTER_API_KEY')
+      : 'local';
+    const content = [
+      { type: 'text', text: userText },
+      ...images.map((im) => ({ type: 'image_url', image_url: { url: `data:${im.mediaType};base64,${im.base64}` } })),
+    ];
+    const res = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content }] }),
+    });
+    if (!res.ok) throw new Error(`${provider} ${res.status}: ${await res.text()}`);
+    const data = await res.json();
+    const inTok = data.usage?.prompt_tokens ?? 0;
+    const outTok = data.usage?.completion_tokens ?? 0;
+    return {
+      text: data.choices?.[0]?.message?.content ?? '',
+      inputTokens: inTok,
+      outputTokens: outTok,
+      costUsd: estimateCost(model, inTok, outTok),
+    };
+  });
+}
+
 /**
  * Streaming completion. Forwards each text delta to onDelta as it arrives and
  * returns the full text + token usage once the stream ends. Single attempt — the

@@ -179,6 +179,25 @@ export async function syncUniverse(u: Universe): Promise<string | null> {
   if (syncing) { pending = u; return null; }
   syncing = true;
   try {
+    return await doSync(u, uid);
+  } finally {
+    syncing = false;
+    if (pending) { const nxt = pending; pending = null; void syncUniverse(nxt); }
+  }
+}
+
+/** Sync WITHOUT the shared in-flight guard. For instantiating a NEW world (workweb genesis):
+ *  a fresh world touches only its own rows, so it never contends with an explorer save of a
+ *  different world — making it wait in that line was why "another sync in progress" errors hit
+ *  users who just clicked Create. Do NOT use this for re-saving an existing explorer world. */
+export async function syncUniverseImmediate(u: Universe): Promise<string | null> {
+  const uid = await sessionUserId();
+  if (!uid) return null;
+  return doSync(u, uid);
+}
+
+async function doSync(u: Universe, uid: string): Promise<string | null> {
+  try {
     // 1. the world row (insert on first push; the touch trigger keeps updated_at fresh on update)
     let worldId = isWorldUuid(u.id) ? u.id : null;
     if (worldId) {
@@ -242,9 +261,6 @@ export async function syncUniverse(u: Universe): Promise<string | null> {
     return worldId;
   } catch {
     return null; // best-effort: local store already has it
-  } finally {
-    syncing = false;
-    if (pending) { const nxt = pending; pending = null; void syncUniverse(nxt); }
   }
 }
 

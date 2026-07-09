@@ -15,7 +15,7 @@
 // Secrets: shares AI_PROVIDER/AI_MODEL + ANTHROPIC_API_KEY/OPENAI_API_KEY, and EMBEDDINGS_API_KEY.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, corsHeaders, parseJson, modelForPlan } from '../_shared/ai.ts';
+import { complete, completeVision, corsHeaders, parseJson, modelForPlan } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { embedOne, embeddingsConfigured, toVectorLiteral, EMBED_MODEL } from '../_shared/embeddings.ts';
 
@@ -29,12 +29,35 @@ interface Body {
   storage_path?: string;
   app_id?: string;
   world_id?: string;
+  cluster_id?: string;
+  /** G2: images enter the brain as pixels — client sends a downscaled base64 (<=~1.5MB). */
+  image_base64?: string;
 }
 
 const SUMMARY_SYSTEM = `You classify a document for a personal AI "second brain". Given the title and
 text, return STRICT JSON only:
-{"summary": "1-3 plain sentences on what this is and why it matters", "concepts": ["<=8 key entities/topics, lowercase"]}
+{"summary": "1-3 plain sentences on what this is and why it matters",
+ "concepts": ["<=8 key entities/topics, lowercase"],
+ "why_matters": "one sentence: what decision or work this could change — grounded ONLY in the text",
+ "question": "one question this raises that the text cannot answer, or null"}
 No preamble, no markdown fences. Never invent facts not in the text.`;
+
+// G2 — photos are not just assets, they are understanding. The caption is the image's text
+// body: it gets summarized-as-caption, embedded, classified, and recommended in ONE pass.
+const VISION_SYSTEM = `You are cataloguing an image for a business's living asset library (often
+artwork, products, or process shots). Look at the image and return STRICT JSON only:
+{"caption": "1-2 sentences: what this actually shows",
+ "subject": "the main subject, short",
+ "style": "visual style, short (e.g. abstract geometric, photoreal, hand-drawn)",
+ "medium": "what it appears to be made with/of, or null",
+ "colors": ["<=4 dominant colors, plain words"],
+ "mood": "one or two words",
+ "themes": ["<=5 lowercase theme tags"],
+ "suggested_use": ["subset of: website, social, video, print — where this image would work best"],
+ "quality_note": "one honest note: hero-grade / usable / weak (blurry, dark, cluttered) and why",
+ "why_matters": "one sentence: what this adds to the business's asset base",
+ "question": "one question worth asking the owner about this image, or null"}
+Describe ONLY what is visible. Never invent an artist, title, price, or location. No markdown fences.`;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -53,7 +76,9 @@ Deno.serve(async (req) => {
     const body = (await req.json().catch(() => ({}))) as Body;
     const title = (body.title ?? '').trim() || 'Untitled document';
     const text = (body.extracted_text ?? '').trim();
-    if (!text && !body.source_url) return json({ error: 'extracted_text or source_url is required.' }, 400);
+    const isImage = !!body.image_base64 && (body.mime ?? '').startsWith('image/');
+    if (!text && !body.source_url && !isImage) return json({ error: 'extracted_text, image_base64, or source_url is required.' }, 400);
+    if (body.image_base64 && body.image_base64.length > 2_400_000) return json({ error: 'Image too large — the client should downscale before ingest.' }, 413);
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
@@ -69,31 +94,64 @@ Deno.serve(async (req) => {
       source_url: body.source_url ?? null,
       mime: body.mime ?? null,
       bytes: body.bytes ?? null,
+      cluster_id: body.cluster_id ?? null,
       extracted_text: text.slice(0, 200000),
       status: 'uploaded',
     }).select('id').single();
     if (insErr || !docRow) return json({ error: `Could not save document: ${insErr?.message}` }, 500);
     const documentId = (docRow as { id: string }).id;
 
-    // 2) Summarize + extract concepts (best-effort — a document is still useful un-summarized).
+    // 2) Understand the upload — ONE metered call whether text or pixels. Text: summary +
+    //    concepts + why-this-matters. Image: vision caption + style/theme/mood/use + the same
+    //    why-this-matters discipline. Best-effort — an upload is still kept un-enriched.
     let summary = '';
     let concepts: string[] = [];
-    if (text) {
+    let whyMatters: string | null = null;
+    let openQuestion: string | null = null;
+    let vision: Record<string, unknown> | null = null;
+    if (text || isImage) {
       try {
         await checkCredits(admin, user.id, 'discover');
         const plan = await getUserPlan(admin, user.id);
         const m = modelForPlan(plan);
-        const r = await complete(
-          [
-            { role: 'system', content: SUMMARY_SYSTEM },
-            { role: 'user', content: `TITLE: ${title}\n\nTEXT:\n${text.slice(0, 24000)}` },
-          ],
-          { provider: m.provider, model: m.model, maxTokens: 500 },
-        );
-        await spendCredits(admin, user.id, { costUsd: r.costUsd, kind: 'discover', provider: m.provider, model: m.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens });
-        const parsed = parseJson<{ summary?: string; concepts?: string[] }>(r.text) ?? {};
-        summary = (parsed.summary ?? '').trim().slice(0, 1000);
-        concepts = (parsed.concepts ?? []).filter((c) => typeof c === 'string').map((c) => c.toLowerCase().trim()).filter(Boolean).slice(0, 8);
+        const strArr = (v: unknown, cap: number) =>
+          (Array.isArray(v) ? v : []).filter((x) => typeof x === 'string').map((x: string) => x.toLowerCase().trim()).filter(Boolean).slice(0, cap);
+        if (isImage) {
+          const r = await completeVision(
+            VISION_SYSTEM,
+            `TITLE: ${title}\nCatalogue this image. JSON only.`,
+            [{ mediaType: body.mime ?? 'image/jpeg', base64: body.image_base64! }],
+            { provider: m.provider, model: m.model, maxTokens: 600 },
+          );
+          await spendCredits(admin, user.id, { costUsd: r.costUsd, kind: 'discover', provider: m.provider, model: m.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens });
+          const p = parseJson<Record<string, unknown>>(r.text) ?? {};
+          summary = String(p.caption ?? '').trim().slice(0, 1000);
+          const themes = strArr(p.themes, 5);
+          concepts = [...new Set([...themes, String(p.style ?? '').toLowerCase().trim(), String(p.medium ?? '').toLowerCase().trim()])].filter(Boolean).slice(0, 8);
+          whyMatters = String(p.why_matters ?? '').trim().slice(0, 400) || null;
+          openQuestion = String(p.question ?? '').trim().slice(0, 300) || null;
+          const uses = strArr(p.suggested_use, 4).filter((u) => ['website', 'social', 'video', 'print'].includes(u));
+          vision = {
+            subject: String(p.subject ?? '').slice(0, 120), style: String(p.style ?? '').slice(0, 120),
+            medium: String(p.medium ?? '').slice(0, 120) || null, colors: strArr(p.colors, 4),
+            mood: String(p.mood ?? '').slice(0, 60), themes, suggested_use: uses,
+            quality_note: String(p.quality_note ?? '').slice(0, 200),
+          };
+        } else {
+          const r = await complete(
+            [
+              { role: 'system', content: SUMMARY_SYSTEM },
+              { role: 'user', content: `TITLE: ${title}\n\nTEXT:\n${text.slice(0, 24000)}` },
+            ],
+            { provider: m.provider, model: m.model, maxTokens: 500 },
+          );
+          await spendCredits(admin, user.id, { costUsd: r.costUsd, kind: 'discover', provider: m.provider, model: m.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens });
+          const parsed = parseJson<{ summary?: string; concepts?: string[]; why_matters?: string; question?: string }>(r.text) ?? {};
+          summary = (parsed.summary ?? '').trim().slice(0, 1000);
+          concepts = (parsed.concepts ?? []).filter((c) => typeof c === 'string').map((c) => c.toLowerCase().trim()).filter(Boolean).slice(0, 8);
+          whyMatters = (parsed.why_matters ?? '').trim().slice(0, 400) || null;
+          openQuestion = (parsed.question ?? '').trim().slice(0, 300) || null;
+        }
       } catch (e) {
         if (e instanceof InsufficientCreditsError) {
           // Not fatal: keep the raw document, skip enrichment.
@@ -107,8 +165,10 @@ Deno.serve(async (req) => {
     let connections: { subject_type: string; subject_id: string; similarity: number; content: string }[] = [];
     let insightId: string | null = null;
 
-    if (embeddingsConfigured()) {
-      const embedText = [title, summary, text.slice(0, 6000)].filter(Boolean).join('\n\n');
+    if (embeddingsConfigured() && (text || summary)) {
+      // Images embed their CAPTION + themes — the caption is the image's text body.
+      const visionTags = vision ? [vision.subject, vision.style, (vision.themes as string[]).join(' ')].filter(Boolean).join(' · ') : '';
+      const embedText = [title, summary, visionTags, text.slice(0, 6000)].filter(Boolean).join('\n\n');
       const vec = await embedOne(embedText);
       if (vec) {
         await admin.from('embeddings').upsert({
@@ -154,13 +214,30 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Why-this-matters feeds the world's heartbeat: the question lands in open_questions
+    // (capped at 5) so fresh uploads sharpen tomorrow morning, not just the archive.
+    const homeWorld = body.world_id ?? suggestedWorldId;
+    if (openQuestion && homeWorld) {
+      const { data: intel } = await admin.from('world_intelligence')
+        .select('id, open_questions').eq('world_id', homeWorld).maybeSingle();
+      if (intel) {
+        const qs = [...new Set([openQuestion, ...(((intel.open_questions as string[] | null) ?? []))])].slice(0, 5);
+        await admin.from('world_intelligence').update({ open_questions: qs }).eq('id', intel.id);
+      }
+    }
+
     // Finalize: record summary/concepts + the classification proposal in meta. world_id stays as the
     // user provided (or null) — the SUGGESTION is a proposal, not an auto-file.
     await admin.from('documents').update({
       summary: summary || null,
       concepts,
       status: 'classified',
-      meta: { suggested_world_id: suggestedWorldId, connection_count: connections.length },
+      meta: {
+        suggested_world_id: suggestedWorldId, connection_count: connections.length,
+        ...(vision ? { vision } : {}),
+        ...(whyMatters ? { why_matters: whyMatters } : {}),
+        ...(openQuestion ? { open_question: openQuestion } : {}),
+      },
     }).eq('id', documentId);
 
     return json({
@@ -168,6 +245,9 @@ Deno.serve(async (req) => {
       status: 'classified',
       summary,
       concepts,
+      vision,
+      why_matters: whyMatters,
+      open_question: openQuestion,
       suggested_world_id: suggestedWorldId,
       connections,
       insight_id: insightId,

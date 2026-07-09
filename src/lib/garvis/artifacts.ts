@@ -91,7 +91,7 @@ export async function createArtifact(input: {
 // Cluster files (binary in project-assets; reference row here)
 // ---------------------------------------------------------------------------
 
-export interface ClusterFile { id: string; name: string; url: string; kind: string; bytes: number | null; created_at: string }
+export interface ClusterFile { id: string; name: string; url: string; kind: string; bytes: number | null; caption: string | null; label: string | null; created_at: string }
 
 const fileKind = (f: File): 'image' | 'doc' | 'csv' | 'other' =>
   f.type.startsWith('image/') ? 'image'
@@ -101,14 +101,14 @@ const fileKind = (f: File): 'image' | 'doc' | 'csv' | 'other' =>
 export async function listClusterFiles(clusterId: string): Promise<ClusterFile[]> {
   const { data, error } = await supabase
     .from('cluster_files')
-    .select('id, name, url, kind, bytes, created_at')
+    .select('id, name, url, kind, bytes, caption, label, created_at')
     .eq('cluster_id', clusterId)
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return (data ?? []) as ClusterFile[];
 }
 
-export async function uploadClusterFile(clusterId: string, file: File): Promise<ClusterFile> {
+export async function uploadClusterFile(clusterId: string, file: File, meta?: { caption?: string | null; label?: string | null }): Promise<ClusterFile> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
@@ -120,7 +120,8 @@ export async function uploadClusterFile(clusterId: string, file: File): Promise<
   const { data, error } = await supabase.from('cluster_files').insert({
     owner_id: uid, cluster_id: clusterId, name: file.name, url: pub.publicUrl,
     kind: fileKind(file), bytes: file.size,
-  }).select('id, name, url, kind, bytes, created_at').single();
+    caption: meta?.caption ?? null, label: meta?.label ?? null,
+  }).select('id, name, url, kind, bytes, caption, label, created_at').single();
   if (error || !data) throw new Error(error?.message ?? 'Could not save the file reference.');
   return data as ClusterFile;
 }

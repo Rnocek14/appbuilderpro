@@ -418,6 +418,37 @@ Deferred within G1, honestly: draft editing beyond node removal (regenerate inst
 research grounding via retrieval (lands with G5); intake requests as actionable upload moves
 (lands with G2). **Next: G2 — photos.**
 
+## G2 — SHIPPED (photos become understanding)
+
+The intake pipeline the owner specified — upload → vision captions → style/theme detection →
+cluster sorting → embeddings → use recommendations → why-this-matters → approval before filing —
+is live end to end:
+
+- **completeVision** in _shared/ai.ts: the ONE vision seam (Anthropic content blocks + OpenAI
+  data-URI paths, same retry/pricing discipline), inherited by every edge function.
+- **ingest-document accepts images**: the client downscales in-browser (max edge 1280, jpeg) and
+  sends base64; the original lands untouched in the documents bucket. One metered call returns
+  caption, subject, style, medium, colors, mood, themes, suggested_use (website/social/video/
+  print), an HONEST quality note (hero-grade / usable / weak — and why), why-this-matters, and
+  an open question. The caption becomes the image's text body: summarized-as-caption, embedded
+  (caption + themes), and classified through the same kNN proposal as documents. The vision
+  prompt's hard rule: describe only what is visible — never invent an artist, title, or price.
+- **Why-this-matters for EVERY ingest** (text and image), folded into the existing metered call
+  (no extra spend): why_matters + open_question land in documents.meta, and the question feeds
+  world_intelligence.open_questions (capped 5) — fresh uploads sharpen tomorrow morning.
+- **app_0029**: documents.cluster_id (filing gains area precision) + cluster_files.caption/label.
+- **Batch propose-sort-approve** in the Brain: drop N files; images queue in a review table —
+  thumbnail, caption, themes, quality note, why-it-matters, proposed world (suggested home
+  pre-selected) and production area. Nothing files without approval. Approving into an area
+  ALSO writes the cluster_files bridge row, caption + routing label riding along.
+- **Studios can finally see**: the studio-chat context now carries file captions ("heron.jpg —
+  A bronze heron mid-flight…"), so "write a post about the bronze heron" references the real
+  photo instead of a bare filename.
+
+Deferred, stated: image-pixel embeddings (captions embed today — style similarity via CLIP is a
+later substance item); derivative generation (width/height + thumbnails); PDF text extraction;
+the private bucket for non-image cluster files. **Next: G3 — the website bridge.**
+
 ## Final principle, restated as an invariant
 
 Genesis generates **data that existing validators accept** — new worlds speak the same seven

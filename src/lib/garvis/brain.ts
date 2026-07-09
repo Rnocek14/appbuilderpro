@@ -126,3 +126,59 @@ export async function listWorlds(): Promise<WorldOption[]> {
   if (error) throw new Error(error.message);
   return (data ?? []) as WorldOption[];
 }
+
+// ---------------------------------------------------------------------------
+// G2 — image intake: photos enter the brain as understanding (vision caption →
+// themes/style/mood → embedding → proposed home), approval-first like everything.
+// ---------------------------------------------------------------------------
+
+export interface ImageIngestResult extends IngestResult {
+  vision: Record<string, unknown> | null;
+  why_matters: string | null;
+  open_question: string | null;
+}
+
+/** Downscale in-browser (max edge 1280) → jpeg base64 (no data: prefix) so the edge function
+ *  never receives multi-MB originals. The ORIGINAL still lands in storage untouched. */
+async function imageToBase64(file: File, maxDim = 1280, quality = 0.85): Promise<{ base64: string; mime: string }> {
+  const bmp = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bmp.width * scale));
+  canvas.height = Math.max(1, Math.round(bmp.height * scale));
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', quality);
+  return { base64: dataUrl.split(',')[1] ?? '', mime: 'image/jpeg' };
+}
+
+export async function uploadAndIngestImage(file: File, opts?: { worldId?: string }): Promise<ImageIngestResult> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const safeName = file.name.replace(/[^\w.\-]+/g, '_').slice(0, 120);
+  const path = `${uid}/${Date.now()}-${safeName}`;
+  await supabase.storage.from('documents').upload(path, file, { upsert: false }); // best-effort original
+  const { base64, mime } = await imageToBase64(file);
+  const { data, error } = await supabase.functions.invoke('ingest-document', {
+    body: {
+      title: file.name, image_base64: base64, mime, bytes: file.size,
+      storage_path: path, source_kind: 'upload', world_id: opts?.worldId,
+    },
+  });
+  if (error) throw new Error(error.message);
+  return data as ImageIngestResult;
+}
+
+/** File a document into a world AND a specific production area (G2's cluster precision). */
+export async function fileDocumentToCluster(documentId: string, worldId: string, clusterId: string | null): Promise<void> {
+  const { error } = await supabase.from('documents')
+    .update({ world_id: worldId, cluster_id: clusterId, status: 'linked' }).eq('id', documentId);
+  if (error) throw new Error(error.message);
+}
+
+export interface ClusterOption { id: string; title: string }
+export async function listClustersForWorld(worldId: string): Promise<ClusterOption[]> {
+  const { data } = await supabase.from('knowledge_clusters')
+    .select('id, title').eq('world_id', worldId).not('charter', 'is', null).order('title');
+  return (data ?? []) as ClusterOption[];
+}
