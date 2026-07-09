@@ -38,7 +38,8 @@
     "verify:worldintel": "tsx src/lib/garvis/worldIntel.verify.ts",
     "verify:systemview": "tsx src/lib/garvis/systemView.verify.ts",
     "verify:universeview": "tsx src/lib/garvis/universeView.verify.ts",
-    "verify:genesis": "tsx src/lib/garvis/genesis.verify.ts"
+    "verify:genesis": "tsx src/lib/garvis/genesis.verify.ts",
+    "verify:intake": "tsx src/lib/garvis/intake.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

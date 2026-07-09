@@ -47,7 +47,7 @@ export async function loadStudioContext(input: {
     cluster: input.cluster,
     tools: input.tools,
     artifacts: arts.map((a) => ({ slug: a.slug ?? a.id, kind: a.kind, title: a.title, detail: a.detail, revision: a.revision })),
-    files: files.map((f) => ({ name: f.name, kind: f.kind })),
+    files: files.map((f) => ({ name: f.name, kind: f.kind, caption: f.caption ?? null })),
     brandKit: brandKit ? { name: brandKit.name, tone: brandKit.tone, palette: brandKit.palette, fonts: brandKit.fonts, compliance_line: brandKit.compliance_line } : null,
     audience,
     results: input.results ?? null,
