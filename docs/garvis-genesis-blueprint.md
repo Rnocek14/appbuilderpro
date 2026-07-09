@@ -449,6 +449,37 @@ Deferred, stated: image-pixel embeddings (captions embed today — style similar
 later substance item); derivative generation (width/height + thumbnails); PDF text extraction;
 the private bucket for non-image cluster files. **Next: G3 — the website bridge.**
 
+## G3 — SHIPPED (the website bridge: real artwork into the first build)
+
+"Build a motion-transition portfolio website from these photos" now works end to end:
+
+- **compileWebsiteBrief** (pure, 12-check verify): ONE brief from everything the world knows —
+  DNA (customers/personality/sales cycle shape the design), brand kit (palette/fonts/voice/
+  compliance), the MOTION DIRECTION naming the real kits (SmoothScroll, ScrollScenes reveals,
+  TextReveal), pages (gallery/story/commissions/contact), the LEAD FORM contract (stores
+  inquiries, never sends — outbound stays behind the approval queue), and THE ARTWORK: every
+  uploaded photo's public URL with its vision caption as alt text, hero candidates from the
+  website-labeled photos, and the explicit rule "use ONLY these images; no stock, no
+  placeholders." Unknown facts are omitted, never invented; a photo-less world gets marked
+  image slots, still no stock.
+- **buildFromWorld → the app builder**: the brief rides the proven constellation handoff into
+  the FIRST generation (prompt + planContext), so the initial build — not just edits — uses the
+  real artwork. The "Build the website" button lives on studio/landing areas in the web.
+- **bindProjectToWorld** after creation: photos metadata-copied into project_assets (source
+  'world' — same public bucket, zero data movement), the assets.md manifest written so every
+  future edit keeps them first-priority, projects.world_id stamped (app_0030), an 'app'
+  artifact recorded in the originating cluster (the world tracks its own website as state), and
+  a mind event on the record.
+- **Approvals honesty for non-email kinds**: approving a deploy_site/publish_post now writes an
+  execution_runs ledger row stating plainly "decision recorded — no server executor for this
+  kind yet" (deploys need the built files, which exist only in the project workspace). The
+  approved-but-not-executed state is visible, never silent; full deploy-through-approval
+  enforcement lands when the workspace deploy path checks the approved row.
+
+Deferred, stated: workspace deploy-button enforcement; the lead-submit → Garvis-CRM edge
+function (generated forms store in the app's own backend today); generic asset-manifest
+injection into initial generation for NON-world projects. **Next: G4 — the lead finder.**
+
 ## Final principle, restated as an invariant
 
 Genesis generates **data that existing validators accept** — new worlds speak the same seven

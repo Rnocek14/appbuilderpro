@@ -87,9 +87,17 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     return { ok: !!res?.ok, error: res?.error, result: res };
   }
 
-  // Other kinds (publish_post/deploy_*/…) are approved here; their existing triggers read the
-  // approved row. Kept intentionally minimal — this sprint wires send_email end-to-end; the rest
-  // land as they get their executors (see docs/garvis-system-architecture.md Phase 3/4).
+  // Other kinds (publish_post/deploy_*/…): the DECISION is recorded; execution happens where
+  // the capability lives (deploys need the built files, which exist only in the project
+  // workspace). Ledger the approved-but-not-executed state honestly — visible, never silent.
+  const { data: sess } = await supabase.auth.getUser();
+  if (sess.user?.id) {
+    await supabase.from('execution_runs').insert({
+      owner_id: sess.user.id, approval_id: a.id, connector: 'garvis', action: a.kind,
+      status: 'skipped', request: { approval_id: a.id },
+      error: 'decision recorded — no server executor for this kind yet; execute from where the capability lives',
+    });
+  }
   return { ok: true, result: { approved: true } };
 }
 
