@@ -25,7 +25,21 @@ type Msg = { role: string; content: string };
 
 // Breaker: once the edge says "not deployed / unreachable" we stop retrying it this session
 // (same pattern as discover.ts). Auth failures do NOT trip it — those mean "sign in", not "no edge".
-let edgeBlocked = false;
+// The REASON is kept so the fallback error can tell the truth: "sign in" and "the backend
+// function isn't deployed" are different problems with different fixes.
+let edgeBlockedReason: string | null = null;
+
+function fallbackMessage(signedOut: boolean): string {
+  if (!supabaseConfigured) {
+    return 'This build has no Supabase configured — add your own API key in Settings for local mode.';
+  }
+  if (signedOut) {
+    return 'Sign in to explore (server AI), or add your own API key in Settings for local mode.';
+  }
+  return `Garvis's server AI is unreachable — ${edgeBlockedReason ?? 'the explorer-turn edge function errored'}. ` +
+    'Deploy the edge functions to your Supabase project (npm run functions:deploy) and set its AI secrets, ' +
+    'or add your own API key in Settings for local mode.';
+}
 
 async function authHeader(): Promise<string | null> {
   if (!supabaseConfigured) return null;
@@ -36,7 +50,7 @@ async function authHeader(): Promise<string | null> {
 }
 
 function edgeCandidate(): boolean {
-  return supabaseConfigured && !edgeBlocked;
+  return supabaseConfigured && !edgeBlockedReason;
 }
 
 /** Local fallback is only legitimate when the user configured their own key. */
@@ -55,10 +69,13 @@ async function callEdge(body: Record<string, unknown>, auth: string): Promise<Re
       body: JSON.stringify(body),
     });
   } catch {
-    edgeBlocked = true; // network wall — don't hammer it again this session
+    edgeBlockedReason = 'the explorer-turn function did not respond (network)'; // don't hammer it again this session
     throw new EdgeUnavailable('explorer-turn unreachable');
   }
-  if (res.status === 404) { edgeBlocked = true; throw new EdgeUnavailable('explorer-turn not deployed'); }
+  if (res.status === 404) {
+    edgeBlockedReason = 'the explorer-turn edge function is NOT DEPLOYED on this Supabase project';
+    throw new EdgeUnavailable('explorer-turn not deployed');
+  }
   return res;
 }
 
@@ -68,8 +85,10 @@ async function edgeError(res: Response): Promise<Error> {
 }
 
 export async function exploreComplete(messages: Msg[], maxTokens = 800, opts: ExploreOpts = {}): Promise<ExploreResult> {
+  let signedOut = false;
   if (edgeCandidate()) {
     const auth = await authHeader();
+    if (!auth) signedOut = true;
     if (auth) {
       try {
         const res = await callEdge({ messages, maxTokens, fast: opts.fast }, auth);
@@ -88,7 +107,7 @@ export async function exploreComplete(messages: Msg[], maxTokens = 800, opts: Ex
     }
   }
   if (!directReady()) {
-    throw new Error('Sign in to explore (server AI), or add your own API key in Settings for local mode.');
+    throw new Error(fallbackMessage(signedOut));
   }
   const r = await rawComplete(messages, maxTokens, { fast: opts.fast });
   return { ...r, costUsd: estimateCostUsd(r.inputTokens, r.outputTokens) };
@@ -97,8 +116,10 @@ export async function exploreComplete(messages: Msg[], maxTokens = 800, opts: Ex
 export async function exploreStream(
   messages: Msg[], maxTokens: number, onDelta: (fullText: string) => void, onUsage?: (u: ExploreUsage) => void, opts: ExploreOpts = {},
 ): Promise<string> {
+  let signedOut = false;
   if (edgeCandidate()) {
     const auth = await authHeader();
+    if (!auth) signedOut = true;
     if (auth) {
       try {
         const res = await callEdge({ messages, maxTokens, stream: true, fast: opts.fast }, auth);
@@ -121,7 +142,7 @@ export async function exploreStream(
     }
   }
   if (!directReady()) {
-    throw new Error('Sign in to explore (server AI), or add your own API key in Settings for local mode.');
+    throw new Error(fallbackMessage(signedOut));
   }
   // Local fallback: streamComplete's onDelta gives chunks; ours promises the accumulated text.
   let acc = '';
