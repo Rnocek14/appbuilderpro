@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Boxes, Github, ExternalLink, Plus, Sparkles, TrendingUp, Rocket, Hammer, X, Check, Lightbulb, Zap, ChevronDown, ChevronRight, RefreshCw, Settings2, Target, Brain, ListChecks } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { GoalsPanel } from '../components/garvis/GoalsPanel';
@@ -372,6 +373,16 @@ export default function Garvis() {
   return (
     <AppShell>
       <div className="mx-auto max-w-5xl">
+        {/* The front door moved: this page is the legacy portfolio plane; the product now wakes
+            in Command and works in the altitude stack. Point there so the old page never shadows it. */}
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl border border-forge-ember/30 bg-forge-ember/5 px-4 py-3">
+          <Sparkles size={16} className="shrink-0 text-forge-ember" />
+          <p className="text-sm text-forge-ink/90">
+            Garvis has a new front door — <Link to="/garvis/command" className="text-forge-ember hover:underline">Command</Link> wakes with what matters,{' '}
+            <Link to="/garvis/webs" className="text-forge-ember hover:underline">Work Webs</Link> is where missions live, and the{' '}
+            <Link to="/garvis/universe" className="text-forge-ember hover:underline">Universe</Link> shows everything in one sky.
+          </p>
+        </div>
         <div className="mb-6 flex flex-wrap items-center gap-3">
           <Boxes size={20} className="text-forge-ember" />
           <div>

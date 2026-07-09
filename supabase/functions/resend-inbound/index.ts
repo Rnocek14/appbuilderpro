@@ -76,8 +76,11 @@ Deno.serve(async (req) => {
     msg = data ?? null;
   }
   if (!msg && from) {
+    // Fallback correlation must only match messages that actually WENT OUT — a reply can't
+    // belong to a never-sent draft.
     const { data } = await admin.from('outreach_messages')
-      .select('id, owner_id, campaign_id').eq('to_address', from).order('sent_at', { ascending: false }).limit(1).maybeSingle();
+      .select('id, owner_id, campaign_id').eq('to_address', from).not('sent_at', 'is', null)
+      .order('sent_at', { ascending: false }).limit(1).maybeSingle();
     msg = data ?? null;
   }
   if (!msg) return json({ ok: true, note: 'no matching message; reply ignored' });
@@ -89,8 +92,25 @@ Deno.serve(async (req) => {
     from_address: from, subject, body_text: text.slice(0, 8000), classification,
   });
   await admin.from('outreach_messages').update({ status: 'replied' }).eq('id', msg.id);
+
+  // Explicit unsubscribe intent → suppression + contact status, so this address can NEVER be
+  // emailed again. This was the missing ingestion path: the 'unsubscribe' suppression reason
+  // existed in the schema but nothing ever wrote it.
+  const wantsOut = /\b(unsubscribe|remove me|stop emailing( me)?|take me off|do not (contact|email))\b/i.test(text);
+  if (wantsOut && from) {
+    await admin.from('suppression').upsert(
+      { owner_id: msg.owner_id, email: from, domain: from.split('@')[1] ?? null, reason: 'unsubscribe' },
+      { onConflict: 'owner_id,email' },
+    );
+    await admin.from('contacts').update({ email_status: 'unsubscribed' }).eq('owner_id', msg.owner_id).eq('email', from);
+    await admin.from('execution_runs').insert({
+      owner_id: msg.owner_id, connector: 'resend', action: 'inbound_unsubscribe',
+      request: { message_id: msg.id }, response: { email: from }, status: 'ok',
+    });
+  }
+
   if (msg.campaign_id) {
-    const state = classification === 'negative' ? 'lost' : 'replied';
+    const state = wantsOut ? 'unsubscribed' : classification === 'negative' ? 'lost' : 'replied';
     await admin.from('outreach_campaigns').update({ state, sequence_stopped: true }).eq('id', msg.campaign_id);
   }
   await admin.from('mind_events').insert({

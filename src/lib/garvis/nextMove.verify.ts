@@ -6,7 +6,7 @@
 
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, collectDrafts, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals,
 } from './nextMove';
 
@@ -145,6 +145,20 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   const mk2 = (kind: NextMove['kind'], key: string): NextMove => ({ key, kind, title: key, why: 'w', action: { label: 'l', route: '/' }, score: 0, bornAt: hoursAgo(2) });
   const order = rankMoves([mk2('reflection_due', 'ref'), mk2('reply_unanswered', 'rep'), mk2('intel_stale', 'int'), mk2('insight_connection', 'ins')], NOW);
   check('ranking: reply > reflection > insight > stale-intel', order.map((m) => m.key).join(',') === 'rep,ref,ins,int', order.map((m) => m.key).join(','));
+}
+
+// 7. Genesis drafts — a designed world waits loudly, outranked only by humans and approvals.
+{
+  const drafts = collectDrafts([{ id: 'd1', title: 'Artist Brother Art Business', areas: 9, created_at: hoursAgo(3) }]);
+  check('a draft becomes a move with counted evidence in the why', drafts.length === 1 && drafts[0].why.includes('9 production areas'));
+  check('the draft move states the boundary: nothing exists until approved', drafts[0].why.includes('Nothing exists until you approve'));
+  check('draft expectation is labeled structural, never a prediction', drafts[0].expected?.basis === 'structural');
+  const ranked = rankMoves([
+    ...collectDrafts([{ id: 'd1', title: 'X', areas: 5, created_at: hoursAgo(1) }]),
+    ...collectApprovals([{ id: 'a1', kind: 'send_email', title: 'send', created_at: hoursAgo(1) }]),
+    ...collectNaturalNext([{ missionId: 'm1', worldId: 'w1', subject: 's', artifactCount: 3, sendsQueued: 0, updated_at: hoursAgo(1) }]),
+  ], NOW, {});
+  check('ranking: approval > draft > natural next', ranked.map((m) => m.kind).join(',') === 'approval_waiting,draft_waiting,natural_next', ranked.map((m) => m.kind).join(','));
 }
 
 console.log(`\nnextMove.verify: ${passed} passed, ${failed} failed`);

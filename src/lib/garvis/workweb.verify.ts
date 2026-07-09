@@ -5,7 +5,7 @@
 
 import {
   ARCHETYPES, FLAVORS, TOOL_IDS, makeCharter, parseCharter, toolsFor,
-  MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, WEB_TEMPLATES, templateById,
+  MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, WEB_TEMPLATES, templateById, templateForWeb,
   flattenTemplate, validateTemplate, parseAudienceCsv, rollupWeb, deriveStatus,
   type Archetype,
 } from './workweb';
@@ -100,6 +100,17 @@ check('parseCharter handles null/undefined/strings', parseCharter(null) === null
   check('status: artifacts → active', deriveStatus(makeCharter('studio'), 3, 0) === 'active');
   check('status: empty → dormant', deriveStatus(makeCharter('studio'), 0, 0) === 'dormant');
   check('status: done sticks when nothing pending', deriveStatus({ ...makeCharter('studio'), status: 'done' }, 3, 0) === 'done');
+}
+
+// 9. Template resolution by structure — a renamed world must keep its play.
+{
+  const momSlugs = flattenTemplate(MOM_REAL_ESTATE_TEMPLATE).map((n) => n.slug);
+  check('a full mom-web resolves to its template regardless of title', templateForWeb(momSlugs)?.id === 'mom-real-estate');
+  check('a partial web (over half the slugs) still resolves', templateForWeb(momSlugs.slice(0, Math.ceil(momSlugs.length * 0.6)))?.id === 'mom-real-estate');
+  const launchSlugs = flattenTemplate(APP_LAUNCH_TEMPLATE).map((n) => n.slug);
+  check('an app-launch web resolves to app-launch', templateForWeb(launchSlugs)?.id === 'app-launch');
+  check('a hand-built web matches no template (no invented play)', templateForWeb(['my-own-area', 'another-area', 'third-area']) === null);
+  check('two shared slugs are not enough to claim a template', templateForWeb(['brand', 'results']) === null);
 }
 
 console.log(`\nworkweb.verify: ${passed} passed, ${failed} failed`);

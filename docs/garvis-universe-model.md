@@ -390,3 +390,32 @@ collateral damage. This unblocks lazy web instantiation whenever we want it.
 
 **The presentation track is complete.** Waking Moment (P1) → System Altitude (P2) → Universe
 (P3), all three altitudes over the same rows, one Next Move engine, no theater anywhere.
+
+**Hardening sprint — SHIPPED (the full-system scan's action items, closed):**
+A 10-auditor scan verified every claim in this document against the code (50 verified / 4
+partial / 0 missing; all 29 verify suites green) and surfaced real defects. Fixed:
+- **send-email fails closed, once, and honestly.** Suppression is now two exact-match queries
+  (no string-built filter, no injection); a lookup ERROR blocks the send. An atomic claim on
+  the approval row makes double-sends impossible (the loser of the race stops). A blocked send
+  no longer overwrites the human's 'approved' decision to 'rejected' — the gate outcome lives
+  in result + the ledger. The body footer now carries a visible unsubscribe line (headers
+  alone weren't CAN-SPAM-conspicuous).
+- **Unsubscribes are finally ingested**: an explicit opt-out reply writes the suppression row,
+  flips the contact to 'unsubscribed', stops the campaign as 'unsubscribed', and lands in the
+  ledger. resend-webhook gained Svix timestamp tolerance + constant-time signature compare;
+  resend-inbound's fallback correlation only matches messages that actually went out.
+- **Work-web dead-ends closed**: the follow-up dedupe is scoped to its own message (a pending
+  approval elsewhere can't swallow a queue click — and a lost approval re-queues the SAME
+  draft); plays resolve by STRUCTURE (slug signature, verified) so renaming a world keeps its
+  play; "View contacts" opens a real contacts view; an unknown tool id reports failure, not
+  success; the list-upload comment now states the truth (skip, never clobber email_status).
+- **The brand vault is a workspace**: a brand-kit editor (name/tone/palette/fonts/logo/
+  compliance) lives in every vault area — the "Set up the brand" move finally lands where it
+  can be done, and the brand-empty blocker can clear.
+- **Waking-moment honesty**: a reply counts as handled only by a touch created AFTER it
+  arrived (a follow-up staged blind no longer silences a warm reply); the nudge and the world
+  page now count the same 120-event record.
+- **Discoverability (the "old layout" fix)**: Command leads the Garvis sidebar, Universe is IN
+  the sidebar, the ⌘K palette knows every Garvis surface, a quiet morning says "all quiet"
+  instead of rendering nothing, and the legacy /garvis Overview page carries a front-door
+  banner to Command / Work Webs / Universe so it can never shadow the new product again.

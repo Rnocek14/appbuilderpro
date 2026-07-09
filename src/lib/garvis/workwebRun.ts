@@ -21,9 +21,10 @@ import {
 import { normalizeGraph, slugify, type ClusterGraph, type Cluster, type Artifact } from './clustering';
 import {
   templateById, flattenTemplate, parseCharter, toolsFor, rollupWeb, deriveStatus,
-  parseAudienceCsv, type Charter, type WebTemplate, type WorkTool,
+  parseAudienceCsv, validateTemplate, type Charter, type WebTemplate, type WorkTool,
 } from './workweb';
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
+import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail } from './genesis';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
 // separate table column (knowledge_clusters.charter). universe.ts's ClusterGraph has no charter
@@ -61,28 +62,41 @@ function templateToGraph(t: WebTemplate): { graph: ClusterGraph; charters: Recor
   return { graph: normalizeGraph({ clusters, edges: [] }), charters };
 }
 
-/** Write charters onto the persisted clusters (matched by world_id + slug). Best-effort, owner-scoped. */
+/** Write charters onto the persisted clusters (matched by world_id + slug). ERROR-CHECKED: an
+ *  unchartered cluster is invisible to the workweb UI and unprotected by the sync guard, so a
+ *  partial failure here must surface, never pass silently. */
 async function persistCharters(worldId: string, charters: Record<string, Charter>): Promise<void> {
   const slugs = Object.keys(charters);
   if (!slugs.length) return;
-  const { data: rows } = await supabase
+  const { data: rows, error: readErr } = await supabase
     .from('knowledge_clusters')
     .select('id, slug')
     .eq('world_id', worldId)
     .in('slug', slugs);
-  await Promise.all((rows ?? []).map((r) => {
+  if (readErr) throw new Error(`Could not read the new clusters to charter them: ${readErr.message}`);
+  const found = new Set((rows ?? []).map((r) => (r as { slug: string }).slug));
+  const missing = slugs.filter((s) => !found.has(s));
+  if (missing.length) throw new Error(`${missing.length} area(s) were not persisted (${missing.slice(0, 3).join(', ')}) — the web is incomplete; try again.`);
+  const results = await Promise.all((rows ?? []).map((r) => {
     const c = charters[(r as { slug: string }).slug];
-    return c ? supabase.from('knowledge_clusters').update({ charter: c }).eq('id', (r as { id: string }).id) : Promise.resolve();
+    return c ? supabase.from('knowledge_clusters').update({ charter: c }).eq('id', (r as { id: string }).id) : Promise.resolve({ error: null });
   }));
+  const failed = results.filter((r) => (r as { error: unknown }).error).length;
+  if (failed) throw new Error(`${failed} charter write(s) failed — the web is partially chartered; open it and retry.`);
 }
 
 /** Create a new work web from a template id. Returns the server world id. */
-export async function instantiateWeb(templateId: string): Promise<WebSummary> {
+export async function instantiateWeb(templateOrId: WebTemplate | string): Promise<WebSummary> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
-  const t = templateById(templateId);
-  if (!t) throw new Error(`Unknown web template "${templateId}".`);
+  // GENESIS SEAM: a template may be a builtin id OR a runtime object (an approved generated
+  // draft). Either way it passes the SAME structural validation — generated structures earn
+  // instantiation through the same gate the builtins were tested against.
+  const t = typeof templateOrId === 'string' ? templateById(templateOrId) : templateOrId;
+  if (!t) throw new Error(`Unknown web template "${String(templateOrId)}".`);
+  const structural = validateTemplate(t, PLAYS.map((p) => p.id));
+  if (structural.length) throw new Error(`Template failed validation: ${structural[0]}`);
 
   const { graph, charters } = templateToGraph(t);
   const universe: Universe = newUniverse(t.title, graph, t.nodes[0]?.slug ?? null);
@@ -129,6 +143,16 @@ export interface LoadedWeb {
 }
 
 /** A web = any world that has at least one chartered cluster. */
+export interface ContactRow { id: string; full_name: string | null; email: string; email_status: string; created_at: string }
+
+/** Everyone this operator can reach — the audience behind every list upload and queue tool. */
+export async function listContacts(limit = 200): Promise<ContactRow[]> {
+  const { data } = await supabase.from('contacts')
+    .select('id, full_name, email, email_status, created_at')
+    .order('created_at', { ascending: false }).limit(limit);
+  return (data ?? []) as ContactRow[];
+}
+
 export async function listWebs(): Promise<WebSummary[]> {
   const worlds = await listUniverseWorlds();
   const out: WebSummary[] = [];
@@ -339,8 +363,29 @@ export async function runTool(
     case 'gen-landing':
     case 'gen-email-seq':
     case 'gen-copy': {
-      // These are single-cluster generators. If the web has a play whose step targets THIS cluster,
-      // run just that step; otherwise write a generic starter artifact so the area is never empty.
+      // Single-cluster generators. Resolution order — and the honesty rule that governs it:
+      // a generator speaks THE WORLD's voice or none. (1) A genesis world's own data play step
+      // for this cluster; (2) a genesis world with context but no matching step → a context-
+      // framed starter; (3) legacy builtin worlds (no business_context) keep the code-play path;
+      // (4) otherwise a plain starter. DEFAULT_LAKE_GENEVA_CONTEXT never leaks across worlds.
+      const voice = await worldVoice(worldId);
+      if (voice.ctx) {
+        const dataStep = voice.play?.steps.find((s) => s.targetSlug === cluster.slug);
+        if (voice.play && dataStep) {
+          const r = await runPlayData(worldId, { ...voice.play, steps: [dataStep] }, voice.ctx);
+          return { ok: r.artifactCount > 0, message: r.artifactCount > 0 ? `Generated ${r.artifactCount} artifact${r.artifactCount === 1 ? '' : 's'} into ${cluster.title}.` : 'Nothing generated.', artifacts: r.artifactCount };
+        }
+        const framed: PlayArtifact = {
+          slug: `starter-${slugify(toolId)}`, kind: 'doc',
+          title: `${cluster.title} — starting point`,
+          detail: mergeTokens(
+            `A starting draft for ${cluster.title} at {{business_name}}.\n\nBusiness: {{craft}}. Audience: {{audience}}. Voice: {{tone}}.\n\nUse the studio chat in this area to turn this into real work — it knows the brand kit and the files here.`,
+            voice.ctx,
+          ),
+        };
+        const n = await writeArtifacts(uid, cluster.id, [framed]);
+        return { ok: n > 0, message: 'Added a starting draft in this world\'s own voice.', artifacts: n };
+      }
       const play = args?.playId ? playById(args.playId) : matchPlayForCluster(cluster.slug);
       const step = play?.steps.find((s) => s.targetSlug === cluster.slug);
       if (play && step) {
@@ -365,8 +410,9 @@ export async function runTool(
       const rows = parsed.contacts.map((ct) => ({
         owner_id: uid, full_name: ct.name, email: ct.email, email_status: 'unknown' as const, is_primary: false,
       }));
-      // Upsert on (owner_id, email) — re-uploading a list or overlapping with an already-known
-      // contact updates rather than duplicating (uq_contacts_owner_email, app_0025).
+      // Upsert on (owner_id, email) with ignoreDuplicates: an already-known contact is SKIPPED,
+      // never overwritten — updating here would reset email_status (including 'unsubscribed')
+      // back to 'unknown', silently re-arming sends to someone who opted out.
       const { error } = await supabase.from('contacts').upsert(rows, { onConflict: 'owner_id,email', ignoreDuplicates: true });
       if (error) return { ok: false, message: `Could not save contacts: ${error.message}` };
       await recordMindEvent(uid, { event_type: 'artifact_imported', source: 'workweb', subject: `Imported ${rows.length} contacts into ${cluster.title}`, payload: { world_id: worldId } });
@@ -376,15 +422,38 @@ export async function runTool(
     case 'queue-sequence': {
       const to = (args?.toEmail ?? '').toLowerCase().trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return { ok: false, message: 'Enter a valid recipient email.' };
-      const play = matchPlayForCluster(cluster.slug) ?? playById('lakefront-seller');
-      if (!play) return { ok: false, message: 'No sequence is defined for this area yet.' };
-      const approvalId = await queueSequenceStep0(uid, worldId, cluster, play, to, args?.contactName ?? null);
-      return { ok: true, message: 'First email queued for approval. The two follow-ups are saved as drafts to send when you\'re ready.', approvalId };
+      // Same honesty rule as the generators: THE WORLD's emails or a plain refusal — never
+      // another world's copy. Genesis worlds use their generated sequence (token-merged);
+      // legacy builtin worlds keep the code play.
+      const voice = await worldVoice(worldId);
+      let seq: { title: string; emails: PlayEmail[] };
+      if (voice.ctx) {
+        if (!voice.play?.emails.length) {
+          return { ok: false, message: 'This web has no email sequence yet — draft one in its follow-up area first (the studio chat can write it in this world\'s voice).' };
+        }
+        seq = {
+          title: voice.play.title,
+          emails: voice.play.emails.map((e) => ({ ...e, subject: mergeTokens(e.subject, voice.ctx!), body: mergeTokens(e.body, voice.ctx!) })),
+        };
+      } else {
+        const play = matchPlayForCluster(cluster.slug) ?? playById('lakefront-seller');
+        if (!play) return { ok: false, message: 'No sequence is defined for this area yet.' };
+        seq = { title: play.title, emails: play.emailSequence(DEFAULT_LAKE_GENEVA_CONTEXT).map((e) => ({ step: e.step, subject: e.subject, body: e.body })) };
+      }
+      const approvalId = await queueSequenceStep0(uid, worldId, cluster, seq, to, args?.contactName ?? null);
+      return { ok: true, message: 'First email queued for approval. The follow-ups are saved as drafts to send when you\'re ready.', approvalId };
     }
 
-    default:
-      // view tools (view-contacts, open-approvals, import-docs, view-results) are handled by the UI (navigation).
+    case 'view-contacts':
+    case 'open-approvals':
+    case 'import-docs':
+    case 'view-results':
+      // View tools are handled by the UI (navigation / modal) — reaching the executor is a no-op.
       return { ok: true, message: '' };
+
+    default:
+      // An unregistered id reaching the executor is a BUG, not a success — say so.
+      return { ok: false, message: `Unknown tool "${toolId}" — not implemented in the executor.` };
   }
 }
 
@@ -392,6 +461,75 @@ export async function runTool(
 function matchPlayForCluster(slug: string): Play | null {
   for (const p of PLAYS) if (p.steps.some((s) => s.targetSlug === slug)) return p;
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// The world's own voice (genesis worlds) — generators read THE WORLD's context,
+// never another world's. This is what killed the Lake Geneva fallback.
+// ---------------------------------------------------------------------------
+
+interface WorldVoice { ctx: BusinessContext | null; play: PlayData | null }
+
+async function worldVoice(worldId: string): Promise<WorldVoice> {
+  const [{ data: w }, { data: t }] = await Promise.all([
+    supabase.from('knowledge_worlds').select('business_context').eq('id', worldId).maybeSingle(),
+    supabase.from('web_templates').select('play').eq('world_id', worldId).eq('status', 'instantiated').limit(1).maybeSingle(),
+  ]);
+  return {
+    ctx: ((w as { business_context?: BusinessContext | null } | null)?.business_context) ?? null,
+    play: ((t as { play?: PlayData | null } | null)?.play) ?? null,
+  };
+}
+
+/** Run a DATA-DRIVEN play (genesis worlds): deterministic token-merged drafts land first (the
+ *  zero-keys floor), then fail-soft AI enrichment where a step carries an aiPrompt. */
+export async function runPlayData(worldId: string, play: PlayData, ctx: BusinessContext): Promise<RunPlayResult> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+
+  const { data: mission } = await supabase.from('garvis_missions').insert({
+    owner_id: uid, world_id: worldId, objective: play.objective, subject: play.title, status: 'running',
+  }).select('id').single();
+  const missionId = (mission as { id: string } | null)?.id ?? null;
+
+  let artifactCount = 0;
+  let costUsd = 0;
+  const steps: RunPlayResult['steps'] = [];
+  for (const step of play.steps) {
+    try {
+      let detail = mergeTokens(step.draft, ctx);
+      if (step.aiPrompt) {
+        try {
+          const r = await exploreComplete([
+            { role: 'system', content: 'You are the studio writer for one business. Improve the draft per the instruction, in the business\'s own voice. Keep it directly usable; never invent facts the context does not contain.' },
+            { role: 'user', content: `BUSINESS:\n${JSON.stringify(ctx)}\n\nDRAFT:\n${detail}\n\nINSTRUCTION: ${step.aiPrompt}` },
+          ], 900);
+          if (r.text.trim().length > 40) { detail = r.text.trim(); costUsd += r.costUsd; }
+        } catch { /* fail-soft — the deterministic draft stands */ }
+      }
+      const clusterId = await clusterIdForSlug(worldId, step.targetSlug);
+      const n = clusterId
+        ? await writeArtifacts(uid, clusterId, [{ slug: step.artifact.slug, kind: step.artifact.kind, title: step.artifact.title, detail }])
+        : 0;
+      artifactCount += n;
+      steps.push({ id: step.artifact.slug, ok: n > 0, artifacts: n });
+    } catch {
+      steps.push({ id: step.artifact.slug, ok: false, artifacts: 0 });
+    }
+  }
+
+  if (missionId) {
+    await supabase.from('garvis_missions').update({
+      status: 'review', summary: `Ran ${play.title}: ${artifactCount} artifacts across ${steps.filter((s) => s.ok).length}/${steps.length} areas.`,
+    }).eq('id', missionId);
+  }
+  await recordMindEvent(uid, {
+    event_type: 'mission_planned', source: 'workweb',
+    subject: `Ran play "${play.title}" through the web — ${artifactCount} artifacts`,
+    payload: { world_id: worldId, play: 'generated', mission_id: missionId, artifacts: artifactCount },
+  });
+  return { missionId, artifactCount, steps, costUsd };
 }
 
 /** Queue the FIRST touch of a play's sequence for approval, and save the play's curated follow-up
@@ -402,8 +540,10 @@ function matchPlayForCluster(slug: string): Play | null {
  *  Idempotent-ish: reuses the contact (upsert on owner+email) and an already-pending campaign for the
  *  same (world, contact) so double-clicks don't queue the same opener twice. All inserts error-checked. */
 async function queueSequenceStep0(
-  ownerId: string, worldId: string, cluster: WebCluster, play: Play, to: string, name: string | null,
+  ownerId: string, worldId: string, cluster: WebCluster,
+  playSeq: { title: string; emails: PlayEmail[] }, to: string, name: string | null,
 ): Promise<string> {
+  if (!playSeq.emails.length) throw new Error('This sequence has no emails.');
   void cluster;
   // Contact: atomic upsert on (owner_id, email) — app_0025 constraint makes this race-free.
   const { data: c, error: cErr } = await supabase.from('contacts')
@@ -428,18 +568,35 @@ async function queueSequenceStep0(
     campaignId = (camp as { id: string }).id;
   }
 
-  // If a step-0 draft already exists for this campaign, don't queue a duplicate opener.
-  const { data: existingMsg } = await supabase.from('outreach_messages')
-    .select('id').eq('campaign_id', campaignId).eq('sequence_step', 0).in('status', ['draft', 'approved', 'scheduled', 'sent']).maybeSingle();
-  if (existingMsg) {
+  // If a step-0 message already exists for this campaign, never draft a duplicate opener. The
+  // pending-approval lookup is scoped to THAT message (payload->>message_id) — a pending send
+  // belonging to some other campaign must never satisfy this check.
+  const { data: existingMsgs } = await supabase.from('outreach_messages')
+    .select('id, status, subject, body_text').eq('campaign_id', campaignId).eq('sequence_step', 0)
+    .in('status', ['draft', 'approved', 'scheduled', 'sent']).limit(5);
+  const existing = (existingMsgs ?? [])[0] as { id: string; status: string; subject: string | null; body_text: string | null } | undefined;
+  if (existing) {
+    if (existing.status === 'sent') throw new Error('The opener for this recipient was already sent — the follow-up drafts are next.');
     const { data: openA } = await supabase.from('approvals')
-      .select('id').eq('kind', 'send_email').eq('status', 'pending').maybeSingle();
-    if (openA) return (openA as { id: string }).id;
+      .select('id').eq('kind', 'send_email').eq('status', 'pending')
+      .eq('payload->>message_id', existing.id).limit(1);
+    if (openA?.length) return (openA[0] as { id: string }).id;
+    // The draft exists but its approval is gone (rejected / expired / failed mid-queue):
+    // re-queue the SAME message instead of drafting a duplicate.
+    return enqueueApproval({
+      kind: 'send_email',
+      title: `${playSeq.title} → ${to} (touch 1, re-queued)`,
+      preview: `${existing.subject ?? ''}\n\n${existing.body_text ?? ''}`,
+      payload: { message_id: existing.id, campaign_id: campaignId },
+      requestedBy: 'worker',
+    });
   }
 
   const firstName = name?.split(/\s+/)[0] ?? 'there';
-  const seq = play.emailSequence(DEFAULT_LAKE_GENEVA_CONTEXT).map((e) => ({
-    ...e, body: e.body.replace(/\{\{first_name\}\}/g, firstName),
+  const seq = playSeq.emails.map((e) => ({
+    ...e,
+    subject: e.subject.replace(/\{\{first_name\}\}/g, firstName),
+    body: e.body.replace(/\{\{first_name\}\}/g, firstName),
   }));
   const seq0 = seq[0];
   const { data: msg, error: mErr } = await supabase.from('outreach_messages').insert({
@@ -464,7 +621,7 @@ async function queueSequenceStep0(
 
   return enqueueApproval({
     kind: 'send_email',
-    title: `${play.title} → ${to} (touch 1 of ${seq.length})`,
+    title: `${playSeq.title} → ${to} (touch 1 of ${seq.length})`,
     preview: `${seq0.subject}\n\n${seq0.body}`,
     payload: { message_id: messageId, campaign_id: campaignId },
     requestedBy: 'worker',

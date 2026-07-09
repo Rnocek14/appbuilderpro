@@ -23,15 +23,28 @@ const CONTACT_STATUS: Record<string, string> = { bounce: 'bounced', complaint: '
 
 // Svix signature: base64 HMAC-SHA256 of `${id}.${ts}.${body}` keyed by the base64-decoded secret
 // (drop the `whsec_` prefix). Native Web Crypto — no remote import, works offline in `deno check`.
+// Per the Svix spec: reject timestamps outside a ±5-minute window (replay protection) and compare
+// signatures in constant time.
+const SVIX_TOLERANCE_S = 300;
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 async function verifySvix(secret: string, id: string, ts: string, body: string, header: string): Promise<boolean> {
   try {
+    const tsNum = Number(ts);
+    if (!Number.isFinite(tsNum) || Math.abs(Date.now() / 1000 - tsNum) > SVIX_TOLERANCE_S) return false;
     const secretBytes = Uint8Array.from(atob(secret.replace(/^whsec_/, '')), (c) => c.charCodeAt(0));
     const key = await crypto.subtle.importKey('raw', secretBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
     const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${id}.${ts}.${body}`));
     const expected = btoa(String.fromCharCode(...new Uint8Array(mac)));
     // svix-signature header: "v1,<sig> v1,<sig>"
     const sigs = header.split(' ').map((s) => s.split(',')[1]).filter(Boolean);
-    return sigs.some((s) => s === expected);
+    return sigs.some((s) => constantTimeEqual(s, expected));
   } catch {
     return false;
   }

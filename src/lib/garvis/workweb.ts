@@ -221,6 +221,23 @@ export function templateById(id: string): WebTemplate | null {
   return WEB_TEMPLATES.find((t) => t.id === id) ?? null;
 }
 
+/** Resolve which template a loaded web was instantiated from by its STRUCTURE, not its title —
+ *  slugs are stable identity, titles are user-editable. The template wins when at least 3 of its
+ *  node slugs exist in the web AND at least half its structure is present; ties go to the higher
+ *  coverage. A renamed world keeps its play; a hand-built web matches nothing and gets none. */
+export function templateForWeb(clusterSlugs: string[], templates: WebTemplate[] = WEB_TEMPLATES): WebTemplate | null {
+  const have = new Set(clusterSlugs);
+  let best: WebTemplate | null = null;
+  let bestScore = 0;
+  for (const t of templates) {
+    const slugs = flattenTemplate(t).map((n) => n.slug);
+    const matched = slugs.filter((s) => have.has(s)).length;
+    const score = matched / slugs.length;
+    if (matched >= 3 && score >= 0.5 && score > bestScore) { best = t; bestScore = score; }
+  }
+  return best;
+}
+
 export interface FlatNode {
   slug: string;
   parentSlug: string | null;
