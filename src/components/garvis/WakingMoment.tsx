@@ -20,6 +20,7 @@ const KIND_DOT: Record<NextMove['kind'], string> = {
   insight_connection: 'bg-[#B98CE0]',
   reflection_due: 'bg-[#B98CE0]',
   intel_stale: 'bg-forge-warn',
+  draft_waiting: 'bg-forge-ember',
 };
 
 export function WakingMoment({ name }: { name: string }) {

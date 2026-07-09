@@ -26,7 +26,8 @@ export type MoveKind =
   | 'blocking_empty'     // structural floor: an empty area blocks a live one (needs no history)
   | 'insight_connection' // "Garvis noticed" — the brain found a link
   | 'reflection_due'     // enough happened in a world that a reflection would teach something
-  | 'intel_stale';       // the world's research is old enough to mislead
+  | 'intel_stale'        // the world's research is old enough to mislead
+  | 'draft_waiting';     // genesis designed a world; it exists only if the user approves it
 
 export interface NextMove {
   key: string;                 // stable identity for dedupe + dismissal
@@ -162,6 +163,22 @@ export interface WorldIntelIn {
   asOf: string;
 }
 
+export interface DraftRowIn { id: string; title: string; areas: number; created_at: string }
+
+/** Genesis drafts: a designed world awaiting judgment. Structural — the row IS the evidence. */
+export function collectDrafts(rows: DraftRowIn[]): NextMove[] {
+  return rows.map((r) => ({
+    key: `draft:${r.id}`,
+    kind: 'draft_waiting' as const,
+    title: `A draft world awaits your review — "${short(r.title, 48)}"`,
+    why: `Genesis designed ${r.areas} production area${r.areas === 1 ? '' : 's'} from your intent. Nothing exists until you approve it.`,
+    action: { label: 'Review the draft', route: '/garvis/webs' },
+    score: 0,
+    bornAt: r.created_at,
+    expected: { text: 'Approving charters the web — every area arrives with its tools and its stated reason.', basis: 'structural' as const },
+  }));
+}
+
 /** Rule 6 made literal: the intelligence layer feeds the morning. */
 export function collectWorldIntel(rows: WorldIntelIn[]): NextMove[] {
   const out: NextMove[] = [];
@@ -212,6 +229,7 @@ export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
 const BASE_VALUE: Record<MoveKind, number> = {
   reply_unanswered: 100,   // a warm human is worth more than anything else in the system
   approval_waiting: 90,    // the user is the bottleneck
+  draft_waiting: 75,       // a designed world waiting on judgment — decide it before it goes stale
   natural_next: 60,
   followup_staged: 55,
   blocking_empty: 50,

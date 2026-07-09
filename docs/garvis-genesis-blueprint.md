@@ -384,6 +384,40 @@ posting API lands.
 
 ---
 
+## G1 — SHIPPED (with the round's two adopted refinements)
+
+The owner's review reframed G1 correctly — *"teach Garvis how to design businesses, not replace
+two hardcoded templates"* — and added two requirements, both now built in:
+
+1. **World DNA precedes structure.** The pipeline is Intent → **DNA** (business synthesis:
+   type, revenue model, ideal customers, value proposition, sales cycle, brand personality,
+   core assets, growth channels, operational loop, success metrics, constraints) → web
+   synthesis grounded in that DNA. The DNA persists on `web_templates.dna` and, after approval,
+   on `knowledge_worlds.dna` — everything downstream derives from the same record.
+2. **Every structure explains itself.** Each generated area carries a rationale ("why THIS
+   business needs it"), every draft states at least one deliberate omission with its reason,
+   and the parser flags any area that arrives unexplained — "(no reason given)" is rendered,
+   never hidden.
+
+Shipped surface: `app_0028_genesis.sql` (web_templates + world DNA columns, owner RLS);
+`genesis.ts` (DNA_SYSTEM + GENESIS_SYSTEM strict-JSON contracts, parseDNA/parseGenesis with the
+quality gauntlet — archetype vocabulary enforcement, coverage repair stated loudly, slug
+de-collision, zero-AI-keys floor on every play step, 28-check verify incl. the Lake Geneva
+contamination guard); `genesisRun.ts` (two-stage synthesis through the metered cluster-chat
+seam; drafts only — `approveDraft` is the single instantiation path and stamps the world with
+its DNA); `instantiateWeb` generalized to accept runtime templates THROUGH `validateTemplate`;
+`persistCharters` now error-checked; **data-driven plays** (`runPlayData`, token-merged with
+unknown tokens left visible) and the **fallback kill**: generators and queue-sequence resolve
+THE WORLD's own context/play — a genesis world can never receive Lake Geneva copy; a world
+without a sequence gets an honest refusal, not a borrowed one. UI: "Start from intent" on Work
+Webs with the draft-review panel (DNA chips, per-area why-lines, omissions, questions, intake
+requests, remove-node, approve/discard); waking moment gains `draft_waiting` (value 75 — only
+humans and approvals outrank a designed world awaiting judgment).
+
+Deferred within G1, honestly: draft editing beyond node removal (regenerate instead); genesis
+research grounding via retrieval (lands with G5); intake requests as actionable upload moves
+(lands with G2). **Next: G2 — photos.**
+
 ## Final principle, restated as an invariant
 
 Genesis generates **data that existing validators accept** — new worlds speak the same seven

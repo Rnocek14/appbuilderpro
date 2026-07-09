@@ -6,7 +6,7 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, collectDrafts, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn,
 } from './nextMove';
 import { reflectionDue } from './worldIntel';
@@ -192,7 +192,18 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     }
   }
 
+  // Genesis drafts awaiting judgment — a designed world should never rot unreviewed.
+  const { data: draftRows } = await supabase.from('web_templates')
+    .select('id, title, template, created_at').eq('status', 'draft').limit(5);
+  const draftsIn = (draftRows ?? []).map((d) => ({
+    id: d.id as string,
+    title: d.title as string,
+    areas: (((d.template as { nodes?: unknown[] } | null)?.nodes) ?? []).length,
+    created_at: d.created_at as string,
+  }));
+
   const moves = rankMoves([
+    ...collectDrafts(draftsIn),
     ...collectWorldIntel(intelMoves),
     ...collectReplies(replies.map((r) => ({
       id: r.id as string, from_address: r.from_address as string | null, subject: r.subject as string | null,
