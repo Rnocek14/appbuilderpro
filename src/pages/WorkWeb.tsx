@@ -12,7 +12,7 @@ import {
 import { AppShell } from '../components/layout/AppShell';
 import { Badge, Spinner, Modal, Button } from '../components/ui';
 import { useToast } from '../context/ToastContext';
-import { cn } from '../lib/utils';
+import { cn, timeAgo } from '../lib/utils';
 import { ARCHETYPES, type CharterStatus, type WorkTool } from '../lib/garvis/workweb';
 import { templateForWeb } from '../lib/garvis/workweb';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
@@ -44,6 +44,7 @@ export default function WorkWeb() {
   const [showContacts, setShowContacts] = useState(false);
   const [intel, setIntel] = useState<WorldIntelligenceRow | null>(null);
   const [reflecting, setReflecting] = useState(false);
+  const [showIntel, setShowIntel] = useState(false);
 
   // The heartbeat updates when observed: refresh the deterministic Living State on open, then read.
   useEffect(() => {
@@ -182,6 +183,11 @@ export default function WorkWeb() {
               title="Garvis reviews this world's record — what was tried, what the evidence says, what should change. Evidence-gated: lessons without proof are dropped."
               className="rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-50"
             >{reflecting ? 'reflecting…' : 'Reflect'}</button>
+            <button
+              onClick={() => setShowIntel((v) => !v)}
+              title="The world's living understanding: what changed, what was learned, what's working, what to test next — every line from persisted rows"
+              className={cn('rounded-lg border px-2.5 py-1 text-xs transition-colors', showIntel ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink')}
+            >Intelligence</button>
             <StatChip label="artifacts" value={web.rollup.artifacts} />
             <StatChip label="waiting" value={web.rollup.pendingApprovals} tone="warn" />
             <StatChip label="sent" value={web.rollup.messagesSent} />
@@ -197,6 +203,8 @@ export default function WorkWeb() {
             )}
           </div>
         </div>
+
+        {showIntel && intel && <WorldIntelDashboard intel={intel} />}
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr]">
           {/* The web — production areas as a connected tree */}
@@ -612,5 +620,58 @@ function ContactsModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+
+/** THE CEO VIEW — understanding, not analytics. Every line is a persisted row: the Living
+ *  State's momentum and blockers, the reflection's lessons (evidence-gated at write time),
+ *  implications, the standing recommendation, and what Garvis still doesn't know. The OBSERVE
+ *  half of the operating loop (site clicks, content metrics) lands with G5 instrumentation —
+ *  until those rows exist, this dashboard refuses to guess at them. */
+function WorldIntelDashboard({ intel }: { intel: WorldIntelligenceRow }) {
+  const st = intel.state;
+  const box = 'rounded-2xl border border-forge-border bg-forge-panel/40 p-4';
+  const h = 'mb-2 text-xs font-semibold uppercase tracking-wide text-forge-dim';
+  return (
+    <div className="mb-5 grid gap-4 lg:grid-cols-3">
+      <section className={box}>
+        <h2 className={h}>State now</h2>
+        {st?.momentum && <p className="text-sm text-forge-ink/90">Momentum: <span className="font-medium">{st.momentum.label}</span> <span className="text-xs text-forge-dim">({st.momentum.evidence})</span></p>}
+        {st?.objective && <p className="mt-1 text-sm text-forge-ink/80">{st.objective}</p>}
+        {(st?.blockers ?? []).map((b) => (
+          <p key={b.text} className="mt-1.5 text-xs"><span className="text-forge-warn">{b.text}</span><span className="block text-forge-dim/80">{b.evidence}</span></p>
+        ))}
+        {(st?.risks ?? []).map((r) => (
+          <p key={r.text} className="mt-1.5 text-xs"><span className="text-forge-dim">{r.text}</span><span className="block text-forge-dim/70">{r.evidence}</span></p>
+        ))}
+        {!st?.blockers?.length && !st?.risks?.length && <p className="mt-1 text-xs text-forge-dim">Nothing structural in the way.</p>}
+      </section>
+      <section className={box}>
+        <h2 className={h}>What we learned {intel.last_reflected_at ? `· reflected ${timeAgo(intel.last_reflected_at)}` : '· never reflected yet'}</h2>
+        {(intel.reflection?.learned ?? []).slice(0, 4).map((l) => (
+          <p key={l.text} className="mt-1 text-sm text-forge-ink/85">{l.text}<span className="block text-[11px] text-forge-dim/80">{l.evidence}</span></p>
+        ))}
+        {(intel.implications ?? []).slice(0, 3).map((im) => (
+          <p key={im.observation} className="mt-1.5 text-xs text-forge-dim"><span className="text-forge-ink/75">{im.observation}</span> → {im.implication}</p>
+        ))}
+        {!intel.reflection?.learned?.length && !intel.implications?.length && (
+          <p className="text-xs text-forge-dim">No lessons on record yet — run a Reflect once real work has happened. Lessons without evidence are dropped, so an empty box is honest.</p>
+        )}
+      </section>
+      <section className={box}>
+        <h2 className={h}>What Garvis recommends</h2>
+        {intel.recommendation ? <p className="text-sm text-forge-ink/90">{intel.recommendation}</p> : <p className="text-xs text-forge-dim">No standing recommendation yet — it arrives from reflection.</p>}
+        {(intel.open_questions ?? []).length > 0 && (
+          <div className="mt-2">
+            <p className="text-[11px] uppercase tracking-wide text-forge-dim/70">Still unknown</p>
+            <ul className="mt-1 list-inside list-disc space-y-0.5 text-xs text-forge-ink/75">
+              {(intel.open_questions ?? []).map((q) => <li key={q}>{q}</li>)}
+            </ul>
+          </div>
+        )}
+        <p className="mt-3 border-t border-forge-border pt-2 text-[11px] text-forge-dim/70">Working/failing by the numbers (site clicks, content performance) arrives with G5 instrumentation — this panel will not guess until those rows exist.</p>
+      </section>
+    </div>
   );
 }

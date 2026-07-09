@@ -480,6 +480,41 @@ Deferred, stated: workspace deploy-button enforcement; the lead-submit → Garvi
 function (generated forms store in the app's own backend today); generic asset-manifest
 injection into initial generation for NON-world projects. **Next: G4 — the lead finder.**
 
+## The revised roadmap (adopted) — from builder to operator
+
+The owner's post-G3 review names the last major leap: the pipeline is solved (Intent → DNA →
+Genesis → Web → Photos → Website), but an OPERATING SYSTEM never ends at build. The loop is
+UNDERSTAND → BUILD → OPERATE → OBSERVE → LEARN → IMPROVE → REBUILD → UNDERSTAND. A world should
+behave like a company: wake, learn, adapt, recommend. Adopted, with one standing constraint:
+
+**The operating loop is only as honest as its instruments.** "The hero isn't getting clicks"
+requires click rows; "carousel #3 performs best" requires post metrics. Garvis already has the
+LEARN half (evidence-gated reflection, implications, heartbeat, momentum); the OBSERVE half for
+websites and content does not exist yet. G5 therefore BEGINS with instrumentation — site events
+from generated apps (lead-form submits, section views), campaign metrics by segment — and no
+adaptive recommendation ships ahead of the rows it stands on.
+
+Revised order:
+- **G4 — Market Intelligence** (broader than Lead Finder): target customers, competitors,
+  pricing, trends, buying signals, content opportunities, SEO/search demand, partnerships —
+  compiled from the DNA into research runs over the existing rails (discover-media, fetch-url,
+  business_profiles), landing as evidenced intel artifacts + world-scoped prospects with fit
+  scores. Research closes the loop: Explore ↔ Market Intel ↔ World Intelligence ↔ Lead Finder
+  ↔ website changes ↔ campaigns ↔ the morning briefing.
+- **G5 — Adaptive Operation**: instrumentation first (site events, per-segment campaign
+  metrics), then the improvement loop — "homepage gets visits but few inquiries → test another
+  hero → generate v2 → approve → deploy"; every campaign teaches the next; reflection consumes
+  the new signals. The world evolves; nothing external moves without approval.
+- **G6 — Retrieval + knowledge quality** (the former G5 substance items).
+- **G7 — Video Studio** (traction-engine port).
+
+**Shipped with this adoption — the World Intelligence Dashboard** (the "biggest missing
+object"): an Intelligence view on every web — State now (momentum + blockers/risks with
+evidence), What we learned (reflection lessons + implications, evidence attached, honestly
+empty until a reflection has run), What Garvis recommends + what's still unknown. Every line is
+a persisted row; the working/failing-by-the-numbers panel states plainly that it waits for G5
+instrumentation rather than guessing.
+
 ## Final principle, restated as an invariant
 
 Genesis generates **data that existing validators accept** — new worlds speak the same seven
