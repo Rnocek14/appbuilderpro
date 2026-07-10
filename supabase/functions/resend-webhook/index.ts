@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
   if (reason && to && ownerId) {
     const lower = to.toLowerCase();
     await admin.from('suppression').upsert(
-      { owner_id: ownerId, email: lower, domain: lower.split('@')[1] ?? null, reason },
+      { owner_id: ownerId, email: lower, domain: null, reason }, // per-ADDRESS row; domain set only on explicit domain blocks
       { onConflict: 'owner_id,email' },
     );
     await admin.from('contacts').update({ email_status: CONTACT_STATUS[reason] }).eq('owner_id', ownerId).eq('email', lower);

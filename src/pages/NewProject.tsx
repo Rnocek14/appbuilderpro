@@ -137,9 +137,13 @@ export default function NewProject() {
       // so you never have to re-explain the rabbit hole you built this from.
       if (briefRef.current) { try { await saveBrain(project.id, briefRef.current); } catch { /* best-effort */ } }
 
-      // World build: bind the project back to its world (assets, manifest, provenance, artifact).
+      // World build: bind the project back to its world (assets, manifest, provenance, artifact) —
+      // but ONLY if the user is still building the seeded thing. If they rewrote the prompt into a
+      // different app, binding the artist's photos to it would be a lie; clear and skip instead.
       if (worldHandoffRef.current) {
-        try { await bindProjectToWorld(project.id, worldHandoffRef.current); } catch { /* best-effort */ }
+        if (text.trim() === worldHandoffRef.current.prompt.trim()) {
+          try { await bindProjectToWorld(project.id, worldHandoffRef.current); } catch { /* best-effort */ }
+        }
         clearWorldHandoff();
         worldHandoffRef.current = null;
       }

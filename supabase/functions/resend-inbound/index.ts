@@ -85,7 +85,17 @@ Deno.serve(async (req) => {
   }
   if (!msg) return json({ ok: true, note: 'no matching message; reply ignored' });
 
-  const classification = (await classifyAI(subject, text)) ?? classifyHeuristic(text);
+  // Strip QUOTED content before any intent detection: the original outreach footer says
+  // 'reply "unsubscribe"', so a quoted copy of it in an interested reply must never read as
+  // an unsubscribe. Keep only the prospect's own words.
+  const ownWords = text
+    .split(/\r?\n/)
+    .filter((l) => !l.trim().startsWith('>'))
+    .join('\n')
+    .split(/\nOn .{0,120}wrote:\s*$/m)[0]
+    .split(/\n-- ?\n/)[0]
+    .trim();
+  const classification = (await classifyAI(subject, ownWords)) ?? classifyHeuristic(ownWords);
 
   await admin.from('replies').insert({
     owner_id: msg.owner_id, message_id: msg.id, campaign_id: msg.campaign_id,
@@ -96,10 +106,10 @@ Deno.serve(async (req) => {
   // Explicit unsubscribe intent → suppression + contact status, so this address can NEVER be
   // emailed again. This was the missing ingestion path: the 'unsubscribe' suppression reason
   // existed in the schema but nothing ever wrote it.
-  const wantsOut = /\b(unsubscribe|remove me|stop emailing( me)?|take me off|do not (contact|email))\b/i.test(text);
+  const wantsOut = /\b(unsubscribe|remove me|stop emailing( me)?|take me off|do not (contact|email))\b/i.test(ownWords);
   if (wantsOut && from) {
     await admin.from('suppression').upsert(
-      { owner_id: msg.owner_id, email: from, domain: from.split('@')[1] ?? null, reason: 'unsubscribe' },
+      { owner_id: msg.owner_id, email: from, domain: null, reason: 'unsubscribe' }, // per-address; never silences the whole domain
       { onConflict: 'owner_id,email' },
     );
     await admin.from('contacts').update({ email_status: 'unsubscribed' }).eq('owner_id', msg.owner_id).eq('email', from);

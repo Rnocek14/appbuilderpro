@@ -415,10 +415,12 @@ export async function runTool(
       // Upsert on (owner_id, email) with ignoreDuplicates: an already-known contact is SKIPPED,
       // never overwritten — updating here would reset email_status (including 'unsubscribed')
       // back to 'unknown', silently re-arming sends to someone who opted out.
-      const { error } = await supabase.from('contacts').upsert(rows, { onConflict: 'owner_id,email', ignoreDuplicates: true });
+      const { data: inserted, error } = await supabase.from('contacts').upsert(rows, { onConflict: 'owner_id,email', ignoreDuplicates: true }).select('id');
       if (error) return { ok: false, message: `Could not save contacts: ${error.message}` };
-      await recordMindEvent(uid, { event_type: 'artifact_imported', source: 'workweb', subject: `Imported ${rows.length} contacts into ${cluster.title}`, payload: { world_id: worldId } });
-      return { ok: true, message: `Imported ${rows.length} contact${rows.length === 1 ? '' : 's'}${parsed.skipped ? ` (${parsed.skipped} skipped)` : ''}.` };
+      const added = inserted?.length ?? 0;                    // rows actually inserted — the honest count
+      const dupes = rows.length - added;
+      await recordMindEvent(uid, { event_type: 'artifact_imported', source: 'workweb', subject: `Imported ${added} contacts into ${cluster.title}`, payload: { world_id: worldId } });
+      return { ok: true, message: `Imported ${added} new contact${added === 1 ? '' : 's'}${dupes ? ` (${dupes} already known)` : ''}${parsed.skipped ? ` (${parsed.skipped} rows skipped)` : ''}.` };
     }
 
     case 'queue-sequence': {
@@ -438,8 +440,10 @@ export async function runTool(
           emails: voice.play.emails.map((e) => ({ ...e, subject: mergeTokens(e.subject, voice.ctx!), body: mergeTokens(e.body, voice.ctx!) })),
         };
       } else {
-        const play = matchPlayForCluster(cluster.slug) ?? playById('lakefront-seller');
-        if (!play) return { ok: false, message: 'No sequence is defined for this area yet.' };
+        // No cross-world fallback — a builtin world whose cluster matches no play gets a plain
+        // refusal, never another world's copy (the same rule the genesis branch enforces).
+        const play = matchPlayForCluster(cluster.slug);
+        if (!play) return { ok: false, message: 'No sequence is defined for this area yet — draft one in its follow-up area first.' };
         seq = { title: play.title, emails: play.emailSequence(DEFAULT_LAKE_GENEVA_CONTEXT).map((e) => ({ step: e.step, subject: e.subject, body: e.body })) };
       }
       const approvalId = await queueSequenceStep0(uid, worldId, cluster, seq, to, args?.contactName ?? null);
@@ -547,12 +551,25 @@ async function queueSequenceStep0(
 ): Promise<string> {
   if (!playSeq.emails.length) throw new Error('This sequence has no emails.');
   void cluster;
-  // Contact: atomic upsert on (owner_id, email) — app_0025 constraint makes this race-free.
-  const { data: c, error: cErr } = await supabase.from('contacts')
-    .upsert({ owner_id: ownerId, email: to, full_name: name, email_status: 'unknown', is_primary: true }, { onConflict: 'owner_id,email' })
-    .select('id').single();
-  if (cErr || !c) throw new Error(`Could not save the contact: ${cErr?.message ?? 'unknown error'}`);
-  const contactId = (c as { id: string }).id;
+  // Contact: select-first, insert-if-missing. NEVER an overwriting upsert here — that would
+  // reset email_status (including 'unsubscribed') back to 'unknown' and silently re-arm sends
+  // to someone who opted out (the exact hazard upload-list documents and avoids).
+  let contactId: string;
+  const { data: existingContact } = await supabase.from('contacts')
+    .select('id, email_status').eq('owner_id', ownerId).eq('email', to).maybeSingle();
+  if (existingContact) {
+    const st = (existingContact as { email_status: string }).email_status;
+    if (['unsubscribed', 'bounced', 'complained', 'invalid'].includes(st)) {
+      throw new Error(`This contact is marked ${st} — Garvis won't queue mail to them.`);
+    }
+    contactId = (existingContact as { id: string }).id;
+  } else {
+    const { data: c, error: cErr } = await supabase.from('contacts')
+      .insert({ owner_id: ownerId, email: to, full_name: name, email_status: 'unknown', is_primary: true })
+      .select('id').single();
+    if (cErr || !c) throw new Error(`Could not save the contact: ${cErr?.message ?? 'unknown error'}`);
+    contactId = (c as { id: string }).id;
+  }
 
   // Reuse an already-pending campaign for this recipient in this web (double-click / retry safety).
   // sequence_stopped:true keeps the generic follow-up cron away — this play owns its own copy.

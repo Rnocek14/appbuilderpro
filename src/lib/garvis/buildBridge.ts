@@ -21,6 +21,7 @@ export interface WorldBuildHandoff {
   worldId: string;
   clusterId: string;
   worldTitle: string;
+  prompt: string;             // the seeded prompt — binding only happens if the user still builds THIS
   assets: { name: string; url: string; alt: string }[];
 }
 
@@ -49,6 +50,7 @@ export async function buildFromWorld(worldId: string, clusterId: string): Promis
 
   const handoff: WorldBuildHandoff = {
     worldId, clusterId, worldTitle: world.title as string,
+    prompt: compiled.prompt,
     assets: photos.map((p) => ({ name: p.name, url: p.url, alt: p.caption ?? '' })),
   };
   try {
