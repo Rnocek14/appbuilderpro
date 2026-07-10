@@ -82,6 +82,18 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
+    // OWNERSHIP GATE: world_id / cluster_id / app_id are caller-supplied and this function writes
+    // with the service role — verify they belong to the caller or drop them. Never write across
+    // tenants because a client lied about an id.
+    if (body.world_id) {
+      const { data: w } = await admin.from('knowledge_worlds').select('id').eq('id', body.world_id).eq('owner_id', user.id).maybeSingle();
+      if (!w) body.world_id = undefined;
+    }
+    if (body.cluster_id) {
+      const { data: c } = await admin.from('knowledge_clusters').select('id').eq('id', body.cluster_id).eq('owner_id', user.id).maybeSingle();
+      if (!c) body.cluster_id = undefined;
+    }
+
     // 1) Persist the document immediately (status uploaded) — so an upload is never lost even if the
     //    AI/embedding steps below fail. Status advances as each step succeeds.
     const { data: docRow, error: insErr } = await admin.from('documents').insert({
@@ -219,7 +231,7 @@ Deno.serve(async (req) => {
     const homeWorld = body.world_id ?? suggestedWorldId;
     if (openQuestion && homeWorld) {
       const { data: intel } = await admin.from('world_intelligence')
-        .select('id, open_questions').eq('world_id', homeWorld).maybeSingle();
+        .select('id, open_questions').eq('world_id', homeWorld).eq('owner_id', user.id).maybeSingle();
       if (intel) {
         const qs = [...new Set([openQuestion, ...(((intel.open_questions as string[] | null) ?? []))])].slice(0, 5);
         await admin.from('world_intelligence').update({ open_questions: qs }).eq('id', intel.id);
@@ -231,7 +243,7 @@ Deno.serve(async (req) => {
     await admin.from('documents').update({
       summary: summary || null,
       concepts,
-      status: 'classified',
+      status: summary ? 'classified' : 'extracted',
       meta: {
         suggested_world_id: suggestedWorldId, connection_count: connections.length,
         ...(vision ? { vision } : {}),
@@ -242,7 +254,7 @@ Deno.serve(async (req) => {
 
     return json({
       document_id: documentId,
-      status: 'classified',
+      status: summary ? 'classified' : 'extracted',
       summary,
       concepts,
       vision,

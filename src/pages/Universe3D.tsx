@@ -215,12 +215,16 @@ function CameraRig({ target, dist, controls }: { target: THREE.Vector3; dist: nu
     goal.current.pos = target.clone().add(dir.multiplyScalar(dist)).add(new THREE.Vector3(0, dist * 0.35, 0));
     goal.current.look = target.clone();
   }, [target, dist]);
+  const settled = useRef(false);
+  useEffect(() => { settled.current = false; }, [target, dist]);
   useFrame(() => {
+    if (settled.current) return; // arrived — free orbit; the rig only drives TRANSITIONS
     camera.position.lerp(goal.current.pos, 0.045);
     if (controls.current) {
       controls.current.target.lerp(goal.current.look, 0.06);
       controls.current.update();
     }
+    if (camera.position.distanceTo(goal.current.pos) < 0.6) settled.current = true;
   });
   return null;
 }

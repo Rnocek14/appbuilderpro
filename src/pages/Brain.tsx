@@ -76,6 +76,7 @@ export default function Brain() {
     if (!images.length) return;
     setUploading(true);
     try {
+      let ok = 0;
       for (const f of images) {
         try {
           const res = await uploadAndIngestImage(f);
@@ -84,11 +85,13 @@ export default function Brain() {
           const worldId = item.suggestedWorldId ?? '';
           const clusters = worldId ? await listClustersForWorld(worldId).catch(() => []) : [];
           setPending((p) => [...p, { file: f, preview: URL.createObjectURL(f), item, worldId, clusterId: '', clusters }]);
+          ok++;
         } catch (e) {
           toast('error', e instanceof Error ? e.message : `Could not ingest ${f.name}.`);
         }
       }
-      toast('success', `Catalogued ${images.length} image${images.length === 1 ? '' : 's'} — review the proposed filing below.`);
+      // The honest count: only what actually queued.
+      if (ok > 0) toast('success', `Catalogued ${ok} of ${images.length} image${images.length === 1 ? '' : 's'} — review the proposed filing below.`);
     } finally {
       setUploading(false);
     }
@@ -106,9 +109,10 @@ export default function Brain() {
     setPending((p) => p.map((row, i) => (i === ix ? { ...row, worldId, clusterId: '', clusters } : row)));
   };
 
-  const approvePending = async (ix: number) => {
-    const row = pending[ix];
-    if (!row || !row.worldId) return;
+  const [filingId, setFilingId] = useState<string | null>(null);
+  const approvePending = async (row: PendingIntake) => {
+    if (!row.worldId || filingId) return;
+    setFilingId(row.item.documentId);
     try {
       await fileDocumentToCluster(row.item.documentId, row.worldId, row.clusterId || null);
       if (row.clusterId) {
@@ -117,20 +121,20 @@ export default function Brain() {
         await uploadClusterFile(row.clusterId, row.file, { caption: row.item.summary, label: defaultLabel(row.item.vision) });
       }
       URL.revokeObjectURL(row.preview);
-      setPending((p) => p.filter((_, i) => i !== ix));
+      // Remove by IDENTITY, never by index — an index is stale the moment the list changes.
+      setPending((p) => p.filter((r) => r.item.documentId !== row.item.documentId));
       toast('success', `Filed ${row.item.title}.`);
       await refresh();
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not file it.');
+    } finally {
+      setFilingId(null);
     }
   };
 
-  const skipPending = (ix: number) => {
-    setPending((p) => {
-      const row = p[ix];
-      if (row) URL.revokeObjectURL(row.preview);
-      return p.filter((_, i) => i !== ix);
-    });
+  const skipPending = (row: PendingIntake) => {
+    URL.revokeObjectURL(row.preview);
+    setPending((p) => p.filter((r) => r.item.documentId !== row.item.documentId));
   };
 
   const fileToWorld = async (documentId: string, worldId: string) => {
@@ -227,8 +231,8 @@ export default function Brain() {
                           {row.clusters.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
                         </select>
                       )}
-                      <Button size="sm" onClick={() => void approvePending(ix)} disabled={!row.worldId}><Check size={13} /> File it</Button>
-                      <button onClick={() => skipPending(ix)} className="text-forge-dim hover:text-forge-warn" title="Skip — stays in the brain unfiled"><X size={14} /></button>
+                      <Button size="sm" onClick={() => void approvePending(row)} disabled={!row.worldId || filingId !== null} loading={filingId === row.item.documentId}><Check size={13} /> File it</Button>
+                      <button onClick={() => skipPending(row)} className="text-forge-dim hover:text-forge-warn" title="Skip — stays in the brain unfiled"><X size={14} /></button>
                     </div>
                   </div>
                 </div>

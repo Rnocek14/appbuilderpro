@@ -92,13 +92,15 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
   // workspace). Ledger the approved-but-not-executed state honestly — visible, never silent.
   const { data: sess } = await supabase.auth.getUser();
   if (sess.user?.id) {
-    await supabase.from('execution_runs').insert({
+    const { error } = await supabase.from('execution_runs').insert({
       owner_id: sess.user.id, approval_id: a.id, connector: 'garvis', action: a.kind,
       status: 'skipped', request: { approval_id: a.id },
       error: 'decision recorded — no server executor for this kind yet; execute from where the capability lives',
     });
+    if (error) console.warn('decision-ledger insert failed (apply app_0031):', error.message);
   }
-  return { ok: true, result: { approved: true } };
+  // executed: false — the UI must say "approved", never "executed", for kinds with no executor.
+  return { ok: true, result: { approved: true, executed: false } };
 }
 
 export async function rejectApproval(id: string): Promise<void> {

@@ -210,6 +210,7 @@ async function doSync(u: Universe, uid: string): Promise<string | null> {
       if (error || !data) return null;
       worldId = data.id as string;
       rekeyLocal(u.id, worldId);
+      u.id = worldId; // adopt the server id on the OBJECT too — a retry or the pending chain must UPDATE this world, never insert a duplicate
     }
 
     // 2. reuse existing row ids so saves UPDATE instead of duplicating

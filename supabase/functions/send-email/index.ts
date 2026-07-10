@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
     const domain = to.split('@')[1] ?? '';
     const [suppEmail, suppDomain] = await Promise.all([
       admin.from('suppression').select('reason').eq('owner_id', user.id).eq('email', to).limit(1),
-      admin.from('suppression').select('reason').eq('owner_id', user.id).eq('domain', domain).limit(1),
+      admin.from('suppression').select('reason').eq('owner_id', user.id).eq('domain', domain).is('email', null).limit(1), // explicit domain blocks ONLY — a per-address row must never silence a whole domain
     ]);
     if (suppEmail.error || suppDomain.error) return block('Suppression list could not be checked — refusing to send.');
     const supp = suppEmail.data?.[0] ?? suppDomain.data?.[0];
@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
 
     await ledger({ status: 'ok', request: { to, subject: msg.subject }, response: { resend_id: resendId } });
     // status is already 'approved' (checked at entry) — only the outcome lands in result.
-    await admin.from('approvals').update({ result: { ...priorResult, resend_id: resendId, sent_at: sentAt } }).eq('id', approval_id);
+    await admin.from('approvals').update({ result: { ...priorResult, send_claimed_at: sentAt, resend_id: resendId, sent_at: sentAt } }).eq('id', approval_id);
     await admin.from('mind_events').insert({
       owner_id: user.id, source: 'execution', event_type: 'email_sent',
       subject: `Sent "${(msg.subject ?? '').slice(0, 120)}" to ${to}`,

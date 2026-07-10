@@ -335,11 +335,16 @@ export async function completeWithWebSearch(
 }
 
 /** Strip markdown fences and parse JSON safely. */
-export function parseJson<T>(raw: string): T {
-  const clean = raw.replace(/```json|```/g, '').trim();
-  const start = clean.indexOf('{');
-  const end = clean.lastIndexOf('}');
-  return JSON.parse(clean.slice(start, end + 1)) as T;
+export function parseJson<T>(raw: string): T | null {
+  try {
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const start = clean.indexOf('{');
+    const end = clean.lastIndexOf('}');
+    if (start === -1 || end <= start) return null;
+    return JSON.parse(clean.slice(start, end + 1)) as T;
+  } catch {
+    return null; // callers hold the deterministic floor — garbage JSON must never throw
+  }
 }
 
 export const corsHeaders = {

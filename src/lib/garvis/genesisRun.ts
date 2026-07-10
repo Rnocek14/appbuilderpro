@@ -102,13 +102,21 @@ export async function generateDraft(intent: string): Promise<GenerateDraftResult
 }
 
 export async function listDrafts(): Promise<DraftRow[]> {
+  // Owner-scoped explicitly: the admin-read RLS policy exists for support, but an admin's own
+  // WorkWebs page must never render other people's business DNA as approvable drafts.
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) return [];
   const { data } = await supabase.from('web_templates')
-    .select(DRAFT_COLS).eq('status', 'draft').order('created_at', { ascending: false }).limit(10);
+    .select(DRAFT_COLS).eq('status', 'draft').eq('owner_id', uid).order('created_at', { ascending: false }).limit(10);
   return (data ?? []) as unknown as DraftRow[];
 }
 
 export async function discardDraft(id: string): Promise<void> {
-  await supabase.from('web_templates').update({ status: 'archived' }).eq('id', id);
+  const { data, error } = await supabase.from('web_templates')
+    .update({ status: 'archived' }).eq('id', id).eq('status', 'draft').select('id');
+  if (error) throw new Error(error.message);
+  if (!data?.length) throw new Error('Draft not found or no longer a draft.');
 }
 
 /** Remove one area from a draft before approval (the user's edit pass). Keeps the draft honest:
@@ -137,16 +145,28 @@ export async function approveDraft(id: string): Promise<WebSummary> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
-  const { data } = await supabase.from('web_templates').select(DRAFT_COLS).eq('id', id).maybeSingle();
-  const row = data as unknown as DraftRow | null;
-  if (!row) throw new Error('Draft not found.');
-  if (row.status !== 'draft') throw new Error(`This draft is ${row.status}, not awaiting approval.`);
+  // ATOMIC CLAIM: flip draft → instantiated only where it is still a draft owned by this user.
+  // Two racing approvals (second tab, retry) cannot both pass — the loser matches zero rows.
+  // On instantiation failure the claim reverts, so the draft is never stranded.
+  const { data: claimed, error: claimErr } = await supabase.from('web_templates')
+    .update({ status: 'instantiated' })
+    .eq('id', id).eq('owner_id', uid).eq('status', 'draft')
+    .select(DRAFT_COLS);
+  if (claimErr) throw new Error(claimErr.message);
+  const row = (claimed?.[0] as unknown as DraftRow | undefined) ?? null;
+  if (!row) throw new Error('This draft was already approved or discarded.');
 
-  const summary = await instantiateWeb(row.template);
+  let summary: WebSummary;
+  try {
+    summary = await instantiateWeb(row.template);
+  } catch (e) {
+    await supabase.from('web_templates').update({ status: 'draft' }).eq('id', id); // release the claim
+    throw e;
+  }
 
   const [{ error: wErr }, { error: tErr }] = await Promise.all([
     supabase.from('knowledge_worlds').update({ dna: row.dna, business_context: row.business_context }).eq('id', summary.worldId),
-    supabase.from('web_templates').update({ status: 'instantiated', world_id: summary.worldId }).eq('id', id),
+    supabase.from('web_templates').update({ world_id: summary.worldId }).eq('id', id),
   ]);
   if (wErr) throw new Error(`The world was created but its DNA could not be saved: ${wErr.message}`);
   if (tErr) throw new Error(`The world was created but the draft could not be marked instantiated: ${tErr.message}`);
