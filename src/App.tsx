@@ -31,6 +31,8 @@ import WorkWebs from './pages/WorkWebs';
 import WorkWeb from './pages/WorkWeb';
 import SystemAltitude from './pages/SystemAltitude';
 import Universe from './pages/Universe';
+import { lazy, Suspense as RSuspense } from 'react';
+const Universe3D = lazy(() => import('./pages/Universe3D'));
 import PreviewEngine from './pages/PreviewEngine';
 import PreviewSite from './pages/PreviewSite';
 import PreviewReport from './pages/PreviewReport';
@@ -70,7 +72,8 @@ export default function App() {
               <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
               <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
               <Route path="/garvis/system/:worldId" element={<Protected><SystemAltitude /></Protected>} />
-              <Route path="/garvis/universe" element={<Protected><Universe /></Protected>} />
+              <Route path="/garvis/universe" element={<Protected><RSuspense fallback={<div className="p-8 text-sm text-forge-dim">Opening the sky…</div>}><Universe3D /></RSuspense></Protected>} />
+              <Route path="/garvis/universe/flat" element={<Protected><Universe /></Protected>} />
               <Route path="/garvis/explore" element={<Protected><ClusterSpike /></Protected>} />
               <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
               <Route path="/new" element={<Protected><NewProject /></Protected>} />
