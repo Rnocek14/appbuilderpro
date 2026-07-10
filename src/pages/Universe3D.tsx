@@ -21,8 +21,10 @@ import { AppShell } from '../components/layout/AppShell';
 import { Spinner } from '../components/ui';
 import { loadUniverseScene } from '../lib/garvis/universeViewRun';
 import { loadSystemScene } from '../lib/garvis/systemViewRun';
+import { listClusterArtifacts, type StudioArtifact } from '../lib/garvis/artifacts';
 import { hash32, BAND_R, BAND_LABEL, type UniverseScene, type WorldBody } from '../lib/garvis/universeView';
-import type { SystemScene } from '../lib/garvis/systemView';
+import type { SystemScene, Planet as SysPlanet } from '../lib/garvis/systemView';
+import { X, FileText } from 'lucide-react';
 
 const SKY = 170;                    // universe radius in world units
 const MOMENTUM_COLOR: Record<string, string> = {
@@ -50,6 +52,14 @@ function discTexture(inner = 'rgba(255,255,255,1)', outer = 'rgba(255,255,255,0)
 
 function useDisc(): THREE.Texture {
   return useMemo(() => discTexture(), []);
+}
+
+/** A planet's position relative to its star — tilt is a stable hash so orbits have volume. */
+function planetLocal(p: SysPlanet): [number, number, number] {
+  const a = (p.angleDeg * Math.PI) / 180;
+  const r = 6 + p.ring * 3.4;
+  const tilt = ((hash32(`tilt-${p.id}`) % 100) / 100 - 0.5) * 0.5;
+  return [Math.cos(a) * r, Math.sin(a) * r * Math.sin(tilt) * 0.6, Math.sin(a) * r * Math.cos(tilt)];
 }
 
 /** 3D position for a world: same identity angle/band as the pure compiler, plus a stable
@@ -219,10 +229,10 @@ function CameraRig({ target, dist, controls }: { target: THREE.Vector3; dist: nu
 // The scene
 // ---------------------------------------------------------------------------
 
-function Sky({ scene, onSelect, selected, system }: {
+function Sky({ scene, onSelect, selected, system, planet, onPlanet, arts, onArt }: {
   scene: UniverseScene; onSelect: (b: WorldBody | null) => void; selected: WorldBody | null; system: SystemScene | null;
+  planet: SysPlanet | null; onPlanet: (p: SysPlanet) => void; arts: StudioArtifact[] | null; onArt: (a: StudioArtifact) => void;
 }) {
-  const navigate = useNavigate();
   const posOf = useMemo(() => new Map(scene.bodies.map((b) => [b.id, worldPos(b)])), [scene.bodies]);
 
   return (
@@ -273,19 +283,15 @@ function Sky({ scene, onSelect, selected, system }: {
         <group position={posOf.get(selected.id)!}>
           <HoloRing radius={13} />
           {system.planets.map((p) => {
-            const a = (p.angleDeg * Math.PI) / 180;
             const r = 6 + p.ring * 3.4;
             const tilt = ((hash32(`tilt-${p.id}`) % 100) / 100 - 0.5) * 0.5;
-            const pos: [number, number, number] = [
-              Math.cos(a) * r,
-              Math.sin(a) * r * Math.sin(tilt) * 0.6,
-              Math.sin(a) * r * Math.cos(tilt),
-            ];
+            const pos = planetLocal(p);
             const ringPts = Array.from({ length: 65 }, (_, i) => {
               const t = (i / 64) * Math.PI * 2;
               return new THREE.Vector3(Math.cos(t) * r, Math.sin(t) * r * Math.sin(tilt) * 0.6, Math.sin(t) * r * Math.cos(tilt));
             });
             const glowing = p.glow > 0;
+            const isFocus = planet?.id === p.id;
             return (
               <group key={p.id}>
                 <Line points={ringPts} color="#3A4051" lineWidth={0.4} transparent opacity={0.5} dashed dashSize={0.6} gapSize={0.9} />
@@ -295,11 +301,28 @@ function Sky({ scene, onSelect, selected, system }: {
                   coreScale={0.45 + p.size * 0.05}
                   halo={glowing ? 4.5 : 1.6}
                   pulse={glowing}
-                  onClick={() => navigate(`/garvis/webs/${system.worldId}?area=${encodeURIComponent(p.slug)}`)}
+                  onClick={() => onPlanet(p)}
                 >
                   <Html center distanceFactor={60} style={{ pointerEvents: 'none' }} position={[0, -1.6, 0]}>
-                    <div style={{ color: '#C9CDD9', fontSize: 10, whiteSpace: 'nowrap', textShadow: '0 0 5px #000' }}>{p.title}</div>
+                    <div style={{ color: isFocus ? '#FFD9B0' : '#C9CDD9', fontSize: 10, whiteSpace: 'nowrap', textShadow: '0 0 5px #000' }}>{p.title}</div>
                   </Html>
+                  {/* V2 — artifact glints: REAL artifact rows in a thin ring around the focused planet */}
+                  {isFocus && (arts ?? []).slice(0, 24).map((art, i) => {
+                    const ga = ((hash32(`art-${art.id}`) % 360) * Math.PI) / 180;
+                    const gr = 1.6 + (i % 3) * 0.5;
+                    return (
+                      <mesh
+                        key={art.id}
+                        position={[Math.cos(ga) * gr, ((hash32(`ay-${art.id}`) % 100) / 100 - 0.5) * 0.9, Math.sin(ga) * gr]}
+                        onClick={(e) => { e.stopPropagation(); onArt(art); }}
+                        onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }}
+                        onPointerOut={() => { document.body.style.cursor = ''; }}
+                      >
+                        <sphereGeometry args={[0.14, 8, 8]} />
+                        <meshBasicMaterial color="#FFC46B" toneMapped={false} />
+                      </mesh>
+                    );
+                  })}
                 </GlowOrb>
               </group>
             );
@@ -320,6 +343,9 @@ export default function Universe3D() {
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<WorldBody | null>(null);
   const [system, setSystem] = useState<SystemScene | null>(null);
+  const [planet, setPlanet] = useState<SysPlanet | null>(null);
+  const [arts, setArts] = useState<StudioArtifact[] | null>(null);
+  const [openArt, setOpenArt] = useState<StudioArtifact | null>(null);
   const controls = useRef<any>(null);
 
   useEffect(() => {
@@ -332,13 +358,30 @@ export default function Universe3D() {
   useEffect(() => {
     let live = true;
     setSystem(null);
+    setPlanet(null);
+    setOpenArt(null);
     if (selected && !selected.localOnly) {
       loadSystemScene(selected.id).then((s) => { if (live) setSystem(s); }).catch(() => {});
     }
     return () => { live = false; };
   }, [selected]);
 
-  const target = useMemo(() => (selected ? new THREE.Vector3(...worldPos(selected)) : new THREE.Vector3(0, 0, 0)), [selected]);
+  // V2 — landing on a planet loads its REAL artifacts (the glints) and docks the studio panel.
+  useEffect(() => {
+    let live = true;
+    setArts(null);
+    setOpenArt(null);
+    if (planet) listClusterArtifacts(planet.id).then((a) => { if (live) setArts(a); }).catch(() => { if (live) setArts([]); });
+    return () => { live = false; };
+  }, [planet]);
+
+  const target = useMemo(() => {
+    if (selected && planet) {
+      const w = worldPos(selected); const pl = planetLocal(planet);
+      return new THREE.Vector3(w[0] + pl[0], w[1] + pl[1], w[2] + pl[2]);
+    }
+    return selected ? new THREE.Vector3(...worldPos(selected)) : new THREE.Vector3(0, 0, 0);
+  }, [selected, planet]);
 
   if (failed) {
     return (
@@ -360,8 +403,8 @@ export default function Universe3D() {
           <Canvas camera={{ fov: 50, position: [0, 46, 168], near: 0.1, far: 2000 }} dpr={[1, 2]} gl={{ antialias: true }}>
             <color attach="background" args={['#04050A']} />
             <Suspense fallback={null}>
-              <Sky scene={scene} onSelect={setSelected} selected={selected} system={system} />
-              <CameraRig target={target} dist={selected ? 26 : 168} controls={controls} />
+              <Sky scene={scene} onSelect={setSelected} selected={selected} system={system} planet={planet} onPlanet={setPlanet} arts={arts} onArt={setOpenArt} />
+              <CameraRig target={target} dist={planet ? 7 : selected ? 26 : 168} controls={controls} />
               <OrbitControls ref={controls} enableDamping dampingFactor={0.08} enablePan={false} minDistance={12} maxDistance={340} />
               <EffectComposer>
                 <Bloom intensity={1.25} luminanceThreshold={0.16} luminanceSmoothing={0.5} mipmapBlur />
@@ -378,15 +421,17 @@ export default function Universe3D() {
             <Telescope size={16} className="text-forge-ember" />
             <span className="text-sm font-semibold text-forge-ink">Universe</span>
             {scene && <span className="text-xs text-forge-dim">{scene.bodies.length} worlds · {scene.filaments.length} filaments</span>}
-            {selected && (
+            {planet ? (
+              <button onClick={() => setPlanet(null)} className="ml-2 rounded-lg border border-forge-border px-2 py-0.5 text-xs text-forge-dim hover:text-forge-ink">← back to system</button>
+            ) : selected ? (
               <button onClick={() => setSelected(null)} className="ml-2 rounded-lg border border-forge-border px-2 py-0.5 text-xs text-forge-dim hover:text-forge-ink">← zoom out</button>
-            )}
+            ) : null}
           </div>
           <Link to="/garvis/universe/flat" className="pointer-events-auto rounded-xl border border-forge-border bg-black/50 px-3 py-2 text-xs text-forge-dim backdrop-blur hover:text-forge-ink">2D map</Link>
         </div>
 
         {/* The selected world's card — every line a row */}
-        {selected && (
+        {selected && !planet && (
           <div className="absolute bottom-4 left-4 w-80 rounded-2xl border border-forge-border bg-black/60 p-4 backdrop-blur">
             <p className="font-display text-sm font-semibold text-forge-ink">{selected.title}</p>
             <p className="mt-0.5 text-xs text-forge-dim">{BAND_LABEL[selected.band]} · {selected.massEvidence}</p>
@@ -402,6 +447,51 @@ export default function Universe3D() {
                   <button onClick={() => navigate(`/garvis/system/${selected.id}`)} className="flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-ink"><OrbitIcon size={12} /> Cockpit</button>
                 </>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* V2 — the docked studio: the cockpit window you work against without leaving space.
+            Every line is a row; the golden glints around the planet ARE these artifacts. */}
+        {planet && selected && (
+          <div className="absolute inset-y-4 right-4 flex w-[380px] flex-col rounded-2xl border border-forge-border bg-black/70 backdrop-blur-md">
+            <div className="flex items-center gap-2 border-b border-forge-border px-4 py-3">
+              <span className="h-2 w-2 rounded-full" style={{ background: planet.glow > 0 ? '#FF8A3D' : '#5A6070' }} />
+              <p className="min-w-0 flex-1 truncate text-sm font-semibold text-forge-ink">{planet.title}</p>
+              <button onClick={() => setPlanet(null)} className="text-forge-dim hover:text-forge-ink"><X size={15} /></button>
+            </div>
+            <p className="border-b border-forge-border px-4 py-2 text-[11px] text-forge-dim">{planet.evidence}</p>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {openArt ? (
+                <div>
+                  <button onClick={() => setOpenArt(null)} className="mb-2 text-[11px] text-forge-dim hover:text-forge-ink">← all artifacts</button>
+                  <p className="text-sm font-medium text-forge-ink">{openArt.title}</p>
+                  <p className="text-[10px] uppercase tracking-wide text-forge-dim">{openArt.kind} · rev {openArt.revision}</p>
+                  <pre className="mt-2 whitespace-pre-wrap break-words font-body text-xs leading-relaxed text-forge-ink/85">{openArt.detail ?? '(no content)'}</pre>
+                </div>
+              ) : arts === null ? (
+                <p className="text-xs text-forge-dim">Loading artifacts…</p>
+              ) : arts.length === 0 ? (
+                <p className="text-xs text-forge-dim">Nothing made here yet — open the full studio to generate the first draft.</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {arts.map((a) => (
+                    <li key={a.id}>
+                      <button onClick={() => setOpenArt(a)} className="flex w-full items-center gap-2 rounded-lg border border-forge-border px-3 py-2 text-left hover:border-forge-ember/50">
+                        <FileText size={13} className="shrink-0 text-forge-ember" />
+                        <span className="min-w-0 flex-1 truncate text-xs text-forge-ink/90">{a.title}</span>
+                        <span className="text-[10px] text-forge-dim">rev {a.revision}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="border-t border-forge-border p-3">
+              <button
+                onClick={() => navigate(`/garvis/webs/${selected.id}?area=${encodeURIComponent(planet.slug)}`)}
+                className="w-full rounded-lg bg-ember-gradient px-3 py-2 text-xs font-medium text-[#1A0E04]"
+              >Open the full studio — tools, files, chat</button>
             </div>
           </div>
         )}
