@@ -217,6 +217,10 @@ function OutreachCard() {
   const [address, setAddress] = useState('');
   const [cap, setCap] = useState('25');
   const [tz, setTz] = useState('America/Chicago');
+  // Speed-to-lead: the ONE pre-authorized action class (app_0044) — a template ack to a new lead.
+  const [autoTouch, setAutoTouch] = useState(false);
+  const [ftSubject, setFtSubject] = useState('');
+  const [ftBody, setFtBody] = useState('');
 
   useEffect(() => {
     if (!session) return;
@@ -227,12 +231,15 @@ function OutreachCard() {
         const s = data as {
           outbound_enabled?: boolean; from_name?: string | null; from_email?: string | null; reply_to?: string | null;
           company_name?: string | null; physical_address?: string | null; daily_send_cap?: number; timezone?: string;
+          auto_first_touch?: boolean; first_touch_subject?: string | null; first_touch_body?: string | null;
         } | null;
         if (s) {
           setEnabled(!!s.outbound_enabled);
           setFromName(s.from_name ?? ''); setFromEmail(s.from_email ?? ''); setReplyTo(s.reply_to ?? '');
           setCompanyName(s.company_name ?? ''); setAddress(s.physical_address ?? '');
           setCap(String(s.daily_send_cap ?? 25)); setTz(s.timezone ?? 'America/Chicago');
+          setAutoTouch(!!s.auto_first_touch);
+          setFtSubject(s.first_touch_subject ?? ''); setFtBody(s.first_touch_body ?? '');
         }
         setLoaded(true);
       });
@@ -255,6 +262,9 @@ function OutreachCard() {
         physical_address: address.trim() || null,
         daily_send_cap: Math.max(0, Math.min(500, Number(cap) || 0)),
         timezone: tz.trim() || 'America/Chicago',
+        auto_first_touch: autoTouch && enabled && !!canEnable,
+        first_touch_subject: ftSubject.trim() || null,
+        first_touch_body: ftBody.trim() || null,
         updated_at: new Date().toISOString(),
       }, { onConflict: 'owner_id' });
       if (error) throw new Error(error.message);
@@ -317,6 +327,51 @@ function OutreachCard() {
           Sending can't turn on yet — add a from-address and mailing address first.
         </p>
       )}
+
+      {/* SPEED-TO-LEAD — the one standing rule. Answering a lead within minutes is ~100x more
+          likely to make contact (MIT); this is the only thing Garvis ever sends without a
+          per-send click, it's YOUR template verbatim, and it runs through every safety gate. */}
+      <div className="mt-5 rounded-lg border border-forge-border bg-forge-bg/50 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-forge-ink">⚡ Instant first touch (works while you sleep)</p>
+            <p className="mt-1 text-xs text-forge-dim">
+              When a new lead lands on one of your sites — even at 3am — Garvis instantly sends
+              <em> your</em> acknowledgment template so they hear back in seconds, and stamps the lead
+              "answered instantly." Your words, filled with their name; never AI-invented. Same
+              suppression, cap, and kill-switch gates as every send; every touch lands in the
+              execution log. Skips anyone you've already been talking to this week.
+            </p>
+          </div>
+          <button
+            onClick={() => setAutoTouch((v) => !v)}
+            aria-pressed={autoTouch}
+            disabled={!enabled}
+            title={!enabled ? 'Turn sending on first' : autoTouch ? 'On — new leads get your template instantly' : 'Off — leads wait for you'}
+            className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors disabled:opacity-40 ${autoTouch && enabled ? 'border-forge-ember/60 bg-forge-ember/30' : 'border-forge-border bg-forge-panel'}`}
+          >
+            <span className={`absolute top-0.5 rounded-full transition-all ${autoTouch && enabled ? 'left-6 bg-forge-ember' : 'left-0.5 bg-forge-dim'}`} style={{ height: 18, width: 18 }} />
+          </button>
+        </div>
+        {autoTouch && enabled && (
+          <div className="mt-3 space-y-2">
+            <label className="block text-xs text-forge-dim">Subject
+              <Input className="mt-1" placeholder="Got your message — I’ll reply personally shortly" value={ftSubject} onChange={(e) => setFtSubject(e.target.value)} />
+            </label>
+            <label className="block text-xs text-forge-dim">
+              Message — <code className="text-forge-ember">{'{{first_name}}'}</code> and <code className="text-forge-ember">{'{{business}}'}</code> fill in automatically
+              <textarea
+                rows={5}
+                className="mt-1 w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/70 focus:border-forge-ember/60 focus:outline-none"
+                placeholder={'Hi {{first_name}},\n\nThanks for reaching out to {{business}} — your message just landed and I wanted you to hear back right away.\n\nI’ll read it properly and reply personally within a few hours. If it’s time-sensitive, just reply to this email and it goes straight to me.\n\nTalk soon'}
+                value={ftBody}
+                onChange={(e) => setFtBody(e.target.value)}
+              />
+              <span className="mt-1 block">Leave blank to use the default above. Keep it a human acknowledgment — the personal reply is still yours to write in the morning.</span>
+            </label>
+          </div>
+        )}
+      </div>
 
       <div className="mt-4">
         <Button onClick={() => void save()} loading={saving}>Save outreach settings</Button>
