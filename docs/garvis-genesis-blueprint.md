@@ -515,6 +515,25 @@ empty until a reflection has run), What Garvis recommends + what's still unknown
 a persisted row; the working/failing-by-the-numbers panel states plainly that it waits for G5
 instrumentation rather than guessing.
 
+## G4 v1 — SHIPPED (Market Intelligence: reasoning before searching)
+
+"Who is likely to benefit from this business?" is answered the honest way:
+- **The research plan derives DETERMINISTICALLY from the World DNA** — one scan segment per
+  ideal customer, queries woven from customers × offerings × locale. Same DNA, same plan; no
+  model call, nothing invented. A world without DNA gets an empty plan and the panel says why.
+- **Scans are read-only and capped** (2 queries, 8 stored prospects per scan) through the
+  existing metered rails: discover-media/Serper finds; prospects land as rows (app_0032, owner
+  RLS, unique per world+url so re-scans never duplicate).
+- **Fit is an evidence-labeled verdict, never a score**: one batched cluster-chat judgment per
+  scan returns strong/possible/weak with a reason grounded ONLY in the search snippet + the DNA;
+  a labeled fit without a reason is dropped by the parser; unjudged prospects stay visibly
+  "unknown". (marketIntel.ts, 9-check verify.)
+- **The finder lives in every audience area**: segment scan buttons, the prospect list with fit
+  chips + reasons, qualify/drop triage. Contacting anyone still requires moving them into
+  contacts and through the approval spine — stated in the panel itself.
+Deferred to G4 v2: fetch-url page-deep profiling, portfolio-matched pitch angles, trend
+questions feeding world_intelligence, scan runs >25 prospects behind an approval.
+
 ## Final principle, restated as an invariant
 
 Genesis generates **data that existing validators accept** — new worlds speak the same seven

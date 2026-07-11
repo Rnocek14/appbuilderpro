@@ -20,6 +20,9 @@ import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../l
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld } from '../lib/garvis/buildBridge';
+import { worldPlan, listProspects, setProspectStatus, scanCategory, type ProspectRow } from '../lib/garvis/marketIntelRun';
+import type { ResearchPlan } from '../lib/garvis/marketIntel';
+import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 
@@ -361,6 +364,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <BrandKitPanel worldId={worldId} onSaved={onChanged} />
       )}
 
+      {/* G4 — Market Intelligence: who plausibly needs this business, reasoned from the DNA,
+          searched read-only, fit-labeled with grounded reasons. Contact = approvals, always. */}
+      {cluster.charter?.archetype === 'audience' && (
+        <ProspectFinderPanel worldId={worldId} />
+      )}
+
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
           into ONE brief and open the app builder. Real photos, never placeholders. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'landing' && (
@@ -672,6 +681,98 @@ function WorldIntelDashboard({ intel }: { intel: WorldIntelligenceRow }) {
         )}
         <p className="mt-3 border-t border-forge-border pt-2 text-[11px] text-forge-dim/70">Working/failing by the numbers (site clicks, content performance) arrives with G5 instrumentation — this panel will not guess until those rows exist.</p>
       </section>
+    </div>
+  );
+}
+
+const FIT_TONE: Record<string, string> = {
+  strong: 'border-forge-ok/50 text-forge-ok', possible: 'border-forge-warn/50 text-forge-warn',
+  weak: 'border-forge-border text-forge-dim', unknown: 'border-forge-border text-forge-dim/60',
+};
+
+/** G4 — the prospect finder: DNA-derived scan segments, read-only searches, evidence-labeled
+ *  fits. Every verdict shows its reason; unknown stays visibly unknown. */
+function ProspectFinderPanel({ worldId }: { worldId: string }) {
+  const { toast } = useToast();
+  const [plan, setPlan] = useState<ResearchPlan | null>(null);
+  const [dna, setDna] = useState<WorldDNA | null>(null);
+  const [ctx, setCtx] = useState<BusinessContext | null>(null);
+  const [rows, setRows] = useState<ProspectRow[]>([]);
+  const [scanning, setScanning] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void worldPlan(worldId).then((w) => { if (live) { setPlan(w.plan); setDna(w.dna); setCtx(w.ctx); } }).catch(() => {});
+    void listProspects(worldId).then((r) => { if (live) setRows(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [worldId]);
+
+  const scan = async (name: string) => {
+    const cat = plan?.categories.find((c) => c.name === name);
+    if (!cat || scanning) return;
+    setScanning(name);
+    try {
+      const r = await scanCategory(worldId, cat, dna, ctx);
+      toast(r.stored > 0 ? 'success' : 'info', r.message);
+      setRows(await listProspects(worldId));
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Scan failed.');
+    } finally {
+      setScanning(null);
+    }
+  };
+
+  const mark = async (row: ProspectRow, status: ProspectRow['status']) => {
+    try {
+      await setProspectStatus(row.id, status);
+      setRows((p) => status === 'dropped' ? p.filter((r) => r.id !== row.id) : p.map((r) => (r.id === row.id ? { ...r, status } : r)));
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update.'); }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Lead finder — market intelligence</h3>
+      {!plan?.categories.length ? (
+        <p className="mt-1 text-xs text-forge-dim">This world has no DNA yet (ideal customers unknown), so there is nothing honest to scan for. Genesis worlds get segments automatically.</p>
+      ) : (
+        <>
+          <p className="mt-1 text-xs text-forge-dim">Segments reasoned from this world's DNA. Scans are read-only and metered; nothing is contacted without approvals.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {plan.categories.map((c) => (
+              <button
+                key={c.name}
+                onClick={() => void scan(c.name)} disabled={scanning !== null}
+                className="flex items-center gap-1.5 rounded-lg border border-forge-border px-3 py-1.5 text-xs text-forge-ink transition-colors hover:border-forge-ember/50 disabled:opacity-50"
+              >
+                {scanning === c.name ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} className="text-forge-ember" />}
+                Scan: {c.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {rows.length > 0 && (
+        <ul className="mt-3 space-y-1.5">
+          {rows.slice(0, 20).map((r) => (
+            <li key={r.id} className="rounded-lg border border-forge-border px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {r.url ? <a href={r.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sm text-forge-ink hover:text-forge-ember">{r.name}</a>
+                  : <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{r.name}</span>}
+                <span className={cn('rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide', FIT_TONE[r.fit])}>{r.fit}</span>
+                <span className="text-[10px] text-forge-dim">{r.category}</span>
+                {r.status === 'new' && (
+                  <>
+                    <button onClick={() => void mark(r, 'qualified')} className="text-[11px] text-forge-ok hover:underline">qualify</button>
+                    <button onClick={() => void mark(r, 'dropped')} className="text-[11px] text-forge-dim hover:text-forge-warn">drop</button>
+                  </>
+                )}
+                {r.status !== 'new' && <span className="text-[10px] uppercase tracking-wide text-forge-dim">{r.status}</span>}
+              </div>
+              {r.fit_reason && <p className="mt-0.5 text-xs text-forge-dim">{r.fit_reason}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
