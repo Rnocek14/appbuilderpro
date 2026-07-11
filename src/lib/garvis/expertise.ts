@@ -9,11 +9,10 @@
 // says "fill this from a Market Intelligence scan / your records" — it never invents a number.
 
 import type { Archetype, Flavor } from './workweb';
+import { H, NOTE, verticalOverlay, type SeedArtifact, type Vertical } from './verticals';
 
-export interface SeedArtifact { slug: string; kind: 'doc' | 'research' | 'post'; title: string; detail: string }
-
-const H = (s: string) => `${s}\n${'—'.repeat(Math.min(s.length, 60))}`;
-const NOTE = '\n\n(Framework — expert structure, not measured data. Where a number belongs, run a Market Intelligence scan or use your records; Garvis never invents figures.)';
+export type { SeedArtifact, Vertical } from './verticals';
+export { detectVertical } from './verticals';
 
 // ---------------------------------------------------------------------------
 // Studio packs
@@ -203,6 +202,85 @@ and mail automatically.${NOTE}`,
   },
 ];
 
+const BRAND_STUDIO: SeedArtifact[] = [
+  {
+    slug: 'brand-messaging-house', kind: 'doc', title: 'Messaging house',
+    detail: `${H('The one-page brand argument for {{business_name}}')}
+POSITIONING STATEMENT (fill each slot, then defend it):
+"For {{audience}}, {{business_name}} is the only ___ that ___ — because ___ (proof)."
+THREE PILLARS — the three things you want remembered, each with its receipts:
+1) Pillar: ___  · Proof: a real result, piece, or fact from the vault.
+2) Pillar: ___  · Proof: ___
+3) Pillar: ___  · Proof: ___
+TONE: {{tone}}. Write 5 DO words and 5 DON'T words (e.g., do: "crafted"; don't: "cheap").
+THE LADDER: the 5-second line (one sentence), the 30-second version (elevator), the
+2-minute story ({{principal}}'s why). Every studio in this world inherits this page —
+when the messaging house changes, everything downstream changes with it.${NOTE}`,
+  },
+  {
+    slug: 'brand-identity-checklist', kind: 'doc', title: 'Visual identity checklist',
+    detail: `${H('Collect/decide these, store them in the vault')}
+□ Logo: primary + one-color + mark-only variants, on light AND dark.
+□ Palette: 1 primary, 1-2 accents, neutrals — hex codes written down, used everywhere.
+□ Type: one heading face, one body face — named, with fallbacks.
+□ Photography rules: what real photos look like here (light, crop, subjects) — and what
+  never appears (stocky handshakes, fake smiles).
+□ Templates: social post, story, one-pager, email header — built once, reused always.
+Consistency compounds: the tenth exposure does the convincing, and it only counts if it
+looks like the first nine.${NOTE}`,
+  },
+];
+
+const MARKET_STUDIO: SeedArtifact[] = [
+  {
+    slug: 'market-update-format', kind: 'doc', title: 'Market update format',
+    detail: `${H('The recurring update that makes {{business_name}} the source')}
+THE SHAPE (same every time — the format IS the brand):
+1) THREE NUMBERS from real sources (your records, a Market Intelligence scan, a public
+   dataset) — each stated plainly with its source named.
+2) "WHAT THIS MEANS" — one line per number, translated for {{audience}}.
+3) ONE ACTION — what a reader should do or watch this period.
+CADENCE: monthly minimum; same day, same channel. Consistency beats depth here — the
+compounding asset is being the person who ALWAYS knows the numbers.
+RULES: cite every figure; if a number can't be sourced, it doesn't run. Never extrapolate
+beyond the data; "we don't know yet" is a credible sentence.${NOTE}`,
+  },
+];
+
+const CRM_STUDIO: SeedArtifact[] = [
+  {
+    slug: 'crm-scripts', kind: 'doc', title: 'Call, voicemail & DM scripts',
+    detail: `${H('Scripts (skeletons — fill with this world\'s facts, then say them like a human)')}
+CALL OPENER (permission-based): "Hi — {{principal}} from {{business_name}}. Did I catch
+you at a bad time?" → one-line reason for calling THEM specifically → one question.
+VOICEMAIL (under 20s): name, one specific reason, callback number said slowly, twice.
+DM/TEXT FIRST TOUCH: one line of genuine specificity about them + one low-pressure
+question. Never paste the same message twice — specificity is the whole trick.
+OBJECTION GRID (acknowledge → reframe → evidence → small ask):
+- "Too expensive" → what's the cost of the alternative? → proof of value → smaller first step.
+- "Bad timing" → agree, ask WHEN → calendar the follow-up in the loop, honor it.
+- "Happy with current provider" → good! what would have to change? → stay warm, no bashing.
+Marketing calls/texts require consent and DNC hygiene — see the launch checklist.${NOTE}`,
+  },
+];
+
+const LISTS_STUDIO: SeedArtifact[] = [
+  {
+    slug: 'list-building-hygiene', kind: 'doc', title: 'List building & hygiene playbook',
+    detail: `${H('The list is the asset — build it clean, keep it honest')}
+SOURCES, RANKED BY CONSENT QUALITY: past clients/inquiries (best) > people who opted in for
+something real (lead magnet, event) > scans/prospecting (cold — outreach rules apply) >
+purchased lists (worst; verify provenance and permissions before ANY send).
+HYGIENE CADENCE: prune hard bounces immediately (automatic here); sunset non-engagers
+(no opens/clicks over a long window) to a re-permission pass, then let them go — a smaller
+honest list outperforms a big dead one and protects deliverability.
+SEGMENTATION MINIMUM: new vs known, customer vs prospect, and one interest split — three
+cuts beat thirty empty ones. PERMISSION RULES: suppression always wins (unsubscribes are
+sacred and automatic), every send through Approvals, physical address + visible opt-out
+on every email.${NOTE}`,
+  },
+];
+
 const GENERIC_STUDIO: SeedArtifact[] = [
   {
     slug: 'studio-brief', kind: 'doc', title: 'Creative brief',
@@ -219,10 +297,11 @@ the brand kit and the files in this area.${NOTE}`,
 
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
+  brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO,
 };
 
-/** Every (archetype, flavor) gets a NON-EMPTY expert pack — verified exhaustively. */
-export function expertiseFor(archetype: Archetype, flavor: Flavor): SeedArtifact[] {
+/** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */
+function basePack(archetype: Archetype, flavor: Flavor): SeedArtifact[] {
   switch (archetype) {
     case 'intel': return MARKET_INTEL;
     case 'audience': return AUDIENCE_PACK;
@@ -232,4 +311,14 @@ export function expertiseFor(archetype: Archetype, flavor: Flavor): SeedArtifact
     case 'ledger': return LEDGER_PACK;
     case 'vault': return VAULT_PACK;
   }
+}
+
+/** Every (archetype, flavor) gets a NON-EMPTY expert pack — verified exhaustively.
+ *  With a vertical, the pack is COMPOSED: the functional base (how to run a social studio,
+ *  a mail campaign, a KPI ledger) plus the industry overlay (what a real estate / finance /
+ *  restaurant operator knows that a generic marketer doesn't — CMA method, due-diligence
+ *  ladders, menu engineering, Fair Housing / SEC / HIPAA compliance flags). The base always
+ *  stands first so index-stable callers keep working; overlays only ever add. */
+export function expertiseFor(archetype: Archetype, flavor: Flavor, vertical: Vertical = 'generic'): SeedArtifact[] {
+  return [...basePack(archetype, flavor), ...verticalOverlay(vertical, archetype, flavor)];
 }

@@ -24,8 +24,8 @@ import {
   parseAudienceCsv, validateTemplate, type Charter, type WebTemplate, type WorkTool,
 } from './workweb';
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
-import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail } from './genesis';
-import { expertiseFor } from './expertise';
+import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail, type WorldDNA } from './genesis';
+import { expertiseFor, detectVertical, type Vertical } from './expertise';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
 // separate table column (knowledge_clusters.charter). universe.ts's ClusterGraph has no charter
@@ -89,8 +89,11 @@ async function persistCharters(worldId: string, charters: Record<string, Charter
 /** Create a new work web from a template id. Returns the server world id.
  *  voiceCtx: the world's own business context (genesis drafts pass theirs) — used to seed every
  *  chartered area with its expert playbook in the right voice. Builtin templates get a minimal
- *  context (title only; unknown tokens stay visible — honest about what isn't known yet). */
-export async function instantiateWeb(templateOrId: WebTemplate | string, voiceCtx?: BusinessContext | null): Promise<WebSummary> {
+ *  context (title only; unknown tokens stay visible — honest about what isn't known yet).
+ *  dna: the World DNA (genesis drafts pass theirs) — its words drive deterministic industry
+ *  detection so the seeds include the DOMAIN pack (real estate, finance, food, …), not just the
+ *  functional one. */
+export async function instantiateWeb(templateOrId: WebTemplate | string, voiceCtx?: BusinessContext | null, dna?: WorldDNA | null): Promise<WebSummary> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
@@ -118,7 +121,7 @@ export async function instantiateWeb(templateOrId: WebTemplate | string, voiceCt
   await persistCharters(worldId, charters);
   // BORN FULL, NOT BLANK: every chartered area starts with its expert playbook (fail-soft —
   // a seeding hiccup never fails creation; the packs regenerate from any area's tools).
-  const seeded = await seedWorld(worldId, voiceCtx ?? minimalContext(t.title));
+  const seeded = await seedWorld(worldId, voiceCtx ?? minimalContext(t.title), dna);
   await recordMindEvent(uid, {
     event_type: 'note', source: 'workweb',
     subject: `Created work web "${t.title}" from template ${t.id}${seeded ? ` — seeded ${seeded} playbook doc${seeded === 1 ? '' : 's'}` : ''}`,
@@ -279,25 +282,37 @@ function minimalContext(title: string): BusinessContext {
   return { business_name: title, principal: null, craft: null, offerings: [], audience: null, locale: null, links: {}, tone: null };
 }
 
-/** Write the expert playbook pack (expertise.ts) into every chartered area of a world: the
- *  30-day social plan, the direct-mail campaign plan + concepts, the market comparison framework,
- *  the KPI tree — deterministic (zero AI keys), token-merged into the world's own voice, and
- *  honestly labeled as frameworks that defer real numbers to scans/records.
+/** Everything the world knows about itself, as one detection string — the vertical (real estate /
+ *  finance / food / …) is derived DETERMINISTICALLY from these words; same world, same vertical. */
+function worldVertical(ctx: BusinessContext, dna?: WorldDNA | null): Vertical {
+  return detectVertical([
+    dna?.businessType, dna?.valueProposition, ...(dna?.idealCustomers ?? []),
+    ctx.business_name, ctx.craft, ctx.audience, ...ctx.offerings,
+  ].filter(Boolean).join(' '));
+}
+
+/** Write the expert playbook pack (expertise.ts + verticals.ts) into every chartered area of a
+ *  world: the functional playbooks (30-day social plan, direct-mail plan + concepts, KPI tree)
+ *  COMPOSED with the industry overlay detected from the World DNA (CMA method for real estate,
+ *  due-diligence ladder for finance, menu engineering for restaurants, the compliance flags each
+ *  industry actually gets burned by) — deterministic (zero AI keys), token-merged into the
+ *  world's own voice, honestly labeled as frameworks that defer real numbers to scans/records.
  *  FAIL-SOFT by design: a seeding failure never fails world creation — the world just starts
  *  emptier, and any area's generator tool writes the same pack on demand. Idempotent (upsert on
  *  cluster_id+slug), so re-running never duplicates. */
-export async function seedWorld(worldId: string, ctx: BusinessContext): Promise<number> {
+export async function seedWorld(worldId: string, ctx: BusinessContext, dna?: WorldDNA | null): Promise<number> {
   try {
     const { data: sess } = await supabase.auth.getUser();
     const uid = sess.user?.id;
     if (!uid) return 0;
+    const vertical = worldVertical(ctx, dna);
     const { data: rows } = await supabase.from('knowledge_clusters')
       .select('id, charter').eq('world_id', worldId).not('charter', 'is', null);
     let seeded = 0;
     for (const r of rows ?? []) {
       const charter = parseCharter((r as { charter: unknown }).charter);
       if (!charter) continue;
-      const arts: PlayArtifact[] = expertiseFor(charter.archetype, charter.flavor)
+      const arts: PlayArtifact[] = expertiseFor(charter.archetype, charter.flavor, vertical)
         .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
       seeded += await writeArtifacts(uid, (r as { id: string }).id, arts);
     }
@@ -423,10 +438,12 @@ export async function runTool(
           const r = await runPlayData(worldId, { ...voice.play, steps: [dataStep] }, voice.ctx);
           return { ok: r.artifactCount > 0, message: r.artifactCount > 0 ? `Generated ${r.artifactCount} artifact${r.artifactCount === 1 ? '' : 's'} into ${cluster.title}.` : 'Nothing generated.', artifacts: r.artifactCount };
         }
-        // No matching play step → the area's EXPERT PLAYBOOK, in this world's voice — never a
-        // vague stub. (Seeded at creation too; upsert by slug makes this a refresh, not a dupe.)
+        // No matching play step → the area's EXPERT PLAYBOOK (functional + industry overlay),
+        // in this world's voice — never a vague stub. (Seeded at creation too; upsert by slug
+        // makes this a refresh, not a dupe.)
         if (cluster.charter) {
-          const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor)
+          const vertical = worldVertical(voice.ctx, voice.dna);
+          const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
             .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, voice.ctx!) }));
           const n = await writeArtifacts(uid, cluster.id, arts);
           return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}) in this world's voice.` : 'Nothing generated.', artifacts: n };
@@ -453,10 +470,12 @@ export async function runTool(
       }
       // Builtin world, no matching play → the expert playbook with a minimal voice (world title
       // fills {{business_name}}; other tokens stay visible — honest about what isn't known yet).
+      // The title's own words still drive industry detection ("Mom's Real Estate Marketing"
+      // gets the CMA method and Fair Housing checklist, not a generic pack).
       if (cluster.charter) {
-        const { data: w } = await supabase.from('knowledge_worlds').select('title').eq('id', worldId).maybeSingle();
-        const ctx = minimalContext(((w as { title?: string } | null)?.title) ?? cluster.title);
-        const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor)
+        const ctx = minimalContext(voice.title ?? cluster.title);
+        const vertical = worldVertical(ctx, voice.dna);
+        const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
           .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
         const n = await writeArtifacts(uid, cluster.id, arts);
         return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}).` : 'Nothing generated.', artifacts: n };
@@ -538,16 +557,19 @@ function matchPlayForCluster(slug: string): Play | null {
 // never another world's. This is what killed the Lake Geneva fallback.
 // ---------------------------------------------------------------------------
 
-interface WorldVoice { ctx: BusinessContext | null; play: PlayData | null }
+interface WorldVoice { ctx: BusinessContext | null; play: PlayData | null; dna: WorldDNA | null; title: string | null }
 
 async function worldVoice(worldId: string): Promise<WorldVoice> {
   const [{ data: w }, { data: t }] = await Promise.all([
-    supabase.from('knowledge_worlds').select('business_context').eq('id', worldId).maybeSingle(),
+    supabase.from('knowledge_worlds').select('business_context, dna, title').eq('id', worldId).maybeSingle(),
     supabase.from('web_templates').select('play').eq('world_id', worldId).eq('status', 'instantiated').limit(1).maybeSingle(),
   ]);
+  const row = w as { business_context?: BusinessContext | null; dna?: WorldDNA | null; title?: string | null } | null;
   return {
-    ctx: ((w as { business_context?: BusinessContext | null } | null)?.business_context) ?? null,
+    ctx: row?.business_context ?? null,
     play: ((t as { play?: PlayData | null } | null)?.play) ?? null,
+    dna: row?.dna ?? null,
+    title: row?.title ?? null,
   };
 }
 

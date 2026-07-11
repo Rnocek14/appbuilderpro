@@ -158,9 +158,11 @@ export async function approveDraft(id: string): Promise<WebSummary> {
 
   let summary: WebSummary;
   try {
-    // The world's own business context rides along so every chartered area is SEEDED with its
-    // expert playbook in this world's voice (born full, not blank).
-    summary = await instantiateWeb(row.template, row.business_context);
+    // The world's own business context + DNA ride along so every chartered area is SEEDED with
+    // its expert playbook in this world's voice AND its industry's knowledge (born full, not
+    // blank — a real estate world knows CMA + Fair Housing; a finance world knows the
+    // due-diligence ladder + the Marketing Rule).
+    summary = await instantiateWeb(row.template, row.business_context, row.dna);
   } catch (e) {
     await supabase.from('web_templates').update({ status: 'draft' }).eq('id', id); // release the claim
     throw e;

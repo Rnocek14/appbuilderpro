@@ -534,6 +534,35 @@ instrumentation rather than guessing.
 Deferred to G4 v2: fetch-url page-deep profiling, portfolio-matched pitch angles, trend
 questions feeding world_intelligence, scan runs >25 prospects behind an approval.
 
+## Vertical intelligence — SHIPPED (the system knows the INDUSTRY, not just the craft)
+
+The expertise packs closed the blank-world problem functionally; this layer closes it
+DOMAIN-wise. "Build a real estate plan for my mom" and "a finance research world" must not
+receive the same generic marketing knowledge — they don't anymore:
+- **Deterministic industry detection** (verticals.ts, 24-check verify): the World DNA's own
+  words (businessType, value proposition, ideal customers, name/craft/offerings) map to one of
+  14 verticals — real estate, finance, creative, food, e-commerce, professional services,
+  health, home services, education, tech/SaaS, events, nonprofit, retail, generic. Keyword-
+  scored, no model call: same world, same vertical, every time. No match → 'generic', stated
+  honestly (the generic brief is a checklist of open questions, not a fake industry).
+- **Researched domain packs compose over the functional base**: every seeded area gets
+  base craft + industry overlay. Real estate arrives with the CMA method (comps/adjustments/
+  absorption), geographic farming math, and the Fair Housing checklist (verified against HUD's
+  digital-platform guidance: targeting ad DISTRIBUTION by protected class is illegal). Finance
+  arrives with the due-diligence ladder, thesis-memo structure, macro dashboard, and the SEC
+  Marketing Rule flags (testimonial disclosures at dissemination, gross-with-net performance —
+  per the Dec-2025 exam risk alert). Food gets menu engineering + the review/regulars loop;
+  e-commerce gets the flow stack + product-page anatomy + FTC review rules; health gets HIPAA
+  marketing rules; SaaS gets positioning teardowns + the activation loop; nonprofits get grant
+  research (990 mining) + donor retention — and so on, each with domain KPIs in the ledger.
+- **Every studio flavor now has a dedicated pack**: brand (messaging house + identity
+  checklist), market (the cited market-update format), crm (call/VM/DM scripts + objection
+  grid), lists (consent-ranked list building + hygiene) joined social/mail/email/video/landing.
+  Nothing falls back to a vague stub.
+- **Same honesty spine**: overlays are labeled frameworks; every number defers to MLS/Fed/BLS/
+  POS/scans/records; compliance content names the rule, not a vibe. Slugs never collide with
+  base packs (verified), so upserts stay idempotent.
+
 ## Expertise packs — SHIPPED (the blank-world problem, closed)
 
 The test: "build a real estate marketing plan for my mom" must arrive WITH the plans — a social
