@@ -470,7 +470,10 @@ export async function runTool(
         if (producer) {
           const r = await producer(worldId, cluster.charter);
           if (r.artifacts.length) {
-            const n = await writeArtifacts(uid, cluster.id, r.artifacts);
+            // Grounded finished work (real research / posts / script) is EARNED activity; a
+            // framework fallback (AI/search down) is context, not activity — tag it as seed so
+            // it never inflates momentum/status (the same No-Theater rule as birth seeding).
+            const n = await writeArtifacts(uid, cluster.id, r.artifacts, r.grounded ? 'garvis' : SEED_SOURCE);
             if (n > 0) return { ok: true, message: r.message, artifacts: n };
           }
         }

@@ -63,6 +63,27 @@ only when you clicked it.
   (≥5 real events in 7 days, not reflected in the last 7) — the evidence gate still applies, so a thin
   world changes nothing, but an active one learns without being asked.
 
+## 5. The producers — every studio tool makes finished work, not a framework
+
+**Before:** an audit of every producer found only three (`gen-social`, `gen-video-script`,
+`gen-postcard`) emit finished, copy-pasteable work — and only for the seven builtin Lake-Geneva
+slugs. Everywhere else, `research` reworded a static template (it fetched *nothing*), `gen-social`
+wrote a 30-day *plan describing what to post*, and `gen-angle` was ungrounded — it even shared a slug
+with `research`, so both buttons produced the same doc. The producers were context-blind: they saw
+the DNA tokens and nothing else — not the photos, not prior research.
+**Now:** a producers layer routes by tool id and reasons over the world's real materials.
+- **`research`** does actual web search (`discover-media`/Serper), then synthesizes a brief grounded
+  **only** in the snippets, with a checkable **SOURCES** footer of real URLs — and a "STILL UNKNOWN"
+  section when the results don't answer, never an invented statistic.
+- **`gen-social`** writes 5 ready-to-paste captions in the world's voice, each **tied to a real vault
+  photo** by its caption (or an explicit "shoot: …"), with a hook, a CTA, and specific hashtags.
+- **`gen-video-script`** writes a shot-by-shot 30–45s script — timed shots, voiceover, on-screen text.
+- **`gen-angle`** synthesizes one campaign angle **grounded in the world's own research artifacts**
+  (earned only); with none yet, it's marked provisional and names the scan that would confirm it.
+- Verified pure core (`producersCore.ts`, 15 checks). Fail-soft: each falls to the area's expert pack
+  when AI/search is down — and that fallback is tagged as context, not activity, so it never fakes
+  momentum. Free-form generation runs through the plain-completion seam, not the decision seam.
+
 ## The end-to-end path, now real
 
 Scan a segment → **find the prospect's email on their own site** → add to audience → generate copy in
