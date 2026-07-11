@@ -25,6 +25,7 @@ import type { ResearchPlan } from '../lib/garvis/marketIntel';
 import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
+import { MailerDesigner } from '../components/garvis/MailerDesigner';
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -373,6 +374,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           searched read-only, fit-labeled with grounded reasons. Contact = approvals, always. */}
       {cluster.charter?.archetype === 'audience' && (
         <ProspectFinderPanel worldId={worldId} />
+      )}
+
+      {/* Direct mail as a real product: a print-ready 6×9 postcard built from this world's own
+          brand kit + vault photos, with a QR from the tracking link, a print/PDF path, and a
+          mail log so mailed batches count as real outreach. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'direct_mail' && (
+        <MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
