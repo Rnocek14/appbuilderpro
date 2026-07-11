@@ -18,6 +18,8 @@ export interface ProspectRow {
   fit: FitLabel; fit_reason: string | null;
   status: 'new' | 'qualified' | 'dropped' | 'contacted' | 'in_audience';
   contact_id?: string | null;
+  contact_emails?: string[];
+  scanned_at?: string | null;
   created_at: string;
 }
 
@@ -33,7 +35,7 @@ export async function worldPlan(worldId: string) {
 
 export async function listProspects(worldId: string): Promise<ProspectRow[]> {
   const { data } = await supabase.from('prospects')
-    .select('id, category, name, url, snippet, fit, fit_reason, status, contact_id, created_at')
+    .select('id, category, name, url, snippet, fit, fit_reason, status, contact_id, contact_emails, scanned_at, created_at')
     .eq('world_id', worldId).neq('status', 'dropped')
     .order('created_at', { ascending: false }).limit(60);
   return (data ?? []) as ProspectRow[];
@@ -42,6 +44,48 @@ export async function listProspects(worldId: string): Promise<ProspectRow[]> {
 export async function setProspectStatus(id: string, status: ProspectRow['status']): Promise<void> {
   const { error } = await supabase.from('prospects').update({ status }).eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+export interface ContactScanResult { emails: string[]; contactPage: string | null; message: string }
+
+/** Scan a prospect's OWN website for publicly listed contact emails (fetch-url mode 'contact':
+ *  mailto: links + text emails + light de-obfuscation, falling back to their contact page).
+ *  Only what the site itself publishes is ever returned — Garvis never guesses an address.
+ *  The result lands on the prospect row either way: found emails, or scanned_at proving
+ *  "we looked, nothing public" (honest state, distinct from "never looked"). */
+export async function scanProspectEmails(worldId: string, prospect: ProspectRow): Promise<ContactScanResult> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  if (!prospect.url) return { emails: [], contactPage: null, message: 'This prospect has no website on record to scan.' };
+
+  const { data, error } = await supabase.functions.invoke('fetch-url', {
+    body: { url: prospect.url, mode: 'contact' },
+  });
+  if (error) throw new Error(error.message);
+  const payload = data as { emails?: string[]; contactPage?: string | null; error?: string };
+  if (payload?.error) throw new Error(payload.error);
+  const emails = (payload?.emails ?? []).filter((e) => typeof e === 'string').slice(0, 6);
+  const contactPage = payload?.contactPage ?? null;
+
+  const { error: upErr } = await supabase.from('prospects')
+    .update({ contact_emails: emails, scanned_at: new Date().toISOString() })
+    .eq('id', prospect.id);
+  if (upErr) throw new Error(`Scan worked but could not be saved: ${upErr.message}`);
+
+  await recordMindEvent(uid, {
+    event_type: 'note', source: 'market-intel',
+    subject: `Scanned ${prospect.name} for contact emails: ${emails.length} found`,
+    payload: { world_id: worldId, prospect_id: prospect.id, found: emails.length },
+  });
+  return {
+    emails, contactPage,
+    message: emails.length
+      ? `${emails.length} public email${emails.length === 1 ? '' : 's'} found on their site.`
+      : contactPage
+        ? 'No public email found — their site has a contact page (linked) you can check yourself.'
+        : 'No public email on their site. Their contact form may be the only route.',
+  };
 }
 
 /** The joint the audit found missing: a QUALIFIED prospect had no path into the audience.

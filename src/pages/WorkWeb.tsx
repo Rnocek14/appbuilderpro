@@ -20,7 +20,7 @@ import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../l
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld } from '../lib/garvis/buildBridge';
-import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, type ProspectRow } from '../lib/garvis/marketIntelRun';
+import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
 import type { ResearchPlan } from '../lib/garvis/marketIntel';
 import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
@@ -734,17 +734,29 @@ function ProspectFinderPanel({ worldId }: { worldId: string }) {
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update.'); }
   };
 
-  // Prospect → audience: scans can't find emails, so the operator pastes the address they found
-  // on the prospect's site. Garvis never invents one — the input IS the honesty.
+  // Prospect → audience. Emails come from the prospect's OWN site (fetch-url contact scan) or
+  // the operator's paste — Garvis never invents an address. Found emails prefill; one click adds.
   const [emailFor, setEmailFor] = useState<string | null>(null);
   const [emailDraft, setEmailDraft] = useState('');
-  const toAudience = async (row: ProspectRow) => {
+  const [findingFor, setFindingFor] = useState<string | null>(null);
+  const toAudience = async (row: ProspectRow, email?: string) => {
     try {
-      const r = await prospectToAudience(worldId, row, emailDraft);
+      const r = await prospectToAudience(worldId, row, email ?? emailDraft);
       toast('success', r.message);
       setEmailFor(null); setEmailDraft('');
       setRows((p) => p.map((x) => (x.id === row.id ? { ...x, status: 'in_audience', contact_id: r.contactId } : x)));
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not add the contact.'); }
+  };
+  const findEmails = async (row: ProspectRow) => {
+    if (findingFor) return;
+    setFindingFor(row.id);
+    try {
+      const r = await scanProspectEmails(worldId, row);
+      toast(r.emails.length ? 'success' : 'info', r.message);
+      setRows((p) => p.map((x) => (x.id === row.id ? { ...x, contact_emails: r.emails, scanned_at: new Date().toISOString() } : x)));
+      if (r.emails.length) { setEmailFor(row.id); setEmailDraft(r.emails[0]); }
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Scan failed.'); }
+    finally { setFindingFor(null); }
   };
 
   return (
@@ -785,11 +797,30 @@ function ProspectFinderPanel({ worldId }: { worldId: string }) {
                   </>
                 )}
                 {r.status === 'qualified' && (
-                  <button onClick={() => { setEmailFor(emailFor === r.id ? null : r.id); setEmailDraft(''); }} className="text-[11px] text-forge-ember hover:underline">→ audience</button>
+                  <>
+                    {r.url && (
+                      <button onClick={() => void findEmails(r)} disabled={findingFor !== null} className="flex items-center gap-1 text-[11px] text-forge-ink/80 hover:text-forge-ember disabled:opacity-50">
+                        {findingFor === r.id && <Loader2 size={10} className="animate-spin" />}
+                        {r.scanned_at && !r.contact_emails?.length ? 'rescan site' : 'find email'}
+                      </button>
+                    )}
+                    <button onClick={() => { setEmailFor(emailFor === r.id ? null : r.id); setEmailDraft(r.contact_emails?.[0] ?? ''); }} className="text-[11px] text-forge-ember hover:underline">→ audience</button>
+                  </>
                 )}
                 {r.status === 'in_audience' && <span className="text-[10px] uppercase tracking-wide text-forge-ok">in audience</span>}
                 {r.status !== 'new' && r.status !== 'qualified' && r.status !== 'in_audience' && <span className="text-[10px] uppercase tracking-wide text-forge-dim">{r.status}</span>}
               </div>
+              {(r.contact_emails?.length ?? 0) > 0 && r.status === 'qualified' && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-forge-dim">on their site:</span>
+                  {r.contact_emails!.map((e) => (
+                    <button key={e} onClick={() => { setEmailFor(r.id); setEmailDraft(e); }}
+                      className={cn('rounded border px-1.5 py-0.5 text-[11px] transition-colors', emailDraft === e && emailFor === r.id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-ink/80 hover:border-forge-ember/40')}>
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
               {emailFor === r.id && (
                 <div className="mt-1.5 flex items-center gap-2">
                   <input

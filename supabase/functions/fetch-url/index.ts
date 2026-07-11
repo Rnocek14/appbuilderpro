@@ -106,6 +106,49 @@ function assetFileName(u: URL): string {
   return `${Date.now()}-${named}`;
 }
 
+// ---------------------------------------------------------------------------
+// Contact discovery (mode 'contact') — mine a prospect's site for PUBLICLY
+// LISTED contact emails. Works on the RAW HTML (mailto: links live in tags the
+// text extractor strips), falls back to the site's own contact page when the
+// landing page lists nothing. Only ever returns what the site itself publishes
+// — Garvis never guesses or constructs an address.
+// ---------------------------------------------------------------------------
+
+const EMAIL_JUNK = /noreply|no-?reply|donotreply|do-?not-?reply|example\.|yourdomain|yourema|sentry|wixpress|schema\.org|\.(png|jpe?g|gif|webp|svg|css|js)$/i;
+
+function extractEmails(html: string): string[] {
+  const found = new Set<string>();
+  const add = (raw: string) => {
+    const e = decodeEntities(raw).trim().toLowerCase().replace(/^mailto:/, '').split('?')[0];
+    if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(e)) return;
+    if (EMAIL_JUNK.test(e)) return;
+    found.add(e);
+  };
+  for (const m of html.matchAll(/mailto:([^"'\s<>?]+)/gi)) add(m[1]);
+  const text = html.replace(/<[^>]+>/g, ' ');
+  for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)) add(m[0]);
+  // Light de-obfuscation: "name [at] domain [dot] com" style listings.
+  for (const m of text.matchAll(/([A-Za-z0-9._%+-]+)\s*[\[(]\s*at\s*[\])]\s*([A-Za-z0-9-]+)\s*[\[(]\s*dot\s*[\])]\s*([A-Za-z]{2,})/gi)) add(`${m[1]}@${m[2]}.${m[3]}`);
+  for (const m of text.matchAll(/([A-Za-z0-9._%+-]+)\s*[\[(]\s*at\s*[\])]\s*([A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi)) add(`${m[1]}@${m[2]}`);
+  return [...found].slice(0, 6);
+}
+
+/** Same-host contact-page link, if the page advertises one. */
+function findContactLink(html: string, base: string): string | null {
+  let baseHost: string;
+  try { baseHost = new URL(base).hostname; } catch { return null; }
+  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]{0,120}?)<\/a>/gi)) {
+    const href = m[1];
+    const label = m[2].replace(/<[^>]+>/g, ' ');
+    if (!/contact|get in touch|reach (us|out)/i.test(href) && !/contact|get in touch/i.test(label)) continue;
+    try {
+      const abs = new URL(href, base);
+      if (abs.hostname === baseHost && isAllowed(abs)) return abs.href;
+    } catch { /* unparseable href — skip */ }
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const json = (b: unknown, status = 200) =>
@@ -122,7 +165,7 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
     const { url: raw, mode, projectId } = (await req.json().catch(() => ({}))) as
-      { url?: string; mode?: 'text' | 'images' | 'save'; projectId?: string };
+      { url?: string; mode?: 'text' | 'images' | 'save' | 'contact'; projectId?: string };
     if (!raw) return json({ error: 'url is required' }, 400);
     let url: URL;
     try { url = new URL(raw); } catch { return json({ error: 'Invalid URL' }, 400); }
@@ -181,6 +224,27 @@ Deno.serve(async (req) => {
     if (mode === 'images') {
       if (!/html/.test(type)) return json({ images: [], url: res.url || url.href });
       return json({ images: extractImages(bodyRaw, res.url || url.href), url: res.url || url.href });
+    }
+
+    // ---- mode 'contact': publicly listed emails from the page (falls back to its contact page) ----
+    if (mode === 'contact') {
+      if (!/html/.test(type)) return json({ emails: [], contactPage: null, url: res.url || url.href });
+      let emails = extractEmails(bodyRaw);
+      const contactPage = findContactLink(bodyRaw, res.url || url.href);
+      if (!emails.length && contactPage) {
+        try {
+          const ac2 = new AbortController();
+          const t2 = setTimeout(() => ac2.abort(), 12_000);
+          let r2: Response;
+          try {
+            r2 = await fetch(contactPage, { signal: ac2.signal, redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+          } finally { clearTimeout(t2); }
+          if (r2.ok && /html/.test(r2.headers.get('content-type') ?? '')) {
+            emails = extractEmails((await r2.text()).slice(0, MAX_BODY));
+          }
+        } catch { /* contact page unreachable — report what the landing page gave us */ }
+      }
+      return json({ emails, contactPage, url: res.url || url.href, title: extractText(bodyRaw).title });
     }
 
     if (/json|text\/plain|csv|xml/.test(type) && !/html/.test(type)) {
