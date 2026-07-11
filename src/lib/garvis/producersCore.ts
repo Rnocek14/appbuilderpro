@@ -119,6 +119,143 @@ each as "0-3s | SHOT: <what's on screen> | VO/TEXT: <the words>" · CTA shot · 
 results or prices. Plain text, no markdown fences.`;
 
 // ---------------------------------------------------------------------------
+// Ads — launch-ready assets at REAL platform limits (paste into Ads Manager)
+// ---------------------------------------------------------------------------
+
+// The platform facts, encoded (current as of mid-2026): Meta headline 40 chars / description 30 /
+// primary text ~125 shown before truncation; Google RSA 15 headlines ≤30 chars / 4 descriptions
+// ≤90. The parser ENFORCES limits — an over-limit asset is trimmed at a word boundary, never
+// shipped broken.
+export const AD_LIMITS = {
+  metaPrimary: 125, metaHeadline: 40, metaDescription: 30,
+  googleHeadline: 30, googleDescription: 90,
+  googleHeadlinesMax: 15, googleDescriptionsMax: 4,
+} as const;
+
+export interface AdAssets {
+  metaPrimaries: string[];       // 2-3 primary-text variants
+  metaHeadlines: string[];       // 3-5, ≤40 chars
+  metaDescriptions: string[];    // 1-3, ≤30 chars
+  googleHeadlines: string[];     // up to 15, ≤30 chars
+  googleDescriptions: string[];  // up to 4, ≤90 chars
+  keywords: string[];            // with match-type notation: [exact] "phrase" broad
+  negatives: string[];
+}
+
+export const ADS_SYSTEM = `You are Garvis writing LAUNCH-READY ad assets for one business — copy the
+owner pastes into Meta Ads Manager and Google Ads today. You get the business DNA/voice, its real
+photos, its research findings, and any compliance rules for its industry (follow them exactly).
+
+Output EXACTLY these labeled sections, nothing else:
+
+META_PRIMARY (3 lines, each a complete primary text ≤125 chars: hook first, one proof, one CTA)
+META_HEADLINES (4 lines, each ≤40 chars)
+META_DESCRIPTIONS (2 lines, each ≤30 chars)
+GOOGLE_HEADLINES (10-12 lines, each ≤30 chars — mix: what it is, the benefit, the location, the
+  offer, a proof point. Google mixes these, so each must stand alone)
+GOOGLE_DESCRIPTIONS (4 lines, each ≤90 chars)
+KEYWORDS (8-12 lines: [exact match] in brackets, "phrase match" in quotes, broad bare — buyer-intent
+  terms for THIS business and locale, never generic)
+NEGATIVES (4-8 lines: terms that waste money — jobs, free, DIY, wrong locations)
+
+Rules: the business's real voice and real facts only — never invent prices, results, or claims.
+One line per asset, no numbering, no markdown.`;
+
+const trimAt = (s: string, n: number): string => {
+  const t = s.trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(0, n);
+  const sp = cut.lastIndexOf(' ');
+  return (sp > n * 0.6 ? cut.slice(0, sp) : cut).trim();
+};
+
+const SECTION_LABELS = ['META_PRIMARY', 'META_HEADLINES', 'META_DESCRIPTIONS', 'GOOGLE_HEADLINES', 'GOOGLE_DESCRIPTIONS', 'KEYWORDS', 'NEGATIVES'] as const;
+
+/** Split the model output into labeled sections by header positions (index-sliced — a lazy regex
+ *  with the m-flag would stop at the first line-end, which is exactly the bug this replaces). */
+function splitSections(text: string): Map<string, string[]> {
+  const headerRe = new RegExp(`^\\s*(${SECTION_LABELS.join('|')})\\b[^\\n]*$`, 'gim');
+  const hits: { label: string; start: number; bodyStart: number }[] = [];
+  for (const m of text.matchAll(headerRe)) {
+    hits.push({ label: m[1].toUpperCase(), start: m.index ?? 0, bodyStart: (m.index ?? 0) + m[0].length });
+  }
+  const out = new Map<string, string[]>();
+  for (let i = 0; i < hits.length; i++) {
+    const body = text.slice(hits[i].bodyStart, i + 1 < hits.length ? hits[i + 1].start : undefined);
+    const lines = body.split('\n')
+      .map((l) => l.replace(/^[-*\d.)\s]+/, '').trim())
+      .filter((l) => l.length > 1);
+    if (!out.has(hits[i].label)) out.set(hits[i].label, lines);
+  }
+  return out;
+}
+
+function section(text: string, label: string): string[] {
+  return splitSections(text).get(label.toUpperCase()) ?? [];
+}
+
+/** Parse + ENFORCE platform limits. Tolerant: missing sections yield empty arrays; over-limit
+ *  lines are word-boundary trimmed; caps applied. isLaunchReady() decides if enough survived. */
+export function parseAdAssets(text: string): AdAssets {
+  return {
+    metaPrimaries: section(text, 'META_PRIMARY').map((l) => trimAt(l, AD_LIMITS.metaPrimary)).slice(0, 3),
+    metaHeadlines: section(text, 'META_HEADLINES').map((l) => trimAt(l, AD_LIMITS.metaHeadline)).slice(0, 5),
+    metaDescriptions: section(text, 'META_DESCRIPTIONS').map((l) => trimAt(l, AD_LIMITS.metaDescription)).slice(0, 3),
+    googleHeadlines: section(text, 'GOOGLE_HEADLINES').map((l) => trimAt(l, AD_LIMITS.googleHeadline)).slice(0, AD_LIMITS.googleHeadlinesMax),
+    googleDescriptions: section(text, 'GOOGLE_DESCRIPTIONS').map((l) => trimAt(l, AD_LIMITS.googleDescription)).slice(0, AD_LIMITS.googleDescriptionsMax),
+    keywords: section(text, 'KEYWORDS').map((l) => l.slice(0, 80)).slice(0, 12),
+    negatives: section(text, 'NEGATIVES').map((l) => l.slice(0, 60)).slice(0, 8),
+  };
+}
+
+/** Enough real assets to be worth shipping? (Below this, the expertise floor is more honest.) */
+export function isLaunchReady(a: AdAssets): boolean {
+  return a.metaPrimaries.length >= 2 && a.metaHeadlines.length >= 3
+    && a.googleHeadlines.length >= 6 && a.googleDescriptions.length >= 2 && a.keywords.length >= 5;
+}
+
+/** Render the Meta ad artifact — paste-ready, with the tracking URL and the category reminder. */
+export function metaAdDetail(a: AdAssets, landingUrl: string | null, complianceNote: string | null): string {
+  const url = landingUrl ? `${landingUrl}${landingUrl.includes('?') ? '&' : '?'}src=meta-ads` : '[EDIT: landing URL]?src=meta-ads';
+  return [
+    'META (Facebook/Instagram) — paste into Ads Manager',
+    '',
+    'PRIMARY TEXT (test these against each other):',
+    ...a.metaPrimaries.map((p, i) => `${i + 1}. ${p}`),
+    '',
+    `HEADLINES (≤${AD_LIMITS.metaHeadline} chars): ${a.metaHeadlines.join(' | ')}`,
+    `DESCRIPTIONS (≤${AD_LIMITS.metaDescription} chars): ${a.metaDescriptions.join(' | ')}`,
+    '',
+    `FINAL URL (keep the src — it lands leads in YOUR ledger): ${url}`,
+    'CREATIVE: your real vault photos — 1:1 and 4:5 crops; video 9:16 if the studio has one.',
+    complianceNote ? `\nCOMPLIANCE: ${complianceNote}` : null,
+  ].filter((l): l is string => l !== null).join('\n');
+}
+
+/** Render the Google Ads artifact — RSA-ready. */
+export function googleAdDetail(a: AdAssets, landingUrl: string | null, complianceNote: string | null): string {
+  const url = landingUrl ? `${landingUrl}${landingUrl.includes('?') ? '&' : '?'}src=google-ads` : '[EDIT: landing URL]?src=google-ads';
+  return [
+    'GOOGLE ADS (Responsive Search Ad) — paste into the RSA form',
+    '',
+    `HEADLINES (each ≤${AD_LIMITS.googleHeadline} chars — Google mixes them):`,
+    ...a.googleHeadlines.map((h) => `- ${h}`),
+    '',
+    `DESCRIPTIONS (each ≤${AD_LIMITS.googleDescription} chars):`,
+    ...a.googleDescriptions.map((d) => `- ${d}`),
+    '',
+    'KEYWORDS ([exact] "phrase" broad):',
+    ...a.keywords.map((k) => `- ${k}`),
+    '',
+    'NEGATIVE KEYWORDS (stop wasted spend):',
+    ...a.negatives.map((n) => `- ${n}`),
+    '',
+    `FINAL URL (keep the src — it lands leads in YOUR ledger): ${url}`,
+    complianceNote ? `\nCOMPLIANCE: ${complianceNote}` : null,
+  ].filter((l): l is string => l !== null).join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Angle — grounded in the world's real research, not free-floating
 // ---------------------------------------------------------------------------
 

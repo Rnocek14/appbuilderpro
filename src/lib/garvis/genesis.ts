@@ -143,7 +143,7 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 10): generic direct_mail email social video landing market brand crm lists
+FLAVORS (exactly 11): generic direct_mail email social video landing market brand crm lists ads
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",

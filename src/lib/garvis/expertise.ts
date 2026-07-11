@@ -281,6 +281,42 @@ on every email.${NOTE}`,
   },
 ];
 
+const ADS_STUDIO: SeedArtifact[] = [
+  {
+    slug: 'paid-ads-playbook', kind: 'doc', title: 'Paid ads playbook',
+    detail: `${H('Paid acquisition for {{business_name}} — the operator\'s rules')}
+STRUCTURE (both platforms): campaign (one objective) → ad set/group (one audience or keyword
+theme) → ads (2-3 variants MAX per set — more splits the data into noise).
+THE TESTING LADDER: start with ONE campaign, ONE audience, small daily budget. Kill nothing for
+the first days (learning phase); judge on cost per LEAD (your form, measured), never platform
+vanity metrics. Scale the survivor ~20-30% at a time; big jumps reset learning.
+TRACKING IS NON-NEGOTIABLE: every ad's final URL carries ?src= / UTM parameters so clicks and
+leads land in YOUR ledger — spend without tracking is spend without knowledge. Log spend in the
+Results panel; cost-per-lead only exists as logged-spend ÷ measured-leads.
+CREATIVE: your REAL photos outperform stock everywhere; the hook is the first 3 words / first
+frame; one idea, one proof, one CTA per ad. Match the landing page to the ad's promise exactly.
+BUDGET MATH (template — your numbers): daily budget × 30 = monthly test cost; leads needed to
+break even = monthly cost ÷ value per customer. Decide the kill threshold BEFORE spending.
+PLATFORM COMPLIANCE: each platform restricts targeting and claims by industry (housing,
+credit, employment, health, finance are "special categories" with hard rules) — the launch
+checklist in this world carries your industry's specifics.${NOTE}`,
+  },
+  {
+    slug: 'ads-channel-map', kind: 'doc', title: 'Which ad channel does what',
+    detail: `${H('Channels, by the job they do')}
+GOOGLE SEARCH: catches EXISTING demand ("near me", "price of X") — highest intent, pay per
+click. Start here when people already search for what {{business_name}} sells.
+META (FB/IG): CREATES demand — visual, interest/lookalike audiences, cheap reach. Start here
+for visual products and local awareness. Lead-form ads work without a landing page (but your
+instrumented site measures better).
+GOOGLE LSA / MAPS: local services — pay per lead, trust badge; strongest for home services.
+YOUTUBE/TIKTOK: attention at scale, needs video; use after the social studio proves a format.
+NEXTDOOR/YELP: neighborhood trust plays; strongest for local services with reviews.
+LINKEDIN: B2B only — expensive clicks, precise titles.
+RULE: master ONE channel to a measured cost-per-lead before adding the next.${NOTE}`,
+  },
+];
+
 const GENERIC_STUDIO: SeedArtifact[] = [
   {
     slug: 'studio-brief', kind: 'doc', title: 'Creative brief',
@@ -297,7 +333,7 @@ the brand kit and the files in this area.${NOTE}`,
 
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
-  brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO,
+  brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */

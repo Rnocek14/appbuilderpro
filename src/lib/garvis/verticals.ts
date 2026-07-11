@@ -181,6 +181,20 @@ Anniversary + tax-season touches for past buyers. Every promise gets a dated nex
 5) CLIENT STORY (with written permission): the problem, the plan, the result — no addresses
    or terms without consent. Fair Housing rules apply to every caption (see launch checklist).${NOTE}`,
     }],
+    ads: [{
+      slug: 're-ads-rules', kind: 'doc', title: 'Housing ads — the platform rules that end accounts',
+      detail: `${H('Before spending a dollar (verified against current platform policy)')}
+HOUSING IS A SPECIAL AD CATEGORY on Meta and restricted on Google: ads about housing sales,
+rentals, or financing MUST be declared as such, which REMOVES age/gender/zip-level targeting —
+you target broad geography + interests only. Running housing ads undeclared is how accounts get
+banned and Fair Housing complaints get filed.
+□ Declare the Special Ad Category (Meta) / follow personalized-ads housing policy (Google).
+□ Copy describes the PROPERTY/SERVICE, never the buyer ("great for young families" fails both
+  the platform and the law). Equal Housing logo in creative where required; broker ID always.
+□ Location targeting: radius/region only — never exclusionary patterns.
+□ Every final URL carries ?src=meta-ads or ?src=google-ads so leads land attributed in YOUR
+  ledger — platform-reported results flatter themselves; your form counts are the truth.${NOTE}`,
+    }],
     direct_mail: [{
       slug: 're-mail-angles', kind: 'doc', title: 'Real estate mail that gets kept',
       detail: `${H('The pieces that survive the counter-sort')}
@@ -278,6 +292,18 @@ track your own hit rate publicly or don't publish calls at all.${NOTE}`,
     },
   ],
   studio: {
+    ads: [{
+      slug: 'fin-ads-rules', kind: 'doc', title: 'Finance ads — the restricted category rules',
+      detail: `${H('Before spending (platforms + regulators both watch this category)')}
+□ CREDIT/FINANCIAL PRODUCTS are special/restricted categories: Meta requires declaration
+  (removing granular targeting); Google requires verification for many financial verticals and
+  bans some outright. Declare honestly — undeclared finance ads get accounts banned.
+□ NO promised returns, no "guaranteed", no cherry-picked performance. If you're a registered
+  adviser, every ad is an advertisement under the SEC Marketing Rule — testimonial and
+  performance rules apply to the AD too, not just the site.
+□ Required disclosures belong IN the ad or one click away, not buried.
+□ Track with ?src= final URLs; measure cost per qualified conversation, not clicks.${NOTE}`,
+    }],
     email: [{
       slug: 'fin-newsletter-format', kind: 'doc', title: 'The finance newsletter format',
       detail: `${H('The repeatable weekly shape')}
@@ -603,6 +629,18 @@ Revenue per visit + schedule utilization. Cost per BOOKED patient by channel.${N
     },
   ],
   studio: {
+    ads: [{
+      slug: 'health-ads-rules', kind: 'doc', title: 'Health ads — platform + privacy rules',
+      detail: `${H('Before spending (the rules platforms actually enforce)')}
+□ NO PERSONAL-ATTRIBUTE TARGETING OR COPY: ads may not imply knowledge of a person's health
+  ("struggling with back pain?" addressed at the reader fails Meta's personal-attributes policy
+  — describe the SERVICE, not the reader's condition).
+□ Claims need substantiation (FTC); no outcome guarantees, no before/after in ads without the
+  platform's and your board's approval; prescription/regulated services have extra gates.
+□ Landing pages: no PHI collected without proper safeguards; your instrumented lead form takes
+  name/contact/message only — keep health details OUT of the form.
+□ Track with ?src= final URLs; judge on measured leads, never platform-reported "results".${NOTE}`,
+    }],
     social: [{
       slug: 'health-content-formats', kind: 'doc', title: 'Health content that builds trust',
       detail: `${H('Educate — never expose')}

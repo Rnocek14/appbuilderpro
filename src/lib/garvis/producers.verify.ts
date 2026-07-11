@@ -1,7 +1,8 @@
 // Run: npx tsx src/lib/garvis/producers.verify.ts
 import {
   researchQueries, formatSources, appendSources, parseSocialPosts, postToDetail,
-  researchContext, type ResearchSource,
+  researchContext, parseAdAssets, isLaunchReady, metaAdDetail, googleAdDetail, AD_LIMITS,
+  type ResearchSource,
 } from './producersCore';
 import type { WorldDNA, BusinessContext } from './genesis';
 
@@ -64,6 +65,52 @@ tags: #a`;
   check('post detail is copy-paste ready (caption then tags then visual)', detail.startsWith('Your shoreline') && detail.includes('#lakegeneva') && detail.includes('VISUAL:'));
   check('garbage in → empty out, no throw', parseSocialPosts('not a post at all').length === 0);
 }
+// --- ads: platform limits ENFORCED, tracking URLs attributed, compliance rides along -------
+{
+  const model = `META_PRIMARY
+Your shoreline has a number. Most owners are off by six figures. Get a private valuation today.
+The buyer for your lakefront is probably already looking. Find out what they'd pay.
+No pitch, just the math on your frontage.
+META_HEADLINES
+Know your lakefront number
+Private valuations, ${'x'.repeat(60)} way too long headline that must be trimmed
+Lake Geneva frontage comps
+Quiet listings, real buyers
+META_DESCRIPTIONS
+Private. No listing pitch.
+Frontage-true comps only.
+GOOGLE_HEADLINES
+Lake Geneva Lakefront Values
+What Is Your Home Worth
+Private Lakefront Valuation
+Frontage-True Comps
+Sell Quietly, Sell Well
+Local Lakefront Experts
+Know Your Number First
+No-Obligation Valuation
+GOOGLE_DESCRIPTIONS
+Private valuations for Lake Geneva lakefront owners. Frontage-true comps, no listing pitch.
+Find out what quiet, qualified buyers would pay for your frontage this season.
+KEYWORDS
+[lake geneva lakefront home value]
+"lakefront home valuation"
+lakefront realtor lake geneva
+NEGATIVES
+rental
+jobs`;
+  const a = parseAdAssets(model);
+  check('ads: sections parsed into structured assets', a.metaPrimaries.length === 3 && a.googleHeadlines.length === 8 && a.keywords.length === 3);
+  check('ads: over-limit lines TRIMMED at word boundaries, never shipped broken',
+    a.metaHeadlines.every((h) => h.length <= AD_LIMITS.metaHeadline) && a.googleHeadlines.every((h) => h.length <= AD_LIMITS.googleHeadline));
+  check('ads: launch-ready gate needs real coverage', !isLaunchReady(parseAdAssets('META_PRIMARY\none line')) );
+  const meta = metaAdDetail(a, 'https://nocek.realty', 'HOUSING is a Special Ad Category — declare it.');
+  check('ads: meta artifact carries the attributed final URL', meta.includes('https://nocek.realty?src=meta-ads'));
+  check('ads: compliance note rides IN the artifact', meta.includes('Special Ad Category'));
+  const goog = googleAdDetail(a, null, null);
+  check('ads: missing landing URL → visible EDIT slot, never an invented domain', goog.includes('[EDIT: landing URL]?src=google-ads'));
+  check('ads: garbage in → empty assets, no throw', parseAdAssets('nothing here').googleHeadlines.length === 0);
+}
+
 // --- angle grounding --------------------------------------------------------------------
 {
   const grounded = researchContext([{ title: 'Market snapshot', detail: 'inventory is thin, buyers are Chicago money' }]);

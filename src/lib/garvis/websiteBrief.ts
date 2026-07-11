@@ -105,13 +105,14 @@ export function compileWebsiteBrief(input: WebsiteBriefInput, budget = 9000): We
       '  then show a warm confirmation. The form must NOT send email or contact anyone directly.',
       `- Endpoint: ${input.ingest.endpoint}`,
       '- Submit body: {"token":"' + input.ingest.token + '","kind":"lead","path":location.pathname,',
-      '  "source":new URLSearchParams(location.search).get("src")||undefined,',
-      '  "lead":{"name":...,"email":...,"phone":...,"message":...}}',
+      '  "source":srcParam(),"lead":{"name":...,"email":...,"phone":...,"message":...}}',
       '- ALSO, once per page load, POST a visit ping: {"token":"' + input.ingest.token + '","kind":"visit",',
-      '  "path":location.pathname,"source":new URLSearchParams(location.search).get("src")||undefined}',
+      '  "path":location.pathname,"source":srcParam()}',
       '  (fire-and-forget; never block rendering; swallow errors silently).',
-      '- The ?src= query param is campaign attribution (postcard QR links carry ?src=postcard) —',
-      '  always pass it through when present.',
+      '- srcParam() = new URLSearchParams(location.search); return p.get("src")||p.get("utm_source")||undefined —',
+      '  campaign attribution: postcard QR carries ?src=postcard, ads carry ?src=meta-ads / ?src=google-ads',
+      '  or standard UTMs. Persist it in sessionStorage on first load so a lead submitted from another',
+      '  page still carries its source.',
     ].join('\n'));
   } else {
     sections.push([

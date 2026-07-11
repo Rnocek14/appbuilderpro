@@ -21,7 +21,8 @@ import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit,
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, maybeReflect, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld } from '../lib/garvis/buildBridge';
 import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
-import { worldResults, setLeadStatus, type ChannelResults, type LeadRow } from '../lib/garvis/resultsRun';
+import { worldResults, setLeadStatus, type LeadRow } from '../lib/garvis/resultsRun';
+import { readAdaptive, logAdSpend, type AdaptiveRead } from '../lib/garvis/adaptiveRun';
 import type { ResearchPlan } from '../lib/garvis/marketIntel';
 import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
@@ -929,18 +930,34 @@ function LeadsPanel({ worldId }: { worldId: string }) {
   );
 }
 
-/** G5 — per-channel results. Counts of rows, nothing interpreted; "not instrumented" is a state,
- *  never a zero pretending to be knowledge. This table is what Adaptive Operation will stand on. */
+/** G5+G6 — per-channel results AND what the numbers say. Counts are rows; recommendations are the
+ *  verified adapt() engine's output, each carrying its evidence and an honest confidence tier
+ *  (act / watch / too-early). Spend is logged by the operator until platform APIs are connected —
+ *  so cost-per-lead is always logged-spend ÷ measured-leads, two real numbers. */
 function ResultsPanel({ worldId }: { worldId: string }) {
-  const [res, setRes] = useState<ChannelResults | null>(null);
+  const { toast } = useToast();
+  const [read, setRead] = useState<AdaptiveRead | null>(null);
+  const [spendChannel, setSpendChannel] = useState('meta ads');
+  const [spendAmount, setSpendAmount] = useState('');
 
-  useEffect(() => {
-    let live = true;
-    void worldResults(worldId).then((r) => { if (live) setRes(r); }).catch(() => {});
-    return () => { live = false; };
+  const reload = useCallback(async () => {
+    try { setRead(await readAdaptive(worldId)); } catch { /* panel hides */ }
   }, [worldId]);
+  useEffect(() => { void reload(); }, [reload]);
 
-  if (!res) return null;
+  const logSpend = async () => {
+    const n = parseFloat(spendAmount);
+    if (!Number.isFinite(n) || n <= 0) { toast('error', 'Enter the real amount spent.'); return; }
+    try {
+      await logAdSpend(worldId, spendChannel, n);
+      setSpendAmount('');
+      toast('success', `Logged $${n} on ${spendChannel} — cost-per-lead now computes from real numbers.`);
+      await reload();
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not log spend.'); }
+  };
+
+  if (!read) return null;
+  const res = read.results;
   const rows: { channel: string; out: string; back: string }[] = [
     {
       channel: 'Email',
@@ -958,6 +975,20 @@ function ResultsPanel({ worldId }: { worldId: string }) {
       channel: 'Website',
       out: res.site ? `${res.site.visits} visits (${res.site.visits7d} this week)` : 'not instrumented — build/rebuild the site to wire reporting',
       back: res.site ? `${res.site.leads} lead${res.site.leads === 1 ? '' : 's'} (${res.site.leads7d} this week)` : '—',
+    },
+    {
+      channel: 'Meta ads',
+      out: (read.spendByChannel['meta ads'] ?? 0) > 0 || (res.site?.bySource.some((s) => s.source === 'meta-ads') ?? false)
+        ? `$${read.spendByChannel['meta ads'] ?? 0} logged · ${res.site?.bySource.find((s) => s.source === 'meta-ads')?.visits ?? 0} visits`
+        : 'not running — generate the campaign in an ads studio',
+      back: `${res.site?.bySource.find((s) => s.source === 'meta-ads')?.leads ?? 0} leads`,
+    },
+    {
+      channel: 'Google ads',
+      out: (read.spendByChannel['google ads'] ?? 0) > 0 || (res.site?.bySource.some((s) => s.source === 'google-ads') ?? false)
+        ? `$${read.spendByChannel['google ads'] ?? 0} logged · ${res.site?.bySource.find((s) => s.source === 'google-ads')?.visits ?? 0} visits`
+        : 'not running — generate the campaign in an ads studio',
+      back: `${res.site?.bySource.find((s) => s.source === 'google-ads')?.leads ?? 0} leads`,
     },
   ];
 
@@ -987,6 +1018,46 @@ function ResultsPanel({ worldId }: { worldId: string }) {
         <p className="mt-2 text-[11px] text-forge-dim">
           Visit sources: {res.site.bySource.slice(0, 5).map((s) => `${s.source} ${s.visits}v/${s.leads}l`).join(' · ')}
         </p>
+      )}
+
+      {/* Spend log — real dollars in, so cost-per-lead is measured, never modeled */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-forge-border/60 pt-3">
+        <span className="text-[11px] uppercase tracking-wide text-forge-dim">Log spend:</span>
+        <select value={spendChannel} onChange={(e) => setSpendChannel(e.target.value)}
+          className="rounded-lg border border-forge-border bg-forge-bg px-2 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+          <option value="meta ads">Meta ads</option>
+          <option value="google ads">Google ads</option>
+          <option value="direct mail">Direct mail</option>
+          <option value="email">Email</option>
+        </select>
+        <input value={spendAmount} onChange={(e) => setSpendAmount(e.target.value)} inputMode="decimal" placeholder="$ spent"
+          className="w-24 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+        <button onClick={() => void logSpend()} className="rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10">Log</button>
+      </div>
+
+      {/* Adaptive Operation — what the numbers say, evidence attached, confidence honest */}
+      {read.recs.length > 0 && (
+        <div className="mt-3 border-t border-forge-border/60 pt-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-forge-ink">What the numbers say</h4>
+          <ul className="mt-1.5 space-y-1.5">
+            {read.recs.map((r, i) => (
+              <li key={i} className="rounded-lg border border-forge-border bg-forge-raised/30 px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <span className={cn(
+                    'mt-px rounded border px-1 py-px font-mono text-[8.5px] uppercase tracking-wide',
+                    r.confidence === 'act' ? 'border-forge-ok/40 text-forge-ok'
+                      : r.confidence === 'watch' ? 'border-forge-warn/40 text-forge-warn'
+                      : 'border-forge-border text-forge-dim/70',
+                  )}>{r.confidence}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-forge-ink">{r.text}</p>
+                    <p className="mt-0.5 text-[11px] text-forge-dim">{r.evidence} <span className="text-forge-dim/60">({r.basis})</span></p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );

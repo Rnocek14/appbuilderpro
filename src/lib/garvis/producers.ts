@@ -16,8 +16,9 @@ import { expertiseFor, detectVertical } from './expertise';
 import type { PlayArtifact } from './plays';
 import type { Charter } from './workweb';
 import {
-  RESEARCH_SYSTEM, SOCIAL_SYSTEM, VIDEO_SYSTEM, ANGLE_SYSTEM,
+  RESEARCH_SYSTEM, SOCIAL_SYSTEM, VIDEO_SYSTEM, ANGLE_SYSTEM, ADS_SYSTEM,
   researchQueries, formatSources, appendSources, parseSocialPosts, postToDetail, researchContext,
+  parseAdAssets, isLaunchReady, metaAdDetail, googleAdDetail,
   type ResearchSource,
 } from './producersCore';
 
@@ -237,6 +238,68 @@ export async function produceAngle(worldId: string, charter: Charter): Promise<P
   return { artifacts: expertiseFloor(charter, m), message: 'Added the strategy framework (AI unavailable).', grounded: false };
 }
 
+// ---------------------------------------------------------------------------
+// 5. Ads — launch-ready Meta + Google assets at real platform limits
+// ---------------------------------------------------------------------------
+
+/** The special-category warnings that MUST ride with regulated industries' ads. */
+function adComplianceNote(vertical: string): string | null {
+  switch (vertical) {
+    case 'real_estate': return 'HOUSING is a Special Ad Category — declare it (Meta) / follow housing policy (Google). Targeting restrictions apply; describe the property, never the buyer.';
+    case 'finance': return 'CREDIT/FINANCIAL PRODUCTS are restricted categories — declare/verify before running. No promised returns; adviser ads fall under the SEC Marketing Rule.';
+    case 'health': return 'No personal-attribute targeting or copy (Meta policy); health claims need substantiation; keep health details out of the lead form.';
+    default: return null;
+  }
+}
+
+export async function produceAds(worldId: string, charter: Charter): Promise<ProduceResult> {
+  const m = await gather(worldId);
+  const vertical = detectVertical([
+    m.dna?.businessType, m.dna?.valueProposition, ...(m.dna?.idealCustomers ?? []),
+    m.ctx?.craft, m.ctx?.audience, ...(m.ctx?.offerings ?? []),
+  ].filter(Boolean).join(' '));
+  const compliance = adComplianceNote(vertical);
+  const landing = Object.values(m.ctx?.links ?? {}).find((v) => typeof v === 'string' && v.trim())?.trim() ?? null;
+
+  // Ground the copy in the world's own research when it exists (earned only).
+  const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
+  const clusterIds = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+  let findings = '';
+  if (clusterIds.length) {
+    const { data: research } = await supabase.from('knowledge_artifacts')
+      .select('title, detail').in('cluster_id', clusterIds).eq('kind', 'research')
+      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(3);
+    findings = ((research ?? []) as { title: string; detail: string | null }[])
+      .map((r) => `- ${r.title}: ${(r.detail ?? '').replace(/\s+/g, ' ').slice(0, 200)}`).join('\n');
+  }
+
+  try {
+    const text = await reason(
+      ADS_SYSTEM,
+      [
+        businessContext(m),
+        m.photos.length ? `REAL PHOTOS: ${m.photos.slice(0, 8).map((p) => p.caption || p.name).join(' | ')}` : '',
+        findings ? `RESEARCH FINDINGS:\n${findings}` : '',
+        compliance ? `COMPLIANCE (follow exactly): ${compliance}` : '',
+      ].filter(Boolean).join('\n\n'),
+      'Write the ad assets now, in the labeled sections. Nothing else.',
+      1800,
+    );
+    const assets = parseAdAssets(text);
+    if (isLaunchReady(assets)) {
+      return {
+        artifacts: [
+          { slug: 'meta-ad-campaign', kind: 'post', title: 'Meta ads — launch-ready', detail: metaAdDetail(assets, landing, compliance) },
+          { slug: 'google-ad-campaign', kind: 'post', title: 'Google ads — launch-ready RSA', detail: googleAdDetail(assets, landing, compliance) },
+        ],
+        message: `Wrote launch-ready Meta + Google assets (${assets.googleHeadlines.length} headlines, ${assets.keywords.length} keywords) — paste into Ads Manager, log spend in the ledger.`,
+        grounded: true,
+      };
+    }
+  } catch { /* fall to the floor */ }
+  return { artifacts: expertiseFloor(charter, m), message: 'Added the paid-ads playbook (AI unavailable — press again for launch-ready assets).', grounded: false };
+}
+
 /** The producer router: which finished-work producer (if any) handles a tool id. */
 export function producerFor(toolId: string): ((worldId: string, charter: Charter) => Promise<ProduceResult>) | null {
   switch (toolId) {
@@ -244,6 +307,7 @@ export function producerFor(toolId: string): ((worldId: string, charter: Charter
     case 'gen-social': return produceSocial;
     case 'gen-video-script': return produceVideo;
     case 'gen-angle': return produceAngle;
+    case 'gen-ads': return produceAds;
     default: return null;
   }
 }
