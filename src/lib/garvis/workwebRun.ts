@@ -26,6 +26,7 @@ import {
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
 import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail, type WorldDNA } from './genesis';
 import { expertiseFor, detectVertical, type Vertical } from './expertise';
+import { producerFor } from './producers';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
 // separate table column (knowledge_clusters.charter). universe.ts's ClusterGraph has no charter
@@ -458,6 +459,23 @@ export async function runTool(
     case 'gen-landing':
     case 'gen-email-seq':
     case 'gen-copy': {
+      // FINISHED-WORK PRODUCERS FIRST (research/gen-social/gen-video-script/gen-angle): these
+      // reason over the world's REAL materials (DNA, brand voice, vault photos, prior research)
+      // and do real web search — producing a cited market brief, ready-to-post captions, a
+      // shot-by-shot script, a grounded angle. Strictly better than any template, so they lead;
+      // each falls to the area's expert pack if AI/search is unavailable (never a stub). Routed
+      // by TOOL ID (fixing the slug-collision where research and gen-angle produced the same doc).
+      if (cluster.charter) {
+        const producer = producerFor(toolId);
+        if (producer) {
+          const r = await producer(worldId, cluster.charter);
+          if (r.artifacts.length) {
+            const n = await writeArtifacts(uid, cluster.id, r.artifacts);
+            if (n > 0) return { ok: true, message: r.message, artifacts: n };
+          }
+        }
+      }
+
       // Single-cluster generators. Resolution order — and the honesty rule that governs it:
       // a generator speaks THE WORLD's voice or none. (1) A genesis world's own data play step
       // for this cluster; (2) a genesis world with context but no matching step → a context-
