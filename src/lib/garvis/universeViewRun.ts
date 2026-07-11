@@ -7,6 +7,7 @@
 
 import { supabase } from '../supabase';
 import { listWorlds as listAllWorlds } from './universe';
+import { SEED_SOURCE } from './workwebRun';
 import { loadRankedMoves } from './nextMoveRun';
 import {
   compileUniverseScene,
@@ -42,7 +43,8 @@ export async function loadUniverseScene(): Promise<UniverseScene> {
   }
   const artifactCount = new Map<string, number>();
   if (clusters.length) {
-    const { data: arts } = await supabase.from('knowledge_artifacts').select('cluster_id').limit(5000);
+    // Earned work only — seeded playbooks must not add mass to a newborn world's body.
+    const { data: arts } = await supabase.from('knowledge_artifacts').select('cluster_id').neq('source', SEED_SOURCE).limit(5000);
     for (const a of arts ?? []) {
       const wid = worldByCluster.get(a.cluster_id as string);
       if (wid) artifactCount.set(wid, (artifactCount.get(wid) ?? 0) + 1);

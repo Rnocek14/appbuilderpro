@@ -143,6 +143,8 @@ export interface WebCluster {
   charter: Charter | null;
   tools: WorkTool[];
   artifacts: Artifact[];
+  earnedArtifacts: number;   // artifacts EXCLUDING seeded playbooks — the honest activity count
+  playbookArtifacts: number; // seeded playbooks — knowledge the area was born with, shown as such
   liveStatus: Charter['status'] | null;
   pendingApprovals: number;
 }
@@ -194,6 +196,22 @@ export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
     bySlug.set((r as { slug: string }).slug, { id: (r as { id: string }).id, charter: parseCharter((r as { charter: unknown }).charter) });
   }
 
+  // Per-cluster artifact counts split by provenance. NO THEATER: seeded playbooks (SEED_SOURCE)
+  // are knowledge the world was born with — they must not light an area 'active' or inflate the
+  // rollup. Status and rollup count EARNED artifacts only; playbooks are surfaced separately.
+  const totalByCluster = new Map<string, number>();
+  const seedsByCluster = new Map<string, number>();
+  const clusterDbIds = (rows ?? []).map((r) => (r as { id: string }).id);
+  if (clusterDbIds.length) {
+    const { data: artRows } = await supabase.from('knowledge_artifacts')
+      .select('cluster_id, source').in('cluster_id', clusterDbIds).limit(2000);
+    for (const a of artRows ?? []) {
+      const cid = (a as { cluster_id: string }).cluster_id;
+      totalByCluster.set(cid, (totalByCluster.get(cid) ?? 0) + 1);
+      if ((a as { source: string | null }).source === SEED_SOURCE) seedsByCluster.set(cid, (seedsByCluster.get(cid) ?? 0) + 1);
+    }
+  }
+
   // Web-scoped signals: outreach campaigns bound to THIS world (app_0024 world_id). Pending approvals
   // are attributed to this web only when their message's campaign belongs to the web — no account-wide
   // bleed. The per-cluster "waiting" heuristic then surfaces that count on launch/loop areas.
@@ -228,6 +246,9 @@ export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
     const meta = bySlug.get(c.id);
     const charter = meta?.charter ?? null;
     const pending = charter && (charter.archetype === 'launch' || charter.archetype === 'loop') ? webPending : 0;
+    const total = meta ? (totalByCluster.get(meta.id) ?? c.artifacts.length) : c.artifacts.length;
+    const playbooks = meta ? (seedsByCluster.get(meta.id) ?? 0) : 0;
+    const earned = Math.max(0, total - playbooks);
     return {
       id: meta?.id ?? c.id,
       slug: c.id,
@@ -237,12 +258,16 @@ export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
       charter,
       tools: charter ? toolsFor(charter) : [],
       artifacts: c.artifacts,
-      liveStatus: charter ? deriveStatus(charter, c.artifacts.length, pending) : null,
+      earnedArtifacts: earned,
+      playbookArtifacts: playbooks,
+      // Status counts EARNED work only — a newborn world full of playbooks is still dormant
+      // until something actually happens in it.
+      liveStatus: charter ? deriveStatus(charter, earned, pending) : null,
       pendingApprovals: pending,
     };
   });
 
-  const artifactCount = clusters.reduce((n, c) => n + c.artifacts.length, 0);
+  const artifactCount = clusters.reduce((n, c) => n + c.earnedArtifacts, 0);
   return {
     worldId,
     title: universe.title,
@@ -260,12 +285,19 @@ async function clusterIdForSlug(worldId: string, slug: string): Promise<string |
   return (data as { id: string } | null)?.id ?? null;
 }
 
+/** The source tag for seeded playbook docs. NO-THEATER LOAD-BEARING: every derived signal that
+ *  counts artifacts (area status, momentum, intel age, planet size/glow, launch-active floors)
+ *  EXCLUDES this source — a playbook is knowledge the world was born with, not work that
+ *  happened. Counting seeds as activity would make a newborn world glow, which is exactly the
+ *  theater the system forbids. */
+export const SEED_SOURCE = 'garvis-seed';
+
 /** Upsert artifacts onto a cluster by (cluster_id, slug) — matches app_0018's unique index. */
-async function writeArtifacts(ownerId: string, clusterId: string, arts: PlayArtifact[]): Promise<number> {
+async function writeArtifacts(ownerId: string, clusterId: string, arts: PlayArtifact[], source = 'garvis'): Promise<number> {
   if (!arts.length) return 0;
   const rows = arts.map((a) => ({
     owner_id: ownerId, cluster_id: clusterId, slug: a.slug,
-    kind: a.kind, title: a.title, detail: a.detail, source: 'garvis',
+    kind: a.kind, title: a.title, detail: a.detail, source,
   }));
   const { error } = await supabase.from('knowledge_artifacts').upsert(rows, { onConflict: 'cluster_id,slug' });
   return error ? 0 : rows.length;
@@ -314,7 +346,7 @@ export async function seedWorld(worldId: string, ctx: BusinessContext, dna?: Wor
       if (!charter) continue;
       const arts: PlayArtifact[] = expertiseFor(charter.archetype, charter.flavor, vertical)
         .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
-      seeded += await writeArtifacts(uid, (r as { id: string }).id, arts);
+      seeded += await writeArtifacts(uid, (r as { id: string }).id, arts, SEED_SOURCE);
     }
     return seeded;
   } catch {
@@ -445,7 +477,7 @@ export async function runTool(
           const vertical = worldVertical(voice.ctx, voice.dna);
           const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
             .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, voice.ctx!) }));
-          const n = await writeArtifacts(uid, cluster.id, arts);
+          const n = await writeArtifacts(uid, cluster.id, arts, SEED_SOURCE);
           return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}) in this world's voice.` : 'Nothing generated.', artifacts: n };
         }
         const framed: PlayArtifact = {
@@ -477,7 +509,7 @@ export async function runTool(
         const vertical = worldVertical(ctx, voice.dna);
         const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
           .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
-        const n = await writeArtifacts(uid, cluster.id, arts);
+        const n = await writeArtifacts(uid, cluster.id, arts, SEED_SOURCE);
         return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}).` : 'Nothing generated.', artifacts: n };
       }
       const starter: PlayArtifact = {

@@ -20,7 +20,7 @@ import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../l
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld } from '../lib/garvis/buildBridge';
-import { worldPlan, listProspects, setProspectStatus, scanCategory, type ProspectRow } from '../lib/garvis/marketIntelRun';
+import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, type ProspectRow } from '../lib/garvis/marketIntelRun';
 import type { ResearchPlan } from '../lib/garvis/marketIntel';
 import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
@@ -191,7 +191,8 @@ export default function WorkWeb() {
               title="The world's living understanding: what changed, what was learned, what's working, what to test next — every line from persisted rows"
               className={cn('rounded-lg border px-2.5 py-1 text-xs transition-colors', showIntel ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink')}
             >Intelligence</button>
-            <StatChip label="artifacts" value={web.rollup.artifacts} />
+            <StatChip label="made" value={web.rollup.artifacts} />
+            <StatChip label="playbooks" value={web.clusters.reduce((n, c) => n + c.playbookArtifacts, 0)} />
             <StatChip label="waiting" value={web.rollup.pendingApprovals} tone="warn" />
             <StatChip label="sent" value={web.rollup.messagesSent} />
             <StatChip label="replies" value={web.rollup.replies} tone="ok" />
@@ -229,7 +230,11 @@ export default function WorkWeb() {
                   {depth > 0 && <span className="text-forge-dim/40">└</span>}
                   <Circle size={9} className={cn('shrink-0 fill-current', STATUS_DOT[c.liveStatus ?? 'dormant'])} />
                   <span className={cn('flex-1 truncate text-sm', isSel ? 'text-forge-ink' : 'text-forge-dim group-hover:text-forge-ink')}>{c.title}</span>
-                  {c.artifacts.length > 0 && <span className="text-[10px] text-forge-dim">{c.artifacts.length}</span>}
+                  {(c.earnedArtifacts > 0 || c.playbookArtifacts > 0) && (
+                    <span className="text-[10px] text-forge-dim" title={`${c.earnedArtifacts} made here · ${c.playbookArtifacts} playbook doc${c.playbookArtifacts === 1 ? '' : 's'} it was born with`}>
+                      {c.earnedArtifacts > 0 ? c.earnedArtifacts : `${c.playbookArtifacts}ᵖ`}
+                    </span>
+                  )}
                   {meta && <span className={cn('h-1.5 w-1.5 rounded-full', meta.tone === 'ember' && 'bg-forge-ember', meta.tone === 'ok' && 'bg-forge-ok', meta.tone === 'warn' && 'bg-forge-warn', meta.tone === 'dim' && 'bg-forge-dim/50')} />}
                 </button>
               );
@@ -729,6 +734,19 @@ function ProspectFinderPanel({ worldId }: { worldId: string }) {
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update.'); }
   };
 
+  // Prospect → audience: scans can't find emails, so the operator pastes the address they found
+  // on the prospect's site. Garvis never invents one — the input IS the honesty.
+  const [emailFor, setEmailFor] = useState<string | null>(null);
+  const [emailDraft, setEmailDraft] = useState('');
+  const toAudience = async (row: ProspectRow) => {
+    try {
+      const r = await prospectToAudience(worldId, row, emailDraft);
+      toast('success', r.message);
+      setEmailFor(null); setEmailDraft('');
+      setRows((p) => p.map((x) => (x.id === row.id ? { ...x, status: 'in_audience', contact_id: r.contactId } : x)));
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not add the contact.'); }
+  };
+
   return (
     <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
       <h3 className="text-sm font-semibold text-forge-ink">Lead finder — market intelligence</h3>
@@ -766,8 +784,23 @@ function ProspectFinderPanel({ worldId }: { worldId: string }) {
                     <button onClick={() => void mark(r, 'dropped')} className="text-[11px] text-forge-dim hover:text-forge-warn">drop</button>
                   </>
                 )}
-                {r.status !== 'new' && <span className="text-[10px] uppercase tracking-wide text-forge-dim">{r.status}</span>}
+                {r.status === 'qualified' && (
+                  <button onClick={() => { setEmailFor(emailFor === r.id ? null : r.id); setEmailDraft(''); }} className="text-[11px] text-forge-ember hover:underline">→ audience</button>
+                )}
+                {r.status === 'in_audience' && <span className="text-[10px] uppercase tracking-wide text-forge-ok">in audience</span>}
+                {r.status !== 'new' && r.status !== 'qualified' && r.status !== 'in_audience' && <span className="text-[10px] uppercase tracking-wide text-forge-dim">{r.status}</span>}
               </div>
+              {emailFor === r.id && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <input
+                    value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void toAudience(r); }}
+                    placeholder="their email (from their site — Garvis won't guess it)"
+                    className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
+                  />
+                  <button onClick={() => void toAudience(r)} className="rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10">Add contact</button>
+                </div>
+              )}
               {r.fit_reason && <p className="mt-0.5 text-xs text-forge-dim">{r.fit_reason}</p>}
             </li>
           ))}

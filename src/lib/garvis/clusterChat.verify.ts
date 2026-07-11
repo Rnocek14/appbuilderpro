@@ -51,6 +51,23 @@ const baseInput: StudioContextInput = {
   const bounded = compileStudioContext(big, 7000);
   check('context respects the byte budget', bounded.length <= 7000);
   check('bounded context still leads with identity', bounded.startsWith('STUDIO:'));
+
+  // The audit fix: the studio must know WHOSE business it's writing for — and what it doesn't know.
+  const withBiz = compileStudioContext({
+    ...baseInput,
+    business: {
+      name: 'Nocek Realty', principal: 'Mom', craft: 'residential real estate',
+      offerings: ['listings', 'buyer representation'], audience: 'lake-area home sellers',
+      locale: 'Lake Geneva WI', tone: 'warm, direct',
+      dnaLines: ['value: local expertise sellers trust', 'model: commission on closed listings'],
+    },
+    openQuestions: ['What is the average commission split?'],
+  });
+  check('context carries the BUSINESS identity block', withBiz.includes('BUSINESS: name: Nocek Realty') && withBiz.includes('audience: lake-area home sellers'));
+  check('context carries DNA lines', withBiz.includes('DNA — value: local expertise sellers trust'));
+  check('context carries known unknowns (never to be guessed)', withBiz.includes('KNOWN UNKNOWNS') && withBiz.includes('commission split'));
+  check('no business block → no invented one', !compileStudioContext(baseInput).includes('BUSINESS:'));
+  check('system prompt tells the model to speak the business voice, never invent', STUDIO_SYSTEM.includes('ITS voice') && STUDIO_SYSTEM.includes('rather than inventing'));
 }
 
 // 2. buildStudioUser: history capped, message present.

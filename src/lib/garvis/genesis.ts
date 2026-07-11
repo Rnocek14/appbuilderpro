@@ -130,7 +130,9 @@ the way a sharp operator sizes up a venture before designing anything. Return ST
 
 HARD RULES:
 - NEVER invent facts: names, prices, locations, URLs. Unknown → null/empty AND a question.
-- 3-8 idealCustomers, concrete segments — never "everyone".
+- 3-8 idealCustomers, concrete segments — never "everyone". If the intent has NO external
+  customers (a personal system, an internal operation), name the real stakeholders/beneficiaries
+  instead and SAY SO in questions — never fabricate a market that doesn't exist.
 - Every DNA field must follow from the stated intent or the common structure of that business
   type; when you generalize, generalize about the TYPE, not this specific business.
 - No markdown fences. JSON only.`;
@@ -162,9 +164,11 @@ HARD RULES:
 - EVERY node gets a rationale entry. At least one omission with its why.
 - DERIVE the structure from the DNA: revenue model shapes the ledger, growth channels shape the
   studios, ideal customers shape the audience areas. Do not emit a generic template.
-- 4-8 play steps, 2-3 emails. Every draft/email uses {{tokens}} for business facts —
-  {{business_name}} {{principal}} {{craft}} {{audience}} {{offerings}} {{tone}} {{first_name}} —
-  and NEVER invents specifics the DNA doesn't contain.
+- 4-8 play steps, 2-3 emails. Every draft/email uses {{tokens}} for business facts, and ONLY
+  these tokens are legal: {{business_name}} {{principal}} {{craft}} {{audience}} {{offerings}}
+  {{tone}} {{locale}} — plus {{first_name}} in EMAILS only (resolved per recipient at send time).
+  Any other {{token}} does not exist and will show to the user as raw text — if a fact has no
+  token and isn't in the DNA, write around it or add a question. NEVER invent specifics.
 - No markdown fences. JSON only.`;
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,9 @@ import type { WorldDNA, BusinessContext } from './genesis';
 
 export interface ProspectRow {
   id: string; category: string; name: string; url: string | null; snippet: string | null;
-  fit: FitLabel; fit_reason: string | null; status: 'new' | 'qualified' | 'dropped' | 'contacted';
+  fit: FitLabel; fit_reason: string | null;
+  status: 'new' | 'qualified' | 'dropped' | 'contacted' | 'in_audience';
+  contact_id?: string | null;
   created_at: string;
 }
 
@@ -31,7 +33,7 @@ export async function worldPlan(worldId: string) {
 
 export async function listProspects(worldId: string): Promise<ProspectRow[]> {
   const { data } = await supabase.from('prospects')
-    .select('id, category, name, url, snippet, fit, fit_reason, status, created_at')
+    .select('id, category, name, url, snippet, fit, fit_reason, status, contact_id, created_at')
     .eq('world_id', worldId).neq('status', 'dropped')
     .order('created_at', { ascending: false }).limit(60);
   return (data ?? []) as ProspectRow[];
@@ -40,6 +42,48 @@ export async function listProspects(worldId: string): Promise<ProspectRow[]> {
 export async function setProspectStatus(id: string, status: ProspectRow['status']): Promise<void> {
   const { error } = await supabase.from('prospects').update({ status }).eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+/** The joint the audit found missing: a QUALIFIED prospect had no path into the audience.
+ *  Scans can't find emails (search snippets don't carry them), so the operator supplies the
+ *  address they found on the prospect's site — Garvis never invents one. Contact creation is
+ *  select-first-insert-if-missing (NEVER an overwriting upsert — that would reset a suppressed
+ *  email_status back to 'unknown'), the prospect links to the contact and becomes 'in_audience'.
+ *  'contacted' stays reserved for when outreach is actually queued/sent. */
+export async function prospectToAudience(worldId: string, prospect: ProspectRow, email: string): Promise<{ contactId: string; message: string }> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const to = email.toLowerCase().trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) throw new Error('Enter a valid email for this prospect.');
+
+  let contactId: string;
+  const { data: existing } = await supabase.from('contacts')
+    .select('id, email_status').eq('owner_id', uid).eq('email', to).maybeSingle();
+  if (existing) {
+    const st = (existing as { email_status: string }).email_status;
+    if (['unsubscribed', 'bounced', 'complained', 'invalid'].includes(st)) {
+      throw new Error(`This email is marked ${st} — Garvis won't re-add someone who opted out.`);
+    }
+    contactId = (existing as { id: string }).id;
+  } else {
+    const { data: c, error: cErr } = await supabase.from('contacts')
+      .insert({ owner_id: uid, email: to, full_name: prospect.name, email_status: 'unknown', is_primary: false })
+      .select('id').single();
+    if (cErr || !c) throw new Error(`Could not save the contact: ${cErr?.message ?? 'unknown error'}`);
+    contactId = (c as { id: string }).id;
+  }
+
+  const { error: pErr } = await supabase.from('prospects')
+    .update({ status: 'in_audience', contact_id: contactId }).eq('id', prospect.id);
+  if (pErr) throw new Error(`Contact saved, but the prospect could not be linked: ${pErr.message}`);
+
+  await recordMindEvent(uid, {
+    event_type: 'note', source: 'market-intel',
+    subject: `Moved prospect "${prospect.name}" into the audience`,
+    payload: { world_id: worldId, prospect_id: prospect.id, contact_id: contactId },
+  });
+  return { contactId, message: `${prospect.name} is in your audience — queue outreach from a follow-up area (approval-gated as always).` };
 }
 
 export interface ScanResult { found: number; stored: number; judged: number; message: string }

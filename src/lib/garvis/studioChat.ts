@@ -9,9 +9,10 @@ import { enqueueApproval } from './execution';
 import { createArtifact, reviseArtifact, listClusterArtifacts, listClusterFiles, getBrandKit, listStudioMessages, saveStudioMessage } from './artifacts';
 import {
   STUDIO_SYSTEM, compileStudioContext, parseStudioDecision,
-  type StudioContextInput, type StudioDecision, type StudioTurn,
+  type StudioContextInput, type StudioBusinessCtx, type StudioDecision, type StudioTurn,
 } from './clusterChat';
 import type { Charter, WorkTool } from './workweb';
+import type { BusinessContext, WorldDNA } from './genesis';
 
 /**
  * Assemble the full studio context for a cluster: static bits from the loaded web + async loads of
@@ -26,11 +27,38 @@ export async function loadStudioContext(input: {
   tools: WorkTool[];
   results?: { sent: number; replies: number; pendingApprovals: number } | null;
 }): Promise<StudioContextInput> {
-  const [arts, files, brandKit] = await Promise.all([
+  const [arts, files, brandKit, worldRow, intelRow] = await Promise.all([
     listClusterArtifacts(input.clusterId).catch(() => []),
     listClusterFiles(input.clusterId).catch(() => []),
     getBrandKit(input.worldId).catch(() => null),
+    // THE WORLD's identity — without this the studio was writing for "a business" instead of
+    // THIS business (the audit's biggest gap: DNA/context existed but never reached the chat).
+    (async () => {
+      try { return (await supabase.from('knowledge_worlds').select('business_context, dna').eq('id', input.worldId).maybeSingle()).data; }
+      catch { return null; }
+    })(),
+    (async () => {
+      try { return (await supabase.from('world_intelligence').select('open_questions').eq('world_id', input.worldId).maybeSingle()).data; }
+      catch { return null; }
+    })(),
   ]);
+  const bc = (worldRow as { business_context?: BusinessContext | null } | null)?.business_context ?? null;
+  const dna = (worldRow as { dna?: WorldDNA | null } | null)?.dna ?? null;
+  const business: StudioBusinessCtx | null = bc
+    ? {
+        name: bc.business_name, principal: bc.principal, craft: bc.craft,
+        offerings: bc.offerings, audience: bc.audience, locale: bc.locale, tone: bc.tone,
+        dnaLines: dna
+          ? [
+              dna.valueProposition && `value: ${dna.valueProposition}`,
+              dna.revenueModel && `model: ${dna.revenueModel}`,
+              dna.idealCustomers.length ? `ideal customers: ${dna.idealCustomers.slice(0, 4).join('; ')}` : null,
+              dna.constraints.length ? `constraints: ${dna.constraints.slice(0, 3).join('; ')}` : null,
+            ].filter((l): l is string => !!l)
+          : [],
+      }
+    : null;
+  const openQuestions = ((intelRow as { open_questions?: string[] } | null)?.open_questions ?? []).filter((q) => typeof q === 'string');
   // Audience stats are web-wide (contacts aren't per-cluster yet); count owner lists + contacts.
   let audience: { lists: number; contacts: number } | null = null;
   try {
@@ -48,6 +76,8 @@ export async function loadStudioContext(input: {
     tools: input.tools,
     artifacts: arts.map((a) => ({ slug: a.slug ?? a.id, kind: a.kind, title: a.title, detail: a.detail, revision: a.revision })),
     files: files.map((f) => ({ name: f.name, kind: f.kind, caption: f.caption ?? null })),
+    business,
+    openQuestions,
     brandKit: brandKit ? { name: brandKit.name, tone: brandKit.tone, palette: brandKit.palette, fonts: brandKit.fonts, compliance_line: brandKit.compliance_line } : null,
     audience,
     results: input.results ?? null,

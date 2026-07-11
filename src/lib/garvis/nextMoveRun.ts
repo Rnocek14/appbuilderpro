@@ -11,6 +11,7 @@ import {
 } from './nextMove';
 import { reflectionDue } from './worldIntel';
 import { parseCharter } from './workweb';
+import { SEED_SOURCE } from './workwebRun';
 
 const KEY_LAST_SEEN = 'ff:waking:last-seen';
 const KEY_DISMISS = 'ff:waking:dismissed';
@@ -122,7 +123,9 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
       supabase.from('contacts').select('id', { count: 'exact', head: true }),
       supabase.from('brand_kits').select('world_id'),
       supabase.from('knowledge_worlds').select('id, title').in('id', worldIds),
-      supabase.from('knowledge_artifacts').select('cluster_id').in('cluster_id', clusters.map((c) => c.id as string)).limit(1000),
+      // Earned only: a launch area holding nothing but seeded playbooks has NOTHING staged —
+      // counting seeds here invented a false "the empty list is blocking sends" move at birth.
+      supabase.from('knowledge_artifacts').select('cluster_id').in('cluster_id', clusters.map((c) => c.id as string)).neq('source', SEED_SOURCE).limit(1000),
     ]);
     const kitWorlds = new Set((kits ?? []).map((k) => k.world_id as string));
     const titleByWorld = new Map((worlds ?? []).map((w) => [w.id as string, w.title as string]));

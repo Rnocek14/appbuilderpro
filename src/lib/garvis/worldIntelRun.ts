@@ -7,6 +7,7 @@
 
 import { supabase } from '../supabase';
 import { recordMindEvent } from './mindStore';
+import { SEED_SOURCE } from './workwebRun';
 import {
   compileLivingState, parseReflection, buildReflectionContext, REFLECT_SYSTEM,
   type LivingState, type Reflection, type MomentumSignals, type Implication,
@@ -62,8 +63,11 @@ async function gather(worldId: string): Promise<Gathered | null> {
   const campIds = (campsQ.data ?? []).map((c) => c.id as string);
 
   const [artsQ, eventsQ, msgsQ, repliesQ, apprQ, contactsQ, kitQ] = await Promise.all([
+    // EARNED artifacts only: seeded playbooks are knowledge the world was born with — counting
+    // them here would fake momentum ("N artifacts this week"), fake research recency (a seeded
+    // framework is NOT market intel), and let reflection "learn" from a template.
     clusterIds.length
-      ? supabase.from('knowledge_artifacts').select('title, kind, created_at').in('cluster_id', clusterIds).order('created_at', { ascending: false }).limit(60)
+      ? supabase.from('knowledge_artifacts').select('title, kind, created_at').in('cluster_id', clusterIds).neq('source', SEED_SOURCE).order('created_at', { ascending: false }).limit(60)
       : Promise.resolve({ data: [] as { title: string; kind: string; created_at: string }[] }),
     supabase.from('mind_events').select('subject, occurred_at, payload').order('occurred_at', { ascending: false }).limit(120),
     campIds.length ? supabase.from('outreach_messages').select('status, sent_at').in('campaign_id', campIds) : Promise.resolve({ data: [] as { status: string; sent_at: string | null }[] }),
