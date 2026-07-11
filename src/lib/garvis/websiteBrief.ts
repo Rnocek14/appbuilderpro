@@ -26,6 +26,9 @@ export interface WebsiteBriefInput {
   ctx: BusinessContext | null;
   brand: BrandKitIn | null;
   photos: WebsitePhoto[];
+  /** What the world has LEARNED — research brief titles, audience findings, reflection lessons —
+   *  so the first generation reflects real work, not just the DNA. Each a short line. */
+  knowledge?: string[];
 }
 
 export interface WebsiteBrief { prompt: string; brief: string; heroCandidates: WebsitePhoto[] }
@@ -62,6 +65,16 @@ export function compileWebsiteBrief(input: WebsiteBriefInput, budget = 9000): We
     line('Compliance line (footer)', input.brand?.compliance_line ?? null),
   ].filter(Boolean) as string[];
   if (brandLines.length) sections.push(['BRAND:', ...brandLines].join('\n'));
+
+  // What the world actually knows — its research, its audience findings, its reflections. This is
+  // the difference between a site built from the DNA alone and one built from real accumulated work.
+  const knowledge = (input.knowledge ?? []).map((k) => k.trim()).filter(Boolean).slice(0, 12);
+  if (knowledge.length) {
+    sections.push([
+      'WHAT THIS BUSINESS HAS LEARNED (ground the copy in these real findings — do not invent beyond them):',
+      ...knowledge.map((k) => `- ${k.slice(0, 200)}`),
+    ].join('\n'));
+  }
 
   sections.push([
     'MOTION DIRECTION (the kits ship in every generated app — use them):',

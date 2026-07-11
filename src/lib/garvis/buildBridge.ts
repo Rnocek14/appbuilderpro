@@ -27,13 +27,14 @@ export interface WorldBuildHandoff {
 
 /** Compile the world's website brief and stage the handoff. Returns the route to navigate to. */
 export async function buildFromWorld(worldId: string, clusterId: string): Promise<string> {
-  const [{ data: world }, { data: intel }, brand, { data: files }] = await Promise.all([
+  const [{ data: world }, { data: intel }, brand, { data: files }, { data: clusterRows }] = await Promise.all([
     supabase.from('knowledge_worlds').select('title, dna, business_context').eq('id', worldId).maybeSingle(),
-    supabase.from('world_intelligence').select('objective').eq('world_id', worldId).maybeSingle(),
+    supabase.from('world_intelligence').select('objective, recommendation, reflection, open_questions').eq('world_id', worldId).maybeSingle(),
     getBrandKit(worldId).catch(() => null),
     supabase.from('cluster_files')
       .select('name, url, kind, caption, label, cluster_id, knowledge_clusters!inner(world_id)')
       .eq('knowledge_clusters.world_id', worldId).eq('kind', 'image').limit(60),
+    supabase.from('knowledge_clusters').select('id').eq('world_id', worldId),
   ]);
   if (!world) throw new Error('World not found.');
 
@@ -42,10 +43,27 @@ export async function buildFromWorld(worldId: string, clusterId: string): Promis
   const photos: WebsitePhoto[] = ((files ?? []) as { name: string; url: string; caption: string | null; label: string | null }[])
     .map((f) => ({ name: f.name, url: f.url, caption: f.caption, label: f.label }));
 
+  // KNOWLEDGE INTO THE BUILD (bones-audit fix): the world's real research briefs and reflection
+  // lessons flow into the FIRST generation, so the site is grounded in accumulated work — not the
+  // DNA alone. EARNED research only (seeded playbooks excluded — they're frameworks, not findings).
+  const knowledge: string[] = [];
+  const clusterIds = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+  if (clusterIds.length) {
+    const { data: research } = await supabase.from('knowledge_artifacts')
+      .select('title, detail, source').in('cluster_id', clusterIds).eq('kind', 'research')
+      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(6);
+    for (const r of (research ?? []) as { title: string; detail: string | null }[]) {
+      knowledge.push(`${r.title}${r.detail ? `: ${r.detail.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`);
+    }
+  }
+  const reflection = intel?.reflection as { learned?: { text: string }[] } | null;
+  for (const l of (reflection?.learned ?? []).slice(0, 4)) if (l?.text) knowledge.push(`Learned: ${l.text}`);
+  if (intel?.recommendation) knowledge.push(`Direction: ${intel.recommendation}`);
+
   const compiled = compileWebsiteBrief({
     worldTitle: world.title as string,
     objective: (intel?.objective as string | null) ?? null,
-    dna, ctx, brand, photos,
+    dna, ctx, brand, photos, knowledge,
   });
 
   const handoff: WorldBuildHandoff = {

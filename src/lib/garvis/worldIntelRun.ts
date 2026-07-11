@@ -9,7 +9,7 @@ import { supabase } from '../supabase';
 import { recordMindEvent } from './mindStore';
 import { SEED_SOURCE } from './workwebRun';
 import {
-  compileLivingState, parseReflection, buildReflectionContext, REFLECT_SYSTEM,
+  compileLivingState, parseReflection, buildReflectionContext, reflectionDue, REFLECT_SYSTEM,
   type LivingState, type Reflection, type MomentumSignals, type Implication,
 } from './worldIntel';
 
@@ -150,6 +150,23 @@ export async function refreshWorldIntelligence(worldId: string): Promise<LivingS
     objective: g.objective, state, signals: g.signals,
   }, { onConflict: 'world_id' });
   return state;
+}
+
+/** Reflect AUTOMATICALLY, but only when genuinely due (≥5 events in 7 days AND not reflected in the
+ *  last 7 days) — the audit's "learning is manual-only" fix, without turning every world-open into
+ *  a model call. Fire-and-forget from the UI; returns whether a reflection actually ran. The
+ *  evidence gate inside reflectOnWorld still applies, so a due-but-thin world changes nothing. */
+export async function maybeReflect(worldId: string): Promise<boolean> {
+  try {
+    const g = await gather(worldId);
+    if (!g) return false;
+    const existing = await getWorldIntelligence(worldId);
+    if (!reflectionDue(existing?.last_reflected_at ?? null, g.signals.events7d, new Date())) return false;
+    const r = await reflectOnWorld(worldId);
+    return r.ok;
+  } catch {
+    return false;
+  }
 }
 
 export interface ReflectResult { ok: boolean; reflection?: Reflection; message: string }

@@ -6,6 +6,7 @@
 import { supabase } from '../supabase';
 import type { ArtifactKind } from './clustering';
 import { slugify } from './clustering';
+import { persistEmbeddings } from './embeddings';
 import type { StudioDecision, StudioTurn, BrandKitCtx } from './clusterChat';
 
 // ---------------------------------------------------------------------------
@@ -55,12 +56,15 @@ export async function listVersions(artifactId: string): Promise<ArtifactVersion[
 /** Revise an artifact — the trigger snapshots the old content and bumps revision. detail may be null
  *  so a restore of a version with no detail preserves NULL instead of rewriting it as ''. */
 export async function reviseArtifact(artifactId: string, patch: { title?: string; detail: string | null; source?: string }): Promise<void> {
-  const { error } = await supabase.from('knowledge_artifacts').update({
+  const { data, error } = await supabase.from('knowledge_artifacts').update({
     detail: patch.detail,
     ...(patch.title ? { title: patch.title } : {}),
     source: patch.source ?? 'garvis-chat',
-  }).eq('id', artifactId);
+  }).eq('id', artifactId).select('title').maybeSingle();
   if (error) throw new Error(error.message);
+  // Keep the searchable brain current — fire-and-forget so Ask Garvis finds the new version.
+  const title = patch.title ?? (data as { title?: string } | null)?.title ?? '';
+  void persistEmbeddings([{ subject_type: 'artifact', subject_id: artifactId, content: `${title}\n\n${patch.detail ?? ''}`.slice(0, 8000) }]);
 }
 
 /** Restore an old version — itself a revision, so the pre-restore state is preserved too. */
@@ -84,7 +88,9 @@ export async function createArtifact(input: {
     kind: input.kind, title: input.title, detail: input.detail, source: input.source ?? 'garvis-chat',
   }).select('id').single();
   if (error || !data) throw new Error(error?.message ?? 'Could not create the artifact.');
-  return (data as { id: string }).id;
+  const id = (data as { id: string }).id;
+  void persistEmbeddings([{ subject_type: 'artifact', subject_id: id, content: `${input.title}\n\n${input.detail}`.slice(0, 8000) }]);
+  return id;
 }
 
 // ---------------------------------------------------------------------------

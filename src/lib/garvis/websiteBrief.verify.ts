@@ -45,6 +45,13 @@ const FULL: WebsiteBriefInput = {
   check('brand palette and voice carried', b.brief.includes('#123B5C') && b.brief.includes('gallery-calm'));
 }
 {
+  // Knowledge-into-build: the world's real findings ground the first generation, not the DNA alone.
+  const withK = compileWebsiteBrief({ ...FULL, knowledge: ['Designers in the Lake Geneva corridor specify local art for hospitality projects', 'Learned: proof reels outperform static shots 3:1'] });
+  check('the WHAT THIS BUSINESS HAS LEARNED section carries real findings', withK.brief.includes('HAS LEARNED') && withK.brief.includes('hospitality projects'));
+  check('reflection lessons reach the brief', withK.brief.includes('proof reels outperform'));
+  check('no knowledge → no learned section (never invented)', !compileWebsiteBrief(FULL).brief.includes('HAS LEARNED'));
+}
+{
   const bare = compileWebsiteBrief({ worldTitle: 'X', objective: null, dna: null, ctx: null, brand: null, photos: [] });
   check('a bare world omits unknown sections instead of inventing them', !bare.brief.includes('WORLD DNA') && !bare.brief.includes('BRAND:'));
   check('no photos → explicit image-slot instruction, still no stock', bare.brief.includes('none uploaded yet') && bare.brief.includes('NO stock'));

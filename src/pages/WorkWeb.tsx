@@ -18,7 +18,7 @@ import { templateForWeb } from '../lib/garvis/workweb';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
-import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
+import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, maybeReflect, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld } from '../lib/garvis/buildBridge';
 import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
 import type { ResearchPlan } from '../lib/garvis/marketIntel';
@@ -26,6 +26,7 @@ import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
+import { AskGarvis } from '../components/garvis/AskGarvis';
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -51,11 +52,15 @@ export default function WorkWeb() {
   const [showIntel, setShowIntel] = useState(false);
 
   // The heartbeat updates when observed: refresh the deterministic Living State on open, then read.
+  // Learning is no longer manual-only — if reflection is genuinely due (enough real activity, not
+  // reflected recently), run it in the background and re-read when it lands.
   useEffect(() => {
     let live = true;
     void refreshWorldIntelligence(worldId)
       .then(() => getWorldIntelligence(worldId))
       .then((row) => { if (live) setIntel(row); })
+      .then(() => maybeReflect(worldId))
+      .then((ran) => { if (ran && live) return getWorldIntelligence(worldId).then((row) => { if (live) setIntel(row); }); })
       .catch(() => {});
     return () => { live = false; };
   }, [worldId]);
@@ -210,6 +215,11 @@ export default function WorkWeb() {
         </div>
 
         {showIntel && intel && <WorldIntelDashboard intel={intel} />}
+
+        {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
+        <div className="mb-4">
+          <AskGarvis worldId={worldId} placeholder={`Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
+        </div>
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr]">
           {/* The web — production areas as a connected tree */}
