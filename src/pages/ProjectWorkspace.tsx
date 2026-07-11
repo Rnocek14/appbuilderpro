@@ -35,7 +35,7 @@ import { ThemeModal } from '../components/ThemeModal';
 import { AssetsModal } from '../components/AssetsModal';
 import { getThreads, createThread, renameThread, deleteThread, getActiveThread, setActiveThread, threadsEnabled, threadOf, MAIN_THREAD_ID, type Thread } from '../lib/threads';
 import type { Project, Deployment, EditPlan, ProjectFile } from '../types';
-import { publishThroughSpine } from '../lib/garvis/deployRun';
+import { publishThroughSpine, deployBackendThroughSpine } from '../lib/garvis/deployRun';
 
 type MiddleTab = 'chat' | 'code';
 
@@ -924,12 +924,14 @@ export default function ProjectWorkspace() {
     .filter((f) => /^\/supabase\/functions\/[^/]+\/index\.ts$/.test(f.path) && !f.path.startsWith('/supabase/functions/_shared/'))
     .map((f) => ({ slug: f.path.split('/')[3], source: f.content }));
 
-  // One-click: deploy the edge functions + push the collected secrets to the user's Supabase via the
-  // deploy-backend edge function (server-side Management API). This is what makes the integrations RUN.
+  // One-click: deploy the edge functions + push the collected secrets to the user's Supabase.
+  // Routes THROUGH THE APPROVAL SPINE (deployBackendThroughSpine): your click is the approval,
+  // deploy-backend verifies it server-side, and the deploy lands in the one execution ledger.
   const deployBackend = async () => {
     const env = files.find((f) => f.path === '/.env')?.content ?? '';
     const ref = /https?:\/\/([a-z0-9]+)\.supabase\.co/i.exec(env)?.[1] ?? projectRef();
     if (!ref) { toast('error', 'Connect your Supabase project first (the Database button) so we know where to deploy.'); return; }
+    if (!id) return;
     const fns = edgeFunctions();
     const secretsToPush = reqSecrets
       .map((s) => ({ name: s.env, value: secretValues[s.env] ?? '' }))
@@ -937,12 +939,12 @@ export default function ProjectWorkspace() {
     if (!fns.length && !secretsToPush.length) { toast('error', 'Nothing to deploy — generate integrations and add their keys first.'); return; }
     setSbDeploying(true);
     try {
-      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string; results?: { step: string; ok: boolean; detail?: string }[] }>(
-        'deploy-backend', { body: { projectId: id, projectRef: ref, functions: fns, secrets: secretsToPush } });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      const failed = (data?.results ?? []).filter((r) => !r.ok);
-      if (failed.length) {
+      const { ok, results, error } = await deployBackendThroughSpine({
+        projectId: id, projectRef: ref, functions: fns, secrets: secretsToPush,
+      });
+      if (error && !results?.length) throw new Error(error);
+      const failed = (results ?? []).filter((r) => !r.ok);
+      if (!ok && failed.length) {
         toast('error', `Deployed with issues: ${failed.map((f) => f.step).join(', ')}. ${failed[0]?.detail ?? ''}`.slice(0, 200));
       } else {
         markDeployed(secretsToPush.map((s) => s.name)); // keys now live server-side — clear local plaintext

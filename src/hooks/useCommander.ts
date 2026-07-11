@@ -9,6 +9,7 @@ import { COMMANDER_SYSTEM, buildCommanderUser, parseCommand } from '../lib/garvi
 import { usePortfolio } from './usePortfolio';
 import { useMissions } from './useMissions';
 import { useMind } from './useMind';
+import { goalsDigest } from '../lib/garvis/goalsRun';
 
 export interface ChatMessage {
   id: string;
@@ -47,9 +48,14 @@ export function useCommander() {
         .map((a) => `- ${a.name} (${a.stage}${a.strategic_importance ? `, ${a.strategic_importance}` : ''}): ${a.description ?? 'no description'}`)
         .join('\n');
 
+      // The owner's PROJECT GOALS steer the front door (goalsRun, fail-soft '') — different
+      // projects, each adapted toward what it's for, alongside the identity/mind digest.
+      const goals = await goalsDigest();
+      const mind = [mindContext(), goals].filter(Boolean).join('\n\n');
+
       const r = await rawComplete([
         { role: 'system', content: COMMANDER_SYSTEM },
-        { role: 'user', content: buildCommanderUser(text, snapshot, history, mindContext()) },
+        { role: 'user', content: buildCommanderUser(text, snapshot, history, mind) },
       ], 1000);
       const cmd = parseCommand(r.text);
 

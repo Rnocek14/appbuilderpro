@@ -18,6 +18,7 @@
 // Deploy: npx supabase functions deploy ads-sync
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -159,12 +160,17 @@ Deno.serve(async (req) => {
       return json({ available: true, ok: false, error: msg }, 200);
     };
 
+    // CREDIT GATE — a sync spends operator API quota, so it meters the caller's credits (audit M2).
+    try { await checkCredits(admin, user.id, 'ads_sync'); }
+    catch (e) { if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402); throw e; }
+
     let rows: MetricRow[];
     try {
       rows = provider === 'meta_ads' ? await fetchMeta(accountId) : await fetchGoogle(accountId);
     } catch (e) {
       return await fail(e instanceof Error ? e.message : String(e));
     }
+    await spendCredits(admin, user.id, { costUsd: 0.02, kind: 'ads_sync', provider });
 
     // Upsert — idempotent re-syncs; world stamped on insert, metrics refreshed on conflict.
     let upserts = 0;

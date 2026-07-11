@@ -11,6 +11,8 @@
 // Deploy: npx supabase functions deploy shot-worker
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { urlAllowed } from '../_shared/safeFetch.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -19,13 +21,10 @@ const cors = {
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
-function isAllowed(url: URL): boolean {
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  const h = url.hostname.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal')) return false;
-  if (/^127\.|^10\.|^0\.|^169\.254\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
-  return true;
-}
+// SSRF guard: the shared hardened validator (_shared/safeFetch.ts) — full private/reserved IP
+// table + DNS resolution with every-record-public required, not just a hostname regex. (The
+// screenshot API does the actual page fetch on its own infrastructure; this validates what we
+// hand it.)
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -55,13 +54,18 @@ Deno.serve(async (req) => {
     } else if (rawUrl) {
       let u: URL;
       try { u = new URL(rawUrl); } catch { return json({ error: 'Invalid url.' }, 400); }
-      if (!isAllowed(u)) return json({ error: 'This URL cannot be captured.' }, 400);
+      if (!(await urlAllowed(u))) return json({ error: 'This URL cannot be captured.' }, 400);
       target = u.href;
     } else {
       return json({ error: 'Provide slug (a preview) or url (an external site).' }, 400);
     }
 
     const apiUrl = Deno.env.get('SCREENSHOT_API_URL') ?? 'https://api.screenshotone.com/take';
+    // CREDIT GATE — a screenshot spends the operator's provider quota, so it meters the caller's
+    // credits like every other paid seam (audit M2).
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    try { await checkCredits(admin, user.id, 'screenshot'); }
+    catch (e) { if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402); throw e; }
     const params = new URLSearchParams({
       access_key: apiKey,
       url: target,
@@ -76,8 +80,7 @@ Deno.serve(async (req) => {
     if (!shotRes.ok) return json({ error: `Screenshot API returned ${shotRes.status}: ${(await shotRes.text()).slice(0, 300)}` }, 502);
     const bytes = new Uint8Array(await shotRes.arrayBuffer());
     if (bytes.byteLength > MAX_BYTES) return json({ error: 'Screenshot exceeded 10MB.' }, 502);
-
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    await spendCredits(admin, user.id, { costUsd: 0.03, kind: 'screenshot', provider: 'screenshotone' });
     const name = `${Date.now()}-${(slug ?? new URL(target).hostname).replace(/[^a-zA-Z0-9-]/g, '_').slice(0, 60)}${mobile ? '-mobile' : ''}.png`;
     const path = `${user.id}/shots/${name}`;
     const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'image/png' });

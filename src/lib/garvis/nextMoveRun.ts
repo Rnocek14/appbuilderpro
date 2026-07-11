@@ -12,6 +12,8 @@ import {
 import { reflectionDue } from './worldIntel';
 import { parseCharter } from './workweb';
 import { SEED_SOURCE } from './workwebRun';
+import { applyGoalFocus } from './goals';
+import { activeGoals } from './goalsRun';
 
 const KEY_LAST_SEEN = 'ff:waking:last-seen';
 const KEY_DISMISS = 'ff:waking:dismissed';
@@ -209,7 +211,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     created_at: d.created_at as string,
   }));
 
-  const moves = rankMoves([
+  const ranked = rankMoves([
     ...collectReminders(((remindersQ.data ?? []) as { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }[]), now),
     ...collectLeads(((leadsQ.data ?? []) as { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }[])),
     ...collectDrafts(draftsIn),
@@ -226,6 +228,11 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     ...collectFloor(floors),
     ...collectNaturalNext(naturals),
   ], now, readDismissals());
+
+  // GOAL FOCUS — the owner's declared project goals steer the ranking (goals.ts, deterministic):
+  // a move that advances an active goal's world rises and NAMES the goal in its why. Fail-soft:
+  // with no goals (or a failed load) the ranking stands untouched.
+  const moves = applyGoalFocus(ranked, await activeGoals(), now);
 
   return {
     moves,

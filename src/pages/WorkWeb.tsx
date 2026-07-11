@@ -31,6 +31,7 @@ import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AskGarvis } from '../components/garvis/AskGarvis';
+import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -219,6 +220,11 @@ export default function WorkWeb() {
         </div>
 
         {showIntel && intel && <WorldIntelDashboard intel={intel} />}
+
+        {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
+        <div className="mb-4">
+          <WorldGoalPanel worldId={worldId} />
+        </div>
 
         {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
         <div className="mb-4">

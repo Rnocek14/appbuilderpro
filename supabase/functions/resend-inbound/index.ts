@@ -56,7 +56,15 @@ Deno.serve(async (req) => {
 
   const secret = Deno.env.get('INBOUND_SECRET');
   const provided = req.headers.get('x-inbound-secret') ?? new URL(req.url).searchParams.get('secret');
-  if (!secret || provided !== secret) return json({ error: 'Unauthorized' }, 401);
+  // Constant-time compare (same discipline as resend-webhook) — a plain !== leaks timing.
+  const constantTimeEqual = (a: string, b: string): boolean => {
+    const ab = new TextEncoder().encode(a), bb = new TextEncoder().encode(b);
+    if (ab.length !== bb.length) return false;
+    let diff = 0;
+    for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+    return diff === 0;
+  };
+  if (!secret || !provided || !constantTimeEqual(provided, secret)) return json({ error: 'Unauthorized' }, 401);
 
   const payload = (await req.json().catch(() => ({}))) as {
     from?: string; subject?: string; text?: string; body?: string;

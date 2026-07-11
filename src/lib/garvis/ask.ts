@@ -12,6 +12,7 @@
 import { supabase } from '../supabase';
 import { embedTexts } from './embeddings';
 import { mergeHits, type RawHit } from './askCore';
+import { goalLineForWorld } from './goalsRun';
 
 export { mergeHits, type RawHit } from './askCore';
 export interface AskSource {
@@ -137,9 +138,13 @@ export async function askGarvis(question: string, opts?: { worldId?: string }): 
     `[${i + 1}] ${s.title}${s.area ? ` (${s.area}${s.world ? ` · ${s.world}` : ''})` : ''}\n${s.snippet}`,
   ).join('\n\n');
 
+  // The owner's goal for this world frames the answer (labeled owner-stated; '' when none —
+  // fail-soft, never blocks the ask).
+  const goalLine = opts?.worldId ? await goalLineForWorld(opts.worldId).catch(() => '') : '';
+
   try {
     const { data, error } = await supabase.functions.invoke('cluster-chat', {
-      body: { system: ASK_SYSTEM, context: `SOURCES:\n${context}`, history: [], message: q },
+      body: { system: ASK_SYSTEM, context: `${goalLine ? `${goalLine}\n\n` : ''}SOURCES:\n${context}`, history: [], message: q },
     });
     if (error) throw new Error(error.message);
     const answer = ((data as { text?: string })?.text ?? '').trim();

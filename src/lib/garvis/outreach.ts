@@ -37,13 +37,29 @@ export async function queuePitch(input: QueuePitchInput): Promise<{ approvalId: 
   const to = input.toEmail.toLowerCase().trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) throw new Error('Enter a valid recipient email.');
 
-  // Atomic upsert on (owner_id, email) — race-free thanks to uq_contacts_owner_email (app_0025).
-  const { data: c, error: cErr } = await supabase.from('contacts').upsert({
-    owner_id: uid, business_profile_id: input.businessProfileId, email: to,
-    email_status: 'unknown', is_primary: true,
-  }, { onConflict: 'owner_id,email' }).select('id').single();
-  if (cErr || !c) throw new Error(cErr?.message ?? 'Could not save the contact.');
-  const contactId = (c as { id: string }).id;
+  // SELECT-FIRST, never a blind upsert: an existing contact keeps its email_status untouched.
+  // A blind upsert here would reset 'unsubscribed'/'bounced'/'complained' back to 'unknown' —
+  // suppression is sacred and is never reset (the same guard inboxRun/workwebRun/site-events use).
+  let contactId: string;
+  const { data: existing } = await supabase.from('contacts')
+    .select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
+  if (existing) {
+    contactId = (existing as { id: string }).id;
+  } else {
+    // Race-safe: uq_contacts_owner_email (app_0025) makes a concurrent insert conflict; on
+    // conflict we re-select rather than overwrite anything.
+    const { data: c, error: cErr } = await supabase.from('contacts').insert({
+      owner_id: uid, business_profile_id: input.businessProfileId, email: to,
+      email_status: 'unknown', is_primary: true,
+    }).select('id').maybeSingle();
+    if (c) contactId = (c as { id: string }).id;
+    else {
+      const { data: again } = await supabase.from('contacts')
+        .select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
+      if (!again) throw new Error(cErr?.message ?? 'Could not save the contact.');
+      contactId = (again as { id: string }).id;
+    }
+  }
 
   const { data: camp, error: campErr } = await supabase.from('outreach_campaigns').insert({
     owner_id: uid, business_profile_id: input.businessProfileId, contact_id: contactId,

@@ -13,6 +13,7 @@ import { getBrandKit } from './artifacts';
 import { parseSerperOrganic } from './marketIntel';
 import { mergeTokens, type WorldDNA, type BusinessContext } from './genesis';
 import { expertiseFor, detectVertical } from './expertise';
+import { goalLineForWorld } from './goalsRun';
 import type { PlayArtifact } from './plays';
 import type { Charter } from './workweb';
 import {
@@ -29,22 +30,27 @@ interface WorldMaterials {
   ctx: BusinessContext | null;
   brandTone: string | null;
   photos: { name: string; caption: string | null }[];
+  /** The owner's active goal for this world ('' when none) — every producer aims at it. */
+  goal: string;
 }
 
-/** Gather everything a producer reasons over — the world's real identity, voice, and photos. */
+/** Gather everything a producer reasons over — the world's real identity, voice, photos, and the
+ *  owner's GOAL for it (goalsRun, fail-soft) so produced work aims at what the project is FOR. */
 async function gather(worldId: string): Promise<WorldMaterials> {
-  const [{ data: world }, brand, { data: files }] = await Promise.all([
+  const [{ data: world }, brand, { data: files }, goal] = await Promise.all([
     supabase.from('knowledge_worlds').select('dna, business_context').eq('id', worldId).maybeSingle(),
     getBrandKit(worldId).catch(() => null),
     supabase.from('cluster_files')
       .select('name, caption, kind, knowledge_clusters!inner(world_id)')
       .eq('knowledge_clusters.world_id', worldId).eq('kind', 'image').limit(24),
+    goalLineForWorld(worldId),
   ]);
   return {
     dna: (world?.dna as WorldDNA | null) ?? null,
     ctx: (world?.business_context as BusinessContext | null) ?? null,
     brandTone: brand?.tone ?? null,
     photos: ((files ?? []) as { name: string; caption: string | null }[]).map((f) => ({ name: f.name, caption: f.caption })),
+    goal,
   };
 }
 
@@ -70,6 +76,7 @@ function businessContext(m: WorldMaterials): string {
     c?.locale && `Locale: ${c.locale}`,
     (m.brandTone ?? c?.tone) && `Voice: ${m.brandTone ?? c?.tone}`,
     m.dna?.valueProposition && `Value: ${m.dna.valueProposition}`,
+    m.goal, // the owner's goal line (already labeled owner-stated; '' when none)
   ].filter(Boolean);
   return lines.join('\n');
 }

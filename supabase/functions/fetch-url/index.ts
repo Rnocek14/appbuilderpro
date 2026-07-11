@@ -12,6 +12,7 @@
 // Deploy: npx supabase functions deploy fetch-url
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { safeFetch, urlAllowed } from '../_shared/safeFetch.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -21,15 +22,9 @@ const cors = {
 const MAX_TEXT = 12_000;      // chars of extracted text returned per page
 const MAX_BODY = 1_500_000;   // chars of raw HTML we'll process
 
-/** Block non-http(s) schemes and private/link-local hosts (SSRF guard). */
-function isAllowed(url: URL): boolean {
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  const h = url.hostname.toLowerCase();
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return false;
-  if (/^127\.|^10\.|^0\.|^169\.254\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
-  if (h === '[::1]' || h.startsWith('fd') || h.startsWith('fe80')) return false;
-  return true;
-}
+// SSRF guard: the shared hardened path (_shared/safeFetch.ts) — static checks + DNS resolution
+// with every-record-public required, and MANUAL redirects re-validated per hop. The old local
+// guard checked only the initial hostname string and then followed redirects blindly.
 
 function decodeEntities(s: string): string {
   return s
@@ -169,7 +164,7 @@ Deno.serve(async (req) => {
     if (!raw) return json({ error: 'url is required' }, 400);
     let url: URL;
     try { url = new URL(raw); } catch { return json({ error: 'Invalid URL' }, 400); }
-    if (!isAllowed(url)) return json({ error: 'This URL cannot be fetched.' }, 400);
+    if (!(await urlAllowed(url))) return json({ error: 'This URL cannot be fetched.' }, 400);
 
     // ---- mode 'save': copy ONE image into the user's project-assets storage + manifest ----
     if (mode === 'save') {
@@ -182,7 +177,7 @@ Deno.serve(async (req) => {
       const t0 = setTimeout(() => ac0.abort(), 20_000);
       let img: Response;
       try {
-        img = await fetch(url.href, { signal: ac0.signal, redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+        img = await safeFetch(url.href, { signal: ac0.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
       } finally { clearTimeout(t0); }
       if (!img.ok) return json({ error: `The image returned ${img.status}.` }, 200);
       const ctype = img.headers.get('content-type') ?? '';
@@ -206,9 +201,8 @@ Deno.serve(async (req) => {
     const t = setTimeout(() => ac.abort(), 15_000);
     let res: Response;
     try {
-      res = await fetch(url.href, {
+      res = await safeFetch(url.href, {
         signal: ac.signal,
-        redirect: 'follow',
         headers: {
           'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0; +https://fableforge.app)',
           'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5',
@@ -237,7 +231,7 @@ Deno.serve(async (req) => {
           const t2 = setTimeout(() => ac2.abort(), 12_000);
           let r2: Response;
           try {
-            r2 = await fetch(contactPage, { signal: ac2.signal, redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+            r2 = await safeFetch(contactPage, { signal: ac2.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
           } finally { clearTimeout(t2); }
           if (r2.ok && /html/.test(r2.headers.get('content-type') ?? '')) {
             emails = extractEmails((await r2.text()).slice(0, MAX_BODY));

@@ -38,9 +38,9 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
     const body = (await req.json().catch(() => ({}))) as {
-      projectId?: string; projectRef?: string; functions?: DeployFn[]; secrets?: DeploySecret[];
+      projectId?: string; projectRef?: string; functions?: DeployFn[]; secrets?: DeploySecret[]; approval_id?: string;
     };
-    const { projectId, projectRef, functions, secrets } = body;
+    const { projectId, projectRef, functions, secrets, approval_id } = body;
     if (!projectId) return json({ error: 'projectId is required.' }, 400);
     if (!projectRef) return json({ error: 'projectRef is required.' }, 400);
     if (!/^[a-z0-9]{16,40}$/i.test(projectRef)) return json({ error: `Invalid project ref "${projectRef}".` }, 400);
@@ -49,6 +49,22 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { data: project } = await admin.from('projects').select('id, owner_id, supabase_managed').eq('id', projectId).single();
     if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
+
+    // APPROVAL SPINE — this is the most privileged external action in the system (it pushes code +
+    // secrets with the Management token), so it requires an APPROVED approval row owned by the
+    // caller, and every outcome lands in execution_runs (same discipline as send-email/deploy-site).
+    if (!approval_id) return json({ error: 'This deploy must go through Approvals — deploy from the project workspace.' }, 400);
+    const { data: approval } = await admin.from('approvals')
+      .select('id, owner_id, kind, status').eq('id', approval_id).single();
+    if (!approval || approval.owner_id !== user.id || approval.kind !== 'deploy_backend' || approval.status !== 'approved') {
+      return json({ error: 'No approved deploy_backend approval found for this deploy.' }, 403);
+    }
+    const ledger = async (status: 'ok' | 'failed', error: string | null, extra: Record<string, unknown> = {}) => {
+      await admin.from('execution_runs').insert({
+        owner_id: user.id, approval_id, connector: 'supabase', action: 'deploy_backend', status,
+        request: { project_id: projectId, project_ref: projectRef, functions: (functions ?? []).map((f) => f.slug), ...extra }, error,
+      }).then(() => {}, () => {});
+    };
 
     // Managed (FableForge Cloud) DBs use the platform token; user-owned DBs use the user's OAuth token.
     const token = await projectSupabaseToken(admin, user.id, (project.supabase_managed as boolean) ?? false);
@@ -167,8 +183,10 @@ select cron.schedule(
       }
     }
 
-    if (!results.length) return json({ error: 'Nothing to deploy — no functions or secrets provided.' }, 400);
+    if (!results.length) { await ledger('failed', 'Nothing to deploy — no functions or secrets provided.'); return json({ error: 'Nothing to deploy — no functions or secrets provided.' }, 400); }
     const allOk = results.every((r) => r.ok);
+    const failedSteps = results.filter((r) => !r.ok).map((r) => `${r.step}: ${r.detail ?? 'failed'}`);
+    await ledger(allOk ? 'ok' : 'failed', allOk ? null : failedSteps.join(' | ').slice(0, 800), { steps: results.length });
     return json({ ok: allOk, results }, allOk ? 200 : 207);
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

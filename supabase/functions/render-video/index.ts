@@ -11,6 +11,7 @@
 // Deploy: npx supabase functions deploy render-video
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -49,11 +50,17 @@ Deno.serve(async (req) => {
 
     if (body.mode === 'render') {
       if (!body.edit || typeof body.edit !== 'object') return json({ error: 'edit JSON required.' }, 400);
+      // CREDIT GATE — a render spends the operator's provider quota, so it spends the user's
+      // credits (the same chokepoint every AI call goes through). Status polls stay free.
+      const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+      try { await checkCredits(admin, user.id, 'render'); }
+      catch (e) { if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402); throw e; }
       const res = await fetch(`${base()}/render`, { method: 'POST', headers, body: JSON.stringify(body.edit) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.success) {
         return json({ available: true, ok: false, error: data?.message ?? `Render provider returned ${res.status}` });
       }
+      await spendCredits(admin, user.id, { costUsd: 0.25, kind: 'render', provider: 'shotstack' });
       return json({ available: true, ok: true, id: data.response?.id });
     }
 

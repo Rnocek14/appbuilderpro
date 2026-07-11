@@ -29,6 +29,34 @@ export async function publishThroughSpine(input: {
   return { url: r?.url ?? null, siteId: r?.site_id ?? null };
 }
 
+/** Publish the BACKEND through the spine: capture functions + secrets into the approval payload,
+ *  approve, and execute (deploy-backend re-verifies the approval server-side and writes the
+ *  ledger row). The operator clicking Deploy is their approval — same pattern as publishThroughSpine. */
+export async function deployBackendThroughSpine(input: {
+  projectId: string; projectRef: string;
+  functions: { slug: string; source: string; verifyJwt?: boolean }[];
+  secrets: { name: string; value: string }[];
+}): Promise<{ ok: boolean; results?: { step: string; ok: boolean; detail?: string }[]; error?: string }> {
+  const { data: sess } = await supabase.auth.getUser();
+  if (!sess.user?.id) throw new Error('Not signed in.');
+  if (!input.functions.length && !input.secrets.length) throw new Error('Nothing to deploy — no functions or secrets.');
+
+  const approvalId = await enqueueApproval({
+    kind: 'deploy_backend',
+    title: `Deploy backend (${input.functions.length} function${input.functions.length === 1 ? '' : 's'}, ${input.secrets.length} secret${input.secrets.length === 1 ? '' : 's'})`,
+    preview: `Deploy ${input.functions.map((f) => f.slug).join(', ') || 'secrets only'} to the project's Supabase. Runs server-side with the Management token.`,
+    payload: {
+      project_id: input.projectId, project_ref: input.projectRef,
+      functions: input.functions, secrets: input.secrets,
+    },
+    requestedBy: 'user',
+  });
+  const { data } = await supabase.from('approvals').select(APPROVAL_COLS).eq('id', approvalId).single();
+  const res = await approveAndExecute(data as unknown as Approval);
+  const r = res.result as { results?: { step: string; ok: boolean; detail?: string }[] } | undefined;
+  return { ok: res.ok, results: r?.results, error: res.error };
+}
+
 /** Capture a built bundle + enqueue a deploy_site approval for it. Returns the approval id. The
  *  optional netlifyToken is passed through the approval payload (self-serve hosting) — it's the
  *  user's own token, kept only in their owner-scoped approval row, never shipped to others. */
