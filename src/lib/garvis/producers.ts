@@ -193,8 +193,8 @@ export async function produceVideo(worldId: string, charter: Charter): Promise<P
     );
     if (script.length > 120) {
       return {
-        artifacts: [{ slug: 'video-script-30s', kind: 'video', title: 'Video script — shot by shot', detail: script }],
-        message: 'Wrote a shot-by-shot video script in this world\'s voice.',
+        artifacts: [{ slug: 'video-script-30s', kind: 'video', title: 'Video script — shot by shot', detail: `${script}\n\n— Turn this into a real video in the Video studio below: it builds a timed, captioned storyboard from your photos, plays it in the browser, and renders an mp4.` }],
+        message: 'Wrote a shot-by-shot video script — build it into a real video in the Video studio below.',
         grounded: true,
       };
     }

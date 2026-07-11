@@ -37,6 +37,7 @@ const FUNCTIONS: { name: string; group: string }[] = [
   { name: 'outreach-followups', group: 'Email' },
   { name: 'site-events', group: 'Instrumentation' },
   { name: 'ads-sync', group: 'Ad connections' },
+  { name: 'render-video', group: 'Video' },
 ];
 
 /** OPTIONS-probe one function. 200 → deployed; 404 → not deployed; other → error. */
@@ -80,6 +81,7 @@ export async function loadHealth(): Promise<HealthReport> {
   providers.push({ name: 'Email (Resend)', configured: 'unknown', detail: 'RESEND_API_KEY is server-side — a send reports if it\'s missing' });
   providers.push({ name: 'Web search (Serper)', configured: 'unknown', detail: 'SERPER_API_KEY is server-side — a scan reports if it\'s missing' });
   providers.push({ name: 'Embeddings', configured: 'unknown', detail: 'EMBEDDINGS_API_KEY is server-side — Ask falls back to lexical without it' });
+  providers.push({ name: 'Video render (Shotstack)', configured: 'unknown', detail: 'SHOTSTACK_API_KEY is server-side — the browser preview works without it' });
 
   return { supabaseConfigured, functions, providers };
 }

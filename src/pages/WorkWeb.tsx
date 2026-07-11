@@ -29,6 +29,7 @@ import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
+import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 
 const STATUS_DOT: Record<CharterStatus, string> = {
@@ -405,6 +406,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           mail log so mailed batches count as real outreach. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'direct_mail' && (
         <MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
+          plays in the browser now, renders a real mp4 when a render key is set. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'video' && (
+        <VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
