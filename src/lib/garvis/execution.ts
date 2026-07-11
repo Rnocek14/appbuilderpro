@@ -87,9 +87,14 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     return { ok: !!res?.ok, error: res?.error, result: res };
   }
 
-  // Other kinds (publish_post/deploy_*/…): the DECISION is recorded; execution happens where
-  // the capability lives (deploys need the built files, which exist only in the project
-  // workspace). Ledger the approved-but-not-executed state honestly — visible, never silent.
+  // deploy_site: a REAL executor. The build ran client-side; its bundle was captured into
+  // deploy_bundles at authorization time (requestSiteDeploy). Load it, deploy via deploy-site,
+  // capture the live URL, record it everywhere, and delete the one-shot bundle.
+  if (a.kind === 'deploy_site') return await executeSiteDeploy(a);
+
+  // Remaining kinds (publish_post/deploy_backend/…): the DECISION is recorded; execution happens
+  // where the capability lives (these need a client-built bundle we don't capture yet). Ledger
+  // the approved-but-not-executed state honestly — visible, never silent.
   const { data: sess } = await supabase.auth.getUser();
   if (sess.user?.id) {
     const { error } = await supabase.from('execution_runs').insert({
@@ -101,6 +106,75 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
   }
   // executed: false — the UI must say "approved", never "executed", for kinds with no executor.
   return { ok: true, result: { approved: true, executed: false } };
+}
+
+/** The deploy_site executor. Honest at every branch: a bundle-less approval (e.g. one Garvis
+ *  proposed without a build) is recorded as skipped with an actionable reason, never a fake deploy;
+ *  a real bundle deploys for real and the live URL flows to the deployments record, the ledger, a
+ *  mind_event, and the world's website artifact. */
+async function executeSiteDeploy(a: Approval): Promise<{ ok: boolean; error?: string; result?: unknown }> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) return { ok: false, error: 'Not signed in.' };
+  const bundleId = a.payload?.bundle_id as string | undefined;
+  const projectId = a.payload?.project_id as string | undefined;
+
+  const ledger = (status: 'ok' | 'failed' | 'skipped', error: string | null, request: Record<string, unknown>) =>
+    supabase.from('execution_runs').insert({ owner_id: uid, approval_id: a.id, connector: 'netlify', action: 'deploy_site', status, request, error }).then(() => {}, () => {});
+
+  if (!bundleId || !projectId) {
+    await ledger('skipped', 'No build captured for this deploy — open the project workspace and Publish (the build runs in your browser).', { approval_id: a.id });
+    return { ok: true, result: { approved: true, executed: false, needsWorkspace: true, projectId } };
+  }
+
+  const { data: bundle } = await supabase.from('deploy_bundles')
+    .select('files, site_id').eq('id', bundleId).eq('owner_id', uid).maybeSingle();
+  if (!bundle) {
+    await ledger('skipped', 'The captured build for this deploy is gone (already deployed or expired) — Publish again from the workspace.', { approval_id: a.id, bundle_id: bundleId });
+    return { ok: true, result: { approved: true, executed: false } };
+  }
+
+  const files = (bundle as { files: unknown }).files;
+  const siteId = (bundle as { site_id: string | null }).site_id ?? undefined;
+  const { data, error } = await supabase.functions.invoke('deploy-site', {
+    body: { projectId, siteId, files, netlifyToken: (a.payload?.netlify_token as string | undefined) },
+  });
+  if (error) { await ledger('failed', error.message, { approval_id: a.id, project_id: projectId }); return { ok: false, error: error.message }; }
+  const res = data as { ok?: boolean; error?: string; siteId?: string; url?: string };
+  if (res?.error) { await ledger('failed', res.error, { approval_id: a.id, project_id: projectId }); return { ok: false, error: res.error }; }
+
+  const url = res?.url ?? null;
+  // Record the live deploy, stamp the approval result, and update the world's website artifact URL.
+  await supabase.from('deployments').insert({
+    project_id: projectId, user_id: uid, target: 'netlify',
+    status: url ? 'live' : 'building', url, logs: 'Deployed via the approval spine.',
+  }).then(() => {}, () => {});
+  await supabase.from('approvals').update({ result: { executed: true, url, site_id: res?.siteId ?? siteId ?? null } }).eq('id', a.id);
+  if (url) {
+    await supabase.from('knowledge_artifacts').update({ url, detail: `Live at ${url}. Re-publish from the project workspace anytime; deploys route through Approvals.` })
+      .eq('kind', 'link').eq('slug', 'website-app').eq('owner_id', uid)
+      .in('cluster_id', (await clusterIdsForProjectWorld(projectId)) ?? [])
+      .then(() => {}, () => {});
+  }
+  await ledger('ok', null, { approval_id: a.id, project_id: projectId, url });
+  await supabase.from('mind_events').insert({
+    owner_id: uid, event_type: 'note', source: 'execution',
+    subject: url ? `Published the site — live at ${url}` : 'Published the site — the host is finishing the deploy',
+    payload: { project_id: projectId, url },
+  }).then(() => {}, () => {});
+  // One-shot: the captured build is consumed.
+  await supabase.from('deploy_bundles').delete().eq('id', bundleId).then(() => {}, () => {});
+
+  return { ok: !!(res?.ok ?? url), result: { approved: true, executed: true, url, site_id: res?.siteId ?? siteId ?? null } };
+}
+
+/** The cluster ids of the world a project is bound to (for updating its website-app artifact). */
+async function clusterIdsForProjectWorld(projectId: string): Promise<string[] | null> {
+  const { data: proj } = await supabase.from('projects').select('world_id').eq('id', projectId).maybeSingle();
+  const worldId = (proj as { world_id: string | null } | null)?.world_id;
+  if (!worldId) return null;
+  const { data: clusters } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
+  return (clusters ?? []).map((c) => (c as { id: string }).id);
 }
 
 export async function rejectApproval(id: string): Promise<void> {

@@ -5,6 +5,7 @@
 // send_email end-to-end; other kinds show their preview and record the decision.
 
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ShieldCheck, Loader2, Check, X, Mail, Rocket, Globe, CreditCard, Database, Users, ScrollText } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Spinner } from '../components/ui';
@@ -27,6 +28,7 @@ const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string }> = {
 
 export default function Approvals() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [pending, setPending] = useState<Approval[]>([]);
   const [runs, setRuns] = useState<ExecutionRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,10 +52,12 @@ export default function Approvals() {
     try {
       const res = await approveAndExecute(a);
       if (res.ok) {
-        // Honest wording: only kinds with a real executor (send_email) actually go out. The rest
-        // are approved-and-recorded; the ledger shows them as 'skipped' with the reason.
-        const executed = (res.result as { executed?: boolean } | undefined)?.executed !== false;
-        toast('success', executed ? 'Approved and sent.' : 'Approved — recorded for you to run where the capability lives.');
+        const r = res.result as { executed?: boolean; url?: string | null; needsWorkspace?: boolean; projectId?: string } | undefined;
+        const executed = r?.executed !== false;
+        if (a.kind === 'deploy_site' && r?.url) { toast('success', `Deployed — live at ${r.url}`); window.open(r.url, '_blank'); }
+        else if (r?.needsWorkspace && r.projectId) { toast('info', 'Approved — open the project and Publish to complete (the build runs in your browser).'); navigate(`/project/${r.projectId}`); }
+        else if (executed) toast('success', a.kind === 'send_email' ? 'Approved and sent.' : 'Approved and executed.');
+        else toast('success', 'Approved — recorded for you to run where the capability lives.');
       } else toast('error', res.error ?? 'Execution failed — see the ledger.');
       await refresh();
     } catch (e) {

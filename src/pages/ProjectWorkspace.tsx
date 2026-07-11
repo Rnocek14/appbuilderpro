@@ -35,6 +35,7 @@ import { ThemeModal } from '../components/ThemeModal';
 import { AssetsModal } from '../components/AssetsModal';
 import { getThreads, createThread, renameThread, deleteThread, getActiveThread, setActiveThread, threadsEnabled, threadOf, MAIN_THREAD_ID, type Thread } from '../lib/threads';
 import type { Project, Deployment, EditPlan, ProjectFile } from '../types';
+import { publishThroughSpine } from '../lib/garvis/deployRun';
 
 type MiddleTab = 'chat' | 'code';
 
@@ -782,16 +783,16 @@ export default function ProjectWorkspace() {
       if (!built.ok) { toast('error', built.error ?? 'Build failed.'); return; }
       toast('info', `Built ${built.files.length} files — publishing to Netlify…`);
       const siteId = localStorage.getItem(`ff:netlify-site:${id}`) || undefined;
-      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string; siteId?: string; url?: string }>(
-        'deploy-site', { body: { projectId: id, siteId, files: built.files, netlifyToken: netlifyToken.trim() || undefined } });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      if (data?.siteId) localStorage.setItem(`ff:netlify-site:${id}`, data.siteId);
-      const url = data?.url ?? null;
-      const { data: dep } = await supabase.from('deployments')
-        .insert({ project_id: id, user_id: session.user.id, target: 'netlify', status: url ? 'live' : 'building', url, logs: `Published ${built.files.length} files.` })
-        .select().single();
-      if (dep) setDeployments((d) => [dep as Deployment, ...d]);
+      // Route through the approval spine: capture the build, record the approval, execute it now
+      // (your Publish click is the approval). The deploy is real AND fully ledgered — one honest
+      // path for every deploy, whether you click Publish or approve one Garvis proposed.
+      const { url, siteId: newSiteId } = await publishThroughSpine({
+        projectId: id, files: built.files, siteId, netlifyToken: netlifyToken.trim() || undefined,
+      });
+      if (newSiteId) localStorage.setItem(`ff:netlify-site:${id}`, newSiteId);
+      // Refresh the deployments list (the executor recorded the live deploy row).
+      const { data: deps } = await supabase.from('deployments').select('*').eq('project_id', id).order('created_at', { ascending: false }).limit(10);
+      if (deps) setDeployments(deps as Deployment[]);
       if (url) { toast('success', `Live at ${url}`); window.open(url, '_blank'); }
       else toast('info', 'Published — Netlify is finishing the deploy.');
     } catch (err) {
