@@ -47,7 +47,8 @@
     "verify:mailer": "tsx src/lib/garvis/mailer.verify.ts",
     "verify:ask": "tsx src/lib/garvis/ask.verify.ts",
     "verify:producers": "tsx src/lib/garvis/producers.verify.ts",
-    "verify:adaptive": "tsx src/lib/garvis/adaptive.verify.ts"
+    "verify:adaptive": "tsx src/lib/garvis/adaptive.verify.ts",
+    "verify:contacts": "tsx src/lib/garvis/contacts.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

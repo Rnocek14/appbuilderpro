@@ -26,6 +26,9 @@ import Billing from './pages/Billing';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import ClusterSpike from './pages/spike/ClusterSpike';
 import Brain from './pages/Brain';
+import OpsInbox from './pages/OpsInbox';
+import Contacts from './pages/Contacts';
+import Health from './pages/Health';
 import Approvals from './pages/Approvals';
 import WorkWebs from './pages/WorkWebs';
 import WorkWeb from './pages/WorkWeb';
@@ -68,6 +71,9 @@ export default function App() {
               <Route path="/garvis/missions" element={<Protected><Missions /></Protected>} />
               <Route path="/garvis/opportunities" element={<Protected><Opportunities /></Protected>} />
               <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
+              <Route path="/garvis/inbox" element={<Protected><OpsInbox /></Protected>} />
+              <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
+              <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
               <Route path="/garvis/approvals" element={<Protected><Approvals /></Protected>} />
               <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
               <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Sparkles, Send, Play, Boxes } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { WakingMoment } from '../components/garvis/WakingMoment';
+import { RemindersCard } from '../components/garvis/RemindersCard';
 import { useAuth } from '../context/AuthContext';
 import { MissionTasks } from '../components/garvis/MissionTasks';
 import { Markdown } from '../components/Markdown';
@@ -100,6 +101,7 @@ export default function Command() {
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <WakingMoment name={firstName} />
+          <RemindersCard />
           {messages.length === 0 && (
             <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-5">
               <div className="mb-3 flex items-center gap-2 text-forge-dim"><Boxes size={16} className="text-forge-ember" /> <span className="text-sm">Try one of these — or just say what's on your mind:</span></div>

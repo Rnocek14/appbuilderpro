@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
@@ -32,6 +32,8 @@ const navSections = [
     items: [
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
       { to: '/garvis/webs', label: 'Work Webs', icon: Waypoints },
+      { to: '/garvis/inbox', label: 'Inbox', icon: MessageSquare },
+      { to: '/garvis/contacts', label: 'Contacts', icon: Users },
       { to: '/garvis/universe', label: 'Universe', icon: Telescope },
       { to: '/garvis/explore', label: 'Explore', icon: Compass },
       { to: '/garvis/brain', label: 'Brain', icon: BrainCircuit },
@@ -42,6 +44,7 @@ const navSections = [
       { to: '/garvis/missions', label: 'Missions', icon: Rocket },
       { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },
       { to: '/garvis/marketing', label: 'Marketing', icon: Megaphone },
+      { to: '/garvis/health', label: 'Health', icon: Activity },
     ],
   },
   {

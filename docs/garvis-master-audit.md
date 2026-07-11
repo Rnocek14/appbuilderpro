@@ -58,15 +58,19 @@ capabilities that need real render/deploy infrastructure (video, autonomous depl
 
 ## The ranked roadmap (what "all-in-one, end to end" still needs)
 
-**Tier 1 — daily-driver completeness (small, high value):**
-1. **Reply/lead inbox + composer** — read `replies.body_text` and lead messages in-app; reply
-   enqueues a `send_email` approval. Turns the waking moment from "go look" into "act here."
-2. **Contacts CRM page** (`/garvis/contacts`) — editable fields, notes, a per-contact activity
-   timeline (messages/replies/leads unioned by contact_id), delete, a `stage` column.
-3. **User tasks/reminders** — a `reminders` table + list + a `collectReminders` waking move
-   ("remind me Friday"), the one operator affordance with no home today.
-4. **Integrations/health board** — one page: every edge function deployed? every secret set? per
-   provider configured/needs-secret/last-error. Highest operability win given ~38 functions.
+**Tier 1 — daily-driver completeness — SHIPPED:**
+1. ✅ **Ops inbox + composer** (`/garvis/inbox`, OpsInbox) — reads email replies (`body_text`) and
+   website leads in one cross-world stream; replying creates a real outreach_message and routes
+   through the SAME send_email approval + executor (nothing sends unreviewed; suppression sacred).
+2. ✅ **Contacts CRM** (`/garvis/contacts`) — editable name, a pipeline stage (new→customer/lost),
+   free-text notes, delete, and a per-contact activity timeline (sent/replies/leads/notes unioned,
+   verified pure in contactsCore). app_0039 adds the stage column + contact_notes.
+3. ✅ **Reminders** (app_0039 reminders table + RemindersCard on Command) — the user's own todos;
+   due ones surface as the top-ranked waking move (`reminder_due`, base 110 — the user's words
+   outrank Garvis's inference), verified.
+4. ✅ **Health board** (`/garvis/health`) — OPTIONS-probes every key edge function (deployed / not
+   deployed / unreachable) and reports ad-provider secret presence; server-only secrets shown as
+   "checked at use" rather than guessed.
 
 **Tier 2 — capability depth (needs infrastructure):**
 5. **PDF ingest** (pdf.js in docExtract) + a document reader with download/copy — completes the

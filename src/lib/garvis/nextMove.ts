@@ -19,6 +19,7 @@
 // ---------------------------------------------------------------------------
 
 export type MoveKind =
+  | 'reminder_due'       // the user asked to be reminded — their own words, honored
   | 'lead_waiting'       // a human submitted the site's form — inbound demand, answer it
   | 'reply_unanswered'   // the highest-value event in the system
   | 'approval_waiting'   // the user IS the bottleneck
@@ -69,6 +70,25 @@ export interface MissionDoneIn { missionId: string; worldId: string | null; subj
 // ---------------------------------------------------------------------------
 
 const short = (s: string | null | undefined, n = 60) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+
+export interface ReminderRowIn { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }
+
+/** The user's own reminders that are DUE (due_at in the past, or no due date = a standing note).
+ *  Their words, surfaced at the top of the cockpit — not Garvis's inference. One move per reminder. */
+export function collectReminders(rows: ReminderRowIn[], now: Date): NextMove[] {
+  return rows
+    .filter((r) => !r.due_at || new Date(r.due_at).getTime() <= now.getTime())
+    .map((r) => ({
+      key: `reminder:${r.id}`,
+      kind: 'reminder_due' as const,
+      title: short(r.title, 80) || 'A reminder',
+      why: r.due_at ? `You asked to be reminded by ${r.due_at.slice(0, 10)}.` : 'You set this reminder for yourself.',
+      action: { label: r.world_id ? 'Open the world' : 'Open reminders', route: r.world_id ? `/garvis/webs/${r.world_id}` : '/garvis/command' },
+      score: 0,
+      bornAt: r.due_at ?? r.created_at,
+      expected: { text: 'Your own note — clear it when done.', basis: 'measured' as const },
+    }));
+}
 
 export interface LeadRowIn { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }
 
@@ -245,6 +265,7 @@ export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
 // ---------------------------------------------------------------------------
 
 const BASE_VALUE: Record<MoveKind, number> = {
+  reminder_due: 110,       // the user's OWN words outrank everything Garvis inferred
   lead_waiting: 100,       // someone ASKED — inbound demand ranks with a warm reply
   reply_unanswered: 100,   // a warm human is worth more than anything else in the system
   approval_waiting: 90,    // the user is the bottleneck

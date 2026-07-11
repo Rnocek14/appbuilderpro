@@ -6,7 +6,7 @@
 
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals,
 } from './nextMove';
 
@@ -42,6 +42,19 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
     const ranked = rankMoves([...replies, ...leads], NOW, {});
     return ranked[0].kind === 'lead_waiting' || ranked[0].kind === 'reply_unanswered';
   })());
+
+  // Tier 1: the user's own reminders — due surfaces, future stays quiet, and they outrank inference.
+  const reminders = collectReminders([
+    { id: 'rm1', title: 'Call the printer', world_id: null, due_at: hoursAgo(1), created_at: hoursAgo(48) },
+    { id: 'rm2', title: 'Future thing', world_id: 'w1', due_at: new Date(NOW.getTime() + 48 * 3_600_000).toISOString(), created_at: hoursAgo(1) },
+    { id: 'rm3', title: 'Standing note', world_id: null, due_at: null, created_at: hoursAgo(2) },
+  ], NOW);
+  check('reminders: due + no-due surface, future stays quiet', reminders.length === 2 && reminders.some((r) => r.key === 'reminder:rm1') && reminders.some((r) => r.key === 'reminder:rm3') && !reminders.some((r) => r.key === 'reminder:rm2'));
+  check('reminders: the user\'s words outrank Garvis inference (top of the cockpit)', (() => {
+    const ranked = rankMoves([...leads, ...reminders], NOW, {});
+    return ranked[0].kind === 'reminder_due';
+  })());
+  check('reminders: expected outcome is labeled measured (it IS the user\'s own datum)', reminders[0].expected?.basis === 'measured');
 
   const approvals = collectApprovals([
     { id: 'a1', kind: 'send_email', title: 'Touch 1', created_at: hoursAgo(5) },
