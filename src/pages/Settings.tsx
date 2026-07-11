@@ -199,6 +199,132 @@ function SpendCard() {
   );
 }
 
+/** THE EMAIL FRONT DOOR (audit E1): outreach_settings had no UI, so outbound_enabled stayed false
+ *  and every send blocked — the safest pillar was unreachable. This card is the missing config:
+ *  the kill switch, sender identity, the CAN-SPAM mailing address (required to send), daily cap,
+ *  and timezone (drives the cap window AND your morning brief). All gates stay server-side in
+ *  send-email; this only supplies the settings they read. */
+function OutreachCard() {
+  const { session } = useAuth();
+  const { toast } = useToast();
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [fromName, setFromName] = useState('');
+  const [fromEmail, setFromEmail] = useState('');
+  const [replyTo, setReplyTo] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [address, setAddress] = useState('');
+  const [cap, setCap] = useState('25');
+  const [tz, setTz] = useState('America/Chicago');
+
+  useEffect(() => {
+    if (!session) return;
+    let live = true;
+    void supabase.from('outreach_settings').select('*').eq('owner_id', session.user.id).maybeSingle()
+      .then(({ data }) => {
+        if (!live) return;
+        const s = data as {
+          outbound_enabled?: boolean; from_name?: string | null; from_email?: string | null; reply_to?: string | null;
+          company_name?: string | null; physical_address?: string | null; daily_send_cap?: number; timezone?: string;
+        } | null;
+        if (s) {
+          setEnabled(!!s.outbound_enabled);
+          setFromName(s.from_name ?? ''); setFromEmail(s.from_email ?? ''); setReplyTo(s.reply_to ?? '');
+          setCompanyName(s.company_name ?? ''); setAddress(s.physical_address ?? '');
+          setCap(String(s.daily_send_cap ?? 25)); setTz(s.timezone ?? 'America/Chicago');
+        }
+        setLoaded(true);
+      });
+    return () => { live = false; };
+  }, [session]);
+
+  const canEnable = fromEmail.trim() && address.trim();
+  const save = async () => {
+    if (!session) return;
+    if (enabled && !canEnable) { toast('error', 'To turn sending on you need a from-address and a real mailing address (CAN-SPAM requires it on every email).'); return; }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('outreach_settings').upsert({
+        owner_id: session.user.id,
+        outbound_enabled: enabled && !!canEnable,
+        from_name: fromName.trim() || null,
+        from_email: fromEmail.trim() || null,
+        reply_to: replyTo.trim() || null,
+        company_name: companyName.trim() || null,
+        physical_address: address.trim() || null,
+        daily_send_cap: Math.max(0, Math.min(500, Number(cap) || 0)),
+        timezone: tz.trim() || 'America/Chicago',
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'owner_id' });
+      if (error) throw new Error(error.message);
+      toast('success', enabled && canEnable ? 'Outreach is ON — approved emails will send, within your daily cap.' : 'Saved. Sending stays off until you flip it on.');
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not save outreach settings.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!loaded) return null;
+  return (
+    <Card className="mt-4 p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">Outreach — sending email</h2>
+          <p className="mt-1 text-xs text-forge-dim">
+            The master switch for real email. Every send still needs your approval in the queue; this
+            sets who it's from, the legally required mailing address, and your daily cap.
+          </p>
+        </div>
+        <button
+          onClick={() => setEnabled((v) => !v)}
+          aria-pressed={enabled}
+          title={enabled ? 'Sending is ON — click to stop all sends' : 'Sending is OFF — every send blocks until enabled'}
+          className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${enabled ? 'border-forge-ok/60 bg-forge-ok/30' : 'border-forge-border bg-forge-panel'}`}
+        >
+          <span className={`absolute top-0.5 h-4.5 w-4.5 rounded-full transition-all ${enabled ? 'left-6 bg-forge-ok' : 'left-0.5 bg-forge-dim'}`} style={{ height: 18, width: 18 }} />
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs text-forge-dim">From name
+          <Input className="mt-1" placeholder="Riley from Acme" value={fromName} onChange={(e) => setFromName(e.target.value)} />
+        </label>
+        <label className="block text-xs text-forge-dim">From email (a domain you can verify with Resend)
+          <Input className="mt-1" placeholder="riley@yourdomain.com" value={fromEmail} onChange={(e) => setFromEmail(e.target.value)} />
+        </label>
+        <label className="block text-xs text-forge-dim">Reply-to (optional)
+          <Input className="mt-1" placeholder="inbox@yourdomain.com" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} />
+        </label>
+        <label className="block text-xs text-forge-dim">Company name (footer)
+          <Input className="mt-1" placeholder="Acme LLC" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+        </label>
+        <label className="block text-xs text-forge-dim sm:col-span-2">Mailing address — required by CAN-SPAM, shown in every email footer
+          <Input className="mt-1" placeholder="123 Main St, Suite 4, Austin TX 78701" value={address} onChange={(e) => setAddress(e.target.value)} />
+        </label>
+        <label className="block text-xs text-forge-dim">Daily send cap
+          <Input className="mt-1" type="number" min={0} max={500} value={cap} onChange={(e) => setCap(e.target.value)} />
+          <span className="mt-1 block">0 blocks everything. Start small — deliverability grows with reputation.</span>
+        </label>
+        <label className="block text-xs text-forge-dim">Timezone (cap window + your morning brief)
+          <Input className="mt-1" placeholder="America/Chicago" value={tz} onChange={(e) => setTz(e.target.value)} />
+        </label>
+      </div>
+
+      {enabled && !canEnable && (
+        <p className="mt-3 rounded-lg border border-forge-warn/40 bg-forge-warn/10 px-3 py-2 text-xs text-forge-warn">
+          Sending can't turn on yet — add a from-address and mailing address first.
+        </p>
+      )}
+
+      <div className="mt-4">
+        <Button onClick={() => void save()} loading={saving}>Save outreach settings</Button>
+      </div>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { profile, refreshProfile } = useAuth();
   const { toast } = useToast();
@@ -276,6 +402,8 @@ export default function Settings() {
         </Card>
 
         <AIProviderCard />
+
+        <OutreachCard />
 
         <Card className="mt-4 p-5">
           <h2 className="text-sm font-medium">Connections</h2>
