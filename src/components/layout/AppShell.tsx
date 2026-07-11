@@ -197,6 +197,16 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
                 style={{ width: `${pct}%` }}
               />
             </div>
+            {/* Credits balance — the metering that gates every server AI action; previously
+                enforced server-side but invisible, so a throttle looked like a bug. Now honest. */}
+            {typeof (profile as { credits_balance?: number } | null)?.credits_balance === 'number' && (
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="text-forge-dim">Credits</span>
+                <span className={cn('font-mono', ((profile as { credits_balance?: number }).credits_balance ?? 0) < 20 ? 'text-forge-err' : 'text-forge-ink')}>
+                  {(profile as { credits_balance?: number }).credits_balance}
+                </span>
+              </div>
+            )}
             {profile?.plan === 'free' && pct >= 70 && (
               <button onClick={() => navigate('/pricing')} className="mt-2 text-xs text-forge-ember hover:underline">
                 Upgrade for more →

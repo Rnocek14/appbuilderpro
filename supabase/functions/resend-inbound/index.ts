@@ -9,6 +9,7 @@
 // optional for classification; without a key it stores the reply unclassified and still stops the sequence).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { notifyText } from '../_shared/notify.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-inbound-secret' };
 
@@ -128,6 +129,17 @@ Deno.serve(async (req) => {
     subject: `${classification} reply from ${from}: ${subject.slice(0, 100)}`,
     payload: { message_id: msg.id, campaign_id: msg.campaign_id, classification },
   }).then(() => {}, () => {});
+
+  // Push a POSITIVE reply to the owner — a warm reply cools fast; it must reach them off-app.
+  if (classification === 'positive' && !wantsOut) {
+    try {
+      const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', msg.owner_id).single();
+      await notifyText(
+        (owner as { webhook_url?: string } | null)?.webhook_url,
+        `💬 WARM REPLY — ${from}\n"${subject.slice(0, 120)}"\n${ownWords.slice(0, 300)}`,
+      );
+    } catch { /* best-effort */ }
+  }
 
   return json({ ok: true, classification });
 });

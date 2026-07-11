@@ -170,17 +170,20 @@ export async function listContacts(limit = 200): Promise<ContactRow[]> {
 
 export async function listWebs(): Promise<WebSummary[]> {
   const worlds = await listUniverseWorlds();
-  const out: WebSummary[] = [];
-  for (const w of worlds) {
-    if (!w.remote) continue;
-    const { count } = await supabase
-      .from('knowledge_clusters')
-      .select('id', { count: 'exact', head: true })
-      .eq('world_id', w.id)
-      .not('charter', 'is', null);
-    if ((count ?? 0) > 0) out.push({ worldId: w.id, title: w.title, templateId: null });
-  }
-  return out;
+  const remoteIds = worlds.filter((w) => w.remote).map((w) => w.id);
+  if (!remoteIds.length) return [];
+  // ONE query instead of a count-per-world N+1: fetch all chartered clusters for the remote
+  // worlds at once, then a world "is a web" if it has ≥1 chartered cluster.
+  const { data: rows } = await supabase
+    .from('knowledge_clusters')
+    .select('world_id')
+    .in('world_id', remoteIds)
+    .not('charter', 'is', null)
+    .limit(5000);
+  const charteredWorlds = new Set((rows ?? []).map((r) => (r as { world_id: string }).world_id));
+  return worlds
+    .filter((w) => w.remote && charteredWorlds.has(w.id))
+    .map((w) => ({ worldId: w.id, title: w.title, templateId: null }));
 }
 
 export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {

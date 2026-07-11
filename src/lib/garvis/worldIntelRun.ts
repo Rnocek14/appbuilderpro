@@ -169,10 +169,13 @@ export async function refreshWorldIntelligence(worldId: string): Promise<LivingS
  *  evidence gate inside reflectOnWorld still applies, so a due-but-thin world changes nothing. */
 export async function maybeReflect(worldId: string): Promise<boolean> {
   try {
-    const g = await gather(worldId);
-    if (!g) return false;
+    // Cheap due-check FIRST, off the just-persisted intelligence row (refreshWorldIntelligence
+    // runs before this on world-open and writes signals incl. events7d) — so the common
+    // not-due path costs ONE query, not a full 14-query gather(). Only when actually due does
+    // reflectOnWorld gather.
     const existing = await getWorldIntelligence(worldId);
-    if (!reflectionDue(existing?.last_reflected_at ?? null, g.signals.events7d, new Date())) return false;
+    const events7d = existing?.signals?.events7d ?? 0;
+    if (!reflectionDue(existing?.last_reflected_at ?? null, events7d, new Date())) return false;
     const r = await reflectOnWorld(worldId);
     return r.ok;
   } catch {

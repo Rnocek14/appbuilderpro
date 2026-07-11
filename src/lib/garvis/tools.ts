@@ -166,6 +166,38 @@ export const GARVIS_TOOLS: GarvisTool[] = [
     inputSchema: { type: 'object', properties: { app_id: { type: 'string' } } },
     modes: ['observe', 'plan', 'act'],
   },
+  // --- WORLDS: the business-growth brain, readable from Command (unification) ---------------
+  {
+    name: 'list_worlds',
+    description:
+      'List the owner\'s WORLDS (businesses being grown — e.g. "Mom Real Estate Marketing") with each ' +
+      'one\'s momentum label, current recommendation, and any blockers. Use this to answer "how is ' +
+      'X doing?" and to decide where attention is needed. Worlds are distinct from apps (products).',
+    inputSchema: { type: 'object', properties: {} },
+    modes: ['observe', 'plan', 'act'],
+  },
+  {
+    name: 'ask_worlds',
+    description:
+      'Ask a grounded question about the owner\'s worlds and get a CITED answer retrieved from their ' +
+      'own artifacts (research, plans, playbooks, designs). Optionally scope to one world by id. Use ' +
+      'this before advising on a business — it grounds you in what actually exists, never guesses.',
+    inputSchema: {
+      type: 'object',
+      properties: { question: { type: 'string' }, world_id: { type: 'string' } },
+      required: ['question'],
+    },
+    modes: ['observe', 'plan', 'act'],
+  },
+  {
+    name: 'draft_world',
+    description:
+      'Propose a NEW world (business system) from a one-line intent (e.g. "grow my brother\'s art ' +
+      'business"). Written as a DRAFT awaiting the owner\'s approval — it does NOT become a live world ' +
+      'until they review and approve it on the Work Webs page. Same proposal discipline as propose_goal.',
+    inputSchema: { type: 'object', properties: { intent: { type: 'string' } }, required: ['intent'] },
+    modes: ['act'],
+  },
   {
     name: 'propose_goal',
     description:

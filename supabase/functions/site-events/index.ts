@@ -15,6 +15,7 @@
 // Deploy: npx supabase functions deploy site-events --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { notifyText } from '../_shared/notify.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -96,6 +97,19 @@ Deno.serve(async (req) => {
         subject: `Lead from the website: ${name || email}${source ? ` (via ${source})` : ''}`,
         payload: { world_id: worldId, kind: 'lead', email_domain: email.split('@')[1] ?? '' },
       });
+
+      // Reach the owner even when they're not in the app — a lead is the highest-value inbound
+      // event; it must never land silently (fire-and-forget, never blocks the response).
+      try {
+        const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', ownerId).single();
+        await notifyText(
+          (owner as { webhook_url?: string } | null)?.webhook_url,
+          `🌱 NEW LEAD — ${name || email}${source ? ` (via ${source})` : ''}\n` +
+          `${email}${phone ? ` · ${phone}` : ''}\n` +
+          (message ? `"${message.slice(0, 300)}"` : ''),
+        );
+      } catch { /* notification is best-effort */ }
+
       return json({ ok: true, lead: true });
     }
 

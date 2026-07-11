@@ -49,8 +49,12 @@ export default function Approvals() {
     setActingId(a.id);
     try {
       const res = await approveAndExecute(a);
-      if (res.ok) toast('success', 'Approved and executed.');
-      else toast('error', res.error ?? 'Execution failed — see the ledger.');
+      if (res.ok) {
+        // Honest wording: only kinds with a real executor (send_email) actually go out. The rest
+        // are approved-and-recorded; the ledger shows them as 'skipped' with the reason.
+        const executed = (res.result as { executed?: boolean } | undefined)?.executed !== false;
+        toast('success', executed ? 'Approved and sent.' : 'Approved — recorded for you to run where the capability lives.');
+      } else toast('error', res.error ?? 'Execution failed — see the ledger.');
       await refresh();
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not execute.');
@@ -86,7 +90,9 @@ export default function Approvals() {
         ) : (
           <div className="space-y-3">
             {pending.map((a) => {
-              const meta = KIND_META[a.kind];
+              // Defensive: an unknown kind (older row / future kind) renders generically instead
+              // of throwing and blanking the whole queue.
+              const meta = KIND_META[a.kind] ?? { icon: ShieldCheck, label: String(a.kind).replace(/_/g, ' ') };
               const Icon = meta.icon;
               return (
                 <Card key={a.id} className="p-4">

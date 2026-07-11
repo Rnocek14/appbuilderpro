@@ -301,6 +301,47 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
       return { ok: true, run_id: data.id };
     }
 
+    // --- WORLDS (unification): Command reads/asks/proposes across the business-growth brain ----
+    case 'list_worlds': {
+      const { listWebs } = await import('./workwebRun');
+      const { getWorldIntelligence } = await import('./worldIntelRun');
+      const webs = await listWebs();
+      const worlds = await Promise.all(webs.slice(0, 20).map(async (w) => {
+        const intel = await getWorldIntelligence(w.worldId).catch(() => null);
+        return {
+          id: w.worldId, title: w.title,
+          momentum: intel?.state?.momentum?.label ?? 'unknown',
+          momentum_evidence: intel?.state?.momentum?.evidence ?? null,
+          recommendation: intel?.recommendation ?? null,
+          blockers: (intel?.state?.blockers ?? []).map((b) => b.text),
+          open_questions: (intel?.open_questions ?? []).slice(0, 3),
+        };
+      }));
+      return { worlds, count: worlds.length };
+    }
+
+    case 'ask_worlds': {
+      const question = String(input.question ?? '').trim();
+      if (!question) throw new Error('ask_worlds requires a question.');
+      const { askGarvis } = await import('./ask');
+      const r = await askGarvis(question, input.world_id ? { worldId: String(input.world_id) } : undefined);
+      return { answer: r.answer, grounded: r.grounded, sources: r.sources.map((s) => ({ title: s.title, area: s.area, world: s.world })) };
+    }
+
+    case 'draft_world': {
+      const intent = String(input.intent ?? '').trim();
+      if (intent.length < 12) throw new Error('draft_world needs a fuller intent (a sentence).');
+      const { generateDraft } = await import('./genesisRun');
+      const r = await generateDraft(intent);
+      if (!r.id) return { ok: false, problems: r.problems, note: 'Could not draft a world from that intent.' };
+      return {
+        ok: true, draft_id: r.id,
+        title: r.draft?.title,
+        note: 'Drafted a world — it is a PROPOSAL awaiting the owner\'s approval on the Work Webs page. Nothing is live until they approve.',
+        review_at: '/garvis/webs',
+      };
+    }
+
     default:
       throw new Error(`Unknown tool: ${call.name}`);
   }

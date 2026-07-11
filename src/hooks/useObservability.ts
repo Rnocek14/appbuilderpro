@@ -32,8 +32,9 @@ export function useObservability() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!session) return;
+    if (!session) { setLoading(false); return; }
     const now = Date.now();
+    try {
     const [runsRes, tasksRes, missionsRes, oppsRes, goalsRes] = await Promise.all([
       supabase.from('agent_runs').select('id, kind, title, status, recommendation, cost_usd, created_at').order('created_at', { ascending: false }).limit(200),
       supabase.from('garvis_tasks').select('cost_usd, created_at').limit(500),
@@ -77,7 +78,12 @@ export function useObservability() {
       topRecommendation: latestRec?.recommendation ?? null,
       feed: sortFeed(feed, 24),
     });
-    setLoading(false);
+    } catch {
+      // A network-layer rejection must not strand the spinner — resolve to the honest empty state.
+      setData(EMPTY);
+    } finally {
+      setLoading(false);
+    }
   }, [session]);
 
   useEffect(() => { refresh(); }, [refresh]);
