@@ -23,6 +23,7 @@ import { buildFromWorld } from '../lib/garvis/buildBridge';
 import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
 import { worldResults, setLeadStatus, type LeadRow } from '../lib/garvis/resultsRun';
 import { readAdaptive, logAdSpend, type AdaptiveRead } from '../lib/garvis/adaptiveRun';
+import { listConnections, saveConnectionAccount, syncProvider, type ConnectionState } from '../lib/garvis/connectionsRun';
 import type { ResearchPlan } from '../lib/garvis/marketIntel';
 import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
@@ -391,10 +392,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         </>
       )}
 
-      {/* G5 — the honest per-channel results: every number a count of rows; channels that
-          aren't instrumented say so instead of showing a zero pretending to be knowledge. */}
+      {/* G5/G6 — the honest per-channel results, the adaptive read, and platform connections. */}
       {cluster.charter?.archetype === 'ledger' && (
-        <ResultsPanel worldId={worldId} />
+        <>
+          <ResultsPanel worldId={worldId} />
+          <ConnectionsCard worldId={worldId} onSynced={onChanged} />
+        </>
       )}
 
       {/* Direct mail as a real product: a print-ready 6×9 postcard built from this world's own
@@ -1059,6 +1062,84 @@ function ResultsPanel({ worldId }: { worldId: string }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The ad-platform connections card — honest state per provider: connected (sync works), needs
+ *  your account id, or not registered yet (with the EXACT registration steps from the server).
+ *  Secrets never touch the browser; this card only holds account ids and the sync button. */
+function ConnectionsCard({ worldId, onSynced }: { worldId: string; onSynced: () => void }) {
+  const { toast } = useToast();
+  const [conns, setConns] = useState<ConnectionState[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showSetup, setShowSetup] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void listConnections().then((c) => { if (live) { setConns(c); setDrafts(Object.fromEntries(c.map((x) => [x.provider, x.accountId]))); } }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  const doSync = async (c: ConnectionState) => {
+    setBusy(c.provider);
+    try {
+      const draft = (drafts[c.provider] ?? '').trim();
+      if (draft && draft !== c.accountId) await saveConnectionAccount(c.provider, draft);
+      const r = await syncProvider(c.provider, worldId);
+      toast(r.ok ? 'success' : 'info', r.message);
+      if (r.ok) { setConns(await listConnections()); onSynced(); }
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Sync failed.'); }
+    finally { setBusy(null); }
+  };
+
+  if (!conns.length) return null;
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Ad platform connections</h3>
+      <p className="mt-0.5 text-[11px] text-forge-dim">Read-only sync (reporting first — the fast approval lane). Secrets live on the server; this card holds only your account ids.</p>
+      <div className="mt-2 space-y-2">
+        {conns.map((c) => (
+          <div key={c.provider} className="rounded-lg border border-forge-border px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-forge-ink">{c.label}</span>
+              <span className={cn(
+                'rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
+                c.serverConfigured && c.status === 'ready' ? 'border-forge-ok/40 text-forge-ok'
+                  : c.serverConfigured ? 'border-forge-warn/40 text-forge-warn'
+                  : 'border-forge-border text-forge-dim',
+              )}>
+                {c.serverConfigured ? (c.status === 'ready' ? 'connected' : 'needs account id') : 'not registered'}
+              </span>
+              {c.lastSyncedAt && <span className="text-[10px] text-forge-dim">synced {timeAgo(c.lastSyncedAt)}</span>}
+              <span className="flex-1" />
+              {c.serverConfigured ? (
+                <>
+                  <input
+                    value={drafts[c.provider] ?? ''} onChange={(e) => setDrafts((d) => ({ ...d, [c.provider]: e.target.value }))}
+                    placeholder={c.provider === 'meta_ads' ? 'act_123… or 123…' : '123-456-7890'}
+                    className="w-36 rounded-lg border border-forge-border bg-forge-bg px-2 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none"
+                  />
+                  <button onClick={() => void doSync(c)} disabled={busy !== null}
+                    className="flex items-center gap-1 rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10 disabled:opacity-50">
+                    {busy === c.provider && <Loader2 size={11} className="animate-spin" />} Sync 30 days
+                  </button>
+                </>
+              ) : (
+                <button onClick={() => setShowSetup(showSetup === c.provider ? null : c.provider)}
+                  className="text-[11px] text-forge-ember hover:underline">how to connect</button>
+              )}
+            </div>
+            {c.lastError && <p className="mt-1 text-[11px] text-forge-warn">Last sync error: {c.lastError}</p>}
+            {showSetup === c.provider && (
+              <ol className="mt-2 space-y-1 border-t border-forge-border/60 pt-2 text-[11px] text-forge-dim">
+                {c.setup.map((s, i) => <li key={i}>{s}</li>)}
+              </ol>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

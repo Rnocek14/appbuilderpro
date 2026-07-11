@@ -49,10 +49,30 @@ approvals only the owner can obtain (detailed below).*
 
 Rule enforced in the playbook: **master ONE paid channel to a measured CPL before adding the next.**
 
-## The connections roadmap (API integrations — honest about the gates)
+## The connections layer — BUILT (read-only sync, wired end to end)
 
-Real "connect your ad account" buttons require platform-issued credentials that only the account
-owner can obtain. None of this is Garvis-side code first — it's registrations:
+The Garvis side is complete and idle-safe; the only missing pieces are the platform registrations
+the owner must obtain. Built to current best practice (read/reporting access first — the fast
+approval lane; System User token for Meta; OAuth refresh + developer token for Google; secrets in
+edge env only, never the browser):
+- **`ads-sync` edge function**: `status` mode reports which providers hold server secrets;
+  `sync` mode pulls the last 30 days of DAILY, per-campaign spend/impressions/clicks — Meta via
+  the Insights API (`act_{id}/insights`, `time_increment=1`), Google via REST `searchStream` GAQL
+  with the refresh-token flow. Upserts into `ad_metrics` (idempotent re-syncs), stamps the world,
+  records errors honestly in `connections.last_error`.
+- **`connections` table (app_0038)**: per-user NON-secret config (ad account id / customer id) +
+  honest status (`unconfigured`/`ready`/`error`) + last-synced. `ad_metrics` is owner-read,
+  service-role-write, and its numbers are labeled platform-reported everywhere.
+- **The Connections card** (ledger area): per provider — `connected` / `needs account id` /
+  `not registered`, with the EXACT registration steps rendered in the UI, the account-id field,
+  and a one-click 30-day sync. When a sync lands, adaptive automatically prefers API spend over
+  the manual log for that channel (same money, fresher record — never summed twice).
+- **Honesty boundary held**: platform metrics inform SPEND and context; LEADS remain Garvis's own
+  measured form submissions. Cost-per-lead stays logged-or-synced spend ÷ measured leads.
+
+## What the owner must register (the only remaining steps)
+
+Real credentials only the account owner can obtain — the card shows these same steps in-app:
 
 1. **Meta Marketing API** — requires: a Meta Business app, App Review for `ads_management`/
    `ads_read`, a System User token on the ad account. Typical approval: days-weeks. Unlocks:

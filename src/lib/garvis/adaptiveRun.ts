@@ -37,12 +37,23 @@ export interface AdaptiveRead {
 }
 
 /** Build the honest channel table from real rows and run the engine. Pure math over counts —
- *  the only judgment calls (sample floors, confidence tiers) live verified in adaptive.ts. */
+ *  the only judgment calls (sample floors, confidence tiers) live verified in adaptive.ts.
+ *  Spend source preference: API-synced platform spend (ad_metrics) over the manual log when both
+ *  exist for a channel — same money, the API count is the fresher record; never summed together. */
 export async function readAdaptive(worldId: string): Promise<AdaptiveRead> {
-  const [results, spends] = await Promise.all([worldResults(worldId), listAdSpends(worldId)]);
+  const [results, spends, metricsQ] = await Promise.all([
+    worldResults(worldId), listAdSpends(worldId),
+    supabase.from('ad_metrics').select('provider, spend_usd').eq('world_id', worldId).limit(2000),
+  ]);
 
   const spendByChannel: Record<string, number> = {};
   for (const s of spends) spendByChannel[s.channel] = (spendByChannel[s.channel] ?? 0) + Number(s.amount_usd);
+  const apiSpend: Record<string, number> = {};
+  for (const m of ((metricsQ.data ?? []) as { provider: string; spend_usd: number }[])) {
+    const ch = m.provider === 'meta_ads' ? 'meta ads' : 'google ads';
+    apiSpend[ch] = (apiSpend[ch] ?? 0) + Number(m.spend_usd);
+  }
+  for (const [ch, v] of Object.entries(apiSpend)) if (v > 0) spendByChannel[ch] = Math.round(v * 100) / 100;
 
   const srcVisits = (src: string) => results.site?.bySource.find((b) => b.source === src)?.visits ?? 0;
   const srcLeads = (src: string) => results.site?.bySource.find((b) => b.source === src)?.leads ?? 0;
