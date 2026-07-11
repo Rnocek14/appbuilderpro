@@ -24,6 +24,8 @@ const BASE: MailerInput = {
   check('the real photo carries the front', s.front.imageUrl === BASE.imageUrl && s.front.imageAlt === 'lobby mural');
   check('the ONE offer reaches the back', s.back.body.includes('First consult free'));
   check('link resolves from ctx.links when not given, and becomes the CTA', s.back.linkUrl === 'https://nocek.studio/work' && s.back.cta.includes('nocek.studio/work'));
+  check('QR encodes the ATTRIBUTED link (?src=postcard) while the printed line stays clean',
+    s.back.qrUrl === 'https://nocek.studio/work?src=postcard' && !s.back.cta.includes('src=postcard'));
   check('compliance line carried from the brand kit', s.back.complianceLine === 'Nocek Studio LLC · Lake Geneva WI');
   check('brand primary becomes the accent', s.accent === '#B98CE0');
   check('USPS geometry encoded (6x9, bleed, safe zone, address zone)',

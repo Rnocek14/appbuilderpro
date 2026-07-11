@@ -18,20 +18,29 @@
 // Momentum — a label derived from counts, with its evidence
 // ---------------------------------------------------------------------------
 
-export interface MomentumSignals { events7d: number; artifacts7d: number; sends7d: number; replies7d: number }
+export interface MomentumSignals {
+  events7d: number; artifacts7d: number; sends7d: number; replies7d: number;
+  /** G5 instrumentation — inbound demand from the generated site (absent when not instrumented). */
+  leads7d?: number; visits7d?: number;
+}
 export type MomentumLabel = 'surging' | 'steady' | 'slowing' | 'dormant';
 
 export function momentumFrom(s: MomentumSignals): { label: MomentumLabel; evidence: string } {
+  const leads = s.leads7d ?? 0;
+  const visits = s.visits7d ?? 0;
   const bits: string[] = [];
+  if (leads) bits.push(`${leads} lead${leads === 1 ? '' : 's'}`);            // inbound demand leads the evidence
   if (s.replies7d) bits.push(`${s.replies7d} repl${s.replies7d === 1 ? 'y' : 'ies'}`);
   if (s.sends7d) bits.push(`${s.sends7d} send${s.sends7d === 1 ? '' : 's'}`);
+  if (visits) bits.push(`${visits} site visit${visits === 1 ? '' : 's'}`);
   if (s.artifacts7d) bits.push(`${s.artifacts7d} artifact${s.artifacts7d === 1 ? '' : 's'}`);
   if (s.events7d) bits.push(`${s.events7d} event${s.events7d === 1 ? '' : 's'}`);
   const evidence = bits.length ? `${bits.join(', ')} this week` : 'no activity this week';
+  // A lead is the strongest signal in the system — a real human raised their hand.
   const label: MomentumLabel =
-    s.replies7d > 0 || s.sends7d >= 3 || s.events7d >= 15 ? 'surging'
-    : s.events7d >= 5 || s.artifacts7d >= 3 ? 'steady'
-    : s.events7d >= 1 || s.artifacts7d >= 1 ? 'slowing'
+    leads > 0 || s.replies7d > 0 || s.sends7d >= 3 || s.events7d >= 15 ? 'surging'
+    : visits >= 10 || s.events7d >= 5 || s.artifacts7d >= 3 ? 'steady'
+    : visits >= 1 || s.events7d >= 1 || s.artifacts7d >= 1 ? 'slowing'
     : 'dormant';
   return { label, evidence };
 }
@@ -189,14 +198,17 @@ export function buildReflectionContext(input: {
   worldTitle: string; objective: string | null;
   events: { subject: string; occurred_at: string }[];
   artifacts: { title: string; kind: string }[];
-  results: { sent: number; replies: number; approvals: number };
+  results: { sent: number; replies: number; approvals: number; leads?: number; visits?: number };
   state: LivingState;
 }, budget = 6000): string {
+  const inbound = (input.results.leads ?? 0) || (input.results.visits ?? 0)
+    ? `, site visits ${input.results.visits ?? 0}, leads ${input.results.leads ?? 0}`
+    : '';
   const lines = [
     `WORLD: ${input.worldTitle}`,
     `OBJECTIVE: ${input.objective ?? '(none set)'}`,
     `MOMENTUM: ${input.state.momentum.label} (${input.state.momentum.evidence})`,
-    `RESULTS: sent ${input.results.sent}, replies ${input.results.replies}, decisions made ${input.results.approvals}`,
+    `RESULTS: sent ${input.results.sent}, replies ${input.results.replies}, decisions made ${input.results.approvals}${inbound}`,
     input.state.blockers.length ? `BLOCKERS: ${input.state.blockers.map((b) => `${b.text} [${b.evidence}]`).join(' · ')}` : '',
     '',
     'RECORD (newest first):',

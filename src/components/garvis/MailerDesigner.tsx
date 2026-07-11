@@ -52,9 +52,9 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
     });
   }, [materials, concept, hero, offer, link]);
 
-  // QR from the resolved tracking link — the exact URL the card prints.
+  // QR from the ATTRIBUTED link (?src=postcard) — scans show up in the ledger as postcard visits.
   useEffect(() => {
-    const url = spec?.back.linkUrl;
+    const url = spec?.back.qrUrl ?? spec?.back.linkUrl;
     if (!url) { setQr(null); return; }
     let live = true;
     void QRCode.toDataURL(url, { margin: 1, width: 240, errorCorrectionLevel: 'M' })

@@ -48,7 +48,8 @@ export interface MailerSpec {
     cta: string;
     contactLine: string;           // who to reach and how (from ctx/links — never invented)
     complianceLine: string | null;
-    linkUrl: string | null;        // rendered as QR + printed short line
+    linkUrl: string | null;        // the clean printed short line
+    qrUrl: string | null;          // linkUrl + ?src=postcard — what the QR actually encodes
   };
   accent: string;                  // brand primary or the house ember
   meta: { sizeIn: [number, number]; bleedIn: number; safeIn: number; addressZoneIn: [number, number] };
@@ -124,6 +125,9 @@ export function compileMailer(input: MailerInput): MailerSpec {
       contactLine: contactBits.join(' · '),
       complianceLine: input.brand?.compliance_line?.trim() || null,
       linkUrl: link,
+      // The QR encodes ?src=postcard so scans are ATTRIBUTABLE: the generated site's visit ping
+      // passes src through to site_events, and the ledger can honestly credit the card.
+      qrUrl: link ? withSource(link, 'postcard') : null,
     },
     accent: input.brand?.palette?.[0] || '#FF8A3D',
     meta: { sizeIn: [9, 6], bleedIn: 0.125, safeIn: 0.25, addressZoneIn: [4, 2.375] },
@@ -137,6 +141,12 @@ function firstLink(ctx: BusinessContext): string | null {
 
 function shortUrl(u: string): string {
   return u.replace(/^https?:\/\//, '').replace(/\/$/, '').slice(0, 40);
+}
+
+/** Append ?src=<source> for attribution without clobbering existing params. Pure. */
+function withSource(u: string, source: string): string {
+  if (/[?&]src=/.test(u)) return u;
+  return `${u}${u.includes('?') ? '&' : '?'}src=${source}`;
 }
 
 // ---------------------------------------------------------------------------

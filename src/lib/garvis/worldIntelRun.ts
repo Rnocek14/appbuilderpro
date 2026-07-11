@@ -41,6 +41,7 @@ interface Gathered {
   events: { subject: string; occurred_at: string }[];
   artifacts: { title: string; kind: string; created_at: string }[];
   sent: number; replies: number; approvalsDecided: number; pendingApprovals: number; oldestPendingHours: number | null;
+  leads: number; visits: number;   // G5 inbound — real rows from the generated site
   signals: MomentumSignals & { intelAgeDays: number | null };
   audienceEmpty: boolean; brandEmpty: boolean;
   openQuestions: string[];
@@ -62,7 +63,7 @@ async function gather(worldId: string): Promise<Gathered | null> {
   const clusterIds = (clustersQ.data ?? []).map((c) => c.id as string);
   const campIds = (campsQ.data ?? []).map((c) => c.id as string);
 
-  const [artsQ, eventsQ, msgsQ, repliesQ, apprQ, contactsQ, kitQ] = await Promise.all([
+  const [artsQ, eventsQ, msgsQ, repliesQ, apprQ, contactsQ, kitQ, leadsQ, visitsQ] = await Promise.all([
     // EARNED artifacts only: seeded playbooks are knowledge the world was born with — counting
     // them here would fake momentum ("N artifacts this week"), fake research recency (a seeded
     // framework is NOT market intel), and let reflection "learn" from a template.
@@ -75,6 +76,9 @@ async function gather(worldId: string): Promise<Gathered | null> {
     supabase.from('approvals').select('status, created_at, decided_at, payload'),
     supabase.from('contacts').select('id', { count: 'exact', head: true }),
     supabase.from('brand_kits').select('id').eq('world_id', worldId).maybeSingle(),
+    // G5 inbound (tables may pre-date app_0036 in an un-migrated env — treat errors as zero rows).
+    supabase.from('leads').select('created_at').eq('world_id', worldId).order('created_at', { ascending: false }).limit(200),
+    supabase.from('site_events').select('created_at').eq('world_id', worldId).eq('kind', 'visit').order('created_at', { ascending: false }).limit(500),
   ]);
 
   // World-tagged events: workweb/studio flows stamp payload.world_id. Untagged events are NOT
@@ -105,6 +109,9 @@ async function gather(worldId: string): Promise<Gathered | null> {
   const hasAudience = charters.some((c) => c?.archetype === 'audience');
   const hasVault = charters.some((c) => c?.archetype === 'vault');
 
+  const leadRows = ((leadsQ as { data?: { created_at: string }[] | null }).data ?? []);
+  const visitRows = ((visitsQ as { data?: { created_at: string }[] | null }).data ?? []);
+
   return {
     worldTitle: worldQ.data.title as string,
     objective: (missionQ.data?.objective as string | undefined) ?? null,
@@ -116,11 +123,15 @@ async function gather(worldId: string): Promise<Gathered | null> {
     approvalsDecided: worldApprovals.filter((a) => a.status === 'approved').length,
     pendingApprovals: pending.length,
     oldestPendingHours,
+    leads: leadRows.length,
+    visits: visitRows.length,
     signals: {
       events7d: worldEvents.filter((e) => within7(e.occurred_at)).length,
       artifacts7d: arts.filter((a) => within7(a.created_at)).length,
       sends7d: msgs.filter((m) => within7(m.sent_at)).length,
       replies7d: reps.filter((r) => within7(r.received_at)).length,
+      leads7d: leadRows.filter((l) => within7(l.created_at)).length,
+      visits7d: visitRows.filter((v) => within7(v.created_at)).length,
       intelAgeDays,
     },
     audienceEmpty: hasAudience && (contactsQ.count ?? 0) === 0,
@@ -190,7 +201,7 @@ export async function reflectOnWorld(worldId: string): Promise<ReflectResult> {
   const context = buildReflectionContext({
     worldTitle: g.worldTitle, objective: g.objective,
     events: g.events, artifacts: g.artifacts,
-    results: { sent: g.sent, replies: g.replies, approvals: g.approvalsDecided },
+    results: { sent: g.sent, replies: g.replies, approvals: g.approvalsDecided, leads: g.leads, visits: g.visits },
     state,
   });
 

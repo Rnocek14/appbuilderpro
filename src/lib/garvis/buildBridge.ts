@@ -60,10 +60,14 @@ export async function buildFromWorld(worldId: string, clusterId: string): Promis
   for (const l of (reflection?.learned ?? []).slice(0, 4)) if (l?.text) knowledge.push(`Learned: ${l.text}`);
   if (intel?.recommendation) knowledge.push(`Direction: ${intel.recommendation}`);
 
+  // G5: provision (or reuse) the world's site channel so the generated site reports visits and
+  // leads back to THIS world. Fail-soft — a channel miss builds the old store-only form.
+  const ingest = await ensureSiteChannel(worldId).catch(() => null);
+
   const compiled = compileWebsiteBrief({
     worldTitle: world.title as string,
     objective: (intel?.objective as string | null) ?? null,
-    dna, ctx, brand, photos, knowledge,
+    dna, ctx, brand, photos, knowledge, ingest,
   });
 
   const handoff: WorldBuildHandoff = {
@@ -76,6 +80,24 @@ export async function buildFromWorld(worldId: string, clusterId: string): Promis
     localStorage.setItem(KEY_WORLD, JSON.stringify(handoff));
   } catch { /* prompt-only seed still works */ }
   return '/new?from=world';
+}
+
+/** G5: one write-only site channel per world. The channel id is the ingest token the generated
+ *  site embeds; reuse an existing unrevoked channel so rebuilding never mints token churn. */
+async function ensureSiteChannel(worldId: string): Promise<{ endpoint: string; token: string } | null> {
+  const base = (import.meta.env?.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '');
+  if (!base) return null;
+  const endpoint = `${base}/functions/v1/site-events`;
+  const { data: existing } = await supabase.from('site_channels')
+    .select('id').eq('world_id', worldId).is('revoked_at', null).limit(1).maybeSingle();
+  if (existing) return { endpoint, token: (existing as { id: string }).id };
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) return null;
+  const { data: created, error } = await supabase.from('site_channels')
+    .insert({ owner_id: uid, world_id: worldId }).select('id').single();
+  if (error || !created) return null;
+  return { endpoint, token: (created as { id: string }).id };
 }
 
 export function readWorldHandoff(): WorldBuildHandoff | null {
@@ -112,6 +134,12 @@ export async function bindProjectToWorld(projectId: string, handoff: WorldBuildH
   }
 
   await supabase.from('projects').update({ world_id: handoff.worldId }).eq('id', projectId);
+
+  // G5: stamp this project onto the world's site channel so events are attributable to the app
+  // that produced them (the channel was provisioned at brief time; fail-soft if absent).
+  await supabase.from('site_channels')
+    .update({ project_id: projectId })
+    .eq('world_id', handoff.worldId).is('revoked_at', null).is('project_id', null);
 
   await supabase.from('knowledge_artifacts').upsert({
     owner_id: uid, cluster_id: handoff.clusterId, slug: 'website-app',

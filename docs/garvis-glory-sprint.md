@@ -84,6 +84,30 @@ the DNA tokens and nothing else — not the photos, not prior research.
   when AI/search is down — and that fallback is tagged as context, not activity, so it never fakes
   momentum. Free-form generation runs through the plain-completion seam, not the decision seam.
 
+## 6. G5 — the sensory organ (instrumentation: the system finally SEES results)
+
+**Before:** the loop's back half was blind — websites were one-way, mail untraceable, and
+reflection could only reason over sends/replies. **Now the world sees what happens:**
+- **`site-events` ingest** (public endpoint, `--no-verify-jwt`): generated sites report visits and
+  lead-form submissions using a write-only channel token (`site_channels` — unguessable, revocable,
+  maps server-side to owner+world; knowing it lets you POST events, never read). Size caps, email
+  validation, one event per request.
+- **The brief wires it automatically**: `buildFromWorld` provisions (or reuses) the world's channel
+  and the LEAD FORM section now instructs the generated site to POST leads + a visit ping with the
+  exact endpoint/token — including `?src=` attribution passthrough. Un-instrumented worlds keep the
+  old store-only form; "not instrumented" is a state, never a fake zero.
+- **Leads are first-class**: a submission with a real email becomes a `leads` row AND links-or-creates
+  a contact (select-first — an existing contact's email_status, including unsubscribed, is NEVER
+  modified). A new lead fires the top-ranked waking move — "they asked, answer while it's warm" —
+  and the LeadsPanel in every audience area shows name/message/source with honest status transitions.
+- **Attribution closes the mail loop**: the postcard QR now encodes `?src=postcard` (printed line
+  stays clean), the site passes it through, and the ledger's new **Results by channel** table shows
+  Email sent/replies · Mail pieces mailed / QR visits+leads · Website visits/leads — every number a
+  count of rows, nothing modeled.
+- **The learning organs feed on it**: `leads7d`/`visits7d` join MomentumSignals (a lead = surging,
+  lead-first evidence; visits alone never claim surging), and reflection's results line now carries
+  visits + leads — Adaptive Operation finally has cause-and-effect to stand on.
+
 ## The end-to-end path, now real
 
 Scan a segment → **find the prospect's email on their own site** → add to audience → generate copy in

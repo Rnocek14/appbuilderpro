@@ -6,7 +6,7 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn,
 } from './nextMove';
 import { reflectionDue } from './worldIntel';
@@ -46,7 +46,7 @@ export interface RankedMoves {
 /** ONE Next Move engine, two altitudes: the waking moment consumes all of this; the System
  *  altitude scopes `moves` to its world (comets) via movesForWorld(). Never fork the ranking. */
 export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
-  const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ] = await Promise.all([
+  const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ, leadsQ] = await Promise.all([
     supabase.from('approvals').select('id, kind, title, created_at').eq('status', 'pending').limit(50),
     supabase.from('replies').select('id, from_address, subject, classification, received_at, campaign_id').order('received_at', { ascending: false }).limit(25),
     // 120 matches worldIntelRun.gather — the waking nudge and the world page must count the
@@ -56,6 +56,8 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     supabase.from('outreach_campaigns').select('id, world_id, state, sequence_stopped').limit(200),
     supabase.from('knowledge_clusters').select('id, world_id, title, charter').not('charter', 'is', null).limit(300),
     supabase.from('garvis_missions').select('id, world_id, subject, status, updated_at').eq('status', 'review').order('updated_at', { ascending: false }).limit(10),
+    // G5: NEW inbound leads from the generated sites (table may pre-date app_0036 — errors → []).
+    supabase.from('leads').select('id, world_id, name, email, message, source, created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(20),
   ]);
 
   const approvals = approvalsQ.data ?? [];
@@ -206,6 +208,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
   }));
 
   const moves = rankMoves([
+    ...collectLeads(((leadsQ.data ?? []) as { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }[])),
     ...collectDrafts(draftsIn),
     ...collectWorldIntel(intelMoves),
     ...collectReplies(replies.map((r) => ({

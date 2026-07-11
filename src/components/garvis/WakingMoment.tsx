@@ -12,6 +12,7 @@ import { loadWakingDigest, dismissMove, markSeen, type WakingDigest } from '../.
 import type { NextMove } from '../../lib/garvis/nextMove';
 
 const KIND_DOT: Record<NextMove['kind'], string> = {
+  lead_waiting: 'bg-forge-ok',
   reply_unanswered: 'bg-forge-ok',
   approval_waiting: 'bg-forge-warn',
   followup_staged: 'bg-forge-ember',

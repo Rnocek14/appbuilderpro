@@ -30,6 +30,20 @@ const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000).toISOStr
     const m = momentumFrom({ events7d: 0, artifacts7d: 0, sends7d: 0, replies7d: 0 });
     return m.label === 'dormant' && m.evidence === 'no activity this week';
   })());
+  // G5: inbound demand is the strongest signal, and its evidence leads.
+  check('a lead → surging, lead-first evidence', (() => {
+    const m = momentumFrom({ events7d: 0, artifacts7d: 0, sends7d: 0, replies7d: 0, leads7d: 1, visits7d: 3 });
+    return m.label === 'surging' && m.evidence.startsWith('1 lead');
+  })());
+  check('site visits alone → steady/slowing (never surging without a human signal)', (() => {
+    const a = momentumFrom({ events7d: 0, artifacts7d: 0, sends7d: 0, replies7d: 0, visits7d: 12 });
+    const b = momentumFrom({ events7d: 0, artifacts7d: 0, sends7d: 0, replies7d: 0, visits7d: 2 });
+    return a.label === 'steady' && a.evidence.includes('12 site visits') && b.label === 'slowing';
+  })());
+  check('un-instrumented worlds (no leads/visits fields) behave exactly as before', (() => {
+    const m = momentumFrom({ events7d: 6, artifacts7d: 0, sends7d: 0, replies7d: 0 });
+    return m.label === 'steady' && !m.evidence.includes('lead') && !m.evidence.includes('visit');
+  })());
 }
 
 // 2. Living State: deterministic, every blocker/risk carries evidence by construction.

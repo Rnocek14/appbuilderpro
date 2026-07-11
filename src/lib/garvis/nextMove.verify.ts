@@ -6,7 +6,7 @@
 
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals,
 } from './nextMove';
 
@@ -29,6 +29,19 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   check('replies: only positive without a next touch', replies.length === 1 && replies[0].key === 'reply:r1');
   check('replies: why carries the quoted evidence', replies[0].why.includes('"interested"') && replies[0].why.includes('no next touch'));
   check('replies: routes to the world', replies[0].action.route === '/garvis/webs/w1');
+
+  // G5: a website lead is inbound demand — one move per human, evidence quoted, top-ranked.
+  const leads = collectLeads([
+    { id: 'l1', world_id: 'w1', name: 'Dana', email: 'dana@x.co', message: 'Do you take commissions?', source: 'postcard-qr', created_at: hoursAgo(1) },
+    { id: 'l2', world_id: 'w1', name: null, email: 'sam@y.co', message: null, source: 'website', created_at: hoursAgo(3) },
+  ]);
+  check('leads: one move per lead, keyed by id', leads.length === 2 && leads[0].key === 'lead:l1' && leads[1].key === 'lead:l2');
+  check('leads: why quotes the message + attribution', leads[0].why.includes('commissions') && leads[0].why.includes('postcard-qr'));
+  check('leads: nameless lead falls back to email, routes to the world', leads[1].title.includes('sam@y.co') && leads[1].action.route === '/garvis/webs/w1');
+  check('leads: rank with warm replies at the very top', (() => {
+    const ranked = rankMoves([...replies, ...leads], NOW, {});
+    return ranked[0].kind === 'lead_waiting' || ranked[0].kind === 'reply_unanswered';
+  })());
 
   const approvals = collectApprovals([
     { id: 'a1', kind: 'send_email', title: 'Touch 1', created_at: hoursAgo(5) },

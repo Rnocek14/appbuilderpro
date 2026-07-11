@@ -29,6 +29,9 @@ export interface WebsiteBriefInput {
   /** What the world has LEARNED — research brief titles, audience findings, reflection lessons —
    *  so the first generation reflects real work, not just the DNA. Each a short line. */
   knowledge?: string[];
+  /** G5 instrumentation: when present, the generated site reports visits + lead submissions back
+   *  to Garvis (endpoint + write-only channel token). Absent → the old store-only form stands. */
+  ingest?: { endpoint: string; token: string } | null;
 }
 
 export interface WebsiteBrief { prompt: string; brief: string; heroCandidates: WebsitePhoto[] }
@@ -94,12 +97,30 @@ export function compileWebsiteBrief(input: WebsiteBriefInput, budget = 9000): We
     '- Contact/Inquiry: the lead form (below).',
   ].join('\n'));
 
-  sections.push([
-    'LEAD FORM (inquiry):',
-    '- Fields: name, email, project type, space/location, budget range (optional), message.',
-    '- STORE submissions in the app\'s backend and show a warm confirmation. The form must NOT',
-    '  send email or contact anyone — outbound stays behind the owner\'s approval queue.',
-  ].join('\n'));
+  if (input.ingest) {
+    sections.push([
+      'LEAD FORM (inquiry) — WIRED TO THE OWNER\'S SYSTEM (implement exactly):',
+      '- Fields: name, email, project type, space/location, budget range (optional), message.',
+      '- On submit, POST JSON to the ingest endpoint below (and ALSO keep a local copy as fallback),',
+      '  then show a warm confirmation. The form must NOT send email or contact anyone directly.',
+      `- Endpoint: ${input.ingest.endpoint}`,
+      '- Submit body: {"token":"' + input.ingest.token + '","kind":"lead","path":location.pathname,',
+      '  "source":new URLSearchParams(location.search).get("src")||undefined,',
+      '  "lead":{"name":...,"email":...,"phone":...,"message":...}}',
+      '- ALSO, once per page load, POST a visit ping: {"token":"' + input.ingest.token + '","kind":"visit",',
+      '  "path":location.pathname,"source":new URLSearchParams(location.search).get("src")||undefined}',
+      '  (fire-and-forget; never block rendering; swallow errors silently).',
+      '- The ?src= query param is campaign attribution (postcard QR links carry ?src=postcard) —',
+      '  always pass it through when present.',
+    ].join('\n'));
+  } else {
+    sections.push([
+      'LEAD FORM (inquiry):',
+      '- Fields: name, email, project type, space/location, budget range (optional), message.',
+      '- STORE submissions in the app\'s backend and show a warm confirmation. The form must NOT',
+      '  send email or contact anyone — outbound stays behind the owner\'s approval queue.',
+    ].join('\n'));
+  }
 
   if (input.photos.length) {
     const imgs = input.photos.slice(0, 40).map((p) => `- ${p.name}: ${p.url}${p.caption ? ` (alt: ${p.caption.slice(0, 140)})` : ''}`);

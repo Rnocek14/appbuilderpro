@@ -21,6 +21,7 @@ import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit,
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, maybeReflect, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld } from '../lib/garvis/buildBridge';
 import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
+import { worldResults, setLeadStatus, type ChannelResults, type LeadRow } from '../lib/garvis/resultsRun';
 import type { ResearchPlan } from '../lib/garvis/marketIntel';
 import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
@@ -383,7 +384,16 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* G4 — Market Intelligence: who plausibly needs this business, reasoned from the DNA,
           searched read-only, fit-labeled with grounded reasons. Contact = approvals, always. */}
       {cluster.charter?.archetype === 'audience' && (
-        <ProspectFinderPanel worldId={worldId} />
+        <>
+          <LeadsPanel worldId={worldId} />
+          <ProspectFinderPanel worldId={worldId} />
+        </>
+      )}
+
+      {/* G5 — the honest per-channel results: every number a count of rows; channels that
+          aren't instrumented say so instead of showing a zero pretending to be knowledge. */}
+      {cluster.charter?.archetype === 'ledger' && (
+        <ResultsPanel worldId={worldId} />
       )}
 
       {/* Direct mail as a real product: a print-ready 6×9 postcard built from this world's own
@@ -854,6 +864,129 @@ function ProspectFinderPanel({ worldId }: { worldId: string }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** G5 — inbound leads from the generated website: real humans who submitted the form. Each is
+ *  already linked (or matched) to a contact by the ingest function, so follow-up is one queue
+ *  tool away. Status transitions are the operator's honest report of what they actually did. */
+function LeadsPanel({ worldId }: { worldId: string }) {
+  const { toast } = useToast();
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [instrumented, setInstrumented] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void worldResults(worldId).then((r) => {
+      if (!live) return;
+      setLeads(r.leadsList);
+      setInstrumented(r.site !== null);
+    }).catch(() => { if (live) setInstrumented(false); });
+    return () => { live = false; };
+  }, [worldId]);
+
+  const mark = async (row: LeadRow, status: LeadRow['status']) => {
+    try {
+      await setLeadStatus(row.id, status);
+      setLeads((p) => status === 'spam' ? p.filter((l) => l.id !== row.id) : p.map((l) => (l.id === row.id ? { ...l, status } : l)));
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update.'); }
+  };
+
+  if (instrumented === null) return null;
+  if (!instrumented && !leads.length) return null;  // no site channel yet — the finder panel below stands alone
+
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Leads — from your website</h3>
+      {leads.length === 0 ? (
+        <p className="mt-1 text-xs text-forge-dim">The site is instrumented and reporting. No form submissions yet — every one will land here (and in your waking moment) the moment it happens.</p>
+      ) : (
+        <ul className="mt-2 space-y-1.5">
+          {leads.slice(0, 12).map((l) => (
+            <li key={l.id} className="rounded-lg border border-forge-border px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{l.name || l.email}</span>
+                {l.source !== 'website' && <span className="rounded border border-forge-ember/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-forge-ember">{l.source}</span>}
+                <span className="text-[10px] text-forge-dim">{timeAgo(l.created_at)}</span>
+                {l.status === 'new' ? (
+                  <>
+                    <button onClick={() => void mark(l, 'contacted')} className="text-[11px] text-forge-ok hover:underline">mark answered</button>
+                    <button onClick={() => void mark(l, 'spam')} className="text-[11px] text-forge-dim hover:text-forge-warn">spam</button>
+                  </>
+                ) : (
+                  <span className="text-[10px] uppercase tracking-wide text-forge-dim">{l.status}</span>
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-forge-dim">{l.email}{l.phone ? ` · ${l.phone}` : ''}</p>
+              {l.message && <p className="mt-0.5 text-xs text-forge-ink/80">&ldquo;{l.message.slice(0, 200)}&rdquo;</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** G5 — per-channel results. Counts of rows, nothing interpreted; "not instrumented" is a state,
+ *  never a zero pretending to be knowledge. This table is what Adaptive Operation will stand on. */
+function ResultsPanel({ worldId }: { worldId: string }) {
+  const [res, setRes] = useState<ChannelResults | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void worldResults(worldId).then((r) => { if (live) setRes(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [worldId]);
+
+  if (!res) return null;
+  const rows: { channel: string; out: string; back: string }[] = [
+    {
+      channel: 'Email',
+      out: res.email ? `${res.email.sent} sent` : 'no campaigns yet',
+      back: res.email ? `${res.email.replies} repl${res.email.replies === 1 ? 'y' : 'ies'}` : '—',
+    },
+    {
+      channel: 'Direct mail',
+      out: res.mail ? `${res.mail.pieces} pieces (${res.mail.batches} batch${res.mail.batches === 1 ? '' : 'es'})` : 'nothing logged yet',
+      back: res.site
+        ? `${res.site.bySource.find((s) => s.source === 'postcard')?.visits ?? 0} QR visits · ${res.site.bySource.find((s) => s.source === 'postcard')?.leads ?? 0} leads`
+        : 'site not instrumented',
+    },
+    {
+      channel: 'Website',
+      out: res.site ? `${res.site.visits} visits (${res.site.visits7d} this week)` : 'not instrumented — build/rebuild the site to wire reporting',
+      back: res.site ? `${res.site.leads} lead${res.site.leads === 1 ? '' : 's'} (${res.site.leads7d} this week)` : '—',
+    },
+  ];
+
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Results by channel</h3>
+      <p className="mt-0.5 text-[11px] text-forge-dim">Every number is a count of real rows — sends, batches, visits, leads. Nothing modeled, nothing estimated.</p>
+      <table className="mt-2 w-full text-xs">
+        <thead>
+          <tr className="text-left text-[10px] uppercase tracking-wide text-forge-dim">
+            <th className="py-1 pr-2 font-medium">Channel</th>
+            <th className="py-1 pr-2 font-medium">Went out</th>
+            <th className="py-1 font-medium">Came back</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.channel} className="border-t border-forge-border/60">
+              <td className="py-1.5 pr-2 text-forge-ink">{r.channel}</td>
+              <td className="py-1.5 pr-2 text-forge-dim">{r.out}</td>
+              <td className="py-1.5 text-forge-dim">{r.back}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {res.site && res.site.bySource.length > 0 && (
+        <p className="mt-2 text-[11px] text-forge-dim">
+          Visit sources: {res.site.bySource.slice(0, 5).map((s) => `${s.source} ${s.visits}v/${s.leads}l`).join(' · ')}
+        </p>
       )}
     </div>
   );

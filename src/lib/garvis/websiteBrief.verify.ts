@@ -52,6 +52,14 @@ const FULL: WebsiteBriefInput = {
   check('no knowledge → no learned section (never invented)', !compileWebsiteBrief(FULL).brief.includes('HAS LEARNED'));
 }
 {
+  // G5: an instrumented brief wires the form + visit ping to the real endpoint with the token.
+  const wired = compileWebsiteBrief({ ...FULL, ingest: { endpoint: 'https://x.supabase.co/functions/v1/site-events', token: 'tok-123' } });
+  check('ingest brief carries the endpoint + token + visit ping + src passthrough',
+    wired.brief.includes('site-events') && wired.brief.includes('tok-123') && wired.brief.includes('"kind":"visit"') && wired.brief.includes('src'));
+  check('ingest form still never sends email directly', wired.brief.includes('must NOT send email'));
+  check('no ingest → the store-only form stands (no phantom endpoint)', !compileWebsiteBrief(FULL).brief.includes('site-events'));
+}
+{
   const bare = compileWebsiteBrief({ worldTitle: 'X', objective: null, dna: null, ctx: null, brand: null, photos: [] });
   check('a bare world omits unknown sections instead of inventing them', !bare.brief.includes('WORLD DNA') && !bare.brief.includes('BRAND:'));
   check('no photos → explicit image-slot instruction, still no stock', bare.brief.includes('none uploaded yet') && bare.brief.includes('NO stock'));

@@ -19,6 +19,7 @@
 // ---------------------------------------------------------------------------
 
 export type MoveKind =
+  | 'lead_waiting'       // a human submitted the site's form — inbound demand, answer it
   | 'reply_unanswered'   // the highest-value event in the system
   | 'approval_waiting'   // the user IS the bottleneck
   | 'followup_staged'    // curated drafts ready to queue
@@ -68,6 +69,23 @@ export interface MissionDoneIn { missionId: string; worldId: string | null; subj
 // ---------------------------------------------------------------------------
 
 const short = (s: string | null | undefined, n = 60) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+
+export interface LeadRowIn { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }
+
+/** G5: a NEW lead from the generated site — a human asked to be answered. One move per lead
+ *  (each is a distinct person, unlike the approvals queue which is one decision surface). */
+export function collectLeads(rows: LeadRowIn[]): NextMove[] {
+  return rows.map((r) => ({
+    key: `lead:${r.id}`,
+    kind: 'lead_waiting' as const,
+    title: `${short(r.name, 40) || short(r.email, 40)} asked about the business — answer while it's warm`,
+    why: `They submitted the site's form${r.source !== 'website' ? ` (via ${r.source})` : ''}${r.message ? `: "${short(r.message, 60)}"` : ''}. Inbound interest is the strongest signal in the system.`,
+    action: { label: 'Open the lead', route: `/garvis/webs/${r.world_id}` },
+    score: 0,
+    bornAt: r.created_at,
+    expected: { text: 'Inquiries answered the same day convert far better than ones answered next week.', basis: 'heuristic' as const },
+  }));
+}
 
 export function collectReplies(rows: ReplyRowIn[]): NextMove[] {
   return rows
@@ -227,6 +245,7 @@ export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
 // ---------------------------------------------------------------------------
 
 const BASE_VALUE: Record<MoveKind, number> = {
+  lead_waiting: 100,       // someone ASKED — inbound demand ranks with a warm reply
   reply_unanswered: 100,   // a warm human is worth more than anything else in the system
   approval_waiting: 90,    // the user is the bottleneck
   draft_waiting: 75,       // a designed world waiting on judgment — decide it before it goes stale
