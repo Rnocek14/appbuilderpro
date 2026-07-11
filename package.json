@@ -41,7 +41,8 @@
     "verify:genesis": "tsx src/lib/garvis/genesis.verify.ts",
     "verify:intake": "tsx src/lib/garvis/intake.verify.ts",
     "verify:websitebrief": "tsx src/lib/garvis/websiteBrief.verify.ts",
-    "verify:marketintel": "tsx src/lib/garvis/marketIntel.verify.ts"
+    "verify:marketintel": "tsx src/lib/garvis/marketIntel.verify.ts",
+    "verify:expertise": "tsx src/lib/garvis/expertise.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

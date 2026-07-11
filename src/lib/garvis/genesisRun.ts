@@ -158,7 +158,9 @@ export async function approveDraft(id: string): Promise<WebSummary> {
 
   let summary: WebSummary;
   try {
-    summary = await instantiateWeb(row.template);
+    // The world's own business context rides along so every chartered area is SEEDED with its
+    // expert playbook in this world's voice (born full, not blank).
+    summary = await instantiateWeb(row.template, row.business_context);
   } catch (e) {
     await supabase.from('web_templates').update({ status: 'draft' }).eq('id', id); // release the claim
     throw e;

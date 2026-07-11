@@ -534,6 +534,30 @@ instrumentation rather than guessing.
 Deferred to G4 v2: fetch-url page-deep profiling, portfolio-matched pitch angles, trend
 questions feeding world_intelligence, scan runs >25 prospects behind an approval.
 
+## Expertise packs — SHIPPED (the blank-world problem, closed)
+
+The test: "build a real estate marketing plan for my mom" must arrive WITH the plans — a social
+area with a real 30-day plan, a direct-mail area with a campaign plan and postcard concepts, a
+market-comparison area with the comparison framework — not empty rooms the user has to fill by
+searching. Now it does:
+- **Domain expertise is data** (expertise.ts, 8-check verify): every archetype × flavor resolves
+  to a non-empty expert pack — 30-day social rhythm + post archetypes, direct-mail 40/40/20 plan
+  + 3 postcard concepts, cold/nurture/post-inquiry email cadences, video formats, landing-page
+  structure, market comparison matrix + research checklist, audience segmentation worksheet,
+  pipeline stages, KPI tree, launch checklist, vault checklist. Deterministic — zero AI keys
+  needed; verified exhaustively (every combination, 300+ chars of real structure each).
+- **Worlds are born full**: instantiateWeb seeds every chartered area with its pack (seedWorld,
+  fail-soft, idempotent upsert). Genesis worlds seed in their OWN voice (approveDraft passes the
+  business context through); builtin templates seed with a minimal voice — the title fills
+  {{business_name}} and every unknown token stays visible, marking exactly what Garvis doesn't
+  know yet.
+- **Generators stopped stubbing**: a generator tool with no matching play step now writes the
+  area's expert playbook instead of a "starting point" sentence.
+- **Honesty is in the packs themselves**: every seed is labeled a framework, and wherever a
+  number belongs the text says to fill it from a Market Intelligence scan or the user's records
+  — Garvis never invents figures. The frameworks are expert structure; the DATA still comes from
+  scans, uploads, and results rows.
+
 ## Final principle, restated as an invariant
 
 Genesis generates **data that existing validators accept** — new worlds speak the same seven

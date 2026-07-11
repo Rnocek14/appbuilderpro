@@ -25,6 +25,7 @@ import {
 } from './workweb';
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
 import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail } from './genesis';
+import { expertiseFor } from './expertise';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
 // separate table column (knowledge_clusters.charter). universe.ts's ClusterGraph has no charter
@@ -85,8 +86,11 @@ async function persistCharters(worldId: string, charters: Record<string, Charter
   if (failed) throw new Error(`${failed} charter write(s) failed — the web is partially chartered; open it and retry.`);
 }
 
-/** Create a new work web from a template id. Returns the server world id. */
-export async function instantiateWeb(templateOrId: WebTemplate | string): Promise<WebSummary> {
+/** Create a new work web from a template id. Returns the server world id.
+ *  voiceCtx: the world's own business context (genesis drafts pass theirs) — used to seed every
+ *  chartered area with its expert playbook in the right voice. Builtin templates get a minimal
+ *  context (title only; unknown tokens stay visible — honest about what isn't known yet). */
+export async function instantiateWeb(templateOrId: WebTemplate | string, voiceCtx?: BusinessContext | null): Promise<WebSummary> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
@@ -112,10 +116,13 @@ export async function instantiateWeb(templateOrId: WebTemplate | string): Promis
   if (!worldId) throw new Error('Could not save the web — check your connection and try again.');
 
   await persistCharters(worldId, charters);
+  // BORN FULL, NOT BLANK: every chartered area starts with its expert playbook (fail-soft —
+  // a seeding hiccup never fails creation; the packs regenerate from any area's tools).
+  const seeded = await seedWorld(worldId, voiceCtx ?? minimalContext(t.title));
   await recordMindEvent(uid, {
     event_type: 'note', source: 'workweb',
-    subject: `Created work web "${t.title}" from template ${t.id}`,
-    payload: { world_id: worldId, template: t.id },
+    subject: `Created work web "${t.title}" from template ${t.id}${seeded ? ` — seeded ${seeded} playbook doc${seeded === 1 ? '' : 's'}` : ''}`,
+    payload: { world_id: worldId, template: t.id, seeded },
   });
   return { worldId, title: t.title, templateId: t.id };
 }
@@ -262,6 +269,45 @@ async function writeArtifacts(ownerId: string, clusterId: string, arts: PlayArti
 }
 
 // ---------------------------------------------------------------------------
+// Born full, not blank — seed every chartered area with its expert playbook
+// ---------------------------------------------------------------------------
+
+/** The voice a world speaks with when it has no synthesized business context (builtin templates):
+ *  the title fills {{business_name}}; every other token stays visibly unmerged, marking exactly
+ *  what Garvis doesn't know yet — never a guess, never another world's context. */
+function minimalContext(title: string): BusinessContext {
+  return { business_name: title, principal: null, craft: null, offerings: [], audience: null, locale: null, links: {}, tone: null };
+}
+
+/** Write the expert playbook pack (expertise.ts) into every chartered area of a world: the
+ *  30-day social plan, the direct-mail campaign plan + concepts, the market comparison framework,
+ *  the KPI tree — deterministic (zero AI keys), token-merged into the world's own voice, and
+ *  honestly labeled as frameworks that defer real numbers to scans/records.
+ *  FAIL-SOFT by design: a seeding failure never fails world creation — the world just starts
+ *  emptier, and any area's generator tool writes the same pack on demand. Idempotent (upsert on
+ *  cluster_id+slug), so re-running never duplicates. */
+export async function seedWorld(worldId: string, ctx: BusinessContext): Promise<number> {
+  try {
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) return 0;
+    const { data: rows } = await supabase.from('knowledge_clusters')
+      .select('id, charter').eq('world_id', worldId).not('charter', 'is', null);
+    let seeded = 0;
+    for (const r of rows ?? []) {
+      const charter = parseCharter((r as { charter: unknown }).charter);
+      if (!charter) continue;
+      const arts: PlayArtifact[] = expertiseFor(charter.archetype, charter.flavor)
+        .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
+      seeded += await writeArtifacts(uid, (r as { id: string }).id, arts);
+    }
+    return seeded;
+  } catch {
+    return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Run a play
 // ---------------------------------------------------------------------------
 
@@ -377,6 +423,14 @@ export async function runTool(
           const r = await runPlayData(worldId, { ...voice.play, steps: [dataStep] }, voice.ctx);
           return { ok: r.artifactCount > 0, message: r.artifactCount > 0 ? `Generated ${r.artifactCount} artifact${r.artifactCount === 1 ? '' : 's'} into ${cluster.title}.` : 'Nothing generated.', artifacts: r.artifactCount };
         }
+        // No matching play step → the area's EXPERT PLAYBOOK, in this world's voice — never a
+        // vague stub. (Seeded at creation too; upsert by slug makes this a refresh, not a dupe.)
+        if (cluster.charter) {
+          const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor)
+            .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, voice.ctx!) }));
+          const n = await writeArtifacts(uid, cluster.id, arts);
+          return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}) in this world's voice.` : 'Nothing generated.', artifacts: n };
+        }
         const framed: PlayArtifact = {
           slug: `starter-${slugify(toolId)}`, kind: 'doc',
           title: `${cluster.title} — starting point`,
@@ -396,6 +450,16 @@ export async function runTool(
         void costUsd;
         const n = await writeArtifacts(uid, cluster.id, arts);
         return { ok: n > 0, message: n > 0 ? `Generated ${n} artifact${n === 1 ? '' : 's'} into ${cluster.title}.` : 'Nothing generated.', artifacts: n };
+      }
+      // Builtin world, no matching play → the expert playbook with a minimal voice (world title
+      // fills {{business_name}}; other tokens stay visible — honest about what isn't known yet).
+      if (cluster.charter) {
+        const { data: w } = await supabase.from('knowledge_worlds').select('title').eq('id', worldId).maybeSingle();
+        const ctx = minimalContext(((w as { title?: string } | null)?.title) ?? cluster.title);
+        const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor)
+          .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
+        const n = await writeArtifacts(uid, cluster.id, arts);
+        return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}).` : 'Nothing generated.', artifacts: n };
       }
       const starter: PlayArtifact = {
         slug: `starter-${slugify(toolId)}`, kind: 'doc',
