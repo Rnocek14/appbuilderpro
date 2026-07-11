@@ -40,6 +40,8 @@ const FUNCTIONS: { name: string; group: string }[] = [
   { name: 'render-video', group: 'Video' },
   { name: 'garvis-pulse', group: 'Heartbeat (works while you sleep)' },
   { name: 'garvis-worker', group: 'Heartbeat (works while you sleep)' },
+  { name: 'ads-watch', group: 'Heartbeat (works while you sleep)' },
+  { name: 'outreach-reactivate', group: 'Heartbeat (works while you sleep)' },
 ];
 
 /** OPTIONS-probe one function. 200 → deployed; 404 → not deployed; other → error. */

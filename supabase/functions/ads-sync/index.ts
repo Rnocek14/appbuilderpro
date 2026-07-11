@@ -125,14 +125,27 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   try {
-    const authClient = createClient(
-      Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
-    );
-    const { data: { user } } = await authClient.auth.getUser();
-    if (!user) return json({ error: 'Unauthorized' }, 401);
+    const body = (await req.json().catch(() => ({}))) as { mode?: string; provider?: string; world_id?: string; owner_id?: string };
 
-    const body = (await req.json().catch(() => ({}))) as { mode?: string; provider?: string; world_id?: string };
+    // TWO callers, one sync path:
+    //  1) the OWNER (browser) — Authorization JWT; syncs their own connection.
+    //  2) the WATCHDOG worker (ads-watch, overnight refresh) — x-worker-secret + owner_id; the
+    //     owner must actually HAVE a connections row (verified below), and metering still applies.
+    const workerSecret = Deno.env.get('WORKER_SECRET');
+    const byWorker = !!workerSecret && req.headers.get('x-worker-secret') === workerSecret;
+    let uid: string;
+    if (byWorker) {
+      if (!body.owner_id) return json({ error: 'owner_id required for worker sync.' }, 400);
+      uid = body.owner_id;
+    } else {
+      const authClient = createClient(
+        Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
+      );
+      const { data: { user } } = await authClient.auth.getUser();
+      if (!user) return json({ error: 'Unauthorized' }, 401);
+      uid = user.id;
+    }
 
     if (body.mode === 'status') {
       return json({
@@ -151,7 +164,7 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const { data: conn } = await admin.from('connections')
-      .select('id, config').eq('owner_id', user.id).eq('provider', provider).maybeSingle();
+      .select('id, config').eq('owner_id', uid).eq('provider', provider).maybeSingle();
     const accountId = String((conn?.config as Record<string, unknown> | null)?.ad_account_id ?? (conn?.config as Record<string, unknown> | null)?.customer_id ?? '').trim();
     if (!accountId) return json({ available: true, needsConfig: true, message: 'Enter your account id first.' });
 
@@ -161,7 +174,7 @@ Deno.serve(async (req) => {
     };
 
     // CREDIT GATE — a sync spends operator API quota, so it meters the caller's credits (audit M2).
-    try { await checkCredits(admin, user.id, 'ads_sync'); }
+    try { await checkCredits(admin, uid, 'ads_sync'); }
     catch (e) { if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402); throw e; }
 
     let rows: MetricRow[];
@@ -170,13 +183,13 @@ Deno.serve(async (req) => {
     } catch (e) {
       return await fail(e instanceof Error ? e.message : String(e));
     }
-    await spendCredits(admin, user.id, { costUsd: 0.02, kind: 'ads_sync', provider });
+    await spendCredits(admin, uid, { costUsd: 0.02, kind: 'ads_sync', provider });
 
     // Upsert — idempotent re-syncs; world stamped on insert, metrics refreshed on conflict.
     let upserts = 0;
     for (let i = 0; i < rows.length; i += 200) {
       const batch = rows.slice(i, i + 200).map((r) => ({
-        owner_id: user.id, world_id: body.world_id ?? null, provider,
+        owner_id: uid, world_id: body.world_id ?? null, provider,
         date: r.date, campaign_name: r.campaign_name,
         spend_usd: r.spend_usd, impressions: r.impressions, clicks: r.clicks,
       }));
