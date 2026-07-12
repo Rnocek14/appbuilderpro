@@ -352,6 +352,7 @@ const SPARKS: Record<string, string[]> = {
   ads: ['lead with the strongest proof point', 'speak to the skeptic', 'one sharp offer, nothing else', 'local-first angle'],
   video: ['30-second transformation cut', 'day-in-the-life', 'answer the #1 question on camera', 'before/after with captions only'],
   direct_mail: ['the neighbor story', 'lead with the offer', 'a question they already ask', 'why this season matters'],
+  feature_lab: ['for the power user', 'fix the first five minutes', 'what makes people come back daily', 'steal the best idea from an adjacent product', 'smallest shippable version'],
   default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
 };
 
@@ -366,6 +367,7 @@ function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster:
       case 'social': return 'gen-social';
       case 'video': return 'gen-video-script';
       case 'ads': return 'gen-ads';
+      case 'feature_lab': return 'gen-spec'; // "another take" specs another feature (steer with a concept)
       default: return 'gen-ideas'; // studios without a single generator explore via ideas
     }
   };
@@ -403,9 +405,15 @@ function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster:
         <button onClick={() => void go(generatorFor(cluster.charter?.flavor))} disabled={!!busy} className={btn} title="Regenerate this studio's work — automatically different from your prior takes">
           {busy && busy !== 'gen-ideas' && busy !== 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>🔁</span>} Another take
         </button>
-        <button onClick={() => void go('gen-plan')} disabled={!!busy} className={btn} title="The operator's 90-day business plan — six substantive sections; thin output is rejected, unknowable numbers become [YOU FILL] holes">
-          {busy === 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>📋</span>} Business plan
-        </button>
+        {cluster.charter?.flavor === 'feature_lab' ? (
+          <button onClick={() => void go('gen-spec')} disabled={!!busy} className={btn} title="A full feature spec — problem → v1 scope → success metric → risks; thin output is rejected, platform internals become [YOU FILL] holes">
+            {busy === 'gen-spec' ? <Loader2 size={13} className="animate-spin" /> : <span>📐</span>} Feature spec
+          </button>
+        ) : (
+          <button onClick={() => void go('gen-plan')} disabled={!!busy} className={btn} title="The operator's 90-day business plan — six substantive sections; thin output is rejected, unknowable numbers become [YOU FILL] holes">
+            {busy === 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>📋</span>} Business plan
+          </button>
+        )}
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span className="text-[11px] text-forge-dim/70">Sparks:</span>

@@ -146,5 +146,18 @@ jobs`;
   check('parsePlan flags a missing section', !parsePlan(fullPlan.replace('== RISKS & HONEST UNKNOWNS ==', '== NOPE ==')).ok);
 }
 
+// ---- the product lab: feature specs carry the same anti-thin discipline as plans ----
+{
+  const { parseSpec, SPEC_SECTIONS } = await import('./producersCore');
+  const fullSpec = SPEC_SECTIONS.map((n) => `== ${n} ==\n${'Concrete, platform-specific substance an engineer could act on without guessing. '.repeat(3)}`).join('\n\n');
+  check('parseSpec accepts a substantive spec (all six sections)', parseSpec(fullSpec).ok);
+  const thinSpec = fullSpec.replace(/== SUCCESS METRIC ==\n[^=]+/, '== SUCCESS METRIC ==\nMore engagement.\n');
+  const gate = parseSpec(thinSpec);
+  check('parseSpec rejects a thin section BY NAME', !gate.ok && gate.thin.includes('SUCCESS METRIC'));
+  check('parseSpec flags a missing scope section', !parseSpec(fullSpec.replace('== HOW IT WORKS (V1 SCOPE) ==', '== VIBES ==')).ok);
+  check('spec sections name the product discipline (problem→scope→metric→risks)',
+    SPEC_SECTIONS.includes('THE PROBLEM') && SPEC_SECTIONS.includes('HOW IT WORKS (V1 SCOPE)') && SPEC_SECTIONS.includes('RISKS & OPEN QUESTIONS'));
+}
+
 console.log(`\nproducers.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} producers check(s) failed`);

@@ -20,7 +20,7 @@ import {
   RESEARCH_SYSTEM, SOCIAL_SYSTEM, VIDEO_SYSTEM, ANGLE_SYSTEM, ADS_SYSTEM,
   researchQueries, formatSources, appendSources, parseSocialPosts, postToDetail, researchContext,
   parseAdAssets, isLaunchReady, metaAdDetail, googleAdDetail,
-  steerBlock, IDEAS_SYSTEM, parseIdeas, ideasToDetail, PLAN_SYSTEM, parsePlan,
+  steerBlock, IDEAS_SYSTEM, parseIdeas, ideasToDetail, PLAN_SYSTEM, parsePlan, SPEC_SYSTEM, parseSpec,
   type ResearchSource,
 } from './producersCore';
 
@@ -351,6 +351,7 @@ function ideaFraming(charter: Charter): string {
     case 'social': return 'SOCIAL CONTENT concepts — each idea is a repeatable post format or mini-series, not a single caption.';
     case 'video': return 'SHORT-VIDEO concepts — each idea is a filmable format using the business\'s real photos/settings.';
     case 'ads': return 'PAID-AD concepts — each idea is a campaign concept: the hook, the audience entry point, the landing promise.';
+    case 'feature_lab': return 'PLATFORM FEATURE concepts — each idea is a buildable feature for THIS platform: the user problem it solves, the core interaction in one line, and why this platform specifically wins by having it. Range across power-user tools, onboarding, retention, and integrations — never five variants of one feature.';
     default: return 'MARKETING CAMPAIGN concepts across any channel this business could realistically run.';
   }
 }
@@ -385,6 +386,52 @@ export async function produceIdeas(worldId: string, charter: Charter, opts?: Pro
 // ---------------------------------------------------------------------------
 // 7. The business plan — an operator's plan with a substance gate (never thin)
 // ---------------------------------------------------------------------------
+
+/** FEATURE SPEC (feature_lab studios): "create features for the platform" ends in a document an
+ *  engineer could pick up — grounded in the world's earned research, unknowables as [YOU FILL]
+ *  holes, thin sections rejected BY NAME. Steer it with a direction (usually a concept from
+ *  gen-features) to spec that specific feature. */
+export async function produceFeatureSpec(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
+  const m = await gather(worldId);
+  const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
+  const clusterIds = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+  let findings = '';
+  if (clusterIds.length) {
+    const { data: research } = await supabase.from('knowledge_artifacts')
+      .select('title, detail').in('cluster_id', clusterIds).eq('kind', 'research')
+      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(3);
+    findings = ((research ?? []) as { title: string; detail: string | null }[])
+      .map((r) => `- ${r.title}: ${(r.detail ?? '').replace(/\s+/g, ' ').slice(0, 250)}`).join('\n');
+  }
+  const direction = opts?.direction?.trim();
+  try {
+    const text = await reason(
+      SPEC_SYSTEM,
+      [
+        businessContext(m),
+        findings ? `RESEARCH ON RECORD (ground the spec in this):\n${findings}` : 'RESEARCH: none on record yet — mark user/market claims provisional and name what research would confirm them.',
+        steerBlock(direction),
+      ].filter(Boolean).join('\n\n'),
+      `Write the full feature spec now${direction ? ` for: "${direction.slice(0, 160)}"` : ' for the strongest candidate feature from the context'} — all six == sections ==, each substantive. Plain text.`,
+      3000,
+    );
+    const gate = parseSpec(text);
+    if (gate.ok) {
+      return {
+        artifacts: [{
+          slug: direction ? `feature-spec-${direction.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}` : 'feature-spec', kind: 'doc',
+          title: `Feature spec — ${direction ? direction.slice(0, 60) : 'strongest candidate'}${findings ? '' : ' (user claims provisional)'}`,
+          detail: `${text}\n\n— Every [YOU FILL: …] is a fact only someone inside the platform can supply. Steer with a different concept (from the feature ideas) to spec another one; prior specs are never overwritten.`,
+        }],
+        message: `Wrote the full feature spec${direction ? ` for "${direction.slice(0, 60)}"` : ''} — six substantive sections, internals marked [YOU FILL], never invented.`,
+        grounded: !!findings,
+      };
+    }
+    // ANTI-THIN GATE: a spec with hollow sections is rejected by name, never shipped as "done".
+    return { artifacts: [], message: `The generated spec was too thin in: ${gate.thin.join(', ')} — rejected it rather than ship filler. Press again (steering with one concrete feature concept helps).`, grounded: false };
+  } catch { /* fall through */ }
+  return { artifacts: [], message: 'The spec generator is unavailable right now — press again, or run Research first so the spec has ground to stand on.', grounded: false };
+}
 
 export async function produceBusinessPlan(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
   const m = await gather(worldId);
@@ -437,6 +484,8 @@ export function producerFor(toolId: string): ((worldId: string, charter: Charter
     case 'gen-ads': return produceAds;
     case 'gen-ideas': return produceIdeas;
     case 'gen-plan': return produceBusinessPlan;
+    case 'gen-features': return produceIdeas;      // same engine — the feature_lab charter frames it
+    case 'gen-spec': return produceFeatureSpec;
     default: return null;
   }
 }

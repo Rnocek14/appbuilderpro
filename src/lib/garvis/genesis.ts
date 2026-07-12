@@ -143,7 +143,17 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 11): generic direct_mail email social video landing market brand crm lists ads
+FLAVORS (exactly 12): generic direct_mail email social video landing market brand crm lists ads feature_lab
+
+THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
+- MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
+  studios for the growth channels, launch, loop, ledger, vault.
+- PRODUCT/PLATFORM intent (the user BUILDS or WORKS FOR a product — "I work at X", feature
+  ideation, improving a platform, internal tooling): design a PRODUCT LAB instead — intel
+  (flavor market: the platform, its users, competitors, complaints), one or more studio areas
+  with flavor feature_lab (feature concepts + specs), vault (source material, screenshots,
+  docs), ledger. OMIT audience/launch/loop entirely unless the intent explicitly asks for
+  outreach — a feature lab has nothing to mail.
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",
@@ -164,8 +174,10 @@ HARD RULES:
 - EVERY node gets a rationale entry. At least one omission with its why.
 - DERIVE the structure from the DNA: revenue model shapes the ledger, growth channels shape the
   studios, ideal customers shape the audience areas. Do not emit a generic template.
-- 4-8 play steps, 2-3 emails. Every draft/email uses {{tokens}} for business facts, and ONLY
-  these tokens are legal: {{business_name}} {{principal}} {{craft}} {{audience}} {{offerings}}
+- 4-8 play steps. 2-3 emails WHEN the design includes an audience/launch area; a world with no
+  outreach (e.g. a product lab) gets "emails": [] — never seed sends nobody will make. Every
+  draft/email uses {{tokens}} for business facts, and ONLY these tokens are legal:
+  {{business_name}} {{principal}} {{craft}} {{audience}} {{offerings}}
   {{tone}} {{locale}} — plus {{first_name}} in EMAILS only (resolved per recipient at send time).
   Any other {{token}} does not exist and will show to the user as raw text — if a fact has no
   token and isn't in the DNA, write around it or add a question. NEVER invent specifics.

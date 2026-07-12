@@ -21,7 +21,8 @@
 export type Archetype = 'intel' | 'audience' | 'studio' | 'launch' | 'loop' | 'ledger' | 'vault';
 export type Flavor =
   | 'generic' | 'direct_mail' | 'email' | 'social' | 'video' | 'landing'
-  | 'market' | 'brand' | 'crm' | 'lists' | 'ads';
+  | 'market' | 'brand' | 'crm' | 'lists' | 'ads'
+  | 'feature_lab'; // PRODUCT work: feature ideation + specs for a platform the owner builds or works for
 export type CharterStatus = 'dormant' | 'active' | 'waiting' | 'done';
 
 export interface CharterRef { type: string; id: string; label?: string }
@@ -51,7 +52,7 @@ export function parseCharter(raw: unknown): Charter | null {
 }
 
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab',
 ];
 
 export interface ArchetypeMeta {
@@ -90,7 +91,7 @@ const T = (id: string, label: string, hint: string, kind: ToolKind): WorkTool =>
 // Executable tool ids (workwebRun.ts implements exactly these; verified in workweb.verify.ts).
 export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
-  'gen-email-seq', 'gen-copy', 'gen-ads', 'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
+  'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-features', 'gen-spec', 'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
   'import-docs', 'view-results',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
@@ -102,6 +103,10 @@ const STUDIO_BY_FLAVOR: Partial<Record<Flavor, WorkTool[]>> = {
   landing:     [T('gen-landing', 'Generate landing page', 'A page outline lands here — build it in the Preview Engine.', 'generate')],
   email:       [T('gen-email-seq', 'Generate email sequence', 'A 3-touch sequence lands here as drafts.', 'generate')],
   ads:         [T('gen-ads', 'Generate ad campaign', 'Launch-ready Meta + Google assets — copy at platform limits, keywords, tracking URLs.', 'generate')],
+  feature_lab: [
+    T('gen-features', 'Generate feature concepts', 'Distinct, buildable feature concepts for THIS platform land here — diversity-gated, grounded in the research.', 'generate'),
+    T('gen-spec', 'Write feature spec', 'A full spec (problem → v1 scope → success metric → risks) lands here. Steer it with a direction.', 'generate'),
+  ],
 };
 
 /** The (archetype, flavor) → tools registry. Every chartered cluster gets a non-empty tool list. */

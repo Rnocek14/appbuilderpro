@@ -192,9 +192,12 @@ export const GARVIS_TOOLS: GarvisTool[] = [
   {
     name: 'draft_world',
     description:
-      'Propose a NEW world (business system) from a one-line intent (e.g. "grow my brother\'s art ' +
-      'business"). Written as a DRAFT awaiting the owner\'s approval — it does NOT become a live world ' +
-      'until they review and approve it on the Work Webs page. Same proposal discipline as propose_goal.',
+      'Propose a NEW world from a one-line intent. The design FITS the objective: a growth intent ' +
+      '("grow my brother\'s art business") gets a marketing world; a product intent ("I work for ' +
+      'WealthCharts — explore and create features for the platform") gets a PRODUCT LAB (research + ' +
+      'feature studio, no outreach). Pass the intent faithfully — platform name, the relationship ' +
+      '(works there / owns it), and the goal. Written as a DRAFT awaiting the owner\'s approval — ' +
+      'nothing becomes live until they review it on the Ventures page. Same discipline as propose_goal.',
     inputSchema: { type: 'object', properties: { intent: { type: 'string' } }, required: ['intent'] },
     modes: ['act'],
   },

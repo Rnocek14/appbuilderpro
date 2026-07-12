@@ -354,17 +354,52 @@ Plain text. No markdown headers other than the == sections.`;
 export const PLAN_SECTIONS = ['POSITIONING', 'OFFER & PRICING', 'TOP 3 CHANNEL PLAYS', '90-DAY PLAN', 'KPIS & WEEKLY SCORECARD', 'RISKS & HONEST UNKNOWNS'] as const;
 const PLAN_MIN_SECTION_CHARS = 180; // substance gate — a one-liner section = a thin plan
 
-/** Validate a generated plan: all sections present, each with real substance. `thin` names the
- *  sections that failed, so the caller can reject honestly instead of shipping a thin plan. */
-export function parsePlan(text: string): { ok: boolean; thin: string[] } {
+/** Shared section gate: all headers present, each with real substance. `thin` names failures so
+ *  callers reject honestly instead of shipping a thin document. */
+function gateSections(text: string, sections: readonly string[], minChars: number): { ok: boolean; thin: string[] } {
   const thin: string[] = [];
-  for (let i = 0; i < PLAN_SECTIONS.length; i++) {
-    const name = PLAN_SECTIONS[i];
+  for (let i = 0; i < sections.length; i++) {
+    const name = sections[i];
     const start = text.indexOf(`== ${name} ==`);
     if (start < 0) { thin.push(name); continue; }
-    const next = i + 1 < PLAN_SECTIONS.length ? text.indexOf(`== ${PLAN_SECTIONS[i + 1]} ==`) : text.length;
+    const next = i + 1 < sections.length ? text.indexOf(`== ${sections[i + 1]} ==`) : text.length;
     const body = text.slice(start + name.length + 6, next > start ? next : text.length).trim();
-    if (body.length < PLAN_MIN_SECTION_CHARS) thin.push(name);
+    if (body.length < minChars) thin.push(name);
   }
   return { ok: thin.length === 0, thin };
+}
+
+/** Validate a generated plan: all sections present, each with real substance. */
+export function parsePlan(text: string): { ok: boolean; thin: string[] } {
+  return gateSections(text, PLAN_SECTIONS, PLAN_MIN_SECTION_CHARS);
+}
+
+// ---------------------------------------------------------------------------
+// FEATURE SPEC — the PRODUCT-work document (feature_lab studios). "I work for WealthCharts and
+// want to create features" ends in one of these: a working spec a PM/engineer could pick up,
+// not a vibe. Same anti-thin discipline as the business plan: named sections, substance gates,
+// [YOU FILL] holes instead of invented facts about a platform Garvis hasn't seen.
+// ---------------------------------------------------------------------------
+
+export const SPEC_SYSTEM = `You write a FEATURE SPEC for one specific platform/product — a working
+document a product person could hand to an engineer, not a pitch. Ground every claim in the
+provided context/research about THIS platform and its users; for anything you cannot know (internal
+architecture, existing metrics, team capacity), write [YOU FILL: what's needed] instead of
+inventing it. Propose ONE feature (the direction given, or the strongest candidate from context)
+and spec it. Use EXACTLY these section headers, each with real substance:
+== THE PROBLEM ==
+== WHO IT SERVES ==
+== HOW IT WORKS (V1 SCOPE) ==
+== DATA & DEPENDENCIES ==
+== SUCCESS METRIC ==
+== RISKS & OPEN QUESTIONS ==
+V1 scope means the smallest shippable version — name what is deliberately OUT of v1.
+Plain text. No markdown headers other than the == sections.`;
+
+export const SPEC_SECTIONS = ['THE PROBLEM', 'WHO IT SERVES', 'HOW IT WORKS (V1 SCOPE)', 'DATA & DEPENDENCIES', 'SUCCESS METRIC', 'RISKS & OPEN QUESTIONS'] as const;
+const SPEC_MIN_SECTION_CHARS = 140; // a spec section can be tighter than a plan's, but never a one-liner
+
+/** Validate a generated feature spec — rejection names its thin sections. */
+export function parseSpec(text: string): { ok: boolean; thin: string[] } {
+  return gateSections(text, SPEC_SECTIONS, SPEC_MIN_SECTION_CHARS);
 }
