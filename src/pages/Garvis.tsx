@@ -77,6 +77,11 @@ export default function Garvis() {
   const didLiveness = useRef(false);
   const didAutoRecommend = useRef(false);
 
+  // DESIGN REVIEW (AI audit): this legacy plane used to run discovery + profiling + liveness +
+  // a recommendation model call SILENTLY on mount — spending money for a page whose own banner
+  // says to leave. The engines now arm only on an explicit click; nothing runs for free.
+  const [armed, setArmed] = useState(false);
+
   // Generate a fresh recommendation and (per "auto-do safe things") immediately draft on it.
   const generateRecommendation = async (autoAct: boolean) => {
     setThinking(true);
@@ -124,7 +129,7 @@ export default function Garvis() {
   // ---- AUTO-PILOT: gather data + surface value on load, no buttons required ----
   // Phase 1 — gather: discover repos if the portfolio is empty, then sync live status (throttled).
   useEffect(() => {
-    if (!session || loading || didGather.current) return;
+    if (!session || loading || !armed || didGather.current) return;
     didGather.current = true;
     (async () => {
       try {
@@ -151,7 +156,7 @@ export default function Garvis() {
   // reasons over WHAT EACH PRODUCT IS (purpose/state/blocker/next), not just commit activity. Read-only
   // against GitHub; one lightweight model call per app. Runs once per mount; skips apps already profiled.
   useEffect(() => {
-    if (!session || loading || didProfiles.current || apps.length === 0) return;
+    if (!session || loading || !armed || didProfiles.current || apps.length === 0) return;
     didProfiles.current = true;
     (async () => {
       try {
@@ -173,7 +178,7 @@ export default function Garvis() {
   // Phase 1.6 — sense liveness: ping each deployed app once per mount so the brain has a real,
   // automatic outcome signal (reachable vs not) instead of only self-reported state. Fast, no LLM.
   useEffect(() => {
-    if (!session || loading || didLiveness.current || apps.length === 0) return;
+    if (!session || loading || !armed || didLiveness.current || apps.length === 0) return;
     if (!apps.some((a) => a.deploy_url)) return; // nothing deployed → nothing to ping
     didLiveness.current = true;
     void checkAll(apps);
@@ -182,7 +187,7 @@ export default function Garvis() {
   // Phase 2 — surface a recommendation: show the latest from history instantly; if there's none yet,
   // generate the first one once profiles are ready (so it's grounded) and auto-draft on it.
   useEffect(() => {
-    if (!session || loading || didAutoRecommend.current || apps.length === 0 || advice) return;
+    if (!session || loading || !armed || didAutoRecommend.current || apps.length === 0 || advice) return;
     (async () => {
       // Only adopt a SUCCEEDED prior recommendation; a stale failed run shouldn't block a fresh one.
       const { data } = await supabase
@@ -389,9 +394,16 @@ export default function Garvis() {
           <Sparkles size={16} className="shrink-0 text-forge-ember" />
           <p className="text-sm text-forge-ink/90">
             Garvis has a new front door — <Link to="/garvis/command" className="text-forge-ember hover:underline">Command</Link> wakes with what matters,{' '}
-            <Link to="/garvis/webs" className="text-forge-ember hover:underline">Work Webs</Link> is where missions live, and the{' '}
+            <Link to="/garvis/webs" className="text-forge-ember hover:underline">Ventures</Link> is where missions live, and the{' '}
             <Link to="/garvis/universe" className="text-forge-ember hover:underline">Universe</Link> shows everything in one sky.
           </p>
+          {!armed && (
+            <button onClick={() => setArmed(true)}
+              className="ml-auto shrink-0 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-xs font-medium text-forge-ember hover:bg-forge-ember/20"
+              title="Discover repos, sync status, build missing profiles, ping liveness, and surface a recommendation — runs model calls, so it waits for your click.">
+              Run portfolio sync
+            </button>
+          )}
         </div>
         <div className="mb-6 flex flex-wrap items-center gap-3">
           <Boxes size={20} className="text-forge-ember" />

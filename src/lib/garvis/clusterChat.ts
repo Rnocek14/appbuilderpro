@@ -104,6 +104,8 @@ export interface StudioContextInput {
   files: StudioFileCtx[];
   business?: StudioBusinessCtx | null;   // THE WORLD's identity — the voice every draft speaks in
   openQuestions?: string[];              // what Garvis knows it doesn't know (from world intelligence)
+  beliefs?: string[];                    // evidence-standing Mind beliefs, pre-labeled with verdicts
+                                         // (design review P2: considered opinions were write-only)
   brandKit?: BrandKitCtx | null;
   audience?: { lists: number; contacts: number } | null;
   results?: { sent: number; replies: number; pendingApprovals: number } | null;
@@ -143,6 +145,9 @@ export function compileStudioContext(input: StudioContextInput, budgetBytes = 90
   }
   if (input.openQuestions?.length) {
     head.push(`KNOWN UNKNOWNS (don't guess these — ask or defer): ${input.openQuestions.slice(0, 3).map((q) => oneLine(q).slice(0, 100)).join(' · ')}`);
+  }
+  if (input.beliefs?.length) {
+    head.push(`WHAT THE RECORD BELIEVES (evidence-counted — weigh by verdict, contradict only with reason): ${input.beliefs.slice(0, 4).map((b) => oneLine(b).slice(0, 140)).join(' · ')}`);
   }
   if (input.brandKit) {
     const bk = input.brandKit;

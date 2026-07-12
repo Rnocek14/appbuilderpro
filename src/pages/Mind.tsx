@@ -220,12 +220,13 @@ function EventStream() {
   );
 }
 
-export default function Mind() {
+/** The Mind's content without the shell — mounted by the Memory room (design review P2: Mind +
+ *  Brain are halves of one organ) and by the standalone /garvis/mind route. */
+export function MindContent() {
   const { events, beliefs, decisions, loading } = useMind();
   const open = decisions.filter(isDecisionOpen).length;
 
   return (
-    <AppShell>
       <div className="mx-auto max-w-5xl">
         <div className="mb-5 flex items-center gap-3">
           <Brain size={20} className="text-forge-ember" />
@@ -265,6 +266,13 @@ export default function Mind() {
           </div>
         </div>
       </div>
+  );
+}
+
+export default function Mind() {
+  return (
+    <AppShell>
+      <MindContent />
     </AppShell>
   );
 }

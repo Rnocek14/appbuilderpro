@@ -265,8 +265,14 @@ export async function produceAngle(worldId: string, charter: Charter, opts?: Pro
       900,
     );
     if (angle.length > 100) {
+      // PROVENANCE (design review P2): name the exact findings this synthesis stood on — the
+      // chain existed at generation time and was being discarded. Citations are cheap here and
+      // impossible to reconstruct later.
+      const sources = findings.length
+        ? `\n\n— Sources: ${findings.map((f) => `“${f.title.replace(/\s+/g, ' ').slice(0, 70)}”`).join(' · ')}`
+        : '';
       return {
-        artifacts: [{ slug: 'campaign-angle', kind: 'research', title: findings.length ? 'Campaign angle — grounded in your research' : 'Campaign angle (provisional)', detail: angle }],
+        artifacts: [{ slug: 'campaign-angle', kind: 'research', title: findings.length ? 'Campaign angle — grounded in your research' : 'Campaign angle (provisional)', detail: `${angle}${sources}` }],
         message: findings.length ? 'Synthesized a campaign angle grounded in your research.' : 'Synthesized a provisional angle — run research to confirm it.',
         grounded: findings.length > 0,
       };
@@ -403,12 +409,14 @@ export async function produceFeatureSpec(worldId: string, charter: Charter, opts
   const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
   const clusterIds = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
   let findings = '';
+  let findingTitles: string[] = [];
   if (clusterIds.length) {
     const { data: research } = await supabase.from('knowledge_artifacts')
       .select('title, detail').in('cluster_id', clusterIds).eq('kind', 'research')
       .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(3);
-    findings = ((research ?? []) as { title: string; detail: string | null }[])
-      .map((r) => `- ${r.title}: ${(r.detail ?? '').replace(/\s+/g, ' ').slice(0, 250)}`).join('\n');
+    const rows = (research ?? []) as { title: string; detail: string | null }[];
+    findings = rows.map((r) => `- ${r.title}: ${(r.detail ?? '').replace(/\s+/g, ' ').slice(0, 250)}`).join('\n');
+    findingTitles = rows.map((r) => r.title.replace(/\s+/g, ' ').slice(0, 70));
   }
   const direction = opts?.direction?.trim();
   try {
@@ -424,11 +432,13 @@ export async function produceFeatureSpec(worldId: string, charter: Charter, opts
     );
     const gate = parseSpec(text);
     if (gate.ok) {
+      // PROVENANCE (design review P2): the spec names the findings it stood on, in the artifact.
+      const sources = findingTitles.length ? `\n— Sources: ${findingTitles.map((t) => `“${t}”`).join(' · ')}` : '';
       return {
         artifacts: [{
           slug: direction ? `feature-spec-${direction.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}` : 'feature-spec', kind: 'doc',
           title: `Feature spec — ${direction ? direction.slice(0, 60) : 'strongest candidate'}${findings ? '' : ' (user claims provisional)'}`,
-          detail: `${text}\n\n— Every [YOU FILL: …] is a fact only someone inside the platform can supply. Steer with a different concept (from the feature ideas) to spec another one; prior specs are never overwritten.`,
+          detail: `${text}\n\n— Every [YOU FILL: …] is a fact only someone inside the platform can supply. Steer with a different concept (from the feature ideas) to spec another one; prior specs are never overwritten.${sources}`,
         }],
         message: `Wrote the full feature spec${direction ? ` for "${direction.slice(0, 60)}"` : ''} — six substantive sections, internals marked [YOU FILL], never invented.`,
         grounded: !!findings,

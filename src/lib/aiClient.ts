@@ -1330,6 +1330,147 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
   return { generationId: genId };
 }
 
+/** RESUME A DEAD BUILD (design review P1). The orchestration still lives in the browser tab, so
+ *  closing it mid-generation kills the build — but everything already produced (blueprint, shell,
+ *  pages written so far) is durably in the database. Resume picks up from the record instead of
+ *  starting over: re-derive the page manifest from the saved App.tsx, generate ONLY what's
+ *  missing, then run the same verify + fix + announce tail as a fresh build. Honest by
+ *  construction — it refuses when there's nothing saved to resume from. */
+export async function resumeGeneration(projectId: string): Promise<{ generationId: string }> {
+  const { data: auth } = await supabase.auth.getUser();
+  const userId = auth.user?.id;
+  if (!userId) throw new Error('Not signed in.');
+
+  const { data: bpRow } = await supabase.from('app_blueprints')
+    .select('*').eq('project_id', projectId)
+    .order('version', { ascending: false }).limit(1).maybeSingle();
+  if (!bpRow) throw new Error('Nothing to resume — the build died before the blueprint was saved. Start it again with the same prompt.');
+
+  const { data: fileRows } = await supabase.from('project_files')
+    .select('path, content').eq('project_id', projectId).is('deleted_at', null).limit(1200);
+  const files = new Map(((fileRows ?? []) as { path: string; content: string }[]).map((f) => [f.path, f.content]));
+  const appTsx = files.get('/src/App.tsx') ?? '';
+  if (!appTsx.trim()) throw new Error('The build died before the app shell existed — start it again with the same prompt (nothing else was lost).');
+
+  // Same manifest rule as generation: App.tsx's ./pages imports are authoritative.
+  const pagePaths = new Set<string>();
+  const addSpec = (spec: string) => {
+    if (!spec.startsWith('./pages/')) return;
+    let p = '/src/' + spec.slice(2);
+    if (!/\.(t|j)sx?$/.test(p)) p += '.tsx';
+    pagePaths.add(p);
+  };
+  for (const m of appTsx.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) addSpec(m[1]);
+  for (const m of appTsx.matchAll(/(?:^|\n)\s*import[^'"\n]*from\s*['"]([^'"]+)['"]/g)) addSpec(m[1]);
+  const missing = [...pagePaths].filter((p) => !files.get(p)?.trim());
+
+  const { data: gen } = await supabase.from('project_generations')
+    .insert({ project_id: projectId, user_id: userId, prompt: `Resume — ${missing.length} missing page(s)`, kind: 'create', status: 'running' })
+    .select().single();
+  if (!gen) throw new Error('Could not start the resume (no generation record).');
+  const genId = (gen as { id: string }).id;
+  const stages: { stage: string; status: 'running' | 'done'; started_at: string; finished_at?: string; note?: string }[] = [];
+  const mark = async (stage: string, status: 'running' | 'done', note?: string) => {
+    const now = new Date().toISOString();
+    const found = stages.find((s) => s.stage === stage);
+    if (found) { found.status = status; if (status === 'done') found.finished_at = now; if (note) found.note = note; }
+    else stages.push({ stage, status, started_at: now, ...(note ? { note } : {}) });
+    await supabase.from('project_generations').update({ stages, current_stage: stage }).eq('id', genId);
+  };
+
+  (async () => {
+    try {
+      // Blueprint context: the saved row minus its bookkeeping columns.
+      const { id: _i, project_id: _p, created_at: _c, version: _v, ...bp } = bpRow as Record<string, unknown>;
+      const bpJson = JSON.stringify(bp);
+      const contractsContext = [...files.entries()]
+        .filter(([p]) => p.startsWith('/src/'))
+        .map(([p, c]) => `--- ${p} ---\n${c}`)
+        .join('\n\n').slice(0, 60000);
+      let usageIn = 0, usageOut = 0;
+
+      await mark('file_tree', 'running', `resuming — ${missing.length} page(s) to recover`);
+      const genPage = async (pagePath: string): Promise<void> => {
+        const r = await rawComplete([
+          { role: 'system', content: GENERATE_FILES_STREAM },
+          { role: 'user', content: filesPromptChunk(bpJson, pagePath, contractsContext, false, false) },
+        ], 9000);
+        usageIn += r.inputTokens; usageOut += r.outputTokens;
+        let changes = parseProtocol(r.text).changes;
+        if (r.stopReason === 'max_tokens' && changes.length && looksTruncated(changes[changes.length - 1].content)) {
+          changes = changes.slice(0, -1);
+        }
+        if (!changes.some((c) => c.path === pagePath && c.content.trim())) throw new Error(`page ${pagePath} was not emitted`);
+        for (const ch of changes) {
+          await supabase.from('project_files').upsert(
+            { project_id: projectId, path: ch.path, content: ch.content, updated_by_ai: true },
+            { onConflict: 'project_id,path' },
+          );
+          files.set(ch.path, ch.content);
+        }
+        await mark('file_tree', 'running', pagePath.split('/').pop());
+      };
+      {
+        const queue = [...missing];
+        const worker = async () => { for (let p = queue.shift(); p; p = queue.shift()) await genPage(p).catch(() => undefined); };
+        await Promise.all(Array.from({ length: Math.min(4, Math.max(1, queue.length)) }, worker));
+      }
+      // one serial retry per still-missing page — same rule as a fresh build
+      for (const p of missing.filter((x) => !files.get(x)?.trim())) await genPage(p).catch(() => undefined);
+      await mark('file_tree', 'done', `${files.size} files on record`);
+
+      // Same verify + fix tail as generation: created modules, compile gate, repair loop.
+      await mark('validate', 'running');
+      let qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+      if (qaErrors.length) {
+        try {
+          const made = await createMissingModules(projectId, { onFile: (p) => void mark('validate', 'running', `creating ${p.split('/').pop()}`) });
+          if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        } catch { /* best-effort */ }
+      }
+      let tsErrors: number | null = null;
+      if (!qaErrors.length) {
+        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+      }
+      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s)` : tsErrors ? `${tsErrors} type error(s)` : 'clean');
+      if (qaErrors.length || tsErrors) {
+        await mark('fix', 'running');
+        try {
+          if (agentAvailable()) await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });
+          else if (qaErrors.length) await qaFixPass(projectId, qaErrors);
+        } catch { /* the summary stays honest below */ }
+        await mark('fix', 'done');
+      }
+
+      void supabase.from('usage_events').insert({
+        user_id: userId, project_id: projectId, event_type: 'generation',
+        provider: resolveAI().provider, model: resolveAI().model,
+        input_tokens: usageIn, output_tokens: usageOut,
+        cost_usd: Math.round(estimateCost(resolveAI().provider, resolveAI().model, usageIn, usageOut) * 1e5) / 1e5,
+      }).then(() => {}, () => {});
+
+      await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
+      void supabase.from('mind_events').insert({
+        owner_id: userId, event_type: 'generation_completed', source: 'builder',
+        subject: `"${(bp.app_name as string) ?? 'Your app'}" — build resumed, ${missing.length} page(s) recovered`,
+        payload: { project_id: projectId },
+      }).then(() => {}, () => {});
+      await supabase.from('project_generations').update({
+        status: 'succeeded', finished_at: new Date().toISOString(),
+        input_tokens: usageIn, output_tokens: usageOut,
+        summary: `Resumed the build — recovered ${missing.length} missing page(s)`,
+      }).eq('id', genId);
+    } catch (err) {
+      await supabase.from('projects').update({ status: 'error' }).eq('id', projectId);
+      await supabase.from('project_generations').update({
+        status: 'failed', error: err instanceof Error ? err.message : String(err), finished_at: new Date().toISOString(),
+      }).eq('id', genId);
+    }
+  })();
+
+  return { generationId: genId };
+}
+
 async function directEdit(projectId: string, message: string, previewError?: string): Promise<EditResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;

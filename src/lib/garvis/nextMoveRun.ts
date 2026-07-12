@@ -1,7 +1,9 @@
 // src/lib/garvis/nextMoveRun.ts
 // Impure half of the Next Move engine: fetch the rows the pure collectors need, compose the waking
-// digest, manage last-seen + dismissals (localStorage v1 — a table can follow when cross-device
-// matters). Every query is owner-scoped by RLS; every line the digest shows exists as a row.
+// digest, manage last-seen + dismissals. Cross-device since app_0052: dismissals and last-seen
+// live on the owner's working_state row (dismiss on the laptop, gone on the phone) with
+// localStorage as the same-device cache. Every query is owner-scoped by RLS; every line the
+// digest shows exists as a row.
 
 import { supabase } from '../supabase';
 import {
@@ -15,6 +17,7 @@ import { parseCharter } from './workweb';
 import { SEED_SOURCE } from './workwebRun';
 import { applyGoalFocus } from './goals';
 import { activeGoals } from './goalsRun';
+import { loadWorkingState, knownWorkingState, mergeDismissal, patchWorkingState } from './workingStateRun';
 
 const KEY_LAST_SEEN = 'ff:waking:last-seen';
 const KEY_DISMISS = 'ff:waking:dismissed';
@@ -30,15 +33,31 @@ function readDismissals(): Dismissals {
   try { return JSON.parse(localStorage.getItem(KEY_DISMISS) ?? '{}') as Dismissals; } catch { return {}; }
 }
 
+/** Local cache ∪ working-state row — per key, the LATER dismissal wins. A move dismissed on any
+ *  device stays dismissed on every device (the review's most-felt "the morning forgets" bug). */
+function mergedDismissals(): Dismissals {
+  const local = readDismissals();
+  const server = knownWorkingState()?.dismissals ?? {};
+  const out: Dismissals = { ...local };
+  for (const [k, v] of Object.entries(server)) {
+    if (!out[k] || out[k] < v) out[k] = v;
+  }
+  return out;
+}
+
 export function dismissMove(key: string): void {
+  const at = new Date().toISOString();
   const d = readDismissals();
-  d[key] = new Date().toISOString();
+  d[key] = at;
   try { localStorage.setItem(KEY_DISMISS, JSON.stringify(d)); } catch { /* best-effort */ }
+  void mergeDismissal(key, at); // travels with the owner; fire-and-forget
 }
 
 /** Call when the digest has been SEEN (not on every render — on real arrival). */
 export function markSeen(): void {
-  try { localStorage.setItem(KEY_LAST_SEEN, new Date().toISOString()); } catch { /* best-effort */ }
+  const at = new Date().toISOString();
+  try { localStorage.setItem(KEY_LAST_SEEN, at); } catch { /* best-effort */ }
+  void patchWorkingState({ last_seen_at: at });
 }
 
 export interface RankedMoves {
@@ -49,6 +68,9 @@ export interface RankedMoves {
 /** ONE Next Move engine, two altitudes: the waking moment consumes all of this; the System
  *  altitude scopes `moves` to its world (comets) via movesForWorld(). Never fork the ranking. */
 export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
+  // Refresh the working-state row FIRST so this wake ranks against the owner's real dismissals
+  // (not this device's stale cache). Fail-soft: a miss leaves the local cache in charge.
+  await loadWorkingState().catch(() => null);
   const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ, leadsQ, remindersQ] = await Promise.all([
     supabase.from('approvals').select('id, kind, title, created_at').eq('status', 'pending').limit(50),
     supabase.from('replies').select('id, from_address, subject, classification, received_at, campaign_id').order('received_at', { ascending: false }).limit(25),
@@ -256,7 +278,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     ...collectFloor(floors),
     ...collectNaturalNext(naturals),
     ...collectTrails(trailRows, now),
-  ], now, readDismissals());
+  ], now, mergedDismissals());
 
   // GOAL FOCUS — the owner's declared project goals steer the ranking (goals.ts, deterministic):
   // a move that advances an active goal's world rises and NAMES the goal in its why. Fail-soft:
@@ -274,8 +296,12 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
 
 export async function loadWakingDigest(name: string): Promise<WakingDigest> {
   const now = new Date();
-  const lastSeen = localStorage.getItem(KEY_LAST_SEEN);
-  const { moves, events } = await loadRankedMoves(now);
+  const { moves, events } = await loadRankedMoves(now); // also refreshes the working-state cache
+  // Last-seen: the LATER of this device's cache and the owner's row — reading the digest on the
+  // phone means the laptop doesn't replay the same "while you were away" story.
+  const localSeen = localStorage.getItem(KEY_LAST_SEEN);
+  const serverSeen = knownWorkingState()?.last_seen_at ?? null;
+  const lastSeen = [localSeen, serverSeen].filter(Boolean).sort().pop() ?? null;
 
   const lines = awayLines(events, lastSeen);
   const coldSky = events.length === 0 && moves.length === 0;

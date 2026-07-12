@@ -71,7 +71,19 @@ function readStore(): Record<string, Universe> {
 }
 
 function writeStore(store: Record<string, Universe>): void {
-  try { localStorage.setItem(KEY_WORLDS, JSON.stringify(store)); } catch { /* storage full — fail silent */ }
+  try { localStorage.setItem(KEY_WORLDS, JSON.stringify(store)); } catch {
+    // DESIGN REVIEW FIX: this used to fail SILENT — a full quota meant losing exploration work
+    // with no signal. The cloud sync still holds the truth; the same-device cache being stale is
+    // now announced once so the owner knows to expect a re-fetch (listeners: Command/Explore toast).
+    try {
+      if (!(window as { __ffStorageWarned?: boolean }).__ffStorageWarned) {
+        (window as { __ffStorageWarned?: boolean }).__ffStorageWarned = true;
+        window.dispatchEvent(new CustomEvent('ff:storage-full', {
+          detail: { message: 'Browser storage is full — this device is running from the cloud copy. Nothing synced is lost.' },
+        }));
+      }
+    } catch { /* even the warning is best-effort */ }
+  }
 }
 
 /** One-time move of the old single-universe key into the multi-world store. */

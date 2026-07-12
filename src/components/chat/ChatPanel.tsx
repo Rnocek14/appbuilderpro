@@ -16,6 +16,8 @@ import { Embers } from './Embers';
 import type { Thread } from '../../lib/threads';
 import { captureScreenshot } from '../../lib/previewRuntime';
 import { costForMessage, subscribeUsage, formatUSD } from '../../lib/usage';
+import { resumeGeneration } from '../../lib/aiClient';
+import { useToast } from '../../context/ToastContext';
 
 /** Tiny estimated-cost tag shown in the corner of an assistant message. */
 function CostTag({ messageId }: { messageId: string }) {
@@ -210,6 +212,7 @@ function ForgeProgress({ gen }: { gen: Generation }) {
 
 export function ChatPanel({ projectId, messages, activeGeneration, lastGeneration = null, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection, onOpenAssets }: Props) {
   const [input, setInput] = useState('');
+  const { toast } = useToast();
   // The "Remember a preference" panel + a seed taken from the most recent user message, so
   // correcting something then clicking Remember pre-fills what you just said.
   const [rememberOpen, setRememberOpen] = useState(false);
@@ -547,9 +550,22 @@ export function ChatPanel({ projectId, messages, activeGeneration, lastGeneratio
         {!busy && !activeGeneration && lastGeneration?.status === 'failed' && (
           <div className="flex items-start gap-2 rounded-xl border border-forge-err/40 bg-forge-raised p-3 text-xs">
             <CircleX size={14} className="mt-0.5 shrink-0 text-forge-err" />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="font-medium text-forge-err">Generation failed</p>
-              <p className="mt-0.5 text-forge-dim">{lastGeneration.error ?? 'Unknown error.'} Try again with a simpler prompt.</p>
+              <p className="mt-0.5 text-forge-dim">{lastGeneration.error ?? 'Unknown error.'}</p>
+              {/* RESUME (design review P1): everything already produced is durably on record —
+                  pick the build up from there instead of starting over. Refuses honestly when
+                  the record holds nothing to resume from (no blueprint / no shell yet). */}
+              <button
+                onClick={() => {
+                  void resumeGeneration(projectId)
+                    .then(() => toast('success', 'Resuming from what was already built — recovering the missing pages.'))
+                    .catch((e) => toast('error', e instanceof Error ? e.message : 'Could not resume — try a fresh build.'));
+                }}
+                className="mt-2 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1 text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20"
+              >
+                Resume from the record
+              </button>
             </div>
           </div>
         )}

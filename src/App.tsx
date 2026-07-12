@@ -13,12 +13,13 @@ import Marketing from './pages/Marketing';
 import Missions from './pages/Missions';
 import Command from './pages/Command';
 import Mind from './pages/Mind';
+import Memory from './pages/Memory';
 import Opportunities from './pages/Opportunities';
 import MissionControl from './pages/MissionControl';
 import NewProject from './pages/NewProject';
 import ImportProject from './pages/ImportProject';
 import Autopilot from './pages/Autopilot';
-import Inbox from './pages/Inbox';
+import Queue from './pages/Queue';
 import ProjectWorkspace from './pages/ProjectWorkspace';
 import Settings from './pages/Settings';
 import Pricing from './pages/Pricing';
@@ -26,15 +27,12 @@ import Billing from './pages/Billing';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import ClusterSpike from './pages/spike/ClusterSpike';
 import Brain from './pages/Brain';
-import OpsInbox from './pages/OpsInbox';
 import Contacts from './pages/Contacts';
 import Money from './pages/Money';
 import Health from './pages/Health';
-import Approvals from './pages/Approvals';
 import WorkWebs from './pages/WorkWebs';
 import WorkWeb from './pages/WorkWeb';
 import SystemAltitude from './pages/SystemAltitude';
-import Universe from './pages/Universe';
 import { lazy, Suspense as RSuspense } from 'react';
 const Universe3D = lazy(() => import('./pages/Universe3D'));
 import PreviewEngine from './pages/PreviewEngine';
@@ -66,28 +64,34 @@ export default function App() {
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/garvis" element={<Protected><Garvis /></Protected>} />
               <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
+              {/* ONE MEMORY (design review P2): the nav door; the old rooms stay routable below. */}
+              <Route path="/garvis/memory" element={<Protected><Memory /></Protected>} />
               <Route path="/garvis/mind" element={<Protected><Mind /></Protected>} />
               <Route path="/garvis/control" element={<Protected><MissionControl /></Protected>} />
               <Route path="/garvis/marketing" element={<Protected><Marketing /></Protected>} />
               <Route path="/garvis/missions" element={<Protected><Missions /></Protected>} />
               <Route path="/garvis/opportunities" element={<Protected><Opportunities /></Protected>} />
               <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
-              <Route path="/garvis/inbox" element={<Protected><OpsInbox /></Protected>} />
+              {/* ONE QUEUE (design review P0): the three triage rooms merged. Old doors redirect —
+                  every deep link, toast, and waking move keeps working (merge and relocate). */}
+              <Route path="/garvis/queue" element={<Protected><Queue /></Protected>} />
+              <Route path="/garvis/inbox" element={<Navigate to="/garvis/queue" replace />} />
               <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
               <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
               <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
-              <Route path="/garvis/approvals" element={<Protected><Approvals /></Protected>} />
+              <Route path="/garvis/approvals" element={<Navigate to="/garvis/queue" replace />} />
               <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
               <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
               <Route path="/garvis/system/:worldId" element={<Protected><SystemAltitude /></Protected>} />
               <Route path="/garvis/universe" element={<Protected><RSuspense fallback={<div className="p-8 text-sm text-forge-dim">Opening the sky…</div>}><Universe3D /></RSuspense></Protected>} />
-              <Route path="/garvis/universe/flat" element={<Protected><Universe /></Protected>} />
+              {/* ONE SKY: the flat map is the same page's fallback + toggle now, not a second door. */}
+              <Route path="/garvis/universe/flat" element={<Navigate to="/garvis/universe?mode=flat" replace />} />
               <Route path="/garvis/explore" element={<Protected><ClusterSpike /></Protected>} />
               <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
               <Route path="/new" element={<Protected><NewProject /></Protected>} />
               <Route path="/import" element={<Protected><ImportProject /></Protected>} />
               <Route path="/autopilot" element={<Protected><Autopilot /></Protected>} />
-              <Route path="/inbox" element={<Protected><Inbox /></Protected>} />
+              <Route path="/inbox" element={<Navigate to="/garvis/queue" replace />} />
               <Route path="/project/:id" element={<Protected><ProjectWorkspace /></Protected>} />
               <Route path="/settings" element={<Protected><Settings /></Protected>} />
               <Route path="/billing" element={<Protected><Billing /></Protected>} />

@@ -76,7 +76,7 @@ export function StudioChat({ worldId, webTitle, objective, clusterId, cluster, t
                 m.role === 'user' ? 'bg-forge-ember/15 text-forge-ink' : 'bg-forge-raised text-forge-dim',
               )}>
                 {m.decision?.kind === 'propose_approval' && (
-                  <Link to="/garvis/approvals" className="mb-1 flex items-center gap-1 text-forge-warn"><ShieldCheck size={11} /> waiting in Approvals</Link>
+                  <Link to="/garvis/queue" className="mb-1 flex items-center gap-1 text-forge-warn"><ShieldCheck size={11} /> waiting in the Queue</Link>
                 )}
                 {m.content}
               </div>

@@ -5,7 +5,7 @@ import {
   GraduationCap, Home, Briefcase, ShieldCheck, ClipboardList, Compass, type LucideIcon,
 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { bindProjectToWorld, readWorldHandoff, clearWorldHandoff, type WorldBuildHandoff } from '../lib/garvis/buildBridge';
+import { bindProjectToWorld, readWorldHandoff, clearWorldHandoff, readDurableBuildBrief, clearDurableBuildBrief, type WorldBuildHandoff } from '../lib/garvis/buildBridge';
 import { useProjects } from '../hooks/useProjectData';
 import { startGeneration, draftGenerationPlan, generateDesignDirections, type DesignDirection } from '../lib/aiClient';
 import { DirectionPicker } from '../components/DirectionPicker';
@@ -44,16 +44,23 @@ export default function NewProject() {
   const briefRef = useRef('');
   const worldHandoffRef = useRef<WorldBuildHandoff | null>(null);
 
-  // On mount: a "Build this" handoff arrives as ?from=constellation with a brief in localStorage; a
-  // lighter handoff (or legacy) arrives as ?idea=. Consume once, then clear so a refresh stays clean.
+  // On mount: a "Build this" handoff arrives as ?from=constellation|world. It rides two channels
+  // since app_0052: localStorage (same-tab fast path) and the owner's working_state row (THE
+  // BATON — survives tabs, devices, and cleared caches). Consume once, clear BOTH, so a brief
+  // seeds exactly one build; ?idea= remains the lightest legacy seed.
   useEffect(() => {
     const from = searchParams.get('from');
+    const seedIdea = () => {
+      const idea = searchParams.get('idea')?.slice(0, 2000) ?? '';
+      if (idea) { setPrompt(idea); setSeeded(true); }
+    };
     if (from === 'constellation' || from === 'world') {
       try {
         const raw = localStorage.getItem('ff:build-brief');
         if (raw) {
           const b = JSON.parse(raw) as { prompt?: string; brief?: string };
           localStorage.removeItem('ff:build-brief');
+          clearDurableBuildBrief(); // the row staged the same brief — consumed here
           if (b.prompt) setPrompt(b.prompt);
           briefRef.current = b.brief ?? '';
           // A WORLD build additionally binds after creation: assets copied in, the manifest
@@ -62,10 +69,23 @@ export default function NewProject() {
           setSeeded(true);
           return;
         }
-      } catch { /* fall through to ?idea= */ }
+      } catch { /* fall through to the durable row */ }
+      // Durable fallback: this tab never saw the localStorage write — the row carries the baton.
+      void (async () => {
+        const { brief, world } = await readDurableBuildBrief().catch(() => ({ brief: null, world: null }));
+        if (brief?.prompt) {
+          setPrompt(brief.prompt);
+          briefRef.current = brief.brief ?? '';
+          if (from === 'world' && world) worldHandoffRef.current = world;
+          setSeeded(true);
+          clearDurableBuildBrief();
+        } else {
+          seedIdea();
+        }
+      })();
+      return;
     }
-    const idea = searchParams.get('idea')?.slice(0, 2000) ?? '';
-    if (idea) { setPrompt(idea); setSeeded(true); }
+    seedIdea();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -272,6 +272,14 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
     inputTokens: totalIn, outputTokens: totalOut, projectId,
   });
   await db.from('projects').update({ status: 'ready', updated_at: new Date().toISOString() }).eq('id', projectId);
+  // PIPELINE PARITY (design review): the client pipeline announces completion into the record;
+  // this one silently didn't — so edge-mode builds were invisible to the waking moment. Same
+  // event, same shape, best-effort.
+  await db.from('mind_events').insert({
+    owner_id: userId, event_type: 'generation_completed', source: 'builder',
+    subject: `"${blueprint.app_name ?? 'Your app'}" — ${total} files generated, preview ready`,
+    payload: { project_id: projectId },
+  }).then(() => {}, () => {});
   await db.from('project_generations').update({
     status: 'succeeded', summary, finished_at: new Date().toISOString(),
     input_tokens: totalIn, output_tokens: totalOut, cost_usd: totalCost,

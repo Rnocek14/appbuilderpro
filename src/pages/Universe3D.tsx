@@ -11,7 +11,7 @@
 // design; every element ABOVE it answers "which row is that?". SVG views remain the fallback.
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import * as THREE from 'three';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Html, Line, OrbitControls } from '@react-three/drei';
@@ -25,6 +25,8 @@ import { listClusterArtifacts, type StudioArtifact } from '../lib/garvis/artifac
 import { hash32, BAND_R, BAND_LABEL, type UniverseScene, type WorldBody } from '../lib/garvis/universeView';
 import type { SystemScene, Planet as SysPlanet } from '../lib/garvis/systemView';
 import { X, FileText } from 'lucide-react';
+import { cn } from '../lib/utils';
+import UniverseFlat from './Universe';
 
 const SKY = 170;                    // universe radius in world units
 const MOMENTUM_COLOR: Record<string, string> = {
@@ -518,7 +520,44 @@ function Sky({ scene, onSelect, selected, system, planet, onPlanet, arts, onArt 
 // The page
 // ---------------------------------------------------------------------------
 
-export default function Universe3D() {
+// ONE SKY (design review P0): /garvis/universe is the only door. The WebGL scene renders when
+// the machine can and the user hasn't asked otherwise; the SVG map (the identical UniverseScene
+// through the same pure compiler) is the automatic fallback for no-WebGL / reduced-motion, and a
+// pill toggles between them. The old /universe/flat route redirects here with ?mode=flat.
+export default function UniverseSky() {
+  const [params, setParams] = useSearchParams();
+  const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const webgl = useMemo(() => {
+    try {
+      const c = document.createElement('canvas');
+      return !!(c.getContext('webgl2') || c.getContext('webgl'));
+    } catch { return false; }
+  }, []);
+  const mode = params.get('mode');
+  const flat = mode === 'flat' || (mode !== '3d' && (!webgl || reduced));
+  const setMode = (m: 'flat' | '3d') => {
+    const next = new URLSearchParams(params);
+    next.set('mode', m);
+    setParams(next, { replace: true });
+  };
+  return (
+    <>
+      {flat ? <UniverseFlat /> : <Universe3D />}
+      <div className="fixed bottom-4 right-4 z-40 flex items-center gap-1 rounded-full border border-forge-border bg-forge-raised/95 p-1 text-[11px] shadow-lift">
+        {webgl && !reduced && (
+          <>
+            <button onClick={() => setMode('3d')} className={cn('rounded-full px-2.5 py-1', !flat ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>3D sky</button>
+            <button onClick={() => setMode('flat')} className={cn('rounded-full px-2.5 py-1', flat ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>2D map</button>
+            <span className="mx-0.5 h-4 w-px bg-forge-border" />
+          </>
+        )}
+        <Link to="/garvis/explore" className="rounded-full px-2.5 py-1 text-forge-dim hover:text-forge-ember" title="The rabbit-hole galaxy — live exploration, same sky family">Rabbit holes →</Link>
+      </div>
+    </>
+  );
+}
+
+function Universe3D() {
   const navigate = useNavigate();
   const [scene, setScene] = useState<UniverseScene | null>(null);
   const [failed, setFailed] = useState(false);

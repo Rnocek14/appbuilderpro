@@ -5,6 +5,7 @@ import {
   LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useToast } from '../../context/ToastContext';
 import { supabase } from '../../lib/supabase';
 import { useInbox } from '../../hooks/useAutopilot';
 import { usePreviewClaims } from '../../hooks/usePreviewClaims';
@@ -22,7 +23,6 @@ const navSections = [
       { to: '/new', label: 'New project', icon: Plus },
       { to: '/import', label: 'Import', icon: FolderDown },
       { to: '/autopilot', label: 'Autopilot', icon: Bot },
-      { to: '/inbox', label: 'Build questions', icon: InboxIcon },
       { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],
   },
@@ -36,12 +36,14 @@ const navSections = [
     title: 'Garvis',
     items: [
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
-      { to: '/garvis/inbox', label: 'Inbox', icon: MessageSquare },
+      // ONE QUEUE (design review P0): approvals + replies/leads + build questions, one room.
+      // The old Inbox/Approvals/Build-questions routes redirect here; the badge sums all lanes.
+      { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
       { to: '/garvis/webs', label: 'Ventures', icon: Waypoints },
       { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
       { to: '/garvis/contacts', label: 'Contacts', icon: Users },
-      { to: '/garvis/brain', label: 'Library', icon: BrainCircuit },
-      { to: '/garvis/approvals', label: 'Approvals', icon: ShieldCheck },
+      // ONE MEMORY (design review P2): Library + Mind, one door. Old routes stay reachable.
+      { to: '/garvis/memory', label: 'Memory', icon: BrainCircuit },
     ],
   },
   {
@@ -101,6 +103,19 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
     document.addEventListener('ff:open-palette', open);
     return () => document.removeEventListener('ff:open-palette', open);
   }, []);
+
+  // Storage-quota honesty (design review): a full localStorage used to eat exploration saves
+  // silently. The writer announces once; whichever page is mounted, the shell tells the human.
+  const { toast } = useToast();
+  useEffect(() => {
+    const onFull = (e: Event) => {
+      const msg = (e as CustomEvent<{ message?: string }>).detail?.message
+        ?? 'Browser storage is full — this device is running from the cloud copy.';
+      toast('info', msg);
+    };
+    window.addEventListener('ff:storage-full', onFull);
+    return () => window.removeEventListener('ff:storage-full', onFull);
+  }, [toast]);
 
   useEffect(() => {
     localStorage.setItem('ff:sidebar-collapsed', collapsed ? '1' : '0');
@@ -175,21 +190,12 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
               >
                 <Icon size={16} className="shrink-0" />
                 {!collapsed && label}
-                {to === '/inbox' && pendingCount > 0 && (
+                {to === '/garvis/queue' && opsCount + pendingCount > 0 && (
                   collapsed ? (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${pendingCount} pending`} />
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${opsCount + pendingCount} waiting`} />
                   ) : (
-                    <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg">
-                      {pendingCount}
-                    </span>
-                  )
-                )}
-                {to === '/garvis/inbox' && opsCount > 0 && (
-                  collapsed ? (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${opsCount} waiting`} />
-                  ) : (
-                    <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="New leads + approvals waiting">
-                      {opsCount}
+                    <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="Approvals + leads + replies + build questions waiting">
+                      {opsCount + pendingCount}
                     </span>
                   )
                 )}
