@@ -21,31 +21,26 @@ const navSections = [
       { to: '/new', label: 'New project', icon: Plus },
       { to: '/import', label: 'Import', icon: FolderDown },
       { to: '/autopilot', label: 'Autopilot', icon: Bot },
-      { to: '/inbox', label: 'Inbox', icon: InboxIcon },
+      { to: '/inbox', label: 'Build questions', icon: InboxIcon },
       { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],
   },
   {
     // Command leads — the waking moment is the product's front door; the altitude stack
-    // (Work Webs → System → Universe) follows; the legacy portfolio pages trail.
+    // UX REDESIGN (docs/garvis-ux-redesign): workflow pillars, not subsystems. The legacy
+    // portfolio pages (Overview/Mind/Mission Control/Missions/Opportunities/Marketing/Health)
+    // keep their ROUTES (nothing 404s; deep links + banners still work) but leave the nav —
+    // their jobs live in Command (the thread), Ventures, Inbox, and Settings. The skies
+    // (Universe/System) stay reachable from Ventures and the palette, not as destinations.
     title: 'Garvis',
     items: [
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
-      { to: '/garvis/webs', label: 'Work Webs', icon: Waypoints },
       { to: '/garvis/inbox', label: 'Inbox', icon: MessageSquare },
-      { to: '/garvis/contacts', label: 'Contacts', icon: Users },
+      { to: '/garvis/webs', label: 'Ventures', icon: Waypoints },
       { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
-      { to: '/garvis/universe', label: 'Universe', icon: Telescope },
-      { to: '/garvis/explore', label: 'Explore', icon: Compass },
-      { to: '/garvis/brain', label: 'Brain', icon: BrainCircuit },
+      { to: '/garvis/contacts', label: 'Contacts', icon: Users },
+      { to: '/garvis/brain', label: 'Library', icon: BrainCircuit },
       { to: '/garvis/approvals', label: 'Approvals', icon: ShieldCheck },
-      { to: '/garvis', label: 'Overview', icon: Boxes, end: true },
-      { to: '/garvis/mind', label: 'Mind', icon: Brain },
-      { to: '/garvis/control', label: 'Mission Control', icon: Activity },
-      { to: '/garvis/missions', label: 'Missions', icon: Rocket },
-      { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },
-      { to: '/garvis/marketing', label: 'Marketing', icon: Megaphone },
-      { to: '/garvis/health', label: 'Health', icon: Activity },
     ],
   },
   {

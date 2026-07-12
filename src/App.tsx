@@ -92,7 +92,7 @@ export default function App() {
               <Route path="/settings" element={<Protected><Settings /></Protected>} />
               <Route path="/billing" element={<Protected><Billing /></Protected>} />
               <Route path="/admin" element={<Protected adminOnly><AdminDashboard /></Protected>} />
-              <Route path="/spike/clusters" element={<Protected><ClusterSpike /></Protected>} />
+              {/* /spike/clusters removed — same component as /garvis/explore (audit: one page, two doors). */}
               <Route path="/business-preview-engine" element={<Protected><PreviewEngine /></Protected>} />
               {/* PUBLIC — the link business owners open from the outreach email (no login). */}
               <Route path="/preview-site/:slug" element={<PreviewSite />} />
