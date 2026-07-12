@@ -24,12 +24,42 @@ export interface ChatMessage {
 
 const THREAD_WINDOW = 40; // recent turns loaded on mount; the full record stays in the DB
 
+/** SUMMONED CANVAS (UX redesign, architectural tier): the studio Garvis opened beside the thread. */
+export interface Canvas { surface: 'mailer' | 'video'; worldId: string; clusterId: string; worldTitle: string }
+
+const FLAVOR_FOR: Record<Canvas['surface'], string> = { mailer: 'direct_mail', video: 'video' };
+
+/** Resolve "the mailer for <world>" to real ids: world by (fuzzy) title, then its studio cluster
+ *  by charter flavor. Honest nulls with a reason — never a guess at the wrong world. */
+async function resolveStudio(surface: Canvas['surface'], worldName: string | null):
+  Promise<{ canvas?: Canvas; reason?: string }> {
+  const { data: worlds } = await supabase.from('knowledge_worlds').select('id, title').limit(100);
+  const all = ((worlds ?? []) as { id: string; title: string }[]);
+  if (!all.length) return { reason: 'You have no ventures yet — create one in Ventures and I can open its studios.' };
+  let world = worldName
+    ? all.find((w) => w.title.toLowerCase() === worldName.toLowerCase())
+      ?? all.find((w) => w.title.toLowerCase().includes(worldName.toLowerCase()))
+    : (all.length === 1 ? all[0] : undefined);
+  if (!world) {
+    return { reason: worldName
+      ? `I don't see a venture named “${worldName}” — yours are: ${all.map((w) => w.title).join(', ')}.`
+      : `Which venture? You have: ${all.map((w) => w.title).join(', ')}.` };
+  }
+  const { data: clusters } = await supabase.from('knowledge_clusters')
+    .select('id, title, charter').eq('world_id', world.id).not('charter', 'is', null).limit(100);
+  const hit = ((clusters ?? []) as { id: string; charter: { flavor?: string } | null }[])
+    .find((c) => c.charter?.flavor === FLAVOR_FOR[surface]);
+  if (!hit) return { reason: `${world.title} doesn't have a ${surface === 'mailer' ? 'direct-mail' : 'video'} studio area yet — open the venture and add one, or ask me to draft it.` };
+  return { canvas: { surface, worldId: world.id, clusterId: hit.id, worldTitle: world.title } };
+}
+
 export function useCommander() {
   const { apps } = usePortfolio();
   const missionsApi = useMissions();
   const { mindContext, emit: emitMindEvent } = useMind();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [thinking, setThinking] = useState(false);
+  const [canvas, setCanvas] = useState<Canvas | null>(null);
 
   // The thread survives refresh: load the recent transcript once (fail-soft — an empty thread
   // renders the same first-run experience as before).
@@ -100,6 +130,20 @@ export function useCommander() {
         return;
       }
 
+      // OPEN — a summoned canvas: Garvis opens the studio BESIDE the conversation, pre-loaded
+      // with the venture's real materials. Resolution is honest: an unknown venture or a missing
+      // studio area gets a plain answer naming what exists, never a guess at the wrong world.
+      if (cmd.kind === 'open') {
+        const r = await resolveStudio(cmd.surface, cmd.world);
+        if (r.canvas) {
+          setCanvas(r.canvas);
+          push({ role: 'garvis', text: `${cmd.preface} ${r.canvas.surface === 'mailer' ? 'The postcard studio' : 'The video studio'} for ${r.canvas.worldTitle} is open beside us — your brand, photos, and takes are loaded. Keep talking to me while you work.` });
+        } else {
+          push({ role: 'garvis', text: r.reason ?? "I couldn't find that studio." });
+        }
+        return;
+      }
+
       // ACT — hands at the front door (one brain, part 2): Garvis runs its gated tool loop RIGHT
       // NOW and narrates each step as an event line in the thread (the No-Theater contract: every
       // line maps to a real runtime event). Anything outward still stops at Approvals.
@@ -159,6 +203,9 @@ export function useCommander() {
     thinking,
     send,
     postGarvis,
+    // the summoned studio canvas (null = conversation only); Command renders it beside the thread
+    canvas,
+    closeCanvas: () => setCanvas(null),
     // mission passthroughs so the chat can render + run the work it proposed
     missions: missionsApi.missions,
     tasksByMission: missionsApi.tasksByMission,

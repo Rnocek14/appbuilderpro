@@ -10,6 +10,9 @@ import { useCommander } from '../hooks/useCommander';
 import { useOpportunities } from '../hooks/useOpportunities';
 import { Badge, Button, Ember, Spinner } from '../components/ui';
 import type { ChatMessage } from '../hooks/useCommander';
+import { useToast } from '../context/ToastContext';
+import { MailerDesigner } from '../components/garvis/MailerDesigner';
+import { VideoStudio } from '../components/garvis/VideoStudio';
 import type { GarvisMission, GarvisTask } from '../types';
 
 const SCAN_THROTTLE_MS = 12 * 60 * 60 * 1000; // proactive scan at most twice a day
@@ -40,7 +43,8 @@ function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMissi
 }
 
 export default function Command() {
-  const { messages, thinking, send, missions, tasksByMission, runMission, busyId } = useCommander();
+  const { messages, thinking, send, missions, tasksByMission, runMission, busyId, canvas, closeCanvas } = useCommander();
+  const { toast } = useToast();
   const { loading: oppLoading, scan } = useOpportunities();
   const { profile } = useAuth();
   const firstName = (profile?.full_name ?? '').trim().split(/\s+/)[0] || 'there';
@@ -90,7 +94,13 @@ export default function Command() {
 
   return (
     <AppShell>
-      <div className="mx-auto flex h-[calc(100vh-3rem)] max-w-3xl flex-col">
+      {/* SUMMONED CANVAS (UX redesign): when Garvis opens a studio, the page splits — the
+          conversation stays live on the left, the studio works on the right. Closing the canvas
+          returns to the centered thread; the studio's output persisted as artifacts either way. */}
+      <div className={canvas
+        ? 'mx-auto grid h-[calc(100vh-3rem)] max-w-[110rem] gap-6 lg:grid-cols-[minmax(0,26rem)_1fr]'
+        : 'mx-auto flex h-[calc(100vh-3rem)] max-w-3xl flex-col'}>
+      <div className="flex min-h-0 flex-col">
         <div className="mb-4 flex items-center gap-3">
           <Sparkles size={20} className="text-forge-ember" />
           <div>
@@ -144,6 +154,23 @@ export default function Command() {
           />
           <Button onClick={submit} loading={thinking} disabled={!input.trim()}><Send size={15} /></Button>
         </div>
+      </div>
+
+      {canvas && (
+        <div className="hidden min-h-0 flex-col overflow-y-auto rounded-2xl border border-forge-border bg-forge-panel/40 p-4 lg:flex">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-sm font-medium text-forge-ink">
+              {canvas.surface === 'mailer' ? '📮 Postcard studio' : '🎬 Video studio'} — {canvas.worldTitle}
+            </span>
+            <button onClick={closeCanvas} className="ml-auto rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-ink" title="Close the canvas (work is saved as artifacts)">
+              Close
+            </button>
+          </div>
+          {canvas.surface === 'mailer'
+            ? <MailerDesigner worldId={canvas.worldId} clusterId={canvas.clusterId} onToast={(k, m) => toast(k, m)} />
+            : <VideoStudio worldId={canvas.worldId} clusterId={canvas.clusterId} title={canvas.worldTitle} onToast={(k, m) => toast(k, m)} />}
+        </div>
+      )}
       </div>
     </AppShell>
   );
