@@ -117,3 +117,35 @@ export async function markReplyHandled(id: string): Promise<void> {
   const { error } = await supabase.from('replies').update({ handled_at: new Date().toISOString() }).eq('id', id);
   if (error) throw new Error(error.message);
 }
+
+/** Undo for "done" — the reply returns to the lane. */
+export async function unmarkReplyHandled(id: string): Promise<void> {
+  const { error } = await supabase.from('replies').update({ handled_at: null }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/** Undo for a lead marked answered — it returns to the new-lead lane (and the waking move). */
+export async function reopenLead(id: string): Promise<void> {
+  const { error } = await supabase.from('leads').update({ status: 'new' }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/** Grounding for the reply drafter — what the record already knows about this correspondent:
+ *  their pipeline stage (so the draft matches the relationship) and the most recent email the
+ *  owner actually APPROVED and sent (tone example — your voice, not a model's guess). Fail-soft:
+ *  any miss returns nulls and the drafter grounds in the thread alone, as before. */
+export async function draftContext(email: string): Promise<{ stage: string | null; name: string | null; toneExample: string | null }> {
+  const out: { stage: string | null; name: string | null; toneExample: string | null } = { stage: null, name: null, toneExample: null };
+  try {
+    const { data: c } = await supabase.from('contacts')
+      .select('full_name, stage').eq('email', email.toLowerCase().trim()).maybeSingle();
+    if (c) { out.stage = (c as { stage?: string | null }).stage ?? null; out.name = (c as { full_name?: string | null }).full_name ?? null; }
+  } catch { /* grounding is optional */ }
+  try {
+    const { data: m } = await supabase.from('outreach_messages')
+      .select('body_text').eq('status', 'sent').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    const body = (m as { body_text?: string | null } | null)?.body_text ?? null;
+    if (body && body.length > 40) out.toneExample = body.slice(0, 600);
+  } catch { /* grounding is optional */ }
+  return out;
+}

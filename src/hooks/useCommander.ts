@@ -15,6 +15,7 @@ import { useMind } from './useMind';
 import { goalsDigest } from '../lib/garvis/goalsRun';
 import { retrieveForPrompt } from '../lib/garvis/ask';
 import { runGarvisAct } from '../lib/garvis';
+import { patchWorkingState, loadWorkingState } from '../lib/garvis/workingStateRun';
 
 export interface ChatMessage {
   id: string;
@@ -70,13 +71,30 @@ export function useCommander() {
   const [thinking, setThinking] = useState(false);
   // The summoned canvas survives refresh and navigate-away-and-back (sessionStorage) — the thread
   // persists its "open beside us" announcements, so the surface they describe must persist too.
+  // Since app_0052 it ALSO rides the working_state row: a fresh session on any device restores
+  // the desk you left ("resume where you were" — design review Phase 6), sessionStorage first.
   const [canvas, setCanvasState] = useState<Canvas | null>(() => {
     try { return JSON.parse(sessionStorage.getItem('ff:canvas') ?? 'null') as Canvas | null; } catch { return null; }
   });
   const setCanvas = (c: Canvas | null) => {
     setCanvasState(c);
     try { c ? sessionStorage.setItem('ff:canvas', JSON.stringify(c)) : sessionStorage.removeItem('ff:canvas'); } catch { /* best-effort */ }
+    void patchWorkingState({ canvas: c }); // travels with the owner; fire-and-forget
   };
+  useEffect(() => {
+    // Fresh session (no sessionStorage) → restore the traveling desk once, if one is staged.
+    if (canvas) return;
+    let live = true;
+    void loadWorkingState().then((ws) => {
+      const c = (ws?.canvas ?? null) as Canvas | null;
+      if (live && c && typeof c === 'object' && 'surface' in c) {
+        setCanvasState(c);
+        try { sessionStorage.setItem('ff:canvas', JSON.stringify(c)); } catch { /* best-effort */ }
+      }
+    }).catch(() => { /* no row, no restore — the cold desk is honest */ });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const navigate = useNavigate();
 
   // The thread survives refresh: load the recent transcript once (fail-soft — an empty thread

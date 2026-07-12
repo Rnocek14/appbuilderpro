@@ -9,6 +9,7 @@
 
 import { supabase } from '../supabase';
 import { recordMindEvent } from './mindStore';
+import { patchWorkingState, loadWorkingState } from './workingStateRun';
 import { getBrandKit } from './artifacts';
 import { compileWebsiteBrief, type WebsitePhoto } from './websiteBrief';
 import { assetsContext, type ProjectAsset } from '../../hooks/useAssets';
@@ -96,7 +97,26 @@ export async function buildFromWorld(worldId: string, clusterId: string, directi
     localStorage.setItem(KEY_BRIEF, JSON.stringify({ prompt: compiled.prompt, brief: compiled.brief }));
     localStorage.setItem(KEY_WORLD, JSON.stringify(handoff));
   } catch { /* prompt-only seed still works */ }
+  // THE BATON (design review P1, app_0052): the brief also rides the owner's working_state row,
+  // so a second tab, another device, or a cleared cache no longer loses the handoff. Awaited —
+  // a durable baton is worth one round-trip before navigation; failure still has localStorage.
+  await patchWorkingState({
+    build_brief: { brief: { prompt: compiled.prompt, brief: compiled.brief }, world: handoff as unknown as Record<string, unknown> },
+  }).catch(() => { /* same-device localStorage carries it */ });
   return '/new?from=world';
+}
+
+/** Durable read of the staged handoff (working_state row) — the fallback when localStorage came
+ *  up empty (other tab, other device, cleared cache). Shape mirrors what buildFromWorld staged. */
+export async function readDurableBuildBrief(): Promise<{ brief: { prompt?: string; brief?: string } | null; world: WorldBuildHandoff | null }> {
+  const ws = await loadWorkingState().catch(() => null);
+  const bb = (ws?.build_brief ?? null) as { brief?: { prompt?: string; brief?: string }; world?: WorldBuildHandoff | null } | null;
+  return { brief: bb?.brief ?? null, world: bb?.world ?? null };
+}
+
+/** Consume the durable copy (both readers clear it so a brief seeds exactly one build). */
+export function clearDurableBuildBrief(): void {
+  void patchWorkingState({ build_brief: null });
 }
 
 /** G5: one write-only site channel per world. The channel id is the ingest token the generated

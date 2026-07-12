@@ -237,6 +237,15 @@ export async function rejectApproval(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Undo a REJECTION — the row returns to pending. Only rejected rows reopen (an approved row has
+ *  already executed; there is no honest undo for a consequence, so none is offered). */
+export async function reopenApproval(id: string): Promise<void> {
+  const { error } = await supabase.from('approvals')
+    .update({ status: 'pending', decided_at: null })
+    .eq('id', id).eq('status', 'rejected');
+  if (error) throw new Error(error.message);
+}
+
 export async function listExecutionRuns(limit = 50): Promise<ExecutionRun[]> {
   const { data, error } = await supabase
     .from('execution_runs')

@@ -20,6 +20,7 @@ import {
 import { composeScene, recordSceneGuess, streamOverview, fetchLeads, expandCluster, gatherWikiMedia, gatherDiscover, gatherVideos, findBridge, investigate, observe, reframe, updateMind, composeProspect, interpretThought, discoverAvailable, type Prospect, type Bridge, type Notice } from '../../lib/garvis/clusteringRun';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
 import { compileBuildBrief } from '../../lib/garvis/buildBrief';
+import { patchWorkingState } from '../../lib/garvis/workingStateRun';
 import { serperRelated, serperAvailable, youTubeId } from '../../lib/garvis/discover';
 import { addLoopPure, closeLoopsPure, epiphanyCount, newLoop, readLoops, writeLoops, type OpenLoop } from '../../lib/garvis/loops';
 import SceneStage, { type StageCurrent } from './SceneStage';
@@ -422,6 +423,8 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
     const compiled = compileBuildBrief(graph, focus.id, { openQuestions: leads.map((l) => l.label) });
     if (!compiled) return;
     try { localStorage.setItem('ff:build-brief', JSON.stringify(compiled)); } catch { /* falls back to prompt-only seed */ }
+    // THE BATON (app_0052): the brief also rides the working_state row — tab/device/cache-proof.
+    void patchWorkingState({ build_brief: { brief: compiled as unknown as Record<string, unknown>, world: null } });
     navigate('/new?from=constellation');
   };
 

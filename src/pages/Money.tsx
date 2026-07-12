@@ -142,7 +142,7 @@ export default function Money() {
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {r.status === 'draft' && (
-                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => queueInvoiceSend(r), 'Invoice queued — approve the send in Approvals.', { status: 'sent' })}
+                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => queueInvoiceSend(r), 'Invoice queued — approve the send in the Queue.', { status: 'sent' })}
                         className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-xs text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">
                         {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Queue send
                       </button>

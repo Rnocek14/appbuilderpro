@@ -27,7 +27,9 @@ interface PendingIntake {
   clusters: ClusterOption[];
 }
 
-export default function Brain() {
+/** The Library's content without the shell — mounted by the Memory room (design review P2: Mind +
+ *  Brain are halves of one organ) and by the standalone /garvis/brain route. */
+export function BrainContent() {
   const { toast } = useToast();
   const [docs, setDocs] = useState<BrainDocument[]>([]);
   const [insights, setInsights] = useState<BrainInsight[]>([]);
@@ -156,7 +158,6 @@ export default function Brain() {
   const worldName = (id: string | null) => worlds.find((w) => w.id === id)?.title ?? null;
 
   return (
-    <AppShell>
       <div className="mx-auto max-w-4xl px-4 py-8">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-forge-border bg-forge-panel">
@@ -332,6 +333,13 @@ export default function Brain() {
           )}
         </div>
       </div>
+  );
+}
+
+export default function Brain() {
+  return (
+    <AppShell>
+      <BrainContent />
     </AppShell>
   );
 }

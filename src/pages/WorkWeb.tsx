@@ -142,7 +142,7 @@ export default function WorkWeb() {
 
   const doTool = async (cluster: WebCluster, tool: WorkTool) => {
     // View tools navigate; action tools run.
-    if (tool.id === 'open-approvals') { navigate('/garvis/approvals'); return; }
+    if (tool.id === 'open-approvals') { navigate('/garvis/queue'); return; }
     if (tool.id === 'view-contacts') { setShowContacts(true); return; }
     if (tool.id === 'import-docs') { navigate('/garvis/brain'); return; }
     if (tool.id === 'view-results') { setSelected(cluster.slug); return; }
@@ -502,7 +502,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {meta && <p className="mt-0.5 text-xs text-forge-dim/70">{meta.tagline}</p>}
 
       {cluster.pendingApprovals > 0 && (
-        <Link to="/garvis/approvals" className="mt-3 flex items-center gap-1.5 rounded-lg border border-forge-warn/40 bg-forge-warn/10 px-3 py-2 text-xs text-forge-warn">
+        <Link to="/garvis/queue" className="mt-3 flex items-center gap-1.5 rounded-lg border border-forge-warn/40 bg-forge-warn/10 px-3 py-2 text-xs text-forge-warn">
           <ShieldCheck size={14} /> {cluster.pendingApprovals} action{cluster.pendingApprovals === 1 ? '' : 's'} waiting for approval <ChevronRight size={13} />
         </Link>
       )}

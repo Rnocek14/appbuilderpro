@@ -13,6 +13,7 @@ import {
 } from './clusterChat';
 import type { Charter, WorkTool } from './workweb';
 import type { BusinessContext, WorldDNA } from './genesis';
+import { beliefEvidence } from './mind';
 
 /**
  * Assemble the full studio context for a cluster: static bits from the loaded web + async loads of
@@ -27,7 +28,7 @@ export async function loadStudioContext(input: {
   tools: WorkTool[];
   results?: { sent: number; replies: number; pendingApprovals: number } | null;
 }): Promise<StudioContextInput> {
-  const [arts, files, brandKit, worldRow, intelRow] = await Promise.all([
+  const [arts, files, brandKit, worldRow, intelRow, beliefRows] = await Promise.all([
     listClusterArtifacts(input.clusterId).catch(() => []),
     listClusterFiles(input.clusterId).catch(() => []),
     getBrandKit(input.worldId).catch(() => null),
@@ -40,6 +41,16 @@ export async function loadStudioContext(input: {
     (async () => {
       try { return (await supabase.from('world_intelligence').select('open_questions').eq('world_id', input.worldId).maybeSingle()).data; }
       catch { return null; }
+    })(),
+    // CIRCULATION (design review P2): the Mind's active beliefs were write-only — maintained with
+    // counted evidence, read by nobody who drafts. The strongest few now ground every studio turn,
+    // labeled with their evidence verdict so the model weighs, not obeys.
+    (async () => {
+      try {
+        return (await supabase.from('mind_beliefs')
+          .select('statement, supporting_event_ids, contradicting_event_ids')
+          .eq('status', 'active').order('updated_at', { ascending: false }).limit(8)).data;
+      } catch { return null; }
     })(),
   ]);
   const bc = (worldRow as { business_context?: BusinessContext | null } | null)?.business_context ?? null;
@@ -78,6 +89,9 @@ export async function loadStudioContext(input: {
     files: files.map((f) => ({ name: f.name, kind: f.kind, caption: f.caption ?? null })),
     business,
     openQuestions,
+    beliefs: ((beliefRows ?? []) as { statement: string; supporting_event_ids: string[]; contradicting_event_ids: string[] }[])
+      .map((b) => `[${beliefEvidence(b).verdict}] ${b.statement}`)
+      .slice(0, 4),
     brandKit: brandKit ? { name: brandKit.name, tone: brandKit.tone, palette: brandKit.palette, fonts: brandKit.fonts, compliance_line: brandKit.compliance_line } : null,
     audience,
     results: input.results ?? null,
