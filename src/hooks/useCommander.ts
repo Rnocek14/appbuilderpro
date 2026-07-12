@@ -65,10 +65,14 @@ export function useCommander() {
         return;
       }
 
-      // It's work → resolve the app (if Garvis matched one) and spin up a mission.
+      // It's work → resolve the app (if Garvis matched one) and spin up a mission — and RUN it.
+      // UX redesign: the "Run it" click was a duplicate gate. Mission workers are draft-only by
+      // construction (consequences still stop at Approvals), so asking twice was pure friction.
+      // The card still shows live progress and a Stop stays one click away.
       const appId = cmd.app ? (apps.find((a) => a.name.toLowerCase() === cmd.app!.toLowerCase())?.id ?? null) : null;
       const missionId = await missionsApi.planMission({ objective: cmd.objective, subject: cmd.subject, appId });
       push({ role: 'garvis', text: cmd.preface, missionId: missionId ?? undefined });
+      if (missionId) void missionsApi.runMission(missionId);
       emitMindEvent({
         event_type: 'mission_planned',
         subject: `Mission: ${cmd.objective.slice(0, 200)}`,
