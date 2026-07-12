@@ -5,7 +5,9 @@
 -- thing I know I have' — doesn't exist." This function is that answer's substrate: a single
 -- owner-scoped sweep over artifacts, areas, worlds, contacts, invoices, documents, beliefs, and
 -- missions. SECURITY INVOKER on purpose — RLS on every underlying table scopes rows to the
--- caller; the function adds reach, never privilege. ILIKE is honest at personal scale (one
+-- caller; the function adds reach, never privilege. Every branch ALSO pins owner_id =
+-- auth.uid() explicitly (review fix): several tables carry admin-read RLS policies, and an
+-- admin's ⌘K must sweep the admin's own record, not every user's. ILIKE is honest at personal scale (one
 -- owner's rows, all indexed by owner); trigram/tsvector can layer on later without changing the
 -- contract.
 
@@ -31,28 +33,32 @@ as $$
           c.world_id, jsonb_build_object('area', c.slug), a.created_at
      from knowledge_artifacts a
      join knowledge_clusters c on c.id = a.cluster_id, needle
-    where a.title ilike needle.pat or a.detail ilike needle.pat
+    where a.owner_id = auth.uid()
+      and (a.title ilike needle.pat or a.detail ilike needle.pat)
     order by a.created_at desc limit cap)
 
   union all
   (select 'area'::text, c.id, c.title, coalesce(left(c.summary, 140), ''),
           c.world_id, jsonb_build_object('area', c.slug), c.created_at
      from knowledge_clusters c, needle
-    where c.title ilike needle.pat or c.summary ilike needle.pat
+    where c.owner_id = auth.uid()
+      and (c.title ilike needle.pat or c.summary ilike needle.pat)
     order by c.updated_at desc limit cap)
 
   union all
   (select 'world'::text, w.id, w.title, coalesce(left(w.description, 140), ''),
           w.id, '{}'::jsonb, w.created_at
      from knowledge_worlds w, needle
-    where w.title ilike needle.pat or w.description ilike needle.pat
+    where w.owner_id = auth.uid()
+      and (w.title ilike needle.pat or w.description ilike needle.pat)
     order by w.updated_at desc limit cap)
 
   union all
   (select 'contact'::text, ct.id, coalesce(nullif(ct.full_name, ''), ct.email), ct.email,
           null::uuid, '{}'::jsonb, ct.created_at
      from contacts ct, needle
-    where ct.full_name ilike needle.pat or ct.email ilike needle.pat
+    where ct.owner_id = auth.uid()
+      and (ct.full_name ilike needle.pat or ct.email ilike needle.pat)
     order by ct.created_at desc limit cap)
 
   union all
@@ -60,28 +66,32 @@ as $$
           i.status || ' · $' || i.amount_usd::text,
           i.world_id, jsonb_build_object('number', i.number), i.created_at
      from invoices i, needle
-    where i.title ilike needle.pat or i.number ilike needle.pat
+    where i.owner_id = auth.uid()
+      and (i.title ilike needle.pat or i.number ilike needle.pat)
     order by i.created_at desc limit cap)
 
   union all
   (select 'document'::text, d.id, d.title, coalesce(left(d.summary, 140), ''),
           d.world_id, '{}'::jsonb, d.created_at
      from documents d, needle
-    where d.title ilike needle.pat or d.summary ilike needle.pat or d.extracted_text ilike needle.pat
+    where d.owner_id = auth.uid()
+      and (d.title ilike needle.pat or d.summary ilike needle.pat or d.extracted_text ilike needle.pat)
     order by d.created_at desc limit cap)
 
   union all
   (select 'belief'::text, b.id, b.statement, 'belief · ' || b.scope,
           null::uuid, '{}'::jsonb, b.created_at
      from mind_beliefs b, needle
-    where b.statement ilike needle.pat
+    where b.owner_id = auth.uid()
+      and b.statement ilike needle.pat
     order by b.updated_at desc limit cap)
 
   union all
   (select 'mission'::text, m.id, m.objective, coalesce(m.subject, '') || ' · ' || m.status::text,
           null::uuid, '{}'::jsonb, m.created_at
      from garvis_missions m, needle
-    where m.objective ilike needle.pat or m.subject ilike needle.pat
+    where m.owner_id = auth.uid()
+      and (m.objective ilike needle.pat or m.subject ilike needle.pat)
     order by m.updated_at desc limit cap)
 $$;
 

@@ -150,7 +150,7 @@ export default function Garvis() {
         setAutoStatus(null);
       }
     })();
-  }, [session, loading, apps.length, discoverFromGitHub, syncFromGitHub, toast]);
+  }, [session, loading, armed, apps.length, discoverFromGitHub, syncFromGitHub, toast]);
 
   // Phase 1.5 — build intelligence: generate a profile for every app that lacks one, so the brain
   // reasons over WHAT EACH PRODUCT IS (purpose/state/blocker/next), not just commit activity. Read-only
@@ -173,7 +173,7 @@ export default function Garvis() {
         setProfilesDone(true); // unblock the first fresh recommendation
       }
     })();
-  }, [session, loading, apps, profilesByAppId, generateMissing]);
+  }, [session, loading, armed, apps, profilesByAppId, generateMissing]);
 
   // Phase 1.6 — sense liveness: ping each deployed app once per mount so the brain has a real,
   // automatic outcome signal (reachable vs not) instead of only self-reported state. Fast, no LLM.
@@ -182,7 +182,7 @@ export default function Garvis() {
     if (!apps.some((a) => a.deploy_url)) return; // nothing deployed → nothing to ping
     didLiveness.current = true;
     void checkAll(apps);
-  }, [session, loading, apps, checkAll]);
+  }, [session, loading, armed, apps, checkAll]);
 
   // Phase 2 — surface a recommendation: show the latest from history instantly; if there's none yet,
   // generate the first one once profiles are ready (so it's grounded) and auto-draft on it.
@@ -201,7 +201,7 @@ export default function Garvis() {
       await generateRecommendation(true);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, loading, apps.length, advice, profilesDone]);
+  }, [session, loading, armed, apps.length, advice, profilesDone]);
 
   const onDiscover = async () => {
     try {

@@ -5,7 +5,7 @@
 // mounts both as tabs; the old /garvis/mind and /garvis/brain routes stay alive (merge and
 // relocate, never amputate), the nav shows one door.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { BrainCircuit } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
@@ -16,6 +16,12 @@ import { MindContent } from './Mind';
 export default function Memory() {
   const [params] = useSearchParams();
   const [tab, setTab] = useState<'library' | 'mind'>(params.get('tab') === 'mind' ? 'mind' : 'library');
+  // In-app navigation to /garvis/memory?tab=… while already mounted (⌘K belief hits do this)
+  // must switch tabs — the initializer alone only runs on mount (review fix).
+  useEffect(() => {
+    const t = params.get('tab');
+    if (t === 'mind' || t === 'library') setTab(t);
+  }, [params]);
 
   return (
     <AppShell>
