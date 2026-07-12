@@ -26,14 +26,24 @@ export interface WorldBuildHandoff {
 }
 
 /** Compile the world's website brief and stage the handoff. Returns the route to navigate to. */
-export async function buildFromWorld(worldId: string, clusterId: string): Promise<string> {
-  const [{ data: world }, { data: intel }, brand, { data: files }] = await Promise.all([
+/** WEBSITE DESIGN DIRECTIONS — renditions for the biggest build: pick the design mechanism BEFORE
+ *  the generator runs, and it produces a genuinely different site from the same real materials.
+ *  Honest by construction: this steers the brief; it never fakes "3 previews" it didn't build. */
+export const SITE_DIRECTIONS: { id: string; label: string; brief: string }[] = [
+  { id: 'visual', label: 'Bold & visual', brief: 'DESIGN DIRECTION: bold and visual — full-bleed photography leads every section, oversized headlines, minimal copy, dramatic whitespace. The photos ARE the argument; text supports.' },
+  { id: 'trust', label: 'Editorial trust', brief: 'DESIGN DIRECTION: editorial and trustworthy — magazine-like typography, longer-form sections that explain and reassure, testimonial and proof emphasis, calm palette discipline. Reads like an established institution.' },
+  { id: 'convert', label: 'Conversion-direct', brief: 'DESIGN DIRECTION: conversion-direct — one dominant call to action repeated, short punchy sections, the offer above the fold, sticky contact affordance, zero decorative detours. Every scroll answers "why act now".' },
+];
+
+export async function buildFromWorld(worldId: string, clusterId: string, directionId?: string): Promise<string> {
+  const [{ data: world }, { data: intel }, brand, { data: files }, { data: clusterRows }] = await Promise.all([
     supabase.from('knowledge_worlds').select('title, dna, business_context').eq('id', worldId).maybeSingle(),
-    supabase.from('world_intelligence').select('objective').eq('world_id', worldId).maybeSingle(),
+    supabase.from('world_intelligence').select('objective, recommendation, reflection, open_questions').eq('world_id', worldId).maybeSingle(),
     getBrandKit(worldId).catch(() => null),
     supabase.from('cluster_files')
       .select('name, url, kind, caption, label, cluster_id, knowledge_clusters!inner(world_id)')
       .eq('knowledge_clusters.world_id', worldId).eq('kind', 'image').limit(60),
+    supabase.from('knowledge_clusters').select('id').eq('world_id', worldId),
   ]);
   if (!world) throw new Error('World not found.');
 
@@ -42,11 +52,40 @@ export async function buildFromWorld(worldId: string, clusterId: string): Promis
   const photos: WebsitePhoto[] = ((files ?? []) as { name: string; url: string; caption: string | null; label: string | null }[])
     .map((f) => ({ name: f.name, url: f.url, caption: f.caption, label: f.label }));
 
+  // KNOWLEDGE INTO THE BUILD (bones-audit fix): the world's real research briefs and reflection
+  // lessons flow into the FIRST generation, so the site is grounded in accumulated work — not the
+  // DNA alone. EARNED research only (seeded playbooks excluded — they're frameworks, not findings).
+  const knowledge: string[] = [];
+  const clusterIds = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+  if (clusterIds.length) {
+    const { data: research } = await supabase.from('knowledge_artifacts')
+      .select('title, detail, source').in('cluster_id', clusterIds).eq('kind', 'research')
+      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(6);
+    for (const r of (research ?? []) as { title: string; detail: string | null }[]) {
+      knowledge.push(`${r.title}${r.detail ? `: ${r.detail.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`);
+    }
+  }
+  const reflection = intel?.reflection as { learned?: { text: string }[] } | null;
+  for (const l of (reflection?.learned ?? []).slice(0, 4)) if (l?.text) knowledge.push(`Learned: ${l.text}`);
+  if (intel?.recommendation) knowledge.push(`Direction: ${intel.recommendation}`);
+
+  // G5: provision (or reuse) the world's site channel so the generated site reports visits and
+  // leads back to THIS world. Fail-soft — a channel miss builds the old store-only form.
+  const ingest = await ensureSiteChannel(worldId).catch(() => null);
+
   const compiled = compileWebsiteBrief({
     worldTitle: world.title as string,
     objective: (intel?.objective as string | null) ?? null,
-    dna, ctx, brand, photos,
+    dna, ctx, brand, photos, knowledge, ingest,
   });
+
+  // The chosen design direction rides at the top of the brief — same real materials, a genuinely
+  // different site. Rebuild with another direction any time; deploys still gate through Approvals.
+  const dir = SITE_DIRECTIONS.find((d) => d.id === directionId);
+  if (dir) {
+    compiled.prompt = `${dir.brief}\n\n${compiled.prompt}`;
+    compiled.brief = `${dir.brief}\n\n${compiled.brief}`;
+  }
 
   const handoff: WorldBuildHandoff = {
     worldId, clusterId, worldTitle: world.title as string,
@@ -58,6 +97,24 @@ export async function buildFromWorld(worldId: string, clusterId: string): Promis
     localStorage.setItem(KEY_WORLD, JSON.stringify(handoff));
   } catch { /* prompt-only seed still works */ }
   return '/new?from=world';
+}
+
+/** G5: one write-only site channel per world. The channel id is the ingest token the generated
+ *  site embeds; reuse an existing unrevoked channel so rebuilding never mints token churn. */
+async function ensureSiteChannel(worldId: string): Promise<{ endpoint: string; token: string } | null> {
+  const base = (import.meta.env?.VITE_SUPABASE_URL as string | undefined)?.replace(/\/$/, '');
+  if (!base) return null;
+  const endpoint = `${base}/functions/v1/site-events`;
+  const { data: existing } = await supabase.from('site_channels')
+    .select('id').eq('world_id', worldId).is('revoked_at', null).limit(1).maybeSingle();
+  if (existing) return { endpoint, token: (existing as { id: string }).id };
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) return null;
+  const { data: created, error } = await supabase.from('site_channels')
+    .insert({ owner_id: uid, world_id: worldId }).select('id').single();
+  if (error || !created) return null;
+  return { endpoint, token: (created as { id: string }).id };
 }
 
 export function readWorldHandoff(): WorldBuildHandoff | null {
@@ -94,6 +151,12 @@ export async function bindProjectToWorld(projectId: string, handoff: WorldBuildH
   }
 
   await supabase.from('projects').update({ world_id: handoff.worldId }).eq('id', projectId);
+
+  // G5: stamp this project onto the world's site channel so events are attributable to the app
+  // that produced them (the channel was provisioned at brief time; fail-soft if absent).
+  await supabase.from('site_channels')
+    .update({ project_id: projectId })
+    .eq('world_id', handoff.worldId).is('revoked_at', null).is('project_id', null);
 
   await supabase.from('knowledge_artifacts').upsert({
     owner_id: uid, cluster_id: handoff.clusterId, slug: 'website-app',

@@ -19,6 +19,8 @@
 // ---------------------------------------------------------------------------
 
 export type MoveKind =
+  | 'reminder_due'       // the user asked to be reminded — their own words, honored
+  | 'lead_waiting'       // a human submitted the site's form — inbound demand, answer it
   | 'reply_unanswered'   // the highest-value event in the system
   | 'approval_waiting'   // the user IS the bottleneck
   | 'followup_staged'    // curated drafts ready to queue
@@ -27,7 +29,8 @@ export type MoveKind =
   | 'insight_connection' // "Garvis noticed" — the brain found a link
   | 'reflection_due'     // enough happened in a world that a reflection would teach something
   | 'intel_stale'        // the world's research is old enough to mislead
-  | 'draft_waiting';     // genesis designed a world; it exists only if the user approves it
+  | 'draft_waiting'      // genesis designed a world; it exists only if the user approves it
+  | 'trail_open';        // a rabbit-hole exploration left warm — momentum worth resuming
 
 export interface NextMove {
   key: string;                 // stable identity for dedupe + dismissal
@@ -59,6 +62,8 @@ export interface FloorIn {
   audienceEmpty: boolean;      // an audience-archetype cluster exists with zero contacts behind it
   brandEmpty: boolean;         // a vault/brand cluster exists but no brand kit saved
   launchActive: boolean;       // a launch/loop cluster has artifacts or queued work (the blockee)
+  audienceArea?: string | null; // slug of the audience area — the route lands ON the upload tool
+  vaultArea?: string | null;    // slug of the brand vault area — the route lands ON the brand kit
   asOf: string;
 }
 export interface MissionDoneIn { missionId: string; worldId: string | null; subject: string | null; artifactCount: number; sendsQueued: number; updated_at: string }
@@ -69,6 +74,46 @@ export interface MissionDoneIn { missionId: string; worldId: string | null; subj
 
 const short = (s: string | null | undefined, n = 60) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
+const HOUR = 3_600_000;
+
+export interface ReminderRowIn { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }
+
+/** The user's own reminders that are DUE (due_at in the past, or no due date = a standing note).
+ *  Their words, surfaced at the top of the cockpit — not Garvis's inference. One move per reminder. */
+export function collectReminders(rows: ReminderRowIn[], now: Date): NextMove[] {
+  return rows
+    .filter((r) => !r.due_at || new Date(r.due_at).getTime() <= now.getTime())
+    .map((r) => ({
+      key: `reminder:${r.id}`,
+      kind: 'reminder_due' as const,
+      title: short(r.title, 80) || 'A reminder',
+      why: r.due_at ? `You asked to be reminded by ${r.due_at.slice(0, 10)}.` : 'You set this reminder for yourself.',
+      action: { label: r.world_id ? 'Open the world' : 'Open reminders', route: r.world_id ? `/garvis/webs/${r.world_id}` : '/garvis/command' },
+      score: 0,
+      bornAt: r.due_at ?? r.created_at,
+      expected: { text: 'Your own note — clear it when done.', basis: 'measured' as const },
+    }));
+}
+
+export interface LeadRowIn { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }
+
+/** G5: a NEW lead from the generated site — a human asked to be answered. One move per lead
+ *  (each is a distinct person, unlike the approvals queue which is one decision surface).
+ *  Routes to the INBOX — the surface where the lead is visible and answerable in one click,
+ *  not the world root where only an aggregate count lives. */
+export function collectLeads(rows: LeadRowIn[]): NextMove[] {
+  return rows.map((r) => ({
+    key: `lead:${r.id}`,
+    kind: 'lead_waiting' as const,
+    title: `${short(r.name, 40) || short(r.email, 40)} asked about the business — answer while it's warm`,
+    why: `They submitted the site's form${r.source !== 'website' ? ` (via ${r.source})` : ''}${r.message ? `: "${short(r.message, 60)}"` : ''}. Inbound interest is the strongest signal in the system.`,
+    action: { label: 'Answer in the Inbox', route: '/garvis/inbox' },
+    score: 0,
+    bornAt: r.created_at,
+    expected: { text: 'Inquiries answered the same day convert far better than ones answered next week.', basis: 'heuristic' as const },
+  }));
+}
+
 export function collectReplies(rows: ReplyRowIn[]): NextMove[] {
   return rows
     .filter((r) => r.classification === 'positive' && !r.has_next_touch)
@@ -77,7 +122,8 @@ export function collectReplies(rows: ReplyRowIn[]): NextMove[] {
       kind: 'reply_unanswered' as const,
       title: `${short(r.from_address, 40) || 'A prospect'} replied — answer while it's warm`,
       why: `They replied "${short(r.subject, 40) || 'interested'}" and no next touch is queued. Warm replies cool fast.`,
-      action: { label: 'Draft the follow-up', route: r.world_id ? `/garvis/webs/${r.world_id}` : '/garvis/webs' },
+      // the reply body + "Draft with Garvis" composer live in the Inbox, not on the world root
+      action: { label: 'Draft the follow-up', route: '/garvis/inbox' },
       score: 0,
       bornAt: r.received_at,
       expected: { text: 'Answering today keeps the thread alive — interest decays fast after the first day or two.', basis: 'heuristic' },
@@ -136,7 +182,7 @@ export function collectFloor(rows: FloorIn[]): NextMove[] {
         kind: 'blocking_empty',
         title: `${f.worldTitle}: the mailing list is empty — and it's blocking sends`,
         why: `Work is staged to go out, but there's nobody to send it to yet. One CSV unblocks the whole channel.`,
-        action: { label: 'Upload the list', route: `/garvis/webs/${f.worldId}` },
+        action: { label: 'Upload the list', route: `/garvis/webs/${f.worldId}${f.audienceArea ? `?area=${encodeURIComponent(f.audienceArea)}` : ''}` },
         score: 0, bornAt: f.asOf,
         expected: { text: 'Unblocks every queued send in this channel at once.', basis: 'structural' },
       });
@@ -147,7 +193,7 @@ export function collectFloor(rows: FloorIn[]): NextMove[] {
         kind: 'blocking_empty',
         title: `${f.worldTitle}: the brand vault is empty`,
         why: `Every studio writes in the brand's voice — logo, tone, compliance line. Five minutes here upgrades everything downstream.`,
-        action: { label: 'Set up the brand', route: `/garvis/webs/${f.worldId}` },
+        action: { label: 'Set up the brand', route: `/garvis/webs/${f.worldId}${f.vaultArea ? `?area=${encodeURIComponent(f.vaultArea)}` : ''}` },
         score: 0, bornAt: f.asOf,
       });
     }
@@ -177,6 +223,38 @@ export function collectDrafts(rows: DraftRowIn[]): NextMove[] {
     bornAt: r.created_at,
     expected: { text: 'Approving charters the web — every area arrives with its tools and its stated reason.', basis: 'structural' as const },
   }));
+}
+
+export interface TrailRowIn { worldId: string; title: string; clusterCount: number; updatedAt: string }
+
+const TRAIL_MIN_IDEAS = 3;               // a real dive, not a spark that never grew
+const TRAIL_MIN_AGE_MS = 20 * HOUR;      // not today — nudging someone mid-dive is noise
+const TRAIL_MAX_AGE_MS = 7 * 24 * HOUR;  // after a week the trail has gone cold
+
+/** Rabbit-hole momentum: at most ONE warm trail — an exploration world grown to real size, last
+ *  touched roughly a day to a week ago. Scarcity by construction (the single most recent), and the
+ *  why carries its evidence: the idea count and the age are the rows' own numbers. */
+export function collectTrails(rows: TrailRowIn[], now: Date): NextMove[] {
+  const warm = rows
+    .filter((r) => r.clusterCount >= TRAIL_MIN_IDEAS)
+    .filter((r) => {
+      const age = now.getTime() - new Date(r.updatedAt).getTime();
+      return age >= TRAIL_MIN_AGE_MS && age <= TRAIL_MAX_AGE_MS;
+    })
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  const t = warm[0];
+  if (!t) return [];
+  const days = Math.max(1, Math.round((now.getTime() - new Date(t.updatedAt).getTime()) / (24 * HOUR)));
+  return [{
+    key: `trail:${t.worldId}`,
+    kind: 'trail_open',
+    title: `The trail on "${short(t.title, 48)}" is still warm`,
+    why: `You grew it to ${t.clusterCount} ideas, last touched ${days === 1 ? 'yesterday' : `${days} days ago`}. Momentum is easier to keep than to rebuild.`,
+    action: { label: 'Drop back in', route: `/garvis/explore?world=${encodeURIComponent(t.worldId)}` },
+    score: 0,
+    bornAt: t.updatedAt,
+    expected: { text: 'A second session usually turns branches into something buildable.', basis: 'heuristic' },
+  }];
 }
 
 /** Rule 6 made literal: the intelligence layer feeds the morning. */
@@ -227,6 +305,8 @@ export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
 // ---------------------------------------------------------------------------
 
 const BASE_VALUE: Record<MoveKind, number> = {
+  reminder_due: 110,       // the user's OWN words outrank everything Garvis inferred
+  lead_waiting: 100,       // someone ASKED — inbound demand ranks with a warm reply
   reply_unanswered: 100,   // a warm human is worth more than anything else in the system
   approval_waiting: 90,    // the user is the bottleneck
   draft_waiting: 75,       // a designed world waiting on judgment — decide it before it goes stale
@@ -235,10 +315,10 @@ const BASE_VALUE: Record<MoveKind, number> = {
   blocking_empty: 50,
   reflection_due: 45,      // learning compounds — but a warm reply still comes first
   insight_connection: 40,
+  trail_open: 35,          // momentum nudge — never outranks a human or a decision
   intel_stale: 30,
 };
 
-const HOUR = 3_600_000;
 const DISMISS_PENALTY = 200;          // a dismissal silences a move…
 const DISMISS_WINDOW_MS = 7 * 24 * HOUR; // …for seven days, then it may earn its way back
 const STALE_AFTER_MS = 14 * 24 * HOUR;   // moves older than two weeks decay away entirely
@@ -268,10 +348,9 @@ export function rankMoves(moves: NextMove[], now: Date, dismissals: Dismissals =
 // ---------------------------------------------------------------------------
 
 export function greetingFor(hour: number, name: string): string {
-  if (hour < 5) return `Working late, ${name}.`;
-  if (hour < 12) return `Good morning, ${name}.`;
-  if (hour < 18) return `Good afternoon, ${name}.`;
-  return `Good evening, ${name}.`;
+  const base = hour < 5 ? 'Working late' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const n = name.trim();
+  return n ? `${base}, ${n}.` : `${base}.`; // no name on record → no robotic ", there."
 }
 
 export interface MindEventIn { event_type: string; subject: string; occurred_at: string; payload?: Record<string, unknown> | null }

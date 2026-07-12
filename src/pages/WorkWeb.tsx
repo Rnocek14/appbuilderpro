@@ -18,10 +18,20 @@ import { templateForWeb } from '../lib/garvis/workweb';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
-import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
-import { buildFromWorld } from '../lib/garvis/buildBridge';
+import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, maybeReflect, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
+import { buildFromWorld, SITE_DIRECTIONS } from '../lib/garvis/buildBridge';
+import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
+import { worldResults, setLeadStatus, type LeadRow } from '../lib/garvis/resultsRun';
+import { readAdaptive, logAdSpend, type AdaptiveRead } from '../lib/garvis/adaptiveRun';
+import { listConnections, saveConnectionAccount, syncProvider, type ConnectionState } from '../lib/garvis/connectionsRun';
+import type { ResearchPlan } from '../lib/garvis/marketIntel';
+import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
+import { MailerDesigner } from '../components/garvis/MailerDesigner';
+import { VideoStudio } from '../components/garvis/VideoStudio';
+import { AskGarvis } from '../components/garvis/AskGarvis';
+import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -47,11 +57,15 @@ export default function WorkWeb() {
   const [showIntel, setShowIntel] = useState(false);
 
   // The heartbeat updates when observed: refresh the deterministic Living State on open, then read.
+  // Learning is no longer manual-only — if reflection is genuinely due (enough real activity, not
+  // reflected recently), run it in the background and re-read when it lands.
   useEffect(() => {
     let live = true;
     void refreshWorldIntelligence(worldId)
       .then(() => getWorldIntelligence(worldId))
       .then((row) => { if (live) setIntel(row); })
+      .then(() => maybeReflect(worldId))
+      .then((ran) => { if (ran && live) return getWorldIntelligence(worldId).then((row) => { if (live) setIntel(row); }); })
       .catch(() => {});
     return () => { live = false; };
   }, [worldId]);
@@ -105,6 +119,12 @@ export default function WorkWeb() {
     const t = templateForWeb(web.clusters.map((c) => c.slug));
     return t?.playIds[0] ?? null;
   }, [web]);
+
+  // PRODUCT LAB = feature_lab studios, no outreach machinery. The page's framing follows the
+  // world's shape: no send/reply chips, product Ask examples, a product ledger.
+  const productLab = useMemo(() => !!web
+    && web.clusters.some((c) => c.charter?.flavor === 'feature_lab')
+    && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
 
   const doRunPlay = async () => {
     if (!templatePlay) return;
@@ -188,10 +208,12 @@ export default function WorkWeb() {
               title="The world's living understanding: what changed, what was learned, what's working, what to test next — every line from persisted rows"
               className={cn('rounded-lg border px-2.5 py-1 text-xs transition-colors', showIntel ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink')}
             >Intelligence</button>
-            <StatChip label="artifacts" value={web.rollup.artifacts} />
+            <StatChip label="made" value={web.rollup.artifacts} />
+            <StatChip label="playbooks" value={web.clusters.reduce((n, c) => n + c.playbookArtifacts, 0)} />
             <StatChip label="waiting" value={web.rollup.pendingApprovals} tone="warn" />
-            <StatChip label="sent" value={web.rollup.messagesSent} />
-            <StatChip label="replies" value={web.rollup.replies} tone="ok" />
+            {/* outreach chips only where outreach exists — a product lab's "sent 0" is not a stat, it's noise */}
+            {!productLab && <StatChip label="sent" value={web.rollup.messagesSent} />}
+            {!productLab && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
             {templatePlay && (
               <button
                 onClick={() => void doRunPlay()} disabled={running}
@@ -205,6 +227,18 @@ export default function WorkWeb() {
         </div>
 
         {showIntel && intel && <WorldIntelDashboard intel={intel} />}
+
+        {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
+        <div className="mb-4">
+          <WorldGoalPanel worldId={worldId} />
+        </div>
+
+        {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
+        <div className="mb-4">
+          <AskGarvis worldId={worldId} placeholder={productLab
+            ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
+            : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
+        </div>
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr]">
           {/* The web — production areas as a connected tree */}
@@ -226,7 +260,11 @@ export default function WorkWeb() {
                   {depth > 0 && <span className="text-forge-dim/40">└</span>}
                   <Circle size={9} className={cn('shrink-0 fill-current', STATUS_DOT[c.liveStatus ?? 'dormant'])} />
                   <span className={cn('flex-1 truncate text-sm', isSel ? 'text-forge-ink' : 'text-forge-dim group-hover:text-forge-ink')}>{c.title}</span>
-                  {c.artifacts.length > 0 && <span className="text-[10px] text-forge-dim">{c.artifacts.length}</span>}
+                  {(c.earnedArtifacts > 0 || c.playbookArtifacts > 0) && (
+                    <span className="text-[10px] text-forge-dim" title={`${c.earnedArtifacts} made here · ${c.playbookArtifacts} playbook doc${c.playbookArtifacts === 1 ? '' : 's'} it was born with`}>
+                      {c.earnedArtifacts > 0 ? c.earnedArtifacts : `${c.playbookArtifacts}ᵖ`}
+                    </span>
+                  )}
                   {meta && <span className={cn('h-1.5 w-1.5 rounded-full', meta.tone === 'ember' && 'bg-forge-ember', meta.tone === 'ok' && 'bg-forge-ok', meta.tone === 'warn' && 'bg-forge-warn', meta.tone === 'dim' && 'bg-forge-dim/50')} />}
                 </button>
               );
@@ -247,6 +285,7 @@ export default function WorkWeb() {
                 busyTool={busyTool}
                 onTool={(t) => void doTool(selectedCluster, t)}
                 onChanged={() => void refresh()}
+                productLab={productLab}
               />
             )}
           </div>
@@ -310,16 +349,129 @@ function StatChip({ label, value, tone }: { label: string; value: number; tone?:
   );
 }
 
-function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged }: {
+/** CREATIVE DEPTH — the answer to "what if I don't like the first take?" One bar, three moves:
+ *  💡 an idea board (10 distinct, diversity-gated concepts for THIS studio), 📋 the operator's
+ *  business plan (six substantive sections, thin output rejected by name), and 🔁 another take of
+ *  this studio's work. The direction box steers all of it in the owner's words — and every
+ *  regeneration automatically diverges from prior takes (recent work rides along as
+ *  "do-not-repeat"). Renditions are ADDED to the shelf ("· take 2"), never overwritten. */
+/** SPARKS — per-studio direction starters that provoke the next take. Prompts, not claims:
+ *  clicking one fills the direction box; the producer still grounds output in real materials. */
+const SPARKS: Record<string, string[]> = {
+  social: ['make it funnier', 'behind-the-scenes series', 'customer-voice posts', 'myth vs fact format', 'the numbers, plainly'],
+  ads: ['lead with the strongest proof point', 'speak to the skeptic', 'one sharp offer, nothing else', 'local-first angle'],
+  video: ['30-second transformation cut', 'day-in-the-life', 'answer the #1 question on camera', 'before/after with captions only'],
+  direct_mail: ['the neighbor story', 'lead with the offer', 'a question they already ask', 'why this season matters'],
+  feature_lab: ['for the power user', 'fix the first five minutes', 'what makes people come back daily', 'steal the best idea from an adjacent product', 'smallest shippable version'],
+  default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
+};
+
+function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId: string; cluster: WebCluster; onDone: () => void; ideaTitles?: string[] }) {
+  const { toast } = useToast();
+  const [direction, setDirection] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const sparks = SPARKS[cluster.charter?.flavor ?? ''] ?? SPARKS.default;
+
+  const generatorFor = (flavor?: string | null): string => {
+    switch (flavor) {
+      case 'social': return 'gen-social';
+      case 'video': return 'gen-video-script';
+      case 'ads': return 'gen-ads';
+      case 'feature_lab': return 'gen-features'; // "another take" regenerates concepts; the spec has its own button
+      default: return 'gen-ideas'; // studios without a single generator explore via ideas
+    }
+  };
+  const takeTool = generatorFor(cluster.charter?.flavor);
+
+  const go = async (toolId: string) => {
+    setBusy(toolId);
+    try {
+      const res = await runTool(worldId, cluster, toolId, { direction: direction.trim() || undefined });
+      toast(res.ok ? 'success' : 'error', res.message || (res.ok ? 'Done.' : 'Nothing generated.'));
+      if (res.ok) { setDirection(''); onDone(); }
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Generation failed.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const btn = 'flex items-center gap-1.5 rounded-lg border border-forge-border px-3 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/60 hover:text-forge-ember disabled:opacity-50';
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs text-forge-dim">
+        <Sparkles size={13} className="text-forge-ember" />
+        <span className="font-medium text-forge-ink">Create more</span>
+        <span className="hidden sm:inline">— every take is added to the shelf, never overwritten; regenerations avoid repeating prior work</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={direction} onChange={(e) => setDirection(e.target.value)} maxLength={200}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void go(takeTool); }}
+          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”… (↵ runs a take)"
+          className="min-w-[220px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
+        />
+        <button onClick={() => void go('gen-ideas')} disabled={!!busy} className={btn} title="10 distinct concepts for this studio — near-duplicates collapsed, each with its first step">
+          {busy === 'gen-ideas' ? <Loader2 size={13} className="animate-spin" /> : <span>💡</span>} Idea board
+        </button>
+        <button onClick={() => void go(takeTool)} disabled={!!busy} className={btn} title="Regenerate this studio's work — automatically different from your prior takes">
+          {busy === takeTool ? <Loader2 size={13} className="animate-spin" /> : <span>🔁</span>} Another take
+        </button>
+        {cluster.charter?.flavor === 'feature_lab' ? (
+          <button onClick={() => void go('gen-spec')} disabled={!!busy} className={btn} title="A full feature spec — problem → v1 scope → success metric → risks; thin output is rejected, platform internals become [YOU FILL] holes">
+            {busy === 'gen-spec' ? <Loader2 size={13} className="animate-spin" /> : <span>📐</span>} Feature spec
+          </button>
+        ) : (
+          <button onClick={() => void go('gen-plan')} disabled={!!busy} className={btn} title="The operator's 90-day business plan — six substantive sections; thin output is rejected, unknowable numbers become [YOU FILL] holes">
+            {busy === 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>📋</span>} Business plan
+          </button>
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-forge-dim/70">Sparks:</span>
+        {sparks.map((s) => (
+          <button
+            key={s} onClick={() => setDirection(s)}
+            className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember"
+          >{s}</button>
+        ))}
+      </div>
+      {/* IDEA → NEXT STEP in one click: the latest idea board's concepts become steer chips —
+          no reading a title out of an artifact and retyping it into the box. */}
+      {ideaTitles.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-forge-dim/70">Your concepts:</span>
+          {ideaTitles.slice(0, 6).map((t) => (
+            <button
+              key={t} onClick={() => setDirection(t)}
+              title={cluster.charter?.flavor === 'feature_lab' ? 'Steer with this concept, then press Feature spec' : 'Steer the next take with this concept'}
+              className="rounded-full border border-forge-ok/30 px-2.5 py-1 text-[11px] text-forge-ok/90 transition-colors hover:border-forge-ok/60"
+            >{t.length > 42 ? `${t.slice(0, 42)}…` : t}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
+  productLab?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const meta = cluster.charter ? ARCHETYPES[cluster.charter.archetype] : null;
   const [artifacts, setArtifacts] = useState<StudioArtifact[]>([]);
   const [files, setFiles] = useState<ClusterFile[]>([]);
+  // The latest idea board's numbered concepts, parsed into one-click steer chips (ideasToDetail
+  // emits "N. Title" lines) — the idea→next-step handoff without retyping.
+  const ideaTitles = useMemo(() => {
+    const board = artifacts.find((a) => a.slug?.startsWith('idea-board'));
+    if (!board?.detail) return [];
+    return [...board.detail.matchAll(/^\d+\.\s+(.+)$/gm)].map((m) => m[1].trim()).filter(Boolean);
+  }, [artifacts]);
   const [loadingArts, setLoadingArts] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -361,17 +513,74 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <BrandKitPanel worldId={worldId} onSaved={onChanged} />
       )}
 
+      {/* G4 — Market Intelligence: who plausibly needs this business, reasoned from the DNA,
+          searched read-only, fit-labeled with grounded reasons. Contact = approvals, always. */}
+      {cluster.charter?.archetype === 'audience' && (
+        <>
+          <LeadsPanel worldId={worldId} />
+          <ProspectFinderPanel worldId={worldId} />
+        </>
+      )}
+
+      {/* G5/G6 — the honest per-channel results, the adaptive read, and platform connections.
+          A PRODUCT LAB's ledger counts shipped thinking, not sends — the 5-channel marketing
+          table ("Email: no campaigns yet · Meta ads: not running") was noise wearing a dashboard. */}
+      {cluster.charter?.archetype === 'ledger' && (productLab ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This lab measures shipped thinking.</p>
+          <p>Concepts and specs live on each studio's shelf; the progress ledger doc here tracks
+          explored → chosen → specced → pitched. If this world ever starts launching things
+          (outreach, a site), the channel results appear here automatically.</p>
+        </div>
+      ) : (
+        <>
+          <ResultsPanel worldId={worldId} />
+          <ConnectionsCard worldId={worldId} onSynced={onChanged} />
+        </>
+      ))}
+
+      {/* Direct mail as a real product: a print-ready 6×9 postcard built from this world's own
+          brand kit + vault photos, with a QR from the tracking link, a print/PDF path, and a
+          mail log so mailed batches count as real outreach. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'direct_mail' && (
+        <MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
+          plays in the browser now, renders a real mp4 when a render key is set. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'video' && (
+        <VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} />
+      )}
+
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
           into ONE brief and open the app builder. Real photos, never placeholders. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'landing' && (
-        <button
-          onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
-          className="mt-4 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px"
-          title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
-        >
-          <Sparkles size={15} /> Build the website — with this world's artwork
-        </button>
+        <div className="mt-4">
+          <button
+            onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
+            className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px"
+            title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
+          >
+            <Sparkles size={15} /> Build the website — with this world's artwork
+          </button>
+          {/* SITE RENDITIONS — pick the design mechanism before the generator runs; same real
+              materials, a genuinely different site. Rebuild under another direction any time. */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-forge-dim/70">Or pick a design direction:</span>
+            {SITE_DIRECTIONS.map((d) => (
+              <button
+                key={d.id} title={d.brief.replace('DESIGN DIRECTION: ', '')}
+                onClick={() => void buildFromWorld(worldId, cluster.id, d.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
+                className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember"
+              >{d.label}</button>
+            ))}
+          </div>
+        </div>
       )}
+
+      {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. Renditions add,
+          never overwrite; regenerations diverge from prior work by default. */}
+      {cluster.charter && <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} ideaTitles={ideaTitles} />}
 
       {/* Tools */}
       <div className="mt-4 flex flex-wrap gap-2">
@@ -672,6 +881,428 @@ function WorldIntelDashboard({ intel }: { intel: WorldIntelligenceRow }) {
         )}
         <p className="mt-3 border-t border-forge-border pt-2 text-[11px] text-forge-dim/70">Working/failing by the numbers (site clicks, content performance) arrives with G5 instrumentation — this panel will not guess until those rows exist.</p>
       </section>
+    </div>
+  );
+}
+
+const FIT_TONE: Record<string, string> = {
+  strong: 'border-forge-ok/50 text-forge-ok', possible: 'border-forge-warn/50 text-forge-warn',
+  weak: 'border-forge-border text-forge-dim', unknown: 'border-forge-border text-forge-dim/60',
+};
+
+/** G4 — the prospect finder: DNA-derived scan segments, read-only searches, evidence-labeled
+ *  fits. Every verdict shows its reason; unknown stays visibly unknown. */
+function ProspectFinderPanel({ worldId }: { worldId: string }) {
+  const { toast } = useToast();
+  const [plan, setPlan] = useState<ResearchPlan | null>(null);
+  const [dna, setDna] = useState<WorldDNA | null>(null);
+  const [ctx, setCtx] = useState<BusinessContext | null>(null);
+  const [rows, setRows] = useState<ProspectRow[]>([]);
+  const [scanning, setScanning] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void worldPlan(worldId).then((w) => { if (live) { setPlan(w.plan); setDna(w.dna); setCtx(w.ctx); } }).catch(() => {});
+    void listProspects(worldId).then((r) => { if (live) setRows(r); }).catch(() => {});
+    return () => { live = false; };
+  }, [worldId]);
+
+  const scan = async (name: string) => {
+    const cat = plan?.categories.find((c) => c.name === name);
+    if (!cat || scanning) return;
+    setScanning(name);
+    try {
+      const r = await scanCategory(worldId, cat, dna, ctx);
+      toast(r.stored > 0 ? 'success' : 'info', r.message);
+      setRows(await listProspects(worldId));
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Scan failed.');
+    } finally {
+      setScanning(null);
+    }
+  };
+
+  const mark = async (row: ProspectRow, status: ProspectRow['status']) => {
+    try {
+      await setProspectStatus(row.id, status);
+      setRows((p) => status === 'dropped' ? p.filter((r) => r.id !== row.id) : p.map((r) => (r.id === row.id ? { ...r, status } : r)));
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update.'); }
+  };
+
+  // Prospect → audience. Emails come from the prospect's OWN site (fetch-url contact scan) or
+  // the operator's paste — Garvis never invents an address. Found emails prefill; one click adds.
+  const [emailFor, setEmailFor] = useState<string | null>(null);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [findingFor, setFindingFor] = useState<string | null>(null);
+  const toAudience = async (row: ProspectRow, email?: string) => {
+    try {
+      const r = await prospectToAudience(worldId, row, email ?? emailDraft);
+      toast('success', r.message);
+      setEmailFor(null); setEmailDraft('');
+      setRows((p) => p.map((x) => (x.id === row.id ? { ...x, status: 'in_audience', contact_id: r.contactId } : x)));
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not add the contact.'); }
+  };
+  const findEmails = async (row: ProspectRow) => {
+    if (findingFor) return;
+    setFindingFor(row.id);
+    try {
+      const r = await scanProspectEmails(worldId, row);
+      toast(r.emails.length ? 'success' : 'info', r.message);
+      setRows((p) => p.map((x) => (x.id === row.id ? { ...x, contact_emails: r.emails, scanned_at: new Date().toISOString() } : x)));
+      if (r.emails.length) { setEmailFor(row.id); setEmailDraft(r.emails[0]); }
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Scan failed.'); }
+    finally { setFindingFor(null); }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Lead finder — market intelligence</h3>
+      {!plan?.categories.length ? (
+        <p className="mt-1 text-xs text-forge-dim">This world has no DNA yet (ideal customers unknown), so there is nothing honest to scan for. Genesis worlds get segments automatically.</p>
+      ) : (
+        <>
+          <p className="mt-1 text-xs text-forge-dim">Segments reasoned from this world's DNA. Scans are read-only and metered; nothing is contacted without approvals.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {plan.categories.map((c) => (
+              <button
+                key={c.name}
+                onClick={() => void scan(c.name)} disabled={scanning !== null}
+                className="flex items-center gap-1.5 rounded-lg border border-forge-border px-3 py-1.5 text-xs text-forge-ink transition-colors hover:border-forge-ember/50 disabled:opacity-50"
+              >
+                {scanning === c.name ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} className="text-forge-ember" />}
+                Scan: {c.name}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {rows.length > 0 && (
+        <ul className="mt-3 space-y-1.5">
+          {rows.slice(0, 20).map((r) => (
+            <li key={r.id} className="rounded-lg border border-forge-border px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {r.url ? <a href={r.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sm text-forge-ink hover:text-forge-ember">{r.name}</a>
+                  : <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{r.name}</span>}
+                <span className={cn('rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide', FIT_TONE[r.fit])}>{r.fit}</span>
+                <span className="text-[10px] text-forge-dim">{r.category}</span>
+                {r.status === 'new' && (
+                  <>
+                    <button onClick={() => void mark(r, 'qualified')} className="text-[11px] text-forge-ok hover:underline">qualify</button>
+                    <button onClick={() => void mark(r, 'dropped')} className="text-[11px] text-forge-dim hover:text-forge-warn">drop</button>
+                  </>
+                )}
+                {r.status === 'qualified' && (
+                  <>
+                    {r.url && (
+                      <button onClick={() => void findEmails(r)} disabled={findingFor !== null} className="flex items-center gap-1 text-[11px] text-forge-ink/80 hover:text-forge-ember disabled:opacity-50">
+                        {findingFor === r.id && <Loader2 size={10} className="animate-spin" />}
+                        {r.scanned_at && !r.contact_emails?.length ? 'rescan site' : 'find email'}
+                      </button>
+                    )}
+                    <button onClick={() => { setEmailFor(emailFor === r.id ? null : r.id); setEmailDraft(r.contact_emails?.[0] ?? ''); }} className="text-[11px] text-forge-ember hover:underline">→ audience</button>
+                  </>
+                )}
+                {r.status === 'in_audience' && <span className="text-[10px] uppercase tracking-wide text-forge-ok">in audience</span>}
+                {r.status !== 'new' && r.status !== 'qualified' && r.status !== 'in_audience' && <span className="text-[10px] uppercase tracking-wide text-forge-dim">{r.status}</span>}
+              </div>
+              {(r.contact_emails?.length ?? 0) > 0 && r.status === 'qualified' && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-forge-dim">on their site:</span>
+                  {r.contact_emails!.map((e) => (
+                    <button key={e} onClick={() => { setEmailFor(r.id); setEmailDraft(e); }}
+                      className={cn('rounded border px-1.5 py-0.5 text-[11px] transition-colors', emailDraft === e && emailFor === r.id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-ink/80 hover:border-forge-ember/40')}>
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {emailFor === r.id && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <input
+                    value={emailDraft} onChange={(e) => setEmailDraft(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') void toAudience(r); }}
+                    placeholder="their email (from their site — Garvis won't guess it)"
+                    className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
+                  />
+                  <button onClick={() => void toAudience(r)} className="rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10">Add contact</button>
+                </div>
+              )}
+              {r.fit_reason && <p className="mt-0.5 text-xs text-forge-dim">{r.fit_reason}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** G5 — inbound leads from the generated website: real humans who submitted the form. Each is
+ *  already linked (or matched) to a contact by the ingest function, so follow-up is one queue
+ *  tool away. Status transitions are the operator's honest report of what they actually did. */
+function LeadsPanel({ worldId }: { worldId: string }) {
+  const { toast } = useToast();
+  const [leads, setLeads] = useState<LeadRow[]>([]);
+  const [instrumented, setInstrumented] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void worldResults(worldId).then((r) => {
+      if (!live) return;
+      setLeads(r.leadsList);
+      setInstrumented(r.site !== null);
+    }).catch(() => { if (live) setInstrumented(false); });
+    return () => { live = false; };
+  }, [worldId]);
+
+  const mark = async (row: LeadRow, status: LeadRow['status']) => {
+    try {
+      await setLeadStatus(row.id, status);
+      setLeads((p) => status === 'spam' ? p.filter((l) => l.id !== row.id) : p.map((l) => (l.id === row.id ? { ...l, status } : l)));
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update.'); }
+  };
+
+  if (instrumented === null) return null;
+  if (!instrumented && !leads.length) return null;  // no site channel yet — the finder panel below stands alone
+
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Leads — from your website</h3>
+      {leads.length === 0 ? (
+        <p className="mt-1 text-xs text-forge-dim">The site is instrumented and reporting. No form submissions yet — every one will land here (and in your waking moment) the moment it happens.</p>
+      ) : (
+        <ul className="mt-2 space-y-1.5">
+          {leads.slice(0, 12).map((l) => (
+            <li key={l.id} className="rounded-lg border border-forge-border px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{l.name || l.email}</span>
+                {l.source !== 'website' && <span className="rounded border border-forge-ember/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-forge-ember">{l.source}</span>}
+                <span className="text-[10px] text-forge-dim">{timeAgo(l.created_at)}</span>
+                {l.status === 'new' ? (
+                  <>
+                    <button onClick={() => void mark(l, 'contacted')} className="text-[11px] text-forge-ok hover:underline">mark answered</button>
+                    <button onClick={() => void mark(l, 'spam')} className="text-[11px] text-forge-dim hover:text-forge-warn">spam</button>
+                  </>
+                ) : (
+                  <span className="text-[10px] uppercase tracking-wide text-forge-dim">{l.status}</span>
+                )}
+              </div>
+              <p className="mt-0.5 text-xs text-forge-dim">{l.email}{l.phone ? ` · ${l.phone}` : ''}</p>
+              {l.message && <p className="mt-0.5 text-xs text-forge-ink/80">&ldquo;{l.message.slice(0, 200)}&rdquo;</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** G5+G6 — per-channel results AND what the numbers say. Counts are rows; recommendations are the
+ *  verified adapt() engine's output, each carrying its evidence and an honest confidence tier
+ *  (act / watch / too-early). Spend is logged by the operator until platform APIs are connected —
+ *  so cost-per-lead is always logged-spend ÷ measured-leads, two real numbers. */
+function ResultsPanel({ worldId }: { worldId: string }) {
+  const { toast } = useToast();
+  const [read, setRead] = useState<AdaptiveRead | null>(null);
+  const [spendChannel, setSpendChannel] = useState('meta ads');
+  const [spendAmount, setSpendAmount] = useState('');
+
+  const reload = useCallback(async () => {
+    try { setRead(await readAdaptive(worldId)); } catch { /* panel hides */ }
+  }, [worldId]);
+  useEffect(() => { void reload(); }, [reload]);
+
+  const logSpend = async () => {
+    const n = parseFloat(spendAmount);
+    if (!Number.isFinite(n) || n <= 0) { toast('error', 'Enter the real amount spent.'); return; }
+    try {
+      await logAdSpend(worldId, spendChannel, n);
+      setSpendAmount('');
+      toast('success', `Logged $${n} on ${spendChannel} — cost-per-lead now computes from real numbers.`);
+      await reload();
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not log spend.'); }
+  };
+
+  if (!read) return null;
+  const res = read.results;
+  const rows: { channel: string; out: string; back: string }[] = [
+    {
+      channel: 'Email',
+      out: res.email ? `${res.email.sent} sent` : 'no campaigns yet',
+      back: res.email ? `${res.email.replies} repl${res.email.replies === 1 ? 'y' : 'ies'}` : '—',
+    },
+    {
+      channel: 'Direct mail',
+      out: res.mail ? `${res.mail.pieces} pieces (${res.mail.batches} batch${res.mail.batches === 1 ? '' : 'es'})` : 'nothing logged yet',
+      back: res.site
+        ? `${res.site.bySource.find((s) => s.source === 'postcard')?.visits ?? 0} QR visits · ${res.site.bySource.find((s) => s.source === 'postcard')?.leads ?? 0} leads`
+        : 'site not instrumented',
+    },
+    {
+      channel: 'Website',
+      out: res.site ? `${res.site.visits} visits (${res.site.visits7d} this week)` : 'not instrumented — build/rebuild the site to wire reporting',
+      back: res.site ? `${res.site.leads} lead${res.site.leads === 1 ? '' : 's'} (${res.site.leads7d} this week)` : '—',
+    },
+    {
+      channel: 'Meta ads',
+      out: (read.spendByChannel['meta ads'] ?? 0) > 0 || (res.site?.bySource.some((s) => s.source === 'meta-ads') ?? false)
+        ? `$${read.spendByChannel['meta ads'] ?? 0} logged · ${res.site?.bySource.find((s) => s.source === 'meta-ads')?.visits ?? 0} visits`
+        : 'not running — generate the campaign in an ads studio',
+      back: `${res.site?.bySource.find((s) => s.source === 'meta-ads')?.leads ?? 0} leads`,
+    },
+    {
+      channel: 'Google ads',
+      out: (read.spendByChannel['google ads'] ?? 0) > 0 || (res.site?.bySource.some((s) => s.source === 'google-ads') ?? false)
+        ? `$${read.spendByChannel['google ads'] ?? 0} logged · ${res.site?.bySource.find((s) => s.source === 'google-ads')?.visits ?? 0} visits`
+        : 'not running — generate the campaign in an ads studio',
+      back: `${res.site?.bySource.find((s) => s.source === 'google-ads')?.leads ?? 0} leads`,
+    },
+  ];
+
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Results by channel</h3>
+      <p className="mt-0.5 text-[11px] text-forge-dim">Every number is a count of real rows — sends, batches, visits, leads. Nothing modeled, nothing estimated.</p>
+      <table className="mt-2 w-full text-xs">
+        <thead>
+          <tr className="text-left text-[10px] uppercase tracking-wide text-forge-dim">
+            <th className="py-1 pr-2 font-medium">Channel</th>
+            <th className="py-1 pr-2 font-medium">Went out</th>
+            <th className="py-1 font-medium">Came back</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.channel} className="border-t border-forge-border/60">
+              <td className="py-1.5 pr-2 text-forge-ink">{r.channel}</td>
+              <td className="py-1.5 pr-2 text-forge-dim">{r.out}</td>
+              <td className="py-1.5 text-forge-dim">{r.back}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {res.site && res.site.bySource.length > 0 && (
+        <p className="mt-2 text-[11px] text-forge-dim">
+          Visit sources: {res.site.bySource.slice(0, 5).map((s) => `${s.source} ${s.visits}v/${s.leads}l`).join(' · ')}
+        </p>
+      )}
+
+      {/* Spend log — real dollars in, so cost-per-lead is measured, never modeled */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-forge-border/60 pt-3">
+        <span className="text-[11px] uppercase tracking-wide text-forge-dim">Log spend:</span>
+        <select value={spendChannel} onChange={(e) => setSpendChannel(e.target.value)}
+          className="rounded-lg border border-forge-border bg-forge-bg px-2 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+          <option value="meta ads">Meta ads</option>
+          <option value="google ads">Google ads</option>
+          <option value="direct mail">Direct mail</option>
+          <option value="email">Email</option>
+        </select>
+        <input value={spendAmount} onChange={(e) => setSpendAmount(e.target.value)} inputMode="decimal" placeholder="$ spent"
+          className="w-24 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+        <button onClick={() => void logSpend()} className="rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10">Log</button>
+      </div>
+
+      {/* Adaptive Operation — what the numbers say, evidence attached, confidence honest */}
+      {read.recs.length > 0 && (
+        <div className="mt-3 border-t border-forge-border/60 pt-3">
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-forge-ink">What the numbers say</h4>
+          <ul className="mt-1.5 space-y-1.5">
+            {read.recs.map((r, i) => (
+              <li key={i} className="rounded-lg border border-forge-border bg-forge-raised/30 px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <span className={cn(
+                    'mt-px rounded border px-1 py-px font-mono text-[8.5px] uppercase tracking-wide',
+                    r.confidence === 'act' ? 'border-forge-ok/40 text-forge-ok'
+                      : r.confidence === 'watch' ? 'border-forge-warn/40 text-forge-warn'
+                      : 'border-forge-border text-forge-dim/70',
+                  )}>{r.confidence}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs text-forge-ink">{r.text}</p>
+                    <p className="mt-0.5 text-[11px] text-forge-dim">{r.evidence} <span className="text-forge-dim/60">({r.basis})</span></p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The ad-platform connections card — honest state per provider: connected (sync works), needs
+ *  your account id, or not registered yet (with the EXACT registration steps from the server).
+ *  Secrets never touch the browser; this card only holds account ids and the sync button. */
+function ConnectionsCard({ worldId, onSynced }: { worldId: string; onSynced: () => void }) {
+  const { toast } = useToast();
+  const [conns, setConns] = useState<ConnectionState[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showSetup, setShowSetup] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void listConnections().then((c) => { if (live) { setConns(c); setDrafts(Object.fromEntries(c.map((x) => [x.provider, x.accountId]))); } }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  const doSync = async (c: ConnectionState) => {
+    setBusy(c.provider);
+    try {
+      const draft = (drafts[c.provider] ?? '').trim();
+      if (draft && draft !== c.accountId) await saveConnectionAccount(c.provider, draft);
+      const r = await syncProvider(c.provider, worldId);
+      toast(r.ok ? 'success' : 'info', r.message);
+      if (r.ok) { setConns(await listConnections()); onSynced(); }
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Sync failed.'); }
+    finally { setBusy(null); }
+  };
+
+  if (!conns.length) return null;
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
+      <h3 className="text-sm font-semibold text-forge-ink">Ad platform connections</h3>
+      <p className="mt-0.5 text-[11px] text-forge-dim">Read-only sync (reporting first — the fast approval lane). Secrets live on the server; this card holds only your account ids.</p>
+      <div className="mt-2 space-y-2">
+        {conns.map((c) => (
+          <div key={c.provider} className="rounded-lg border border-forge-border px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-forge-ink">{c.label}</span>
+              <span className={cn(
+                'rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
+                c.serverConfigured && c.status === 'ready' ? 'border-forge-ok/40 text-forge-ok'
+                  : c.serverConfigured ? 'border-forge-warn/40 text-forge-warn'
+                  : 'border-forge-border text-forge-dim',
+              )}>
+                {c.serverConfigured ? (c.status === 'ready' ? 'connected' : 'needs account id') : 'not registered'}
+              </span>
+              {c.lastSyncedAt && <span className="text-[10px] text-forge-dim">synced {timeAgo(c.lastSyncedAt)}</span>}
+              <span className="flex-1" />
+              {c.serverConfigured ? (
+                <>
+                  <input
+                    value={drafts[c.provider] ?? ''} onChange={(e) => setDrafts((d) => ({ ...d, [c.provider]: e.target.value }))}
+                    placeholder={c.provider === 'meta_ads' ? 'act_123… or 123…' : '123-456-7890'}
+                    className="w-36 rounded-lg border border-forge-border bg-forge-bg px-2 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none"
+                  />
+                  <button onClick={() => void doSync(c)} disabled={busy !== null}
+                    className="flex items-center gap-1 rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10 disabled:opacity-50">
+                    {busy === c.provider && <Loader2 size={11} className="animate-spin" />} Sync 30 days
+                  </button>
+                </>
+              ) : (
+                <button onClick={() => setShowSetup(showSetup === c.provider ? null : c.provider)}
+                  className="text-[11px] text-forge-ember hover:underline">how to connect</button>
+              )}
+            </div>
+            {c.lastError && <p className="mt-1 text-[11px] text-forge-warn">Last sync error: {c.lastError}</p>}
+            {showSetup === c.provider && (
+              <ol className="mt-2 space-y-1 border-t border-forge-border/60 pt-2 text-[11px] text-forge-dim">
+                {c.setup.map((s, i) => <li key={i}>{s}</li>)}
+              </ol>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

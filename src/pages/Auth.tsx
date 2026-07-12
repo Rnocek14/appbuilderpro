@@ -17,7 +17,9 @@ export default function Auth() {
   const [busy, setBusy] = useState(false);
   const [magicSent, setMagicSent] = useState(false);
 
-  if (session) return <Navigate to="/dashboard" replace />;
+  // The front door is Garvis's Command — the surface designed for a first session (waking moment,
+  // suggestions, the three first moves). The legacy Projects dashboard stays one nav-click away.
+  if (session) return <Navigate to="/garvis/command" replace />;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

@@ -166,6 +166,41 @@ export const GARVIS_TOOLS: GarvisTool[] = [
     inputSchema: { type: 'object', properties: { app_id: { type: 'string' } } },
     modes: ['observe', 'plan', 'act'],
   },
+  // --- WORLDS: the business-growth brain, readable from Command (unification) ---------------
+  {
+    name: 'list_worlds',
+    description:
+      'List the owner\'s WORLDS (businesses being grown — e.g. "Mom Real Estate Marketing") with each ' +
+      'one\'s momentum label, current recommendation, and any blockers. Use this to answer "how is ' +
+      'X doing?" and to decide where attention is needed. Worlds are distinct from apps (products).',
+    inputSchema: { type: 'object', properties: {} },
+    modes: ['observe', 'plan', 'act'],
+  },
+  {
+    name: 'ask_worlds',
+    description:
+      'Ask a grounded question about the owner\'s worlds and get a CITED answer retrieved from their ' +
+      'own artifacts (research, plans, playbooks, designs). Optionally scope to one world by id. Use ' +
+      'this before advising on a business — it grounds you in what actually exists, never guesses.',
+    inputSchema: {
+      type: 'object',
+      properties: { question: { type: 'string' }, world_id: { type: 'string' } },
+      required: ['question'],
+    },
+    modes: ['observe', 'plan', 'act'],
+  },
+  {
+    name: 'draft_world',
+    description:
+      'Propose a NEW world from a one-line intent. The design FITS the objective: a growth intent ' +
+      '("grow my brother\'s art business") gets a marketing world; a product intent ("I work for ' +
+      'WealthCharts — explore and create features for the platform") gets a PRODUCT LAB (research + ' +
+      'feature studio, no outreach). Pass the intent faithfully — platform name, the relationship ' +
+      '(works there / owns it), and the goal. Written as a DRAFT awaiting the owner\'s approval — ' +
+      'nothing becomes live until they review it on the Ventures page. Same discipline as propose_goal.',
+    inputSchema: { type: 'object', properties: { intent: { type: 'string' } }, required: ['intent'] },
+    modes: ['act'],
+  },
   {
     name: 'propose_goal',
     description:
@@ -232,6 +267,41 @@ export const GARVIS_TOOLS: GarvisTool[] = [
       },
       required: ['kind', 'title'],
     },
+    modes: ['act'],
+  },
+  // --- MONEY (flow audit): the invoice loop gets a conversational door. Drafting is safe;
+  // QUEUEING creates a PENDING approval — nothing is ever emailed without the owner's yes. ---
+  {
+    name: 'list_invoices',
+    description: 'List the owner\'s invoices (number, title, recipient, amount, status draft|sent|paid|void, due date).',
+    inputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['draft', 'sent', 'paid', 'void'] } } },
+    modes: ['observe', 'plan', 'act'],
+  },
+  {
+    name: 'create_invoice',
+    description:
+      'Create a DRAFT invoice (auto-numbered INV-year-NNN). Give line_items when the work has parts; ' +
+      'or just amount_usd + title for a single-line invoice. Creates/links the contact by email. ' +
+      'The draft sends NOTHING — queue_invoice_send stages it for the owner\'s approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        to_email: { type: 'string' },
+        amount_usd: { type: 'number' },
+        line_items: { type: 'array', items: { type: 'object', properties: { description: { type: 'string' }, qty: { type: 'number' }, unit_usd: { type: 'number' } } } },
+        due_date: { type: 'string' },
+      },
+      required: ['title', 'to_email'],
+    },
+    modes: ['act'],
+  },
+  {
+    name: 'queue_invoice_send',
+    description:
+      'Queue an existing invoice (by its INV- number) for emailing. Creates a PENDING approval — ' +
+      'the email leaves only after the owner approves it in Approvals.',
+    inputSchema: { type: 'object', properties: { number: { type: 'string' } }, required: ['number'] },
     modes: ['act'],
   },
 ];

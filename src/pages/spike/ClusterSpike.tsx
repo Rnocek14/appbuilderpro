@@ -6,11 +6,13 @@
 // worlds follow you across devices. The old clustering test tools live in a collapsible Dev panel.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
-  GitBranch, RefreshCw, Plus, ChevronRight, Orbit, ListTree, Sparkles, ArrowRight, RotateCcw, FlaskConical, Check, Globe2, Cloud, Loader2,
+  GitBranch, RefreshCw, Plus, ChevronRight, Orbit, ListTree, Sparkles, ArrowRight, RotateCcw, FlaskConical, Check, Globe2, Cloud, Loader2, Sprout, DoorOpen,
 } from 'lucide-react';
 import { Button, Card } from '../../components/ui';
 import GalaxyView from './GalaxyView';
+import IdeaRoom from './IdeaRoom';
 import { CLUSTER_SAMPLES } from '../../data/clusterSamples';
 import {
   stabilityReport, graphStats, normalizeGraph, slugify,
@@ -22,6 +24,8 @@ import {
   type Universe, type WorldMeta,
 } from '../../lib/garvis/universe';
 import { migrateLoops } from '../../lib/garvis/loops';
+import { sweepRecurringThreads } from '../../lib/garvis/gardenerRun';
+import type { RecurringThread } from '../../lib/garvis/gardener';
 
 const CURIOSITIES = ['Black holes', 'The Roman Empire', 'How memory works', 'Bioluminescence', 'The history of money', 'Why we dream', 'Lake Geneva real estate', 'How LLMs actually work'];
 
@@ -41,6 +45,8 @@ function parseTranscript(text: string, startIndex = 0): Turn[] {
 const KIND_TONE: Record<Cluster['kind'], string> = {
   topic: 'text-forge-ink', question: 'text-sky-400', idea: 'text-forge-ember',
   investigation: 'text-violet-400', artifact: 'text-emerald-400', project: 'text-amber-400',
+  claim: 'text-rose-400', theory: 'text-purple-400', evidence: 'text-emerald-400',
+  scenario: 'text-orange-400', experiment: 'text-cyan-400', insight: 'text-amber-300',
 };
 
 function TreeNode({ node, all, depth }: { node: Cluster; all: Cluster[]; depth: number }) {
@@ -70,7 +76,9 @@ function StatPill({ label, value, warn }: { label: string; value: string | numbe
   );
 }
 
-export default function ClusterSpike() {
+/** Page by default; `embedded` mounts it as a summoned canvas beside the Command thread (h-full,
+ *  no focus theft). `seed` starts a NEW dive immediately — whatever world was current stays saved. */
+export default function ClusterSpike({ embedded = false, seed: seedProp }: { embedded?: boolean; seed?: string } = {}) {
   const [graph, setGraph] = useState<ClusterGraph | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
@@ -79,7 +87,10 @@ export default function ClusterSpike() {
   const [cost, setCost] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
-  const [view, setView] = useState<'universe' | 'tree'>('universe');
+  // Three views of one world: Map (the galaxy), Room (the focused branch — where the Lab verbs
+  // live: what-if, lab bench, compare, make it rigorous), Tree (the outline). The embedded canvas
+  // defaults to the Room — a 4000px pannable stage is the wrong tool inside a side panel.
+  const [view, setView] = useState<'universe' | 'room' | 'tree'>(embedded ? 'room' : 'universe');
   const [showDev, setShowDev] = useState(false);
   const [curiosity, setCuriosity] = useState('');
   // dev-panel state
@@ -93,29 +104,71 @@ export default function ClusterSpike() {
   const [worlds, setWorlds] = useState<WorldMeta[]>([]);
   const [opening, setOpening] = useState<string | null>(null);
   const [synced, setSynced] = useState(false);
+  const [threads, setThreads] = useState<RecurringThread[]>([]); // the gardener's cross-world sweep
 
   const meta = useRef<{ id: string; createdAt: string }>({ id: '', createdAt: '' });
   const stats = graph ? graphStats(graph) : null;
 
-  const refreshWorlds = () => { void listWorlds().then(setWorlds).catch(() => {}); };
+  const refreshWorlds = () => {
+    void listWorlds().then(setWorlds).catch(() => {});
+    void sweepRecurringThreads().then(setThreads).catch(() => {}); // fail-soft: silence over guesses
+  };
 
-  // restore the universe on mount — "still here when you come back" — and learn what other worlds exist
+  const restore = (u: Universe, welcome = true) => {
+    meta.current = { id: u.id, createdAt: u.createdAt };
+    setGraph(u.graph); setFocusId(u.focusId); setTitle(u.title);
+    if (welcome) setWelcome(`Welcome back — last explored ${lastSeen(u)}`);
+    setSaved(true);
+  };
+
+  // Mount: a SEED (embedded canvas prop, or ?dive= handed over by Command) starts falling into a
+  // NEW world right now — UNLESS the current world already IS that dive (a re-summoned canvas or a
+  // refresh must CONTINUE the dive, never clone it). ?world= deep-links a specific world (the
+  // waking moment's warm-trail move lands here). Otherwise, restore — "still here when you come
+  // back". Either way, learn what other worlds exist.
+  const entered = useRef(false);
+  const lastSearch = useRef('');
   useEffect(() => {
+    if (entered.current) return;
+    entered.current = true;
+    lastSearch.current = embedded ? '' : window.location.search;
+    const params = embedded ? null : new URLSearchParams(window.location.search);
+    const s = (seedProp ?? params?.get('dive') ?? '').trim();
+    const worldId = params?.get('world')?.trim() ?? '';
     const u = loadUniverse();
-    if (u) {
-      meta.current = { id: u.id, createdAt: u.createdAt };
-      setGraph(u.graph); setFocusId(u.focusId); setTitle(u.title);
-      setWelcome(`Welcome back — last explored ${lastSeen(u)}`);
-      setSaved(true);
-    }
+    if (s) {
+      if (u && slugify(u.title) === slugify(s)) restore(u);
+      else { setCuriosity(s); void begin(s); }
+    } else if (worldId) { open(worldId); }
+    else if (u) { restore(u); }
     refreshWorlds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The route is live, not consume-once: navigating to /garvis/explore?dive=… or ?world=… while
+  // the page is ALREADY mounted (React Router doesn't remount on search-param changes) must still
+  // start the dive / open the world instead of silently ignoring the link.
+  const location = useLocation();
+  useEffect(() => {
+    if (embedded || !entered.current || location.search === lastSearch.current) return;
+    lastSearch.current = location.search;
+    const p = new URLSearchParams(location.search);
+    const d = p.get('dive')?.trim();
+    const w = p.get('world')?.trim();
+    if (d && slugify(d) !== slugify(title)) { setCuriosity(d); void begin(d); }
+    else if (w && w !== meta.current.id) { open(w); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   // auto-save (debounced): localStorage immediately, then a best-effort cloud push. The first push
   // assigns the world its server uuid — adopt it so every later save updates the same world.
+  // `latest` mirrors the newest unsaved state so unmount can FLUSH it synchronously — a dive
+  // younger than the 700ms debounce (fast canvas close, quick second rabbit hole) is never lost.
+  const latest = useRef<Universe | null>(null);
   useEffect(() => {
     if (!graph || !meta.current.id) return;
     setSaved(false);
+    latest.current = { id: meta.current.id, title, graph, focusId, createdAt: meta.current.createdAt, updatedAt: '' };
     const h = window.setTimeout(() => {
       const u: Universe = { id: meta.current.id, title, graph, focusId, createdAt: meta.current.createdAt, updatedAt: '' };
       saveUniverse(u);
@@ -139,7 +192,7 @@ export default function ClusterSpike() {
   const install = (t: string, g: ClusterGraph, focus: string | null) => {
     const u = newUniverse(t, g, focus);
     meta.current = { id: u.id, createdAt: u.createdAt };
-    setTitle(t); setGraph(g); setFocusId(focus); setView('universe'); setWelcome(null); setReport(null);
+    setTitle(t); setGraph(g); setFocusId(focus); setView(embedded ? 'room' : 'universe'); setWelcome(null); setReport(null);
   };
 
   // the curiosity cold-start — drop straight INTO the idea. No pre-built subtopics (those read as a
@@ -154,8 +207,13 @@ export default function ClusterSpike() {
 
   // "New" LEAVES the current world (it stays saved, locally and in the cloud) and returns to the
   // cold start, where every world — this one included — is one click away. Nothing is ever erased.
+  // Flush-on-unmount (localStorage is synchronous): whatever the debounce hadn't written yet is
+  // written now, so "everything you grow stays saved" survives even a sub-second canvas swap.
+  useEffect(() => () => { if (latest.current?.id) saveUniverse(latest.current); }, []);
+
   const startOver = () => {
     leaveUniverse();
+    latest.current = null; // leaving is deliberate — the unmount flush must not resurrect the pointer
     meta.current = { id: '', createdAt: '' };
     setGraph(null); setFocusId(null); setTitle(''); setWelcome(null); setCuriosity(''); setSynced(false);
     refreshWorlds();
@@ -194,7 +252,7 @@ export default function ClusterSpike() {
   // ---------- COLD START ----------
   if (!graph) {
     return (
-      <div className="relative flex h-screen w-full flex-col items-center justify-center overflow-hidden px-6">
+      <div className={`relative flex ${embedded ? 'h-full' : 'h-screen'} w-full flex-col items-center justify-center overflow-hidden px-6`}>
         <style>{`@keyframes ku-cs-glow{0%,100%{box-shadow:0 0 0 1px rgba(233,162,59,.25),0 0 40px -8px rgba(233,162,59,.5)}50%{box-shadow:0 0 0 1px rgba(233,162,59,.4),0 0 70px -6px rgba(233,162,59,.8)}}`}</style>
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(900px 600px at 50% 40%, rgba(233,162,59,0.12), transparent 70%), radial-gradient(circle at 50% 50%, #0c0a14, #060509 85%)' }} />
         <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.35) 1px, transparent 1px)', backgroundSize: '60px 60px', opacity: 0.5 }} />
@@ -210,7 +268,7 @@ export default function ClusterSpike() {
             style={{ animation: 'ku-cs-glow 5s ease-in-out infinite' }}
           >
             <input
-              autoFocus value={curiosity} onChange={(e) => setCuriosity(e.target.value)}
+              autoFocus={!embedded} value={curiosity} onChange={(e) => setCuriosity(e.target.value)}
               placeholder="black holes, the Roman Empire, how memory works…"
               className="flex-1 bg-transparent px-3 py-2 text-base text-forge-ink outline-none placeholder:text-forge-dim/60"
             />
@@ -243,7 +301,28 @@ export default function ClusterSpike() {
             </div>
           )}
 
-          {busy === 'begin' && <p className="mt-6 text-sm text-forge-ember">Composing your universe…</p>}
+          {/* THE GARDENER SPEAKS — a thread growing in several worlds at once is worth a dive of
+              its own. Measured recurrence (≥2 distinct worlds), never an invented connection. */}
+          {threads.length > 0 && (
+            <div className="mt-8">
+              <div className="mb-2 flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-[0.2em] text-forge-dim/70"><Sprout size={12} /> threads that keep coming back</div>
+              <div className="flex flex-wrap justify-center gap-2">
+                {threads.map((t) => (
+                  <button
+                    key={t.title} onClick={() => begin(t.title)}
+                    title={`Appears in: ${t.appearances.map((a) => a.worldTitle).join(' · ')} — dive into it as its own world`}
+                    className="group flex items-center gap-2 rounded-xl border border-emerald-400/25 bg-forge-panel/70 px-3 py-2 text-left backdrop-blur transition-all hover:-translate-y-0.5 hover:border-emerald-400/50"
+                  >
+                    <Sprout size={13} className="shrink-0 text-emerald-400/80" />
+                    <span className="max-w-[220px] truncate text-xs font-medium text-forge-ink">{t.title}</span>
+                    <span className="text-[10px] text-forge-dim">in {t.worldCount} worlds → new dive</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {busy === 'begin' && <p className="mt-6 text-sm text-forge-ember">Composing your world…</p>}
           {err && <p className="mt-4 rounded-lg border border-forge-err/30 bg-forge-err/10 p-3 text-sm text-forge-err">{err}</p>}
 
           <button onClick={() => setShowDev((v) => !v)} className="mt-10 inline-flex items-center gap-1 text-[11px] text-forge-dim/60 hover:text-forge-dim"><FlaskConical size={11} /> dev / clustering tools</button>
@@ -265,10 +344,10 @@ export default function ClusterSpike() {
 
   // ---------- THE UNIVERSE ----------
   return (
-    <div className="relative flex h-screen w-full flex-col bg-forge-bg">
+    <div className={`relative flex ${embedded ? 'h-full' : 'h-screen'} w-full flex-col bg-forge-bg`}>
       <div className="flex flex-wrap items-center gap-2 border-b border-forge-border px-4 py-2">
         <Sparkles size={16} className="text-forge-ember" />
-        <h1 className="font-display text-base font-semibold text-forge-ink">{title || 'Your universe'}</h1>
+        <h1 className="font-display text-base font-semibold text-forge-ink">{title || 'Your world'}</h1>
         <span className="inline-flex items-center gap-1 text-[11px] text-forge-dim">
           {saved ? <><Check size={11} className="text-emerald-400" /> saved</> : 'saving…'}
           {synced && <Cloud size={11} className="ml-1 text-sky-400/80" aria-label="Synced to cloud" />}
@@ -277,6 +356,7 @@ export default function ClusterSpike() {
         <div className="ml-auto flex items-center gap-2">
           <div className="inline-flex gap-0.5 rounded-lg border border-forge-border p-0.5">
             <button onClick={() => setView('universe')} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs ${view === 'universe' ? 'bg-forge-raised text-forge-ink' : 'text-forge-dim'}`}><Orbit size={12} /> Map</button>
+            <button onClick={() => setView('room')} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs ${view === 'room' ? 'bg-forge-raised text-forge-ink' : 'text-forge-dim'}`} title="Enter the focused idea — what-if, lab bench, compare, make it rigorous"><DoorOpen size={12} /> Room</button>
             <button onClick={() => setView('tree')} className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs ${view === 'tree' ? 'bg-forge-raised text-forge-ink' : 'text-forge-dim'}`}><ListTree size={12} /> Tree</button>
           </div>
           <button onClick={() => setShowDev((v) => !v)} className="rounded-lg border border-forge-border p-1.5 text-forge-dim hover:text-forge-ink" title="Dev tools"><FlaskConical size={13} /></button>
@@ -289,6 +369,10 @@ export default function ClusterSpike() {
       <div className="relative min-h-0 flex-1">
         {view === 'universe' ? (
           <GalaxyView graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={setCost} worldKey={meta.current.id || 'local'} />
+        ) : view === 'room' ? (
+          <div className="h-full overflow-y-auto px-4 py-3">
+            <IdeaRoom graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={setCost} onOpenMap={() => setView('universe')} />
+          </div>
         ) : (
           <div className="grid h-full gap-4 overflow-auto p-4 md:grid-cols-2">
             <Card className="p-4">

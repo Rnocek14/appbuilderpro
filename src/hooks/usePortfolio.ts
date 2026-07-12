@@ -20,14 +20,19 @@ export function usePortfolio() {
   const [syncing, setSyncing] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!session) return;
-    const { data } = await supabase
-      .from('apps')
-      .select('*')
-      .is('deleted_at', null)
-      .order('updated_at', { ascending: false });
-    setApps((data as PortfolioApp[]) ?? []);
-    setLoading(false);
+    if (!session) { setLoading(false); return; }
+    try {
+      const { data } = await supabase
+        .from('apps')
+        .select('*')
+        .is('deleted_at', null)
+        .order('updated_at', { ascending: false });
+      setApps((data as PortfolioApp[]) ?? []);
+    } catch {
+      setApps([]);   // never strand the spinner on a network rejection
+    } finally {
+      setLoading(false);
+    }
   }, [session]);
 
   useEffect(() => { refresh(); }, [refresh]);

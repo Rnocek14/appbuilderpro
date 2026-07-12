@@ -38,7 +38,7 @@ const graph: ClusterGraph = {
     {
       id: 'distributed-ai', parentId: 'bee-hives', title: 'Is this like distributed AI?',
       summary: 'Swarms and agent fleets share a shape.', kind: 'idea', salience: 0.8,
-      maturity: 'spark', turnRefs: [5], artifacts: [],
+      maturity: 'spark', epistemic: 'hypothesis', turnRefs: [5], artifacts: [], // app_0049 honesty layer rides the roundtrip
     },
   ],
   edges: [

@@ -23,13 +23,16 @@ export function useMissions() {
 
   const refresh = useCallback(async () => {
     if (!session) return;
-    const [m, t] = await Promise.all([
-      supabase.from('garvis_missions').select('*').order('created_at', { ascending: false }),
-      supabase.from('garvis_tasks').select('*').order('seq', { ascending: true }),
-    ]);
-    setMissions((m.data as GarvisMission[]) ?? []);
-    setTasks((t.data as GarvisTask[]) ?? []);
-    setLoading(false);
+    try {
+      const [m, t] = await Promise.all([
+        supabase.from('garvis_missions').select('*').order('created_at', { ascending: false }),
+        supabase.from('garvis_tasks').select('*').order('seq', { ascending: true }),
+      ]);
+      setMissions((m.data as GarvisMission[]) ?? []);
+      setTasks((t.data as GarvisTask[]) ?? []);
+    } finally {
+      setLoading(false); // a failed load must never leave an eternal spinner
+    }
   }, [session]);
 
   useEffect(() => { refresh(); }, [refresh]);

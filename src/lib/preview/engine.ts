@@ -435,15 +435,12 @@ export async function listPublishRequests(): Promise<(PublishRequestRow & { busi
     .map((r) => ({ ...r, business_name: r.preview_sites?.business_name, slug: r.preview_sites?.slug }));
 }
 
-/** Public fetch for the no-login preview route — matches by slug first, then id. */
+/** Public fetch for the no-login preview route. Goes through the get_preview_by_slug RPC
+ *  (app_0041): the table itself is owner-read-only now, and the ONLY anonymous door returns
+ *  exactly one row for an exact (unguessable) slug — never the whole pipeline. */
 export async function getPreviewSite(slugOrId: string): Promise<PreviewSiteRow | null> {
-  const bySlug = await supabase.from('preview_sites').select('*').eq('slug', slugOrId).maybeSingle();
-  if (bySlug.data) return bySlug.data as PreviewSiteRow;
-  if (/^[0-9a-f-]{36}$/i.test(slugOrId)) {
-    const byId = await supabase.from('preview_sites').select('*').eq('id', slugOrId).maybeSingle();
-    if (byId.data) return byId.data as PreviewSiteRow;
-  }
-  return null;
+  const { data } = await supabase.rpc('get_preview_by_slug', { p_slug: slugOrId });
+  return (data as PreviewSiteRow | null) ?? null;
 }
 
 export async function listPreviewSites(): Promise<PreviewSiteRow[]> {

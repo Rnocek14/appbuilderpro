@@ -515,6 +515,78 @@ empty until a reflection has run), What Garvis recommends + what's still unknown
 a persisted row; the working/failing-by-the-numbers panel states plainly that it waits for G5
 instrumentation rather than guessing.
 
+## G4 v1 — SHIPPED (Market Intelligence: reasoning before searching)
+
+"Who is likely to benefit from this business?" is answered the honest way:
+- **The research plan derives DETERMINISTICALLY from the World DNA** — one scan segment per
+  ideal customer, queries woven from customers × offerings × locale. Same DNA, same plan; no
+  model call, nothing invented. A world without DNA gets an empty plan and the panel says why.
+- **Scans are read-only and capped** (2 queries, 8 stored prospects per scan) through the
+  existing metered rails: discover-media/Serper finds; prospects land as rows (app_0032, owner
+  RLS, unique per world+url so re-scans never duplicate).
+- **Fit is an evidence-labeled verdict, never a score**: one batched cluster-chat judgment per
+  scan returns strong/possible/weak with a reason grounded ONLY in the search snippet + the DNA;
+  a labeled fit without a reason is dropped by the parser; unjudged prospects stay visibly
+  "unknown". (marketIntel.ts, 9-check verify.)
+- **The finder lives in every audience area**: segment scan buttons, the prospect list with fit
+  chips + reasons, qualify/drop triage. Contacting anyone still requires moving them into
+  contacts and through the approval spine — stated in the panel itself.
+Deferred to G4 v2: fetch-url page-deep profiling, portfolio-matched pitch angles, trend
+questions feeding world_intelligence, scan runs >25 prospects behind an approval.
+
+## Vertical intelligence — SHIPPED (the system knows the INDUSTRY, not just the craft)
+
+The expertise packs closed the blank-world problem functionally; this layer closes it
+DOMAIN-wise. "Build a real estate plan for my mom" and "a finance research world" must not
+receive the same generic marketing knowledge — they don't anymore:
+- **Deterministic industry detection** (verticals.ts, 24-check verify): the World DNA's own
+  words (businessType, value proposition, ideal customers, name/craft/offerings) map to one of
+  14 verticals — real estate, finance, creative, food, e-commerce, professional services,
+  health, home services, education, tech/SaaS, events, nonprofit, retail, generic. Keyword-
+  scored, no model call: same world, same vertical, every time. No match → 'generic', stated
+  honestly (the generic brief is a checklist of open questions, not a fake industry).
+- **Researched domain packs compose over the functional base**: every seeded area gets
+  base craft + industry overlay. Real estate arrives with the CMA method (comps/adjustments/
+  absorption), geographic farming math, and the Fair Housing checklist (verified against HUD's
+  digital-platform guidance: targeting ad DISTRIBUTION by protected class is illegal). Finance
+  arrives with the due-diligence ladder, thesis-memo structure, macro dashboard, and the SEC
+  Marketing Rule flags (testimonial disclosures at dissemination, gross-with-net performance —
+  per the Dec-2025 exam risk alert). Food gets menu engineering + the review/regulars loop;
+  e-commerce gets the flow stack + product-page anatomy + FTC review rules; health gets HIPAA
+  marketing rules; SaaS gets positioning teardowns + the activation loop; nonprofits get grant
+  research (990 mining) + donor retention — and so on, each with domain KPIs in the ledger.
+- **Every studio flavor now has a dedicated pack**: brand (messaging house + identity
+  checklist), market (the cited market-update format), crm (call/VM/DM scripts + objection
+  grid), lists (consent-ranked list building + hygiene) joined social/mail/email/video/landing.
+  Nothing falls back to a vague stub.
+- **Same honesty spine**: overlays are labeled frameworks; every number defers to MLS/Fed/BLS/
+  POS/scans/records; compliance content names the rule, not a vibe. Slugs never collide with
+  base packs (verified), so upserts stay idempotent.
+
+## Expertise packs — SHIPPED (the blank-world problem, closed)
+
+The test: "build a real estate marketing plan for my mom" must arrive WITH the plans — a social
+area with a real 30-day plan, a direct-mail area with a campaign plan and postcard concepts, a
+market-comparison area with the comparison framework — not empty rooms the user has to fill by
+searching. Now it does:
+- **Domain expertise is data** (expertise.ts, 8-check verify): every archetype × flavor resolves
+  to a non-empty expert pack — 30-day social rhythm + post archetypes, direct-mail 40/40/20 plan
+  + 3 postcard concepts, cold/nurture/post-inquiry email cadences, video formats, landing-page
+  structure, market comparison matrix + research checklist, audience segmentation worksheet,
+  pipeline stages, KPI tree, launch checklist, vault checklist. Deterministic — zero AI keys
+  needed; verified exhaustively (every combination, 300+ chars of real structure each).
+- **Worlds are born full**: instantiateWeb seeds every chartered area with its pack (seedWorld,
+  fail-soft, idempotent upsert). Genesis worlds seed in their OWN voice (approveDraft passes the
+  business context through); builtin templates seed with a minimal voice — the title fills
+  {{business_name}} and every unknown token stays visible, marking exactly what Garvis doesn't
+  know yet.
+- **Generators stopped stubbing**: a generator tool with no matching play step now writes the
+  area's expert playbook instead of a "starting point" sentence.
+- **Honesty is in the packs themselves**: every seed is labeled a framework, and wherever a
+  number belongs the text says to fill it from a Market Intelligence scan or the user's records
+  — Garvis never invents figures. The frameworks are expert structure; the DATA still comes from
+  scans, uploads, and results rows.
+
 ## Final principle, restated as an invariant
 
 Genesis generates **data that existing validators accept** — new worlds speak the same seven

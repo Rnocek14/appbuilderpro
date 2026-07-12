@@ -21,13 +21,26 @@
 // clustering.verify.ts. The thin impure half (clusterConversation / extendClusters) lives in
 // clusteringRun.ts, exactly like marketing.ts / marketingRun.ts.
 
-export type ClusterKind = 'topic' | 'question' | 'idea' | 'investigation' | 'artifact' | 'project';
+export type ClusterKind =
+  | 'topic' | 'question' | 'idea' | 'investigation' | 'artifact' | 'project'
+  // Exploration Lab vocabulary — the map can now say WHAT a thought is, not just that it exists:
+  | 'claim'        // an assertion that could be true or false
+  | 'theory'       // a structured explanation being examined
+  | 'evidence'     // something that supports or undercuts a claim
+  | 'scenario'     // a what-if branch — controlled divergence, never replaces the original
+  | 'experiment'   // a way to test something (thought experiment or real)
+  | 'insight';     // a conclusion the exploration actually reached
 export type EdgeType = 'relates' | 'leads_to' | 'contradicts' | 'supports';
+
+/** THE HONESTY LAYER (Exploration Lab): how solid a node is. A beautiful map must never make a
+ *  speculation look like a fact — the label travels with the node everywhere it renders. */
+export type Epistemic = 'established' | 'strong' | 'plausible' | 'disputed' | 'speculative' | 'fiction' | 'hypothesis';
+export const EPISTEMICS: Epistemic[] = ['established', 'strong', 'plausible', 'disputed', 'speculative', 'fiction', 'hypothesis'];
 
 // A concrete OUTPUT produced or referenced in the conversation — the "nothing gets lost" promise.
 // Lives ON the cluster it belongs to, so a generated image / video concept / diagram / research
 // finding / document is always one hop from the idea that spawned it.
-export type ArtifactKind = 'image' | 'video' | 'diagram' | 'research' | 'doc' | 'link' | 'post' | 'data';
+export type ArtifactKind = 'image' | 'video' | 'diagram' | 'research' | 'doc' | 'link' | 'post' | 'data' | 'simulation';
 export interface Artifact {
   id: string;
   kind: ArtifactKind;
@@ -49,6 +62,7 @@ export interface Cluster {
   kind: ClusterKind;
   salience: number;      // 0..1 — how central this thread is (core vs trivia). Drives DOI/zoom later.
   maturity: ClusterMaturity;
+  epistemic?: Epistemic; // how solid this is (claims/theories/scenarios) — absent when not applicable
   trajectory?: string;   // "where is it going" — the forward-looking line that makes it a companion
   turnRefs: number[];    // indices of the conversation turns that fed this cluster ("ideas")
   artifacts: Artifact[]; // media / results / docs attached to this thread
@@ -74,10 +88,10 @@ export interface Turn { i: number; role: 'user' | 'assistant'; text: string }
 
 export interface RawGraph { clusters?: unknown[]; edges?: unknown[] }
 
-const KINDS: ClusterKind[] = ['topic', 'question', 'idea', 'investigation', 'artifact', 'project'];
+const KINDS: ClusterKind[] = ['topic', 'question', 'idea', 'investigation', 'artifact', 'project', 'claim', 'theory', 'evidence', 'scenario', 'experiment', 'insight'];
 const EDGE_TYPES: EdgeType[] = ['relates', 'leads_to', 'contradicts', 'supports'];
 const MATURITIES: ClusterMaturity[] = ['spark', 'growing', 'mature', 'building', 'finished', 'dormant', 'archived'];
-const ARTIFACT_KINDS: ArtifactKind[] = ['image', 'video', 'diagram', 'research', 'doc', 'link', 'post', 'data'];
+const ARTIFACT_KINDS: ArtifactKind[] = ['image', 'video', 'diagram', 'research', 'doc', 'link', 'post', 'data', 'simulation'];
 
 /** Parse + sanitize the artifacts array on a cluster. */
 function parseArtifacts(raw: unknown): Artifact[] {
@@ -183,6 +197,7 @@ export function normalizeGraph(raw: RawGraph): ClusterGraph {
       kind: KINDS.includes(c?.kind as ClusterKind) ? (c.kind as ClusterKind) : 'topic',
       salience: clamp01(c?.salience, 0.5),
       maturity: MATURITIES.includes(c?.maturity as ClusterMaturity) ? (c.maturity as ClusterMaturity) : 'growing',
+      epistemic: EPISTEMICS.includes(c?.epistemic as Epistemic) ? (c.epistemic as Epistemic) : undefined,
       trajectory: typeof c?.trajectory === 'string' && c.trajectory.trim() ? c.trajectory.trim() : undefined,
       turnRefs: Array.isArray(c?.turnRefs)
         ? ((c.turnRefs as unknown[]).filter((n) => typeof n === 'number') as number[])
@@ -456,7 +471,7 @@ export function pressure(c: Cluster, childCount = 0, cfg: BranchConfig = BRANCH_
 }
 
 /** Add ONE child branch under a cluster (a lead dive). Pure; only ADDS — never reshuffles. */
-export function addChild(graph: ClusterGraph, parentId: string, opts: { title: string; kind?: ClusterKind }): { graph: ClusterGraph; id: string } {
+export function addChild(graph: ClusterGraph, parentId: string, opts: { title: string; kind?: ClusterKind; epistemic?: Epistemic }): { graph: ClusterGraph; id: string } {
   const parent = graph.clusters.find((c) => c.id === parentId);
   if (!parent) return { graph, id: '' };
   const existing = new Set(graph.clusters.map((c) => c.id));
@@ -465,8 +480,24 @@ export function addChild(graph: ClusterGraph, parentId: string, opts: { title: s
   const child: Cluster = {
     id, parentId, title: opts.title, summary: '', kind: opts.kind ?? 'topic',
     salience: Math.max(0.3, parent.salience * 0.85), maturity: 'spark', turnRefs: [], artifacts: [],
+    ...(opts.epistemic ? { epistemic: opts.epistemic } : {}),
   };
   return { graph: normalizeGraph({ clusters: [...graph.clusters, child], edges: graph.edges }), id };
+}
+
+/** WHAT IF? — normalize a user's twist into a question title ("the sponsors were free" →
+ *  "What if the sponsors were free?"). Pure; the branch itself is addChild with kind 'scenario'
+ *  + epistemic 'speculative' — divergence is CONTROLLED: a new child, never a replacement. */
+export function whatIfTitle(twist: string): string {
+  const t = twist.replace(/\s+/g, ' ').trim().replace(/[?.!\s]+$/, '').replace(/^what\s+if\b\s*/i, '');
+  return t ? `What if ${t}?` : '';
+}
+
+/** The one rule of a what-if branch, in code: scenario kind + speculative label, always a CHILD. */
+export function whatIfChild(graph: ClusterGraph, parentId: string, twist: string): { graph: ClusterGraph; id: string } {
+  const title = whatIfTitle(twist);
+  if (!title) return { graph, id: '' };
+  return addChild(graph, parentId, { title, kind: 'scenario', epistemic: 'speculative' });
 }
 
 /**
@@ -631,8 +662,11 @@ WORK IN TWO STEPS (do them silently, output only the final JSON):
 2) STRUCTURE: turn those segments into a tidy hierarchy with cross-links.
 
 A CLUSTER is one coherent thread worth returning to — a topic, a question, an idea, an
-investigation, an artifact they made, or a project. A cluster is NOT one message. Fold chatter and
-tangents into the thread they belong to; split genuinely distinct threads apart.
+investigation, an artifact they made, or a project. When the thinking is EPISTEMIC, be precise
+about what a thread IS: a claim someone asserted, a theory being examined, evidence for or against,
+a what-if scenario, an experiment worth running, or an insight actually reached. A cluster is NOT
+one message. Fold chatter and tangents into the thread they belong to; split genuinely distinct
+threads apart.
 
 GRANULARITY (the thing that matters most): map the natural threads, not the messages. A focused
 session is usually 4–15 clusters. One node per message is a FAILURE. Collapsing distinct threads
@@ -651,7 +685,9 @@ EACH CLUSTER CARRIES:
 - salience 0..1: how CENTRAL this thread was to the session. A core spine gets ~0.8–1.0; a passing
   tangent or aside gets ~0.1–0.3. This lets the map show what matters and fade what doesn't.
 - summary: ONE line.
-- kind ∈ topic|question|idea|investigation|artifact|project.
+- kind ∈ topic|question|idea|investigation|artifact|project|claim|theory|evidence|scenario|experiment|insight.
+- epistemic (OPTIONAL, for claims/theories/scenarios — omit elsewhere): how solid it is, honestly —
+  established|strong|plausible|disputed|speculative|fiction|hypothesis. Never dress speculation as fact.
 - turnRefs: the turn indices that fed it.
 
 ARTIFACTS — capture every concrete OUTPUT the conversation produced or referenced, attached to the
@@ -729,7 +765,7 @@ const EXPAND_INTENT: Record<ExpandMode, string> = {
 export const EXPAND_SYSTEM = `You expand one node of a Knowledge Universe into a few child threads.
 Given a focus cluster (and its context), propose child clusters that are specific, non-overlapping,
 and genuinely worth their own space — not filler. Each child gets a short title, a one-line summary,
-a kind (topic|question|idea|investigation|artifact|project), and a salience 0..1.
+a kind (topic|question|idea|investigation|artifact|project|claim|theory|evidence|scenario|experiment|insight), and a salience 0..1.
 
 Output EXACTLY ONE JSON object, no prose, no fences:
 {"children":[{"title":"…","summary":"…","kind":"question","salience":0.6}]}`;

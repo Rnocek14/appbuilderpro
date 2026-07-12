@@ -24,7 +24,9 @@ import {
   parseAudienceCsv, validateTemplate, type Charter, type WebTemplate, type WorkTool,
 } from './workweb';
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
-import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail } from './genesis';
+import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail, type WorldDNA } from './genesis';
+import { expertiseFor, productLabExpertiseFor, isProductLab, detectVertical, type Vertical } from './expertise';
+import { producerFor } from './producers';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
 // separate table column (knowledge_clusters.charter). universe.ts's ClusterGraph has no charter
@@ -85,8 +87,14 @@ async function persistCharters(worldId: string, charters: Record<string, Charter
   if (failed) throw new Error(`${failed} charter write(s) failed — the web is partially chartered; open it and retry.`);
 }
 
-/** Create a new work web from a template id. Returns the server world id. */
-export async function instantiateWeb(templateOrId: WebTemplate | string): Promise<WebSummary> {
+/** Create a new work web from a template id. Returns the server world id.
+ *  voiceCtx: the world's own business context (genesis drafts pass theirs) — used to seed every
+ *  chartered area with its expert playbook in the right voice. Builtin templates get a minimal
+ *  context (title only; unknown tokens stay visible — honest about what isn't known yet).
+ *  dna: the World DNA (genesis drafts pass theirs) — its words drive deterministic industry
+ *  detection so the seeds include the DOMAIN pack (real estate, finance, food, …), not just the
+ *  functional one. */
+export async function instantiateWeb(templateOrId: WebTemplate | string, voiceCtx?: BusinessContext | null, dna?: WorldDNA | null): Promise<WebSummary> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
@@ -112,10 +120,13 @@ export async function instantiateWeb(templateOrId: WebTemplate | string): Promis
   if (!worldId) throw new Error('Could not save the web — check your connection and try again.');
 
   await persistCharters(worldId, charters);
+  // BORN FULL, NOT BLANK: every chartered area starts with its expert playbook (fail-soft —
+  // a seeding hiccup never fails creation; the packs regenerate from any area's tools).
+  const seeded = await seedWorld(worldId, voiceCtx ?? minimalContext(t.title), dna);
   await recordMindEvent(uid, {
     event_type: 'note', source: 'workweb',
-    subject: `Created work web "${t.title}" from template ${t.id}`,
-    payload: { world_id: worldId, template: t.id },
+    subject: `Created work web "${t.title}" from template ${t.id}${seeded ? ` — seeded ${seeded} playbook doc${seeded === 1 ? '' : 's'}` : ''}`,
+    payload: { world_id: worldId, template: t.id, seeded },
   });
   return { worldId, title: t.title, templateId: t.id };
 }
@@ -133,6 +144,8 @@ export interface WebCluster {
   charter: Charter | null;
   tools: WorkTool[];
   artifacts: Artifact[];
+  earnedArtifacts: number;   // artifacts EXCLUDING seeded playbooks — the honest activity count
+  playbookArtifacts: number; // seeded playbooks — knowledge the area was born with, shown as such
   liveStatus: Charter['status'] | null;
   pendingApprovals: number;
 }
@@ -157,17 +170,20 @@ export async function listContacts(limit = 200): Promise<ContactRow[]> {
 
 export async function listWebs(): Promise<WebSummary[]> {
   const worlds = await listUniverseWorlds();
-  const out: WebSummary[] = [];
-  for (const w of worlds) {
-    if (!w.remote) continue;
-    const { count } = await supabase
-      .from('knowledge_clusters')
-      .select('id', { count: 'exact', head: true })
-      .eq('world_id', w.id)
-      .not('charter', 'is', null);
-    if ((count ?? 0) > 0) out.push({ worldId: w.id, title: w.title, templateId: null });
-  }
-  return out;
+  const remoteIds = worlds.filter((w) => w.remote).map((w) => w.id);
+  if (!remoteIds.length) return [];
+  // ONE query instead of a count-per-world N+1: fetch all chartered clusters for the remote
+  // worlds at once, then a world "is a web" if it has ≥1 chartered cluster.
+  const { data: rows } = await supabase
+    .from('knowledge_clusters')
+    .select('world_id')
+    .in('world_id', remoteIds)
+    .not('charter', 'is', null)
+    .limit(5000);
+  const charteredWorlds = new Set((rows ?? []).map((r) => (r as { world_id: string }).world_id));
+  return worlds
+    .filter((w) => w.remote && charteredWorlds.has(w.id))
+    .map((w) => ({ worldId: w.id, title: w.title, templateId: null }));
 }
 
 export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
@@ -182,6 +198,22 @@ export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
   const bySlug = new Map<string, { id: string; charter: Charter | null }>();
   for (const r of rows ?? []) {
     bySlug.set((r as { slug: string }).slug, { id: (r as { id: string }).id, charter: parseCharter((r as { charter: unknown }).charter) });
+  }
+
+  // Per-cluster artifact counts split by provenance. NO THEATER: seeded playbooks (SEED_SOURCE)
+  // are knowledge the world was born with — they must not light an area 'active' or inflate the
+  // rollup. Status and rollup count EARNED artifacts only; playbooks are surfaced separately.
+  const totalByCluster = new Map<string, number>();
+  const seedsByCluster = new Map<string, number>();
+  const clusterDbIds = (rows ?? []).map((r) => (r as { id: string }).id);
+  if (clusterDbIds.length) {
+    const { data: artRows } = await supabase.from('knowledge_artifacts')
+      .select('cluster_id, source').in('cluster_id', clusterDbIds).limit(2000);
+    for (const a of artRows ?? []) {
+      const cid = (a as { cluster_id: string }).cluster_id;
+      totalByCluster.set(cid, (totalByCluster.get(cid) ?? 0) + 1);
+      if ((a as { source: string | null }).source === SEED_SOURCE) seedsByCluster.set(cid, (seedsByCluster.get(cid) ?? 0) + 1);
+    }
   }
 
   // Web-scoped signals: outreach campaigns bound to THIS world (app_0024 world_id). Pending approvals
@@ -218,6 +250,9 @@ export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
     const meta = bySlug.get(c.id);
     const charter = meta?.charter ?? null;
     const pending = charter && (charter.archetype === 'launch' || charter.archetype === 'loop') ? webPending : 0;
+    const total = meta ? (totalByCluster.get(meta.id) ?? c.artifacts.length) : c.artifacts.length;
+    const playbooks = meta ? (seedsByCluster.get(meta.id) ?? 0) : 0;
+    const earned = Math.max(0, total - playbooks);
     return {
       id: meta?.id ?? c.id,
       slug: c.id,
@@ -227,12 +262,16 @@ export async function loadWeb(worldId: string): Promise<LoadedWeb | null> {
       charter,
       tools: charter ? toolsFor(charter) : [],
       artifacts: c.artifacts,
-      liveStatus: charter ? deriveStatus(charter, c.artifacts.length, pending) : null,
+      earnedArtifacts: earned,
+      playbookArtifacts: playbooks,
+      // Status counts EARNED work only — a newborn world full of playbooks is still dormant
+      // until something actually happens in it.
+      liveStatus: charter ? deriveStatus(charter, earned, pending) : null,
       pendingApprovals: pending,
     };
   });
 
-  const artifactCount = clusters.reduce((n, c) => n + c.artifacts.length, 0);
+  const artifactCount = clusters.reduce((n, c) => n + c.earnedArtifacts, 0);
   return {
     worldId,
     title: universe.title,
@@ -250,15 +289,80 @@ async function clusterIdForSlug(worldId: string, slug: string): Promise<string |
   return (data as { id: string } | null)?.id ?? null;
 }
 
+/** The source tag for seeded playbook docs. NO-THEATER LOAD-BEARING: every derived signal that
+ *  counts artifacts (area status, momentum, intel age, planet size/glow, launch-active floors)
+ *  EXCLUDES this source — a playbook is knowledge the world was born with, not work that
+ *  happened. Counting seeds as activity would make a newborn world glow, which is exactly the
+ *  theater the system forbids. */
+export const SEED_SOURCE = 'garvis-seed';
+
 /** Upsert artifacts onto a cluster by (cluster_id, slug) — matches app_0018's unique index. */
-async function writeArtifacts(ownerId: string, clusterId: string, arts: PlayArtifact[]): Promise<number> {
+async function writeArtifacts(ownerId: string, clusterId: string, arts: PlayArtifact[], source = 'garvis'): Promise<number> {
   if (!arts.length) return 0;
   const rows = arts.map((a) => ({
     owner_id: ownerId, cluster_id: clusterId, slug: a.slug,
-    kind: a.kind, title: a.title, detail: a.detail, source: 'garvis',
+    kind: a.kind, title: a.title, detail: a.detail, source,
   }));
   const { error } = await supabase.from('knowledge_artifacts').upsert(rows, { onConflict: 'cluster_id,slug' });
   return error ? 0 : rows.length;
+}
+
+// ---------------------------------------------------------------------------
+// Born full, not blank — seed every chartered area with its expert playbook
+// ---------------------------------------------------------------------------
+
+/** The voice a world speaks with when it has no synthesized business context (builtin templates):
+ *  the title fills {{business_name}}; every other token stays visibly unmerged, marking exactly
+ *  what Garvis doesn't know yet — never a guess, never another world's context. */
+function minimalContext(title: string): BusinessContext {
+  return { business_name: title, principal: null, craft: null, offerings: [], audience: null, locale: null, links: {}, tone: null };
+}
+
+/** Everything the world knows about itself, as one detection string — the vertical (real estate /
+ *  finance / food / …) is derived DETERMINISTICALLY from these words; same world, same vertical. */
+function worldVertical(ctx: BusinessContext, dna?: WorldDNA | null): Vertical {
+  return detectVertical([
+    dna?.businessType, dna?.valueProposition, ...(dna?.idealCustomers ?? []),
+    ctx.business_name, ctx.craft, ctx.audience, ...ctx.offerings,
+  ].filter(Boolean).join(' '));
+}
+
+/** Write the expert playbook pack (expertise.ts + verticals.ts) into every chartered area of a
+ *  world: the functional playbooks (30-day social plan, direct-mail plan + concepts, KPI tree)
+ *  COMPOSED with the industry overlay detected from the World DNA (CMA method for real estate,
+ *  due-diligence ladder for finance, menu engineering for restaurants, the compliance flags each
+ *  industry actually gets burned by) — deterministic (zero AI keys), token-merged into the
+ *  world's own voice, honestly labeled as frameworks that defer real numbers to scans/records.
+ *  FAIL-SOFT by design: a seeding failure never fails world creation — the world just starts
+ *  emptier, and any area's generator tool writes the same pack on demand. Idempotent (upsert on
+ *  cluster_id+slug), so re-running never duplicates. */
+export async function seedWorld(worldId: string, ctx: BusinessContext, dna?: WorldDNA | null): Promise<number> {
+  try {
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) return 0;
+    const vertical = worldVertical(ctx, dna);
+    const { data: rows } = await supabase.from('knowledge_clusters')
+      .select('id, charter').eq('world_id', worldId).not('charter', 'is', null);
+    const parsed = (rows ?? []).map((r) => ({ id: (r as { id: string }).id, charter: parseCharter((r as { charter: unknown }).charter) }));
+    // PRODUCT LABS get product knowledge (flow audit H1): a feature lab born full of marketing
+    // playbooks and finance go-to-market advice ("trust is the product — referrals first") is
+    // noise wearing an expert costume. Product variants for intel/vault/ledger, no industry overlay.
+    const productLab = isProductLab(parsed.filter((p) => p.charter).map((p) => p.charter!));
+    let seeded = 0;
+    for (const r of parsed) {
+      if (!r.charter) continue;
+      const pack = productLab
+        ? productLabExpertiseFor(r.charter.archetype, r.charter.flavor)
+        : expertiseFor(r.charter.archetype, r.charter.flavor, vertical);
+      const arts: PlayArtifact[] = pack
+        .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
+      seeded += await writeArtifacts(uid, r.id, arts, SEED_SOURCE);
+    }
+    return seeded;
+  } catch {
+    return 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -348,9 +452,32 @@ export interface ToolRunResult { ok: boolean; message: string; artifacts?: numbe
 
 /** Execute a single tool on a chartered cluster. Generators write artifacts; queue tools enqueue an
  *  approval (never send directly). Returns a human message for the toast. */
+/** RENDITIONS: give grounded creative artifacts a versioned slug (base, base-v2, base-v3 …) so a
+ *  re-press ADDS a take to the library instead of silently overwriting the last one (the artifact
+ *  upsert conflicts on cluster_id+slug). Titles gain "· take N" so the shelf reads honestly. */
+async function versionCreativeSlugs(clusterId: string, artifacts: PlayArtifact[]): Promise<PlayArtifact[]> {
+  const out: PlayArtifact[] = [];
+  for (const a of artifacts) {
+    try {
+      // ANCHORED match (exact slug or its -vN versions) — an open prefix LIKE made sibling slugs
+      // that merely share a stem ('feature-spec' vs 'feature-spec-alerts') inflate each other's
+      // take numbers.
+      const { data } = await supabase.from('knowledge_artifacts')
+        .select('slug').eq('cluster_id', clusterId)
+        .or(`slug.eq.${a.slug},slug.like.${a.slug}-v%`).limit(50);
+      const existing = ((data ?? []) as { slug: string }[]).map((r) => r.slug);
+      if (!existing.length) { out.push(a); continue; }
+      let n = existing.length + 1;
+      while (existing.includes(n === 1 ? a.slug : `${a.slug}-v${n}`)) n++;
+      out.push({ ...a, slug: `${a.slug}-v${n}`, title: `${a.title} · take ${n}` });
+    } catch { out.push(a); } // fail-soft: worst case is the old refresh behavior
+  }
+  return out;
+}
+
 export async function runTool(
   worldId: string, cluster: WebCluster, toolId: string,
-  args?: { csvText?: string; toEmail?: string; contactName?: string; playId?: string },
+  args?: { csvText?: string; toEmail?: string; contactName?: string; playId?: string; direction?: string },
 ): Promise<ToolRunResult> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
@@ -364,7 +491,42 @@ export async function runTool(
     case 'gen-video-script':
     case 'gen-landing':
     case 'gen-email-seq':
+    case 'gen-ideas':
+    case 'gen-plan':
+    case 'gen-features':
+    case 'gen-spec':
+    case 'gen-ads':
     case 'gen-copy': {
+      // FINISHED-WORK PRODUCERS FIRST (research/gen-social/gen-video-script/gen-angle): these
+      // reason over the world's REAL materials (DNA, brand voice, vault photos, prior research)
+      // and do real web search — producing a cited market brief, ready-to-post captions, a
+      // shot-by-shot script, a grounded angle. Strictly better than any template, so they lead;
+      // each falls to the area's expert pack if AI/search is unavailable (never a stub). Routed
+      // by TOOL ID (fixing the slug-collision where research and gen-angle produced the same doc).
+      if (cluster.charter) {
+        const producer = producerFor(toolId);
+        if (producer) {
+          const r = await producer(worldId, cluster.charter, { direction: args?.direction });
+          if (r.artifacts.length) {
+            // RENDITIONS, not replacements: grounded creative work gets a VERSIONED slug so a
+            // re-press ADDS a take instead of overwriting the last one (the upsert-by-slug that
+            // silently ate prior work). Framework fallbacks keep their fixed slugs — a playbook
+            // refresh should replace itself.
+            const arts = r.grounded ? await versionCreativeSlugs(cluster.id, r.artifacts) : r.artifacts;
+            // Grounded finished work (real research / posts / script) is EARNED activity; a
+            // framework fallback (AI/search down) is context, not activity — tag it as seed so
+            // it never inflates momentum/status (the same No-Theater rule as birth seeding).
+            const n = await writeArtifacts(uid, cluster.id, arts, r.grounded ? 'garvis' : SEED_SOURCE);
+            if (n > 0) return { ok: true, message: r.message, artifacts: n };
+          } else {
+            // THE PRODUCER'S EMPTY RESULT IS THE HONEST OUTCOME (no-theater): a rejected-thin or
+            // AI-down spec must surface ITS message — falling through to the legacy generators
+            // wrote a generic playbook with a green "success" toast over a real failure.
+            return { ok: false, message: r.message };
+          }
+        }
+      }
+
       // Single-cluster generators. Resolution order — and the honesty rule that governs it:
       // a generator speaks THE WORLD's voice or none. (1) A genesis world's own data play step
       // for this cluster; (2) a genesis world with context but no matching step → a context-
@@ -376,6 +538,16 @@ export async function runTool(
         if (voice.play && dataStep) {
           const r = await runPlayData(worldId, { ...voice.play, steps: [dataStep] }, voice.ctx);
           return { ok: r.artifactCount > 0, message: r.artifactCount > 0 ? `Generated ${r.artifactCount} artifact${r.artifactCount === 1 ? '' : 's'} into ${cluster.title}.` : 'Nothing generated.', artifacts: r.artifactCount };
+        }
+        // No matching play step → the area's EXPERT PLAYBOOK (functional + industry overlay),
+        // in this world's voice — never a vague stub. (Seeded at creation too; upsert by slug
+        // makes this a refresh, not a dupe.)
+        if (cluster.charter) {
+          const vertical = worldVertical(voice.ctx, voice.dna);
+          const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
+            .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, voice.ctx!) }));
+          const n = await writeArtifacts(uid, cluster.id, arts, SEED_SOURCE);
+          return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}) in this world's voice.` : 'Nothing generated.', artifacts: n };
         }
         const framed: PlayArtifact = {
           slug: `starter-${slugify(toolId)}`, kind: 'doc',
@@ -396,6 +568,18 @@ export async function runTool(
         void costUsd;
         const n = await writeArtifacts(uid, cluster.id, arts);
         return { ok: n > 0, message: n > 0 ? `Generated ${n} artifact${n === 1 ? '' : 's'} into ${cluster.title}.` : 'Nothing generated.', artifacts: n };
+      }
+      // Builtin world, no matching play → the expert playbook with a minimal voice (world title
+      // fills {{business_name}}; other tokens stay visible — honest about what isn't known yet).
+      // The title's own words still drive industry detection ("Mom's Real Estate Marketing"
+      // gets the CMA method and Fair Housing checklist, not a generic pack).
+      if (cluster.charter) {
+        const ctx = minimalContext(voice.title ?? cluster.title);
+        const vertical = worldVertical(ctx, voice.dna);
+        const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
+          .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
+        const n = await writeArtifacts(uid, cluster.id, arts, SEED_SOURCE);
+        return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}).` : 'Nothing generated.', artifacts: n };
       }
       const starter: PlayArtifact = {
         slug: `starter-${slugify(toolId)}`, kind: 'doc',
@@ -474,16 +658,19 @@ function matchPlayForCluster(slug: string): Play | null {
 // never another world's. This is what killed the Lake Geneva fallback.
 // ---------------------------------------------------------------------------
 
-interface WorldVoice { ctx: BusinessContext | null; play: PlayData | null }
+interface WorldVoice { ctx: BusinessContext | null; play: PlayData | null; dna: WorldDNA | null; title: string | null }
 
 async function worldVoice(worldId: string): Promise<WorldVoice> {
   const [{ data: w }, { data: t }] = await Promise.all([
-    supabase.from('knowledge_worlds').select('business_context').eq('id', worldId).maybeSingle(),
+    supabase.from('knowledge_worlds').select('business_context, dna, title').eq('id', worldId).maybeSingle(),
     supabase.from('web_templates').select('play').eq('world_id', worldId).eq('status', 'instantiated').limit(1).maybeSingle(),
   ]);
+  const row = w as { business_context?: BusinessContext | null; dna?: WorldDNA | null; title?: string | null } | null;
   return {
-    ctx: ((w as { business_context?: BusinessContext | null } | null)?.business_context) ?? null,
+    ctx: row?.business_context ?? null,
     play: ((t as { play?: PlayData | null } | null)?.play) ?? null,
+    dna: row?.dna ?? null,
+    title: row?.title ?? null,
   };
 }
 

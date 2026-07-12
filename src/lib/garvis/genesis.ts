@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 10 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 12 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -130,7 +130,9 @@ the way a sharp operator sizes up a venture before designing anything. Return ST
 
 HARD RULES:
 - NEVER invent facts: names, prices, locations, URLs. Unknown → null/empty AND a question.
-- 3-8 idealCustomers, concrete segments — never "everyone".
+- 3-8 idealCustomers, concrete segments — never "everyone". If the intent has NO external
+  customers (a personal system, an internal operation), name the real stakeholders/beneficiaries
+  instead and SAY SO in questions — never fabricate a market that doesn't exist.
 - Every DNA field must follow from the stated intent or the common structure of that business
   type; when you generalize, generalize about the TYPE, not this specific business.
 - No markdown fences. JSON only.`;
@@ -141,7 +143,17 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 10): generic direct_mail email social video landing market brand crm lists
+FLAVORS (exactly 12): generic direct_mail email social video landing market brand crm lists ads feature_lab
+
+THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
+- MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
+  studios for the growth channels, launch, loop, ledger, vault.
+- PRODUCT/PLATFORM intent (the user BUILDS or WORKS FOR a product — "I work at X", feature
+  ideation, improving a platform, internal tooling): design a PRODUCT LAB instead — intel
+  (flavor market: the platform, its users, competitors, complaints), one or more studio areas
+  with flavor feature_lab (feature concepts + specs), vault (source material, screenshots,
+  docs), ledger. OMIT audience/launch/loop entirely unless the intent explicitly asks for
+  outreach — a feature lab has nothing to mail.
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",
@@ -162,9 +174,13 @@ HARD RULES:
 - EVERY node gets a rationale entry. At least one omission with its why.
 - DERIVE the structure from the DNA: revenue model shapes the ledger, growth channels shape the
   studios, ideal customers shape the audience areas. Do not emit a generic template.
-- 4-8 play steps, 2-3 emails. Every draft/email uses {{tokens}} for business facts —
-  {{business_name}} {{principal}} {{craft}} {{audience}} {{offerings}} {{tone}} {{first_name}} —
-  and NEVER invents specifics the DNA doesn't contain.
+- 4-8 play steps. 2-3 emails WHEN the design includes an audience/launch area; a world with no
+  outreach (e.g. a product lab) gets "emails": [] — never seed sends nobody will make. Every
+  draft/email uses {{tokens}} for business facts, and ONLY these tokens are legal:
+  {{business_name}} {{principal}} {{craft}} {{audience}} {{offerings}}
+  {{tone}} {{locale}} — plus {{first_name}} in EMAILS only (resolved per recipient at send time).
+  Any other {{token}} does not exist and will show to the user as raw text — if a fact has no
+  token and isn't in the DNA, write around it or add a question. NEVER invent specifics.
 - No markdown fences. JSON only.`;
 
 // ---------------------------------------------------------------------------

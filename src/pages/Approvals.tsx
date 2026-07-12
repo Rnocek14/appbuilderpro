@@ -5,28 +5,21 @@
 // send_email end-to-end; other kinds show their preview and record the decision.
 
 import { useCallback, useEffect, useState } from 'react';
-import { ShieldCheck, Loader2, Check, X, Mail, Rocket, Globe, CreditCard, Database, Users, ScrollText } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ShieldCheck, Loader2, Check, X, ScrollText } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Spinner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { timeAgo } from '../lib/utils';
 import {
   listApprovals, approveAndExecute, rejectApproval, listExecutionRuns,
-  type Approval, type ApprovalKind, type ExecutionRun,
+  type Approval, type ExecutionRun,
 } from '../lib/garvis/execution';
-
-const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string }> = {
-  send_email: { icon: Mail, label: 'Send email' },
-  publish_post: { icon: Users, label: 'Publish post' },
-  deploy_site: { icon: Globe, label: 'Deploy site' },
-  deploy_backend: { icon: Rocket, label: 'Deploy backend' },
-  spend: { icon: CreditCard, label: 'Spend' },
-  apply_migration: { icon: Database, label: 'Apply migration' },
-  crm_action: { icon: Users, label: 'CRM action' },
-};
+import { KIND_META } from '../components/garvis/approvalMeta';
 
 export default function Approvals() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [pending, setPending] = useState<Approval[]>([]);
   const [runs, setRuns] = useState<ExecutionRun[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,8 +42,14 @@ export default function Approvals() {
     setActingId(a.id);
     try {
       const res = await approveAndExecute(a);
-      if (res.ok) toast('success', 'Approved and executed.');
-      else toast('error', res.error ?? 'Execution failed — see the ledger.');
+      if (res.ok) {
+        const r = res.result as { executed?: boolean; url?: string | null; needsWorkspace?: boolean; projectId?: string } | undefined;
+        const executed = r?.executed !== false;
+        if (a.kind === 'deploy_site' && r?.url) { toast('success', `Deployed — live at ${r.url}`); window.open(r.url, '_blank'); }
+        else if (r?.needsWorkspace && r.projectId) { toast('info', 'Approved — open the project and Publish to complete (the build runs in your browser).'); navigate(`/project/${r.projectId}`); }
+        else if (executed) toast('success', a.kind === 'send_email' ? 'Approved and sent.' : 'Approved and executed.');
+        else toast('success', 'Approved — recorded for you to run where the capability lives.');
+      } else toast('error', res.error ?? 'Execution failed — see the ledger.');
       await refresh();
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not execute.');
@@ -85,11 +84,13 @@ export default function Approvals() {
           <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear" body="When Garvis drafts an email, a deploy, or another outward action, it lands here for your sign-off." />
         ) : (
           <div className="space-y-3">
-            {pending.map((a) => {
-              const meta = KIND_META[a.kind];
+            {pending.map((a, i) => {
+              // Defensive: an unknown kind (older row / future kind) renders generically instead
+              // of throwing and blanking the whole queue.
+              const meta = KIND_META[a.kind] ?? { icon: ShieldCheck, label: String(a.kind).replace(/_/g, ' ') };
               const Icon = meta.icon;
               return (
-                <Card key={a.id} className="p-4">
+                <Card key={a.id} className="animate-fadeInUp p-4" style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}>
                   <div className="flex items-start gap-3">
                     <Icon size={18} className="mt-0.5 text-forge-ember" />
                     <div className="min-w-0 flex-1">

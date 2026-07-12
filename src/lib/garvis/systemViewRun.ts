@@ -8,7 +8,7 @@
 // from counted created_at rows, and the loaded web doesn't carry timestamps.
 
 import { supabase } from '../supabase';
-import { loadWeb } from './workwebRun';
+import { loadWeb, SEED_SOURCE } from './workwebRun';
 import { refreshWorldIntelligence, getWorldIntelligence } from './worldIntelRun';
 import { loadRankedMoves } from './nextMoveRun';
 import { compileSystemScene, type SystemScene, type SceneClusterIn, type SceneIntelIn } from './systemView';
@@ -37,6 +37,7 @@ export async function loadSystemScene(worldId: string): Promise<SystemScene | nu
       .select('cluster_id')
       .in('cluster_id', chartered.map((c) => c.id))
       .gte('created_at', weekAgoIso)
+      .neq('source', SEED_SOURCE)   // seeded playbooks are birth-knowledge, not this week's work
       .limit(1000);
     for (const a of data ?? []) {
       const cid = a.cluster_id as string;
@@ -48,7 +49,7 @@ export async function loadSystemScene(worldId: string): Promise<SystemScene | nu
     id: c.id, slug: c.slug, parentSlug: c.parentSlug, title: c.title,
     archetype: c.charter!.archetype,
     status: c.liveStatus ?? c.charter!.status,
-    artifactsTotal: c.artifacts.length,
+    artifactsTotal: c.earnedArtifacts,
     artifacts7d: arts7.get(c.id) ?? 0,
     pendingApprovals: c.pendingApprovals,
   }));

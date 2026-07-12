@@ -53,7 +53,7 @@ export default function ImportProject() {
       setName(result.name);
       setSourceLabel(file.name);
     } catch {
-      toast('error', 'Could not read that zip file');
+      toast('error', 'Could not read that zip file.');
     } finally {
       setBusy(null);
     }
@@ -70,10 +70,10 @@ export default function ImportProject() {
         analysis.files,
         sourceLabel,
       );
-      toast('success', `Imported ${analysis.files.length} files`);
+      toast('success', `Imported ${analysis.files.length} files.`);
       navigate(`/project/${id}`);
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Import failed');
+      toast('error', e instanceof Error ? e.message : 'Import failed.');
       setBusy(null);
     }
   };

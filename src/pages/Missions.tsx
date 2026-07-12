@@ -101,7 +101,7 @@ export default function Missions() {
                         <Play size={13} /> {m.status === 'planned' ? 'Run' : 'Re-run'}
                       </Button>
                     )}
-                    <button onClick={() => deleteMission(m.id)} className="text-forge-dim/60 hover:text-forge-err" title="Delete"><Trash2 size={14} /></button>
+                    <button onClick={() => { if (window.confirm(`Delete the mission "${m.objective.slice(0, 60)}" and its tasks? This can't be undone.`)) void deleteMission(m.id); }} className="text-forge-dim/60 hover:text-forge-err" title="Delete"><Trash2 size={14} /></button>
                   </div>
 
                   {open && mTasks.length > 0 && (

@@ -74,6 +74,24 @@ export async function embedTexts(texts: string[]): Promise<number[][] | null> {
   return null;
 }
 
+/** Persist embeddings for one or more subjects (artifacts, documents, …) via the server-side
+ *  worker, which holds the key and stamps owner_id. FIRE-AND-FORGET + fail-soft: retrieval is a
+ *  progressive enhancement (lexical search always stands), so an embedding miss must never fail
+ *  or slow the write it rides behind. Returns how many were embedded (0 when unconfigured). */
+export async function persistEmbeddings(
+  subjects: { subject_type: 'artifact' | 'document' | 'cluster' | 'business'; subject_id: string; content: string; chunk_ix?: number }[],
+): Promise<number> {
+  const clean = subjects.filter((s) => s.subject_id && (s.content ?? '').trim()).slice(0, 128);
+  if (!clean.length) return 0;
+  try {
+    const { data, error } = await supabase.functions.invoke('embed-worker', { body: { subjects: clean } });
+    if (error) return 0;
+    return (data as { embedded?: number })?.embedded ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** Cosine similarity in [-1,1] (≈[0,1] for embeddings). Pure. */
 export function cosine(a: number[], b: number[]): number {
   if (!a?.length || a.length !== b?.length) return 0;

@@ -26,6 +26,12 @@ export interface WebsiteBriefInput {
   ctx: BusinessContext | null;
   brand: BrandKitIn | null;
   photos: WebsitePhoto[];
+  /** What the world has LEARNED — research brief titles, audience findings, reflection lessons —
+   *  so the first generation reflects real work, not just the DNA. Each a short line. */
+  knowledge?: string[];
+  /** G5 instrumentation: when present, the generated site reports visits + lead submissions back
+   *  to Garvis (endpoint + write-only channel token). Absent → the old store-only form stands. */
+  ingest?: { endpoint: string; token: string } | null;
 }
 
 export interface WebsiteBrief { prompt: string; brief: string; heroCandidates: WebsitePhoto[] }
@@ -63,6 +69,16 @@ export function compileWebsiteBrief(input: WebsiteBriefInput, budget = 9000): We
   ].filter(Boolean) as string[];
   if (brandLines.length) sections.push(['BRAND:', ...brandLines].join('\n'));
 
+  // What the world actually knows — its research, its audience findings, its reflections. This is
+  // the difference between a site built from the DNA alone and one built from real accumulated work.
+  const knowledge = (input.knowledge ?? []).map((k) => k.trim()).filter(Boolean).slice(0, 12);
+  if (knowledge.length) {
+    sections.push([
+      'WHAT THIS BUSINESS HAS LEARNED (ground the copy in these real findings — do not invent beyond them):',
+      ...knowledge.map((k) => `- ${k.slice(0, 200)}`),
+    ].join('\n'));
+  }
+
   sections.push([
     'MOTION DIRECTION (the kits ship in every generated app — use them):',
     '- SmoothScroll for the whole page; the site should feel like walking a gallery.',
@@ -81,12 +97,31 @@ export function compileWebsiteBrief(input: WebsiteBriefInput, budget = 9000): We
     '- Contact/Inquiry: the lead form (below).',
   ].join('\n'));
 
-  sections.push([
-    'LEAD FORM (inquiry):',
-    '- Fields: name, email, project type, space/location, budget range (optional), message.',
-    '- STORE submissions in the app\'s backend and show a warm confirmation. The form must NOT',
-    '  send email or contact anyone — outbound stays behind the owner\'s approval queue.',
-  ].join('\n'));
+  if (input.ingest) {
+    sections.push([
+      'LEAD FORM (inquiry) — WIRED TO THE OWNER\'S SYSTEM (implement exactly):',
+      '- Fields: name, email, project type, space/location, budget range (optional), message.',
+      '- On submit, POST JSON to the ingest endpoint below (and ALSO keep a local copy as fallback),',
+      '  then show a warm confirmation. The form must NOT send email or contact anyone directly.',
+      `- Endpoint: ${input.ingest.endpoint}`,
+      '- Submit body: {"token":"' + input.ingest.token + '","kind":"lead","path":location.pathname,',
+      '  "source":srcParam(),"lead":{"name":...,"email":...,"phone":...,"message":...}}',
+      '- ALSO, once per page load, POST a visit ping: {"token":"' + input.ingest.token + '","kind":"visit",',
+      '  "path":location.pathname,"source":srcParam()}',
+      '  (fire-and-forget; never block rendering; swallow errors silently).',
+      '- srcParam() = new URLSearchParams(location.search); return p.get("src")||p.get("utm_source")||undefined —',
+      '  campaign attribution: postcard QR carries ?src=postcard, ads carry ?src=meta-ads / ?src=google-ads',
+      '  or standard UTMs. Persist it in sessionStorage on first load so a lead submitted from another',
+      '  page still carries its source.',
+    ].join('\n'));
+  } else {
+    sections.push([
+      'LEAD FORM (inquiry):',
+      '- Fields: name, email, project type, space/location, budget range (optional), message.',
+      '- STORE submissions in the app\'s backend and show a warm confirmation. The form must NOT',
+      '  send email or contact anyone — outbound stays behind the owner\'s approval queue.',
+    ].join('\n'));
+  }
 
   if (input.photos.length) {
     const imgs = input.photos.slice(0, 40).map((p) => `- ${p.name}: ${p.url}${p.caption ? ` (alt: ${p.caption.slice(0, 140)})` : ''}`);

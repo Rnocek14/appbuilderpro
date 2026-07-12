@@ -45,9 +45,11 @@ export type StudioDecision =
 // ---------------------------------------------------------------------------
 
 export const STUDIO_SYSTEM = `You are Garvis working INSIDE one production area (a "studio") of the
-owner's work web. You have the studio's context: its charter, its artifacts (with versions), its
-files, the brand kit, and recent results. You are a sharp creative/strategic partner — concrete,
-calm, zero hype.
+owner's work web. You have the studio's context: the BUSINESS identity (who this business is —
+speak in ITS voice, never a generic one), its charter, its artifacts (with versions), its files,
+the brand kit, known unknowns, and recent results. You are a sharp creative/strategic partner —
+concrete, calm, zero hype. If the BUSINESS block is absent or a fact isn't in the context, say so
+rather than inventing it.
 
 You return EXACTLY ONE JSON object per turn — one of these four decisions:
 
@@ -83,6 +85,16 @@ export interface StudioFileCtx { name: string; kind: string; caption?: string | 
 export interface BrandKitCtx {
   name?: string; tone?: string | null; palette?: string[]; fonts?: string[]; compliance_line?: string | null;
 }
+export interface StudioBusinessCtx {
+  name: string;
+  principal?: string | null;
+  craft?: string | null;
+  offerings?: string[];
+  audience?: string | null;
+  locale?: string | null;
+  tone?: string | null;
+  dnaLines?: string[];           // key WorldDNA facts, pre-rendered ("value: …", "model: …")
+}
 export interface StudioContextInput {
   webTitle: string;
   objective?: string | null;
@@ -90,6 +102,8 @@ export interface StudioContextInput {
   tools: WorkTool[];
   artifacts: StudioArtifactCtx[];
   files: StudioFileCtx[];
+  business?: StudioBusinessCtx | null;   // THE WORLD's identity — the voice every draft speaks in
+  openQuestions?: string[];              // what Garvis knows it doesn't know (from world intelligence)
   brandKit?: BrandKitCtx | null;
   audience?: { lists: number; contacts: number } | null;
   results?: { sent: number; replies: number; pendingApprovals: number } | null;
@@ -102,7 +116,7 @@ const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim();
  * (artifacts), then supporting facts. Trimmed to fit `budgetBytes` — artifacts get the remaining
  * room split between them, most recent (later in list) favored equally via per-artifact caps.
  */
-export function compileStudioContext(input: StudioContextInput, budgetBytes = 7000): string {
+export function compileStudioContext(input: StudioContextInput, budgetBytes = 9000): string {
   const meta = ARCHETYPES[input.cluster.charter.archetype];
   const head: string[] = [
     `STUDIO: ${input.cluster.title} — ${meta.label} (${input.cluster.charter.flavor})`,
@@ -110,6 +124,26 @@ export function compileStudioContext(input: StudioContextInput, budgetBytes = 70
     `WEB: ${input.webTitle}${input.objective ? ` — objective: ${oneLine(input.objective).slice(0, 200)}` : ''}`,
     `TOOLS HERE: ${input.tools.map((t) => t.label).join(' · ') || 'none'}`,
   ];
+  // THE BUSINESS — the single most important block: every draft must speak THIS identity's voice.
+  // Absent for legacy worlds without a synthesized context; the system prompt tells the model to
+  // say so rather than invent one.
+  if (input.business) {
+    const b = input.business;
+    const bits = [
+      `name: ${b.name}`,
+      b.principal && `principal: ${oneLine(b.principal).slice(0, 80)}`,
+      b.craft && `does: ${oneLine(b.craft).slice(0, 120)}`,
+      b.offerings?.length && `offerings: ${b.offerings.slice(0, 6).join(', ').slice(0, 160)}`,
+      b.audience && `audience: ${oneLine(b.audience).slice(0, 120)}`,
+      b.locale && `locale: ${oneLine(b.locale).slice(0, 60)}`,
+      b.tone && `voice: ${oneLine(b.tone).slice(0, 80)}`,
+    ].filter(Boolean);
+    head.push(`BUSINESS: ${bits.join(' | ')}`);
+    for (const line of (b.dnaLines ?? []).slice(0, 4)) head.push(`  DNA — ${oneLine(line).slice(0, 160)}`);
+  }
+  if (input.openQuestions?.length) {
+    head.push(`KNOWN UNKNOWNS (don't guess these — ask or defer): ${input.openQuestions.slice(0, 3).map((q) => oneLine(q).slice(0, 100)).join(' · ')}`);
+  }
   if (input.brandKit) {
     const bk = input.brandKit;
     const bits = [

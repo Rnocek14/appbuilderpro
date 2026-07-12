@@ -29,13 +29,16 @@ export function useMarketing() {
 
   const refresh = useCallback(async () => {
     if (!session) return;
-    const [c, a] = await Promise.all([
-      supabase.from('marketing_campaigns').select('*').order('created_at', { ascending: false }),
-      supabase.from('marketing_assets').select('*').order('created_at', { ascending: true }),
-    ]);
-    setCampaigns((c.data as MarketingCampaign[]) ?? []);
-    setAssets((a.data as MarketingAsset[]) ?? []);
-    setLoading(false);
+    try {
+      const [c, a] = await Promise.all([
+        supabase.from('marketing_campaigns').select('*').order('created_at', { ascending: false }),
+        supabase.from('marketing_assets').select('*').order('created_at', { ascending: true }),
+      ]);
+      setCampaigns((c.data as MarketingCampaign[]) ?? []);
+      setAssets((a.data as MarketingAsset[]) ?? []);
+    } finally {
+      setLoading(false); // a failed load must never leave an eternal spinner
+    }
   }, [session]);
 
   useEffect(() => { refresh(); }, [refresh]);

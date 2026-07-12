@@ -21,6 +21,8 @@ import {
   deriveMaturity,
   pressure,
   addChild,
+  whatIfChild,
+  whatIfTitle,
   parseScene,
   extractSceneField,
   extractScenePartial,
@@ -333,6 +335,38 @@ check('extractSceneField unescapes a quote', extractSceneField('{"gap":"she said
   check('repair: trailing escape is dropped cleanly', (JSON.parse(r5) as { gap: string }).gap.includes('hi'));
   const complete = '{"gap":"g?","beats":["b"]}';
   check('repair: already-valid JSON passes through', JSON.stringify(JSON.parse(repairTruncatedJson(complete))) === JSON.stringify(JSON.parse(complete)));
+}
+
+// EXPLORATION LAB — richer vocabulary + the honesty layer + controlled what-if divergence.
+{
+  const g = normalizeGraph({
+    clusters: [
+      { id: 'time', title: 'Time', kind: 'topic', salience: 1 },
+      { id: 'emergent', parentId: 'time', title: 'Time as emergent', kind: 'theory', salience: 0.7, epistemic: 'hypothesis' },
+      { id: 'bad', parentId: 'time', title: 'Bad status', kind: 'claim', salience: 0.5, epistemic: 'totally-true' },
+    ],
+    edges: [],
+  });
+  check('lab kinds survive normalize (theory/claim)', g.clusters.find((c) => c.id === 'emergent')?.kind === 'theory' && g.clusters.find((c) => c.id === 'bad')?.kind === 'claim');
+  check('valid epistemic survives normalize', g.clusters.find((c) => c.id === 'emergent')?.epistemic === 'hypothesis');
+  check('garbage epistemic is dropped, never invented', g.clusters.find((c) => c.id === 'bad')?.epistemic === undefined);
+
+  const { graph: g2, id } = whatIfChild(g, 'time', 'entropy ran backwards?');
+  const scenario = g2.clusters.find((c) => c.id === id)!;
+  check('what-if: creates a CHILD scenario, speculative by construction',
+    scenario.parentId === 'time' && scenario.kind === 'scenario' && scenario.epistemic === 'speculative');
+  check('what-if: the original is untouched', g2.clusters.find((c) => c.id === 'time')!.kind === 'topic' && g2.clusters.length === g.clusters.length + 1);
+  check('what-if title: plain twist → question', whatIfTitle('the sponsors were free') === 'What if the sponsors were free?');
+  check('what-if title: already a what-if → not doubled', whatIfTitle('What if Rome never fell?') === 'What if Rome never fell?');
+  check('what-if title: empty twist → empty (no branch)', whatIfTitle('  ?! ') === '' && whatIfChild(g, 'time', ' ').id === '');
+
+  const merged = mergeGraphs(g, normalizeGraph({ clusters: [{ id: 'time', title: 'Time', kind: 'topic', salience: 1 }], edges: [] }));
+  check('epistemic survives an incremental merge (prior clusters re-added intact)',
+    merged.clusters.find((c) => c.id === 'emergent')?.epistemic === 'hypothesis');
+  check('addChild carries an explicit epistemic', (() => {
+    const r = addChild(g, 'time', { title: 'A claim', kind: 'claim', epistemic: 'disputed' });
+    return r.graph.clusters.find((c) => c.id === r.id)?.epistemic === 'disputed';
+  })());
 }
 
 console.log(`\nclustering.verify: ${passed} passed, ${failed} failed`);

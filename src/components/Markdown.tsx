@@ -1,4 +1,5 @@
 import { marked, type Tokens } from 'marked';
+import { useNavigate } from 'react-router-dom';
 import DOMPurify from 'dompurify';
 import hljs from 'highlight.js/lib/common';
 import 'highlight.js/styles/github-dark.css';
@@ -79,9 +80,21 @@ function handleCopyClick(e: React.MouseEvent<HTMLDivElement>) {
   window.setTimeout(() => { btn.textContent = prev ?? 'Copy'; }, 1500);
 }
 
-/** Render model markdown (research/discuss answers, assistant replies) as themed, sanitized HTML. */
+/** Render model markdown (research/discuss answers, assistant replies) as themed, sanitized HTML.
+ *  Internal links ("/garvis/…") navigate client-side — a model-authored path must not trigger a
+ *  full SPA reload when every hand-built link in the app is instant. */
 export function Markdown({ content, className }: { content: string; className?: string }) {
+  const navigate = useNavigate();
   const raw = marked.parse(content, { async: false }) as string;
   const html = DOMPurify.sanitize(raw, { ADD_ATTR: ['target', 'rel'] });
-  return <div className={cn(PROSE, className)} onClick={handleCopyClick} dangerouslySetInnerHTML={{ __html: html }} />;
+  const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    handleCopyClick(e);
+    const a = (e.target as HTMLElement).closest('a');
+    const href = a?.getAttribute('href') ?? '';
+    if (a && href.startsWith('/') && !href.startsWith('//')) {
+      e.preventDefault();
+      navigate(href);
+    }
+  };
+  return <div className={cn(PROSE, className)} onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 }

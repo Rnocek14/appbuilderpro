@@ -6,11 +6,15 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
-  type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn,
+  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn, type TrailRowIn,
 } from './nextMove';
+import { listWorlds, isWorldUuid } from './universe';
 import { reflectionDue } from './worldIntel';
 import { parseCharter } from './workweb';
+import { SEED_SOURCE } from './workwebRun';
+import { applyGoalFocus } from './goals';
+import { activeGoals } from './goalsRun';
 
 const KEY_LAST_SEEN = 'ff:waking:last-seen';
 const KEY_DISMISS = 'ff:waking:dismissed';
@@ -45,7 +49,7 @@ export interface RankedMoves {
 /** ONE Next Move engine, two altitudes: the waking moment consumes all of this; the System
  *  altitude scopes `moves` to its world (comets) via movesForWorld(). Never fork the ranking. */
 export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
-  const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ] = await Promise.all([
+  const [approvalsQ, repliesQ, eventsQ, insightsQ, campsQ, clustersQ, missionsQ, leadsQ, remindersQ] = await Promise.all([
     supabase.from('approvals').select('id, kind, title, created_at').eq('status', 'pending').limit(50),
     supabase.from('replies').select('id, from_address, subject, classification, received_at, campaign_id').order('received_at', { ascending: false }).limit(25),
     // 120 matches worldIntelRun.gather — the waking nudge and the world page must count the
@@ -53,8 +57,12 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     supabase.from('mind_events').select('event_type, subject, occurred_at, payload').order('occurred_at', { ascending: false }).limit(120),
     supabase.from('insights').select('id, title, body, score, created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(10),
     supabase.from('outreach_campaigns').select('id, world_id, state, sequence_stopped').limit(200),
-    supabase.from('knowledge_clusters').select('id, world_id, title, charter').not('charter', 'is', null).limit(300),
+    supabase.from('knowledge_clusters').select('id, world_id, slug, title, charter').not('charter', 'is', null).limit(300),
     supabase.from('garvis_missions').select('id, world_id, subject, status, updated_at').eq('status', 'review').order('updated_at', { ascending: false }).limit(10),
+    // G5: NEW inbound leads from the generated sites (table may pre-date app_0036 — errors → []).
+    supabase.from('leads').select('id, world_id, name, email, message, source, created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(20),
+    // Tier 1: the user's own open reminders (table may pre-date app_0039 — errors → []).
+    supabase.from('reminders').select('id, title, world_id, due_at, created_at').eq('done', false).order('due_at', { ascending: true, nullsFirst: false }).limit(20),
   ]);
 
   const approvals = approvalsQ.data ?? [];
@@ -122,7 +130,9 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
       supabase.from('contacts').select('id', { count: 'exact', head: true }),
       supabase.from('brand_kits').select('world_id'),
       supabase.from('knowledge_worlds').select('id, title').in('id', worldIds),
-      supabase.from('knowledge_artifacts').select('cluster_id').in('cluster_id', clusters.map((c) => c.id as string)).limit(1000),
+      // Earned only: a launch area holding nothing but seeded playbooks has NOTHING staged —
+      // counting seeds here invented a false "the empty list is blocking sends" move at birth.
+      supabase.from('knowledge_artifacts').select('cluster_id').in('cluster_id', clusters.map((c) => c.id as string)).neq('source', SEED_SOURCE).limit(1000),
     ]);
     const kitWorlds = new Set((kits ?? []).map((k) => k.world_id as string));
     const titleByWorld = new Map((worlds ?? []).map((w) => [w.id as string, w.title as string]));
@@ -138,15 +148,21 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     for (const wid of worldIds) {
       const wc = clusters.filter((c) => c.world_id === wid);
       const charters = wc.map((c) => ({ c, ch: parseCharter(c.charter) })).filter((x) => x.ch);
-      const hasAudience = charters.some((x) => x.ch!.archetype === 'audience');
-      const hasBrandVault = charters.some((x) => x.ch!.archetype === 'vault');
+      const audience = charters.find((x) => x.ch!.archetype === 'audience');
+      const vault = charters.find((x) => x.ch!.archetype === 'vault');
+      // Only voice-consuming studios need a brand kit — a product lab's vault holds screenshots
+      // and specs, and "the brand vault is empty" would nag it forever about a kit it never needs.
+      const voiceStudio = charters.some((x) => x.ch!.archetype === 'studio' && x.ch!.flavor !== 'feature_lab');
       const launchActive = charters.some((x) => (x.ch!.archetype === 'launch' || x.ch!.archetype === 'loop') && (artCount.get(x.c.id as string) ?? 0) > 0);
       floors.push({
         worldId: wid,
         worldTitle: titleByWorld.get(wid) ?? 'A mission',
-        audienceEmpty: hasAudience && (contactCount ?? 0) === 0,
-        brandEmpty: hasBrandVault && !kitWorlds.has(wid),
+        audienceEmpty: !!audience && (contactCount ?? 0) === 0,
+        brandEmpty: !!vault && voiceStudio && !kitWorlds.has(wid),
         launchActive,
+        // area slugs make the move land ON the tool, not on the world's default pane
+        audienceArea: (audience?.c as { slug?: string } | undefined)?.slug ?? null,
+        vaultArea: (vault?.c as { slug?: string } | undefined)?.slug ?? null,
         asOf: now.toISOString(),
       });
     }
@@ -192,6 +208,27 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     }
   }
 
+  // Rabbit-hole trails: exploration worlds (no chartered areas — those are ventures) left warm.
+  // listWorlds merges local + cloud, so a dive that only lives in this browser still counts; for
+  // remote-only worlds the local cluster count is missing, so fetch it (the why must be real).
+  let trailRows: TrailRowIn[] = [];
+  try {
+    const allWorlds = await listWorlds();
+    const chartered = new Set(clusters.map((c) => c.world_id as string));
+    const candidates = allWorlds.filter((w) => !chartered.has(w.id)).slice(0, 12);
+    const uncounted = candidates.filter((w) => w.clusterCount == null && isWorldUuid(w.id)).map((w) => w.id);
+    const counts = new Map<string, number>();
+    if (uncounted.length) {
+      const { data } = await supabase.from('knowledge_clusters').select('world_id').in('world_id', uncounted).limit(1000);
+      for (const r of data ?? []) counts.set(r.world_id as string, (counts.get(r.world_id as string) ?? 0) + 1);
+    }
+    trailRows = candidates.map((w) => ({
+      worldId: w.id, title: w.title,
+      clusterCount: w.clusterCount ?? counts.get(w.id) ?? 0,
+      updatedAt: w.updatedAt,
+    }));
+  } catch { /* fail-soft: no trail nudge is better than a made-up one */ }
+
   // Genesis drafts awaiting judgment — a designed world should never rot unreviewed.
   const { data: draftRows } = await supabase.from('web_templates')
     .select('id, title, template, created_at').eq('status', 'draft').limit(5);
@@ -202,7 +239,9 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     created_at: d.created_at as string,
   }));
 
-  const moves = rankMoves([
+  const ranked = rankMoves([
+    ...collectReminders(((remindersQ.data ?? []) as { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }[]), now),
+    ...collectLeads(((leadsQ.data ?? []) as { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }[])),
     ...collectDrafts(draftsIn),
     ...collectWorldIntel(intelMoves),
     ...collectReplies(replies.map((r) => ({
@@ -216,7 +255,13 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     ...collectInsights(insights.map((i) => ({ id: i.id as string, title: i.title as string, body: i.body as string, score: Number(i.score), created_at: i.created_at as string }))),
     ...collectFloor(floors),
     ...collectNaturalNext(naturals),
+    ...collectTrails(trailRows, now),
   ], now, readDismissals());
+
+  // GOAL FOCUS — the owner's declared project goals steer the ranking (goals.ts, deterministic):
+  // a move that advances an active goal's world rises and NAMES the goal in its why. Fail-soft:
+  // with no goals (or a failed load) the ranking stands untouched.
+  const moves = applyGoalFocus(ranked, await activeGoals(), now);
 
   return {
     moves,

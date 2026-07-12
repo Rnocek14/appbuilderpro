@@ -6,12 +6,13 @@
 // `idFor` maps a stable client key to a row uuid; the caller feeds it existing ids (so saves UPDATE
 // rows in place) and mints uuids for new keys. Cluster key = slug; artifact key = `${slug}\n${artifactId}`.
 
-import { slugify, type Artifact, type ArtifactKind, type Cluster, type ClusterGraph, type ClusterKind, type ClusterMaturity, type EdgeType } from './clustering';
+import { slugify, EPISTEMICS, type Artifact, type ArtifactKind, type Cluster, type ClusterGraph, type ClusterKind, type ClusterMaturity, type EdgeType, type Epistemic } from './clustering';
 
 export interface ClusterRow {
   id: string; owner_id: string; world_id: string; parent_id: string | null;
   slug: string; title: string; summary: string | null; trajectory: string | null;
   kind: ClusterKind; maturity: ClusterMaturity; salience: number; turn_refs: number[];
+  epistemic?: string | null; // app_0049 — optional so pre-migration rows still map
 }
 export interface EdgeRow {
   owner_id: string; world_id: string; source_id: string; target_id: string; type: string;
@@ -59,6 +60,7 @@ export function graphToRows(
     maturity: c.maturity,
     salience: Math.round(c.salience * 100) / 100, // numeric(3,2)
     turn_refs: c.turnRefs,
+    epistemic: c.epistemic ?? null,
   }));
   const edges: EdgeRow[] = graph.edges.map((e) => ({
     owner_id: ownerId, world_id: worldId,
@@ -106,6 +108,7 @@ export function rowsToGraph(clusters: ClusterRow[], edges: EdgeRow[], artifacts:
     kind: r.kind,
     salience: Number(r.salience),
     maturity: r.maturity,
+    epistemic: EPISTEMICS.includes(r.epistemic as Epistemic) ? (r.epistemic as Epistemic) : undefined,
     trajectory: orUndef(r.trajectory),
     turnRefs: r.turn_refs ?? [],
     artifacts: artsByCluster.get(r.id) ?? [],

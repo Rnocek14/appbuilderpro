@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, Play, Boxes } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Sparkles, Send, Play, Boxes, Maximize2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { WakingMoment } from '../components/garvis/WakingMoment';
+import { RemindersCard } from '../components/garvis/RemindersCard';
 import { useAuth } from '../context/AuthContext';
 import { MissionTasks } from '../components/garvis/MissionTasks';
 import { Markdown } from '../components/Markdown';
@@ -9,15 +11,23 @@ import { useCommander } from '../hooks/useCommander';
 import { useOpportunities } from '../hooks/useOpportunities';
 import { Badge, Button, Ember, Spinner } from '../components/ui';
 import type { ChatMessage } from '../hooks/useCommander';
+import { useToast } from '../context/ToastContext';
+import { MailerDesigner } from '../components/garvis/MailerDesigner';
+import { VideoStudio } from '../components/garvis/VideoStudio';
+import ClusterSpike from './spike/ClusterSpike';
 import type { GarvisMission, GarvisTask } from '../types';
 
 const SCAN_THROTTLE_MS = 12 * 60 * 60 * 1000; // proactive scan at most twice a day
 
+// First-screen chips exist FOR the empty-thread user (they render only before the first message),
+// so every one must produce real value on a zero-data account — no chips that need an existing
+// portfolio. The three first moves are all here: venture, rabbit hole, build.
 const SUGGESTIONS = [
-  'Review my portfolio — what should I focus on?',
-  'Grow Theory Thread end-to-end',
+  'Design a business for me — I\'ll describe the idea',
   'Help my mom grow her Lake Geneva real-estate business',
-  'Find new opportunities across my apps',
+  'Take me down the rabbit hole on local lead generation',
+  'Build me an app for tracking client appointments',
+  'What can you do?',
 ];
 
 function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMission; tasks: GarvisTask[]; onRun: () => void; running: boolean }) {
@@ -31,18 +41,29 @@ function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMissi
         {mission.status === 'planned' && (
           <Button onClick={onRun} loading={running} className="ml-auto"><Play size={13} /> Run it</Button>
         )}
-        {mission.status === 'running' && <span className="ml-auto"><Spinner label="working…" /></span>}
+        {/* 'running' with no live driver = the page was refreshed mid-run and the loop died with
+            the DB row still saying running. Resume re-dispatches (done tasks are skipped) instead
+            of leaving an eternal spinner with no way forward. */}
+        {mission.status === 'running' && (running
+          ? <span className="ml-auto"><Spinner label="working…" /></span>
+          : <Button onClick={onRun} className="ml-auto"><Play size={13} /> Resume</Button>)}
       </div>
-      {tasks.length > 0 ? <MissionTasks tasks={tasks} /> : <p className="text-xs text-forge-dim">Planning…</p>}
+      {tasks.length > 0
+        ? <MissionTasks tasks={tasks} />
+        : <p className="text-xs text-forge-dim">{mission.status === 'planning' && !running
+            ? 'Planning was interrupted — just ask me again and I\'ll replan it.'
+            : 'Planning…'}</p>}
     </div>
   );
 }
 
 export default function Command() {
-  const { messages, thinking, send, missions, tasksByMission, runMission, busyId } = useCommander();
+  const { messages, thinking, send, missions, tasksByMission, runMission, busyId, canvas, closeCanvas } = useCommander();
+  const { toast } = useToast();
+  const navigate = useNavigate();
   const { loading: oppLoading, scan } = useOpportunities();
   const { profile } = useAuth();
-  const firstName = (profile?.full_name ?? '').trim().split(/\s+/)[0] || 'there';
+  const firstName = (profile?.full_name ?? '').trim().split(/\s+/)[0] || ''; // '' → "Good morning." not "…, there."
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
@@ -75,6 +96,14 @@ export default function Command() {
         <div className="rounded-2xl rounded-tl-sm border border-forge-border bg-forge-panel px-3.5 py-2.5">
           <Markdown content={m.text} />
         </div>
+        {m.action && (
+          <button
+            onClick={() => navigate(m.action!.to)}
+            className="mt-2 flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-xs font-medium text-forge-ember transition-colors hover:bg-forge-ember/20"
+          >
+            {m.action.label}
+          </button>
+        )}
         {mission && (
           <MissionBlock
             mission={mission}
@@ -89,7 +118,13 @@ export default function Command() {
 
   return (
     <AppShell>
-      <div className="mx-auto flex h-[calc(100vh-3rem)] max-w-3xl flex-col">
+      {/* SUMMONED CANVAS (UX redesign): when Garvis opens a studio, the page splits — the
+          conversation stays live on the left, the studio works on the right. Closing the canvas
+          returns to the centered thread; the studio's output persisted as artifacts either way. */}
+      <div className={canvas
+        ? 'mx-auto grid h-[calc(100vh-3rem)] max-w-[110rem] gap-6 lg:grid-cols-[minmax(0,26rem)_1fr]'
+        : 'mx-auto flex h-[calc(100vh-3rem)] max-w-3xl flex-col'}>
+      <div className="flex min-h-0 flex-col">
         <div className="mb-4 flex items-center gap-3">
           <Sparkles size={20} className="text-forge-ember" />
           <div>
@@ -100,6 +135,7 @@ export default function Command() {
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <WakingMoment name={firstName} />
+          <RemindersCard />
           {messages.length === 0 && (
             <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-5">
               <div className="mb-3 flex items-center gap-2 text-forge-dim"><Boxes size={16} className="text-forge-ember" /> <span className="text-sm">Try one of these — or just say what's on your mind:</span></div>
@@ -142,6 +178,40 @@ export default function Command() {
           />
           <Button onClick={submit} loading={thinking} disabled={!input.trim()}><Send size={15} /></Button>
         </div>
+      </div>
+
+      {canvas && (
+        <div className="hidden min-h-0 flex-col overflow-y-auto rounded-2xl border border-forge-border bg-forge-panel/40 p-4 lg:flex">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="min-w-0 truncate text-sm font-medium text-forge-ink">
+              {canvas.surface === 'explore'
+                ? <>🕳️ Rabbit hole — {canvas.query}</>
+                : <>{canvas.surface === 'mailer' ? '📮 Postcard studio' : '🎬 Video studio'} — {canvas.worldTitle}</>}
+            </span>
+            {canvas.surface === 'explore' && (
+              <button
+                onClick={() => { closeCanvas(); navigate('/garvis/explore'); }}
+                className="ml-auto flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-ink"
+                title="Go full-bleed — the dive continues right where you are"
+              >
+                <Maximize2 size={11} /> Full screen
+              </button>
+            )}
+            <button onClick={closeCanvas} className={`${canvas.surface === 'explore' ? '' : 'ml-auto '}rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-ink`} title="Close the canvas (everything you grew is saved)">
+              Close
+            </button>
+          </div>
+          {canvas.surface === 'explore'
+            ? (
+              <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-forge-border">
+                <ClusterSpike key={canvas.query} embedded seed={canvas.query} />
+              </div>
+            )
+            : canvas.surface === 'mailer'
+              ? <MailerDesigner worldId={canvas.worldId} clusterId={canvas.clusterId} onToast={(k, m) => toast(k, m)} />
+              : <VideoStudio worldId={canvas.worldId} clusterId={canvas.clusterId} title={canvas.worldTitle} onToast={(k, m) => toast(k, m)} />}
+        </div>
+      )}
       </div>
     </AppShell>
   );

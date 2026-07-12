@@ -12,6 +12,8 @@ import { loadWakingDigest, dismissMove, markSeen, type WakingDigest } from '../.
 import type { NextMove } from '../../lib/garvis/nextMove';
 
 const KIND_DOT: Record<NextMove['kind'], string> = {
+  reminder_due: 'bg-forge-ember',
+  lead_waiting: 'bg-forge-ok',
   reply_unanswered: 'bg-forge-ok',
   approval_waiting: 'bg-forge-warn',
   followup_staged: 'bg-forge-ember',
@@ -21,12 +23,23 @@ const KIND_DOT: Record<NextMove['kind'], string> = {
   reflection_due: 'bg-[#B98CE0]',
   intel_stale: 'bg-forge-warn',
   draft_waiting: 'bg-forge-ember',
+  trail_open: 'bg-[#B98CE0]', // curiosity purple — same family as insights/reflections
 };
 
 export function WakingMoment({ name }: { name: string }) {
   const navigate = useNavigate();
   const [digest, setDigest] = useState<WakingDigest | null>(null);
   const [showAll, setShowAll] = useState(false);
+  // UX audit: the front door must never push the composer below the fold. The brief renders full
+  // the FIRST time each day; after that it collapses to one honest summary line (expand on tap).
+  const todayKey = `ff:waking-collapsed:${new Date().toISOString().slice(0, 10)}`;
+  const [collapsedBrief, setCollapsedBrief] = useState(() => localStorage.getItem(todayKey) === '1');
+  useEffect(() => {
+    if (!collapsedBrief) {
+      const t = setTimeout(() => { try { localStorage.setItem(todayKey, '1'); } catch { /* best-effort */ } }, 8000);
+      return () => clearTimeout(t);
+    }
+  }, [collapsedBrief, todayKey]);
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   useEffect(() => {
@@ -43,12 +56,40 @@ export function WakingMoment({ name }: { name: string }) {
   }, []);
 
   if (!digest) return null; // loading (or load failed) — the chat never waits on the front door
-  const { greeting, awayLines, moves } = digest;
+  const { greeting, awayLines, moves, coldSky } = digest;
   // A quiet morning is a FACT worth stating, not a reason to vanish: zero moves means zero
   // replies waiting, nothing blocked, nothing new — say so instead of rendering nothing.
   const quiet = !awayLines.length && !moves.length;
 
   const shown = showAll ? moves : moves.slice(0, 3);
+
+  // FIRST RUN (cold sky): nothing has ever happened. The invitation is a welcome — never a line
+  // under "While you were away" (nothing happened, they were never here), never "1 update".
+  if (coldSky) {
+    return (
+      <div className="mb-4 rounded-2xl border border-forge-border bg-forge-panel/60 p-5">
+        <p className="font-display text-lg font-semibold text-forge-ink">{greeting}</p>
+        <p className="mt-1 text-sm text-forge-dim">{awayLines[0]?.text ?? 'Say anything — a question, a business, a thing you want to build — and I\'ll make it a world.'}</p>
+      </div>
+    );
+  }
+
+  // Collapsed: one honest line — the same facts, none of the height. Tap to expand.
+  if (collapsedBrief) {
+    return (
+      <button
+        onClick={() => setCollapsedBrief(false)}
+        className="mb-4 flex w-full items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/50 px-4 py-2.5 text-left text-sm text-forge-dim transition-colors hover:border-forge-ember/40"
+        title="Expand this morning's brief"
+      >
+        <span className="text-forge-ink">{greeting}</span>
+        <span className="truncate">
+          {quiet ? 'All quiet.' : `${moves.length} move${moves.length === 1 ? '' : 's'} waiting${awayLines.length ? ` · ${awayLines.length} update${awayLines.length === 1 ? '' : 's'} while you were away` : ''}.`}
+        </span>
+        <span className="ml-auto shrink-0 text-[11px] text-forge-ember">expand</span>
+      </button>
+    );
+  }
 
   return (
     <div className="mb-4 rounded-2xl border border-forge-border bg-forge-panel/60 p-5">
@@ -57,7 +98,7 @@ export function WakingMoment({ name }: { name: string }) {
       {quiet && (
         <p className="mt-1 text-sm text-forge-dim">
           All quiet — no replies waiting, nothing blocked, nothing new since you last looked.{' '}
-          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your webs</button>
+          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your ventures</button>
           {' '}to push something forward.
         </p>
       )}
@@ -104,7 +145,15 @@ export function WakingMoment({ name }: { name: string }) {
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
-                  onClick={() => navigate(m.action.route)}
+                  onClick={() => {
+                    // a world-less reminder's home (RemindersCard) is already on THIS page —
+                    // navigating to /garvis/command from /garvis/command is a no-op dead end
+                    if (m.kind === 'reminder_due' && m.action.route === '/garvis/command') {
+                      document.getElementById('reminders-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      return;
+                    }
+                    navigate(m.action.route);
+                  }}
                   className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-xs font-medium text-forge-ember transition-colors hover:bg-forge-ember/20"
                 >
                   {m.action.label} <ChevronRight size={12} />

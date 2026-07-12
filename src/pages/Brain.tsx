@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain as BrainIcon, Upload, Loader2, Sparkles, FileText, Link2, X, Check } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { AskGarvis } from '../components/garvis/AskGarvis';
 import { Button, Card, Badge, EmptyState, Spinner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { timeAgo } from '../lib/utils';
@@ -165,6 +166,11 @@ export default function Brain() {
             <h1 className="text-xl font-semibold text-forge-ink">Brain</h1>
             <p className="text-sm text-forge-dim">Drop a document — Garvis reads it, summarizes it, and connects it to what you already know.</p>
           </div>
+        </div>
+
+        {/* Ask Garvis — retrieval over everything the system knows (playbooks, research, designs) */}
+        <div className="mb-6">
+          <AskGarvis />
         </div>
 
         {/* Dropzone */}

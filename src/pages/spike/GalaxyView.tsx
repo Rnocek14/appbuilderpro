@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Sparkles, ArrowRight, ArrowLeft, ExternalLink, Maximize2, Layers, HelpCircle, Shuffle, Wand2, Clapperboard, Play, Loader2, Paperclip, GitBranch,
   Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Link2, Image as ImageIcon, FileText, Lightbulb, Repeat2, X, Flame, Lock,
+  Scale, Atom, ClipboardCheck, Split, FlaskConical,
 } from 'lucide-react';
 import {
   universeConnections, addChild, slugify, titleSimilarity, sceneOf,
@@ -37,9 +38,14 @@ const PREFETCH_N = 3;
 const KIND_HEX: Record<ClusterKind, string> = {
   topic: '#F2A44D', idea: '#FFC061', project: '#E5631F', artifact: '#E0B36A', // warm family, by weight
   question: '#5AA9E6', investigation: '#B98CE0', // the two meaningful cool accents
+  // Lab vocabulary joins the SAME discipline — warm family by weight, cool accents keep their meaning:
+  claim: '#E0B36A', evidence: '#F2A44D', scenario: '#FFC061', insight: '#E5631F', // warm, by weight
+  theory: '#B98CE0',      // a deep dive of explanation — investigation's violet
+  experiment: '#5AA9E6',  // an open loop to close — question's blue
 };
 const KIND_ICON: Record<ClusterKind, typeof Sparkles> = {
   topic: Sparkles, question: CircleHelp, idea: Sparkles, investigation: Telescope, artifact: BookOpen, project: FolderKanban,
+  claim: Scale, theory: Atom, evidence: ClipboardCheck, scenario: Split, experiment: FlaskConical, insight: Lightbulb,
 };
 const MATURITY_LABEL: Record<ClusterMaturity, string> = {
   spark: 'spark', growing: 'growing', mature: 'mature', building: 'building', finished: 'done', dormant: 'dormant', archived: 'archived',

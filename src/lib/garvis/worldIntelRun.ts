@@ -7,8 +7,9 @@
 
 import { supabase } from '../supabase';
 import { recordMindEvent } from './mindStore';
+import { SEED_SOURCE } from './workwebRun';
 import {
-  compileLivingState, parseReflection, buildReflectionContext, REFLECT_SYSTEM,
+  compileLivingState, parseReflection, buildReflectionContext, reflectionDue, REFLECT_SYSTEM,
   type LivingState, type Reflection, type MomentumSignals, type Implication,
 } from './worldIntel';
 
@@ -40,6 +41,7 @@ interface Gathered {
   events: { subject: string; occurred_at: string }[];
   artifacts: { title: string; kind: string; created_at: string }[];
   sent: number; replies: number; approvalsDecided: number; pendingApprovals: number; oldestPendingHours: number | null;
+  leads: number; visits: number;   // G5 inbound — real rows from the generated site
   signals: MomentumSignals & { intelAgeDays: number | null };
   audienceEmpty: boolean; brandEmpty: boolean;
   openQuestions: string[];
@@ -61,9 +63,12 @@ async function gather(worldId: string): Promise<Gathered | null> {
   const clusterIds = (clustersQ.data ?? []).map((c) => c.id as string);
   const campIds = (campsQ.data ?? []).map((c) => c.id as string);
 
-  const [artsQ, eventsQ, msgsQ, repliesQ, apprQ, contactsQ, kitQ] = await Promise.all([
+  const [artsQ, eventsQ, msgsQ, repliesQ, apprQ, contactsQ, kitQ, leadsQ, visitsQ] = await Promise.all([
+    // EARNED artifacts only: seeded playbooks are knowledge the world was born with — counting
+    // them here would fake momentum ("N artifacts this week"), fake research recency (a seeded
+    // framework is NOT market intel), and let reflection "learn" from a template.
     clusterIds.length
-      ? supabase.from('knowledge_artifacts').select('title, kind, created_at').in('cluster_id', clusterIds).order('created_at', { ascending: false }).limit(60)
+      ? supabase.from('knowledge_artifacts').select('title, kind, created_at').in('cluster_id', clusterIds).neq('source', SEED_SOURCE).order('created_at', { ascending: false }).limit(60)
       : Promise.resolve({ data: [] as { title: string; kind: string; created_at: string }[] }),
     supabase.from('mind_events').select('subject, occurred_at, payload').order('occurred_at', { ascending: false }).limit(120),
     campIds.length ? supabase.from('outreach_messages').select('status, sent_at').in('campaign_id', campIds) : Promise.resolve({ data: [] as { status: string; sent_at: string | null }[] }),
@@ -71,6 +76,9 @@ async function gather(worldId: string): Promise<Gathered | null> {
     supabase.from('approvals').select('status, created_at, decided_at, payload'),
     supabase.from('contacts').select('id', { count: 'exact', head: true }),
     supabase.from('brand_kits').select('id').eq('world_id', worldId).maybeSingle(),
+    // G5 inbound (tables may pre-date app_0036 in an un-migrated env — treat errors as zero rows).
+    supabase.from('leads').select('created_at').eq('world_id', worldId).order('created_at', { ascending: false }).limit(200),
+    supabase.from('site_events').select('created_at').eq('world_id', worldId).eq('kind', 'visit').order('created_at', { ascending: false }).limit(500),
   ]);
 
   // World-tagged events: workweb/studio flows stamp payload.world_id. Untagged events are NOT
@@ -97,9 +105,15 @@ async function gather(worldId: string): Promise<Gathered | null> {
   const newestIntel = arts.find((a) => a.kind === 'research');
   const intelAgeDays = newestIntel ? (now - new Date(newestIntel.created_at).getTime()) / DAY : null;
 
-  const charters = (clustersQ.data ?? []).map((c) => c.charter as { archetype?: string } | null);
+  const charters = (clustersQ.data ?? []).map((c) => c.charter as { archetype?: string; flavor?: string } | null);
   const hasAudience = charters.some((c) => c?.archetype === 'audience');
   const hasVault = charters.some((c) => c?.archetype === 'vault');
+  // A brand kit only matters where a studio speaks in the brand's voice — a product lab's
+  // feature_lab studios don't, so "brand vault is empty" must not blocker-nag them forever.
+  const hasVoiceStudio = charters.some((c) => c?.archetype === 'studio' && c?.flavor !== 'feature_lab');
+
+  const leadRows = ((leadsQ as { data?: { created_at: string }[] | null }).data ?? []);
+  const visitRows = ((visitsQ as { data?: { created_at: string }[] | null }).data ?? []);
 
   return {
     worldTitle: worldQ.data.title as string,
@@ -112,15 +126,19 @@ async function gather(worldId: string): Promise<Gathered | null> {
     approvalsDecided: worldApprovals.filter((a) => a.status === 'approved').length,
     pendingApprovals: pending.length,
     oldestPendingHours,
+    leads: leadRows.length,
+    visits: visitRows.length,
     signals: {
       events7d: worldEvents.filter((e) => within7(e.occurred_at)).length,
       artifacts7d: arts.filter((a) => within7(a.created_at)).length,
       sends7d: msgs.filter((m) => within7(m.sent_at)).length,
       replies7d: reps.filter((r) => within7(r.received_at)).length,
+      leads7d: leadRows.filter((l) => within7(l.created_at)).length,
+      visits7d: visitRows.filter((v) => within7(v.created_at)).length,
       intelAgeDays,
     },
     audienceEmpty: hasAudience && (contactsQ.count ?? 0) === 0,
-    brandEmpty: hasVault && !kitQ.data,
+    brandEmpty: hasVault && hasVoiceStudio && !kitQ.data,
     openQuestions: ((intelQ.data?.open_questions as string[] | undefined) ?? []),
   };
 }
@@ -148,6 +166,26 @@ export async function refreshWorldIntelligence(worldId: string): Promise<LivingS
   return state;
 }
 
+/** Reflect AUTOMATICALLY, but only when genuinely due (≥5 events in 7 days AND not reflected in the
+ *  last 7 days) — the audit's "learning is manual-only" fix, without turning every world-open into
+ *  a model call. Fire-and-forget from the UI; returns whether a reflection actually ran. The
+ *  evidence gate inside reflectOnWorld still applies, so a due-but-thin world changes nothing. */
+export async function maybeReflect(worldId: string): Promise<boolean> {
+  try {
+    // Cheap due-check FIRST, off the just-persisted intelligence row (refreshWorldIntelligence
+    // runs before this on world-open and writes signals incl. events7d) — so the common
+    // not-due path costs ONE query, not a full 14-query gather(). Only when actually due does
+    // reflectOnWorld gather.
+    const existing = await getWorldIntelligence(worldId);
+    const events7d = existing?.signals?.events7d ?? 0;
+    if (!reflectionDue(existing?.last_reflected_at ?? null, events7d, new Date())) return false;
+    const r = await reflectOnWorld(worldId);
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
 export interface ReflectResult { ok: boolean; reflection?: Reflection; message: string }
 
 /** Run a reflection: compile the evidence pack, reason via cluster-chat, evidence-gate the output,
@@ -169,7 +207,7 @@ export async function reflectOnWorld(worldId: string): Promise<ReflectResult> {
   const context = buildReflectionContext({
     worldTitle: g.worldTitle, objective: g.objective,
     events: g.events, artifacts: g.artifacts,
-    results: { sent: g.sent, replies: g.replies, approvals: g.approvalsDecided },
+    results: { sent: g.sent, replies: g.replies, approvals: g.approvalsDecided, leads: g.leads, visits: g.visits },
     state,
   });
 

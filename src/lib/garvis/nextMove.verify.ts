@@ -6,7 +6,7 @@
 
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals,
 } from './nextMove';
 
@@ -28,7 +28,33 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   ]);
   check('replies: only positive without a next touch', replies.length === 1 && replies[0].key === 'reply:r1');
   check('replies: why carries the quoted evidence', replies[0].why.includes('"interested"') && replies[0].why.includes('no next touch'));
-  check('replies: routes to the world', replies[0].action.route === '/garvis/webs/w1');
+  check('replies: routes to the Inbox (where the reply is answerable)', replies[0].action.route === '/garvis/inbox');
+
+  // G5: a website lead is inbound demand — one move per human, evidence quoted, top-ranked.
+  const leads = collectLeads([
+    { id: 'l1', world_id: 'w1', name: 'Dana', email: 'dana@x.co', message: 'Do you take commissions?', source: 'postcard-qr', created_at: hoursAgo(1) },
+    { id: 'l2', world_id: 'w1', name: null, email: 'sam@y.co', message: null, source: 'website', created_at: hoursAgo(3) },
+  ]);
+  check('leads: one move per lead, keyed by id', leads.length === 2 && leads[0].key === 'lead:l1' && leads[1].key === 'lead:l2');
+  check('leads: why quotes the message + attribution', leads[0].why.includes('commissions') && leads[0].why.includes('postcard-qr'));
+  check('leads: nameless lead falls back to email, routes to the Inbox', leads[1].title.includes('sam@y.co') && leads[1].action.route === '/garvis/inbox');
+  check('leads: rank with warm replies at the very top', (() => {
+    const ranked = rankMoves([...replies, ...leads], NOW, {});
+    return ranked[0].kind === 'lead_waiting' || ranked[0].kind === 'reply_unanswered';
+  })());
+
+  // Tier 1: the user's own reminders — due surfaces, future stays quiet, and they outrank inference.
+  const reminders = collectReminders([
+    { id: 'rm1', title: 'Call the printer', world_id: null, due_at: hoursAgo(1), created_at: hoursAgo(48) },
+    { id: 'rm2', title: 'Future thing', world_id: 'w1', due_at: new Date(NOW.getTime() + 48 * 3_600_000).toISOString(), created_at: hoursAgo(1) },
+    { id: 'rm3', title: 'Standing note', world_id: null, due_at: null, created_at: hoursAgo(2) },
+  ], NOW);
+  check('reminders: due + no-due surface, future stays quiet', reminders.length === 2 && reminders.some((r) => r.key === 'reminder:rm1') && reminders.some((r) => r.key === 'reminder:rm3') && !reminders.some((r) => r.key === 'reminder:rm2'));
+  check('reminders: the user\'s words outrank Garvis inference (top of the cockpit)', (() => {
+    const ranked = rankMoves([...leads, ...reminders], NOW, {});
+    return ranked[0].kind === 'reminder_due';
+  })());
+  check('reminders: expected outcome is labeled measured (it IS the user\'s own datum)', reminders[0].expected?.basis === 'measured');
 
   const approvals = collectApprovals([
     { id: 'a1', kind: 'send_email', title: 'Touch 1', created_at: hoursAgo(5) },
@@ -49,6 +75,11 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   check('floor: empty audience blocking a live channel surfaces', floor.some((m) => m.key === 'floor:audience:w1'));
   check('floor: empty brand vault surfaces', floor.some((m) => m.key === 'floor:brand:w1'));
   check('floor: audience-empty without live launch stays quiet', collectFloor([{ worldId: 'w2', worldTitle: 'X', audienceEmpty: true, brandEmpty: false, launchActive: false, asOf: hoursAgo(0) }]).length === 0);
+  check('floor: area slugs land the move ON the tool (≤1-click rule)', (() => {
+    const withAreas = collectFloor([{ worldId: 'w1', worldTitle: 'M', audienceEmpty: true, brandEmpty: true, launchActive: true, audienceArea: 'mailing-list', vaultArea: 'brand-vault', asOf: hoursAgo(0) }]);
+    return withAreas.find((m) => m.key === 'floor:audience:w1')!.action.route === '/garvis/webs/w1?area=mailing-list'
+      && withAreas.find((m) => m.key === 'floor:brand:w1')!.action.route === '/garvis/webs/w1?area=brand-vault';
+  })());
 
   const nat = collectNaturalNext([
     { missionId: 'm1', worldId: 'w1', subject: 'Lakefront Seller', artifactCount: 12, sendsQueued: 0, updated_at: hoursAgo(6) },
@@ -159,6 +190,27 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
     ...collectNaturalNext([{ missionId: 'm1', worldId: 'w1', subject: 's', artifactCount: 3, sendsQueued: 0, updated_at: hoursAgo(1) }]),
   ], NOW, {});
   check('ranking: approval > draft > natural next', ranked.map((m) => m.kind).join(',') === 'approval_waiting,draft_waiting,natural_next', ranked.map((m) => m.kind).join(','));
+}
+
+// 8. Warm trails — the rabbit hole nudges honestly: one at most, real dives only, right window.
+{
+  const trail = (worldId: string, clusterCount: number, ageH: number) =>
+    ({ worldId, title: `World ${worldId}`, clusterCount, updatedAt: hoursAgo(ageH) });
+  check('trail: a fresh dive (<20h) stays quiet — mid-dive nudges are noise', collectTrails([trail('w1', 8, 3)], NOW).length === 0);
+  check('trail: a spark that never grew (<3 ideas) stays quiet', collectTrails([trail('w1', 2, 48)], NOW).length === 0);
+  check('trail: a cold trail (>7d) stays quiet', collectTrails([trail('w1', 8, 8 * 24)], NOW).length === 0);
+  const warm = collectTrails([trail('w1', 9, 48)], NOW);
+  check('trail: a warm real dive surfaces with counted evidence', warm.length === 1 && warm[0].why.includes('9 ideas') && warm[0].why.includes('2 days ago'));
+  check('trail: deep-links into the specific world', warm[0].action.route === '/garvis/explore?world=w1');
+  check('trail: at most ONE — the most recent wins', (() => {
+    const out = collectTrails([trail('older', 12, 96), trail('newer', 5, 30)], NOW);
+    return out.length === 1 && out[0].key === 'trail:newer';
+  })());
+  check('trail: yesterday reads as yesterday', collectTrails([trail('w1', 4, 22)], NOW)[0].why.includes('yesterday'));
+  // same bornAt across kinds so the check compares BASE VALUES, not urgency accrual
+  const mk3 = (kind: NextMove['kind'], key: string): NextMove => ({ key, kind, title: key, why: 'w', action: { label: 'l', route: '/' }, score: 0, bornAt: hoursAgo(48) });
+  const order = rankMoves([...collectTrails([trail('w1', 9, 48)], NOW), mk3('reply_unanswered', 'rep'), mk3('insight_connection', 'ins'), mk3('intel_stale', 'int')], NOW);
+  check('ranking: reply > insight > trail > stale-intel', order.map((m) => m.kind).join(',') === 'reply_unanswered,insight_connection,trail_open,intel_stale', order.map((m) => m.kind).join(','));
 }
 
 console.log(`\nnextMove.verify: ${passed} passed, ${failed} failed`);

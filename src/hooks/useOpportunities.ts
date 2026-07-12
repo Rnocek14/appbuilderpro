@@ -25,9 +25,12 @@ export function useOpportunities() {
 
   const refresh = useCallback(async () => {
     if (!session) return;
-    const { data } = await supabase.from('garvis_opportunities').select('*').order('created_at', { ascending: false });
-    setOpportunities((data as GarvisOpportunity[]) ?? []);
-    setLoading(false);
+    try {
+      const { data } = await supabase.from('garvis_opportunities').select('*').order('created_at', { ascending: false });
+      setOpportunities((data as GarvisOpportunity[]) ?? []);
+    } finally {
+      setLoading(false); // a failed load must never leave an eternal spinner
+    }
   }, [session]);
 
   useEffect(() => { refresh(); }, [refresh]);

@@ -54,6 +54,58 @@ function useDisc(): THREE.Texture {
   return useMemo(() => discTexture(), []);
 }
 
+/** A 4-point diffraction-spike star texture — the "telescope photo" signal on bright stars. */
+function spikeTexture(): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 22);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.5, 'rgba(255,240,220,0.5)');
+  grad.addColorStop(1, 'rgba(255,240,220,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  for (const rot of [0, Math.PI / 2]) {
+    g.save();
+    g.translate(64, 64);
+    g.rotate(rot);
+    const lg = g.createLinearGradient(-64, 0, 64, 0);
+    lg.addColorStop(0, 'rgba(255,255,255,0)');
+    lg.addColorStop(0.5, 'rgba(255,255,255,0.9)');
+    lg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = lg;
+    g.fillRect(-64, -1.2, 128, 2.4);
+    g.restore();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.needsUpdate = true;
+  return t;
+}
+
+// FRESNEL ORB — the two lighting facts that make a body read as a sphere in the references:
+// a terminator (lit side / dark side from the star) and an atmosphere rim. Pure presentation:
+// color and intensity still come from momentum/activity, exactly as before.
+const ORB_VERT = `
+varying vec3 vN; varying vec3 vW;
+void main() {
+  vN = normalize(mat3(modelMatrix) * normal);
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vW = wp.xyz;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+const ORB_FRAG = `
+uniform vec3 uColor; uniform float uIntensity; uniform vec3 uLight;
+varying vec3 vN; varying vec3 vW;
+void main() {
+  vec3 N = normalize(vN);
+  vec3 V = normalize(cameraPosition - vW);
+  vec3 L = normalize(uLight - vW);
+  float diff = clamp(dot(N, L), 0.0, 1.0) * 0.6 + 0.16;
+  float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 2.4);
+  vec3 col = uColor * (diff + fres * 1.9) * uIntensity;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
 /** A planet's position relative to its star — tilt is a stable hash so orbits have volume. */
 function planetLocal(p: SysPlanet): [number, number, number] {
   const a = (p.angleDeg * Math.PI) / 180;
@@ -103,47 +155,141 @@ function StarShell({ count, radius, size, salt, hue }: { count: number; radius: 
   );
 }
 
-/** The spiral dust arms — a logarithmic spiral of tinted particles in the galactic plane. */
-function DustArms() {
+/** Spiral position on arm `arm` at parameter t, with gaussian scatter around the centerline —
+ *  DENSITY is what makes an arm read as an arm. */
+function armPoint(i: number, salt: string, spread: number): { x: number; y: number; z: number; t: number } {
+  const arm = hash32(`${salt}-arm-${i}`) % 2;
+  const t = rnd(i, `${salt}t`) * 4.6 + 0.5;
+  const ang = t * 1.9 + arm * Math.PI;
+  // gaussian-ish scatter: sum of two uniforms, tighter near the centerline
+  const g = (rnd(i, `${salt}g1`) + rnd(i, `${salt}g2`) - 1) * spread * (0.5 + t * 0.22);
+  const rad = 13 * Math.exp(0.285 * t) + g;
+  return { x: Math.cos(ang) * rad, y: (rnd(i, `${salt}y`) + rnd(i, `${salt}y2`) - 1) * (3.5 + rad * 0.035), z: Math.sin(ang) * rad, t };
+}
+
+/** The galaxy disk: dense blue-white arm stars + magenta HII knots + DARK occluding dust lanes.
+ *  The lanes are the trick the references depend on — additive light can never make darkness,
+ *  so they render normal-blended, near-black, drawn OVER the arms. */
+function GalaxyDisk() {
   const tex = useDisc();
-  const [positions, colors] = useMemo(() => {
-    const N = 4200;
-    const p = new Float32Array(N * 3);
-    const c = new Float32Array(N * 3);
-    const tints: [number, number, number][] = [[0.56, 0.66, 1], [0.72, 0.55, 0.88], [1, 0.54, 0.24]];
+  const [armPos, armCol, laneP, hiiP, hiiC] = useMemo(() => {
+    const N = 9000;
+    const p = new Float32Array(N * 3); const c = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
-      const arm = i % 2;
-      const t = rnd(i, 'sp') * 4.4 + 0.6;                 // spiral parameter
-      const ang = t * 1.9 + arm * Math.PI;
-      const rad = 14 * Math.exp(0.28 * t) + (rnd(i, 'sj') - 0.5) * 16;
-      if (rad > SKY * 0.98) continue;
-      p[i * 3] = Math.cos(ang) * rad;
-      p[i * 3 + 1] = (rnd(i, 'sy') - 0.5) * (7 + rad * 0.05);
-      p[i * 3 + 2] = Math.sin(ang) * rad;
-      const tint = tints[hash32(`tint-${i}`) % 3];
-      const w = 0.16 + 0.5 * rnd(i, 'sw');
-      c[i * 3] = tint[0] * w; c[i * 3 + 1] = tint[1] * w; c[i * 3 + 2] = tint[2] * w;
+      const a = armPoint(i, 'ga', 9);
+      if (Math.hypot(a.x, a.z) > SKY * 0.98) continue;
+      p[i * 3] = a.x; p[i * 3 + 1] = a.y; p[i * 3 + 2] = a.z;
+      // color temperature: warm toward the core, blue-white outward
+      const warm = Math.max(0, 1 - a.t / 4.6);
+      const w = 0.2 + 0.55 * rnd(i, 'gw');
+      c[i * 3] = (0.62 + 0.38 * warm) * w; c[i * 3 + 1] = (0.68 + 0.2 * warm) * w; c[i * 3 + 2] = (1 - 0.35 * warm) * w;
     }
-    return [p, c];
+    const L = 2600;
+    const lp = new Float32Array(L * 3);
+    for (let i = 0; i < L; i++) {
+      const a = armPoint(i, 'lane', 3.2); // tight to the arm's inner edge
+      lp[i * 3] = a.x * 0.96; lp[i * 3 + 1] = a.y * 0.6 + 0.8; lp[i * 3 + 2] = a.z * 0.96;
+    }
+    const H = 260;
+    const hp = new Float32Array(H * 3); const hc = new Float32Array(H * 3);
+    for (let i = 0; i < H; i++) {
+      const a = armPoint(i, 'hii', 4);
+      hp[i * 3] = a.x; hp[i * 3 + 1] = a.y; hp[i * 3 + 2] = a.z;
+      hc[i * 3] = 1; hc[i * 3 + 1] = 0.35; hc[i * 3 + 2] = 0.62; // HII magenta
+    }
+    return [p, c, lp, hp, hc];
+  }, []);
+  return (
+    <group>
+      <points renderOrder={1}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[armPos, 3]} />
+          <bufferAttribute attach="attributes-color" args={[armCol, 3]} />
+        </bufferGeometry>
+        <pointsMaterial map={tex} size={1.9} vertexColors transparent opacity={0.85} depthWrite={false} blending={THREE.AdditiveBlending} sizeAttenuation />
+      </points>
+      <points renderOrder={3}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[laneP, 3]} />
+        </bufferGeometry>
+        <pointsMaterial map={tex} size={4.6} color="#0B0705" transparent opacity={0.5} depthWrite={false} sizeAttenuation />
+      </points>
+      <points renderOrder={2}>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[hiiP, 3]} />
+          <bufferAttribute attach="attributes-color" args={[hiiC, 3]} />
+        </bufferGeometry>
+        <pointsMaterial map={tex} size={3.4} vertexColors transparent opacity={0.55} depthWrite={false} blending={THREE.AdditiveBlending} sizeAttenuation />
+      </points>
+    </group>
+  );
+}
+
+/** Sparse bright stars with diffraction spikes — the power-law top of the field. */
+function BrightStars() {
+  const tex = useMemo(() => spikeTexture(), []);
+  const [positions] = useMemo(() => {
+    const N = 110;
+    const p = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      const th = rnd(i, 'bs') * Math.PI * 2;
+      const ph = Math.acos(2 * rnd(i, 'bsp') - 1);
+      const rr = SKY * (1.1 + 1.2 * rnd(i, 'bsr'));
+      p[i * 3] = rr * Math.sin(ph) * Math.cos(th);
+      p[i * 3 + 1] = rr * Math.cos(ph) * 0.62;
+      p[i * 3 + 2] = rr * Math.sin(ph) * Math.sin(th);
+    }
+    return [p];
   }, []);
   return (
     <points>
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-        <bufferAttribute attach="attributes-color" args={[colors, 3]} />
       </bufferGeometry>
-      <pointsMaterial map={tex} size={2.1} vertexColors transparent opacity={0.8} depthWrite={false} blending={THREE.AdditiveBlending} sizeAttenuation />
+      <pointsMaterial map={tex} size={13} color="#FFF6E8" transparent opacity={0.9} depthWrite={false} blending={THREE.AdditiveBlending} sizeAttenuation />
     </points>
+  );
+}
+
+/** Fixed-seed nebula banks — the colored darkness that gives the void its depth layers. */
+function Nebulae() {
+  const tex = useDisc();
+  const banks = useMemo(() => Array.from({ length: 8 }, (_, i) => ({
+    pos: [
+      Math.cos(rnd(i, 'nb') * Math.PI * 2) * SKY * (0.5 + 0.6 * rnd(i, 'nbr')),
+      (rnd(i, 'nby') - 0.5) * 70,
+      Math.sin(rnd(i, 'nb') * Math.PI * 2) * SKY * (0.5 + 0.6 * rnd(i, 'nbr')),
+    ] as [number, number, number],
+    scale: 80 + 90 * rnd(i, 'nbs'),
+    color: ['#5A4B8A', '#274B5E', '#6E3A22', '#3C2B55'][i % 4],
+    opacity: 0.06 + 0.06 * rnd(i, 'nbo'),
+  })), []);
+  return (
+    <group>
+      {banks.map((b, i) => (
+        <sprite key={i} position={b.pos} scale={[b.scale, b.scale * 0.62, 1]}>
+          <spriteMaterial map={tex} color={b.color} transparent opacity={b.opacity} depthWrite={false} blending={THREE.AdditiveBlending} />
+        </sprite>
+      ))}
+    </group>
   );
 }
 
 function CoreGlow() {
   const tex = useDisc();
+  // Elliptical + stratified, like the references: a wide disk haze squashed into the galactic
+  // plane, then cream → amber → white toward the nucleus.
+  const layers: [number, number, string, number][] = [
+    [250, 0.34, '#8A6B4A', 0.22],   // disk haze
+    [120, 0.42, '#FFE7C2', 0.4],
+    [62, 0.5, '#FFB573', 0.55],
+    [24, 0.7, '#FFFFFF', 0.95],
+  ];
   return (
     <group>
-      {[[120, '#FFE7C2', 0.5], [64, '#FFB573', 0.55], [26, '#FFFFFF', 0.9]].map(([s, col, op], i) => (
-        <sprite key={i} scale={[s as number, s as number, 1]}>
-          <spriteMaterial map={tex} color={col as string} transparent opacity={op as number} depthWrite={false} blending={THREE.AdditiveBlending} />
+      {layers.map(([w, ratio, col, op], i) => (
+        <sprite key={i} scale={[w, w * ratio, 1]}>
+          <spriteMaterial map={tex} color={col} transparent opacity={op} depthWrite={false} blending={THREE.AdditiveBlending} />
         </sprite>
       ))}
     </group>
@@ -165,13 +311,25 @@ function HoloRing({ radius }: { radius: number }) {
     }
     return [p];
   }, [radius]);
+  // Segmented rim: bright dashes with deliberate gaps — structure, not fuzz (the JARVIS ring).
+  const rim = useMemo(() => {
+    const pts: THREE.Vector3[] = [];
+    for (let i = 0; i <= 240; i++) {
+      const a = (i / 240) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.cos(a) * radius * 1.12, 0, Math.sin(a) * radius * 1.12));
+    }
+    return pts;
+  }, [radius]);
   return (
-    <points rotation={[0.28, 0, 0.12]}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-      </bufferGeometry>
-      <pointsMaterial map={tex} color="#FFC46B" size={1.5} transparent opacity={0.9} depthWrite={false} blending={THREE.AdditiveBlending} sizeAttenuation />
-    </points>
+    <group rotation={[0.28, 0, 0.12]}>
+      <points>
+        <bufferGeometry>
+          <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+        </bufferGeometry>
+        <pointsMaterial map={tex} color="#FFC46B" size={1.5} transparent opacity={0.9} depthWrite={false} blending={THREE.AdditiveBlending} sizeAttenuation />
+      </points>
+      <Line points={rim} color="#FFD9A0" lineWidth={1} transparent opacity={0.8} dashed dashSize={2.2} gapSize={1.1} />
+    </group>
   );
 }
 
@@ -179,21 +337,29 @@ function HoloRing({ radius }: { radius: number }) {
 // Bodies
 // ---------------------------------------------------------------------------
 
-function GlowOrb({ pos, color, coreScale, halo, pulse, onClick, children }: {
+function GlowOrb({ pos, color, coreScale, halo, pulse, hot, lightPos, onClick, children }: {
   pos: [number, number, number]; color: string; coreScale: number; halo: number;
-  pulse: boolean; onClick?: () => void; children?: React.ReactNode;
+  pulse: boolean; hot?: boolean; lightPos?: [number, number, number]; onClick?: () => void; children?: React.ReactNode;
 }) {
   const tex = useDisc();
   const mat = useRef<THREE.SpriteMaterial>(null);
-  const base = useRef(Math.random() * Math.PI * 2);
+  // Deterministic pulse phase from position — no Math.random in the sky.
+  const base = useRef(((pos[0] * 13.37 + pos[2] * 7.77) % 6.28));
   useFrame(({ clock }) => {
     if (mat.current && pulse) mat.current.opacity = 0.55 + 0.2 * Math.sin(clock.elapsedTime * 1.4 + base.current);
   });
+  // Fresnel-lit body: terminator from the light source + atmosphere rim. Hot bodies over-drive
+  // (only REAL momentum burns past the bloom threshold — dynamic-range discipline).
+  const uniforms = useMemo(() => ({
+    uColor: { value: new THREE.Color(color) },
+    uIntensity: { value: hot ? 2.4 : 0.85 },
+    uLight: { value: new THREE.Vector3(...(lightPos ?? [0, 0, 0])) },
+  }), [color, hot, lightPos]);
   return (
     <group position={pos}>
       <mesh onClick={onClick} onPointerOver={(e) => { e.stopPropagation(); document.body.style.cursor = 'pointer'; }} onPointerOut={() => { document.body.style.cursor = ''; }}>
-        <sphereGeometry args={[coreScale, 24, 24]} />
-        <meshBasicMaterial color={color} toneMapped={false} />
+        <sphereGeometry args={[coreScale, 32, 32]} />
+        <shaderMaterial vertexShader={ORB_VERT} fragmentShader={ORB_FRAG} uniforms={uniforms} toneMapped={false} />
       </mesh>
       <sprite scale={[halo, halo, 1]}>
         <spriteMaterial ref={mat} map={tex} color={color} transparent opacity={0.6} depthWrite={false} blending={THREE.AdditiveBlending} />
@@ -241,10 +407,12 @@ function Sky({ scene, onSelect, selected, system, planet, onPlanet, arts, onArt 
 
   return (
     <group>
-      <StarShell count={4200} radius={SKY * 2.4} size={1.6} salt="far" hue={[0.75, 0.8, 1]} />
-      <StarShell count={3200} radius={SKY * 1.6} size={2.2} salt="mid" hue={[1, 0.92, 0.8]} />
-      <StarShell count={1600} radius={SKY * 1.05} size={3.0} salt="near" hue={[1, 0.78, 0.5]} />
-      <DustArms />
+      <StarShell count={4200} radius={SKY * 2.4} size={1.5} salt="far" hue={[0.75, 0.8, 1]} />
+      <StarShell count={3200} radius={SKY * 1.6} size={2.0} salt="mid" hue={[1, 0.92, 0.8]} />
+      <StarShell count={1600} radius={SKY * 1.05} size={2.7} salt="near" hue={[1, 0.78, 0.5]} />
+      <BrightStars />
+      <Nebulae />
+      <GalaxyDisk />
       <CoreGlow />
 
       {/* Filaments — measured cross-world threads, arcing through space */}
@@ -263,19 +431,26 @@ function Sky({ scene, onSelect, selected, system, planet, onPlanet, arts, onArt 
       {scene.bodies.map((b) => {
         const color = b.momentum ? MOMENTUM_COLOR[b.momentum.label] : '#3A4051';
         const size = 1.2 + b.size * 0.22;
+        const hot = !!b.momentum && b.momentum.label !== 'dormant';
         return (
           <GlowOrb
             key={b.id}
             pos={posOf.get(b.id)!}
             color={color}
             coreScale={size}
-            halo={size * (b.momentum ? 7 : 3.5)}
-            pulse={!!b.momentum && b.momentum.label !== 'dormant'}
+            halo={size * (hot ? 7 : 3)}
+            pulse={hot}
+            hot={hot}
+            lightPos={[0, 0, 0]}
             onClick={() => onSelect(b)}
           >
-            <Html center distanceFactor={140} style={{ pointerEvents: 'none' }} position={[0, -(size + 2.4), 0]}>
-              <div style={{ color: selected?.id === b.id ? '#FFD9B0' : '#8B90A0', fontSize: 11, whiteSpace: 'nowrap', textShadow: '0 0 6px #000' }}>
-                {b.title}{b.localOnly ? ' · local' : ''}
+            <Html center distanceFactor={140} style={{ pointerEvents: 'none' }} position={[0, -(size + 2.6), 0]}>
+              <div style={{
+                color: selected?.id === b.id ? '#FFC46B' : b.isSystem ? '#D8B98A' : '#8B90A0',
+                fontSize: 10.5, whiteSpace: 'nowrap', textShadow: '0 0 8px #000',
+                letterSpacing: 2, textTransform: 'uppercase', fontWeight: b.isSystem ? 600 : 400,
+              }}>
+                {b.title}{b.localOnly ? ' · LOCAL' : ''}
               </div>
             </Html>
           </GlowOrb>
@@ -305,6 +480,8 @@ function Sky({ scene, onSelect, selected, system, planet, onPlanet, arts, onArt 
                   coreScale={0.45 + p.size * 0.05}
                   halo={glowing ? 4.5 : 1.6}
                   pulse={glowing}
+                  hot={glowing}
+                  lightPos={posOf.get(selected!.id)!}
                   onClick={() => onPlanet(p)}
                 >
                   <Html center distanceFactor={60} style={{ pointerEvents: 'none' }} position={[0, -1.6, 0]}>
@@ -400,18 +577,18 @@ export default function Universe3D() {
 
   return (
     <AppShell fullBleed>
-      <div className="relative h-[calc(100vh-0px)] w-full bg-[#04050A]">
+      <div className="relative h-[calc(100vh-0px)] w-full bg-[#020308]">
         {!scene ? (
           <div className="flex h-full items-center justify-center"><Spinner label="Compiling the universe…" /></div>
         ) : (
           <Canvas camera={{ fov: 50, position: [0, 46, 168], near: 0.1, far: 2000 }} dpr={[1, 2]} gl={{ antialias: true }}>
-            <color attach="background" args={['#04050A']} />
+            <color attach="background" args={['#020308']} />
             <Suspense fallback={null}>
               <Sky scene={scene} onSelect={setSelected} selected={selected} system={system} planet={planet} onPlanet={setPlanet} arts={arts} onArt={setOpenArt} />
               <CameraRig target={target} dist={planet ? 7 : selected ? 26 : 168} controls={controls} />
               <OrbitControls ref={controls} enableDamping dampingFactor={0.08} enablePan={false} minDistance={12} maxDistance={340} />
               <EffectComposer>
-                <Bloom intensity={1.25} luminanceThreshold={0.16} luminanceSmoothing={0.5} mipmapBlur />
+                <Bloom intensity={1.35} luminanceThreshold={0.32} luminanceSmoothing={0.35} mipmapBlur />
                 <Vignette eskil={false} offset={0.18} darkness={0.82} />
                 <Noise opacity={0.022} />
               </EffectComposer>

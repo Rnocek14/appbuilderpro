@@ -2,9 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 import { useInbox } from '../../hooks/useAutopilot';
 import { usePreviewClaims } from '../../hooks/usePreviewClaims';
 import { cn } from '../../lib/utils';
@@ -21,27 +22,26 @@ const navSections = [
       { to: '/new', label: 'New project', icon: Plus },
       { to: '/import', label: 'Import', icon: FolderDown },
       { to: '/autopilot', label: 'Autopilot', icon: Bot },
-      { to: '/inbox', label: 'Inbox', icon: InboxIcon },
+      { to: '/inbox', label: 'Build questions', icon: InboxIcon },
       { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],
   },
   {
     // Command leads — the waking moment is the product's front door; the altitude stack
-    // (Work Webs → System → Universe) follows; the legacy portfolio pages trail.
+    // UX REDESIGN (docs/garvis-ux-redesign): workflow pillars, not subsystems. The legacy
+    // portfolio pages (Overview/Mind/Mission Control/Missions/Opportunities/Marketing/Health)
+    // keep their ROUTES (nothing 404s; deep links + banners still work) but leave the nav —
+    // their jobs live in Command (the thread), Ventures, Inbox, and Settings. The skies
+    // (Universe/System) stay reachable from Ventures and the palette, not as destinations.
     title: 'Garvis',
     items: [
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
-      { to: '/garvis/webs', label: 'Work Webs', icon: Waypoints },
-      { to: '/garvis/universe', label: 'Universe', icon: Telescope },
-      { to: '/garvis/explore', label: 'Explore', icon: Compass },
-      { to: '/garvis/brain', label: 'Brain', icon: BrainCircuit },
+      { to: '/garvis/inbox', label: 'Inbox', icon: MessageSquare },
+      { to: '/garvis/webs', label: 'Ventures', icon: Waypoints },
+      { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
+      { to: '/garvis/contacts', label: 'Contacts', icon: Users },
+      { to: '/garvis/brain', label: 'Library', icon: BrainCircuit },
       { to: '/garvis/approvals', label: 'Approvals', icon: ShieldCheck },
-      { to: '/garvis', label: 'Overview', icon: Boxes, end: true },
-      { to: '/garvis/mind', label: 'Mind', icon: Brain },
-      { to: '/garvis/control', label: 'Mission Control', icon: Activity },
-      { to: '/garvis/missions', label: 'Missions', icon: Rocket },
-      { to: '/garvis/opportunities', label: 'Opportunities', icon: Lightbulb },
-      { to: '/garvis/marketing', label: 'Marketing', icon: Megaphone },
     ],
   },
   {
@@ -56,7 +56,8 @@ const navSections = [
 // Admin-only experiments — a 900-line spike should not be one click from Billing for everyone.
 const labsSection = {
   title: 'Labs',
-  items: [{ to: '/spike/clusters', label: 'Cluster spike', icon: FlaskConical }],
+  // the /spike/clusters route was folded into /garvis/explore — the old link bounced to Landing
+  items: [{ to: '/garvis/explore', label: 'Cluster spike (Explore)', icon: FlaskConical }],
 };
 
 export function AppShell({ children, fullBleed }: { children: ReactNode; fullBleed?: boolean }) {
@@ -64,6 +65,31 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
   const navigate = useNavigate();
   const { pendingCount } = useInbox();
   const { newCount: claimCount } = usePreviewClaims();
+  // A lead must never arrive invisibly (UX audit): the ops inbox gets the same badge treatment —
+  // new leads + pending approvals, counted from real rows on mount and window focus.
+  const [opsCount, setOpsCount] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const [{ count: leads }, { count: approvals }, replies] = await Promise.all([
+          supabase.from('leads').select('id', { count: 'exact', head: true }).eq('status', 'new'),
+          supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+          // Unanswered warm replies count too (app_0050 handled_at) — the same event that fires
+          // the highest-value waking move must never arrive invisibly. Separately caught so a
+          // server that pre-dates the column can't zero the whole badge.
+          supabase.from('replies').select('id', { count: 'exact', head: true })
+            .eq('classification', 'positive').is('handled_at', null)
+            .then((r) => r.count ?? 0, () => 0),
+        ]);
+        if (live) setOpsCount((leads ?? 0) + (approvals ?? 0) + replies);
+      } catch { /* badge is best-effort */ }
+    };
+    void load();
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    return () => { live = false; window.removeEventListener('focus', onFocus); };
+  }, []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Desktop sidebar collapse (slim icon rail), persisted across sessions.
@@ -158,6 +184,15 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
                     </span>
                   )
                 )}
+                {to === '/garvis/inbox' && opsCount > 0 && (
+                  collapsed ? (
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${opsCount} waiting`} />
+                  ) : (
+                    <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="New leads + approvals waiting">
+                      {opsCount}
+                    </span>
+                  )
+                )}
                 {to === '/business-preview-engine' && claimCount > 0 && (
                   collapsed ? (
                     <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ok" aria-label={`${claimCount} new claims`} />
@@ -197,6 +232,16 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
                 style={{ width: `${pct}%` }}
               />
             </div>
+            {/* Credits balance — the metering that gates every server AI action; previously
+                enforced server-side but invisible, so a throttle looked like a bug. Now honest. */}
+            {typeof (profile as { credits_balance?: number } | null)?.credits_balance === 'number' && (
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="text-forge-dim">Credits</span>
+                <span className={cn('font-mono', ((profile as { credits_balance?: number }).credits_balance ?? 0) < 20 ? 'text-forge-err' : 'text-forge-ink')}>
+                  {(profile as { credits_balance?: number }).credits_balance}
+                </span>
+              </div>
+            )}
             {profile?.plan === 'free' && pct >= 70 && (
               <button onClick={() => navigate('/pricing')} className="mt-2 text-xs text-forge-ember hover:underline">
                 Upgrade for more →

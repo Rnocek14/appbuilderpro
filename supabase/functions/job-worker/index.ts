@@ -277,6 +277,22 @@ async function step(job: Job): Promise<boolean> {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  // AUTH GATE (mirrors garvis-worker): the self-chain's service-key bearer, a worker secret for
+  // cron, or any signed-in user's nudge. The claimed work is always owner-scoped, but an ungated
+  // endpoint let anyone holding the public anon key drain the queue and burn job-owners' credits.
+  const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
+  const workerSecret = Deno.env.get('WORKER_SECRET');
+  const trusted = bearer === SERVICE_KEY || (!!workerSecret && req.headers.get('x-worker-secret') === workerSecret);
+  if (!trusted) {
+    const authClient = createClient(
+      Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
+    );
+    const { data: { user } } = await authClient.auth.getUser();
+    if (!user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
+
   const body = await req.json().catch(() => ({}));
   const chain: number = body.chain ?? 0;
 

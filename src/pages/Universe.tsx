@@ -174,7 +174,9 @@ export default function Universe() {
                 const activity = glow.get(b.id) ?? 0;
                 const fill = b.momentum ? MOMENTUM_HEX[b.momentum.label] : UNOBSERVED_HEX;
                 const open = () => {
-                  if (b.localOnly) { void loadWorld(b.id).then(() => navigate('/garvis/explore')); return; }
+                  // Navigate regardless — the local world is loaded into the explorer's store; a
+                  // load hiccup must not leave the click silently dead (unhandled rejection).
+                  if (b.localOnly) { void loadWorld(b.id).catch(() => {}).finally(() => navigate('/garvis/explore')); return; }
                   if (b.isSystem) { navigate(`/garvis/system/${b.id}`); return; }
                   setSelected(b);
                 };

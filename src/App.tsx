@@ -26,6 +26,10 @@ import Billing from './pages/Billing';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import ClusterSpike from './pages/spike/ClusterSpike';
 import Brain from './pages/Brain';
+import OpsInbox from './pages/OpsInbox';
+import Contacts from './pages/Contacts';
+import Money from './pages/Money';
+import Health from './pages/Health';
 import Approvals from './pages/Approvals';
 import WorkWebs from './pages/WorkWebs';
 import WorkWeb from './pages/WorkWeb';
@@ -68,6 +72,10 @@ export default function App() {
               <Route path="/garvis/missions" element={<Protected><Missions /></Protected>} />
               <Route path="/garvis/opportunities" element={<Protected><Opportunities /></Protected>} />
               <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
+              <Route path="/garvis/inbox" element={<Protected><OpsInbox /></Protected>} />
+              <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
+              <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
+              <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
               <Route path="/garvis/approvals" element={<Protected><Approvals /></Protected>} />
               <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
               <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
@@ -84,7 +92,7 @@ export default function App() {
               <Route path="/settings" element={<Protected><Settings /></Protected>} />
               <Route path="/billing" element={<Protected><Billing /></Protected>} />
               <Route path="/admin" element={<Protected adminOnly><AdminDashboard /></Protected>} />
-              <Route path="/spike/clusters" element={<Protected><ClusterSpike /></Protected>} />
+              {/* /spike/clusters removed — same component as /garvis/explore (audit: one page, two doors). */}
               <Route path="/business-preview-engine" element={<Protected><PreviewEngine /></Protected>} />
               {/* PUBLIC — the link business owners open from the outreach email (no login). */}
               <Route path="/preview-site/:slug" element={<PreviewSite />} />

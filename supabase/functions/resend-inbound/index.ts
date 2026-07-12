@@ -9,6 +9,7 @@
 // optional for classification; without a key it stores the reply unclassified and still stops the sequence).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { notifyText } from '../_shared/notify.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-inbound-secret' };
 
@@ -55,7 +56,15 @@ Deno.serve(async (req) => {
 
   const secret = Deno.env.get('INBOUND_SECRET');
   const provided = req.headers.get('x-inbound-secret') ?? new URL(req.url).searchParams.get('secret');
-  if (!secret || provided !== secret) return json({ error: 'Unauthorized' }, 401);
+  // Constant-time compare (same discipline as resend-webhook) — a plain !== leaks timing.
+  const constantTimeEqual = (a: string, b: string): boolean => {
+    const ab = new TextEncoder().encode(a), bb = new TextEncoder().encode(b);
+    if (ab.length !== bb.length) return false;
+    let diff = 0;
+    for (let i = 0; i < ab.length; i++) diff |= ab[i] ^ bb[i];
+    return diff === 0;
+  };
+  if (!secret || !provided || !constantTimeEqual(provided, secret)) return json({ error: 'Unauthorized' }, 401);
 
   const payload = (await req.json().catch(() => ({}))) as {
     from?: string; subject?: string; text?: string; body?: string;
@@ -128,6 +137,17 @@ Deno.serve(async (req) => {
     subject: `${classification} reply from ${from}: ${subject.slice(0, 100)}`,
     payload: { message_id: msg.id, campaign_id: msg.campaign_id, classification },
   }).then(() => {}, () => {});
+
+  // Push a POSITIVE reply to the owner — a warm reply cools fast; it must reach them off-app.
+  if (classification === 'positive' && !wantsOut) {
+    try {
+      const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', msg.owner_id).single();
+      await notifyText(
+        (owner as { webhook_url?: string } | null)?.webhook_url,
+        `💬 WARM REPLY — ${from}\n"${subject.slice(0, 120)}"\n${ownWords.slice(0, 300)}`,
+      );
+    } catch { /* best-effort */ }
+  }
 
   return json({ ok: true, classification });
 });

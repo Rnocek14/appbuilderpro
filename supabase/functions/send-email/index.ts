@@ -39,24 +39,42 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   try {
-    const authClient = createClient(
-      Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
-    );
-    const { data: { user } } = await authClient.auth.getUser();
-    if (!user) return json({ error: 'Unauthorized' }, 401);
-
     const { approval_id } = (await req.json().catch(() => ({}))) as { approval_id?: string };
     if (!approval_id) return json({ error: 'approval_id is required.' }, 400);
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-    // The approval is the authority to send. Verify it: owned by caller, correct kind, approved.
+    // TWO callers, ONE path, every gate below shared:
+    //  1) the OWNER (browser) — Authorization JWT; the approval must be theirs.
+    //  2) the STANDING-RULE worker (site-events instant first touch) — x-worker-secret; allowed
+    //     ONLY for approvals stamped requested_by='garvis-auto' (the pre-authorized class), and
+    //     the owner is derived FROM the approval row, never from the caller.
+    const workerSecret = Deno.env.get('WORKER_SECRET');
+    const byWorker = !!workerSecret && req.headers.get('x-worker-secret') === workerSecret;
+
+    // The approval is the authority to send. Verify it: correct kind, approved, and owned.
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status, payload, result').eq('id', approval_id).single();
-    if (!approval || approval.owner_id !== user.id) return json({ error: 'Approval not found' }, 404);
+      .select('id, owner_id, kind, status, payload, result, requested_by').eq('id', approval_id).single();
+    if (!approval) return json({ error: 'Approval not found' }, 404);
     if (approval.kind !== 'send_email') return json({ error: 'Approval is not a send_email.' }, 400);
     if (approval.status !== 'approved') return json({ error: `Approval is ${approval.status}, not approved.` }, 409);
+
+    let uid: string;
+    if (byWorker) {
+      if (approval.requested_by !== 'garvis-auto') {
+        return json({ error: 'Worker sends are limited to standing-rule (garvis-auto) approvals.' }, 403);
+      }
+      uid = approval.owner_id as string;
+    } else {
+      const authClient = createClient(
+        Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
+      );
+      const { data: { user } } = await authClient.auth.getUser();
+      if (!user) return json({ error: 'Unauthorized' }, 401);
+      if (approval.owner_id !== user.id) return json({ error: 'Approval not found' }, 404);
+      uid = user.id;
+    }
 
     const messageId = (approval.payload as { message_id?: string })?.message_id;
     if (!messageId) return json({ error: 'Approval payload is missing message_id.' }, 400);
@@ -67,7 +85,7 @@ Deno.serve(async (req) => {
     const { data: msg } = await admin.from('outreach_messages')
       .select('id, owner_id, campaign_id, contact_id, preview_site_id, subject, body_text, to_address, status, sent_at')
       .eq('id', messageId).single();
-    if (!msg || msg.owner_id !== user.id) return json({ error: 'Message not found' }, 404);
+    if (!msg || msg.owner_id !== uid) return json({ error: 'Message not found' }, 404);
     if (msg.sent_at || msg.status === 'sent') return json({ error: 'Message already sent.' }, 409);
 
     const priorResult = (approval.result as Record<string, unknown> | null) ?? {};
@@ -85,7 +103,7 @@ Deno.serve(async (req) => {
       admin.from('approvals').update({ result: { ...priorResult, ...extra, send_claimed_at: null } }).eq('id', approval_id);
 
     const ledger = (row: Record<string, unknown>) =>
-      admin.from('execution_runs').insert({ owner_id: user.id, approval_id, connector: 'resend', action: 'send_email', ...row });
+      admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'resend', action: 'send_email', ...row });
     const block = async (reason: string): Promise<Response> => {
       await admin.from('outreach_messages').update({ status: 'blocked' }).eq('id', messageId);
       await ledger({ status: 'skipped', request: { message_id: messageId }, error: reason });
@@ -99,7 +117,7 @@ Deno.serve(async (req) => {
     // ----- safety gates (owner-scoped) -----
     const { data: settings } = await admin.from('outreach_settings')
       .select('from_name, from_email, reply_to, company_name, physical_address, unsubscribe_url_template, daily_send_cap, warmup_start_date, warmup_daily_step, outbound_enabled, timezone')
-      .eq('owner_id', user.id).maybeSingle();
+      .eq('owner_id', uid).maybeSingle();
     if (!settings) return block('Outreach settings not configured (Settings → Outreach).');
     if (!settings.outbound_enabled) return block('Outbound is DISABLED (kill switch is off).');
     if (!settings.from_email) return block('Set a from_email in Outreach settings before sending.');
@@ -124,8 +142,8 @@ Deno.serve(async (req) => {
     // Any lookup error BLOCKS the send: the suppression list fails closed, never open.
     const domain = to.split('@')[1] ?? '';
     const [suppEmail, suppDomain] = await Promise.all([
-      admin.from('suppression').select('reason').eq('owner_id', user.id).eq('email', to).limit(1),
-      admin.from('suppression').select('reason').eq('owner_id', user.id).eq('domain', domain).is('email', null).limit(1), // explicit domain blocks ONLY — a per-address row must never silence a whole domain
+      admin.from('suppression').select('reason').eq('owner_id', uid).eq('email', to).limit(1),
+      admin.from('suppression').select('reason').eq('owner_id', uid).eq('domain', domain).is('email', null).limit(1), // explicit domain blocks ONLY — a per-address row must never silence a whole domain
     ]);
     if (suppEmail.error || suppDomain.error) return block('Suppression list could not be checked — refusing to send.');
     const supp = suppEmail.data?.[0] ?? suppDomain.data?.[0];
@@ -156,7 +174,7 @@ Deno.serve(async (req) => {
       if (daysIn >= 0) cap = Math.min(cap, Math.max(1, (daysIn + 1) * (settings.warmup_daily_step ?? 5)));
     }
     const { count } = await admin.from('outreach_messages')
-      .select('id', { count: 'exact', head: true }).eq('owner_id', user.id).gte('sent_at', since.toISOString());
+      .select('id', { count: 'exact', head: true }).eq('owner_id', uid).gte('sent_at', since.toISOString());
     if ((count ?? 0) >= cap) return block(`Daily send cap (${cap}) reached.`);
 
     // ----- compose + send -----
@@ -210,7 +228,7 @@ Deno.serve(async (req) => {
     // status is already 'approved' (checked at entry) — only the outcome lands in result.
     await admin.from('approvals').update({ result: { ...priorResult, send_claimed_at: sentAt, resend_id: resendId, sent_at: sentAt } }).eq('id', approval_id);
     await admin.from('mind_events').insert({
-      owner_id: user.id, source: 'execution', event_type: 'email_sent',
+      owner_id: uid, source: 'execution', event_type: 'email_sent',
       subject: `Sent "${(msg.subject ?? '').slice(0, 120)}" to ${to}`,
       payload: { message_id: messageId, resend_id: resendId, campaign_id: msg.campaign_id },
     }).then(() => {}, () => {});

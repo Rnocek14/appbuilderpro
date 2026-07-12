@@ -1,4 +1,4 @@
-import { type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useEffect, useRef, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react';
 import { Flame, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -49,9 +49,9 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
 
 // ---------------- Card ----------------
 // `interactive` adds the hover-lift cue for clickable cards (premium feel)
-export function Card({ className, children, interactive }: { className?: string; children: ReactNode; interactive?: boolean }) {
+export function Card({ className, children, interactive, style }: { className?: string; children: ReactNode; interactive?: boolean; style?: CSSProperties }) {
   return (
-    <div className={cn('rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen', interactive && 'card-lift cursor-pointer', className)}>
+    <div style={style} className={cn('rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen', interactive && 'card-lift cursor-pointer', className)}>
       {children}
     </div>
   );
@@ -133,8 +133,20 @@ export function Ember({ size = 15, className }: { size?: number; className?: str
 }
 
 // ---------------- Modal ----------------
-export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'lg' }) {
-  if (!open) return null;
+// Escape closes and focus RETURNS to whatever opened it — handled once here so every consumer
+// inherits it (the system scan found each modal reinventing or forgetting both).
+function ModalShell({ onClose, title, children, size }: { onClose: () => void; title: string; children: ReactNode; size: 'md' | 'lg' }) {
+  const trigger = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    trigger.current = document.activeElement as HTMLElement | null;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      trigger.current?.focus?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeInUp [animation-duration:0.18s]" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
       <div className={cn('w-full rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen p-5 shadow-lift animate-scaleIn', size === 'lg' ? 'max-w-3xl' : 'max-w-md')} onClick={(e) => e.stopPropagation()}>
@@ -143,6 +155,11 @@ export function Modal({ open, onClose, title, children, size = 'md' }: { open: b
       </div>
     </div>
   );
+}
+
+export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'lg' }) {
+  if (!open) return null;
+  return <ModalShell onClose={onClose} title={title} size={size}>{children}</ModalShell>;
 }
 
 // ---------------- StatCard ----------------
