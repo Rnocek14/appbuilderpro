@@ -29,6 +29,16 @@ export function WakingMoment({ name }: { name: string }) {
   const navigate = useNavigate();
   const [digest, setDigest] = useState<WakingDigest | null>(null);
   const [showAll, setShowAll] = useState(false);
+  // UX audit: the front door must never push the composer below the fold. The brief renders full
+  // the FIRST time each day; after that it collapses to one honest summary line (expand on tap).
+  const todayKey = `ff:waking-collapsed:${new Date().toISOString().slice(0, 10)}`;
+  const [collapsedBrief, setCollapsedBrief] = useState(() => localStorage.getItem(todayKey) === '1');
+  useEffect(() => {
+    if (!collapsedBrief) {
+      const t = setTimeout(() => { try { localStorage.setItem(todayKey, '1'); } catch { /* best-effort */ } }, 8000);
+      return () => clearTimeout(t);
+    }
+  }, [collapsedBrief, todayKey]);
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   useEffect(() => {
@@ -51,6 +61,23 @@ export function WakingMoment({ name }: { name: string }) {
   const quiet = !awayLines.length && !moves.length;
 
   const shown = showAll ? moves : moves.slice(0, 3);
+
+  // Collapsed: one honest line — the same facts, none of the height. Tap to expand.
+  if (collapsedBrief) {
+    return (
+      <button
+        onClick={() => setCollapsedBrief(false)}
+        className="mb-4 flex w-full items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/50 px-4 py-2.5 text-left text-sm text-forge-dim transition-colors hover:border-forge-ember/40"
+        title="Expand this morning's brief"
+      >
+        <span className="text-forge-ink">{greeting}</span>
+        <span className="truncate">
+          {quiet ? 'All quiet.' : `${moves.length} move${moves.length === 1 ? '' : 's'} waiting${awayLines.length ? ` · ${awayLines.length} update${awayLines.length === 1 ? '' : 's'} while you were away` : ''}.`}
+        </span>
+        <span className="ml-auto shrink-0 text-[11px] text-forge-ember">expand</span>
+      </button>
+    );
+  }
 
   return (
     <div className="mb-4 rounded-2xl border border-forge-border bg-forge-panel/60 p-5">

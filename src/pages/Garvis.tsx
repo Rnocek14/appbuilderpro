@@ -17,7 +17,7 @@ import { useGarvisKnowledge } from '../hooks/useGarvisKnowledge';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
-import { Badge, Button, Card, EmptyState, Spinner, StatCard } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Spinner, StatCard, Modal, Input } from '../components/ui';
 import { formatUsd, timeAgo } from '../lib/utils';
 import { recommendNextAction, runGarvisAct, classifyLiveness } from '../lib/garvis';
 import type { AgentRun, AppStage, StrategicImportance } from '../types';
@@ -221,8 +221,17 @@ export default function Garvis() {
     }
   };
 
+  // UX audit: window.prompt in an AI OS is disqualifying — both prompts became a proper modal.
+  const [ask, setAsk] = useState<{ title: string; hint: string; initial: string; submit: (v: string) => void } | null>(null);
+  const [askValue, setAskValue] = useState('');
+  const openAsk = (title: string, hint: string, initial: string, submit: (v: string) => void) => {
+    setAskValue(initial); setAsk({ title, hint, initial, submit });
+  };
+
   const onAdd = async () => {
-    const name = window.prompt('Product name?')?.trim();
+    openAsk('Add a product', 'The product’s name — you can flesh out everything else later.', '', (name) => { void doAdd(name.trim()); });
+  };
+  const doAdd = async (name: string) => {
     if (!name) return;
     setAdding(true);
     try {
@@ -327,8 +336,9 @@ export default function Garvis() {
 
   // Edit the one-line strategic role (why it matters / platform role / relationship to other apps).
   const onEditRole = async (id: string, current: string | null) => {
-    const role = window.prompt('Why does this app matter long-term? (its platform role / relationship to other apps)', current ?? '');
-    if (role === null) return; // cancelled
+    openAsk('Strategic role', 'Why does this app matter long-term? Its platform role / relationship to other apps.', current ?? '', (role) => { void doEditRole(id, role); });
+  };
+  const doEditRole = async (id: string, role: string) => {
     try {
       await updateApp(id, { strategic_role: role.trim() || null });
       toast('success', 'Strategic role saved.');
@@ -644,6 +654,23 @@ export default function Garvis() {
           )}
         </div>
       </div>
+
+      {ask && (
+        <Modal open onClose={() => setAsk(null)} title={ask.title}>
+          <div>
+            <p className="text-xs text-forge-dim">{ask.hint}</p>
+            <Input
+              className="mt-3" autoFocus value={askValue}
+              onChange={(e) => setAskValue(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { ask.submit(askValue); setAsk(null); } if (e.key === 'Escape') setAsk(null); }}
+            />
+            <div className="mt-3 flex gap-2">
+              <Button onClick={() => { ask.submit(askValue); setAsk(null); }}>Save</Button>
+              <button onClick={() => setAsk(null)} className="rounded-lg border border-forge-border px-3 py-2 text-xs text-forge-dim hover:text-forge-ink">Cancel</button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </AppShell>
   );
 }
