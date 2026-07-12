@@ -17,22 +17,26 @@ export interface InboxLead {
 }
 export type InboxItem = InboxReply | InboxLead;
 
-/** Everything that came in, newest first — replies and leads merged into one cross-world stream. */
+/** Everything that came in, newest first — replies and leads merged into one cross-world stream.
+ *  Handled replies (app_0050 handled_at) leave the lane: done = gone, like any inbox. The replies
+ *  select is '*' + a client-side filter so a server that pre-dates the column still loads. */
 export async function loadInbox(limit = 40): Promise<InboxItem[]> {
   const [repliesQ, leadsQ] = await Promise.all([
     supabase.from('replies')
-      .select('id, from_address, subject, body_text, classification, campaign_id, received_at')
+      .select('*')
       .order('received_at', { ascending: false }).limit(limit),
     supabase.from('leads')
       .select('id, name, email, message, source, world_id, status, contact_id, created_at')
       .neq('status', 'spam').order('created_at', { ascending: false }).limit(limit),
   ]);
-  const replies: InboxItem[] = ((repliesQ.data ?? []) as Record<string, unknown>[]).map((r) => ({
-    kind: 'reply', id: r.id as string, from: (r.from_address as string) ?? '',
-    subject: (r.subject as string) ?? '', body: (r.body_text as string) ?? '',
-    classification: (r.classification as string) ?? 'neutral',
-    campaignId: (r.campaign_id as string | null) ?? null, at: r.received_at as string,
-  }));
+  const replies: InboxItem[] = ((repliesQ.data ?? []) as Record<string, unknown>[])
+    .filter((r) => !r.handled_at)
+    .map((r) => ({
+      kind: 'reply', id: r.id as string, from: (r.from_address as string) ?? '',
+      subject: (r.subject as string) ?? '', body: (r.body_text as string) ?? '',
+      classification: (r.classification as string) ?? 'neutral',
+      campaignId: (r.campaign_id as string | null) ?? null, at: r.received_at as string,
+    }));
   const leads: InboxItem[] = ((leadsQ.data ?? []) as Record<string, unknown>[]).map((l) => ({
     kind: 'lead', id: l.id as string, name: (l.name as string | null) ?? null,
     email: (l.email as string) ?? '', message: (l.message as string | null) ?? null,
@@ -104,5 +108,12 @@ export async function composeReply(input: {
 /** Mark a website lead as answered (its own lifecycle, unchanged by the reply path). */
 export async function markLeadAnswered(id: string): Promise<void> {
   const { error } = await supabase.from('leads').update({ status: 'contacted' }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/** Mark a reply handled (answered elsewhere, or simply dealt with) — it leaves the Messages lane
+ *  and stops counting on the Inbox badge. Never deletes; the row stays on the record. */
+export async function markReplyHandled(id: string): Promise<void> {
+  const { error } = await supabase.from('replies').update({ handled_at: new Date().toISOString() }).eq('id', id);
   if (error) throw new Error(error.message);
 }

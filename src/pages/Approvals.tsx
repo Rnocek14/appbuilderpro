@@ -6,25 +6,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Loader2, Check, X, Mail, Rocket, Globe, CreditCard, Database, Users, ScrollText } from 'lucide-react';
+import { ShieldCheck, Loader2, Check, X, ScrollText } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Spinner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { timeAgo } from '../lib/utils';
 import {
   listApprovals, approveAndExecute, rejectApproval, listExecutionRuns,
-  type Approval, type ApprovalKind, type ExecutionRun,
+  type Approval, type ExecutionRun,
 } from '../lib/garvis/execution';
-
-const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string }> = {
-  send_email: { icon: Mail, label: 'Send email' },
-  publish_post: { icon: Users, label: 'Publish post' },
-  deploy_site: { icon: Globe, label: 'Deploy site' },
-  deploy_backend: { icon: Rocket, label: 'Deploy backend' },
-  spend: { icon: CreditCard, label: 'Spend' },
-  apply_migration: { icon: Database, label: 'Apply migration' },
-  crm_action: { icon: Users, label: 'CRM action' },
-};
+import { KIND_META } from '../components/garvis/approvalMeta';
 
 export default function Approvals() {
   const { toast } = useToast();

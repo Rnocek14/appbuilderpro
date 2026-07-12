@@ -9,7 +9,8 @@ import { AppShell } from '../components/layout/AppShell';
 import { EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
-import { loadInbox, composeReply, markLeadAnswered, type InboxItem } from '../lib/garvis/inboxRun';
+import { loadInbox, composeReply, markLeadAnswered, markReplyHandled, type InboxItem } from '../lib/garvis/inboxRun';
+import { KIND_META } from '../components/garvis/approvalMeta';
 import { rawComplete } from '../lib/aiClient';
 import { useNavigate, Link } from 'react-router-dom';
 import { listApprovals, approveAndExecute, rejectApproval, type Approval } from '../lib/garvis/execution';
@@ -98,6 +99,8 @@ export default function OpsInbox() {
         subject, body, worldId: replyTo.kind === 'lead' ? replyTo.worldId : null,
       });
       if (replyTo.kind === 'lead') await markLeadAnswered(replyTo.id).catch(() => {});
+      // answering IS handling — the reply leaves the lane + badge automatically (no second chore)
+      if (replyTo.kind === 'reply') await markReplyHandled(replyTo.id).catch(() => {});
       toast('success', 'Reply queued for approval — it sends once you sign off in Approvals.');
       setReplyTo(null); setBody('');
       await refresh();
@@ -127,7 +130,7 @@ export default function OpsInbox() {
               {approvals.map((a) => (
                 <li key={a.id} className="rounded-xl border border-forge-warn/30 bg-forge-panel/40 p-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded border border-forge-warn/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-forge-warn">{String(a.kind).replace(/_/g, ' ')}</span>
+                    <span className="rounded border border-forge-warn/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-forge-warn">{KIND_META[a.kind]?.label ?? String(a.kind).replace(/_/g, ' ')}</span>
                     <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{a.title}</span>
                     <span className="text-[10px] text-forge-dim">{timeAgo(a.created_at)}</span>
                     <button onClick={() => void decide(a, true)} disabled={actingId === a.id}
@@ -182,6 +185,15 @@ export default function OpsInbox() {
                   <button onClick={() => openReply(it)} className="flex items-center gap-1 text-[11px] text-forge-ember hover:underline">
                     <MessageSquareReply size={12} /> reply
                   </button>
+                  {it.kind === 'reply' && (
+                    <button
+                      onClick={() => { void markReplyHandled(it.id).then(() => setItems((prev) => (prev ?? []).filter((x) => !(x.kind === 'reply' && x.id === it.id)))).catch(() => toast('error', 'Could not mark that handled.')); }}
+                      title="Handled elsewhere / needs no answer — clears it from the lane and the badge (the record keeps the row)"
+                      className="text-[11px] text-forge-dim hover:text-forge-ink"
+                    >
+                      done
+                    </button>
+                  )}
                 </div>
                 {it.kind === 'reply' && it.subject && <p className="mt-1 text-xs font-medium text-forge-ink/80">{it.subject}</p>}
                 <p className="mt-0.5 whitespace-pre-wrap text-xs text-forge-dim">

@@ -266,6 +266,41 @@ export const GARVIS_TOOLS: GarvisTool[] = [
     },
     modes: ['act'],
   },
+  // --- MONEY (flow audit): the invoice loop gets a conversational door. Drafting is safe;
+  // QUEUEING creates a PENDING approval — nothing is ever emailed without the owner's yes. ---
+  {
+    name: 'list_invoices',
+    description: 'List the owner\'s invoices (number, title, recipient, amount, status draft|sent|paid|void, due date).',
+    inputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['draft', 'sent', 'paid', 'void'] } } },
+    modes: ['observe', 'plan', 'act'],
+  },
+  {
+    name: 'create_invoice',
+    description:
+      'Create a DRAFT invoice (auto-numbered INV-year-NNN). Give line_items when the work has parts; ' +
+      'or just amount_usd + title for a single-line invoice. Creates/links the contact by email. ' +
+      'The draft sends NOTHING — queue_invoice_send stages it for the owner\'s approval.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        to_email: { type: 'string' },
+        amount_usd: { type: 'number' },
+        line_items: { type: 'array', items: { type: 'object', properties: { description: { type: 'string' }, qty: { type: 'number' }, unit_usd: { type: 'number' } } } },
+        due_date: { type: 'string' },
+      },
+      required: ['title', 'to_email'],
+    },
+    modes: ['act'],
+  },
+  {
+    name: 'queue_invoice_send',
+    description:
+      'Queue an existing invoice (by its INV- number) for emailing. Creates a PENDING approval — ' +
+      'the email leaves only after the owner approves it in Approvals.',
+    inputSchema: { type: 'object', properties: { number: { type: 'string' } }, required: ['number'] },
+    modes: ['act'],
+  },
 ];
 
 /** The gate: tools exposed in the given mode. */

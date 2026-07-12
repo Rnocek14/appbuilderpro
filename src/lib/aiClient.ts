@@ -1306,6 +1306,13 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
       await mark('summarize', 'done');
 
       await supabase.from('projects').update({ status: 'ready' }).eq('id', projectId);
+      // THE BUILD ANNOUNCES ITSELF (flow audit): completion lands in the record, so the waking
+      // moment shows "Built: …" instead of the build finishing silently in another tab. Best-effort.
+      void supabase.from('mind_events').insert({
+        owner_id: userId, event_type: 'generation_completed', source: 'builder',
+        subject: `"${(blueprint.app_name as string) ?? 'Your app'}" — ${total} files generated, preview ready`,
+        payload: { project_id: projectId },
+      }).then(() => {}, () => {});
       await supabase.from('project_generations').update({
         status: 'succeeded', finished_at: new Date().toISOString(),
         input_tokens: usageIn,

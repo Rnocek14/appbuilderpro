@@ -72,11 +72,17 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
     let live = true;
     const load = async () => {
       try {
-        const [{ count: leads }, { count: approvals }] = await Promise.all([
+        const [{ count: leads }, { count: approvals }, replies] = await Promise.all([
           supabase.from('leads').select('id', { count: 'exact', head: true }).eq('status', 'new'),
           supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+          // Unanswered warm replies count too (app_0050 handled_at) — the same event that fires
+          // the highest-value waking move must never arrive invisibly. Separately caught so a
+          // server that pre-dates the column can't zero the whole badge.
+          supabase.from('replies').select('id', { count: 'exact', head: true })
+            .eq('classification', 'positive').is('handled_at', null)
+            .then((r) => r.count ?? 0, () => 0),
         ]);
-        if (live) setOpsCount((leads ?? 0) + (approvals ?? 0));
+        if (live) setOpsCount((leads ?? 0) + (approvals ?? 0) + replies);
       } catch { /* badge is best-effort */ }
     };
     void load();
