@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Play, Pause, Save, Film, Download, Clapperboard } from 'lucide-react';
-import { buildStoryboard, type Aspect, type Storyboard } from '../../lib/garvis/storyboard';
+import { buildStoryboard, VIDEO_CONCEPTS, type Aspect, type Storyboard, type VideoConcept } from '../../lib/garvis/storyboard';
 import {
   loadVideoMaterials, defaultStoryboardFor, saveStoryboard, startRender, pollRender, saveRenderedVideo,
   type VideoMaterials,
@@ -28,6 +28,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   const [materials, setMaterials] = useState<VideoMaterials | null>(null);
   const [sb, setSb] = useState<Storyboard | null>(null);
   const [aspect, setAspect] = useState<Aspect>('9:16');
+  const [concept, setConcept] = useState<VideoConcept>('proof_first');
   const [playing, setPlaying] = useState(false);
   const [scene, setScene] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -167,6 +168,17 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
 
         {/* Controls */}
         <div className="space-y-3">
+          {/* THE CUTS — three renditions of the same real photos (the postcard pattern on a
+              timeline). Switching rebuilds the timeline from the concept; edit lines after picking. */}
+          <div className="flex flex-wrap gap-1.5">
+            {VIDEO_CONCEPTS.map((c) => (
+              <button key={c.id} title={`${c.blurb} (switching cuts rebuilds the timeline)`}
+                onClick={() => { if (!materials) return; setConcept(c.id); setSb(defaultStoryboardFor(materials, title, aspect, c.id)); setScene(0); setPlaying(false); }}
+                className={cn('rounded-lg border px-2.5 py-1 text-xs transition-colors', concept === c.id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                {c.label}
+              </button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {ASPECTS.map((a) => (
               <button key={a.id} onClick={() => { setAspect(a.id); rebuild({ aspect: a.id }); setScene(0); }}

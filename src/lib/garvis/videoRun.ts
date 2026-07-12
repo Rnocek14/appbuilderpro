@@ -6,7 +6,7 @@
 
 import { supabase } from '../supabase';
 import { getBrandKit } from './artifacts';
-import { buildStoryboard, defaultScenes, toShotstackEdit, type Storyboard } from './storyboard';
+import { buildStoryboard, conceptScenes, toShotstackEdit, type Storyboard, type VideoConcept } from './storyboard';
 import type { BusinessContext } from './genesis';
 
 export interface VideoMaterials {
@@ -36,17 +36,17 @@ export async function loadVideoMaterials(worldId: string): Promise<VideoMaterial
 }
 
 /** The zero-AI default storyboard from a world's own photos — what the preview shows first. */
-export function defaultStoryboardFor(m: VideoMaterials, title: string, aspect: Storyboard['aspect'] = '9:16'): Storyboard {
+export function defaultStoryboardFor(m: VideoMaterials, title: string, aspect: Storyboard['aspect'] = '9:16', concept: VideoConcept = 'proof_first'): Storyboard {
   const c = m.ctx;
   return buildStoryboard({
     title, aspect, accent: m.accent,
-    scenes: defaultScenes({
+    scenes: conceptScenes({
       businessName: c?.business_name ?? title,
       craft: c?.craft ?? null,
       audience: c?.audience ?? null,
       offer: c?.offerings?.[0] ? `Ask about ${c.offerings[0]}` : null,
       photos: m.photos,
-    }),
+    }, concept),
   });
 }
 

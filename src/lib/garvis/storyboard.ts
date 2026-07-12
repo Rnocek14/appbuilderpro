@@ -150,6 +150,54 @@ export interface DefaultScenesInput {
   photos: { url: string; caption: string | null }[];
 }
 
+/** VIDEO RENDITIONS — the postcard pattern applied to the timeline: three deterministic CUTS of
+ *  the SAME real photos, one click each. Different opening mechanism, different narrative order,
+ *  zero invention — every line derives from the business context or a photo caption. */
+export type VideoConcept = 'proof_first' | 'story_first' | 'offer_first';
+
+export const VIDEO_CONCEPTS: { id: VideoConcept; label: string; blurb: string }[] = [
+  { id: 'proof_first', label: 'Proof first', blurb: 'Hook card, then the work speaks — photo by photo — then the ask.' },
+  { id: 'story_first', label: 'Story first', blurb: 'Opens with the human why, photos as chapters, the ask lands last.' },
+  { id: 'offer_first', label: 'Offer first', blurb: 'The offer IS the opening card; proof follows; closes with how to respond.' },
+];
+
+export function conceptScenes(input: DefaultScenesInput, concept: VideoConcept): SceneInput[] {
+  if (concept === 'proof_first') return defaultScenes(input);
+  const name = input.businessName || 'this business';
+  const photos = input.photos.slice(0, 5).map((p) => ({
+    imageUrl: p.url,
+    onScreen: p.caption ? clip(p.caption, 60) : '',
+    voiceover: p.caption ? clip(p.caption, 120) : '',
+    durationS: 3.5,
+  }));
+  if (concept === 'story_first') {
+    return [
+      {
+        onScreen: clip(`Why ${name} exists`, 60),
+        voiceover: input.craft ? `${name} started with one thing: ${input.craft}.` : `${name} — here's the short story.`,
+        durationS: 3,
+      },
+      ...photos,
+      ...(input.audience ? [{ onScreen: clip(`For ${input.audience}`, 60), voiceover: clip(`We do it for ${input.audience}.`, 120), durationS: 3 }] : []),
+      { onScreen: clip(input.offer || 'Get in touch', 60), voiceover: input.offer || `Reach out to ${name}.`, durationS: 3 },
+    ];
+  }
+  // offer_first
+  return [
+    {
+      onScreen: clip(input.offer || `${name} — one offer`, 60),
+      voiceover: input.offer ? `${input.offer}. Here's the proof.` : `${name}. Here's the proof.`,
+      durationS: 3,
+    },
+    ...photos,
+    {
+      onScreen: clip(input.craft ? `${name} · ${input.craft}` : name, 60),
+      voiceover: `That's ${name}. Reach out — the offer stands.`,
+      durationS: 3,
+    },
+  ];
+}
+
 /** A deterministic default storyboard from a business's real photos — the zero-AI floor. A hook
  *  card, one scene per photo (its caption becomes the voiceover), and a closing CTA card. This is
  *  what plays in the browser preview before any AI script runs. */

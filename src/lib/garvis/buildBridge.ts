@@ -26,7 +26,16 @@ export interface WorldBuildHandoff {
 }
 
 /** Compile the world's website brief and stage the handoff. Returns the route to navigate to. */
-export async function buildFromWorld(worldId: string, clusterId: string): Promise<string> {
+/** WEBSITE DESIGN DIRECTIONS — renditions for the biggest build: pick the design mechanism BEFORE
+ *  the generator runs, and it produces a genuinely different site from the same real materials.
+ *  Honest by construction: this steers the brief; it never fakes "3 previews" it didn't build. */
+export const SITE_DIRECTIONS: { id: string; label: string; brief: string }[] = [
+  { id: 'visual', label: 'Bold & visual', brief: 'DESIGN DIRECTION: bold and visual — full-bleed photography leads every section, oversized headlines, minimal copy, dramatic whitespace. The photos ARE the argument; text supports.' },
+  { id: 'trust', label: 'Editorial trust', brief: 'DESIGN DIRECTION: editorial and trustworthy — magazine-like typography, longer-form sections that explain and reassure, testimonial and proof emphasis, calm palette discipline. Reads like an established institution.' },
+  { id: 'convert', label: 'Conversion-direct', brief: 'DESIGN DIRECTION: conversion-direct — one dominant call to action repeated, short punchy sections, the offer above the fold, sticky contact affordance, zero decorative detours. Every scroll answers "why act now".' },
+];
+
+export async function buildFromWorld(worldId: string, clusterId: string, directionId?: string): Promise<string> {
   const [{ data: world }, { data: intel }, brand, { data: files }, { data: clusterRows }] = await Promise.all([
     supabase.from('knowledge_worlds').select('title, dna, business_context').eq('id', worldId).maybeSingle(),
     supabase.from('world_intelligence').select('objective, recommendation, reflection, open_questions').eq('world_id', worldId).maybeSingle(),
@@ -69,6 +78,14 @@ export async function buildFromWorld(worldId: string, clusterId: string): Promis
     objective: (intel?.objective as string | null) ?? null,
     dna, ctx, brand, photos, knowledge, ingest,
   });
+
+  // The chosen design direction rides at the top of the brief — same real materials, a genuinely
+  // different site. Rebuild with another direction any time; deploys still gate through Approvals.
+  const dir = SITE_DIRECTIONS.find((d) => d.id === directionId);
+  if (dir) {
+    compiled.prompt = `${dir.brief}\n\n${compiled.prompt}`;
+    compiled.brief = `${dir.brief}\n\n${compiled.brief}`;
+  }
 
   const handoff: WorldBuildHandoff = {
     worldId, clusterId, worldTitle: world.title as string,

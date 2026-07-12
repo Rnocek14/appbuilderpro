@@ -19,7 +19,7 @@ import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, maybeReflect, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
-import { buildFromWorld } from '../lib/garvis/buildBridge';
+import { buildFromWorld, SITE_DIRECTIONS } from '../lib/garvis/buildBridge';
 import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
 import { worldResults, setLeadStatus, type LeadRow } from '../lib/garvis/resultsRun';
 import { readAdaptive, logAdSpend, type AdaptiveRead } from '../lib/garvis/adaptiveRun';
@@ -504,13 +504,27 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
           into ONE brief and open the app builder. Real photos, never placeholders. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'landing' && (
-        <button
-          onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
-          className="mt-4 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px"
-          title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
-        >
-          <Sparkles size={15} /> Build the website — with this world's artwork
-        </button>
+        <div className="mt-4">
+          <button
+            onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
+            className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px"
+            title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
+          >
+            <Sparkles size={15} /> Build the website — with this world's artwork
+          </button>
+          {/* SITE RENDITIONS — pick the design mechanism before the generator runs; same real
+              materials, a genuinely different site. Rebuild under another direction any time. */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-forge-dim/70">Or pick a design direction:</span>
+            {SITE_DIRECTIONS.map((d) => (
+              <button
+                key={d.id} title={d.brief.replace('DESIGN DIRECTION: ', '')}
+                onClick={() => void buildFromWorld(worldId, cluster.id, d.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
+                className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember"
+              >{d.label}</button>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. Renditions add,

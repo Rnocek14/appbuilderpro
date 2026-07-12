@@ -59,5 +59,23 @@ console.log('storyboard.verify');
   check('empty everything → still a valid board, no throw', buildStoryboard({ title: '', scenes: [] }).scenes.length === 0);
 }
 
+// ---- the three cuts: same real photos, different mechanism, deterministic ----
+{
+  const { conceptScenes } = await import('./storyboard');
+  const input = {
+    businessName: 'Nocek Pottery', craft: 'hand-thrown stoneware', audience: 'collectors',
+    offer: 'Ask about the studio sale', photos: [{ url: 'u1', caption: 'The kiln room' }, { url: 'u2', caption: 'Glaze day' }],
+  };
+  const proof = conceptScenes(input, 'proof_first');
+  const story = conceptScenes(input, 'story_first');
+  const offer = conceptScenes(input, 'offer_first');
+  check('proof_first cut matches the classic default shape', proof[0].onScreen?.includes('stoneware') === true && proof[proof.length - 1].onScreen?.includes('studio sale') === true);
+  check('story_first opens with the why, closes with the ask', story[0].onScreen?.includes('Why') === true && story[story.length - 1].onScreen?.includes('studio sale') === true);
+  check('offer_first leads WITH the offer', offer[0].onScreen?.includes('studio sale') === true);
+  check('all three cuts use the SAME real photos, no inventions', [proof, story, offer].every((c) => c.filter((s) => s.imageUrl).length === 2 && c.every((s) => !s.imageUrl || ['u1', 'u2'].includes(s.imageUrl))));
+  check('cuts are genuinely different (opening lines differ)', new Set([proof[0].onScreen, story[0].onScreen, offer[0].onScreen]).size === 3);
+  check('deterministic: same input → same cut', JSON.stringify(conceptScenes(input, 'story_first')) === JSON.stringify(story));
+}
+
 console.log(`\nstoryboard.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} storyboard check(s) failed`);
