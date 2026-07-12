@@ -209,7 +209,9 @@ export const simTemplateById = (id: string): SimTemplate | undefined => SIM_TEMP
  *  a convenience default, freely overridable in the bench (never a hidden decision). */
 export function suggestTemplate(text: string): SimTemplate {
   const s = text.toLowerCase();
-  if (/(light ?speed|relativit|time dilat|spacetime|black hole|twin paradox|physics)/.test(s)) return timeDilation;
+  // ('einstein clock speed' fell through to the business bench in the full-product exercise —
+  // the physicist's own name and the experiment's instrument belong in the physics matcher.)
+  if (/(light ?speed|speed of light|relativit|time dilat|spacetime|black hole|twin paradox|physics|einstein|lorentz|(moving|atomic) clock)/.test(s)) return timeDilation;
   if (/(sponsor|city|cities|rollout|revenue|pricing|price|mrr|unit econ|business model|franchise|market|customer)/.test(s)) return rolloutModel;
   if (/(invest|compound|interest|saving|grow(th)? rate|retire)/.test(s)) return compoundGrowth;
   if (/(odds|probabilit|response rate|conversion|chance|outreach|reply rate|lead)/.test(s)) return reachOdds;
