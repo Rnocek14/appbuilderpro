@@ -42,8 +42,20 @@ export function CommandPalette({ open, onClose }: Props) {
       { id: 'garvis-webs', label: 'Garvis: Work Webs', icon: Waypoints, run: () => navigate('/garvis/webs') },
       { id: 'garvis-universe', label: 'Garvis: Universe', icon: Telescope, run: () => navigate('/garvis/universe') },
       { id: 'garvis-explore', label: 'Garvis: Explore (rabbitholes)', icon: Search, run: () => navigate('/garvis/explore') },
-      { id: 'garvis-brain', label: 'Garvis: Brain', icon: BrainCircuit, run: () => navigate('/garvis/brain') },
+      { id: 'garvis-brain', label: 'Garvis: Library (Brain)', icon: BrainCircuit, run: () => navigate('/garvis/brain') },
       { id: 'garvis-approvals', label: 'Garvis: Approvals', icon: ShieldCheck, run: () => navigate('/garvis/approvals') },
+      // NOTHING LOST: every page that left the sidebar in the nav collapse stays one keystroke
+      // away here — full functionality, without 16 permanent doors.
+      { id: 'garvis-inbox', label: 'Garvis: Inbox (leads & replies)', icon: Sparkles, run: () => navigate('/garvis/inbox') },
+      { id: 'garvis-money', label: 'Garvis: Money (invoices)', icon: CreditCard, run: () => navigate('/garvis/money') },
+      { id: 'garvis-contacts', label: 'Garvis: Contacts', icon: FolderOpen, run: () => navigate('/garvis/contacts') },
+      { id: 'garvis-overview', label: 'Garvis: Overview (legacy portfolio)', icon: Waypoints, run: () => navigate('/garvis') },
+      { id: 'garvis-mind', label: 'Garvis: Mind (identity & beliefs)', icon: BrainCircuit, run: () => navigate('/garvis/mind') },
+      { id: 'garvis-control', label: 'Garvis: Mission Control (activity)', icon: ShieldCheck, run: () => navigate('/garvis/control') },
+      { id: 'garvis-missions', label: 'Garvis: Missions', icon: Sparkles, run: () => navigate('/garvis/missions') },
+      { id: 'garvis-opps', label: 'Garvis: Opportunities', icon: Search, run: () => navigate('/garvis/opportunities') },
+      { id: 'garvis-marketing', label: 'Garvis: Marketing (portfolio)', icon: Waypoints, run: () => navigate('/garvis/marketing') },
+      { id: 'garvis-health', label: 'Garvis: Health (system status)', icon: ShieldCheck, run: () => navigate('/garvis/health') },
       { id: 'billing', label: 'Open billing', icon: CreditCard, run: () => navigate('/billing') },
       { id: 'settings', label: 'Open settings', icon: SettingsIcon, run: () => navigate('/settings') },
     ];
