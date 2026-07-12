@@ -21,6 +21,8 @@ export interface ChatMessage {
   role: 'user' | 'garvis';
   text: string;
   missionId?: string; // when Garvis spun up a mission in response
+  /** A tappable next step (e.g. "Review the draft →") — the handoff is never prose-only. */
+  action?: { label: string; to: string };
 }
 
 const THREAD_WINDOW = 40; // recent turns loaded on mount; the full record stays in the DB
@@ -205,12 +207,39 @@ export function useCommander() {
         const lines: string[] = [];
         setMessages((prev) => [...prev, { id: narrId, role: 'garvis', text: '⏺ working…' }]);
         const paint = () => setMessages((prev) => prev.map((m) => (m.id === narrId ? { ...m, text: lines.join('\n') || '⏺ working…' } : m)));
+        // NARRATION, not a transcript dump (flow audit): terminal events carry the FULL final
+        // output as their detail (the answer rendered twice, once mangled by the ⏺ prefix) and
+        // 'started' just echoes the user's own words. Tool steps read as human actions, not
+        // internal snake_case names.
+        const FRIENDLY: Record<string, string> = {
+          draft_world: 'Designing the world from your intent…',
+          list_worlds: 'Reading your worlds…',
+          ask_worlds: 'Consulting the knowledge on record…',
+          recall_knowledge: 'Recalling approved decisions and lessons…',
+          log_decision: 'Proposing a decision for your approval…',
+          record_outcome: 'Proposing an outcome for the record…',
+          generate_short_script: 'Writing the script…',
+          create_invoice: 'Drafting the invoice…',
+          queue_invoice_send: 'Queueing the send for your approval…',
+          list_invoices: 'Checking the invoices on record…',
+          propose_goal: 'Proposing the goal…',
+          list_apps: 'Reading the portfolio…',
+          get_app_profile: 'Reading the product profile…',
+          query_metrics: 'Reading the metrics…',
+          get_repo_state: 'Checking the repo…',
+        };
+        let sawDraftWorld = false;
         try {
           const run = await runGarvisAct({
             title: cmd.instruction.slice(0, 80),
             input: cmd.instruction,
             budgetUsd: 0.5,
-            onEvent: (e) => { if (e.detail) { lines.push(`⏺ ${e.detail}`); paint(); } },
+            onEvent: (e) => {
+              if (!e.detail || e.status === 'started' || e.status === 'finished' || e.status === 'awaiting_approval') return;
+              if (e.status === 'tool' && e.detail === 'draft_world') sawDraftWorld = true;
+              const line = e.status === 'tool' ? (FRIENDLY[e.detail] ?? `${e.detail.replace(/_/g, ' ')}…`) : e.detail;
+              lines.push(`⏺ ${line}`); paint();
+            },
           });
           if (lines.length) persist({ role: 'garvis', text: lines.join('\n') }); // narration, persisted once
           else setMessages((prev) => prev.filter((m) => m.id !== narrId)); // no events came — drop the '⏺ working…' shell instead of leaving it stuck
@@ -221,6 +250,8 @@ export function useCommander() {
               || (run?.status === 'failed'
                 ? 'That ran into a problem — the run is on the ledger with the error.'
                 : 'Done — the results are on the record (anything outward is waiting in Approvals).'),
+            // the handoff is never prose-only: a drafted world ends with the door to it
+            ...(sawDraftWorld ? { action: { label: 'Review the draft →', to: '/garvis/webs' } } : {}),
           });
           emitMindEvent({ event_type: 'commander_exchange', subject: `Acted: "${text.slice(0, 160)}"`, source: 'commander' });
         } catch (e) {

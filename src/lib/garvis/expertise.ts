@@ -327,6 +327,25 @@ the brand kit and the files in this area.${NOTE}`,
   },
 ];
 
+// PRODUCT work is not marketing work: the feature lab's born-with knowledge is a product
+// discipline, not a creative brief. This is also the honest AI-down floor for gen-features.
+const FEATURE_LAB_PACK: SeedArtifact[] = [
+  {
+    slug: 'feature-ideation-frame', kind: 'doc', title: 'Feature ideation frame',
+    detail: `${H('How this lab evaluates a feature for {{business_name}}')}
+EVERY CONCEPT ANSWERS THREE THINGS: the user problem (whose day gets better, how) · the core
+interaction in ONE line · why THIS platform specifically wins by having it.
+RANGE THE SEARCH — concepts should span at least three of these axes, never five variants of one:
+□ Power-user depth (what heavy users hack around today) □ First-five-minutes onboarding
+□ Daily-return hooks (what brings them back tomorrow) □ Integrations (where users already live)
+□ Trust & clarity (what confuses or worries new users).
+PICK BY IMPACT × EFFORT: gut-score each concept 1-3 on both; argue the top-right cell first.
+THEN SPEC IT: press "Write feature spec" steered with the winning concept — problem → who it
+serves → v1 scope (say what's OUT) → data & dependencies → success metric → risks.
+Evidence beats opinion: run Research on user complaints/competitor moves before ranking.${NOTE}`,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The registry
 // ---------------------------------------------------------------------------
@@ -334,6 +353,7 @@ the brand kit and the files in this area.${NOTE}`,
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
+  feature_lab: FEATURE_LAB_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */
@@ -347,6 +367,65 @@ function basePack(archetype: Archetype, flavor: Flavor): SeedArtifact[] {
     case 'ledger': return LEDGER_PACK;
     case 'vault': return VAULT_PACK;
   }
+}
+
+// ---------------------------------------------------------------------------
+// PRODUCT-LAB pack set — a world whose studios are feature_lab does PRODUCT work, not marketing.
+// Its born-with knowledge must match: platform research instead of pricing scans, source material
+// instead of hero photos, shipped-thinking instead of send KPIs. Industry overlays (which are
+// go-to-market advice) are deliberately NOT applied to product labs.
+// ---------------------------------------------------------------------------
+
+const PRODUCT_INTEL: SeedArtifact[] = [
+  {
+    slug: 'platform-research-frame', kind: 'research', title: 'Platform research frame',
+    detail: `${H('Know the platform before inventing for it — {{business_name}}')}
+USERS — who actually uses it, segmented by intensity (daily power users / weekly regulars /
+churned). What does each group hack around, complain about, or export to other tools?
+COMPETITORS — for each of 5: what they ship that users envy | their gap | their pricing posture.
+COMPLAINT MINING — support threads, reviews, community posts: the top 10 recurring pains, verbatim.
+ADJACENT MOVES — what neighboring products shipped lately that changed user expectations.
+Each box unfilled is an open question — run Research here and the feature lab ranks better.${NOTE}`,
+  },
+];
+
+const PRODUCT_VAULT: SeedArtifact[] = [
+  {
+    slug: 'vault-checklist', kind: 'doc', title: 'What belongs in this vault',
+    detail: `${H('Collect here')}
+□ Screenshots of the current product (the surfaces you want to improve) □ Docs/help center
+extracts □ User feedback exports □ Competitor screenshots □ Internal terminology/glossary.
+Everything uploaded is filed by intake and grounds the feature lab's concepts and specs —
+a spec written against real screenshots beats one written from memory.${NOTE}`,
+  },
+];
+
+const PRODUCT_LEDGER: SeedArtifact[] = [
+  {
+    slug: 'progress-ledger', kind: 'doc', title: 'Progress ledger — shipped thinking',
+    detail: `${H('Count what this lab actually produces')}
+EXPLORED: concepts generated · CHOSEN: concepts promoted to specs · SPECCED: full specs written ·
+PITCHED/SHIPPED: what you carried into the platform's roadmap, and what happened to it.
+WEEKLY REVIEW: which axis produced the winners (power-user? onboarding? retention?), what
+died and why. Garvis fills what it can measure; log the pitched/shipped column here honestly.${NOTE}`,
+  },
+];
+
+/** Pack selection for PRODUCT-LAB worlds: product variants for intel/vault/ledger, the functional
+ *  base for studios (feature_lab resolves its own pack) — and NO industry overlay anywhere. */
+export function productLabExpertiseFor(archetype: Archetype, flavor: Flavor): SeedArtifact[] {
+  switch (archetype) {
+    case 'intel': return PRODUCT_INTEL;
+    case 'vault': return PRODUCT_VAULT;
+    case 'ledger': return PRODUCT_LEDGER;
+    default: return basePack(archetype, flavor);
+  }
+}
+
+/** A product lab = has a feature_lab studio and no outreach machinery. */
+export function isProductLab(charters: { archetype: Archetype; flavor: Flavor }[]): boolean {
+  return charters.some((c) => c.archetype === 'studio' && c.flavor === 'feature_lab')
+    && !charters.some((c) => c.archetype === 'launch' || c.archetype === 'audience');
 }
 
 /** Every (archetype, flavor) gets a NON-EMPTY expert pack — verified exhaustively.

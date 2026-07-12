@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 10 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 12 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //

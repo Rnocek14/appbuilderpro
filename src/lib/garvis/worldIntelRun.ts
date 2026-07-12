@@ -105,9 +105,12 @@ async function gather(worldId: string): Promise<Gathered | null> {
   const newestIntel = arts.find((a) => a.kind === 'research');
   const intelAgeDays = newestIntel ? (now - new Date(newestIntel.created_at).getTime()) / DAY : null;
 
-  const charters = (clustersQ.data ?? []).map((c) => c.charter as { archetype?: string } | null);
+  const charters = (clustersQ.data ?? []).map((c) => c.charter as { archetype?: string; flavor?: string } | null);
   const hasAudience = charters.some((c) => c?.archetype === 'audience');
   const hasVault = charters.some((c) => c?.archetype === 'vault');
+  // A brand kit only matters where a studio speaks in the brand's voice — a product lab's
+  // feature_lab studios don't, so "brand vault is empty" must not blocker-nag them forever.
+  const hasVoiceStudio = charters.some((c) => c?.archetype === 'studio' && c?.flavor !== 'feature_lab');
 
   const leadRows = ((leadsQ as { data?: { created_at: string }[] | null }).data ?? []);
   const visitRows = ((visitsQ as { data?: { created_at: string }[] | null }).data ?? []);
@@ -135,7 +138,7 @@ async function gather(worldId: string): Promise<Gathered | null> {
       intelAgeDays,
     },
     audienceEmpty: hasAudience && (contactsQ.count ?? 0) === 0,
-    brandEmpty: hasVault && !kitQ.data,
+    brandEmpty: hasVault && hasVoiceStudio && !kitQ.data,
     openQuestions: ((intelQ.data?.open_questions as string[] | undefined) ?? []),
   };
 }

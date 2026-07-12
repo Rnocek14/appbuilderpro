@@ -150,12 +150,15 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
       const charters = wc.map((c) => ({ c, ch: parseCharter(c.charter) })).filter((x) => x.ch);
       const audience = charters.find((x) => x.ch!.archetype === 'audience');
       const vault = charters.find((x) => x.ch!.archetype === 'vault');
+      // Only voice-consuming studios need a brand kit — a product lab's vault holds screenshots
+      // and specs, and "the brand vault is empty" would nag it forever about a kit it never needs.
+      const voiceStudio = charters.some((x) => x.ch!.archetype === 'studio' && x.ch!.flavor !== 'feature_lab');
       const launchActive = charters.some((x) => (x.ch!.archetype === 'launch' || x.ch!.archetype === 'loop') && (artCount.get(x.c.id as string) ?? 0) > 0);
       floors.push({
         worldId: wid,
         worldTitle: titleByWorld.get(wid) ?? 'A mission',
         audienceEmpty: !!audience && (contactCount ?? 0) === 0,
-        brandEmpty: !!vault && !kitWorlds.has(wid),
+        brandEmpty: !!vault && voiceStudio && !kitWorlds.has(wid),
         launchActive,
         // area slugs make the move land ON the tool, not on the world's default pane
         audienceArea: (audience?.c as { slug?: string } | undefined)?.slug ?? null,

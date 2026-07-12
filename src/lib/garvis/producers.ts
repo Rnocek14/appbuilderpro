@@ -379,8 +379,15 @@ export async function produceIdeas(worldId: string, charter: Charter, opts?: Pro
       };
     }
   } catch { /* fall to the floor */ }
-  // Deterministic floor: the vertical pack's channel plays as idea seeds — structure, honestly labeled.
-  return { artifacts: expertiseFloor(charter, m), message: 'Added the channel playbook as idea seeds (AI unavailable — press again for a generated board).', grounded: false };
+  // Deterministic floor: the area's expert pack as idea seeds — structure, honestly labeled
+  // (feature labs get the feature-ideation frame, never a marketing playbook).
+  return {
+    artifacts: expertiseFloor(charter, m),
+    message: charter.flavor === 'feature_lab'
+      ? 'Added the feature-ideation frame (AI unavailable — press again for generated concepts).'
+      : 'Added the channel playbook as idea seeds (AI unavailable — press again for a generated board).',
+    grounded: false,
+  };
 }
 
 // ---------------------------------------------------------------------------

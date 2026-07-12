@@ -93,6 +93,14 @@ export default function Command() {
         <div className="rounded-2xl rounded-tl-sm border border-forge-border bg-forge-panel px-3.5 py-2.5">
           <Markdown content={m.text} />
         </div>
+        {m.action && (
+          <button
+            onClick={() => navigate(m.action!.to)}
+            className="mt-2 flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-xs font-medium text-forge-ember transition-colors hover:bg-forge-ember/20"
+          >
+            {m.action.label}
+          </button>
+        )}
         {mission && (
           <MissionBlock
             mission={mission}

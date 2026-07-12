@@ -120,6 +120,12 @@ export default function WorkWeb() {
     return t?.playIds[0] ?? null;
   }, [web]);
 
+  // PRODUCT LAB = feature_lab studios, no outreach machinery. The page's framing follows the
+  // world's shape: no send/reply chips, product Ask examples, a product ledger.
+  const productLab = useMemo(() => !!web
+    && web.clusters.some((c) => c.charter?.flavor === 'feature_lab')
+    && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
+
   const doRunPlay = async () => {
     if (!templatePlay) return;
     setRunning(true);
@@ -205,8 +211,9 @@ export default function WorkWeb() {
             <StatChip label="made" value={web.rollup.artifacts} />
             <StatChip label="playbooks" value={web.clusters.reduce((n, c) => n + c.playbookArtifacts, 0)} />
             <StatChip label="waiting" value={web.rollup.pendingApprovals} tone="warn" />
-            <StatChip label="sent" value={web.rollup.messagesSent} />
-            <StatChip label="replies" value={web.rollup.replies} tone="ok" />
+            {/* outreach chips only where outreach exists — a product lab's "sent 0" is not a stat, it's noise */}
+            {!productLab && <StatChip label="sent" value={web.rollup.messagesSent} />}
+            {!productLab && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
             {templatePlay && (
               <button
                 onClick={() => void doRunPlay()} disabled={running}
@@ -228,7 +235,9 @@ export default function WorkWeb() {
 
         {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
         <div className="mb-4">
-          <AskGarvis worldId={worldId} placeholder={`Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
+          <AskGarvis worldId={worldId} placeholder={productLab
+            ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
+            : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr]">
@@ -276,6 +285,7 @@ export default function WorkWeb() {
                 busyTool={busyTool}
                 onTool={(t) => void doTool(selectedCluster, t)}
                 onChanged={() => void refresh()}
+                productLab={productLab}
               />
             )}
           </div>
@@ -356,7 +366,7 @@ const SPARKS: Record<string, string[]> = {
   default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
 };
 
-function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster: WebCluster; onDone: () => void }) {
+function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId: string; cluster: WebCluster; onDone: () => void; ideaTitles?: string[] }) {
   const { toast } = useToast();
   const [direction, setDirection] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -367,10 +377,11 @@ function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster:
       case 'social': return 'gen-social';
       case 'video': return 'gen-video-script';
       case 'ads': return 'gen-ads';
-      case 'feature_lab': return 'gen-spec'; // "another take" specs another feature (steer with a concept)
+      case 'feature_lab': return 'gen-features'; // "another take" regenerates concepts; the spec has its own button
       default: return 'gen-ideas'; // studios without a single generator explore via ideas
     }
   };
+  const takeTool = generatorFor(cluster.charter?.flavor);
 
   const go = async (toolId: string) => {
     setBusy(toolId);
@@ -402,8 +413,8 @@ function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster:
         <button onClick={() => void go('gen-ideas')} disabled={!!busy} className={btn} title="10 distinct concepts for this studio — near-duplicates collapsed, each with its first step">
           {busy === 'gen-ideas' ? <Loader2 size={13} className="animate-spin" /> : <span>💡</span>} Idea board
         </button>
-        <button onClick={() => void go(generatorFor(cluster.charter?.flavor))} disabled={!!busy} className={btn} title="Regenerate this studio's work — automatically different from your prior takes">
-          {busy && busy !== 'gen-ideas' && busy !== 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>🔁</span>} Another take
+        <button onClick={() => void go(takeTool)} disabled={!!busy} className={btn} title="Regenerate this studio's work — automatically different from your prior takes">
+          {busy === takeTool ? <Loader2 size={13} className="animate-spin" /> : <span>🔁</span>} Another take
         </button>
         {cluster.charter?.flavor === 'feature_lab' ? (
           <button onClick={() => void go('gen-spec')} disabled={!!busy} className={btn} title="A full feature spec — problem → v1 scope → success metric → risks; thin output is rejected, platform internals become [YOU FILL] holes">
@@ -424,20 +435,42 @@ function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster:
           >{s}</button>
         ))}
       </div>
+      {/* IDEA → NEXT STEP in one click: the latest idea board's concepts become steer chips —
+          no reading a title out of an artifact and retyping it into the box. */}
+      {ideaTitles.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-forge-dim/70">Your concepts:</span>
+          {ideaTitles.slice(0, 6).map((t) => (
+            <button
+              key={t} onClick={() => setDirection(t)}
+              title={cluster.charter?.flavor === 'feature_lab' ? 'Steer with this concept, then press Feature spec' : 'Steer the next take with this concept'}
+              className="rounded-full border border-forge-ok/30 px-2.5 py-1 text-[11px] text-forge-ok/90 transition-colors hover:border-forge-ok/60"
+            >{t.length > 42 ? `${t.slice(0, 42)}…` : t}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged }: {
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
+  productLab?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
   const meta = cluster.charter ? ARCHETYPES[cluster.charter.archetype] : null;
   const [artifacts, setArtifacts] = useState<StudioArtifact[]>([]);
   const [files, setFiles] = useState<ClusterFile[]>([]);
+  // The latest idea board's numbered concepts, parsed into one-click steer chips (ideasToDetail
+  // emits "N. Title" lines) — the idea→next-step handoff without retyping.
+  const ideaTitles = useMemo(() => {
+    const board = artifacts.find((a) => a.slug?.startsWith('idea-board'));
+    if (!board?.detail) return [];
+    return [...board.detail.matchAll(/^\d+\.\s+(.+)$/gm)].map((m) => m[1].trim()).filter(Boolean);
+  }, [artifacts]);
   const [loadingArts, setLoadingArts] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -488,13 +521,22 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         </>
       )}
 
-      {/* G5/G6 — the honest per-channel results, the adaptive read, and platform connections. */}
-      {cluster.charter?.archetype === 'ledger' && (
+      {/* G5/G6 — the honest per-channel results, the adaptive read, and platform connections.
+          A PRODUCT LAB's ledger counts shipped thinking, not sends — the 5-channel marketing
+          table ("Email: no campaigns yet · Meta ads: not running") was noise wearing a dashboard. */}
+      {cluster.charter?.archetype === 'ledger' && (productLab ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This lab measures shipped thinking.</p>
+          <p>Concepts and specs live on each studio's shelf; the progress ledger doc here tracks
+          explored → chosen → specced → pitched. If this world ever starts launching things
+          (outreach, a site), the channel results appear here automatically.</p>
+        </div>
+      ) : (
         <>
           <ResultsPanel worldId={worldId} />
           <ConnectionsCard worldId={worldId} onSynced={onChanged} />
         </>
-      )}
+      ))}
 
       {/* Direct mail as a real product: a print-ready 6×9 postcard built from this world's own
           brand kit + vault photos, with a QR from the tracking link, a print/PDF path, and a
@@ -537,7 +579,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
 
       {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. Renditions add,
           never overwrite; regenerations diverge from prior work by default. */}
-      {cluster.charter && <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} />}
+      {cluster.charter && <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} ideaTitles={ideaTitles} />}
 
       {/* Tools */}
       <div className="mt-4 flex flex-wrap gap-2">

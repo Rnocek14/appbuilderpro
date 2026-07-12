@@ -25,7 +25,7 @@ import {
 } from './workweb';
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
 import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail, type WorldDNA } from './genesis';
-import { expertiseFor, detectVertical, type Vertical } from './expertise';
+import { expertiseFor, productLabExpertiseFor, isProductLab, detectVertical, type Vertical } from './expertise';
 import { producerFor } from './producers';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
@@ -344,13 +344,20 @@ export async function seedWorld(worldId: string, ctx: BusinessContext, dna?: Wor
     const vertical = worldVertical(ctx, dna);
     const { data: rows } = await supabase.from('knowledge_clusters')
       .select('id, charter').eq('world_id', worldId).not('charter', 'is', null);
+    const parsed = (rows ?? []).map((r) => ({ id: (r as { id: string }).id, charter: parseCharter((r as { charter: unknown }).charter) }));
+    // PRODUCT LABS get product knowledge (flow audit H1): a feature lab born full of marketing
+    // playbooks and finance go-to-market advice ("trust is the product — referrals first") is
+    // noise wearing an expert costume. Product variants for intel/vault/ledger, no industry overlay.
+    const productLab = isProductLab(parsed.filter((p) => p.charter).map((p) => p.charter!));
     let seeded = 0;
-    for (const r of rows ?? []) {
-      const charter = parseCharter((r as { charter: unknown }).charter);
-      if (!charter) continue;
-      const arts: PlayArtifact[] = expertiseFor(charter.archetype, charter.flavor, vertical)
+    for (const r of parsed) {
+      if (!r.charter) continue;
+      const pack = productLab
+        ? productLabExpertiseFor(r.charter.archetype, r.charter.flavor)
+        : expertiseFor(r.charter.archetype, r.charter.flavor, vertical);
+      const arts: PlayArtifact[] = pack
         .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
-      seeded += await writeArtifacts(uid, (r as { id: string }).id, arts, SEED_SOURCE);
+      seeded += await writeArtifacts(uid, r.id, arts, SEED_SOURCE);
     }
     return seeded;
   } catch {
@@ -452,8 +459,12 @@ async function versionCreativeSlugs(clusterId: string, artifacts: PlayArtifact[]
   const out: PlayArtifact[] = [];
   for (const a of artifacts) {
     try {
+      // ANCHORED match (exact slug or its -vN versions) — an open prefix LIKE made sibling slugs
+      // that merely share a stem ('feature-spec' vs 'feature-spec-alerts') inflate each other's
+      // take numbers.
       const { data } = await supabase.from('knowledge_artifacts')
-        .select('slug').eq('cluster_id', clusterId).like('slug', `${a.slug}%`).limit(50);
+        .select('slug').eq('cluster_id', clusterId)
+        .or(`slug.eq.${a.slug},slug.like.${a.slug}-v%`).limit(50);
       const existing = ((data ?? []) as { slug: string }[]).map((r) => r.slug);
       if (!existing.length) { out.push(a); continue; }
       let n = existing.length + 1;
@@ -506,6 +517,11 @@ export async function runTool(
             // it never inflates momentum/status (the same No-Theater rule as birth seeding).
             const n = await writeArtifacts(uid, cluster.id, arts, r.grounded ? 'garvis' : SEED_SOURCE);
             if (n > 0) return { ok: true, message: r.message, artifacts: n };
+          } else {
+            // THE PRODUCER'S EMPTY RESULT IS THE HONEST OUTCOME (no-theater): a rejected-thin or
+            // AI-down spec must surface ITS message — falling through to the legacy generators
+            // wrote a generic playbook with a green "success" toast over a real failure.
+            return { ok: false, message: r.message };
           }
         }
       }
