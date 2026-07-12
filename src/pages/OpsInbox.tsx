@@ -10,6 +10,7 @@ import { EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { loadInbox, composeReply, markLeadAnswered, type InboxItem } from '../lib/garvis/inboxRun';
+import { rawComplete } from '../lib/aiClient';
 
 export default function OpsInbox() {
   const { toast } = useToast();
@@ -18,11 +19,34 @@ export default function OpsInbox() {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [drafting, setDrafting] = useState(false);
 
   const refresh = useCallback(async () => {
     try { setItems(await loadInbox()); } catch { setItems([]); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  /** UX audit fix: hand-typing replies in an AI OS. Garvis drafts from THEIR actual message —
+   *  grounded in the thread only; unknowable facts (prices, dates) become visible [YOU FILL: …]
+   *  holes, never inventions. You edit, then queue; the send still gates at Approvals. */
+  const draftWithGarvis = async (it: InboxItem) => {
+    setDrafting(true);
+    try {
+      const theirText = (it.kind === 'reply' ? it.body : it.message) || '(no message text)';
+      const who = it.kind === 'lead' ? (it.name || it.email) : it.from;
+      const r = await rawComplete([
+        { role: 'system', content: 'You draft a reply to a warm inbound message for a small-business owner. Warm, direct, under 110 words, plain text. Answer ONLY what their message supports; for anything you cannot know (prices, availability, dates) insert [YOU FILL: what is needed] instead of inventing. One clear next step. No "hope this finds you well".' },
+        { role: 'user', content: `They ${it.kind === 'lead' ? 'submitted the website form' : 'replied to our email'}.\nFrom: ${who}\nTheir message:\n"""${theirText.slice(0, 1200)}"""\n\nWrite the reply body only (no subject line).` },
+      ], 500);
+      const text = r.text.trim();
+      if (text) { setBody(text); toast('success', 'Drafted — edit anything, then queue. Holes marked [YOU FILL] are yours.'); }
+      else toast('error', 'The draft came back empty — try again or write it directly.');
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Drafting is unavailable — write it directly.');
+    } finally {
+      setDrafting(false);
+    }
+  };
 
   const openReply = (it: InboxItem) => {
     setReplyTo(it);
@@ -96,6 +120,11 @@ export default function OpsInbox() {
                       <button onClick={() => void send()} disabled={sending}
                         className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-60">
                         {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue reply
+                      </button>
+                      <button onClick={() => void draftWithGarvis(it)} disabled={drafting || sending}
+                        title="Garvis drafts a reply grounded in their actual message — unknowable facts become [YOU FILL] holes; you edit, then queue."
+                        className="flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-[11px] text-forge-dim hover:border-forge-ember/60 hover:text-forge-ember disabled:opacity-50">
+                        {drafting ? <Loader2 size={12} className="animate-spin" /> : '✨'} Draft with Garvis
                       </button>
                       <button onClick={() => setReplyTo(null)} className="text-[11px] text-forge-dim hover:text-forge-ink">cancel</button>
                       <span className="text-[10px] text-forge-dim">Goes to Approvals before it sends.</span>
