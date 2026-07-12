@@ -1,15 +1,18 @@
 // src/hooks/useCommander.ts
-// The conversational front door's brain. Holds an (ephemeral) conversation, routes each message through
-// the Commander dispatcher, and either replies or spins up a mission — reusing useMissions underneath.
-// No new table: the durable record is the mission; the chat transcript lives for the session.
+// The conversational front door's brain — ONE BRAIN (UX redesign): the transcript is PERSISTENT
+// (command_messages, app_0048 — refresh no longer wipes the conversation) and every turn runs
+// REFLEXIVE RETRIEVAL over the owner's own artifacts (retrieveForPrompt), so the front door
+// answers from what's actually on record instead of improvising from a snapshot string.
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { rawComplete } from '../lib/aiClient';
+import { supabase } from '../lib/supabase';
 import { COMMANDER_SYSTEM, buildCommanderUser, parseCommand } from '../lib/garvis/commander';
 import { usePortfolio } from './usePortfolio';
 import { useMissions } from './useMissions';
 import { useMind } from './useMind';
 import { goalsDigest } from '../lib/garvis/goalsRun';
+import { retrieveForPrompt } from '../lib/garvis/ask';
 
 export interface ChatMessage {
   id: string;
@@ -18,6 +21,8 @@ export interface ChatMessage {
   missionId?: string; // when Garvis spun up a mission in response
 }
 
+const THREAD_WINDOW = 40; // recent turns loaded on mount; the full record stays in the DB
+
 export function useCommander() {
   const { apps } = usePortfolio();
   const missionsApi = useMissions();
@@ -25,9 +30,37 @@ export function useCommander() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [thinking, setThinking] = useState(false);
 
+  // The thread survives refresh: load the recent transcript once (fail-soft — an empty thread
+  // renders the same first-run experience as before).
+  useEffect(() => {
+    let live = true;
+    void supabase.from('command_messages')
+      .select('id, role, text, mission_id, created_at')
+      .order('created_at', { ascending: false }).limit(THREAD_WINDOW)
+      .then(({ data }) => {
+        if (!live || !data?.length) return;
+        setMessages((prev) => prev.length ? prev : (data as { id: string; role: 'user' | 'garvis'; text: string; mission_id: string | null }[])
+          .reverse()
+          .map((m) => ({ id: m.id, role: m.role, text: m.text, missionId: m.mission_id ?? undefined })));
+      });
+    return () => { live = false; };
+  }, []);
+
+  const persist = (m: Omit<ChatMessage, 'id'>) => {
+    // Fire-and-forget: a lost row must never break the conversation.
+    void supabase.auth.getUser().then(({ data }) => {
+      const uid = data.user?.id;
+      if (!uid) return;
+      return supabase.from('command_messages').insert({
+        owner_id: uid, role: m.role, text: m.text, mission_id: m.missionId ?? null,
+      });
+    }).then(() => {}, () => {});
+  };
+
   const push = (m: Omit<ChatMessage, 'id'>) => {
     const msg = { ...m, id: crypto.randomUUID() };
     setMessages((prev) => [...prev, msg]);
+    persist(m);
     return msg;
   };
 
@@ -48,10 +81,11 @@ export function useCommander() {
         .map((a) => `- ${a.name} (${a.stage}${a.strategic_importance ? `, ${a.strategic_importance}` : ''}): ${a.description ?? 'no description'}`)
         .join('\n');
 
-      // The owner's PROJECT GOALS steer the front door (goalsRun, fail-soft '') — different
-      // projects, each adapted toward what it's for, alongside the identity/mind digest.
-      const goals = await goalsDigest();
-      const mind = [mindContext(), goals].filter(Boolean).join('\n\n');
+      // The owner's PROJECT GOALS steer the front door (goalsRun, fail-soft '') and REFLEXIVE
+      // RETRIEVAL grounds it (ask.ts) — the front door now answers from what's actually on
+      // record, cited, alongside the identity/mind digest. Both fail-soft.
+      const [goals, knowledge] = await Promise.all([goalsDigest(), retrieveForPrompt(text)]);
+      const mind = [mindContext(), goals, knowledge].filter(Boolean).join('\n\n');
 
       const r = await rawComplete([
         { role: 'system', content: COMMANDER_SYSTEM },
