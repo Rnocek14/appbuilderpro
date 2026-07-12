@@ -138,6 +138,12 @@ function localMetas(): WorldMeta[] {
   }));
 }
 
+/** Read-only view of every locally stored world — NO side effects (unlike loadWorld, this never
+ *  touches the current-world pointer). The gardener sweeps with this. */
+export function peekLocalWorlds(): Universe[] {
+  return Object.values(readStore()).filter((u) => u?.graph?.clusters);
+}
+
 /** Human "last seen" string for the welcome-back line. */
 export function lastSeen(u: { updatedAt: string }): string {
   try {

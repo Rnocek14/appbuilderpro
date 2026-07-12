@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  GitBranch, RefreshCw, Plus, ChevronRight, Orbit, ListTree, Sparkles, ArrowRight, RotateCcw, FlaskConical, Check, Globe2, Cloud, Loader2,
+  GitBranch, RefreshCw, Plus, ChevronRight, Orbit, ListTree, Sparkles, ArrowRight, RotateCcw, FlaskConical, Check, Globe2, Cloud, Loader2, Sprout,
 } from 'lucide-react';
 import { Button, Card } from '../../components/ui';
 import GalaxyView from './GalaxyView';
@@ -22,6 +22,8 @@ import {
   type Universe, type WorldMeta,
 } from '../../lib/garvis/universe';
 import { migrateLoops } from '../../lib/garvis/loops';
+import { sweepRecurringThreads } from '../../lib/garvis/gardenerRun';
+import type { RecurringThread } from '../../lib/garvis/gardener';
 
 const CURIOSITIES = ['Black holes', 'The Roman Empire', 'How memory works', 'Bioluminescence', 'The history of money', 'Why we dream', 'Lake Geneva real estate', 'How LLMs actually work'];
 
@@ -97,11 +99,15 @@ export default function ClusterSpike({ embedded = false, seed: seedProp }: { emb
   const [worlds, setWorlds] = useState<WorldMeta[]>([]);
   const [opening, setOpening] = useState<string | null>(null);
   const [synced, setSynced] = useState(false);
+  const [threads, setThreads] = useState<RecurringThread[]>([]); // the gardener's cross-world sweep
 
   const meta = useRef<{ id: string; createdAt: string }>({ id: '', createdAt: '' });
   const stats = graph ? graphStats(graph) : null;
 
-  const refreshWorlds = () => { void listWorlds().then(setWorlds).catch(() => {}); };
+  const refreshWorlds = () => {
+    void listWorlds().then(setWorlds).catch(() => {});
+    void sweepRecurringThreads().then(setThreads).catch(() => {}); // fail-soft: silence over guesses
+  };
 
   // Mount: a SEED (embedded canvas prop, or ?dive= handed over by Command) starts falling into a
   // NEW world right now — whatever was current stays saved (the universe only grows). ?world= is a
@@ -255,6 +261,27 @@ export default function ClusterSpike({ embedded = false, seed: seedProp }: { emb
                     <span className="max-w-[180px] truncate text-xs font-medium text-forge-ink">{w.title}</span>
                     <span className="text-[10px] text-forge-dim">{lastSeen(w)}{typeof w.clusterCount === 'number' ? ` · ${w.clusterCount} ideas` : ''}</span>
                     {w.remote && <Cloud size={11} className="shrink-0 text-sky-400/80" />}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* THE GARDENER SPEAKS — a thread growing in several worlds at once is worth a dive of
+              its own. Measured recurrence (≥2 distinct worlds), never an invented connection. */}
+          {threads.length > 0 && (
+            <div className="mt-8">
+              <div className="mb-2 flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-[0.2em] text-forge-dim/70"><Sprout size={12} /> threads that keep coming back</div>
+              <div className="flex flex-wrap justify-center gap-2">
+                {threads.map((t) => (
+                  <button
+                    key={t.title} onClick={() => begin(t.title)}
+                    title={`Appears in: ${t.appearances.map((a) => a.worldTitle).join(' · ')} — dive into it as its own world`}
+                    className="group flex items-center gap-2 rounded-xl border border-emerald-400/25 bg-forge-panel/70 px-3 py-2 text-left backdrop-blur transition-all hover:-translate-y-0.5 hover:border-emerald-400/50"
+                  >
+                    <Sprout size={13} className="shrink-0 text-emerald-400/80" />
+                    <span className="max-w-[220px] truncate text-xs font-medium text-forge-ink">{t.title}</span>
+                    <span className="text-[10px] text-forge-dim">in {t.worldCount} worlds</span>
                   </button>
                 ))}
               </div>

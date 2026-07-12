@@ -51,7 +51,8 @@
     "verify:contacts": "tsx src/lib/garvis/contacts.verify.ts",
     "verify:storyboard": "tsx src/lib/garvis/storyboard.verify.ts",
     "verify:lab": "tsx src/lib/garvis/lab.verify.ts",
-    "verify:inquiry": "tsx src/lib/garvis/inquiry.verify.ts"
+    "verify:inquiry": "tsx src/lib/garvis/inquiry.verify.ts",
+    "verify:gardener": "tsx src/lib/garvis/gardener.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
