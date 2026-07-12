@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, Users, Trash2, ChevronRight } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { EmptyState } from '../components/ui';
+import { EmptyState, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
@@ -49,7 +49,23 @@ export default function Contacts() {
         </div>
 
         {rows === null ? (
-          <div className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+          // Skeletons over spinners (design review): the list keeps its shape while it loads.
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_1fr]">
+            <div className="space-y-2">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+                  <Skeleton className="h-8 w-8 rounded-full" />
+                  <div className="flex-1 space-y-1.5"><Skeleton className="h-3.5 w-3/5" /><Skeleton className="h-3 w-2/5" /></div>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-5">
+              <Skeleton className="h-5 w-1/3" />
+              <Skeleton className="mt-3 h-3 w-1/2" />
+              <Skeleton className="mt-6 h-3 w-full" />
+              <Skeleton className="mt-2 h-3 w-4/5" />
+            </div>
+          </div>
         ) : loadFailed ? (
           <div className="rounded-xl border border-forge-err/30 bg-forge-err/10 p-4 text-sm text-forge-err">
             Couldn't load your contacts — this is a connection problem, not an empty list.{' '}

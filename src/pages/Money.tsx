@@ -8,16 +8,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CircleDollarSign, Plus, Send, Check, Ban, Loader2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { Card, Badge, EmptyState, Spinner, Button, Input } from '../components/ui';
+import { Card, Badge, EmptyState, Button, Input, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { useUndoBar } from '../components/garvis/UndoBar';
 import { invoiceTotal, chaseStage, type LineItem } from '../lib/garvis/money';
-import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, voidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
+import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, voidInvoice, unvoidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
 
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 const STAGE_LABEL = ['', 'reminder queued window', 'due', 'past due', 'final notice'];
 
 export default function Money() {
   const { toast } = useToast();
+  const { offerUndo, undoBar } = useUndoBar((e) => toast('error', e instanceof Error ? e.message : 'Could not undo that.'));
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -53,12 +55,13 @@ export default function Money() {
 
   // Optimistic (system scan): the row's status flips NOW ("Mark paid" lights instantly, like it
   // should); the background refresh reconciles, and a failure restores the truthful row.
-  const act = async (id: string, fn: () => Promise<void>, ok: string, optimistic?: Partial<InvoiceRow>) => {
+  // Returns whether the action landed — Undo must only be offered for a void that actually took.
+  const act = async (id: string, fn: () => Promise<void>, ok: string, optimistic?: Partial<InvoiceRow>): Promise<boolean> => {
     setBusyId(id);
     const prev = rows;
     if (optimistic) setRows((cur) => cur.map((r) => (r.id === id ? { ...r, ...optimistic } : r)));
-    try { await fn(); toast('success', ok); void refresh(); }
-    catch (e) { setRows(prev); toast('error', e instanceof Error ? e.message : 'Action failed.'); }
+    try { await fn(); toast('success', ok); void refresh(); return true; }
+    catch (e) { setRows(prev); toast('error', e instanceof Error ? e.message : 'Action failed.'); return false; }
     finally { setBusyId(null); }
   };
 
@@ -121,7 +124,17 @@ export default function Money() {
           </Card>
         )}
 
-        {loading ? <Spinner label="Loading the ledger…" /> : rows.length === 0 ? (
+        {loading ? (
+          // Skeletons over spinners (design review): the page keeps its shape while it loads.
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-3 rounded-xl border border-forge-border bg-forge-panel p-3">
+                <div className="flex-1 space-y-2"><Skeleton className="h-4 w-2/5" /><Skeleton className="h-3 w-1/4" /></div>
+                <Skeleton className="h-7 w-24 rounded-lg" />
+              </div>
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
           <EmptyState icon={<CircleDollarSign size={20} />} title="No invoices yet"
             body="Create one in a minute — Garvis sends it through your approval queue, chases it politely while you sleep, and counts it as revenue the moment you mark it paid." />
         ) : (
@@ -154,8 +167,15 @@ export default function Money() {
                       </button>
                     )}
                     {r.status !== 'paid' && r.status !== 'void' && (
-                      <button disabled={busyId === r.id} title="Void (kept on record, never chased)"
-                        onClick={() => { if (window.confirm(`Void ${r.number}? It stays on record but will never be chased.`)) void act(r.id, () => voidInvoice(r.id), 'Voided.', { status: 'void' }); }}
+                      <button disabled={busyId === r.id} title="Void — kept on record, never chased (Undo for 6s)"
+                        onClick={() => {
+                          // UNDO LAYER (design review): the confirm dialog is gone — void acts
+                          // instantly, and Undo restores exactly the status it took away.
+                          const restoreTo = r.status === 'sent' ? 'sent' as const : 'draft' as const;
+                          void act(r.id, () => voidInvoice(r.id), `Voided ${r.number}.`, { status: 'void' }).then((ok) => {
+                            if (ok) offerUndo(`Voided ${r.number}`, async () => { await unvoidInvoice(r.id, restoreTo); await refresh(); });
+                          });
+                        }}
                         className="rounded-lg border border-forge-border p-1.5 text-forge-dim hover:text-forge-err disabled:opacity-50"><Ban size={12} /></button>
                     )}
                   </div>
@@ -165,6 +185,7 @@ export default function Money() {
           </div>
         )}
       </div>
+      {undoBar}
     </AppShell>
   );
 }

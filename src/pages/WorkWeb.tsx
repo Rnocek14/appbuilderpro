@@ -153,7 +153,9 @@ export default function WorkWeb() {
     try {
       const res = await runTool(worldId, cluster, tool.id);
       if (res.message) toast(res.ok ? 'success' : 'error', res.message);
-      if (res.ok) await refresh();
+      // Non-blocking reconcile (design review): the tool's real work is done and announced — the
+      // button unlocks NOW; the full web reload lands in the background instead of holding the UI.
+      if (res.ok) void refresh();
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Tool failed.');
     } finally {

@@ -13,6 +13,7 @@ import {
   type MailerMaterials, type MailBatchRow,
 } from '../../lib/garvis/mailerRun';
 import { cn } from '../../lib/utils';
+import { useUnsavedGuard } from '../../hooks/useUnsavedGuard';
 
 // SEVEN renditions of the same real materials — different persuasion mechanisms, one click each.
 // Pick one, then hand-edit any line; [EDIT] holes mark what only you can supply.
@@ -34,6 +35,10 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
   const [imageIx, setImageIx] = useState(0);
   const [offer, setOffer] = useState('');
   const [link, setLink] = useState('');
+  // Unsaved-edit guard: the offer/link live only in state until Save — leaving the browser with
+  // edits pending must ask first (design review).
+  const [dirty, setDirty] = useState(false);
+  useUnsavedGuard(dirty);
   const [qr, setQr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [batches, setBatches] = useState<MailBatchRow[]>([]);
@@ -75,6 +80,7 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
     setBusy(true);
     try {
       await saveMailerDesign(clusterId, spec, `Postcard — ${CONCEPTS.find((c) => c.id === concept)?.label}`);
+      setDirty(false);
       onToast('success', 'Design saved into this area. Print it or log a mail batch below.');
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not save.'); }
     finally { setBusy(false); }
@@ -150,14 +156,14 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
 
           <div>
             <label className="text-[11px] uppercase tracking-wide text-forge-dim">The one offer (40/40/20: the offer is 40%)</label>
-            <textarea value={offer} onChange={(e) => setOffer(e.target.value)} rows={2}
+            <textarea value={offer} onChange={(e) => { setOffer(e.target.value); setDirty(true); }} rows={2}
               placeholder="e.g. First consult free — 3 concepts for your space."
               className="mt-1 w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
           </div>
 
           <div>
             <label className="text-[11px] uppercase tracking-wide text-forge-dim">Tracking link (becomes the QR)</label>
-            <input value={link} onChange={(e) => setLink(e.target.value)}
+            <input value={link} onChange={(e) => { setLink(e.target.value); setDirty(true); }}
               placeholder={materials.ctx?.links && Object.values(materials.ctx.links)[0] ? String(Object.values(materials.ctx.links)[0]) : 'https://…'}
               className="mt-1 w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
           </div>

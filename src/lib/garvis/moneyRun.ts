@@ -119,3 +119,12 @@ export async function voidInvoice(id: string): Promise<void> {
     .update({ status: 'void', updated_at: new Date().toISOString() }).eq('id', id);
   if (error) throw new Error(error.message);
 }
+
+/** Undo for void (design review: act instantly, regret politely — the confirm dialog is gone).
+ *  Restores exactly the status the void took away; only flips rows that are actually void. */
+export async function unvoidInvoice(id: string, restoreTo: 'draft' | 'sent'): Promise<void> {
+  const { error } = await supabase.from('invoices')
+    .update({ status: restoreTo, updated_at: new Date().toISOString() })
+    .eq('id', id).eq('status', 'void');
+  if (error) throw new Error(error.message);
+}

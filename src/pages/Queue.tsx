@@ -8,9 +8,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck, Undo2 } from 'lucide-react';
+import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
+import { useUndoBar } from '../components/garvis/UndoBar';
 import { AppShell } from '../components/layout/AppShell';
-import { Badge, Button, EmptyState, Input, Spinner } from '../components/ui';
+import { Badge, Button, EmptyState, Input, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { rawComplete } from '../lib/aiClient';
@@ -30,8 +31,6 @@ type Row =
   | { key: string; lane: 'decision'; a: Approval }
   | { key: string; lane: 'question'; q: AgentQuestion }
   | { key: string; lane: 'message'; m: InboxItem };
-
-type Undoable = { label: string; run: () => Promise<void> };
 
 export default function Queue() {
   const { toast } = useToast();
@@ -55,15 +54,8 @@ export default function Queue() {
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
 
-  // undo bar — one at a time; a new undoable replaces the last (its window has passed its moment)
-  const [undoable, setUndoable] = useState<Undoable | null>(null);
-  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const offerUndo = (label: string, run: () => Promise<void>) => {
-    if (undoTimer.current) clearTimeout(undoTimer.current);
-    setUndoable({ label, run });
-    undoTimer.current = setTimeout(() => setUndoable(null), 6000);
-  };
-  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+  // Undo bar — the shared layer (components/garvis/UndoBar): act instantly, regret politely.
+  const { offerUndo, undoBar } = useUndoBar(() => toast('error', 'Could not undo that.'));
 
   // history tab — refetched on EVERY entry (review fix: a one-time latch meant "see History"
   // after a failed execution pointed at a stale list that didn't contain the failure).
@@ -301,7 +293,19 @@ export default function Queue() {
             )}
           </div>
         ) : loading ? (
-          <Spinner label="Loading the queue…" />
+          // Skeletons over spinners (design review): the queue keeps its shape while it loads.
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-16 rounded-full" />
+                  <Skeleton className="h-4 flex-1" />
+                  <Skeleton className="h-6 w-20 rounded-lg" />
+                </div>
+                <Skeleton className="mt-2 h-3 w-3/4" />
+              </div>
+            ))}
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear"
             body="Approvals, blocked build questions, replies, and website leads all land here. Right now: nothing needs you." />
@@ -400,16 +404,7 @@ export default function Queue() {
       </div>
 
       {/* Undo bar — reversible actions act instantly and regret politely. */}
-      {undoable && (
-        <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-forge-border bg-forge-raised px-4 py-2.5 shadow-lift animate-fadeInUp [animation-duration:0.15s]">
-          <span className="text-sm text-forge-ink">{undoable.label}</span>
-          <button
-            onClick={() => { const u = undoable; setUndoable(null); if (undoTimer.current) clearTimeout(undoTimer.current); void u.run().catch(() => toast('error', 'Could not undo that.')); }}
-            className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1 text-xs font-medium text-forge-ember hover:bg-forge-ember/20">
-            <Undo2 size={12} /> Undo
-          </button>
-        </div>
-      )}
+      {undoBar}
     </AppShell>
   );
 }

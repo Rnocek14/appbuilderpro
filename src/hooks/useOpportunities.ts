@@ -98,7 +98,13 @@ export function useOpportunities() {
     }
   }, [session, apps, opportunities, buildDigest, refresh]);
 
-  const setStatus = async (id: string, status: 'saved' | 'dismissed') => { await supabase.from('garvis_opportunities').update({ status }).eq('id', id); await refresh(); };
+  // Throws on failure (design review): a swallowed error left the card looking dismissed while
+  // the row stayed active — it returned on the next load with no explanation.
+  const setStatus = async (id: string, status: 'saved' | 'dismissed') => {
+    const { error } = await supabase.from('garvis_opportunities').update({ status }).eq('id', id);
+    if (error) throw new Error(error.message);
+    await refresh();
+  };
 
   /** Turn an opportunity into a mission (the planner takes it from here). */
   const convertToMission = useCallback(async (opp: GarvisOpportunity): Promise<string | null> => {
