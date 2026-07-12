@@ -6,7 +6,8 @@
 
 export type Command =
   | { kind: 'reply'; text: string }
-  | { kind: 'mission'; preface: string; objective: string; subject: string; app: string | null };
+  | { kind: 'mission'; preface: string; objective: string; subject: string; app: string | null }
+  | { kind: 'act'; preface: string; instruction: string };
 
 export const COMMANDER_SYSTEM = `You are Garvis — a solo founder's AI chief of staff. You speak like a sharp, calm, capable operator:
 warm, brief, never fluffy. The founder talks to you in plain language; you decide what to DO.
@@ -23,11 +24,18 @@ You have a worker team (research, analytics, marketing, bug/QA diagnosis, builde
    message — hand it to a mission. Extract a crisp objective, the subject, and (if it matches a portfolio app
    in the snapshot) that app's exact name, else null. Add a short, warm preface ("On it — here's how I'd …").
 
+3) ACT — when the founder wants something done RIGHT NOW that your tool hands cover: dig across the
+   business worlds and knowledge in depth (multiple lookups, synthesis), draft a NEW business world/venture,
+   log a decision or an observed outcome to memory, or draft a short script. You act with gated tools and
+   narrate each step; anything outward still stops at Approvals. Write the instruction as a direct brief to
+   your acting self. Prefer REPLY when the provided KNOWLEDGE ON RECORD already answers it in a sentence.
+
 When unsure, REPLY and offer to run a mission. Prefer REPLY for anything answerable in a sentence or two.
 
 OUTPUT exactly one JSON object, no prose, no fences:
 {"kind":"reply","text":"…"}
-{"kind":"mission","preface":"…","objective":"…","subject":"…","app":"<exact portfolio app name or null>"}`;
+{"kind":"mission","preface":"…","objective":"…","subject":"…","app":"<exact portfolio app name or null>"}
+{"kind":"act","preface":"…","instruction":"…"}`;
 
 export function buildCommanderUser(
   message: string,
@@ -68,6 +76,9 @@ const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 export function parseCommand(raw: string): Command {
   const o = extractJson(raw);
   if (!o) return { kind: 'reply', text: raw.trim() || "I didn't catch that — try rephrasing?" };
+  if (o.kind === 'act' && str(o.instruction)) {
+    return { kind: 'act', preface: str(o.preface) || 'On it — working now.', instruction: str(o.instruction) };
+  }
   if (o.kind === 'mission' && str(o.objective)) {
     return {
       kind: 'mission',

@@ -13,6 +13,7 @@ import { useMissions } from './useMissions';
 import { useMind } from './useMind';
 import { goalsDigest } from '../lib/garvis/goalsRun';
 import { retrieveForPrompt } from '../lib/garvis/ask';
+import { runGarvisAct } from '../lib/garvis';
 
 export interface ChatMessage {
   id: string;
@@ -96,6 +97,38 @@ export function useCommander() {
       if (cmd.kind === 'reply') {
         push({ role: 'garvis', text: cmd.text });
         emitMindEvent({ event_type: 'commander_exchange', subject: `Asked: "${text.slice(0, 160)}" → replied`, source: 'commander' });
+        return;
+      }
+
+      // ACT — hands at the front door (one brain, part 2): Garvis runs its gated tool loop RIGHT
+      // NOW and narrates each step as an event line in the thread (the No-Theater contract: every
+      // line maps to a real runtime event). Anything outward still stops at Approvals.
+      if (cmd.kind === 'act') {
+        push({ role: 'garvis', text: cmd.preface });
+        const narrId = crypto.randomUUID();
+        const lines: string[] = [];
+        setMessages((prev) => [...prev, { id: narrId, role: 'garvis', text: '⏺ working…' }]);
+        const paint = () => setMessages((prev) => prev.map((m) => (m.id === narrId ? { ...m, text: lines.join('\n') || '⏺ working…' } : m)));
+        try {
+          const run = await runGarvisAct({
+            title: cmd.instruction.slice(0, 80),
+            input: cmd.instruction,
+            budgetUsd: 0.5,
+            onEvent: (e) => { if (e.detail) { lines.push(`⏺ ${e.detail}`); paint(); } },
+          });
+          if (lines.length) persist({ role: 'garvis', text: lines.join('\n') }); // narration, persisted once
+          const out = typeof run?.output === 'string' ? run.output : '';
+          push({
+            role: 'garvis',
+            text: out.trim()
+              || (run?.status === 'failed'
+                ? 'That ran into a problem — the run is on the ledger with the error.'
+                : 'Done — the results are on the record (anything outward is waiting in Approvals).'),
+          });
+          emitMindEvent({ event_type: 'commander_exchange', subject: `Acted: "${text.slice(0, 160)}"`, source: 'commander' });
+        } catch (e) {
+          push({ role: 'garvis', text: `I hit a snag acting on that: ${e instanceof Error ? e.message : 'something went wrong'}.` });
+        }
         return;
       }
 
