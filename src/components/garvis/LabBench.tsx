@@ -12,6 +12,7 @@ import {
   SIM_TEMPLATES, simTemplateById, suggestTemplate, clampValues, sensitivity,
   simRecordArtifact, parseSimRecord, fmtSimValue, type SimTemplate,
 } from '../../lib/garvis/lab';
+import { SimVisual } from './SimVisual';
 import type { Artifact, Cluster } from '../../lib/garvis/clustering';
 
 const defaultsFor = (t: SimTemplate): Record<string, number> =>
@@ -64,6 +65,11 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
 
       <p className="text-xs text-forge-dim">{template.tagline}</p>
       <p className="mt-1 text-[11px] text-forge-dim/70"><span className="text-forge-dim">Basis:</span> {template.basis}</p>
+
+      {/* THE MECHANISM — animated from the SAME clamped values + outputs as the readout below.
+          Drag a dial and watch the physics (or the arithmetic) respond; nothing moves that the
+          model didn't compute. */}
+      <SimVisual template={template} values={clamped} outputs={outputs} />
 
       <div className="mt-4 grid gap-5 md:grid-cols-[1fr_1fr]">
         {/* THE DIALS — yours. The model takes these as given; it cannot validate them. */}

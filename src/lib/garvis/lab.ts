@@ -100,6 +100,44 @@ const timeDilation: SimTemplate = {
   },
 };
 
+const gravityWell: SimTemplate = {
+  id: 'gravity-well',
+  title: 'Black hole time dilation',
+  domain: 'physics',
+  tagline: 'How much slower a clock ticks the closer it hovers to a black hole.',
+  modelType: 'equation',
+  basis: 'Schwarzschild static observer: far time = near time ÷ √(1 − rs/r) (Schwarzschild, 1916; the Interstellar effect).',
+  params: [
+    { key: 'r', label: 'Hover distance (in horizon radii, r/rs)', min: 1.02, max: 20, step: 0.02, def: 2 },
+    { key: 'hours', label: 'Hours experienced near the hole', min: 1, max: 8760, step: 1, def: 24 },
+  ],
+  assumptions: [
+    'Hovering at a fixed distance (static observer) — not orbiting, not falling in',
+    'Non-rotating, uncharged black hole (Schwarzschild); the far clock sits effectively at infinity',
+  ],
+  limits: [
+    'Inside the horizon (r ≤ rs) no static observer can exist — the model refuses rather than pretend',
+    'Real black holes spin (Kerr): frame dragging changes these numbers',
+  ],
+  compute: (v0) => {
+    const { r, hours } = v0;
+    if (r <= 1) {
+      return [
+        { key: 'factor', label: 'Time factor (far ÷ near)', value: null, note: 'no static observer exists at or inside the horizon' },
+        { key: 'far', label: 'Hours passed far away', value: null },
+        { key: 'skipped', label: 'Extra hours the hoverer skipped', value: null },
+      ];
+    }
+    const factor = 1 / Math.sqrt(1 - 1 / r);
+    const far = hours * factor;
+    return [
+      { key: 'factor', label: 'Time factor (far ÷ near)', value: round(factor, 4), note: 'each near-hour is this many far-hours' },
+      { key: 'far', label: 'Hours passed far away', value: round(far, 2), unit: 'hr' },
+      { key: 'skipped', label: 'Extra hours the hoverer skipped', value: round(far - hours, 2), unit: 'hr' },
+    ];
+  },
+};
+
 const compoundGrowth: SimTemplate = {
   id: 'compound-growth',
   title: 'Compound growth',
@@ -201,7 +239,7 @@ const reachOdds: SimTemplate = {
   },
 };
 
-export const SIM_TEMPLATES: SimTemplate[] = [timeDilation, compoundGrowth, rolloutModel, reachOdds];
+export const SIM_TEMPLATES: SimTemplate[] = [timeDilation, gravityWell, compoundGrowth, rolloutModel, reachOdds];
 
 export const simTemplateById = (id: string): SimTemplate | undefined => SIM_TEMPLATES.find((t) => t.id === id);
 
@@ -209,9 +247,11 @@ export const simTemplateById = (id: string): SimTemplate | undefined => SIM_TEMP
  *  a convenience default, freely overridable in the bench (never a hidden decision). */
 export function suggestTemplate(text: string): SimTemplate {
   const s = text.toLowerCase();
+  // Gravity FIRST — 'black hole' must land on the hole, not the train.
+  if (/(black ?hole|event horizon|schwarzschild|gravit|interstellar|neutron star|singularity)/.test(s)) return gravityWell;
   // ('einstein clock speed' fell through to the business bench in the full-product exercise —
   // the physicist's own name and the experiment's instrument belong in the physics matcher.)
-  if (/(light ?speed|speed of light|relativit|time dilat|spacetime|black hole|twin paradox|physics|einstein|lorentz|(moving|atomic) clock)/.test(s)) return timeDilation;
+  if (/(light ?speed|speed of light|relativit|time dilat|spacetime|twin paradox|physics|einstein|lorentz|(moving|atomic) clock)/.test(s)) return timeDilation;
   if (/(sponsor|city|cities|rollout|revenue|pricing|price|mrr|unit econ|business model|franchise|market|customer)/.test(s)) return rolloutModel;
   if (/(invest|compound|interest|saving|grow(th)? rate|retire)/.test(s)) return compoundGrowth;
   if (/(odds|probabilit|response rate|conversion|chance|outreach|reply rate|lead)/.test(s)) return reachOdds;
