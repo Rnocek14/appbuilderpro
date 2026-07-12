@@ -495,6 +495,7 @@ export async function runTool(
     case 'gen-plan':
     case 'gen-features':
     case 'gen-spec':
+    case 'gen-ads':
     case 'gen-copy': {
       // FINISHED-WORK PRODUCERS FIRST (research/gen-social/gen-video-script/gen-angle): these
       // reason over the world's REAL materials (DNA, brand voice, vault photos, prior research)

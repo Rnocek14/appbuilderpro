@@ -19,12 +19,15 @@ import type { GarvisMission, GarvisTask } from '../types';
 
 const SCAN_THROTTLE_MS = 12 * 60 * 60 * 1000; // proactive scan at most twice a day
 
+// First-screen chips exist FOR the empty-thread user (they render only before the first message),
+// so every one must produce real value on a zero-data account — no chips that need an existing
+// portfolio. The three first moves are all here: venture, rabbit hole, build.
 const SUGGESTIONS = [
-  'Review my portfolio — what should I focus on?',
-  'Grow Theory Thread end-to-end',
+  'Design a business for me — I\'ll describe the idea',
   'Help my mom grow her Lake Geneva real-estate business',
-  'Find new opportunities across my apps',
   'Take me down the rabbit hole on local lead generation',
+  'Build me an app for tracking client appointments',
+  'What can you do?',
 ];
 
 function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMission; tasks: GarvisTask[]; onRun: () => void; running: boolean }) {
@@ -60,7 +63,7 @@ export default function Command() {
   const navigate = useNavigate();
   const { loading: oppLoading, scan } = useOpportunities();
   const { profile } = useAuth();
-  const firstName = (profile?.full_name ?? '').trim().split(/\s+/)[0] || 'there';
+  const firstName = (profile?.full_name ?? '').trim().split(/\s+/)[0] || ''; // '' → "Good morning." not "…, there."
   const [input, setInput] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);

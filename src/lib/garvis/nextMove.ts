@@ -348,10 +348,9 @@ export function rankMoves(moves: NextMove[], now: Date, dismissals: Dismissals =
 // ---------------------------------------------------------------------------
 
 export function greetingFor(hour: number, name: string): string {
-  if (hour < 5) return `Working late, ${name}.`;
-  if (hour < 12) return `Good morning, ${name}.`;
-  if (hour < 18) return `Good afternoon, ${name}.`;
-  return `Good evening, ${name}.`;
+  const base = hour < 5 ? 'Working late' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const n = name.trim();
+  return n ? `${base}, ${n}.` : `${base}.`; // no name on record → no robotic ", there."
 }
 
 export interface MindEventIn { event_type: string; subject: string; occurred_at: string; payload?: Record<string, unknown> | null }

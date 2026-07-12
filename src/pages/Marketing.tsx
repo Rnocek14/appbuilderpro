@@ -212,7 +212,7 @@ export default function Marketing() {
                       </div>
                       {c.summary && <p className="mt-1 text-xs text-forge-dim">{c.summary}</p>}
                     </div>
-                    <button onClick={() => deleteCampaign(c.id)} className="text-forge-dim/60 hover:text-forge-err" title="Delete campaign"><Trash2 size={14} /></button>
+                    <button onClick={() => { if (window.confirm('Delete this campaign and its assets? This can\'t be undone.')) deleteCampaign(c.id); }} className="text-forge-dim/60 hover:text-forge-err" title="Delete campaign"><Trash2 size={14} /></button>
                   </div>
 
                   {open && (

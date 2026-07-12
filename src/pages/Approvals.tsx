@@ -84,13 +84,13 @@ export default function Approvals() {
           <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear" body="When Garvis drafts an email, a deploy, or another outward action, it lands here for your sign-off." />
         ) : (
           <div className="space-y-3">
-            {pending.map((a) => {
+            {pending.map((a, i) => {
               // Defensive: an unknown kind (older row / future kind) renders generically instead
               // of throwing and blanking the whole queue.
               const meta = KIND_META[a.kind] ?? { icon: ShieldCheck, label: String(a.kind).replace(/_/g, ' ') };
               const Icon = meta.icon;
               return (
-                <Card key={a.id} className="p-4">
+                <Card key={a.id} className="animate-fadeInUp p-4" style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}>
                   <div className="flex items-start gap-3">
                     <Icon size={18} className="mt-0.5 text-forge-ember" />
                     <div className="min-w-0 flex-1">

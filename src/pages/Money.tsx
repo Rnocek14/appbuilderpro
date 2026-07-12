@@ -51,10 +51,14 @@ export default function Money() {
     finally { setSaving(false); }
   };
 
-  const act = async (id: string, fn: () => Promise<void>, ok: string) => {
+  // Optimistic (system scan): the row's status flips NOW ("Mark paid" lights instantly, like it
+  // should); the background refresh reconciles, and a failure restores the truthful row.
+  const act = async (id: string, fn: () => Promise<void>, ok: string, optimistic?: Partial<InvoiceRow>) => {
     setBusyId(id);
-    try { await fn(); toast('success', ok); await refresh(); }
-    catch (e) { toast('error', e instanceof Error ? e.message : 'Action failed.'); }
+    const prev = rows;
+    if (optimistic) setRows((cur) => cur.map((r) => (r.id === id ? { ...r, ...optimistic } : r)));
+    try { await fn(); toast('success', ok); void refresh(); }
+    catch (e) { setRows(prev); toast('error', e instanceof Error ? e.message : 'Action failed.'); }
     finally { setBusyId(null); }
   };
 
@@ -84,7 +88,7 @@ export default function Money() {
           <Card className="mb-5 p-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block text-xs text-forge-dim">What for
-                <Input className="mt-1" placeholder="Lakefront listing photography" value={title} onChange={(e) => setTitle(e.target.value)} />
+                <Input autoFocus className="mt-1" placeholder="Lakefront listing photography" value={title} onChange={(e) => setTitle(e.target.value)} />
               </label>
               <label className="block text-xs text-forge-dim">Bill to (email)
                 <Input className="mt-1" placeholder="client@theirdomain.com" value={toEmail} onChange={(e) => setToEmail(e.target.value)} />
@@ -122,10 +126,10 @@ export default function Money() {
             body="Create one in a minute — Garvis sends it through your approval queue, chases it politely while you sleep, and counts it as revenue the moment you mark it paid." />
         ) : (
           <div className="space-y-2">
-            {rows.map((r) => {
+            {rows.map((r, i) => {
               const stage = chaseStage(r, now);
               return (
-                <Card key={r.id} className="flex flex-wrap items-center gap-3 p-3">
+                <Card key={r.id} className="flex animate-fadeInUp flex-wrap items-center gap-3 p-3" style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-mono text-xs text-forge-dim">{r.number}</span>
@@ -138,20 +142,20 @@ export default function Money() {
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {r.status === 'draft' && (
-                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => queueInvoiceSend(r), 'Invoice queued — approve the send in Approvals.')}
+                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => queueInvoiceSend(r), 'Invoice queued — approve the send in Approvals.', { status: 'sent' })}
                         className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-xs text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">
                         {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />} Queue send
                       </button>
                     )}
                     {r.status === 'sent' && (
-                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => markInvoicePaid(r.id), 'Paid — recorded as revenue. 🎉')}
+                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => markInvoicePaid(r.id), 'Paid — recorded as revenue. 🎉', { status: 'paid' })}
                         className="flex items-center gap-1 rounded-lg border border-forge-ok/50 bg-forge-ok/10 px-2.5 py-1.5 text-xs text-forge-ok hover:bg-forge-ok/20 disabled:opacity-50">
                         {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Mark paid
                       </button>
                     )}
                     {r.status !== 'paid' && r.status !== 'void' && (
                       <button disabled={busyId === r.id} title="Void (kept on record, never chased)"
-                        onClick={() => void act(r.id, () => voidInvoice(r.id), 'Voided.')}
+                        onClick={() => { if (window.confirm(`Void ${r.number}? It stays on record but will never be chased.`)) void act(r.id, () => voidInvoice(r.id), 'Voided.', { status: 'void' }); }}
                         className="rounded-lg border border-forge-border p-1.5 text-forge-dim hover:text-forge-err disabled:opacity-50"><Ban size={12} /></button>
                     )}
                   </div>

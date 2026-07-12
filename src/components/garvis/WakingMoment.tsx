@@ -56,12 +56,23 @@ export function WakingMoment({ name }: { name: string }) {
   }, []);
 
   if (!digest) return null; // loading (or load failed) — the chat never waits on the front door
-  const { greeting, awayLines, moves } = digest;
+  const { greeting, awayLines, moves, coldSky } = digest;
   // A quiet morning is a FACT worth stating, not a reason to vanish: zero moves means zero
   // replies waiting, nothing blocked, nothing new — say so instead of rendering nothing.
   const quiet = !awayLines.length && !moves.length;
 
   const shown = showAll ? moves : moves.slice(0, 3);
+
+  // FIRST RUN (cold sky): nothing has ever happened. The invitation is a welcome — never a line
+  // under "While you were away" (nothing happened, they were never here), never "1 update".
+  if (coldSky) {
+    return (
+      <div className="mb-4 rounded-2xl border border-forge-border bg-forge-panel/60 p-5">
+        <p className="font-display text-lg font-semibold text-forge-ink">{greeting}</p>
+        <p className="mt-1 text-sm text-forge-dim">{awayLines[0]?.text ?? 'Say anything — a question, a business, a thing you want to build — and I\'ll make it a world.'}</p>
+      </div>
+    );
+  }
 
   // Collapsed: one honest line — the same facts, none of the height. Tap to expand.
   if (collapsedBrief) {
@@ -87,7 +98,7 @@ export function WakingMoment({ name }: { name: string }) {
       {quiet && (
         <p className="mt-1 text-sm text-forge-dim">
           All quiet — no replies waiting, nothing blocked, nothing new since you last looked.{' '}
-          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your webs</button>
+          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your ventures</button>
           {' '}to push something forward.
         </p>
       )}

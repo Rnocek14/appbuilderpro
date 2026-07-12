@@ -32,11 +32,6 @@ export async function createInvoice(input: {
   const to = input.toEmail.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) throw new Error('Enter a valid recipient email.');
 
-  // Number: INV-<year>-<count+1> for this owner — readable, monotonic enough for a solo shop.
-  const year = new Date().getFullYear();
-  const { count } = await supabase.from('invoices').select('id', { count: 'exact', head: true });
-  const number = `INV-${year}-${String((count ?? 0) + 1).padStart(3, '0')}`;
-
   // Link-or-create the contact (select-first — email_status NEVER reset; suppression sacred).
   let contactId: string | null = null;
   const { data: existing } = await supabase.from('contacts').select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
@@ -47,13 +42,24 @@ export async function createInvoice(input: {
     contactId = (c as { id: string } | null)?.id ?? null;
   }
 
-  const { data, error } = await supabase.from('invoices').insert({
-    owner_id: uid, world_id: input.worldId ?? null, contact_id: contactId,
-    number, title: input.title.trim(), to_email: to, line_items: items,
-    amount_usd: invoiceTotal(items), due_date: input.dueDate || null, payment_url: input.paymentUrl?.trim() || null,
-  }).select(COLS).single();
-  if (error || !data) throw new Error(error?.message ?? 'Could not create the invoice.');
-  return data as InvoiceRow;
+  // Number: INV-<year>-<NNN> — readable, and UNIQUE for real (app_0051). Two tabs used to be able
+  // to read the same count and silently mint the same number; the unique index now rejects the
+  // duplicate (23505) and we re-mint with a bumped sequence, up to three attempts.
+  const year = new Date().getFullYear();
+  const { count } = await supabase.from('invoices').select('id', { count: 'exact', head: true });
+  let lastError = 'Could not create the invoice.';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const number = `INV-${year}-${String((count ?? 0) + 1 + attempt).padStart(3, '0')}`;
+    const { data, error } = await supabase.from('invoices').insert({
+      owner_id: uid, world_id: input.worldId ?? null, contact_id: contactId,
+      number, title: input.title.trim(), to_email: to, line_items: items,
+      amount_usd: invoiceTotal(items), due_date: input.dueDate || null, payment_url: input.paymentUrl?.trim() || null,
+    }).select(COLS).single();
+    if (data) return data as InvoiceRow;
+    lastError = error?.message ?? lastError;
+    if (error?.code !== '23505') break; // only a number collision earns a retry
+  }
+  throw new Error(lastError);
 }
 
 /** Queue the invoice email as a PENDING approval — the one send path does the rest (suppression
@@ -83,8 +89,12 @@ export async function queueInvoiceSend(invoice: InvoiceRow): Promise<void> {
     payload: { message_id: (msg as { id: string }).id, invoice_id: invoice.id },
   });
   // 'sent' is stamped optimistically at queue time so the chaser can see it; the approval queue +
-  // ledger remain the source of truth for whether the email actually left.
-  await supabase.from('invoices').update({ status: 'sent', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', invoice.id);
+  // ledger remain the source of truth for whether the email actually left. The stamp's failure
+  // must SURFACE (system scan): if it silently failed, the invoice stayed 'draft' and a second
+  // press queued a duplicate approval for the same money.
+  const { error: stampErr } = await supabase.from('invoices')
+    .update({ status: 'sent', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', invoice.id);
+  if (stampErr) throw new Error(`Queued for approval, but the invoice could not be marked sent (${stampErr.message}) — do NOT queue it again; check Approvals.`);
 }
 
 /** YOU confirm payment (it landed in your processor/bank) — Garvis records the fact as revenue. */

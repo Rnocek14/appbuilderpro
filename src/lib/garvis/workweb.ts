@@ -91,7 +91,8 @@ const T = (id: string, label: string, hint: string, kind: ToolKind): WorkTool =>
 // Executable tool ids (workwebRun.ts implements exactly these; verified in workweb.verify.ts).
 export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
-  'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-features', 'gen-spec', 'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
+  'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec',
+  'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
   'import-docs', 'view-results',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];

@@ -407,7 +407,8 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={direction} onChange={(e) => setDirection(e.target.value)} maxLength={200}
-          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”…"
+          onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void go(takeTool); }}
+          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”… (↵ runs a take)"
           className="min-w-[220px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
         />
         <button onClick={() => void go('gen-ideas')} disabled={!!busy} className={btn} title="10 distinct concepts for this studio — near-duplicates collapsed, each with its first step">

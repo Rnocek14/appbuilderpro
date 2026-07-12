@@ -43,6 +43,11 @@ export default function OpsInbox() {
   // workspace, non-executing kinds say "recorded" honestly) — the decision just lives HERE now.
   const decide = async (a: Approval, approve: boolean) => {
     setActingId(a.id);
+    // Optimistic (system scan): the decided card leaves the lane NOW; the background refresh
+    // reconciles. Watching the whole 3-lane inbox reload after every decision was the app's
+    // single most-felt latency.
+    const prevApprovals = approvals;
+    setApprovals((prev) => prev.filter((x) => x.id !== a.id));
     try {
       if (!approve) { await rejectApproval(a.id); toast('success', 'Rejected.'); }
       else {
@@ -55,8 +60,11 @@ export default function OpsInbox() {
           else toast('success', 'Approved — recorded for you to run where the capability lives.');
         } else toast('error', res.error ?? 'Execution failed — see the ledger.');
       }
-      await refresh();
-    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not act on that.'); }
+      void refresh(); // background reconcile — the lane already reflects the decision
+    } catch (e) {
+      setApprovals(prevApprovals); // the decision failed — put the card back honestly
+      toast('error', e instanceof Error ? e.message : 'Could not act on that.');
+    }
     finally { setActingId(null); }
   };
 
@@ -171,8 +179,8 @@ export default function OpsInbox() {
           <EmptyState icon={<InboxIcon size={20} />} title="Nothing in yet" body="When someone replies to an email or submits your website's form, it lands here — and pings your notification webhook if you set one in Settings." />
         ) : (
           <ul className="space-y-2">
-            {items.map((it) => (
-              <li key={`${it.kind}-${it.id}`} className="rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+            {items.map((it, i) => (
+              <li key={`${it.kind}-${it.id}`} className="animate-fadeInUp rounded-xl border border-forge-border bg-forge-panel/40 p-3" style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={cn('rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
                     it.kind === 'lead' ? 'border-forge-ok/40 text-forge-ok' : 'border-forge-ember/40 text-forge-ember')}>
@@ -201,9 +209,14 @@ export default function OpsInbox() {
                 </p>
                 {replyTo && replyTo.kind === it.kind && replyTo.id === it.id && (
                   <div className="mt-2 space-y-2 border-t border-forge-border/60 pt-2">
-                    <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
+                    <input autoFocus value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
+                      onKeyDown={(e) => { if (e.key === 'Escape') setReplyTo(null); }}
                       className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
-                    <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="Your reply…"
+                    <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="Your reply… (⌘↵ to queue)"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setReplyTo(null);
+                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !sending) void send();
+                      }}
                       className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
                     <div className="flex items-center gap-2">
                       <button onClick={() => void send()} disabled={sending}

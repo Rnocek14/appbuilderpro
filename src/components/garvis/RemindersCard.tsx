@@ -39,6 +39,9 @@ export function RemindersCard() {
   };
 
   if (!loaded && !rows.length) return null;
+  // Cold-start clutter guard: an empty reminders card above the suggestions is noise on day one.
+  // (It reappears the moment a reminder exists, or while the user is adding one via the ⌘K path.)
+  if (loaded && !rows.length && !adding) return null;
   const isDue = (r: ReminderRow) => !r.due_at || new Date(r.due_at).getTime() <= Date.now();
 
   return (

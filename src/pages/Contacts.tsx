@@ -25,9 +25,13 @@ export default function Contacts() {
   const { toast } = useToast();
   const [rows, setRows] = useState<ContactRow[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const refresh = useCallback(async () => {
-    try { setRows(await listContacts(500)); } catch { setRows([]); }
+    // A failed load must SAY it failed — rendering "No contacts yet" over a network error told
+    // the user their contacts were gone (system scan).
+    try { setLoadFailed(false); setRows(await listContacts(500)); }
+    catch { setLoadFailed(true); setRows([]); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -46,6 +50,11 @@ export default function Contacts() {
 
         {rows === null ? (
           <div className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+        ) : loadFailed ? (
+          <div className="rounded-xl border border-forge-err/30 bg-forge-err/10 p-4 text-sm text-forge-err">
+            Couldn't load your contacts — this is a connection problem, not an empty list.{' '}
+            <button onClick={() => void refresh()} className="underline">Retry</button>
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState icon={<Users size={20} />} title="No contacts yet" body="Contacts arrive from website leads, prospect scans, and CSV uploads in your worlds' audience areas." />
         ) : (
@@ -79,15 +88,19 @@ function ContactDetailPane({ id, onDeleted, onStageChanged }: { id: string; onDe
   const [timeline, setTimeline] = useState<TimelineItem[]>([]);
   const [noteDraft, setNoteDraft] = useState('');
   const [nameDraft, setNameDraft] = useState('');
+  const [detailFailed, setDetailFailed] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
 
   useEffect(() => {
     let live = true;
+    setDetailFailed(false);
     void getContact(id).then((d) => {
-      if (!live || !d) return;
+      if (!live) return;
+      if (!d) { setDetailFailed(true); return; } // a failed load must not spin forever
       setC(d); setNameDraft(d.full_name ?? '');
-      void listNotes(id).then((n) => { if (live) setNotes(n); });
-      void contactTimeline(id, d.email).then((t) => { if (live) setTimeline(t); });
-    });
+      void listNotes(id).then((n) => { if (live) setNotes(n); }).catch(() => {});
+      void contactTimeline(id, d.email).then((t) => { if (live) setTimeline(t); }).catch(() => {});
+    }).catch(() => { if (live) setDetailFailed(true); });
     return () => { live = false; };
   }, [id]);
 
@@ -101,15 +114,19 @@ function ContactDetailPane({ id, onDeleted, onStageChanged }: { id: string; onDe
     catch (e) { toast('error', e instanceof Error ? e.message : 'Could not save.'); }
   };
   const saveNote = async () => {
+    if (savingNote || !noteDraft.trim()) return; // two rapid Enters used to write two identical notes
+    setSavingNote(true);
     try { const n = await addNote(id, noteDraft); setNotes((p) => [n, ...p]); setNoteDraft('');
-      void contactTimeline(id, c?.email ?? '').then(setTimeline); }
+      void contactTimeline(id, c?.email ?? '').then(setTimeline).catch(() => {}); }
     catch (e) { toast('error', e instanceof Error ? e.message : 'Could not save the note.'); }
+    finally { setSavingNote(false); }
   };
   const remove = async () => {
     try { await deleteContact(id); toast('success', 'Contact deleted.'); onDeleted(); }
     catch (e) { toast('error', e instanceof Error ? e.message : 'Could not delete.'); }
   };
 
+  if (detailFailed) return <div className="rounded-2xl border border-forge-err/30 bg-forge-err/10 p-6 text-sm text-forge-err">Couldn't load this contact — try selecting them again.</div>;
   if (!c) return <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-8 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /></div>;
   return (
     <div className="space-y-4">

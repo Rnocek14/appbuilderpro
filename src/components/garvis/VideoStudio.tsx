@@ -173,7 +173,13 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
           <div className="flex flex-wrap gap-1.5">
             {VIDEO_CONCEPTS.map((c) => (
               <button key={c.id} title={`${c.blurb} (switching cuts rebuilds the timeline)`}
-                onClick={() => { if (!materials) return; setConcept(c.id); setSb(defaultStoryboardFor(materials, title, aspect, c.id)); setScene(0); setPlaying(false); }}
+                onClick={() => {
+                  if (!materials || c.id === concept) return;
+                  // Switching cuts rebuilds the timeline — hand-edited lines would vanish
+                  // silently (system scan). One honest question protects an hour of edits.
+                  if (!window.confirm(`Switch to the "${c.label}" cut? The timeline rebuilds from that concept — any lines you edited on this cut are discarded.`)) return;
+                  setConcept(c.id); setSb(defaultStoryboardFor(materials, title, aspect, c.id)); setScene(0); setPlaying(false);
+                }}
                 className={cn('rounded-lg border px-2.5 py-1 text-xs transition-colors', concept === c.id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
                 {c.label}
               </button>
