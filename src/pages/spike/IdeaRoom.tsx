@@ -11,13 +11,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, ArrowRight, Home, Layers, HelpCircle, Shuffle, Wand2, Clapperboard, Play, Loader2,
   Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Map as MapIcon, Link2,
-  Split, FlaskConical, Scale, Atom, ClipboardCheck, Lightbulb,
+  Split, FlaskConical, Scale, Atom, ClipboardCheck, Lightbulb, GitCompare, Microscope,
 } from 'lucide-react';
 import {
   relatedClusters, addChild, whatIfChild, slugify, EPISTEMICS,
   type ClusterGraph, type Cluster, type ClusterKind, type ClusterMaturity, type Epistemic, type Artifact, type ExpandMode, type Lead, type LeadKind, type RelatedCluster,
 } from '../../lib/garvis/clustering';
 import { exploreLeads, expandCluster, gatherWikiMedia, gatherVideos, findSimilarClusters, composeProspect, type Prospect } from '../../lib/garvis/clusteringRun';
+import { compareNodes, formalizeTheory } from '../../lib/garvis/inquiryRun';
+import { THEORY_ARTIFACT_ID, type Comparison } from '../../lib/garvis/inquiry';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
 import { LabBench } from '../../components/garvis/LabBench';
 
@@ -52,7 +54,7 @@ const leadToKind = (k: LeadKind): ClusterKind => (k === 'question' ? 'question' 
 const imagesOf = (c: Cluster) => c.artifacts.filter((a) => a.kind === 'image' && (a.thumb || a.url));
 const videosOf = (c: Cluster) => c.artifacts.filter((a) => a.kind === 'video');
 const understandingOf = (c: Cluster) => c.artifacts.find((a) => a.id === 'understanding') ?? c.artifacts.find((a) => a.kind === 'research');
-const creationsOf = (c: Cluster) => c.artifacts.filter((a) => a.source === 'generated' || a.kind === 'diagram' || a.kind === 'post');
+const creationsOf = (c: Cluster) => c.artifacts.filter((a) => a.source === 'generated' || a.source === 'lab' || a.kind === 'diagram' || a.kind === 'post');
 
 function trail(byId: Map<string, Cluster>, id: string): Cluster[] {
   const out: Cluster[] = [];
@@ -82,6 +84,11 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const [whatIf, setWhatIf] = useState<string | null>(null); // null = closed; '' = open, typing
   const [showBench, setShowBench] = useState(false);
   const [pickStatus, setPickStatus] = useState(false);
+  const [comparePick, setComparePick] = useState(false);
+  const [compareQ, setCompareQ] = useState('');
+  const [comparison, setComparison] = useState<{ withTitle: string; cmp: Comparison } | null>(null);
+  const [showTheory, setShowTheory] = useState(false);
+  const [labErr, setLabErr] = useState('');
   const [, setReadyTick] = useState(0);
   const leadsCache = useRef<Record<string, Lead[]>>({});
   const done = useRef<Set<string>>(new Set());
@@ -100,6 +107,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     const id = focus.id;
     setLeads(leadsCache.current[id] ?? []); setSimilar(null);
     setWhatIf(null); setShowBench(false); setPickStatus(false); // lab state is per-branch
+    setComparePick(false); setCompareQ(''); setComparison(null); setShowTheory(false); setLabErr('');
     if (done.current.has(id)) return;
     done.current.add(id);
     let cancelled = false;
@@ -189,6 +197,35 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const setEpistemic = (e: Epistemic | undefined) => {
     setGraph({ ...graph, clusters: graph.clusters.map((c) => (c.id === focus.id ? { ...c, epistemic: e } : c)) });
     setPickStatus(false);
+  };
+
+  // COMPARE — the decision laboratory: two thoughts side by side, and the parts a table can't
+  // give (agreements, conflicts, hinges, discriminating evidence). Survivors become an artifact
+  // on this branch AND a typed edge on the map. Thin output names its gaps and saves nothing.
+  const runCompare = async (bId: string) => {
+    setComparePick(false); setBusy('cmp'); setLabErr(''); setComparison(null);
+    try {
+      const r = await compareNodes(graph, focus.id, bId);
+      if (r.costUsd) onCost?.(r.costUsd);
+      if (r.cmp) { setGraph(r.graph); setComparison({ withTitle: byId.get(bId)?.title ?? 'the other', cmp: r.cmp }); }
+      else setLabErr(r.error ?? 'The comparison came back too thin to trust.');
+    } catch (e) { setLabErr(e instanceof Error ? e.message : 'Comparison failed.'); }
+    finally { setBusy(null); }
+  };
+
+  // MAKE IT RIGOROUS — the falsification engine: claim, assumptions, predictions, the case
+  // against, and (non-negotiable) what would prove it wrong. Rejected scaffolds save nothing.
+  const theoryArt = focus.artifacts.find((a) => a.id === THEORY_ARTIFACT_ID);
+  const runTheory = async () => {
+    if (theoryArt) { setShowTheory((v) => !v); return; } // already scaffolded — toggle the view
+    setBusy('theory'); setLabErr('');
+    try {
+      const r = await formalizeTheory(graph, focus.id);
+      if (r.costUsd) onCost?.(r.costUsd);
+      if (r.scaffold) { setGraph(r.graph); setShowTheory(true); }
+      else setLabErr(r.error ?? 'The scaffold came back too thin to trust.');
+    } catch (e) { setLabErr(e instanceof Error ? e.message : 'Scaffolding failed.'); }
+    finally { setBusy(null); }
   };
 
   // merge existing branches + fresh leads into one set of "currents", ranked by your currents
@@ -314,7 +351,39 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             <button onClick={() => run('vid', () => gatherVideos(graph, focus.id))} className="inline-flex items-center gap-1 hover:text-forge-ember">{busy === 'vid' ? <Loader2 size={11} className="animate-spin" /> : <Clapperboard size={11} />} more videos</button>
             <button onClick={() => setWhatIf(whatIf === null ? '' : null)} className={`inline-flex items-center gap-1 ${whatIf !== null ? 'text-orange-400' : 'hover:text-orange-400'}`}><Split size={11} /> what if…</button>
             <button onClick={() => setShowBench((v) => !v)} className={`inline-flex items-center gap-1 ${showBench ? 'text-cyan-300' : 'hover:text-cyan-300'}`}><FlaskConical size={11} /> lab bench</button>
+            <button onClick={() => setComparePick((v) => !v)} className={`inline-flex items-center gap-1 ${comparePick || comparison ? 'text-sky-400' : 'hover:text-sky-400'}`}>{busy === 'cmp' ? <Loader2 size={11} className="animate-spin" /> : <GitCompare size={11} />} compare</button>
+            <button onClick={runTheory} className={`inline-flex items-center gap-1 ${theoryArt ? 'text-violet-400' : 'hover:text-violet-400'}`}>{busy === 'theory' ? <Loader2 size={11} className="animate-spin" /> : <Microscope size={11} />} {theoryArt ? 'rigor ✓' : 'make it rigorous'}</button>
           </div>
+
+          {labErr && <p className="mt-3 rounded-lg border border-forge-err/30 bg-forge-err/10 p-2.5 text-xs text-forge-err">{labErr}</p>}
+
+          {/* COMPARE PICKER — choose the other side of the bench */}
+          {comparePick && (
+            <div className="ku-rise mt-3 rounded-xl border border-forge-border bg-forge-panel/60 p-3">
+              <div className="mb-2 text-[10px] uppercase tracking-wide text-forge-dim/70">compare “{focus.title}” with…</div>
+              <input
+                autoFocus value={compareQ} onChange={(e) => setCompareQ(e.target.value)}
+                placeholder="find another thought on this map…"
+                className="mb-2 w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-1.5 text-xs text-forge-ink outline-none focus:border-sky-400/60"
+              />
+              <div className="flex flex-wrap gap-1.5">
+                {(() => {
+                  const relIds = new Set(related.map((r) => r.id));
+                  const q = compareQ.trim().toLowerCase();
+                  return graph.clusters
+                    .filter((c) => c.id !== focus.id && (!q || c.title.toLowerCase().includes(q)))
+                    .sort((a, b) => Number(relIds.has(b.id)) - Number(relIds.has(a.id)))
+                    .slice(0, 10)
+                    .map((c) => (
+                      <button key={c.id} onClick={() => runCompare(c.id)} title={c.summary || c.title}
+                        className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-sky-400/50 hover:text-forge-ink">
+                        {c.title}
+                      </button>
+                    ));
+                })()}
+              </div>
+            </div>
+          )}
 
           {/* WHAT IF? — the central action of the Lab: pick any thought, twist one thing, and a NEW
               scenario branch grows beside the original. The original is never touched. */}
@@ -337,6 +406,72 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
 
           {/* THE LAB BENCH — manipulate the idea: known equations + your dials, honestly labeled */}
           {showBench && <LabBench cluster={focus} onSave={saveArtifact} />}
+
+          {/* DECISION LAB READOUT — saved to this branch; the relationship is now a map edge */}
+          {comparison && (
+            <div className="ku-rise mt-5 rounded-2xl border border-forge-border bg-forge-panel/50 p-4">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <GitCompare size={14} className="text-sky-400" />
+                <span className="text-sm font-semibold text-forge-ink">vs {comparison.withTitle}</span>
+                <span className={`rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-wide ${
+                  comparison.cmp.verdict === 'contradicts' ? 'border-rose-400/50 text-rose-400'
+                    : comparison.cmp.verdict === 'complementary' ? 'border-forge-ok/50 text-forge-ok'
+                      : 'border-sky-400/50 text-sky-400'}`}>
+                  {comparison.cmp.verdict}
+                </span>
+                <span className="text-[10px] text-forge-dim/60">saved here · relationship drawn on the map</span>
+                <button onClick={() => setComparison(null)} className="ml-auto text-[11px] text-forge-dim hover:text-forge-ink">close</button>
+              </div>
+              <div className="grid gap-3 text-xs md:grid-cols-2">
+                {([['A', focus.title, comparison.cmp.a], ['B', comparison.withTitle, comparison.cmp.b]] as const).map(([tag, title, side]) => (
+                  <div key={tag} className="rounded-xl border border-forge-border p-3">
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-forge-dim/60">{tag} — {title}</div>
+                    <p className="text-forge-ink">{side.claim}</p>
+                    {side.assumptions.slice(0, 3).map((s) => <p key={s} className="mt-1 text-forge-dim">assumes: {s}</p>)}
+                    {side.problems.slice(0, 2).map((s) => <p key={s} className="mt-1 text-forge-warn/80">problem: {s}</p>)}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 grid gap-3 text-xs md:grid-cols-2">
+                {comparison.cmp.agree.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-forge-ok/70">where they agree</div>
+                    {comparison.cmp.agree.map((s) => <p key={s} className="text-forge-dim">· {s}</p>)}
+                  </div>
+                )}
+                {comparison.cmp.conflict.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-forge-warn/70">where they conflict</div>
+                    {comparison.cmp.conflict.map((s) => <p key={s} className="text-forge-dim">· {s}</p>)}
+                  </div>
+                )}
+              </div>
+              {comparison.cmp.hinges.length > 0 && (
+                <div className="mt-3 text-xs">
+                  <div className="mb-1 text-[10px] uppercase tracking-wide text-forge-dim/60">what it hinges on</div>
+                  {comparison.cmp.hinges.map((s) => <p key={s} className="text-forge-dim">· {s}</p>)}
+                </div>
+              )}
+              <div className="mt-3 rounded-xl border border-cyan-400/25 bg-cyan-400/5 p-3 text-xs">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-cyan-300/80">what would settle it</div>
+                {comparison.cmp.discriminators.map((s) => <p key={s} className="text-forge-ink/90">· {s}</p>)}
+              </div>
+              <p className="mt-3 text-xs italic text-forge-dim">{comparison.cmp.readout}</p>
+            </div>
+          )}
+
+          {/* THE THEORY, SCAFFOLDED — the falsification block is the point, not the fine print */}
+          {showTheory && theoryArt?.detail && (
+            <div className="ku-rise mt-5 rounded-2xl border border-violet-400/30 bg-forge-panel/50 p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Microscope size={14} className="text-violet-400" />
+                <span className="text-sm font-semibold text-forge-ink">{theoryArt.title}</span>
+                <button onClick={() => setShowTheory(false)} className="ml-auto text-[11px] text-forge-dim hover:text-forge-ink">close</button>
+              </div>
+              <p className="mb-3 text-[10px] uppercase tracking-wide text-forge-dim/60">a theory is only as good as what could prove it wrong — its experiments now live as branches below</p>
+              <p className="whitespace-pre-line text-xs leading-relaxed text-forge-dim">{theoryArt.detail}</p>
+            </div>
+          )}
         </div>
 
         {/* CURRENTS — the next thoughts, drifting in, varied weight, ready ones glowing */}
