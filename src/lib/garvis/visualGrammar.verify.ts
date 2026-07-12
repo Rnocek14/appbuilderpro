@@ -98,5 +98,43 @@ const GOOD = JSON.stringify({
   check('all six starters parse whole through the gates', all.every((s) => s && parseVisualSpec(JSON.stringify(s)).spec));
 }
 
+
+// 6. Word boundaries + gate hardening (review round 2).
+{
+  check("'embraced' does not summon a race", localSpecFor('she embraced the change gracefully') === null);
+  check("'unlimited' does not summon a threshold", localSpecFor('an unlimited vacation policy') === null);
+  check("'revs' does not summon a race", localSpecFor('the engine revs higher') === null);
+
+  const dupe = JSON.stringify({
+    archetype: 'decay',
+    title: 'Duplicate dials',
+    caption: 'assumes your numbers hold each month',
+    basis: 'a plain exponential decay of the starting pool',
+    params: [
+      { key: 'keep', label: 'kept share', min: 0.01, max: 0.99, step: 0.01, def: 0.5 },
+      { key: 'keep', label: 'kept share again', min: 0.01, max: 0.99, step: 0.01, def: 0.6 },
+    ],
+    slots: { start: 100, keep: 'keep', steps: 12 },
+  });
+  const dres = parseVisualSpec(dupe);
+  check('duplicate dial keys rejected by name', !dres.spec && dres.missing.some((m) => m.includes('duplicate dial key')));
+
+  const messy = JSON.stringify({
+    archetype: 'race',
+    title: 'Label sanity',
+    caption: 'assumes both paces stay steady as you set them',
+    basis: 'two steady rates compared side by side over time',
+    params: [
+      { key: 'rateA', label: 'pace A', min: 1, max: 10, step: 1, def: 2 },
+      { key: 'rateB', label: 'pace B', min: 1, max: 10, step: 1, def: 5 },
+    ],
+    slots: { rateA: 'rateA', rateB: 'rateB' },
+    labels: { a: 'Tortoise', b: { nested: 'object' }, c: 42 },
+  });
+  const mres = parseVisualSpec(messy);
+  check('non-string labels are dropped, string ones kept',
+    !!mres.spec && mres.spec.labels?.a === 'Tortoise' && !('b' in (mres.spec.labels ?? {})) && !('c' in (mres.spec.labels ?? {})));
+}
+
 console.log(`\nvisualGrammar.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} visualGrammar check(s) failed`);

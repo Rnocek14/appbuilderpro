@@ -256,6 +256,10 @@ const CAPTIONS: Record<string, string> = {
 
 export function SimVisual({ template, values, outputs }: { template: SimTemplate; values: Record<string, number>; outputs: SimOutput[] }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Values/outputs ride refs read fresh each frame (reviewed): keying the loop on them restarted
+  // the animation clock on every slider tick — the ship photon snapped home for the whole drag.
+  const live = useRef({ values, outputs });
+  useEffect(() => { live.current = { values, outputs }; }, [values, outputs]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -273,11 +277,22 @@ export function SimVisual({ template, values, outputs }: { template: SimTemplate
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, w, H);
       // reduced motion: one representative mid-cycle frame, no loop
-      render(ctx, w, reduced ? 3.7 : (now - start) / 1000, values, outputs);
+      render(ctx, w, reduced ? 3.7 : (now - start) / 1000, live.current.values, live.current.outputs);
       if (!reduced) raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
+  }, [template.id]);
+  // Reduced motion: no loop reads the ref — redraw the static frame when the dials change.
+  useEffect(() => {
+    if (!(typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    const canvas = ref.current; const render = RENDERERS[template.id]; const ctx = canvas?.getContext('2d');
+    if (!canvas || !render || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 600;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, H);
+    render(ctx, w, 3.7, values, outputs);
   }, [template.id, values, outputs]);
 
   if (!RENDERERS[template.id]) return null;

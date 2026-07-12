@@ -120,12 +120,15 @@ export function parseVisualSpec(raw: string): ParsedSpec {
 
   const rawParams = Array.isArray(o.params) ? o.params as Record<string, unknown>[] : [];
   const params: SpecParam[] = [];
+  const seenKeys = new Set<string>(); // duplicate keys = two sliders fighting over one value (reviewed)
   for (const p of rawParams.slice(0, 5)) {
     const key = typeof p?.key === 'string' ? p.key.trim() : '';
     const label = typeof p?.label === 'string' ? p.label.trim() : '';
     const min = Number(p?.min), max = Number(p?.max), step = Number(p?.step), def = Number(p?.def);
     if (!key || !label || ![min, max, step, def].every(Number.isFinite)) continue;
     if (!(min < max) || !(step > 0) || def < min || def > max) continue;
+    if (seenKeys.has(key)) { missing.push(`duplicate dial key "${key}" — one key, one dial`); continue; }
+    seenKeys.add(key);
     params.push({ key, label, min, max, step, def, ...(typeof p?.unit === 'string' ? { unit: p.unit } : {}) });
   }
   if (params.length < 1) missing.push('at least one sane, user-adjustable dial (min < max, default in range)');
@@ -142,7 +145,14 @@ export function parseVisualSpec(raw: string): ParsedSpec {
   }
 
   if (missing.length) return { spec: null, missing };
-  const labels = (o.labels && typeof o.labels === 'object' ? o.labels : undefined) as Record<string, string> | undefined;
+  // labels: keep string values only — anything else rendered as '[object Object]' (reviewed)
+  let labels: Record<string, string> | undefined;
+  if (o.labels && typeof o.labels === 'object') {
+    const clean = Object.fromEntries(Object.entries(o.labels as Record<string, unknown>)
+      .filter(([, v]) => typeof v === 'string' && (v as string).trim().length > 0)
+      .map(([k, v]) => [k, (v as string).trim().slice(0, 40)]));
+    if (Object.keys(clean).length) labels = clean;
+  }
   return { spec: { archetype: archetype!, title, caption, basis, params, slots, labels }, missing: [] };
 }
 
@@ -211,7 +221,8 @@ export function localSpecFor(text: string): VisualSpec | null {
   const cap = (what: string) =>
     `Starter mechanism for ${what} — every dial is an assumption to set, not a measured fact.`;
 
-  if (/(half-?life|decay|churn|forget|fade|attrition|erode)/.test(s)) {
+  // Word-bounded matchers (reviewed): 'embraced' must not summon a race, 'unlimited' no threshold.
+  if (/(half-?life|\bdecays?\b|\bchurn\b|forgett?ing|\bfades?\b|attrition|erosion|\berodes?\b)/.test(s)) {
     return {
       archetype: 'decay', title: 'How fast it fades',
       caption: cap('a decaying quantity'),
@@ -223,7 +234,7 @@ export function localSpecFor(text: string): VisualSpec | null {
       slots: { start: 100, keep: 'keep', steps: 'steps' },
     };
   }
-  if (/(compound|grow(th|s|ing)?|adopt|accumulat|snowball|save|savings)/.test(s)) {
+  if (/(\bcompound|\bgrow(th|s|ing)?\b|adoption|accumulat|snowball|\bsav(e|es|ings?)\b)/.test(s)) {
     return {
       archetype: 'accumulate', title: 'How it compounds',
       caption: cap('a compounding quantity'),
@@ -236,7 +247,7 @@ export function localSpecFor(text: string): VisualSpec | null {
       slots: { start: 0, rate: 'rate', add: 'add', steps: 'steps' },
     };
   }
-  if (/(odds|probabilit|chance|response rate|conversion|hit rate|success rate)/.test(s)) {
+  if (/(\bodds\b|probabilit|\bchances?\b|response rate|conversion|hit rate|success rate)/.test(s)) {
     return {
       archetype: 'field', title: 'Odds across many tries',
       caption: cap('independent attempts'),
@@ -248,7 +259,7 @@ export function localSpecFor(text: string): VisualSpec | null {
       slots: { p: 'p', n: 'n' },
     };
   }
-  if (/(vs\.?|versus|faster than|slower than|compared to|twice as|race)/.test(s)) {
+  if (/(\bvs\.?\b|\bversus\b|faster than|slower than|compared to|twice as|\brace\b)/.test(s)) {
     return {
       archetype: 'race', title: 'Two rates, side by side',
       caption: cap('two competing rates'),
@@ -261,7 +272,7 @@ export function localSpecFor(text: string): VisualSpec | null {
       labels: { a: 'A', b: 'B' },
     };
   }
-  if (/(runway|burn ?rate|inflow|outflow|fill|drain|queue|backlog|reservoir|stock and flow)/.test(s)) {
+  if (/(\brunway\b|burn ?rate|inflow|outflow|\bfills?\b|\bdrains?\b|\bqueue\b|backlog|reservoir|stock and flow)/.test(s)) {
     return {
       archetype: 'flow', title: 'What fills vs what drains',
       caption: cap('a stock with inflow and outflow'),
@@ -273,7 +284,7 @@ export function localSpecFor(text: string): VisualSpec | null {
       slots: { inflow: 'inflow', outflow: 'outflow', capacity: 100 },
     };
   }
-  if (/(break-?even|tipping point|capacity|limit|threshold|critical mass|saturat)/.test(s)) {
+  if (/(break-?even|tipping point|capacity|\blimits?\b|threshold|critical mass|saturat)/.test(s)) {
     return {
       archetype: 'threshold', title: 'How close to the line',
       caption: cap('a value against a hard limit'),

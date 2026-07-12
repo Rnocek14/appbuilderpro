@@ -128,7 +128,7 @@ const gravityWell: SimTemplate = {
 
   anchors: [
     'Interstellar\'s 1-hour-costs-7-years planet needs r a whisker outside a fast-spinning hole\'s horizon (Kerr, not this simple model)',
-    'Earth\'s own gravity well is shallow: surface clocks lose < 1 μs per year vs deep space',
+    'Earth\'s own well is shallow by comparison: surface clocks run ~0.7 ns/s slower than deep space — about 22 ms per year',
   ],  compute: (v0) => {
     const { r, hours } = v0;
     if (r <= 1) {

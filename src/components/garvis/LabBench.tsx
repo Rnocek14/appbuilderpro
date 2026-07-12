@@ -33,9 +33,11 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
 
   // GUESS FIRST (the hypercorrection effect): commit a number before the reveal — being wrong by
   // a surprising margin is what makes the real value stick. Purely optional; never blocks the dials.
-  const [guess, setGuess] = useState<{ armed: boolean; text: string; revealed: boolean }>({ armed: false, text: '', revealed: false });
+  // `actual` is snapshotted at the moment of reveal — the verdict must judge the guess against the
+  // number that was hidden, not against wherever the dials sit later.
+  const [guess, setGuess] = useState<{ armed: boolean; text: string; revealed: boolean; actual: number | null }>({ armed: false, text: '', revealed: false, actual: null });
 
-  const pick = (t: SimTemplate) => { setTemplate(t); setValues(defaultsFor(t)); setSavedId(null); setGuess((g) => ({ ...g, text: '', revealed: false })); };
+  const pick = (t: SimTemplate) => { setTemplate(t); setValues(defaultsFor(t)); setSavedId(null); setGuess((g) => ({ ...g, text: '', revealed: false, actual: null })); };
   const loadRun = (rec: NonNullable<ReturnType<typeof parseSimRecord>>) => {
     const t = simTemplateById(rec.templateId);
     if (!t) return;
@@ -116,7 +118,7 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
           <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-forge-dim/70">
             <span>the model computes</span>
             <button
-              onClick={() => setGuess((g) => ({ armed: !g.armed, text: '', revealed: false }))}
+              onClick={() => setGuess((g) => ({ armed: !g.armed, text: '', revealed: false, actual: null }))}
               title="Commit a guess before you look — being surprised is how the real number sticks"
               className={`rounded border px-1.5 py-0.5 text-[9px] normal-case tracking-normal ${guess.armed ? 'border-cyan-400/50 text-cyan-300' : 'border-forge-border text-forge-dim hover:text-forge-ink'}`}
             >
@@ -131,19 +133,19 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
                 <input
                   autoFocus value={guess.text} inputMode="decimal" placeholder="your guess"
                   onChange={(e) => setGuess((g) => ({ ...g, text: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') setGuess((g) => ({ ...g, revealed: true })); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setGuess((g) => ({ ...g, revealed: true, actual: primary.value })); }}
                   className="w-28 rounded-lg border border-forge-border bg-forge-bg px-2 py-1 font-mono text-sm text-forge-ink focus:border-cyan-400/60 focus:outline-none"
                 />
-                <button onClick={() => setGuess((g) => ({ ...g, revealed: true }))}
+                <button onClick={() => setGuess((g) => ({ ...g, revealed: true, actual: primary.value }))}
                   className="rounded-lg border border-cyan-400/40 px-2 py-1 text-[11px] text-forge-ink hover:bg-cyan-400/10">reveal</button>
               </div>
             ) : (
               <>
                 <div className="font-mono text-2xl text-forge-ink">{fmtSimValue(primary)}</div>
                 {guess.armed && guess.revealed && (() => {
-                  const g = Number(guess.text);
-                  if (!Number.isFinite(g) || primary.value === null) return <div className="mt-0.5 text-[10px] text-forge-dim">no comparable guess committed</div>;
-                  const off = primary.value !== 0 ? Math.abs(g - primary.value) / Math.abs(primary.value) * 100 : null;
+                  const g = guess.text.trim() === '' ? NaN : Number(guess.text); // Number('') is 0 — an empty box is no guess
+                  if (!Number.isFinite(g) || guess.actual === null) return <div className="mt-0.5 text-[10px] text-forge-dim">no comparable guess committed</div>;
+                  const off = guess.actual !== 0 ? Math.abs(g - guess.actual) / Math.abs(guess.actual) * 100 : null;
                   return (
                     <div className={`mt-0.5 text-[10px] ${off !== null && off <= 20 ? 'text-forge-ok' : 'text-forge-warn'}`}>
                       you guessed {g} — {off === null ? 'actual is 0' : off <= 20 ? `within ${off.toFixed(0)}% — well calibrated` : `off by ${off.toFixed(0)}% — the surprising ones stick hardest`}

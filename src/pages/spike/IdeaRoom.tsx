@@ -102,6 +102,9 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const [pictureVals, setPictureVals] = useState<Record<string, number>>({});
   const [pictureSavedId, setPictureSavedId] = useState<string | null>(null);
   const [, setReadyTick] = useState(0);
+  // A designed visual resolving after the user has stepped to another branch must be dropped,
+  // not painted onto whatever branch is focused now.
+  const focusRef = useRef<string | null>(null);
   const leadsCache = useRef<Record<string, Lead[]>>({});
   const done = useRef<Set<string>>(new Set());
   const prefetch = useRef<Record<string, Prospect | 'loading'>>({});
@@ -109,6 +112,8 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const byId = useMemo(() => new Map(graph.clusters.map((c) => [c.id, c])), [graph]);
   const roots = useMemo(() => graph.clusters.filter((c) => !c.parentId), [graph]);
   const focus = (focusId && byId.get(focusId)) || roots[0] || graph.clusters[0] || null;
+
+  focusRef.current = focus?.id ?? null;
 
   const ancestors = focus ? trail(byId, focus.id) : [];
   const children = focus ? graph.clusters.filter((c) => c.parentId === focus.id).sort((a, b) => b.salience - a.salience) : [];
@@ -380,8 +385,10 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             <button
               onClick={() => {
                 if (picture) { setPicture(null); return; }
+                const focusIdAtCall = focus.id;
                 void run('pic', async () => {
                   const r = await designVisual(focus.title, focus.summary);
+                  if (focusRef.current !== focusIdAtCall) return {}; // stale — user moved on
                   if ('visual' in r) {
                     setPicture(r.visual);
                     setPictureVals(specDefaults(r.visual.spec));

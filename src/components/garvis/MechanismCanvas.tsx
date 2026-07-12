@@ -20,7 +20,8 @@ function refused(ctx: Ctx, w: number, why: string) {
 // race — two tracks advancing at their rates; the gap IS the ratio.
 function drawRace(ctx: Ctx, w: number, t: number, s: Slots, spec: VisualSpec) {
   const a = s('rateA'), b = s('rateB');
-  if (a === null || b === null || (a <= 0 && b <= 0)) return refused(ctx, w, 'both rates must be set');
+  // Both rates must be positive — a zero lane makes the ratio meaningless ("Infinity× the pace").
+  if (a === null || b === null || a <= 0 || b <= 0) return refused(ctx, w, 'both rates must be above zero');
   const la = spec.labels?.a ?? 'A', lb = spec.labels?.b ?? 'B';
   const L = 90, R = 30, trackW = w - L - R, loop = 9; // seconds for the faster lane to finish
   const fast = Math.max(a, b);
@@ -33,8 +34,10 @@ function drawRace(ctx: Ctx, w: number, t: number, s: Slots, spec: VisualSpec) {
   };
   lane(H * 0.32, a, la, EMBER);
   lane(H * 0.58, b, lb, CYAN);
-  const ratio = b !== 0 ? a / b : null;
-  label(ctx, ratio !== null ? `${la} runs at ${ratio >= 1 ? ratio.toFixed(2) : (1 / ratio).toFixed(2)}× ${ratio >= 1 ? `${lb}'s` : `${la}'s`} pace — the widening gap is that ratio` : '', L, H - 24, DIM, 10);
+  // The FASTER lane is always the subject, the slower the reference — reviewed: the old line
+  // named the wrong lane when A trailed ("A runs at 2× A's pace").
+  const [fastL, slowL, factor] = a >= b ? [la, lb, a / b] : [lb, la, b / a];
+  label(ctx, `${fastL} runs at ${factor.toFixed(2)}× ${slowL}'s pace — the widening gap is that ratio`, L, H - 24, DIM, 10);
 }
 
 // accumulate — value ← value·(1+rate) + add, swept step by step.
@@ -181,6 +184,12 @@ const RENDER: Record<VisualSpec['archetype'], (ctx: Ctx, w: number, t: number, s
 
 export function MechanismCanvas({ spec, values }: { spec: VisualSpec; values: Record<string, number> }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Dial values ride a REF read fresh each frame (reviewed): keying the loop on the values object
+  // restarted the animation clock on every parent re-render and froze the sweep at t≈0 for the
+  // whole length of a slider drag. Now the loop keys on the spec alone — twist a dial and the
+  // RUNNING mechanism responds; only a new spec restarts the clock.
+  const valuesRef = useRef(values);
+  useEffect(() => { valuesRef.current = values; }, [values]);
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
@@ -190,7 +199,7 @@ export function MechanismCanvas({ spec, values }: { spec: VisualSpec; values: Re
     const dpr = window.devicePixelRatio || 1;
     let raf = 0;
     const start = performance.now();
-    const s: Slots = (name) => slotValue(spec, name, values);
+    const s: Slots = (name) => slotValue(spec, name, valuesRef.current);
     const frame = (now: number) => {
       const w = canvas.clientWidth || 600;
       if (canvas.width !== Math.round(w * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(H * dpr); }
@@ -201,6 +210,17 @@ export function MechanismCanvas({ spec, values }: { spec: VisualSpec; values: Re
     };
     raf = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(raf);
+  }, [spec]);
+  // Reduced motion draws once per values change (no loop to pick the ref up) — re-render the frame.
+  useEffect(() => {
+    if (!(typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    const canvas = ref.current; const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth || 600;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, w, H);
+    RENDER[spec.archetype](ctx, w, 3.4, (name) => slotValue(spec, name, values), spec);
   }, [spec, values]);
   return <canvas ref={ref} className="w-full rounded-xl border border-forge-border bg-[#0a0c11]" style={{ height: H }} />;
 }
