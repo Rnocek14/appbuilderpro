@@ -1014,6 +1014,12 @@ export async function createMissingModules(projectId: string, opts?: { onFile?: 
  *   → VERIFY + FIX inline: missing-module heal → real compile gate → agentic repair.
  * rawComplete routes each call to the browser key (direct) or the metered agent-turn relay (cloud).
  */
+// app_blueprints' actual columns (supabase/schema.sql) — inserts must never spread unknown keys.
+const BLUEPRINT_COLUMNS = [
+  'app_name', 'description', 'user_roles', 'database_schema', 'pages', 'components',
+  'auth_rules', 'workflows', 'integrations', 'deployment_notes',
+] as const;
+
 async function chunkedGenerate(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   const { data: auth } = await supabase.auth.getUser();
   const userId = auth.user!.id;
@@ -1051,7 +1057,12 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
       let usageIn = bpRaw.inputTokens, usageOut = bpRaw.outputTokens;
       const track = (r: RawResult): RawResult => { usageIn += r.inputTokens; usageOut += r.outputTokens; return r; };
       const blueprint = await parseJsonWithRepair<Record<string, unknown>>(bpRaw.text);
-      await supabase.from('app_blueprints').insert({ project_id: projectId, ...blueprint });
+      // SANITIZED to the table's real columns (review fix): the model's blueprint carries keys the
+      // table doesn't have (notably "design"), and spreading them made PostgREST reject the WHOLE
+      // insert — silently, so no blueprint was ever saved and Resume had nothing to stand on. The
+      // full blueprint (design included) still drives generation via bpJson below.
+      const bpRow = Object.fromEntries(BLUEPRINT_COLUMNS.filter((k) => k in blueprint).map((k) => [k, blueprint[k]]));
+      await supabase.from('app_blueprints').insert({ project_id: projectId, ...bpRow });
       await supabase.from('projects').update({
         name: (blueprint.app_name as string) ?? 'Untitled app',
         description: (blueprint.description as string) ?? null,
@@ -1344,13 +1355,23 @@ export async function resumeGeneration(projectId: string): Promise<{ generationI
   const { data: bpRow } = await supabase.from('app_blueprints')
     .select('*').eq('project_id', projectId)
     .order('version', { ascending: false }).limit(1).maybeSingle();
-  if (!bpRow) throw new Error('Nothing to resume — the build died before the blueprint was saved. Start it again with the same prompt.');
 
   const { data: fileRows } = await supabase.from('project_files')
     .select('path, content').eq('project_id', projectId).is('deleted_at', null).limit(1200);
   const files = new Map(((fileRows ?? []) as { path: string; content: string }[]).map((f) => [f.path, f.content]));
   const appTsx = files.get('/src/App.tsx') ?? '';
   if (!appTsx.trim()) throw new Error('The build died before the app shell existed — start it again with the same prompt (nothing else was lost).');
+
+  // No blueprint row (builds from before the sanitized insert never saved one) — the shell exists,
+  // so resume from a minimal reconstruction rather than refuse: the saved files ARE the contracts.
+  let bpFallback: Record<string, unknown> | null = null;
+  if (!bpRow) {
+    const { data: proj } = await supabase.from('projects').select('name, description').eq('id', projectId).maybeSingle();
+    bpFallback = {
+      app_name: (proj as { name?: string } | null)?.name ?? 'The app',
+      description: (proj as { description?: string | null } | null)?.description ?? 'Resume of an interrupted build — the existing files are the authoritative contracts.',
+    };
+  }
 
   // Same manifest rule as generation: App.tsx's ./pages imports are authoritative.
   const pagePaths = new Set<string>();
@@ -1380,8 +1401,9 @@ export async function resumeGeneration(projectId: string): Promise<{ generationI
 
   (async () => {
     try {
-      // Blueprint context: the saved row minus its bookkeeping columns.
-      const { id: _i, project_id: _p, created_at: _c, version: _v, ...bp } = bpRow as Record<string, unknown>;
+      // Blueprint context: the saved row minus its bookkeeping columns (or the reconstruction).
+      const { id: _i, project_id: _p, created_at: _c, version: _v, ...saved } = (bpRow ?? {}) as Record<string, unknown>;
+      const bp = bpRow ? saved : (bpFallback as Record<string, unknown>);
       const bpJson = JSON.stringify(bp);
       const contractsContext = [...files.entries()]
         .filter(([p]) => p.startsWith('/src/'))
@@ -1401,7 +1423,14 @@ export async function resumeGeneration(projectId: string): Promise<{ generationI
           changes = changes.slice(0, -1);
         }
         if (!changes.some((c) => c.path === pagePath && c.content.trim())) throw new Error(`page ${pagePath} was not emitted`);
+        // Same write rules as a fresh build (review fix): never the scaffold/UI kit, and — resume
+        // being a RECOVERY — never overwrite a file that already survived; only the target page
+        // and genuinely-new companions land. The model can't see every saved file (context cap),
+        // so its re-emissions of existing files must not clobber the record.
+        const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
         for (const ch of changes) {
+          if (!ch.path || !ch.content.trim() || reserved.has(ch.path) || ch.path.startsWith('/src/components/ui/')) continue;
+          if (ch.path !== pagePath && files.get(ch.path)?.trim()) continue;
           await supabase.from('project_files').upsert(
             { project_id: projectId, path: ch.path, content: ch.content, updated_by_ai: true },
             { onConflict: 'project_id,path' },

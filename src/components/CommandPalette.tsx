@@ -49,7 +49,11 @@ export function CommandPalette({ open, onClose }: Props) {
   const searchSeq = useRef(0);
   useEffect(() => {
     const q = query.trim();
-    if (!open || q.length < 3) { setHits([]); return; }
+    if (!open || q.length < 3) {
+      searchSeq.current++; // invalidate any in-flight RPC (review fix: a stale 'invoices' response
+      setHits([]);         // must not repopulate hits after the query shrank or the palette closed)
+      return;
+    }
     const seq = ++searchSeq.current;
     const t = setTimeout(() => {
       void universalSearch(q).then((r) => { if (searchSeq.current === seq) setHits(r); });

@@ -25,9 +25,12 @@ export async function loadInbox(limit = 40): Promise<InboxItem[]> {
     supabase.from('replies')
       .select('*')
       .order('received_at', { ascending: false }).limit(limit),
+    // NEW leads only (review fix): 'contacted' is the lane's done-state — including it meant a
+    // lead marked done popped straight back on the next refresh, making done + Undo both lies.
+    // Matches the badge (AppShell) and the waking move (nextMoveRun), which already count 'new'.
     supabase.from('leads')
       .select('id, name, email, message, source, world_id, status, contact_id, created_at')
-      .neq('status', 'spam').order('created_at', { ascending: false }).limit(limit),
+      .eq('status', 'new').order('created_at', { ascending: false }).limit(limit),
   ]);
   const replies: InboxItem[] = ((repliesQ.data ?? []) as Record<string, unknown>[])
     .filter((r) => !r.handled_at)
@@ -124,9 +127,11 @@ export async function unmarkReplyHandled(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-/** Undo for a lead marked answered — it returns to the new-lead lane (and the waking move). */
+/** Undo for a lead marked answered — it returns to the new-lead lane (and the waking move).
+ *  Only flips leads that are currently 'contacted': the lane admits 'new' leads only, so this
+ *  restores exactly the state "done" left, and can never resurrect some other lifecycle state. */
 export async function reopenLead(id: string): Promise<void> {
-  const { error } = await supabase.from('leads').update({ status: 'new' }).eq('id', id);
+  const { error } = await supabase.from('leads').update({ status: 'new' }).eq('id', id).eq('status', 'contacted');
   if (error) throw new Error(error.message);
 }
 

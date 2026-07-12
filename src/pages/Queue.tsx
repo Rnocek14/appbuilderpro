@@ -65,10 +65,10 @@ export default function Queue() {
   };
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
-  // history tab
+  // history tab — refetched on EVERY entry (review fix: a one-time latch meant "see History"
+  // after a failed execution pointed at a stale list that didn't contain the failure).
   const [decided, setDecided] = useState<Approval[]>([]);
   const [runs, setRuns] = useState<ExecutionRun[]>([]);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
 
   const refresh = useCallback(async () => {
     try { setApprovals(await listApprovals('pending')); } catch { setApprovals((prev) => prev ?? []); }
@@ -77,16 +77,15 @@ export default function Queue() {
   useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
-    if (tab !== 'history' || historyLoaded) return;
+    if (tab !== 'history') return;
     void (async () => {
       try {
         const [all, r] = await Promise.all([listApprovals('all', 40), listExecutionRuns(40)]);
         setDecided(all.filter((a) => a.status !== 'pending'));
         setRuns(r);
       } catch { /* history renders what it has */ }
-      setHistoryLoaded(true);
     })();
-  }, [tab, historyLoaded]);
+  }, [tab]);
 
   const rows: Row[] = useMemo(() => [
     ...(approvals ?? []).map((a): Row => ({ key: `d-${a.id}`, lane: 'decision', a })),
@@ -197,30 +196,33 @@ export default function Queue() {
 
   // ---- keyboard ------------------------------------------------------------
   // j/k move · a approve · x reject · r reply · d done · Enter = the row's primary action.
-  // Silent while typing (composer, question answers) — the list yields to the text.
+  // Safety rails (adversarial review): silent while ANY interactive element has focus — a
+  // focused button owns its own Enter (the review caught Enter-on-Reject rerouting to APPROVE);
+  // auto-repeat never fires (holding 'a' must not walk the lane approving everything); and a
+  // decision in flight blocks the next one.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (tab !== 'queue' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (tab !== 'queue' || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON' || t.tagName === 'SELECT' || t.tagName === 'A' || t.isContentEditable)) return;
       const row = rows[sel];
       if (e.key === 'j') { e.preventDefault(); setSel((s) => Math.min(s + 1, rows.length - 1)); }
       else if (e.key === 'k') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }
       else if (!row) return;
-      else if (e.key === 'a' && row.lane === 'decision') { e.preventDefault(); void decide(row.a, true); }
-      else if (e.key === 'x' && row.lane === 'decision') { e.preventDefault(); void decide(row.a, false); }
+      else if (e.key === 'a' && row.lane === 'decision') { e.preventDefault(); if (!actingId) void decide(row.a, true); }
+      else if (e.key === 'x' && row.lane === 'decision') { e.preventDefault(); if (!actingId) void decide(row.a, false); }
       else if (e.key === 'r' && row.lane === 'message') { e.preventDefault(); openReply(row.m); }
       else if (e.key === 'd' && row.lane === 'message') { e.preventDefault(); void done(row.m); }
       else if (e.key === 'Enter') {
         e.preventDefault();
-        if (row.lane === 'decision') void decide(row.a, true);
+        if (row.lane === 'decision') { if (!actingId) void decide(row.a, true); }
         else if (row.lane === 'message') openReply(row.m);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, sel, tab, approvals, items]);
+  }, [rows, sel, tab, approvals, items, actingId]);
 
   const loading = approvals === null || items === null;
   const selKey = rows[sel]?.key;
@@ -265,6 +267,23 @@ export default function Queue() {
                   </li>
                 ))}
               </ul>
+            )}
+            {/* Answered build questions (review fix: the old /inbox rendered these — the record
+                of what you told the agent must stay readable after the merge). */}
+            {questions.some((q) => q.status !== 'pending') && (
+              <>
+                {laneHead('Build questions answered')}
+                <ul className="space-y-1.5">
+                  {questions.filter((q) => q.status !== 'pending').slice(0, 10).map((q) => (
+                    <li key={q.id} className="rounded-lg border border-forge-border px-3 py-2 text-xs">
+                      <span className="text-forge-ink">{q.question}</span>
+                      <span className="mt-0.5 block text-forge-dim">
+                        {q.status === 'skipped' ? 'Skipped — the agent used its judgment.' : q.answer}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
             <h2 className="mb-2 mt-8 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-forge-dim"><ScrollText size={13} /> Execution log</h2>
             {runs.length === 0 ? <p className="text-sm text-forge-dim">No external actions yet. Every send, deploy, and charge lands here.</p> : (

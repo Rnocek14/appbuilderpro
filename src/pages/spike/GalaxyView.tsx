@@ -419,12 +419,14 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
   // into a structured brief, so a rabbit hole becomes a fully-briefed build instead of a thin seed I'd
   // have to re-explain. The brief is too big for a URL, so it rides in localStorage; NewProject writes
   // it into the project Brain (persists into every future edit) and feeds it into the first generation.
-  const buildThis = () => {
+  const buildThis = async () => {
     const compiled = compileBuildBrief(graph, focus.id, { openQuestions: leads.map((l) => l.label) });
     if (!compiled) return;
     try { localStorage.setItem('ff:build-brief', JSON.stringify(compiled)); } catch { /* falls back to prompt-only seed */ }
     // THE BATON (app_0052): the brief also rides the working_state row — tab/device/cache-proof.
-    void patchWorkingState({ build_brief: { brief: compiled as unknown as Record<string, unknown>, world: null } });
+    // AWAITED (review fix): fire-and-forget raced NewProject's consume-and-clear — the clear could
+    // land first and the set second, re-staging a consumed brief on the row forever.
+    await patchWorkingState({ build_brief: { brief: compiled as unknown as Record<string, unknown>, world: null } }).catch(() => { /* localStorage carries it */ });
     navigate('/new?from=constellation');
   };
 

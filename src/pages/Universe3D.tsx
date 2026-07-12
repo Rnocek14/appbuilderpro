@@ -543,7 +543,9 @@ export default function UniverseSky() {
   return (
     <>
       {flat ? <UniverseFlat /> : <Universe3D />}
-      <div className="fixed bottom-4 right-4 z-40 flex items-center gap-1 rounded-full border border-forge-border bg-forge-raised/95 p-1 text-[11px] shadow-lift">
+      {/* Bottom-CENTER (review fix): both bottom corners belong to the 3D scene's own UI — the
+          selected-world card sits left, the orbit hint and docked studio panel sit right. */}
+      <div className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full border border-forge-border bg-forge-raised/95 p-1 text-[11px] shadow-lift">
         {webgl && !reduced && (
           <>
             <button onClick={() => setMode('3d')} className={cn('rounded-full px-2.5 py-1', !flat ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>3D sky</button>

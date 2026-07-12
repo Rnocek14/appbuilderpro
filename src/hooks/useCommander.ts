@@ -4,7 +4,7 @@
 // REFLEXIVE RETRIEVAL over the owner's own artifacts (retrieveForPrompt), so the front door
 // answers from what's actually on record instead of improvising from a snapshot string.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { rawComplete } from '../lib/aiClient';
 import { supabase } from '../lib/supabase';
@@ -15,7 +15,7 @@ import { useMind } from './useMind';
 import { goalsDigest } from '../lib/garvis/goalsRun';
 import { retrieveForPrompt } from '../lib/garvis/ask';
 import { runGarvisAct } from '../lib/garvis';
-import { patchWorkingState, loadWorkingState } from '../lib/garvis/workingStateRun';
+import { patchWorkingState, loadWorkingState, clearCanvasIfMatches } from '../lib/garvis/workingStateRun';
 
 export interface ChatMessage {
   id: string;
@@ -76,20 +76,32 @@ export function useCommander() {
   const [canvas, setCanvasState] = useState<Canvas | null>(() => {
     try { return JSON.parse(sessionStorage.getItem('ff:canvas') ?? 'null') as Canvas | null; } catch { return null; }
   });
+  const canvasRef = useRef<Canvas | null>(canvas); // what THIS tab currently shows (for close-compare)
   const setCanvas = (c: Canvas | null) => {
+    const closing = canvasRef.current;
+    canvasRef.current = c;
     setCanvasState(c);
     try { c ? sessionStorage.setItem('ff:canvas', JSON.stringify(c)) : sessionStorage.removeItem('ff:canvas'); } catch { /* best-effort */ }
-    void patchWorkingState({ canvas: c }); // travels with the owner; fire-and-forget
+    // Travels with the owner. Closing clears the row ONLY if it still holds the desk this tab is
+    // closing — a stale tab must not destroy a newer desk staged elsewhere (review fix).
+    if (c) void patchWorkingState({ canvas: c });
+    else void clearCanvasIfMatches(closing);
   };
   useEffect(() => {
     // Fresh session (no sessionStorage) → restore the traveling desk once, if one is staged.
+    // Functional set (review fix): if the user summoned a canvas while this fetch was in flight,
+    // the fresh desk wins and the stale restore is discarded.
     if (canvas) return;
     let live = true;
     void loadWorkingState().then((ws) => {
       const c = (ws?.canvas ?? null) as Canvas | null;
       if (live && c && typeof c === 'object' && 'surface' in c) {
-        setCanvasState(c);
-        try { sessionStorage.setItem('ff:canvas', JSON.stringify(c)); } catch { /* best-effort */ }
+        setCanvasState((cur) => {
+          if (cur) return cur; // the user got here first — keep their desk
+          canvasRef.current = c;
+          try { sessionStorage.setItem('ff:canvas', JSON.stringify(c)); } catch { /* best-effort */ }
+          return c;
+        });
       }
     }).catch(() => { /* no row, no restore — the cold desk is honest */ });
     return () => { live = false; };
