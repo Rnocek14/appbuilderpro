@@ -15,7 +15,7 @@
 
 import type { BusinessContext } from './genesis';
 
-export type MailerConcept = 'proof' | 'before_after' | 'local_authority';
+export type MailerConcept = 'proof' | 'before_after' | 'local_authority' | 'question' | 'urgency' | 'offer_first' | 'story';
 
 export interface MailerBrand {
   palette?: string[];          // hex colors, first = primary accent
@@ -101,6 +101,49 @@ export function compileMailer(input: MailerInput): MailerSpec {
           ? `${principal} works right here${locale ? ` in ${locale}` : ''} — not a franchise, not a call center.`
           : EDIT('one line: the local human behind the work'),
         ctx.offerings.length ? `What we do: ${clip(ctx.offerings.slice(0, 3).join(', '), 90)}.` : EDIT('what you offer, plainly'),
+        offer,
+      ];
+      break;
+    // Renditions 4–7 — the same REAL materials reframed through different persuasion mechanisms
+    // (question, deadline, offer-led, narrative). Deterministic, instant, print-safe; anything
+    // the record can't supply is a visible EDIT hole, never an invented claim.
+    case 'question':
+      headline = ctx.audience ? clip(`Still ${craft ? `settling for less ${craft}` : 'waiting'}?`, 48) : clip(`What would you change first?`, 48);
+      kicker = locale ? clip(`${name} · ${locale}`, 44) : name;
+      backHeadline = clip(`A fair question — and our answer.`, 60);
+      bodyLines = [
+        ctx.audience ? `If you're ${clip(ctx.audience, 70)}, you've probably wondered about this.` : EDIT('one line: the question your audience is already asking'),
+        craft ? `${name} does ${craft} — the front of this card is our real work.` : EDIT('one line: what you do, plainly'),
+        offer,
+      ];
+      break;
+    case 'urgency':
+      headline = clip(`This season, not next.`, 48);
+      kicker = name;
+      backHeadline = clip(`Why now beats later.`, 60);
+      bodyLines = [
+        EDIT('one honest reason timing matters (season, capacity, a real date — never a fake countdown)'),
+        craft ? `${name} — ${craft}${locale ? `, here in ${locale}` : ''}.` : `From ${name}.`,
+        offer,
+      ];
+      break;
+    case 'offer_first':
+      headline = clip(offer.startsWith('[EDIT') ? EDIT('the offer, big: it IS the headline') : offer, 48);
+      kicker = locale ? clip(`${name} · ${locale}`, 44) : name;
+      backHeadline = clip(`The fine print (there isn't much).`, 60);
+      bodyLines = [
+        EDIT('one line: what the offer includes and how long it stands'),
+        ctx.audience ? `For ${clip(ctx.audience, 70)}.` : EDIT('who it’s for'),
+        craft ? `The photo on the front is our real ${craft}.` : 'The photo on the front is our real work.',
+      ];
+      break;
+    case 'story':
+      headline = principal ? clip(`${principal.split(/\s+/)[0]} started this for a reason.`, 48) : clip(`There's a story behind this card.`, 48);
+      kicker = name;
+      backHeadline = clip(`The short version:`, 60);
+      bodyLines = [
+        EDIT('two lines: the founding story — why this business exists, in plain words'),
+        ctx.audience ? `Today we do it for ${clip(ctx.audience, 60)}.` : '',
         offer,
       ];
       break;

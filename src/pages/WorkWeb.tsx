@@ -345,10 +345,21 @@ function StatChip({ label, value, tone }: { label: string; value: number; tone?:
  *  this studio's work. The direction box steers all of it in the owner's words — and every
  *  regeneration automatically diverges from prior takes (recent work rides along as
  *  "do-not-repeat"). Renditions are ADDED to the shelf ("· take 2"), never overwritten. */
+/** SPARKS — per-studio direction starters that provoke the next take. Prompts, not claims:
+ *  clicking one fills the direction box; the producer still grounds output in real materials. */
+const SPARKS: Record<string, string[]> = {
+  social: ['make it funnier', 'behind-the-scenes series', 'customer-voice posts', 'myth vs fact format', 'the numbers, plainly'],
+  ads: ['lead with the strongest proof point', 'speak to the skeptic', 'one sharp offer, nothing else', 'local-first angle'],
+  video: ['30-second transformation cut', 'day-in-the-life', 'answer the #1 question on camera', 'before/after with captions only'],
+  direct_mail: ['the neighbor story', 'lead with the offer', 'a question they already ask', 'why this season matters'],
+  default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
+};
+
 function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster: WebCluster; onDone: () => void }) {
   const { toast } = useToast();
   const [direction, setDirection] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const sparks = SPARKS[cluster.charter?.flavor ?? ''] ?? SPARKS.default;
 
   const generatorFor = (flavor?: string | null): string => {
     switch (flavor) {
@@ -395,6 +406,15 @@ function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster:
         <button onClick={() => void go('gen-plan')} disabled={!!busy} className={btn} title="The operator's 90-day business plan — six substantive sections; thin output is rejected, unknowable numbers become [YOU FILL] holes">
           {busy === 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>📋</span>} Business plan
         </button>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-forge-dim/70">Sparks:</span>
+        {sparks.map((s) => (
+          <button
+            key={s} onClick={() => setDirection(s)}
+            className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember"
+          >{s}</button>
+        ))}
       </div>
     </div>
   );

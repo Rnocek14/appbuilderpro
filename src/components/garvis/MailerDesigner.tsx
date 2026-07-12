@@ -14,10 +14,16 @@ import {
 } from '../../lib/garvis/mailerRun';
 import { cn } from '../../lib/utils';
 
+// SEVEN renditions of the same real materials — different persuasion mechanisms, one click each.
+// Pick one, then hand-edit any line; [EDIT] holes mark what only you can supply.
 const CONCEPTS: { id: MailerConcept; label: string; blurb: string }[] = [
   { id: 'proof', label: 'Full-bleed proof', blurb: 'One stunning piece, minimal words. Lets the work sell.' },
   { id: 'before_after', label: 'Before / after', blurb: 'The transformation. Strongest when you have both shots.' },
   { id: 'local_authority', label: 'Local authority', blurb: 'The neighbor angle — the human, made here.' },
+  { id: 'question', label: 'The question', blurb: 'Opens with the question your audience is already asking.' },
+  { id: 'urgency', label: 'Why now', blurb: 'An honest reason timing matters — season, capacity, a real date.' },
+  { id: 'offer_first', label: 'Offer up front', blurb: 'The offer IS the headline. Strongest with a sharp offer.' },
+  { id: 'story', label: 'The story', blurb: 'Why this business exists — people keep cards that read human.' },
 ];
 
 export function MailerDesigner({ worldId, clusterId, onToast }: {
