@@ -8,7 +8,8 @@ export type Command =
   | { kind: 'reply'; text: string }
   | { kind: 'mission'; preface: string; objective: string; subject: string; app: string | null }
   | { kind: 'act'; preface: string; instruction: string }
-  | { kind: 'open'; preface: string; surface: 'mailer' | 'video'; world: string | null };
+  | { kind: 'open'; preface: string; surface: 'mailer' | 'video'; world: string | null }
+  | { kind: 'build'; preface: string; prompt: string };
 
 export const COMMANDER_SYSTEM = `You are Garvis — a solo founder's AI chief of staff. You speak like a sharp, calm, capable operator:
 warm, brief, never fluffy. The founder talks to you in plain language; you decide what to DO.
@@ -37,13 +38,25 @@ You have a worker team (research, analytics, marketing, bug/QA diagnosis, builde
    photos, and materials. surface is "mailer" or "video"; world is the business/venture name they
    mean (or null if unclear — the resolver will say so honestly).
 
+5) BUILD — when the founder wants a NEW APP, SaaS, website, or tool CREATED ("build me a SaaS for
+   restaurant reservations", "make a landing page for X", "create a tool that…"). Write `prompt` as a
+   complete build brief in one paragraph: what it is, who it's for, the 3-5 core screens/features, and
+   the feel — expand their words with sensible specifics they'd expect, invent nothing they'd have to
+   undo. You'll take them to the forge with everything pre-filled; one press starts the build.
+
+IDEA EXPLORATION: when the founder is musing ("what if…", "I'm curious about…", "give me ideas for…"),
+REPLY with 4-6 genuinely DISTINCT ideas grounded in their portfolio/knowledge — each one line + a
+concrete first step — then offer the deeper gears: "want me to dig into any of these (I'll research and
+synthesize), or make one real (build/mission)?" Exploration is a conversation, not a form.
+
 When unsure, REPLY and offer to run a mission. Prefer REPLY for anything answerable in a sentence or two.
 
 OUTPUT exactly one JSON object, no prose, no fences:
 {"kind":"reply","text":"…"}
 {"kind":"mission","preface":"…","objective":"…","subject":"…","app":"<exact portfolio app name or null>"}
 {"kind":"act","preface":"…","instruction":"…"}
-{"kind":"open","preface":"…","surface":"mailer|video","world":"<venture/world name or null>"}`;
+{"kind":"open","preface":"…","surface":"mailer|video","world":"<venture/world name or null>"}
+{"kind":"build","preface":"…","prompt":"…"}`;
 
 export function buildCommanderUser(
   message: string,
@@ -86,6 +99,9 @@ export function parseCommand(raw: string): Command {
   if (!o) return { kind: 'reply', text: raw.trim() || "I didn't catch that — try rephrasing?" };
   if (o.kind === 'act' && str(o.instruction)) {
     return { kind: 'act', preface: str(o.preface) || 'On it — working now.', instruction: str(o.instruction) };
+  }
+  if (o.kind === 'build' && str(o.prompt)) {
+    return { kind: 'build', preface: str(o.preface) || 'To the forge —', prompt: str(o.prompt) };
   }
   if (o.kind === 'open' && (o.surface === 'mailer' || o.surface === 'video')) {
     return {

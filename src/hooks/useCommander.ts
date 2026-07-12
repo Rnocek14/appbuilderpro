@@ -5,6 +5,7 @@
 // answers from what's actually on record instead of improvising from a snapshot string.
 
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { rawComplete } from '../lib/aiClient';
 import { supabase } from '../lib/supabase';
 import { COMMANDER_SYSTEM, buildCommanderUser, parseCommand } from '../lib/garvis/commander';
@@ -60,6 +61,7 @@ export function useCommander() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [thinking, setThinking] = useState(false);
   const [canvas, setCanvas] = useState<Canvas | null>(null);
+  const navigate = useNavigate();
 
   // The thread survives refresh: load the recent transcript once (fail-soft — an empty thread
   // renders the same first-run experience as before).
@@ -127,6 +129,16 @@ export function useCommander() {
       if (cmd.kind === 'reply') {
         push({ role: 'garvis', text: cmd.text });
         emitMindEvent({ event_type: 'commander_exchange', subject: `Asked: "${text.slice(0, 160)}" → replied`, source: 'commander' });
+        return;
+      }
+
+      // BUILD — "build me a SaaS for restaurant reservations" flows in one motion: Garvis expands
+      // the ask into a complete build brief and lands you at the forge with everything pre-filled
+      // (the existing ?idea= seed channel) — one press starts the build. From ~9 decisions to 2.
+      if (cmd.kind === 'build') {
+        push({ role: 'garvis', text: `${cmd.preface} I've written the full brief from what you said — it's pre-filled at the forge. Press Generate when it reads right; I'll be here when it's built.` });
+        emitMindEvent({ event_type: 'commander_exchange', subject: `Build handoff: "${cmd.prompt.slice(0, 160)}"`, source: 'commander' });
+        navigate(`/new?idea=${encodeURIComponent(cmd.prompt.slice(0, 1900))}`);
         return;
       }
 
