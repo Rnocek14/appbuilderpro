@@ -53,7 +53,9 @@ const leadToKind = (k: LeadKind): ClusterKind => (k === 'question' ? 'question' 
 
 const imagesOf = (c: Cluster) => c.artifacts.filter((a) => a.kind === 'image' && (a.thumb || a.url));
 const videosOf = (c: Cluster) => c.artifacts.filter((a) => a.kind === 'video');
-const understandingOf = (c: Cluster) => c.artifacts.find((a) => a.id === 'understanding') ?? c.artifacts.find((a) => a.kind === 'research');
+// Lab outputs (comparisons, theory scaffolds) are also kind 'research' — they must never hijack
+// the branch's main prose, so the fallback excludes source 'lab'.
+const understandingOf = (c: Cluster) => c.artifacts.find((a) => a.id === 'understanding') ?? c.artifacts.find((a) => a.kind === 'research' && a.source !== 'lab');
 const creationsOf = (c: Cluster) => c.artifacts.filter((a) => a.source === 'generated' || a.source === 'lab' || a.kind === 'diagram' || a.kind === 'post');
 
 function trail(byId: Map<string, Cluster>, id: string): Cluster[] {
@@ -87,7 +89,9 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const [comparePick, setComparePick] = useState(false);
   const [compareQ, setCompareQ] = useState('');
   const [comparison, setComparison] = useState<{ withTitle: string; cmp: Comparison } | null>(null);
+  const [comparingWith, setComparingWith] = useState<string | null>(null); // in-flight compare target
   const [showTheory, setShowTheory] = useState(false);
+  const [viewArt, setViewArt] = useState<Artifact | null>(null); // made-here chip re-opened
   const [labErr, setLabErr] = useState('');
   const [, setReadyTick] = useState(0);
   const leadsCache = useRef<Record<string, Lead[]>>({});
@@ -107,7 +111,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     const id = focus.id;
     setLeads(leadsCache.current[id] ?? []); setSimilar(null);
     setWhatIf(null); setShowBench(false); setPickStatus(false); // lab state is per-branch
-    setComparePick(false); setCompareQ(''); setComparison(null); setShowTheory(false); setLabErr('');
+    setComparePick(false); setCompareQ(''); setComparison(null); setShowTheory(false); setLabErr(''); setViewArt(null);
     if (done.current.has(id)) return;
     done.current.add(id);
     let cancelled = false;
@@ -116,9 +120,11 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     const needMedia = !c.artifacts.some((a) => a.kind === 'image');
     const needVideo = !c.artifacts.some((a) => a.kind === 'video');
     setLoading({ answer: needAnswer, media: needMedia, video: needVideo });
-    if (needAnswer) exploreLeads(graph, id, ancestors.map((a) => a.title)).then((r) => { if (cancelled) return; leadsCache.current[id] = r.leads; setLeads(r.leads); setGraph(r.graph); if (r.costUsd) onCost?.(r.costUsd); }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); });
-    if (needMedia) gatherWikiMedia(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, media: false })); });
-    if (needVideo) gatherVideos(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, video: false })); });
+    // The composed answer failing must SAY so (labErr + a retry path via re-entering); media and
+    // videos are enrichment — they fail quiet, but never as unhandled rejections.
+    if (needAnswer) exploreLeads(graph, id, ancestors.map((a) => a.title)).then((r) => { if (cancelled) return; leadsCache.current[id] = r.leads; setLeads(r.leads); setGraph(r.graph); if (r.costUsd) onCost?.(r.costUsd); }).catch((e) => { if (!cancelled) { done.current.delete(id); setLabErr(e instanceof Error ? e.message : "Couldn't compose this thought — step out and back in to retry."); } }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); });
+    if (needMedia) gatherWikiMedia(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, media: false })); });
+    if (needVideo) gatherVideos(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, video: false })); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.id]);
@@ -166,9 +172,15 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     } else setGraph(g2);
     travel(id);
   };
+  // ONE op at a time: every lab/nav op reads `graph` at call time and writes it back on resolve,
+  // so two in-flight ops would clobber each other's writes (last-slow-write-wins on a stale base).
+  // The single `busy` lock is the guard — and every failure lands in the one labErr surface
+  // instead of vanishing into an unhandled rejection.
   const run = async (label: string, fn: () => Promise<{ graph?: ClusterGraph; costUsd?: number } | RelatedCluster[]>) => {
-    setBusy(label);
+    if (busy) return;
+    setBusy(label); setLabErr('');
     try { const res = await fn(); if (Array.isArray(res)) setSimilar(res); else { if (res.graph) setGraph(res.graph); if (res.costUsd) onCost?.(res.costUsd); } }
+    catch (e) { setLabErr(e instanceof Error ? e.message : "That didn't go through — try again."); }
     finally { setBusy(null); }
   };
   const expand = (m: ExpandMode) => run(`x:${m}`, () => expandCluster(graph, focus.id, m));
@@ -176,6 +188,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   // WHAT IF? — controlled divergence: a NEW scenario branch beside the original (never a
   // replacement), born speculative. The room then explores it like any other thought.
   const submitWhatIf = () => {
+    if (busy) return; // one graph write at a time (see run())
     const twist = (whatIf ?? '').trim();
     setWhatIf(null);
     if (!twist) return;
@@ -203,14 +216,16 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   // give (agreements, conflicts, hinges, discriminating evidence). Survivors become an artifact
   // on this branch AND a typed edge on the map. Thin output names its gaps and saves nothing.
   const runCompare = async (bId: string) => {
+    if (busy) return;
     setComparePick(false); setBusy('cmp'); setLabErr(''); setComparison(null);
+    setComparingWith(byId.get(bId)?.title ?? 'the other'); // feedback lives where the readout will land
     try {
       const r = await compareNodes(graph, focus.id, bId);
       if (r.costUsd) onCost?.(r.costUsd);
       if (r.cmp) { setGraph(r.graph); setComparison({ withTitle: byId.get(bId)?.title ?? 'the other', cmp: r.cmp }); }
       else setLabErr(r.error ?? 'The comparison came back too thin to trust.');
     } catch (e) { setLabErr(e instanceof Error ? e.message : 'Comparison failed.'); }
-    finally { setBusy(null); }
+    finally { setBusy(null); setComparingWith(null); }
   };
 
   // MAKE IT RIGOROUS — the falsification engine: claim, assumptions, predictions, the case
@@ -218,6 +233,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const theoryArt = focus.artifacts.find((a) => a.id === THEORY_ARTIFACT_ID);
   const runTheory = async () => {
     if (theoryArt) { setShowTheory((v) => !v); return; } // already scaffolded — toggle the view
+    if (busy) return;
     setBusy('theory'); setLabErr('');
     try {
       const r = await formalizeTheory(graph, focus.id);
@@ -349,6 +365,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             <button onClick={() => expand('questions')} className="inline-flex items-center gap-1 hover:text-forge-ember">{busy === 'x:questions' ? <Loader2 size={11} className="animate-spin" /> : <HelpCircle size={11} />} more questions</button>
             <button onClick={() => run('sim', () => findSimilarClusters(graph, focus.id))} className="inline-flex items-center gap-1 hover:text-forge-ember">{busy === 'sim' ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />} surprise me</button>
             <button onClick={() => run('vid', () => gatherVideos(graph, focus.id))} className="inline-flex items-center gap-1 hover:text-forge-ember">{busy === 'vid' ? <Loader2 size={11} className="animate-spin" /> : <Clapperboard size={11} />} more videos</button>
+            <span className="mx-1 inline-block h-3 w-px self-center bg-forge-border" aria-hidden />{/* learn ↑ · test ↓ */}
             <button onClick={() => setWhatIf(whatIf === null ? '' : null)} className={`inline-flex items-center gap-1 ${whatIf !== null ? 'text-orange-400' : 'hover:text-orange-400'}`}><Split size={11} /> what if…</button>
             <button onClick={() => setShowBench((v) => !v)} className={`inline-flex items-center gap-1 ${showBench ? 'text-cyan-300' : 'hover:text-cyan-300'}`}><FlaskConical size={11} /> lab bench</button>
             <button onClick={() => setComparePick((v) => !v)} className={`inline-flex items-center gap-1 ${comparePick || comparison ? 'text-sky-400' : 'hover:text-sky-400'}`}>{busy === 'cmp' ? <Loader2 size={11} className="animate-spin" /> : <GitCompare size={11} />} compare</button>
@@ -370,16 +387,18 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
                 {(() => {
                   const relIds = new Set(related.map((r) => r.id));
                   const q = compareQ.trim().toLowerCase();
-                  return graph.clusters
+                  const candidates = graph.clusters
                     .filter((c) => c.id !== focus.id && (!q || c.title.toLowerCase().includes(q)))
-                    .sort((a, b) => Number(relIds.has(b.id)) - Number(relIds.has(a.id)))
-                    .slice(0, 10)
-                    .map((c) => (
-                      <button key={c.id} onClick={() => runCompare(c.id)} title={c.summary || c.title}
-                        className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-sky-400/50 hover:text-forge-ink">
-                        {c.title}
-                      </button>
-                    ));
+                    .sort((a, b) => Number(relIds.has(b.id)) - Number(relIds.has(a.id)));
+                  if (!candidates.length) {
+                    return <p className="text-[11px] text-forge-dim">{q ? 'Nothing on this map matches that.' : 'Nothing else on this map yet — branch a few thoughts first, then bring one back here.'}</p>;
+                  }
+                  return candidates.slice(0, 10).map((c) => (
+                    <button key={c.id} onClick={() => runCompare(c.id)} title={c.summary || c.title}
+                      className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-sky-400/50 hover:text-forge-ink">
+                      {c.title}
+                    </button>
+                  ));
                 })()}
               </div>
             </div>
@@ -406,6 +425,13 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
 
           {/* THE LAB BENCH — manipulate the idea: known equations + your dials, honestly labeled */}
           {showBench && <LabBench cluster={focus} onSave={saveArtifact} />}
+
+          {/* comparing… — the feedback renders exactly where the readout will land */}
+          {comparingWith && (
+            <div className="ku-rise mt-5 flex items-center gap-2 rounded-2xl border border-sky-400/25 bg-forge-panel/50 p-4 text-xs text-forge-dim">
+              <Loader2 size={13} className="animate-spin text-sky-400" /> Comparing “{focus.title}” with “{comparingWith}” — claims, conflicts, and what would settle it…
+            </div>
+          )}
 
           {/* DECISION LAB READOUT — saved to this branch; the relationship is now a map edge */}
           {comparison && (
@@ -517,7 +543,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
           <div className="mx-auto mt-8 max-w-4xl space-y-3 text-center">
             {related.length > 0 && (
               <div>
-                <span className="text-[11px] uppercase tracking-wide text-forge-dim/60">{similar ? 'across your universe' : 'this reminds you of'}</span>
+                <span className="text-[11px] uppercase tracking-wide text-forge-dim/60">{similar ? 'across your worlds' : 'this reminds you of'}</span>
                 <div className="mt-1.5 flex flex-wrap justify-center gap-2">
                   {related.map((r) => { const c = byId.get(r.id); return c ? <button key={r.id} onClick={() => travel(r.id)} className="inline-flex items-center gap-1.5 rounded-full border border-forge-border px-3 py-1.5 text-xs text-forge-dim transition-all hover:-translate-y-0.5 hover:text-forge-ink"><Link2 size={11} className="text-violet-400" /> {c.title}</button> : null; })}
                 </div>
@@ -525,7 +551,28 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             )}
             {creations.length > 0 && (
               <div className="flex flex-wrap justify-center gap-2">
-                {creations.map((a) => <span key={a.id} className="rounded-lg border border-forge-border bg-forge-raised px-2 py-1 text-[11px] text-emerald-400" title={a.detail}>{a.kind}: {a.title.slice(0, 28)}</span>)}
+                {creations.map((a) => (
+                  // made here, re-openable here — a saved comparison/scaffold/run is one click from
+                  // its full text again, not a hover-tooltip fossil
+                  <button
+                    key={a.id}
+                    onClick={() => a.detail && setViewArt(viewArt?.id === a.id ? null : a)}
+                    className={`rounded-lg border px-2 py-1 text-[11px] text-emerald-400 ${a.detail ? 'border-forge-border bg-forge-raised transition-colors hover:border-emerald-400/50' : 'cursor-default border-forge-border bg-forge-raised'}`}
+                    title={a.detail ? 'Open the full record' : a.title}
+                  >
+                    {a.kind}: {a.title.slice(0, 28)}
+                  </button>
+                ))}
+              </div>
+            )}
+            {viewArt?.detail && (
+              <div className="ku-rise mx-auto max-w-3xl rounded-2xl border border-forge-border bg-forge-panel/50 p-4 text-left">
+                <div className="mb-2 flex items-center gap-2">
+                  <BookOpen size={13} className="text-emerald-400" />
+                  <span className="text-sm font-medium text-forge-ink">{viewArt.title}</span>
+                  <button onClick={() => setViewArt(null)} className="ml-auto text-[11px] text-forge-dim hover:text-forge-ink">close</button>
+                </div>
+                <p className="whitespace-pre-line text-xs leading-relaxed text-forge-dim">{viewArt.detail}</p>
               </div>
             )}
           </div>

@@ -113,8 +113,9 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
                 {sens.slice(0, 4).map((s) => (
                   <div key={s.key} className="flex items-center gap-2 text-[11px]">
                     <span className="w-40 truncate text-forge-dim">{s.label}</span>
+                    {/* direction, not valence: a decrease isn't a "warning" (amber), it's just the other direction */}
                     <div className="h-1.5 flex-1 overflow-hidden rounded bg-forge-raised">
-                      <div className="h-full rounded" style={{ width: `${Math.min(100, Math.abs(s.deltaPct) * 4)}%`, background: s.deltaPct >= 0 ? '#4ADE80' : '#FACC15' }} />
+                      <div className="h-full rounded" style={{ width: `${Math.min(100, Math.abs(s.deltaPct) * 4)}%`, background: s.deltaPct >= 0 ? '#4ADE80' : '#38bdf8' }} />
                     </div>
                     <span className="w-14 text-right font-mono text-forge-ink">{s.deltaPct > 0 ? '+' : ''}{s.deltaPct}%</span>
                   </div>

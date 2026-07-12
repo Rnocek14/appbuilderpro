@@ -57,7 +57,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     supabase.from('mind_events').select('event_type, subject, occurred_at, payload').order('occurred_at', { ascending: false }).limit(120),
     supabase.from('insights').select('id, title, body, score, created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(10),
     supabase.from('outreach_campaigns').select('id, world_id, state, sequence_stopped').limit(200),
-    supabase.from('knowledge_clusters').select('id, world_id, title, charter').not('charter', 'is', null).limit(300),
+    supabase.from('knowledge_clusters').select('id, world_id, slug, title, charter').not('charter', 'is', null).limit(300),
     supabase.from('garvis_missions').select('id, world_id, subject, status, updated_at').eq('status', 'review').order('updated_at', { ascending: false }).limit(10),
     // G5: NEW inbound leads from the generated sites (table may pre-date app_0036 — errors → []).
     supabase.from('leads').select('id, world_id, name, email, message, source, created_at').eq('status', 'new').order('created_at', { ascending: false }).limit(20),
@@ -148,15 +148,18 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     for (const wid of worldIds) {
       const wc = clusters.filter((c) => c.world_id === wid);
       const charters = wc.map((c) => ({ c, ch: parseCharter(c.charter) })).filter((x) => x.ch);
-      const hasAudience = charters.some((x) => x.ch!.archetype === 'audience');
-      const hasBrandVault = charters.some((x) => x.ch!.archetype === 'vault');
+      const audience = charters.find((x) => x.ch!.archetype === 'audience');
+      const vault = charters.find((x) => x.ch!.archetype === 'vault');
       const launchActive = charters.some((x) => (x.ch!.archetype === 'launch' || x.ch!.archetype === 'loop') && (artCount.get(x.c.id as string) ?? 0) > 0);
       floors.push({
         worldId: wid,
         worldTitle: titleByWorld.get(wid) ?? 'A mission',
-        audienceEmpty: hasAudience && (contactCount ?? 0) === 0,
-        brandEmpty: hasBrandVault && !kitWorlds.has(wid),
+        audienceEmpty: !!audience && (contactCount ?? 0) === 0,
+        brandEmpty: !!vault && !kitWorlds.has(wid),
         launchActive,
+        // area slugs make the move land ON the tool, not on the world's default pane
+        audienceArea: (audience?.c as { slug?: string } | undefined)?.slug ?? null,
+        vaultArea: (vault?.c as { slug?: string } | undefined)?.slug ?? null,
         asOf: now.toISOString(),
       });
     }

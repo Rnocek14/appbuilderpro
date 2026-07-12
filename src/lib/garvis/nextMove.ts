@@ -62,6 +62,8 @@ export interface FloorIn {
   audienceEmpty: boolean;      // an audience-archetype cluster exists with zero contacts behind it
   brandEmpty: boolean;         // a vault/brand cluster exists but no brand kit saved
   launchActive: boolean;       // a launch/loop cluster has artifacts or queued work (the blockee)
+  audienceArea?: string | null; // slug of the audience area — the route lands ON the upload tool
+  vaultArea?: string | null;    // slug of the brand vault area — the route lands ON the brand kit
   asOf: string;
 }
 export interface MissionDoneIn { missionId: string; worldId: string | null; subject: string | null; artifactCount: number; sendsQueued: number; updated_at: string }
@@ -96,14 +98,16 @@ export function collectReminders(rows: ReminderRowIn[], now: Date): NextMove[] {
 export interface LeadRowIn { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }
 
 /** G5: a NEW lead from the generated site — a human asked to be answered. One move per lead
- *  (each is a distinct person, unlike the approvals queue which is one decision surface). */
+ *  (each is a distinct person, unlike the approvals queue which is one decision surface).
+ *  Routes to the INBOX — the surface where the lead is visible and answerable in one click,
+ *  not the world root where only an aggregate count lives. */
 export function collectLeads(rows: LeadRowIn[]): NextMove[] {
   return rows.map((r) => ({
     key: `lead:${r.id}`,
     kind: 'lead_waiting' as const,
     title: `${short(r.name, 40) || short(r.email, 40)} asked about the business — answer while it's warm`,
     why: `They submitted the site's form${r.source !== 'website' ? ` (via ${r.source})` : ''}${r.message ? `: "${short(r.message, 60)}"` : ''}. Inbound interest is the strongest signal in the system.`,
-    action: { label: 'Open the lead', route: `/garvis/webs/${r.world_id}` },
+    action: { label: 'Answer in the Inbox', route: '/garvis/inbox' },
     score: 0,
     bornAt: r.created_at,
     expected: { text: 'Inquiries answered the same day convert far better than ones answered next week.', basis: 'heuristic' as const },
@@ -118,7 +122,8 @@ export function collectReplies(rows: ReplyRowIn[]): NextMove[] {
       kind: 'reply_unanswered' as const,
       title: `${short(r.from_address, 40) || 'A prospect'} replied — answer while it's warm`,
       why: `They replied "${short(r.subject, 40) || 'interested'}" and no next touch is queued. Warm replies cool fast.`,
-      action: { label: 'Draft the follow-up', route: r.world_id ? `/garvis/webs/${r.world_id}` : '/garvis/webs' },
+      // the reply body + "Draft with Garvis" composer live in the Inbox, not on the world root
+      action: { label: 'Draft the follow-up', route: '/garvis/inbox' },
       score: 0,
       bornAt: r.received_at,
       expected: { text: 'Answering today keeps the thread alive — interest decays fast after the first day or two.', basis: 'heuristic' },
@@ -177,7 +182,7 @@ export function collectFloor(rows: FloorIn[]): NextMove[] {
         kind: 'blocking_empty',
         title: `${f.worldTitle}: the mailing list is empty — and it's blocking sends`,
         why: `Work is staged to go out, but there's nobody to send it to yet. One CSV unblocks the whole channel.`,
-        action: { label: 'Upload the list', route: `/garvis/webs/${f.worldId}` },
+        action: { label: 'Upload the list', route: `/garvis/webs/${f.worldId}${f.audienceArea ? `?area=${encodeURIComponent(f.audienceArea)}` : ''}` },
         score: 0, bornAt: f.asOf,
         expected: { text: 'Unblocks every queued send in this channel at once.', basis: 'structural' },
       });
@@ -188,7 +193,7 @@ export function collectFloor(rows: FloorIn[]): NextMove[] {
         kind: 'blocking_empty',
         title: `${f.worldTitle}: the brand vault is empty`,
         why: `Every studio writes in the brand's voice — logo, tone, compliance line. Five minutes here upgrades everything downstream.`,
-        action: { label: 'Set up the brand', route: `/garvis/webs/${f.worldId}` },
+        action: { label: 'Set up the brand', route: `/garvis/webs/${f.worldId}${f.vaultArea ? `?area=${encodeURIComponent(f.vaultArea)}` : ''}` },
         score: 0, bornAt: f.asOf,
       });
     }

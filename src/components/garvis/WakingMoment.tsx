@@ -134,7 +134,15 @@ export function WakingMoment({ name }: { name: string }) {
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
-                  onClick={() => navigate(m.action.route)}
+                  onClick={() => {
+                    // a world-less reminder's home (RemindersCard) is already on THIS page —
+                    // navigating to /garvis/command from /garvis/command is a no-op dead end
+                    if (m.kind === 'reminder_due' && m.action.route === '/garvis/command') {
+                      document.getElementById('reminders-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      return;
+                    }
+                    navigate(m.action.route);
+                  }}
                   className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-xs font-medium text-forge-ember transition-colors hover:bg-forge-ember/20"
                 >
                   {m.action.label} <ChevronRight size={12} />

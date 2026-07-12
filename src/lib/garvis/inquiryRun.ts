@@ -17,7 +17,9 @@ import {
 import { addChild, normalizeGraph, slugify, type ClusterGraph, type Cluster } from './clustering';
 
 const understandingOf = (c: Cluster): string =>
-  c.artifacts.find((a) => a.id === 'understanding')?.detail ?? c.artifacts.find((a) => a.kind === 'research')?.detail ?? '';
+  // exclude source 'lab' from the fallback — a prior comparison/scaffold must not feed itself back in
+  c.artifacts.find((a) => a.id === 'understanding')?.detail
+    ?? c.artifacts.find((a) => a.kind === 'research' && a.source !== 'lab')?.detail ?? '';
 
 export interface CompareResult { graph: ClusterGraph; costUsd: number; cmp: Comparison | null; error?: string }
 

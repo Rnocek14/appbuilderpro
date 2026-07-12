@@ -42,7 +42,7 @@ export function RemindersCard() {
   const isDue = (r: ReminderRow) => !r.due_at || new Date(r.due_at).getTime() <= Date.now();
 
   return (
-    <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-3">
+    <div id="reminders-card" className="rounded-2xl border border-forge-border bg-forge-panel/40 p-3">
       <div className="flex items-center gap-2">
         <Bell size={14} className="text-forge-ember" />
         <span className="text-sm font-semibold text-forge-ink">Reminders</span>

@@ -28,7 +28,7 @@ const THREAD_WINDOW = 40; // recent turns loaded on mount; the full record stays
 /** SUMMONED CANVAS (UX redesign, architectural tier): what Garvis opened beside the thread —
  *  a studio pre-loaded with a venture's materials, or the exploration galaxy mid-dive. */
 export type Canvas =
-  | { surface: 'mailer' | 'video'; worldId: string; clusterId: string; worldTitle: string }
+  | { surface: 'mailer' | 'video'; worldId: string; clusterId: string; clusterSlug: string; worldTitle: string }
   | { surface: 'explore'; query: string };
 
 type StudioSurface = 'mailer' | 'video';
@@ -53,11 +53,11 @@ async function resolveStudio(surface: StudioSurface, worldName: string | null):
       : `Which venture? You have: ${all.map((w) => w.title).join(', ')}.` };
   }
   const { data: clusters } = await supabase.from('knowledge_clusters')
-    .select('id, title, charter').eq('world_id', world.id).not('charter', 'is', null).limit(100);
-  const hit = ((clusters ?? []) as { id: string; charter: { flavor?: string } | null }[])
+    .select('id, slug, title, charter').eq('world_id', world.id).not('charter', 'is', null).limit(100);
+  const hit = ((clusters ?? []) as { id: string; slug: string; charter: { flavor?: string } | null }[])
     .find((c) => c.charter?.flavor === FLAVOR_FOR[surface]);
-  if (!hit) return { reason: `${world.title} doesn't have a ${surface === 'mailer' ? 'direct-mail' : 'video'} studio area yet — open the venture and add one, or ask me to draft it.` };
-  return { canvas: { surface, worldId: world.id, clusterId: hit.id, worldTitle: world.title } };
+  if (!hit) return { reason: `${world.title} doesn't have a ${surface === 'mailer' ? 'postcard' : 'video'} studio area yet — open the venture and add one, or ask me to draft it.` };
+  return { canvas: { surface, worldId: world.id, clusterId: hit.id, clusterSlug: hit.slug, worldTitle: world.title } };
 }
 
 export function useCommander() {
@@ -66,7 +66,15 @@ export function useCommander() {
   const { mindContext, emit: emitMindEvent } = useMind();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [thinking, setThinking] = useState(false);
-  const [canvas, setCanvas] = useState<Canvas | null>(null);
+  // The summoned canvas survives refresh and navigate-away-and-back (sessionStorage) — the thread
+  // persists its "open beside us" announcements, so the surface they describe must persist too.
+  const [canvas, setCanvasState] = useState<Canvas | null>(() => {
+    try { return JSON.parse(sessionStorage.getItem('ff:canvas') ?? 'null') as Canvas | null; } catch { return null; }
+  });
+  const setCanvas = (c: Canvas | null) => {
+    setCanvasState(c);
+    try { c ? sessionStorage.setItem('ff:canvas', JSON.stringify(c)) : sessionStorage.removeItem('ff:canvas'); } catch { /* best-effort */ }
+  };
   const navigate = useNavigate();
 
   // The thread survives refresh: load the recent transcript once (fail-soft — an empty thread
@@ -169,11 +177,19 @@ export function useCommander() {
       // OPEN — a summoned canvas: Garvis opens the studio BESIDE the conversation, pre-loaded
       // with the venture's real materials. Resolution is honest: an unknown venture or a missing
       // studio area gets a plain answer naming what exists, never a guess at the wrong world.
+      // Below lg the side panel doesn't render, so small screens go to the venture's studio page
+      // instead — the same components live there (never announce a surface the user can't see).
       if (cmd.kind === 'open') {
         const r = await resolveStudio(cmd.surface, cmd.world);
         if (r.canvas) {
-          setCanvas(r.canvas);
-          push({ role: 'garvis', text: `${cmd.preface} ${r.canvas.surface === 'mailer' ? 'The postcard studio' : 'The video studio'} for ${r.canvas.worldTitle} is open beside us — your brand, photos, and takes are loaded. Keep talking to me while you work.` });
+          const studioName = r.canvas.surface === 'mailer' ? 'postcard studio' : 'video studio';
+          if (window.matchMedia('(min-width: 1024px)').matches) {
+            setCanvas(r.canvas);
+            push({ role: 'garvis', text: `${cmd.preface} The ${studioName} for ${r.canvas.worldTitle} is open beside us — your brand, photos, and takes are loaded. Keep talking to me while you work.` });
+          } else {
+            push({ role: 'garvis', text: `${cmd.preface} Taking you into the ${studioName} for ${r.canvas.worldTitle} — your brand, photos, and takes are loaded.` });
+            navigate(`/garvis/webs/${r.canvas.worldId}?area=${encodeURIComponent(r.canvas.clusterSlug)}`);
+          }
         } else {
           push({ role: 'garvis', text: r.reason ?? "I couldn't find that studio." });
         }
@@ -197,6 +213,7 @@ export function useCommander() {
             onEvent: (e) => { if (e.detail) { lines.push(`⏺ ${e.detail}`); paint(); } },
           });
           if (lines.length) persist({ role: 'garvis', text: lines.join('\n') }); // narration, persisted once
+          else setMessages((prev) => prev.filter((m) => m.id !== narrId)); // no events came — drop the '⏺ working…' shell instead of leaving it stuck
           const out = typeof run?.output === 'string' ? run.output : '';
           push({
             role: 'garvis',

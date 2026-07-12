@@ -56,7 +56,8 @@ const navSections = [
 // Admin-only experiments — a 900-line spike should not be one click from Billing for everyone.
 const labsSection = {
   title: 'Labs',
-  items: [{ to: '/spike/clusters', label: 'Cluster spike', icon: FlaskConical }],
+  // the /spike/clusters route was folded into /garvis/explore — the old link bounced to Landing
+  items: [{ to: '/garvis/explore', label: 'Cluster spike (Explore)', icon: FlaskConical }],
 };
 
 export function AppShell({ children, fullBleed }: { children: ReactNode; fullBleed?: boolean }) {

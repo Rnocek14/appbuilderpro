@@ -210,10 +210,12 @@ export const simTemplateById = (id: string): SimTemplate | undefined => SIM_TEMP
 export function suggestTemplate(text: string): SimTemplate {
   const s = text.toLowerCase();
   if (/(light ?speed|relativit|time dilat|spacetime|black hole|twin paradox|physics)/.test(s)) return timeDilation;
-  if (/(sponsor|city|cities|rollout|revenue|pricing|price|mrr|unit econ|business model|franchise)/.test(s)) return rolloutModel;
+  if (/(sponsor|city|cities|rollout|revenue|pricing|price|mrr|unit econ|business model|franchise|market|customer)/.test(s)) return rolloutModel;
   if (/(invest|compound|interest|saving|grow(th)? rate|retire)/.test(s)) return compoundGrowth;
-  if (/(odds|probabilit|response rate|conversion|chance|outreach|reply rate)/.test(s)) return reachOdds;
-  return SIM_TEMPLATES[0];
+  if (/(odds|probabilit|response rate|conversion|chance|outreach|reply rate|lead)/.test(s)) return reachOdds;
+  // no keyword hit: default to the business rollout bench — this is a business OS, and opening a
+  // history branch onto special relativity read as a wrong guess, not a neutral default
+  return rolloutModel;
 }
 
 // ---------------------------------------------------------------------------

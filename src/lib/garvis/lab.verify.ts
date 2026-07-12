@@ -107,7 +107,8 @@ const out = (id: string, values: Record<string, number>, key: string) => {
   check('business words → rollout model', suggestTemplate('hyperlocal news sponsors per city').id === 'rollout-model');
   check('investing words → compound growth', suggestTemplate('compound interest on savings').id === 'compound-growth');
   check('outreach words → reach odds', suggestTemplate('response rate on 50 pitches').id === 'reach-odds');
-  check('no match → first template (a default, not a guess presented as a match)', suggestTemplate('the roman empire').id === SIM_TEMPLATES[0].id);
+  check('lead-gen words → reach odds', suggestTemplate('local lead generation').id === 'reach-odds');
+  check('no match → the business rollout bench (a business OS defaults to business math)', suggestTemplate('the roman empire').id === 'rollout-model');
   const t = simTemplateById('time-dilation')!;
   check('clampValues pins out-of-range + fills defaults', clampValues(t, { v: 5 }).v === 0.999 && clampValues(t, {}).years === 5);
 }

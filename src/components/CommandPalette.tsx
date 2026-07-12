@@ -39,8 +39,9 @@ export function CommandPalette({ open, onClose }: Props) {
     const commands = [
       { id: 'new', label: 'New project', icon: Plus, run: () => navigate('/new') },
       { id: 'garvis-command', label: 'Garvis: Command (waking moment)', icon: Sparkles, run: () => navigate('/garvis/command') },
-      { id: 'garvis-webs', label: 'Garvis: Work Webs', icon: Waypoints, run: () => navigate('/garvis/webs') },
-      { id: 'garvis-universe', label: 'Garvis: Universe', icon: Telescope, run: () => navigate('/garvis/universe') },
+      { id: 'garvis-webs', label: 'Garvis: Ventures (work webs)', icon: Waypoints, run: () => navigate('/garvis/webs') },
+      { id: 'garvis-universe', label: 'Garvis: Universe (all worlds, 3D)', icon: Telescope, run: () => navigate('/garvis/universe') },
+      { id: 'garvis-universe-flat', label: 'Garvis: Universe (flat map)', icon: Telescope, run: () => navigate('/garvis/universe/flat') },
       { id: 'garvis-explore', label: 'Garvis: Explore (rabbitholes)', icon: Search, run: () => navigate('/garvis/explore') },
       { id: 'garvis-brain', label: 'Garvis: Library (Brain)', icon: BrainCircuit, run: () => navigate('/garvis/brain') },
       { id: 'garvis-approvals', label: 'Garvis: Approvals', icon: ShieldCheck, run: () => navigate('/garvis/approvals') },

@@ -28,7 +28,7 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   ]);
   check('replies: only positive without a next touch', replies.length === 1 && replies[0].key === 'reply:r1');
   check('replies: why carries the quoted evidence', replies[0].why.includes('"interested"') && replies[0].why.includes('no next touch'));
-  check('replies: routes to the world', replies[0].action.route === '/garvis/webs/w1');
+  check('replies: routes to the Inbox (where the reply is answerable)', replies[0].action.route === '/garvis/inbox');
 
   // G5: a website lead is inbound demand — one move per human, evidence quoted, top-ranked.
   const leads = collectLeads([
@@ -37,7 +37,7 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   ]);
   check('leads: one move per lead, keyed by id', leads.length === 2 && leads[0].key === 'lead:l1' && leads[1].key === 'lead:l2');
   check('leads: why quotes the message + attribution', leads[0].why.includes('commissions') && leads[0].why.includes('postcard-qr'));
-  check('leads: nameless lead falls back to email, routes to the world', leads[1].title.includes('sam@y.co') && leads[1].action.route === '/garvis/webs/w1');
+  check('leads: nameless lead falls back to email, routes to the Inbox', leads[1].title.includes('sam@y.co') && leads[1].action.route === '/garvis/inbox');
   check('leads: rank with warm replies at the very top', (() => {
     const ranked = rankMoves([...replies, ...leads], NOW, {});
     return ranked[0].kind === 'lead_waiting' || ranked[0].kind === 'reply_unanswered';
@@ -75,6 +75,11 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   check('floor: empty audience blocking a live channel surfaces', floor.some((m) => m.key === 'floor:audience:w1'));
   check('floor: empty brand vault surfaces', floor.some((m) => m.key === 'floor:brand:w1'));
   check('floor: audience-empty without live launch stays quiet', collectFloor([{ worldId: 'w2', worldTitle: 'X', audienceEmpty: true, brandEmpty: false, launchActive: false, asOf: hoursAgo(0) }]).length === 0);
+  check('floor: area slugs land the move ON the tool (≤1-click rule)', (() => {
+    const withAreas = collectFloor([{ worldId: 'w1', worldTitle: 'M', audienceEmpty: true, brandEmpty: true, launchActive: true, audienceArea: 'mailing-list', vaultArea: 'brand-vault', asOf: hoursAgo(0) }]);
+    return withAreas.find((m) => m.key === 'floor:audience:w1')!.action.route === '/garvis/webs/w1?area=mailing-list'
+      && withAreas.find((m) => m.key === 'floor:brand:w1')!.action.route === '/garvis/webs/w1?area=brand-vault';
+  })());
 
   const nat = collectNaturalNext([
     { missionId: 'm1', worldId: 'w1', subject: 'Lakefront Seller', artifactCount: 12, sendsQueued: 0, updated_at: hoursAgo(6) },

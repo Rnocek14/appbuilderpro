@@ -38,9 +38,18 @@ function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMissi
         {mission.status === 'planned' && (
           <Button onClick={onRun} loading={running} className="ml-auto"><Play size={13} /> Run it</Button>
         )}
-        {mission.status === 'running' && <span className="ml-auto"><Spinner label="working…" /></span>}
+        {/* 'running' with no live driver = the page was refreshed mid-run and the loop died with
+            the DB row still saying running. Resume re-dispatches (done tasks are skipped) instead
+            of leaving an eternal spinner with no way forward. */}
+        {mission.status === 'running' && (running
+          ? <span className="ml-auto"><Spinner label="working…" /></span>
+          : <Button onClick={onRun} className="ml-auto"><Play size={13} /> Resume</Button>)}
       </div>
-      {tasks.length > 0 ? <MissionTasks tasks={tasks} /> : <p className="text-xs text-forge-dim">Planning…</p>}
+      {tasks.length > 0
+        ? <MissionTasks tasks={tasks} />
+        : <p className="text-xs text-forge-dim">{mission.status === 'planning' && !running
+            ? 'Planning was interrupted — just ask me again and I\'ll replan it.'
+            : 'Planning…'}</p>}
     </div>
   );
 }
