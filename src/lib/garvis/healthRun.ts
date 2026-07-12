@@ -44,6 +44,7 @@ const FUNCTIONS: { name: string; group: string }[] = [
   { name: 'outreach-reactivate', group: 'Heartbeat (works while you sleep)' },
   { name: 'inbox-draft', group: 'Heartbeat (works while you sleep)' },
   { name: 'garvis-scorecard', group: 'Heartbeat (works while you sleep)' },
+  { name: 'invoice-chase', group: 'Heartbeat (works while you sleep)' },
 ];
 
 /** OPTIONS-probe one function. 200 → deployed; 404 → not deployed; other → error. */

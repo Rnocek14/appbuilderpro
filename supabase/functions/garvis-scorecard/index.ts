@@ -70,6 +70,19 @@ Deno.serve(async (req) => {
         (admin.from('approvals').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).eq('status', 'pending') as any).then((r: { count: number | null }) => r.count ?? 0),
       ]);
 
+      // REVENUE — the money loop's contribution: sums of invoices YOU marked paid (payment truth
+      // lives in your processor; these are your own confirmations, never guesses).
+      const { data: paidRows } = await admin.from('invoices')
+        .select('paid_at, amount_usd').eq('owner_id', p.id).eq('status', 'paid').gte('paid_at', prevStart).limit(500);
+      let revNow = 0, revPrev = 0;
+      for (const r of (paidRows ?? []) as { paid_at: string; amount_usd: number }[]) {
+        if (r.paid_at >= thisStart) revNow += Number(r.amount_usd) || 0;
+        else revPrev += Number(r.amount_usd) || 0;
+      }
+      const { count: overdue } = await admin.from('invoices')
+        .select('id', { count: 'exact', head: true }).eq('owner_id', p.id).eq('status', 'sent')
+        .not('due_date', 'is', null).lt('due_date', nowIso.slice(0, 10));
+
       // Ad spend: summed from synced daily rows (real platform numbers, when connected).
       const { data: adRows } = await admin.from('ad_metrics')
         .select('date, spend_usd').eq('owner_id', p.id).gte('date', prevDate).limit(3000);
@@ -80,13 +93,16 @@ Deno.serve(async (req) => {
       }
 
       const total = leadsNow + leadsPrev + visitsNow + visitsPrev + repliesNow + repliesPrev
-        + sentNow + sentPrev + contactsNow + contactsPrev + adNow + adPrev + pendingApprovals;
+        + sentNow + sentPrev + contactsNow + contactsPrev + adNow + adPrev + pendingApprovals
+        + revNow + revPrev + (overdue ?? 0);
       if (total === 0) continue; // an empty fortnight sends nothing
 
       const line = (label: string, nowV: number, prevV: number, fmt: (n: number) => string = String) =>
         nowV + prevV > 0 ? `${arrow(nowV, prevV)} ${label}: ${fmt(nowV)} (last week ${fmt(prevV)})` : null;
       const lines = [
         `📊 Weekly scorecard${p.full_name ? `, ${p.full_name.split(' ')[0]}` : ''} — this week vs last:`,
+        line('Revenue collected', revNow, revPrev, (n) => `$${n.toFixed(2)}`),
+        (overdue ?? 0) > 0 ? `⚠️ ${overdue} invoice${overdue === 1 ? '' : 's'} past due — the chaser has reminders in your queue` : null,
         line('Leads', leadsNow, leadsPrev),
         touchesNow + touchesPrev > 0 ? `${arrow(touchesNow, touchesPrev)} …answered instantly: ${touchesNow} (last week ${touchesPrev})` : null,
         line('Site visits', visitsNow, visitsPrev),

@@ -28,6 +28,7 @@ import ClusterSpike from './pages/spike/ClusterSpike';
 import Brain from './pages/Brain';
 import OpsInbox from './pages/OpsInbox';
 import Contacts from './pages/Contacts';
+import Money from './pages/Money';
 import Health from './pages/Health';
 import Approvals from './pages/Approvals';
 import WorkWebs from './pages/WorkWebs';
@@ -73,6 +74,7 @@ export default function App() {
               <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
               <Route path="/garvis/inbox" element={<Protected><OpsInbox /></Protected>} />
               <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
+              <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
               <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
               <Route path="/garvis/approvals" element={<Protected><Approvals /></Protected>} />
               <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />

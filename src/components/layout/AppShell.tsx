@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users,
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useInbox } from '../../hooks/useAutopilot';
@@ -34,6 +34,7 @@ const navSections = [
       { to: '/garvis/webs', label: 'Work Webs', icon: Waypoints },
       { to: '/garvis/inbox', label: 'Inbox', icon: MessageSquare },
       { to: '/garvis/contacts', label: 'Contacts', icon: Users },
+      { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
       { to: '/garvis/universe', label: 'Universe', icon: Telescope },
       { to: '/garvis/explore', label: 'Explore', icon: Compass },
       { to: '/garvis/brain', label: 'Brain', icon: BrainCircuit },
