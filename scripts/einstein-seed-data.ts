@@ -14,7 +14,7 @@ export default {
       summary: 'Newton: time flows equably for all observers, everywhere. Contradicted by every relativistic clock experiment, yet it remains the working intuition of daily life.',
       trajectory: 'Kept as the foil — every relativity test is also a test against this.' },
     { id: 'muon-decay', parentId: 'time-dilation', title: 'Muons reach the ground', kind: 'evidence', epistemic: 'established', salience: 0.85, maturity: 'mature',
-      summary: 'Cosmic-ray muons live ~2.2μs — too short to cross the atmosphere at 0.98c without dilation. They arrive anyway: their clocks run ~5× slow in our frame. Direct, repeatable evidence.',
+      summary: 'Cosmic-ray muons live ~2.2μs — too short to cross the atmosphere at 0.98c without dilation. They arrive anyway: their clocks run ~5× slow in our frame. Direct, repeatable evidence; the survival counts follow the half-life decay curve.',
       trajectory: 'The cleanest classroom-grade confirmation; γ≈5 at 0.98c.' },
     { id: 'hafele-keating', parentId: 'time-dilation', title: 'Hafele–Keating: clocks on airliners', kind: 'experiment', epistemic: 'established', salience: 0.8, maturity: 'finished',
       summary: '1971: cesium clocks flown around the world east and west disagreed with the ground clock by tens to hundreds of nanoseconds — matching special + general relativistic predictions.',

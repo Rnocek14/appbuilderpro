@@ -46,6 +46,8 @@ export interface SimTemplate {
   params: SimParam[];
   assumptions: string[]; // what the model takes as given (the user's dials are listed separately)
   limits: string[];      // what it does NOT model — shown next to every result
+  anchors?: string[];    // scale anchors — REAL reference points that make the numbers mean something,
+                         // each labeled for what it is (a measurement, a reported range, an average)
   compute: (values: Record<string, number>) => SimOutput[];
 }
 
@@ -88,7 +90,11 @@ const timeDilation: SimTemplate = {
     'Does not model the turnaround of a real round trip (the full twin paradox needs acceleration)',
     'No gravity: near a massive body the effect compounds differently',
   ],
-  compute: (v0) => {
+
+  anchors: [
+    'γ ≈ 5 is a real muon at 0.98c — the reason cosmic-ray muons survive to the ground',
+    'GPS satellite clocks run ~38 μs/day fast (−7 special, +45 general); uncorrected, fixes would drift ~10 km per day',
+  ],  compute: (v0) => {
     const { v, years } = v0;
     const gamma = 1 / Math.sqrt(1 - v * v);
     const home = years * gamma;
@@ -119,7 +125,11 @@ const gravityWell: SimTemplate = {
     'Inside the horizon (r ≤ rs) no static observer can exist — the model refuses rather than pretend',
     'Real black holes spin (Kerr): frame dragging changes these numbers',
   ],
-  compute: (v0) => {
+
+  anchors: [
+    'Interstellar\'s 1-hour-costs-7-years planet needs r a whisker outside a fast-spinning hole\'s horizon (Kerr, not this simple model)',
+    'Earth\'s own gravity well is shallow: surface clocks lose < 1 μs per year vs deep space',
+  ],  compute: (v0) => {
     const { r, hours } = v0;
     if (r <= 1) {
       return [
@@ -156,7 +166,11 @@ const compoundGrowth: SimTemplate = {
     'Additions arrive at the end of each month; nothing is ever withdrawn',
   ],
   limits: ['No volatility, taxes, fees, or inflation — subtract those before believing the number'],
-  compute: (v0) => {
+
+  anchors: [
+    'The S&P 500\'s long-run average is ~10%/yr nominal (~7% real) — a decades-long average, never a promise for any given decade',
+    'Rule of 72: at 7%, money doubles roughly every 10.3 years',
+  ],  compute: (v0) => {
     const { principal, monthly, rate, years } = v0;
     const i = rate / 100 / 12;
     const n = years * 12;
@@ -193,7 +207,10 @@ const rolloutModel: SimTemplate = {
     'No churn, no ramp-up time, no seasonality, no price pressure as you scale',
     'This is a calculator over your assumptions, not a market forecast',
   ],
-  compute: (v0) => {
+
+  anchors: [
+    'Local-sponsorship price points commonly reported across niche newsletters: $100–500/mo — validate in YOUR market before believing the dial',
+  ],  compute: (v0) => {
     const { cities, sponsors, price, cost, launch } = v0;
     const mrr = cities * sponsors * price;
     const monthlyCost = cities * cost;
@@ -229,7 +246,11 @@ const reachOdds: SimTemplate = {
     'The response rate is YOUR estimate until your own send data replaces it',
   ],
   limits: ['Says nothing about the QUALITY of a response — only whether any arrives'],
-  compute: (v0) => {
+
+  anchors: [
+    'Commonly reported cold-email reply rates: 1–5%; warm introductions: 20–40% — industry-reported ranges, not your data',
+    'At 5% per try it takes 14 tries to pass a coin flip (51%) for at least one yes',
+  ],  compute: (v0) => {
     const { p, n } = v0;
     const q = p / 100;
     return [

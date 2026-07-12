@@ -27,6 +27,8 @@ const out = (id: string, values: Record<string, number>, key: string) => {
     (t) => t.basis.length > 20 && t.assumptions.length >= 1 && t.limits.length >= 1));
   check('every template declares a model type', SIM_TEMPLATES.every(
     (t) => t.modelType === 'equation' || t.modelType === 'deterministic-model'));
+  check('every template carries at least one substantive scale anchor', SIM_TEMPLATES.every(
+    (t) => (t.anchors ?? []).length >= 1 && (t.anchors ?? []).every((a) => a.length >= 30)));
   check('every param has a sane range containing its default', SIM_TEMPLATES.every(
     (t) => t.params.every((p) => p.min < p.max && p.def >= p.min && p.def <= p.max)));
 }

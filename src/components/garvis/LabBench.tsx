@@ -31,7 +31,11 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
     [cluster.artifacts],
   );
 
-  const pick = (t: SimTemplate) => { setTemplate(t); setValues(defaultsFor(t)); setSavedId(null); };
+  // GUESS FIRST (the hypercorrection effect): commit a number before the reveal — being wrong by
+  // a surprising margin is what makes the real value stick. Purely optional; never blocks the dials.
+  const [guess, setGuess] = useState<{ armed: boolean; text: string; revealed: boolean }>({ armed: false, text: '', revealed: false });
+
+  const pick = (t: SimTemplate) => { setTemplate(t); setValues(defaultsFor(t)); setSavedId(null); setGuess((g) => ({ ...g, text: '', revealed: false })); };
   const loadRun = (rec: NonNullable<ReturnType<typeof parseSimRecord>>) => {
     const t = simTemplateById(rec.templateId);
     if (!t) return;
@@ -68,8 +72,14 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
 
       {/* THE MECHANISM — animated from the SAME clamped values + outputs as the readout below.
           Drag a dial and watch the physics (or the arithmetic) respond; nothing moves that the
-          model didn't compute. */}
-      <SimVisual template={template} values={clamped} outputs={outputs} />
+          model didn't compute. Hidden while a guess is pending — the animation prints the answer. */}
+      {guess.armed && !guess.revealed ? (
+        <div className="mt-4 flex items-center justify-center rounded-xl border border-dashed border-forge-border py-10 text-xs text-forge-dim">
+          mechanism hidden until you commit a guess — the picture gives the number away
+        </div>
+      ) : (
+        <SimVisual template={template} values={clamped} outputs={outputs} />
+      )}
 
       <div className="mt-4 grid gap-5 md:grid-cols-[1fr_1fr]">
         {/* THE DIALS — yours. The model takes these as given; it cannot validate them. */}
@@ -82,11 +92,20 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
                   <span className="text-forge-dim">{p.label}</span>
                   <span className="font-mono text-forge-ink">{p.unit === '$' ? '$' : ''}{clamped[p.key].toLocaleString('en-US')}{p.unit && p.unit !== '$' ? ` ${p.unit}` : ''}</span>
                 </div>
-                <input
-                  type="range" min={p.min} max={p.max} step={p.step} value={clamped[p.key]}
-                  onChange={(e) => { setValues((v) => ({ ...v, [p.key]: Number(e.target.value) })); setSavedId(null); }}
-                  className="w-full accent-[#22d3ee]"
-                />
+                <div className="flex items-center gap-1.5">
+                  {/* PUSH TO THE EDGE — the physicist's limiting-case trick, one tap per end. */}
+                  <button onClick={() => { setValues((v) => ({ ...v, [p.key]: p.min })); setSavedId(null); }}
+                    title={`Snap to the minimum (${p.min}) — watch the limiting case`}
+                    className="rounded border border-forge-border px-1 text-[9px] text-forge-dim hover:text-cyan-300">min</button>
+                  <input
+                    type="range" min={p.min} max={p.max} step={p.step} value={clamped[p.key]}
+                    onChange={(e) => { setValues((v) => ({ ...v, [p.key]: Number(e.target.value) })); setSavedId(null); }}
+                    className="w-full accent-[#22d3ee]"
+                  />
+                  <button onClick={() => { setValues((v) => ({ ...v, [p.key]: p.max })); setSavedId(null); }}
+                    title={`Snap to the maximum (${p.max}) — watch what breaks`}
+                    className="rounded border border-forge-border px-1 text-[9px] text-forge-dim hover:text-cyan-300">max</button>
+                </div>
               </div>
             ))}
           </div>
@@ -94,17 +113,54 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
 
         {/* THE RESULT — computed, never estimated. Nulls stay null. */}
         <div>
-          <div className="mb-2 text-[10px] uppercase tracking-[0.2em] text-forge-dim/70">the model computes</div>
+          <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-forge-dim/70">
+            <span>the model computes</span>
+            <button
+              onClick={() => setGuess((g) => ({ armed: !g.armed, text: '', revealed: false }))}
+              title="Commit a guess before you look — being surprised is how the real number sticks"
+              className={`rounded border px-1.5 py-0.5 text-[9px] normal-case tracking-normal ${guess.armed ? 'border-cyan-400/50 text-cyan-300' : 'border-forge-border text-forge-dim hover:text-forge-ink'}`}
+            >
+              guess first
+            </button>
+          </div>
           <div className="rounded-xl border border-cyan-400/25 bg-cyan-400/5 p-3">
             <div className="text-[11px] text-forge-dim">{primary.label}</div>
-            <div className="font-mono text-2xl text-forge-ink">{fmtSimValue(primary)}</div>
+            {guess.armed && !guess.revealed ? (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="font-mono text-2xl text-forge-dim/50" aria-label="hidden until you guess">•••</span>
+                <input
+                  autoFocus value={guess.text} inputMode="decimal" placeholder="your guess"
+                  onChange={(e) => setGuess((g) => ({ ...g, text: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') setGuess((g) => ({ ...g, revealed: true })); }}
+                  className="w-28 rounded-lg border border-forge-border bg-forge-bg px-2 py-1 font-mono text-sm text-forge-ink focus:border-cyan-400/60 focus:outline-none"
+                />
+                <button onClick={() => setGuess((g) => ({ ...g, revealed: true }))}
+                  className="rounded-lg border border-cyan-400/40 px-2 py-1 text-[11px] text-forge-ink hover:bg-cyan-400/10">reveal</button>
+              </div>
+            ) : (
+              <>
+                <div className="font-mono text-2xl text-forge-ink">{fmtSimValue(primary)}</div>
+                {guess.armed && guess.revealed && (() => {
+                  const g = Number(guess.text);
+                  if (!Number.isFinite(g) || primary.value === null) return <div className="mt-0.5 text-[10px] text-forge-dim">no comparable guess committed</div>;
+                  const off = primary.value !== 0 ? Math.abs(g - primary.value) / Math.abs(primary.value) * 100 : null;
+                  return (
+                    <div className={`mt-0.5 text-[10px] ${off !== null && off <= 20 ? 'text-forge-ok' : 'text-forge-warn'}`}>
+                      you guessed {g} — {off === null ? 'actual is 0' : off <= 20 ? `within ${off.toFixed(0)}% — well calibrated` : `off by ${off.toFixed(0)}% — the surprising ones stick hardest`}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
             {primary.note && <div className="mt-0.5 text-[10px] text-forge-dim/70">{primary.note}</div>}
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {outputs.slice(1).map((o) => (
               <div key={o.key} className="rounded-lg border border-forge-border px-2.5 py-2">
                 <div className="text-[10px] text-forge-dim">{o.label}</div>
-                <div className="font-mono text-sm text-forge-ink">{fmtSimValue(o)}</div>
+                {/* while a guess is pending, EVERY output masks — the secondary cards would
+                    leak the primary (home-years = traveler-years × γ) */}
+                <div className="font-mono text-sm text-forge-ink">{guess.armed && !guess.revealed ? '•••' : fmtSimValue(o)}</div>
                 {o.note && <div className="text-[9px] text-forge-dim/60">{o.note}</div>}
               </div>
             ))}
@@ -143,6 +199,15 @@ export function LabBench({ cluster, onSave }: { cluster: Cluster; onSave: (a: Ar
           <ul className="space-y-0.5 text-forge-dim">{template.limits.map((l) => <li key={l}>· {l}</li>)}</ul>
         </div>
       </div>
+
+      {/* ANCHORED TO THE KNOWN — real reference points that give the numbers scale, each labeled
+          for what it is (a measurement, a reported range, a long-run average). */}
+      {template.anchors && template.anchors.length > 0 && (
+        <div className="mt-3 text-[11px]">
+          <div className="mb-1 text-[10px] uppercase tracking-wide text-cyan-300/70">anchored to the known</div>
+          <ul className="space-y-0.5 text-forge-dim">{template.anchors.map((a) => <li key={a}>◈ {a}</li>)}</ul>
+        </div>
+      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-forge-border pt-3">
         <button onClick={save}

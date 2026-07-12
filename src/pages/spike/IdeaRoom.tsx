@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, ArrowRight, Home, Layers, HelpCircle, Shuffle, Wand2, Clapperboard, Play, Loader2,
   Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Map as MapIcon, Link2,
-  Split, FlaskConical, Scale, Atom, ClipboardCheck, Lightbulb, GitCompare, Microscope,
+  Split, FlaskConical, Scale, Atom, ClipboardCheck, Lightbulb, GitCompare, Microscope, Waypoints,
 } from 'lucide-react';
 import {
   relatedClusters, addChild, whatIfChild, slugify, EPISTEMICS,
@@ -22,6 +22,9 @@ import { compareNodes, formalizeTheory } from '../../lib/garvis/inquiryRun';
 import { THEORY_ARTIFACT_ID, type Comparison } from '../../lib/garvis/inquiry';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
 import { LabBench } from '../../components/garvis/LabBench';
+import { MechanismCanvas } from '../../components/garvis/MechanismCanvas';
+import { designVisual, type DesignedVisual } from '../../lib/garvis/visualRun';
+import { clampSpecValues, specDefaults, specArtifact } from '../../lib/garvis/visualGrammar';
 
 const PREFETCH_N = 3;
 
@@ -93,6 +96,11 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const [showTheory, setShowTheory] = useState(false);
   const [viewArt, setViewArt] = useState<Artifact | null>(null); // made-here chip re-opened
   const [labErr, setLabErr] = useState('');
+  // PICTURE IT — the designed mechanism visual for THIS branch (visual grammar). The spec's dials
+  // live here (assumptions the user owns); 'starter' means the offline heuristic designed it.
+  const [picture, setPicture] = useState<DesignedVisual | null>(null);
+  const [pictureVals, setPictureVals] = useState<Record<string, number>>({});
+  const [pictureSavedId, setPictureSavedId] = useState<string | null>(null);
   const [, setReadyTick] = useState(0);
   const leadsCache = useRef<Record<string, Lead[]>>({});
   const done = useRef<Set<string>>(new Set());
@@ -112,6 +120,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     setLeads(leadsCache.current[id] ?? []); setSimilar(null);
     setWhatIf(null); setShowBench(false); setPickStatus(false); // lab state is per-branch
     setComparePick(false); setCompareQ(''); setComparison(null); setShowTheory(false); setLabErr(''); setViewArt(null);
+    setPicture(null); setPictureVals({}); setPictureSavedId(null);
     if (done.current.has(id)) return;
     done.current.add(id);
     let cancelled = false;
@@ -368,6 +377,26 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             <span className="mx-1 inline-block h-3 w-px self-center bg-forge-border" aria-hidden />{/* learn ↑ · test ↓ */}
             <button onClick={() => setWhatIf(whatIf === null ? '' : null)} className={`inline-flex items-center gap-1 ${whatIf !== null ? 'text-orange-400' : 'hover:text-orange-400'}`}><Split size={11} /> what if…</button>
             <button onClick={() => setShowBench((v) => !v)} className={`inline-flex items-center gap-1 ${showBench ? 'text-cyan-300' : 'hover:text-cyan-300'}`}><FlaskConical size={11} /> lab bench</button>
+            <button
+              onClick={() => {
+                if (picture) { setPicture(null); return; }
+                void run('pic', async () => {
+                  const r = await designVisual(focus.title, focus.summary);
+                  if ('visual' in r) {
+                    setPicture(r.visual);
+                    setPictureVals(specDefaults(r.visual.spec));
+                    setPictureSavedId(null);
+                    return { costUsd: r.visual.costUsd };
+                  }
+                  if ('refusal' in r) throw new Error(`No honest mechanism for this one: ${r.refusal}`);
+                  throw new Error(r.error);
+                });
+              }}
+              className={`inline-flex items-center gap-1 ${picture ? 'text-emerald-300' : 'hover:text-emerald-300'}`}
+              title="Design the mechanism visual for this branch — an animated model whose dials are your assumptions"
+            >
+              {busy === 'pic' ? <Loader2 size={11} className="animate-spin" /> : <Waypoints size={11} />} picture it
+            </button>
             <button onClick={() => setComparePick((v) => !v)} className={`inline-flex items-center gap-1 ${comparePick || comparison ? 'text-sky-400' : 'hover:text-sky-400'}`}>{busy === 'cmp' ? <Loader2 size={11} className="animate-spin" /> : <GitCompare size={11} />} compare</button>
             <button onClick={runTheory} className={`inline-flex items-center gap-1 ${theoryArt ? 'text-violet-400' : 'hover:text-violet-400'}`}>{busy === 'theory' ? <Loader2 size={11} className="animate-spin" /> : <Microscope size={11} />} {theoryArt ? 'rigor ✓' : 'make it rigorous'}</button>
           </div>
@@ -425,6 +454,50 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
 
           {/* THE LAB BENCH — manipulate the idea: known equations + your dials, honestly labeled */}
           {showBench && <LabBench cluster={focus} onSave={saveArtifact} />}
+
+          {/* THE DESIGNED MECHANISM — picture-it's output: an archetype animation whose dials are
+              the user's assumptions. 'starter' is plainly labeled; save writes a diagram artifact. */}
+          {picture && (() => {
+            const clampedVals = clampSpecValues(picture.spec, pictureVals);
+            return (
+              <div className="ku-rise mt-5 rounded-2xl border border-forge-border bg-forge-panel/50 p-4 backdrop-blur">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Waypoints size={15} className="text-emerald-300" />
+                  <span className="text-sm font-semibold text-forge-ink">{picture.spec.title}</span>
+                  <span className="rounded-full border border-forge-border px-2 py-0.5 text-[9px] uppercase tracking-wide text-forge-dim">{picture.spec.archetype}</span>
+                  {picture.source === 'starter' && (
+                    <span className="rounded-full border border-forge-warn/40 px-2 py-0.5 text-[9px] uppercase tracking-wide text-forge-warn" title="The designer was unreachable — this is the offline starter mechanism; every dial is yours to set.">
+                      starter — dials are assumptions
+                    </span>
+                  )}
+                </div>
+                <MechanismCanvas spec={picture.spec} values={clampedVals} />
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {picture.spec.params.map((p) => (
+                    <div key={p.key}>
+                      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="text-forge-dim">{p.label}</span>
+                        <span className="font-mono text-forge-ink">{clampedVals[p.key]}{p.unit ? ` ${p.unit}` : ''}</span>
+                      </div>
+                      <input
+                        type="range" min={p.min} max={p.max} step={p.step} value={clampedVals[p.key]}
+                        onChange={(e) => { setPictureVals((v) => ({ ...v, [p.key]: Number(e.target.value) })); setPictureSavedId(null); }}
+                        className="w-full accent-[#34d399]"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-forge-dim/70">{picture.spec.caption}</p>
+                <p className="mt-0.5 text-[10px] text-forge-dim/60"><span className="text-forge-dim">Basis:</span> {picture.spec.basis}</p>
+                <button
+                  onClick={() => { const a = specArtifact(picture.spec, clampedVals); saveArtifact(a); setPictureSavedId(a.id); }}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-forge-ink transition-colors hover:bg-emerald-400/10"
+                >
+                  {pictureSavedId ? <CheckCircle2 size={12} className="text-forge-ok" /> : <BookOpen size={12} />} {pictureSavedId ? 'Saved to this branch' : 'Save this mechanism'}
+                </button>
+              </div>
+            );
+          })()}
 
           {/* comparing… — the feedback renders exactly where the readout will land */}
           {comparingWith && (

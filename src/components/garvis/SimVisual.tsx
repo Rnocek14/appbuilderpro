@@ -9,15 +9,18 @@
 import { useEffect, useRef } from 'react';
 import type { SimTemplate, SimOutput } from '../../lib/garvis/lab';
 
-const H = 250;
-const INK = '#e8eaf0', DIM = '#8b90a0', FAINT = '#5c6170', EMBER = '#FF8A3D', OK = '#4ADE80', ERR = '#f87171', CYAN = '#67e8f9', RAISED = '#1a1e28', BORDER = '#262b36';
+// Shared drawing vocabulary — also consumed by MechanismCanvas (the generic archetype renderer),
+// so the hand-tuned and grammar-driven visuals speak one visual language.
+export const VIZ_H = 250;
+export const INK = '#e8eaf0', DIM = '#8b90a0', FAINT = '#5c6170', EMBER = '#FF8A3D', OK = '#4ADE80', ERR = '#f87171', CYAN = '#67e8f9', RAISED = '#1a1e28', BORDER = '#262b36';
+const H = VIZ_H;
 
 const hash32 = (s: string): number => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h; };
-const rnd = (i: number, salt: string) => (hash32(`${salt}-${i}`) % 10000) / 10000;
-const money = (v: number) => v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${Math.round(v)}`;
+export const rnd = (i: number, salt: string) => (hash32(`${salt}-${i}`) % 10000) / 10000;
+export const money = (v: number) => v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M` : v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${Math.round(v)}`;
 const out = (outputs: SimOutput[], key: string): number | null => outputs.find((o) => o.key === key)?.value ?? null;
 
-function clock(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, angle: number, color: string) {
+export function clock(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, angle: number, color: string) {
   ctx.strokeStyle = BORDER; ctx.fillStyle = RAISED; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
   ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -25,7 +28,7 @@ function clock(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, a
   ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
 }
 
-function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color = DIM, size = 10, align: CanvasTextAlign = 'left') {
+export function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color = DIM, size = 10, align: CanvasTextAlign = 'left') {
   ctx.fillStyle = color; ctx.font = `${size}px ui-monospace, monospace`; ctx.textAlign = align; ctx.fillText(text, x, y); ctx.textAlign = 'left';
 }
 
