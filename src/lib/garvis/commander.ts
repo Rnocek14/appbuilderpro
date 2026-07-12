@@ -9,7 +9,8 @@ export type Command =
   | { kind: 'mission'; preface: string; objective: string; subject: string; app: string | null }
   | { kind: 'act'; preface: string; instruction: string }
   | { kind: 'open'; preface: string; surface: 'mailer' | 'video'; world: string | null }
-  | { kind: 'build'; preface: string; prompt: string };
+  | { kind: 'build'; preface: string; prompt: string }
+  | { kind: 'explore'; preface: string; query: string };
 
 export const COMMANDER_SYSTEM = `You are Garvis — a solo founder's AI chief of staff. You speak like a sharp, calm, capable operator:
 warm, brief, never fluffy. The founder talks to you in plain language; you decide what to DO.
@@ -44,10 +45,15 @@ You have a worker team (research, analytics, marketing, bug/QA diagnosis, builde
    the feel — expand their words with sensible specifics they'd expect, invent nothing they'd have to
    undo. You'll take them to the forge with everything pre-filled; one press starts the build.
 
-IDEA EXPLORATION: when the founder is musing ("what if…", "I'm curious about…", "give me ideas for…"),
+6) EXPLORE — when the founder wants to DIVE and wander: "take me down the rabbit hole on X",
+   "let's really explore Y", "I want to get lost in Z for a while". You open the exploration galaxy
+   seeded with their curiosity — the place for having twenty tabs open, organized: branches, trails,
+   parallel investigations, everything saved. Distill their curiosity into a crisp "query" topic.
+
+IDEA EXPLORATION (lighter): when the founder is just musing ("what if…", "give me ideas for…"),
 REPLY with 4-6 genuinely DISTINCT ideas grounded in their portfolio/knowledge — each one line + a
-concrete first step — then offer the deeper gears: "want me to dig into any of these (I'll research and
-synthesize), or make one real (build/mission)?" Exploration is a conversation, not a form.
+concrete first step — then offer the deeper gears: "want me to dig into one (act), take it down the
+rabbit hole (explore), or make it real (build/mission)?" Exploration is a conversation, not a form.
 
 When unsure, REPLY and offer to run a mission. Prefer REPLY for anything answerable in a sentence or two.
 
@@ -56,7 +62,8 @@ OUTPUT exactly one JSON object, no prose, no fences:
 {"kind":"mission","preface":"…","objective":"…","subject":"…","app":"<exact portfolio app name or null>"}
 {"kind":"act","preface":"…","instruction":"…"}
 {"kind":"open","preface":"…","surface":"mailer|video","world":"<venture/world name or null>"}
-{"kind":"build","preface":"…","prompt":"…"}`;
+{"kind":"build","preface":"…","prompt":"…"}
+{"kind":"explore","preface":"…","query":"…"}`;
 
 export function buildCommanderUser(
   message: string,
@@ -102,6 +109,9 @@ export function parseCommand(raw: string): Command {
   }
   if (o.kind === 'build' && str(o.prompt)) {
     return { kind: 'build', preface: str(o.preface) || 'To the forge —', prompt: str(o.prompt) };
+  }
+  if (o.kind === 'explore' && str(o.query)) {
+    return { kind: 'explore', preface: str(o.preface) || 'Down we go —', query: str(o.query) };
   }
   if (o.kind === 'open' && (o.surface === 'mailer' || o.surface === 'video')) {
     return {

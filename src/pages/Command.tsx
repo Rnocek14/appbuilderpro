@@ -22,6 +22,7 @@ const SUGGESTIONS = [
   'Grow Theory Thread end-to-end',
   'Help my mom grow her Lake Geneva real-estate business',
   'Find new opportunities across my apps',
+  'Take me down the rabbit hole on local lead generation',
 ];
 
 function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMission; tasks: GarvisTask[]; onRun: () => void; running: boolean }) {

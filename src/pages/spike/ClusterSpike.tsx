@@ -152,6 +152,16 @@ export default function ClusterSpike() {
     install(t, g, slug);
   });
 
+  // RABBIT HOLE FROM THE THREAD (UX redesign): Command hands a curiosity over as ?dive= — the
+  // galaxy opens already falling into it. Consumed once; a refresh stays on whatever you grew.
+  const dove = useRef(false);
+  useEffect(() => {
+    if (dove.current || graph) return;
+    const d = new URLSearchParams(window.location.search).get('dive')?.trim();
+    if (d) { dove.current = true; setCuriosity(d); begin(d); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph]);
+
   // "New" LEAVES the current world (it stays saved, locally and in the cloud) and returns to the
   // cold start, where every world — this one included — is one click away. Nothing is ever erased.
   const startOver = () => {

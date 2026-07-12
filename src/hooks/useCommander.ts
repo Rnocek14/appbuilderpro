@@ -142,6 +142,16 @@ export function useCommander() {
         return;
       }
 
+      // EXPLORE — the rabbit hole: "take me down the rabbit hole on X" opens the exploration
+      // galaxy already falling into that curiosity (?dive= seed, consumed once by the galaxy).
+      // The fun of eighteen tabs open — branches, trails, parallel dives — organized and saved.
+      if (cmd.kind === 'explore') {
+        push({ role: 'garvis', text: `${cmd.preface} Opening the rabbit hole on “${cmd.query}” — branch it, wander, chase the tangents. Everything you grow stays saved, and I'm right here when you surface.` });
+        emitMindEvent({ event_type: 'commander_exchange', subject: `Rabbit hole: "${cmd.query.slice(0, 160)}"`, source: 'commander' });
+        navigate(`/garvis/explore?dive=${encodeURIComponent(cmd.query.slice(0, 500))}`);
+        return;
+      }
+
       // OPEN — a summoned canvas: Garvis opens the studio BESIDE the conversation, pre-loaded
       // with the venture's real materials. Resolution is honest: an unknown venture or a missing
       // studio area gets a plain answer naming what exists, never a guess at the wrong world.
