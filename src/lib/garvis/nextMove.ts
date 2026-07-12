@@ -29,7 +29,8 @@ export type MoveKind =
   | 'insight_connection' // "Garvis noticed" — the brain found a link
   | 'reflection_due'     // enough happened in a world that a reflection would teach something
   | 'intel_stale'        // the world's research is old enough to mislead
-  | 'draft_waiting';     // genesis designed a world; it exists only if the user approves it
+  | 'draft_waiting'      // genesis designed a world; it exists only if the user approves it
+  | 'trail_open';        // a rabbit-hole exploration left warm — momentum worth resuming
 
 export interface NextMove {
   key: string;                 // stable identity for dedupe + dismissal
@@ -70,6 +71,8 @@ export interface MissionDoneIn { missionId: string; worldId: string | null; subj
 // ---------------------------------------------------------------------------
 
 const short = (s: string | null | undefined, n = 60) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+
+const HOUR = 3_600_000;
 
 export interface ReminderRowIn { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }
 
@@ -217,6 +220,38 @@ export function collectDrafts(rows: DraftRowIn[]): NextMove[] {
   }));
 }
 
+export interface TrailRowIn { worldId: string; title: string; clusterCount: number; updatedAt: string }
+
+const TRAIL_MIN_IDEAS = 3;               // a real dive, not a spark that never grew
+const TRAIL_MIN_AGE_MS = 20 * HOUR;      // not today — nudging someone mid-dive is noise
+const TRAIL_MAX_AGE_MS = 7 * 24 * HOUR;  // after a week the trail has gone cold
+
+/** Rabbit-hole momentum: at most ONE warm trail — an exploration world grown to real size, last
+ *  touched roughly a day to a week ago. Scarcity by construction (the single most recent), and the
+ *  why carries its evidence: the idea count and the age are the rows' own numbers. */
+export function collectTrails(rows: TrailRowIn[], now: Date): NextMove[] {
+  const warm = rows
+    .filter((r) => r.clusterCount >= TRAIL_MIN_IDEAS)
+    .filter((r) => {
+      const age = now.getTime() - new Date(r.updatedAt).getTime();
+      return age >= TRAIL_MIN_AGE_MS && age <= TRAIL_MAX_AGE_MS;
+    })
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  const t = warm[0];
+  if (!t) return [];
+  const days = Math.max(1, Math.round((now.getTime() - new Date(t.updatedAt).getTime()) / (24 * HOUR)));
+  return [{
+    key: `trail:${t.worldId}`,
+    kind: 'trail_open',
+    title: `The trail on "${short(t.title, 48)}" is still warm`,
+    why: `You grew it to ${t.clusterCount} ideas, last touched ${days === 1 ? 'yesterday' : `${days} days ago`}. Momentum is easier to keep than to rebuild.`,
+    action: { label: 'Drop back in', route: `/garvis/explore?world=${encodeURIComponent(t.worldId)}` },
+    score: 0,
+    bornAt: t.updatedAt,
+    expected: { text: 'A second session usually turns branches into something buildable.', basis: 'heuristic' },
+  }];
+}
+
 /** Rule 6 made literal: the intelligence layer feeds the morning. */
 export function collectWorldIntel(rows: WorldIntelIn[]): NextMove[] {
   const out: NextMove[] = [];
@@ -275,10 +310,10 @@ const BASE_VALUE: Record<MoveKind, number> = {
   blocking_empty: 50,
   reflection_due: 45,      // learning compounds — but a warm reply still comes first
   insight_connection: 40,
+  trail_open: 35,          // momentum nudge — never outranks a human or a decision
   intel_stale: 30,
 };
 
-const HOUR = 3_600_000;
 const DISMISS_PENALTY = 200;          // a dismissal silences a move…
 const DISMISS_WINDOW_MS = 7 * 24 * HOUR; // …for seven days, then it may earn its way back
 const STALE_AFTER_MS = 14 * 24 * HOUR;   // moves older than two weeks decay away entirely

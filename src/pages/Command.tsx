@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Send, Play, Boxes } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Sparkles, Send, Play, Boxes, Maximize2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { WakingMoment } from '../components/garvis/WakingMoment';
 import { RemindersCard } from '../components/garvis/RemindersCard';
@@ -13,6 +14,7 @@ import type { ChatMessage } from '../hooks/useCommander';
 import { useToast } from '../context/ToastContext';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { VideoStudio } from '../components/garvis/VideoStudio';
+import ClusterSpike from './spike/ClusterSpike';
 import type { GarvisMission, GarvisTask } from '../types';
 
 const SCAN_THROTTLE_MS = 12 * 60 * 60 * 1000; // proactive scan at most twice a day
@@ -46,6 +48,7 @@ function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMissi
 export default function Command() {
   const { messages, thinking, send, missions, tasksByMission, runMission, busyId, canvas, closeCanvas } = useCommander();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { loading: oppLoading, scan } = useOpportunities();
   const { profile } = useAuth();
   const firstName = (profile?.full_name ?? '').trim().split(/\s+/)[0] || 'there';
@@ -160,16 +163,33 @@ export default function Command() {
       {canvas && (
         <div className="hidden min-h-0 flex-col overflow-y-auto rounded-2xl border border-forge-border bg-forge-panel/40 p-4 lg:flex">
           <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-medium text-forge-ink">
-              {canvas.surface === 'mailer' ? '📮 Postcard studio' : '🎬 Video studio'} — {canvas.worldTitle}
+            <span className="min-w-0 truncate text-sm font-medium text-forge-ink">
+              {canvas.surface === 'explore'
+                ? <>🕳️ Rabbit hole — {canvas.query}</>
+                : <>{canvas.surface === 'mailer' ? '📮 Postcard studio' : '🎬 Video studio'} — {canvas.worldTitle}</>}
             </span>
-            <button onClick={closeCanvas} className="ml-auto rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-ink" title="Close the canvas (work is saved as artifacts)">
+            {canvas.surface === 'explore' && (
+              <button
+                onClick={() => { closeCanvas(); navigate('/garvis/explore'); }}
+                className="ml-auto flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-ink"
+                title="Go full-bleed — the dive continues right where you are"
+              >
+                <Maximize2 size={11} /> Full screen
+              </button>
+            )}
+            <button onClick={closeCanvas} className={`${canvas.surface === 'explore' ? '' : 'ml-auto '}rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-ink`} title="Close the canvas (everything you grew is saved)">
               Close
             </button>
           </div>
-          {canvas.surface === 'mailer'
-            ? <MailerDesigner worldId={canvas.worldId} clusterId={canvas.clusterId} onToast={(k, m) => toast(k, m)} />
-            : <VideoStudio worldId={canvas.worldId} clusterId={canvas.clusterId} title={canvas.worldTitle} onToast={(k, m) => toast(k, m)} />}
+          {canvas.surface === 'explore'
+            ? (
+              <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-forge-border">
+                <ClusterSpike key={canvas.query} embedded seed={canvas.query} />
+              </div>
+            )
+            : canvas.surface === 'mailer'
+              ? <MailerDesigner worldId={canvas.worldId} clusterId={canvas.clusterId} onToast={(k, m) => toast(k, m)} />
+              : <VideoStudio worldId={canvas.worldId} clusterId={canvas.clusterId} title={canvas.worldTitle} onToast={(k, m) => toast(k, m)} />}
         </div>
       )}
       </div>

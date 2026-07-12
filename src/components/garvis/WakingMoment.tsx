@@ -23,6 +23,7 @@ const KIND_DOT: Record<NextMove['kind'], string> = {
   reflection_due: 'bg-[#B98CE0]',
   intel_stale: 'bg-forge-warn',
   draft_waiting: 'bg-forge-ember',
+  trail_open: 'bg-[#B98CE0]', // curiosity purple — same family as insights/reflections
 };
 
 export function WakingMoment({ name }: { name: string }) {

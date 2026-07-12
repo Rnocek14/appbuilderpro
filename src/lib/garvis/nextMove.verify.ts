@@ -6,7 +6,7 @@
 
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals,
 } from './nextMove';
 
@@ -185,6 +185,27 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
     ...collectNaturalNext([{ missionId: 'm1', worldId: 'w1', subject: 's', artifactCount: 3, sendsQueued: 0, updated_at: hoursAgo(1) }]),
   ], NOW, {});
   check('ranking: approval > draft > natural next', ranked.map((m) => m.kind).join(',') === 'approval_waiting,draft_waiting,natural_next', ranked.map((m) => m.kind).join(','));
+}
+
+// 8. Warm trails — the rabbit hole nudges honestly: one at most, real dives only, right window.
+{
+  const trail = (worldId: string, clusterCount: number, ageH: number) =>
+    ({ worldId, title: `World ${worldId}`, clusterCount, updatedAt: hoursAgo(ageH) });
+  check('trail: a fresh dive (<20h) stays quiet — mid-dive nudges are noise', collectTrails([trail('w1', 8, 3)], NOW).length === 0);
+  check('trail: a spark that never grew (<3 ideas) stays quiet', collectTrails([trail('w1', 2, 48)], NOW).length === 0);
+  check('trail: a cold trail (>7d) stays quiet', collectTrails([trail('w1', 8, 8 * 24)], NOW).length === 0);
+  const warm = collectTrails([trail('w1', 9, 48)], NOW);
+  check('trail: a warm real dive surfaces with counted evidence', warm.length === 1 && warm[0].why.includes('9 ideas') && warm[0].why.includes('2 days ago'));
+  check('trail: deep-links into the specific world', warm[0].action.route === '/garvis/explore?world=w1');
+  check('trail: at most ONE — the most recent wins', (() => {
+    const out = collectTrails([trail('older', 12, 96), trail('newer', 5, 30)], NOW);
+    return out.length === 1 && out[0].key === 'trail:newer';
+  })());
+  check('trail: yesterday reads as yesterday', collectTrails([trail('w1', 4, 22)], NOW)[0].why.includes('yesterday'));
+  // same bornAt across kinds so the check compares BASE VALUES, not urgency accrual
+  const mk3 = (kind: NextMove['kind'], key: string): NextMove => ({ key, kind, title: key, why: 'w', action: { label: 'l', route: '/' }, score: 0, bornAt: hoursAgo(48) });
+  const order = rankMoves([...collectTrails([trail('w1', 9, 48)], NOW), mk3('reply_unanswered', 'rep'), mk3('insight_connection', 'ins'), mk3('intel_stale', 'int')], NOW);
+  check('ranking: reply > insight > trail > stale-intel', order.map((m) => m.kind).join(',') === 'reply_unanswered,insight_connection,trail_open,intel_stale', order.map((m) => m.kind).join(','));
 }
 
 console.log(`\nnextMove.verify: ${passed} passed, ${failed} failed`);

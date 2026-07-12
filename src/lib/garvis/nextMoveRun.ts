@@ -6,9 +6,10 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
-  type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn,
+  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn, type TrailRowIn,
 } from './nextMove';
+import { listWorlds, isWorldUuid } from './universe';
 import { reflectionDue } from './worldIntel';
 import { parseCharter } from './workweb';
 import { SEED_SOURCE } from './workwebRun';
@@ -201,6 +202,27 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     }
   }
 
+  // Rabbit-hole trails: exploration worlds (no chartered areas — those are ventures) left warm.
+  // listWorlds merges local + cloud, so a dive that only lives in this browser still counts; for
+  // remote-only worlds the local cluster count is missing, so fetch it (the why must be real).
+  let trailRows: TrailRowIn[] = [];
+  try {
+    const allWorlds = await listWorlds();
+    const chartered = new Set(clusters.map((c) => c.world_id as string));
+    const candidates = allWorlds.filter((w) => !chartered.has(w.id)).slice(0, 12);
+    const uncounted = candidates.filter((w) => w.clusterCount == null && isWorldUuid(w.id)).map((w) => w.id);
+    const counts = new Map<string, number>();
+    if (uncounted.length) {
+      const { data } = await supabase.from('knowledge_clusters').select('world_id').in('world_id', uncounted).limit(1000);
+      for (const r of data ?? []) counts.set(r.world_id as string, (counts.get(r.world_id as string) ?? 0) + 1);
+    }
+    trailRows = candidates.map((w) => ({
+      worldId: w.id, title: w.title,
+      clusterCount: w.clusterCount ?? counts.get(w.id) ?? 0,
+      updatedAt: w.updatedAt,
+    }));
+  } catch { /* fail-soft: no trail nudge is better than a made-up one */ }
+
   // Genesis drafts awaiting judgment — a designed world should never rot unreviewed.
   const { data: draftRows } = await supabase.from('web_templates')
     .select('id, title, template, created_at').eq('status', 'draft').limit(5);
@@ -227,6 +249,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     ...collectInsights(insights.map((i) => ({ id: i.id as string, title: i.title as string, body: i.body as string, score: Number(i.score), created_at: i.created_at as string }))),
     ...collectFloor(floors),
     ...collectNaturalNext(naturals),
+    ...collectTrails(trailRows, now),
   ], now, readDismissals());
 
   // GOAL FOCUS — the owner's declared project goals steer the ranking (goals.ts, deterministic):

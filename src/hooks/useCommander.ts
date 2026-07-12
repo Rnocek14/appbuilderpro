@@ -25,15 +25,21 @@ export interface ChatMessage {
 
 const THREAD_WINDOW = 40; // recent turns loaded on mount; the full record stays in the DB
 
-/** SUMMONED CANVAS (UX redesign, architectural tier): the studio Garvis opened beside the thread. */
-export interface Canvas { surface: 'mailer' | 'video'; worldId: string; clusterId: string; worldTitle: string }
+/** SUMMONED CANVAS (UX redesign, architectural tier): what Garvis opened beside the thread —
+ *  a studio pre-loaded with a venture's materials, or the exploration galaxy mid-dive. */
+export type Canvas =
+  | { surface: 'mailer' | 'video'; worldId: string; clusterId: string; worldTitle: string }
+  | { surface: 'explore'; query: string };
 
-const FLAVOR_FOR: Record<Canvas['surface'], string> = { mailer: 'direct_mail', video: 'video' };
+type StudioSurface = 'mailer' | 'video';
+type StudioCanvas = Extract<Canvas, { surface: StudioSurface }>;
+
+const FLAVOR_FOR: Record<StudioSurface, string> = { mailer: 'direct_mail', video: 'video' };
 
 /** Resolve "the mailer for <world>" to real ids: world by (fuzzy) title, then its studio cluster
  *  by charter flavor. Honest nulls with a reason — never a guess at the wrong world. */
-async function resolveStudio(surface: Canvas['surface'], worldName: string | null):
-  Promise<{ canvas?: Canvas; reason?: string }> {
+async function resolveStudio(surface: StudioSurface, worldName: string | null):
+  Promise<{ canvas?: StudioCanvas; reason?: string }> {
   const { data: worlds } = await supabase.from('knowledge_worlds').select('id, title').limit(100);
   const all = ((worlds ?? []) as { id: string; title: string }[]);
   if (!all.length) return { reason: 'You have no ventures yet — create one in Ventures and I can open its studios.' };
@@ -143,12 +149,20 @@ export function useCommander() {
       }
 
       // EXPLORE — the rabbit hole: "take me down the rabbit hole on X" opens the exploration
-      // galaxy already falling into that curiosity (?dive= seed, consumed once by the galaxy).
-      // The fun of eighteen tabs open — branches, trails, parallel dives — organized and saved.
+      // galaxy already falling into that curiosity. The fun of eighteen tabs open — branches,
+      // trails, parallel dives — organized and saved. On wide screens the galaxy is a SUMMONED
+      // CANVAS beside this thread (dive without leaving the conversation); below lg the side
+      // panel doesn't render, so small screens go full-bleed via the ?dive= seed instead.
       if (cmd.kind === 'explore') {
-        push({ role: 'garvis', text: `${cmd.preface} Opening the rabbit hole on “${cmd.query}” — branch it, wander, chase the tangents. Everything you grow stays saved, and I'm right here when you surface.` });
         emitMindEvent({ event_type: 'commander_exchange', subject: `Rabbit hole: "${cmd.query.slice(0, 160)}"`, source: 'commander' });
-        navigate(`/garvis/explore?dive=${encodeURIComponent(cmd.query.slice(0, 500))}`);
+        const query = cmd.query.slice(0, 500);
+        if (window.matchMedia('(min-width: 1024px)').matches) {
+          setCanvas({ surface: 'explore', query });
+          push({ role: 'garvis', text: `${cmd.preface} The rabbit hole on “${cmd.query}” is open beside us — branch it, wander, chase the tangents. Tell me what you find and I'll pull threads with you; everything you grow stays saved.` });
+        } else {
+          push({ role: 'garvis', text: `${cmd.preface} Opening the rabbit hole on “${cmd.query}” — branch it, wander, chase the tangents. Everything you grow stays saved, and I'm right here when you surface.` });
+          navigate(`/garvis/explore?dive=${encodeURIComponent(query)}`);
+        }
         return;
       }
 

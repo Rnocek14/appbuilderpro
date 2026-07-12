@@ -70,7 +70,9 @@ function StatPill({ label, value, warn }: { label: string; value: string | numbe
   );
 }
 
-export default function ClusterSpike() {
+/** Page by default; `embedded` mounts it as a summoned canvas beside the Command thread (h-full,
+ *  no focus theft). `seed` starts a NEW dive immediately — whatever world was current stays saved. */
+export default function ClusterSpike({ embedded = false, seed: seedProp }: { embedded?: boolean; seed?: string } = {}) {
   const [graph, setGraph] = useState<ClusterGraph | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
@@ -99,16 +101,30 @@ export default function ClusterSpike() {
 
   const refreshWorlds = () => { void listWorlds().then(setWorlds).catch(() => {}); };
 
-  // restore the universe on mount — "still here when you come back" — and learn what other worlds exist
+  // Mount: a SEED (embedded canvas prop, or ?dive= handed over by Command) starts falling into a
+  // NEW world right now — whatever was current stays saved (the universe only grows). ?world= is a
+  // deep link into a specific world (the waking moment's warm-trail move lands here). Otherwise,
+  // restore — "still here when you come back". Either way, learn what other worlds exist.
+  const entered = useRef(false);
   useEffect(() => {
-    const u = loadUniverse();
-    if (u) {
-      meta.current = { id: u.id, createdAt: u.createdAt };
-      setGraph(u.graph); setFocusId(u.focusId); setTitle(u.title);
-      setWelcome(`Welcome back — last explored ${lastSeen(u)}`);
-      setSaved(true);
+    if (entered.current) return;
+    entered.current = true;
+    const params = embedded ? null : new URLSearchParams(window.location.search);
+    const s = (seedProp ?? params?.get('dive') ?? '').trim();
+    const worldId = params?.get('world')?.trim() ?? '';
+    if (s) { setCuriosity(s); void begin(s); }
+    else if (worldId) { open(worldId); }
+    else {
+      const u = loadUniverse();
+      if (u) {
+        meta.current = { id: u.id, createdAt: u.createdAt };
+        setGraph(u.graph); setFocusId(u.focusId); setTitle(u.title);
+        setWelcome(`Welcome back — last explored ${lastSeen(u)}`);
+        setSaved(true);
+      }
     }
     refreshWorlds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // auto-save (debounced): localStorage immediately, then a best-effort cloud push. The first push
@@ -152,16 +168,6 @@ export default function ClusterSpike() {
     install(t, g, slug);
   });
 
-  // RABBIT HOLE FROM THE THREAD (UX redesign): Command hands a curiosity over as ?dive= — the
-  // galaxy opens already falling into it. Consumed once; a refresh stays on whatever you grew.
-  const dove = useRef(false);
-  useEffect(() => {
-    if (dove.current || graph) return;
-    const d = new URLSearchParams(window.location.search).get('dive')?.trim();
-    if (d) { dove.current = true; setCuriosity(d); begin(d); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [graph]);
-
   // "New" LEAVES the current world (it stays saved, locally and in the cloud) and returns to the
   // cold start, where every world — this one included — is one click away. Nothing is ever erased.
   const startOver = () => {
@@ -204,7 +210,7 @@ export default function ClusterSpike() {
   // ---------- COLD START ----------
   if (!graph) {
     return (
-      <div className="relative flex h-screen w-full flex-col items-center justify-center overflow-hidden px-6">
+      <div className={`relative flex ${embedded ? 'h-full' : 'h-screen'} w-full flex-col items-center justify-center overflow-hidden px-6`}>
         <style>{`@keyframes ku-cs-glow{0%,100%{box-shadow:0 0 0 1px rgba(233,162,59,.25),0 0 40px -8px rgba(233,162,59,.5)}50%{box-shadow:0 0 0 1px rgba(233,162,59,.4),0 0 70px -6px rgba(233,162,59,.8)}}`}</style>
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(900px 600px at 50% 40%, rgba(233,162,59,0.12), transparent 70%), radial-gradient(circle at 50% 50%, #0c0a14, #060509 85%)' }} />
         <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.35) 1px, transparent 1px)', backgroundSize: '60px 60px', opacity: 0.5 }} />
@@ -220,7 +226,7 @@ export default function ClusterSpike() {
             style={{ animation: 'ku-cs-glow 5s ease-in-out infinite' }}
           >
             <input
-              autoFocus value={curiosity} onChange={(e) => setCuriosity(e.target.value)}
+              autoFocus={!embedded} value={curiosity} onChange={(e) => setCuriosity(e.target.value)}
               placeholder="black holes, the Roman Empire, how memory works…"
               className="flex-1 bg-transparent px-3 py-2 text-base text-forge-ink outline-none placeholder:text-forge-dim/60"
             />
@@ -275,7 +281,7 @@ export default function ClusterSpike() {
 
   // ---------- THE UNIVERSE ----------
   return (
-    <div className="relative flex h-screen w-full flex-col bg-forge-bg">
+    <div className={`relative flex ${embedded ? 'h-full' : 'h-screen'} w-full flex-col bg-forge-bg`}>
       <div className="flex flex-wrap items-center gap-2 border-b border-forge-border px-4 py-2">
         <Sparkles size={16} className="text-forge-ember" />
         <h1 className="font-display text-base font-semibold text-forge-ink">{title || 'Your universe'}</h1>
