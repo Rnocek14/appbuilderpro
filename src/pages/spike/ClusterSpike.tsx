@@ -41,6 +41,8 @@ function parseTranscript(text: string, startIndex = 0): Turn[] {
 const KIND_TONE: Record<Cluster['kind'], string> = {
   topic: 'text-forge-ink', question: 'text-sky-400', idea: 'text-forge-ember',
   investigation: 'text-violet-400', artifact: 'text-emerald-400', project: 'text-amber-400',
+  claim: 'text-rose-400', theory: 'text-purple-400', evidence: 'text-emerald-400',
+  scenario: 'text-orange-400', experiment: 'text-cyan-400', insight: 'text-amber-300',
 };
 
 function TreeNode({ node, all, depth }: { node: Cluster; all: Cluster[]; depth: number }) {

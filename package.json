@@ -49,7 +49,8 @@
     "verify:producers": "tsx src/lib/garvis/producers.verify.ts",
     "verify:adaptive": "tsx src/lib/garvis/adaptive.verify.ts",
     "verify:contacts": "tsx src/lib/garvis/contacts.verify.ts",
-    "verify:storyboard": "tsx src/lib/garvis/storyboard.verify.ts"
+    "verify:storyboard": "tsx src/lib/garvis/storyboard.verify.ts",
+    "verify:lab": "tsx src/lib/garvis/lab.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

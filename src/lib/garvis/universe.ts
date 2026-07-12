@@ -299,7 +299,9 @@ export async function loadWorld(id: string): Promise<Universe | null> {
   try {
     const [{ data: world }, { data: clusters }] = await Promise.all([
       supabase.from('knowledge_worlds').select('id, title, focus_slug, created_at, updated_at').eq('id', id).single(),
-      supabase.from('knowledge_clusters').select('id, owner_id, world_id, parent_id, slug, title, summary, trajectory, kind, maturity, salience, turn_refs').eq('world_id', id),
+      // '*' (not an explicit column list) so a server that pre-dates a newer column (e.g. app_0049
+      // epistemic) still loads — rowsToGraph reads what it needs and tolerates what's missing.
+      supabase.from('knowledge_clusters').select('*').eq('world_id', id),
     ]);
     if (!world || !clusters) return null;
     const clusterIds = clusters.map((c) => c.id as string);

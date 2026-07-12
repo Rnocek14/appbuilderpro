@@ -11,21 +11,36 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, ArrowRight, Home, Layers, HelpCircle, Shuffle, Wand2, Clapperboard, Play, Loader2,
   Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Map as MapIcon, Link2,
+  Split, FlaskConical, Scale, Atom, ClipboardCheck, Lightbulb,
 } from 'lucide-react';
 import {
-  relatedClusters, addChild, slugify,
-  type ClusterGraph, type Cluster, type ClusterKind, type ClusterMaturity, type Artifact, type ExpandMode, type Lead, type LeadKind, type RelatedCluster,
+  relatedClusters, addChild, whatIfChild, slugify, EPISTEMICS,
+  type ClusterGraph, type Cluster, type ClusterKind, type ClusterMaturity, type Epistemic, type Artifact, type ExpandMode, type Lead, type LeadKind, type RelatedCluster,
 } from '../../lib/garvis/clustering';
 import { exploreLeads, expandCluster, gatherWikiMedia, gatherVideos, findSimilarClusters, composeProspect, type Prospect } from '../../lib/garvis/clusteringRun';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
+import { LabBench } from '../../components/garvis/LabBench';
 
 const PREFETCH_N = 3;
 
 const KIND_HEX: Record<ClusterKind, string> = {
   topic: '#e9a23b', question: '#38bdf8', idea: '#f59e0b', investigation: '#a78bfa', artifact: '#34d399', project: '#fbbf24',
+  claim: '#f472b6', theory: '#c084fc', evidence: '#4ade80', scenario: '#fb923c', experiment: '#22d3ee', insight: '#facc15',
 };
 const KIND_ICON: Record<ClusterKind, typeof Sparkles> = {
   topic: Sparkles, question: CircleHelp, idea: Sparkles, investigation: Telescope, artifact: BookOpen, project: FolderKanban,
+  claim: Scale, theory: Atom, evidence: ClipboardCheck, scenario: Split, experiment: FlaskConical, insight: Lightbulb,
+};
+
+// THE HONESTY LAYER, rendered: the epistemic label travels with the node — speculation never
+// dresses as fact, and the more beautiful the room, the more this chip matters.
+const EPISTEMIC_HEX: Record<Epistemic, string> = {
+  established: '#4ade80', strong: '#a3e635', plausible: '#38bdf8', disputed: '#facc15',
+  speculative: '#fb923c', fiction: '#c084fc', hypothesis: '#FF8A3D',
+};
+const EPISTEMIC_LABEL: Record<Epistemic, string> = {
+  established: 'established', strong: 'strong evidence', plausible: 'plausible', disputed: 'disputed',
+  speculative: 'speculative', fiction: 'fiction', hypothesis: 'your hypothesis',
 };
 const MATURITY_LABEL: Record<ClusterMaturity, string> = {
   spark: 'spark', growing: 'growing', mature: 'mature', building: 'building', finished: 'done', dormant: 'dormant', archived: 'archived',
@@ -64,6 +79,9 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const [similar, setSimilar] = useState<RelatedCluster[] | null>(null);
   const [loading, setLoading] = useState({ answer: false, media: false, video: false });
   const [busy, setBusy] = useState<string | null>(null);
+  const [whatIf, setWhatIf] = useState<string | null>(null); // null = closed; '' = open, typing
+  const [showBench, setShowBench] = useState(false);
+  const [pickStatus, setPickStatus] = useState(false);
   const [, setReadyTick] = useState(0);
   const leadsCache = useRef<Record<string, Lead[]>>({});
   const done = useRef<Set<string>>(new Set());
@@ -81,6 +99,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     if (!focus) return;
     const id = focus.id;
     setLeads(leadsCache.current[id] ?? []); setSimilar(null);
+    setWhatIf(null); setShowBench(false); setPickStatus(false); // lab state is per-branch
     if (done.current.has(id)) return;
     done.current.add(id);
     let cancelled = false;
@@ -146,6 +165,32 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   };
   const expand = (m: ExpandMode) => run(`x:${m}`, () => expandCluster(graph, focus.id, m));
 
+  // WHAT IF? — controlled divergence: a NEW scenario branch beside the original (never a
+  // replacement), born speculative. The room then explores it like any other thought.
+  const submitWhatIf = () => {
+    const twist = (whatIf ?? '').trim();
+    setWhatIf(null);
+    if (!twist) return;
+    const { graph: g2, id } = whatIfChild(graph, focus.id, twist);
+    if (!id) return;
+    setGraph(g2);
+    travel(id);
+  };
+
+  // Lab Bench runs land as simulation-record artifacts ON this branch (same id = same inputs —
+  // an identical re-run replaces nothing and adds nothing).
+  const saveArtifact = (a: Artifact) => setGraph({
+    ...graph,
+    clusters: graph.clusters.map((c) => c.id === focus.id
+      ? (c.artifacts.some((x) => x.id === a.id) ? c : { ...c, artifacts: [...c.artifacts, a] })
+      : c),
+  });
+
+  const setEpistemic = (e: Epistemic | undefined) => {
+    setGraph({ ...graph, clusters: graph.clusters.map((c) => (c.id === focus.id ? { ...c, epistemic: e } : c)) });
+    setPickStatus(false);
+  };
+
   // merge existing branches + fresh leads into one set of "currents", ranked by your currents
   const bias = kindBias();
   const seen = new Set<string>();
@@ -199,6 +244,14 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
                 {focus.maturity === 'finished' ? <CheckCircle2 size={9} className="mr-1 inline" /> : focus.maturity === 'dormant' ? <Moon size={9} className="mr-1 inline" /> : null}
                 {MATURITY_LABEL[focus.maturity]}
               </span>
+              <button
+                onClick={() => setPickStatus((v) => !v)}
+                className={`rounded-full border bg-forge-bg/50 px-2 py-0.5 text-[9px] uppercase tracking-wide ${focus.epistemic ? '' : 'border-forge-border text-forge-dim/60 hover:text-forge-dim'}`}
+                style={focus.epistemic ? { borderColor: `${EPISTEMIC_HEX[focus.epistemic]}66`, color: EPISTEMIC_HEX[focus.epistemic] } : undefined}
+                title="How solid is this? The label travels with the node — speculation never dresses as fact."
+              >
+                {focus.epistemic ? EPISTEMIC_LABEL[focus.epistemic] : 'how solid?'}
+              </button>
               {focus.trajectory && <span className="inline-flex items-center gap-1 text-[11px] text-forge-ember"><ArrowRight size={11} /> {focus.trajectory}</span>}
             </div>
             <h1 className="font-display text-4xl font-semibold tracking-tight text-forge-ink sm:text-5xl">{focus.title}</h1>
@@ -209,6 +262,23 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             ) : null}
           </div>
         </div>
+
+        {/* the honesty picker — one tap, seven honest words, never a form */}
+        {pickStatus && (
+          <div className="mx-auto mt-3 flex max-w-3xl flex-wrap items-center gap-1.5">
+            <span className="text-[10px] uppercase tracking-wide text-forge-dim/60">how solid is this?</span>
+            {EPISTEMICS.map((e) => (
+              <button key={e} onClick={() => setEpistemic(e)}
+                className="rounded-full border px-2.5 py-1 text-[10px] transition-colors hover:bg-white/5"
+                style={{ borderColor: `${EPISTEMIC_HEX[e]}${focus.epistemic === e ? 'aa' : '40'}`, color: EPISTEMIC_HEX[e] }}>
+                {EPISTEMIC_LABEL[e]}
+              </button>
+            ))}
+            {focus.epistemic && (
+              <button onClick={() => setEpistemic(undefined)} className="rounded-full border border-forge-border px-2.5 py-1 text-[10px] text-forge-dim hover:text-forge-ink">clear</button>
+            )}
+          </div>
+        )}
 
         {/* the concept, speaking */}
         <div className="mx-auto mt-5 max-w-3xl">
@@ -242,7 +312,31 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             <button onClick={() => expand('questions')} className="inline-flex items-center gap-1 hover:text-forge-ember">{busy === 'x:questions' ? <Loader2 size={11} className="animate-spin" /> : <HelpCircle size={11} />} more questions</button>
             <button onClick={() => run('sim', () => findSimilarClusters(graph, focus.id))} className="inline-flex items-center gap-1 hover:text-forge-ember">{busy === 'sim' ? <Loader2 size={11} className="animate-spin" /> : <Wand2 size={11} />} surprise me</button>
             <button onClick={() => run('vid', () => gatherVideos(graph, focus.id))} className="inline-flex items-center gap-1 hover:text-forge-ember">{busy === 'vid' ? <Loader2 size={11} className="animate-spin" /> : <Clapperboard size={11} />} more videos</button>
+            <button onClick={() => setWhatIf(whatIf === null ? '' : null)} className={`inline-flex items-center gap-1 ${whatIf !== null ? 'text-orange-400' : 'hover:text-orange-400'}`}><Split size={11} /> what if…</button>
+            <button onClick={() => setShowBench((v) => !v)} className={`inline-flex items-center gap-1 ${showBench ? 'text-cyan-300' : 'hover:text-cyan-300'}`}><FlaskConical size={11} /> lab bench</button>
           </div>
+
+          {/* WHAT IF? — the central action of the Lab: pick any thought, twist one thing, and a NEW
+              scenario branch grows beside the original. The original is never touched. */}
+          {whatIf !== null && (
+            <form onSubmit={(e) => { e.preventDefault(); submitWhatIf(); }} className="ku-rise mt-3">
+              <div className="flex items-center gap-2">
+                <Split size={13} className="shrink-0 text-orange-400" />
+                <input
+                  autoFocus value={whatIf}
+                  onChange={(e) => setWhatIf(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setWhatIf(null); }}
+                  placeholder="what if… this doubled / the opposite happened / it ran in every lake town"
+                  className="flex-1 rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink outline-none focus:border-orange-400/60"
+                />
+                <button type="submit" className="rounded-lg border border-orange-400/40 px-3 py-2 text-xs text-forge-ink transition-colors hover:bg-orange-400/10">Branch it</button>
+              </div>
+              <p className="mt-1 pl-6 text-[10px] text-forge-dim/60">grows a new speculative branch beside this one — the original stays exactly as it is</p>
+            </form>
+          )}
+
+          {/* THE LAB BENCH — manipulate the idea: known equations + your dials, honestly labeled */}
+          {showBench && <LabBench cluster={focus} onSave={saveArtifact} />}
         </div>
 
         {/* CURRENTS — the next thoughts, drifting in, varied weight, ready ones glowing */}
