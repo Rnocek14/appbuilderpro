@@ -5,6 +5,7 @@ import {
   LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 import { useInbox } from '../../hooks/useAutopilot';
 import { usePreviewClaims } from '../../hooks/usePreviewClaims';
 import { cn } from '../../lib/utils';
@@ -63,6 +64,25 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
   const navigate = useNavigate();
   const { pendingCount } = useInbox();
   const { newCount: claimCount } = usePreviewClaims();
+  // A lead must never arrive invisibly (UX audit): the ops inbox gets the same badge treatment —
+  // new leads + pending approvals, counted from real rows on mount and window focus.
+  const [opsCount, setOpsCount] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try {
+        const [{ count: leads }, { count: approvals }] = await Promise.all([
+          supabase.from('leads').select('id', { count: 'exact', head: true }).eq('status', 'new'),
+          supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+        ]);
+        if (live) setOpsCount((leads ?? 0) + (approvals ?? 0));
+      } catch { /* badge is best-effort */ }
+    };
+    void load();
+    const onFocus = () => void load();
+    window.addEventListener('focus', onFocus);
+    return () => { live = false; window.removeEventListener('focus', onFocus); };
+  }, []);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Desktop sidebar collapse (slim icon rail), persisted across sessions.
@@ -154,6 +174,15 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
                   ) : (
                     <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg">
                       {pendingCount}
+                    </span>
+                  )
+                )}
+                {to === '/garvis/inbox' && opsCount > 0 && (
+                  collapsed ? (
+                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${opsCount} waiting`} />
+                  ) : (
+                    <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="New leads + approvals waiting">
+                      {opsCount}
                     </span>
                   )
                 )}
