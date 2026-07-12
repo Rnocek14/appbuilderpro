@@ -339,6 +339,67 @@ function StatChip({ label, value, tone }: { label: string; value: number; tone?:
   );
 }
 
+/** CREATIVE DEPTH — the answer to "what if I don't like the first take?" One bar, three moves:
+ *  💡 an idea board (10 distinct, diversity-gated concepts for THIS studio), 📋 the operator's
+ *  business plan (six substantive sections, thin output rejected by name), and 🔁 another take of
+ *  this studio's work. The direction box steers all of it in the owner's words — and every
+ *  regeneration automatically diverges from prior takes (recent work rides along as
+ *  "do-not-repeat"). Renditions are ADDED to the shelf ("· take 2"), never overwritten. */
+function CreateMoreBar({ worldId, cluster, onDone }: { worldId: string; cluster: WebCluster; onDone: () => void }) {
+  const { toast } = useToast();
+  const [direction, setDirection] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const generatorFor = (flavor?: string | null): string => {
+    switch (flavor) {
+      case 'social': return 'gen-social';
+      case 'video': return 'gen-video-script';
+      case 'ads': return 'gen-ads';
+      default: return 'gen-ideas'; // studios without a single generator explore via ideas
+    }
+  };
+
+  const go = async (toolId: string) => {
+    setBusy(toolId);
+    try {
+      const res = await runTool(worldId, cluster, toolId, { direction: direction.trim() || undefined });
+      toast(res.ok ? 'success' : 'error', res.message || (res.ok ? 'Done.' : 'Nothing generated.'));
+      if (res.ok) { setDirection(''); onDone(); }
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Generation failed.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const btn = 'flex items-center gap-1.5 rounded-lg border border-forge-border px-3 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/60 hover:text-forge-ember disabled:opacity-50';
+  return (
+    <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs text-forge-dim">
+        <Sparkles size={13} className="text-forge-ember" />
+        <span className="font-medium text-forge-ink">Create more</span>
+        <span className="hidden sm:inline">— every take is added to the shelf, never overwritten; regenerations avoid repeating prior work</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={direction} onChange={(e) => setDirection(e.target.value)} maxLength={200}
+          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”…"
+          className="min-w-[220px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
+        />
+        <button onClick={() => void go('gen-ideas')} disabled={!!busy} className={btn} title="10 distinct concepts for this studio — near-duplicates collapsed, each with its first step">
+          {busy === 'gen-ideas' ? <Loader2 size={13} className="animate-spin" /> : <span>💡</span>} Idea board
+        </button>
+        <button onClick={() => void go(generatorFor(cluster.charter?.flavor))} disabled={!!busy} className={btn} title="Regenerate this studio's work — automatically different from your prior takes">
+          {busy && busy !== 'gen-ideas' && busy !== 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>🔁</span>} Another take
+        </button>
+        <button onClick={() => void go('gen-plan')} disabled={!!busy} className={btn} title="The operator's 90-day business plan — six substantive sections; thin output is rejected, unknowable numbers become [YOU FILL] holes">
+          {busy === 'gen-plan' ? <Loader2 size={13} className="animate-spin" /> : <span>📋</span>} Business plan
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
@@ -431,6 +492,10 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           <Sparkles size={15} /> Build the website — with this world's artwork
         </button>
       )}
+
+      {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. Renditions add,
+          never overwrite; regenerations diverge from prior work by default. */}
+      {cluster.charter && <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} />}
 
       {/* Tools */}
       <div className="mt-4 flex flex-wrap gap-2">

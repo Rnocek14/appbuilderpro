@@ -273,3 +273,98 @@ export function researchContext(findings: { title: string; detail: string }[]): 
     .map((f, i) => `[${i + 1}] ${f.title}: ${f.detail.replace(/\s+/g, ' ').slice(0, 300)}`)
     .join('\n')}`;
 }
+
+// ---------------------------------------------------------------------------
+// 6. CREATIVE DEPTH — direction steering, the idea engine, the business plan
+// ---------------------------------------------------------------------------
+// The one-shot problem, fixed at the contract level: every regeneration can be STEERED (the
+// owner's direction in their words) and is DIVERGENT BY DEFAULT (prior concepts are handed to
+// the model as "do not repeat"). Ideas come in validated batches with a diversity gate — near-
+// duplicates are collapsed so ten ideas are ten ideas, not one idea worn five ways. The business
+// plan parser enforces SUBSTANCE per section (a thin plan is rejected and falls to the floor).
+
+/** The steering block appended to producer prompts. '' when there's nothing to steer by. */
+export function steerBlock(direction?: string, avoid?: string[]): string {
+  const parts: string[] = [];
+  if (direction?.trim()) parts.push(`DIRECTION FROM THE OWNER (follow it): ${direction.trim().slice(0, 300)}`);
+  if (avoid?.length) {
+    parts.push(`PRIOR WORK ALREADY MADE — do NOT repeat these concepts; take a genuinely different angle:\n${avoid.slice(0, 8).map((a) => `- ${a.replace(/\s+/g, ' ').slice(0, 120)}`).join('\n')}`);
+  }
+  return parts.join('\n\n');
+}
+
+export const IDEAS_SYSTEM = `You are a senior creative director generating campaign ideas for ONE
+specific small business. Rules: every idea must reference THIS business's actual offer, audience,
+or locale (from the context) — an idea that could apply to any business is a failure. Each idea is
+a different MECHANISM (different hook, channel, or audience entry point), not the same idea
+rephrased. No generic filler ("post consistently", "engage your audience"). Format each as:
+IDEA: <punchy title>
+HOOK: <the one line that makes a stranger stop>
+WHY: <why THIS business's audience responds — tie to a context fact>
+FIRST STEP: <the concrete first action, doable this week>
+Nothing else between blocks. Plain text.`;
+
+export interface Idea { title: string; hook: string; why: string; firstStep: string }
+
+const tokens = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter((w) => w.length > 3));
+function similar(a: string, b: string): boolean {
+  const ta = tokens(a), tb = tokens(b);
+  if (!ta.size || !tb.size) return false;
+  let inter = 0;
+  for (const t of ta) if (tb.has(t)) inter++;
+  return inter / Math.min(ta.size, tb.size) > 0.6;
+}
+
+/** Parse + de-duplicate ideas. Near-duplicate titles/hooks collapse (diversity gate); ideas
+ *  missing any field are dropped. Tolerant: malformed text yields fewer ideas, never a throw. */
+export function parseIdeas(text: string): Idea[] {
+  const out: Idea[] = [];
+  const blocks = text.split(/^IDEA:\s*/m).slice(1);
+  for (const b of blocks) {
+    const title = b.split('\n')[0]?.trim() ?? '';
+    const hook = /^HOOK:\s*(.+)$/m.exec(b)?.[1]?.trim() ?? '';
+    const why = /^WHY:\s*(.+)$/m.exec(b)?.[1]?.trim() ?? '';
+    const firstStep = /^FIRST STEP:\s*(.+)$/m.exec(b)?.[1]?.trim() ?? '';
+    if (!title || !hook || !why || !firstStep) continue;
+    if (out.some((i) => similar(i.title, title) || similar(i.hook, hook))) continue; // diversity gate
+    out.push({ title: title.slice(0, 120), hook: hook.slice(0, 200), why: why.slice(0, 300), firstStep: firstStep.slice(0, 300) });
+  }
+  return out;
+}
+
+export function ideasToDetail(ideas: Idea[], studioLabel: string): string {
+  return ideas.map((i, n) =>
+    `${n + 1}. ${i.title}\n   Hook: ${i.hook}\n   Why it fits: ${i.why}\n   First step: ${i.firstStep}\n   → Build it: press this studio's generator with the direction "${i.title}".`,
+  ).join('\n\n') + `\n\n(${ideas.length} distinct ${studioLabel} ideas — press Ideas again with a direction to explore another vein.)`;
+}
+
+export const PLAN_SYSTEM = `You write an OPERATOR'S business plan for one specific small business —
+a working document the owner runs the next 90 days from, not an investor deck. Ground every claim
+in the provided context/research; for any number you cannot know (prices, budgets, capacity), write
+[YOU FILL: what's needed] instead of inventing it. Use EXACTLY these section headers, each with
+real substance (specific to THIS business, minimum several sentences):
+== POSITIONING ==
+== OFFER & PRICING ==
+== TOP 3 CHANNEL PLAYS ==
+== 90-DAY PLAN ==
+== KPIS & WEEKLY SCORECARD ==
+== RISKS & HONEST UNKNOWNS ==
+Plain text. No markdown headers other than the == sections.`;
+
+export const PLAN_SECTIONS = ['POSITIONING', 'OFFER & PRICING', 'TOP 3 CHANNEL PLAYS', '90-DAY PLAN', 'KPIS & WEEKLY SCORECARD', 'RISKS & HONEST UNKNOWNS'] as const;
+const PLAN_MIN_SECTION_CHARS = 180; // substance gate — a one-liner section = a thin plan
+
+/** Validate a generated plan: all sections present, each with real substance. `thin` names the
+ *  sections that failed, so the caller can reject honestly instead of shipping a thin plan. */
+export function parsePlan(text: string): { ok: boolean; thin: string[] } {
+  const thin: string[] = [];
+  for (let i = 0; i < PLAN_SECTIONS.length; i++) {
+    const name = PLAN_SECTIONS[i];
+    const start = text.indexOf(`== ${name} ==`);
+    if (start < 0) { thin.push(name); continue; }
+    const next = i + 1 < PLAN_SECTIONS.length ? text.indexOf(`== ${PLAN_SECTIONS[i + 1]} ==`) : text.length;
+    const body = text.slice(start + name.length + 6, next > start ? next : text.length).trim();
+    if (body.length < PLAN_MIN_SECTION_CHARS) thin.push(name);
+  }
+  return { ok: thin.length === 0, thin };
+}

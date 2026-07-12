@@ -445,9 +445,28 @@ export interface ToolRunResult { ok: boolean; message: string; artifacts?: numbe
 
 /** Execute a single tool on a chartered cluster. Generators write artifacts; queue tools enqueue an
  *  approval (never send directly). Returns a human message for the toast. */
+/** RENDITIONS: give grounded creative artifacts a versioned slug (base, base-v2, base-v3 …) so a
+ *  re-press ADDS a take to the library instead of silently overwriting the last one (the artifact
+ *  upsert conflicts on cluster_id+slug). Titles gain "· take N" so the shelf reads honestly. */
+async function versionCreativeSlugs(clusterId: string, artifacts: PlayArtifact[]): Promise<PlayArtifact[]> {
+  const out: PlayArtifact[] = [];
+  for (const a of artifacts) {
+    try {
+      const { data } = await supabase.from('knowledge_artifacts')
+        .select('slug').eq('cluster_id', clusterId).like('slug', `${a.slug}%`).limit(50);
+      const existing = ((data ?? []) as { slug: string }[]).map((r) => r.slug);
+      if (!existing.length) { out.push(a); continue; }
+      let n = existing.length + 1;
+      while (existing.includes(n === 1 ? a.slug : `${a.slug}-v${n}`)) n++;
+      out.push({ ...a, slug: `${a.slug}-v${n}`, title: `${a.title} · take ${n}` });
+    } catch { out.push(a); } // fail-soft: worst case is the old refresh behavior
+  }
+  return out;
+}
+
 export async function runTool(
   worldId: string, cluster: WebCluster, toolId: string,
-  args?: { csvText?: string; toEmail?: string; contactName?: string; playId?: string },
+  args?: { csvText?: string; toEmail?: string; contactName?: string; playId?: string; direction?: string },
 ): Promise<ToolRunResult> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
@@ -461,6 +480,8 @@ export async function runTool(
     case 'gen-video-script':
     case 'gen-landing':
     case 'gen-email-seq':
+    case 'gen-ideas':
+    case 'gen-plan':
     case 'gen-copy': {
       // FINISHED-WORK PRODUCERS FIRST (research/gen-social/gen-video-script/gen-angle): these
       // reason over the world's REAL materials (DNA, brand voice, vault photos, prior research)
@@ -471,12 +492,17 @@ export async function runTool(
       if (cluster.charter) {
         const producer = producerFor(toolId);
         if (producer) {
-          const r = await producer(worldId, cluster.charter);
+          const r = await producer(worldId, cluster.charter, { direction: args?.direction });
           if (r.artifacts.length) {
+            // RENDITIONS, not replacements: grounded creative work gets a VERSIONED slug so a
+            // re-press ADDS a take instead of overwriting the last one (the upsert-by-slug that
+            // silently ate prior work). Framework fallbacks keep their fixed slugs — a playbook
+            // refresh should replace itself.
+            const arts = r.grounded ? await versionCreativeSlugs(cluster.id, r.artifacts) : r.artifacts;
             // Grounded finished work (real research / posts / script) is EARNED activity; a
             // framework fallback (AI/search down) is context, not activity — tag it as seed so
             // it never inflates momentum/status (the same No-Theater rule as birth seeding).
-            const n = await writeArtifacts(uid, cluster.id, r.artifacts, r.grounded ? 'garvis' : SEED_SOURCE);
+            const n = await writeArtifacts(uid, cluster.id, arts, r.grounded ? 'garvis' : SEED_SOURCE);
             if (n > 0) return { ok: true, message: r.message, artifacts: n };
           }
         }

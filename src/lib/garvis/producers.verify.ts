@@ -118,5 +118,33 @@ jobs`;
   check('no findings → provisional, names the gap', researchContext([]).includes('provisional'));
 }
 
+// ---- creative depth: steering, ideas diversity gate, plan substance gate ----
+{
+  const { steerBlock, parseIdeas, parsePlan, PLAN_SECTIONS } = await import('./producersCore');
+
+  check('steerBlock empty when nothing to steer by', steerBlock() === '');
+  const s = steerBlock('bolder, lake-life humor', ['Post 1 — sunset dock shots', 'Meta ads — launch-ready']);
+  check('steerBlock carries the owner direction verbatim', s.includes('bolder, lake-life humor'));
+  check('steerBlock lists prior work as do-not-repeat', s.includes('do NOT repeat') && s.includes('sunset dock shots'));
+
+  const ideasText = [
+    'IDEA: The Dock Appraisal Weekend\nHOOK: Free 15-minute "what is your pier worth" walk-ups.\nWHY: Lakefront owners obsess over dock value.\nFIRST STEP: Book the marina table for Saturday.',
+    'IDEA: Dock Value Weekend\nHOOK: Free 15-minute pier worth walk-ups at the marina.\nWHY: Same audience.\nFIRST STEP: Same.',
+    'IDEA: Sold-Over-Ask Postcards\nHOOK: "Your neighbor got $61k over ask."\nWHY: Proof beats promises in a tight market.\nFIRST STEP: Pull the last 3 sales from the ledger.',
+    'IDEA: Broken One\nHOOK: has no why or step',
+  ].join('\n\n');
+  const ideas = parseIdeas(ideasText);
+  check('parseIdeas keeps complete ideas and drops incomplete ones', ideas.length === 2);
+  check('diversity gate collapses near-duplicate ideas', !ideas.some((i) => i.title === 'Dock Value Weekend'));
+  check('parseIdeas tolerates garbage without throwing', parseIdeas('nothing here').length === 0);
+
+  const fullPlan = PLAN_SECTIONS.map((n) => `== ${n} ==\n${'This section has real, specific substance about the business and what to do. '.repeat(4)}`).join('\n\n');
+  check('parsePlan accepts a substantive plan', parsePlan(fullPlan).ok);
+  const thinPlan = fullPlan.replace(/== 90-DAY PLAN ==\n[^=]+/, '== 90-DAY PLAN ==\nDo marketing.\n');
+  const thin = parsePlan(thinPlan);
+  check('parsePlan rejects a thin section BY NAME (anti-thin gate)', !thin.ok && thin.thin.includes('90-DAY PLAN'));
+  check('parsePlan flags a missing section', !parsePlan(fullPlan.replace('== RISKS & HONEST UNKNOWNS ==', '== NOPE ==')).ok);
+}
+
 console.log(`\nproducers.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} producers check(s) failed`);

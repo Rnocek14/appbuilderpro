@@ -20,10 +20,37 @@ import {
   RESEARCH_SYSTEM, SOCIAL_SYSTEM, VIDEO_SYSTEM, ANGLE_SYSTEM, ADS_SYSTEM,
   researchQueries, formatSources, appendSources, parseSocialPosts, postToDetail, researchContext,
   parseAdAssets, isLaunchReady, metaAdDetail, googleAdDetail,
+  steerBlock, IDEAS_SYSTEM, parseIdeas, ideasToDetail, PLAN_SYSTEM, parsePlan,
   type ResearchSource,
 } from './producersCore';
 
 export interface ProduceResult { artifacts: PlayArtifact[]; message: string; grounded: boolean }
+
+/** Creative steering: the owner's direction in their own words, plus prior concepts to diverge
+ *  from. When `avoid` is not supplied, producers LOAD IT THEMSELVES from the world's recent
+ *  artifacts — so every re-press explores new ground by default instead of re-treading. */
+export interface ProduceOpts { direction?: string; avoid?: string[] }
+
+/** Recent creative concepts of the given kinds (titles + a first line), seeds excluded — the
+ *  "do not repeat" fuel. Fail-soft: [] on any error. */
+async function priorCreative(worldId: string, kinds: string[], limit = 6): Promise<string[]> {
+  try {
+    const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
+    const ids = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+    if (!ids.length) return [];
+    const { data } = await supabase.from('knowledge_artifacts')
+      .select('title, detail').in('cluster_id', ids).in('kind', kinds)
+      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(limit);
+    return ((data ?? []) as { title: string; detail: string | null }[])
+      .map((a) => `${a.title}: ${(a.detail ?? '').replace(/\s+/g, ' ').slice(0, 80)}`);
+  } catch { return []; }
+}
+
+/** Resolve the steering block for a producer: owner direction + (auto-loaded) prior work. */
+async function steer(worldId: string, kinds: string[], opts?: ProduceOpts): Promise<string> {
+  const avoid = opts?.avoid ?? await priorCreative(worldId, kinds);
+  return steerBlock(opts?.direction, avoid);
+}
 
 interface WorldMaterials {
   dna: WorldDNA | null;
@@ -156,15 +183,16 @@ export async function produceResearch(worldId: string, charter: Charter): Promis
 // 2. Social — finished, postable content tied to real photos
 // ---------------------------------------------------------------------------
 
-export async function produceSocial(worldId: string, charter: Charter): Promise<ProduceResult> {
+export async function produceSocial(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
   const m = await gather(worldId);
   const photoLines = m.photos.length
     ? m.photos.map((p) => `- ${p.caption?.trim() || p.name}`).join('\n')
     : '(no photos uploaded yet — direct a shot for each post)';
+  const steering = await steer(worldId, ['post'], opts);
   try {
     const text = await reason(
       SOCIAL_SYSTEM,
-      `${businessContext(m)}\n\nREAL PHOTOS (use these, by caption):\n${photoLines}`,
+      [`${businessContext(m)}\n\nREAL PHOTOS (use these, by caption):\n${photoLines}`, steering].filter(Boolean).join('\n\n'),
       'Write the five finished posts now, in the POST block format. Nothing else.',
       1600,
     );
@@ -188,13 +216,14 @@ export async function produceSocial(worldId: string, charter: Charter): Promise<
 // 3. Video — a shot-by-shot script
 // ---------------------------------------------------------------------------
 
-export async function produceVideo(worldId: string, charter: Charter): Promise<ProduceResult> {
+export async function produceVideo(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
   const m = await gather(worldId);
   const photoLines = m.photos.length ? m.photos.map((p) => `- ${p.caption?.trim() || p.name}`).join('\n') : '(no photos yet)';
+  const steering = await steer(worldId, ['video'], opts);
   try {
     const script = await reason(
       VIDEO_SYSTEM,
-      `${businessContext(m)}\n\nREAL PHOTOS:\n${photoLines}`,
+      [`${businessContext(m)}\n\nREAL PHOTOS:\n${photoLines}`, steering].filter(Boolean).join('\n\n'),
       'Write the shot-by-shot script now. Plain text.',
       1200,
     );
@@ -213,7 +242,7 @@ export async function produceVideo(worldId: string, charter: Charter): Promise<P
 // 4. Angle — grounded in the world's own research
 // ---------------------------------------------------------------------------
 
-export async function produceAngle(worldId: string, charter: Charter): Promise<ProduceResult> {
+export async function produceAngle(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
   const m = await gather(worldId);
   // Read the world's REAL research findings (earned research artifacts, seeds excluded).
   const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
@@ -228,9 +257,10 @@ export async function produceAngle(worldId: string, charter: Charter): Promise<P
     }
   }
   try {
+    const steering = await steer(worldId, ['research'], opts);
     const angle = await reason(
       ANGLE_SYSTEM,
-      `${businessContext(m)}\n\n${researchContext(findings)}`,
+      [`${businessContext(m)}\n\n${researchContext(findings)}`, steering].filter(Boolean).join('\n\n'),
       'Synthesize the one campaign angle now. Plain text.',
       900,
     );
@@ -259,7 +289,7 @@ function adComplianceNote(vertical: string): string | null {
   }
 }
 
-export async function produceAds(worldId: string, charter: Charter): Promise<ProduceResult> {
+export async function produceAds(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
   const m = await gather(worldId);
   const vertical = detectVertical([
     m.dna?.businessType, m.dna?.valueProposition, ...(m.dna?.idealCustomers ?? []),
@@ -288,6 +318,7 @@ export async function produceAds(worldId: string, charter: Charter): Promise<Pro
         m.photos.length ? `REAL PHOTOS: ${m.photos.slice(0, 8).map((p) => p.caption || p.name).join(' | ')}` : '',
         findings ? `RESEARCH FINDINGS:\n${findings}` : '',
         compliance ? `COMPLIANCE (follow exactly): ${compliance}` : '',
+        await steer(worldId, ['post'], opts),
       ].filter(Boolean).join('\n\n'),
       'Write the ad assets now, in the labeled sections. Nothing else.',
       1800,
@@ -308,13 +339,104 @@ export async function produceAds(worldId: string, charter: Charter): Promise<Pro
 }
 
 /** The producer router: which finished-work producer (if any) handles a tool id. */
-export function producerFor(toolId: string): ((worldId: string, charter: Charter) => Promise<ProduceResult>) | null {
+// ---------------------------------------------------------------------------
+// 6. Ideas — a validated batch of DISTINCT campaign ideas, each with its first step
+// ---------------------------------------------------------------------------
+
+/** What this studio's ideas should be: mailer concepts in the mail studio, post concepts in the
+ *  social studio, and so on — the same engine, flavored by the charter. */
+function ideaFraming(charter: Charter): string {
+  switch (charter.flavor) {
+    case 'direct_mail': return 'DIRECT-MAIL POSTCARD concepts — each idea is a mailable concept: the headline on the card, the offer, and who it goes to.';
+    case 'social': return 'SOCIAL CONTENT concepts — each idea is a repeatable post format or mini-series, not a single caption.';
+    case 'video': return 'SHORT-VIDEO concepts — each idea is a filmable format using the business\'s real photos/settings.';
+    case 'ads': return 'PAID-AD concepts — each idea is a campaign concept: the hook, the audience entry point, the landing promise.';
+    default: return 'MARKETING CAMPAIGN concepts across any channel this business could realistically run.';
+  }
+}
+
+export async function produceIdeas(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
+  const m = await gather(worldId);
+  const steering = await steer(worldId, ['post', 'research', 'video', 'doc'], opts);
+  try {
+    const text = await reason(
+      IDEAS_SYSTEM,
+      [businessContext(m), `WHAT TO GENERATE: ${ideaFraming(charter)}`, steering].filter(Boolean).join('\n\n'),
+      'Generate 10 distinct ideas now, in the IDEA block format. Nothing else.',
+      2000,
+    );
+    const ideas = parseIdeas(text);
+    if (ideas.length >= 5) {
+      return {
+        artifacts: [{
+          slug: 'idea-board', kind: 'doc',
+          title: `Idea board — ${ideas.length} ${charter.flavor === 'direct_mail' ? 'mailer' : charter.flavor ?? 'campaign'} concepts${opts?.direction ? ` (direction: ${opts.direction.slice(0, 40)})` : ''}`,
+          detail: ideasToDetail(ideas, charter.flavor ?? 'campaign'),
+        }],
+        message: `Generated ${ideas.length} distinct ideas (diversity-gated — near-duplicates collapsed). Pick one and press the generator with its title as the direction.`,
+        grounded: true,
+      };
+    }
+  } catch { /* fall to the floor */ }
+  // Deterministic floor: the vertical pack's channel plays as idea seeds — structure, honestly labeled.
+  return { artifacts: expertiseFloor(charter, m), message: 'Added the channel playbook as idea seeds (AI unavailable — press again for a generated board).', grounded: false };
+}
+
+// ---------------------------------------------------------------------------
+// 7. The business plan — an operator's plan with a substance gate (never thin)
+// ---------------------------------------------------------------------------
+
+export async function produceBusinessPlan(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
+  const m = await gather(worldId);
+  // Ground in the world's EARNED research when it exists (same discipline as the angle producer).
+  const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
+  const clusterIds = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+  let findings = '';
+  if (clusterIds.length) {
+    const { data: research } = await supabase.from('knowledge_artifacts')
+      .select('title, detail').in('cluster_id', clusterIds).eq('kind', 'research')
+      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(3);
+    findings = ((research ?? []) as { title: string; detail: string | null }[])
+      .map((r) => `- ${r.title}: ${(r.detail ?? '').replace(/\s+/g, ' ').slice(0, 250)}`).join('\n');
+  }
+  try {
+    const text = await reason(
+      PLAN_SYSTEM,
+      [
+        businessContext(m),
+        findings ? `RESEARCH ON RECORD (ground the plan in this):\n${findings}` : 'RESEARCH: none on record yet — mark market claims provisional and name the scan that would confirm them.',
+        steerBlock(opts?.direction),
+      ].filter(Boolean).join('\n\n'),
+      'Write the full operator plan now, all six == sections ==, each substantive. Plain text.',
+      3200,
+    );
+    const gate = parsePlan(text);
+    if (gate.ok) {
+      return {
+        artifacts: [{
+          slug: 'business-plan', kind: 'doc',
+          title: `Business plan — operator's 90-day edition${findings ? '' : ' (market claims provisional)'}`,
+          detail: `${text}\n\n— Every [YOU FILL: …] is a number only you can supply; fill them and re-press with a direction to iterate. Grounded in ${findings ? 'your research on record' : 'your business context only — run Research to strengthen it'}.`,
+        }],
+        message: 'Wrote the full operator plan — six substantive sections, unknowables marked [YOU FILL], never invented.',
+        grounded: !!findings,
+      };
+    }
+    // ANTI-THIN GATE: a plan with hollow sections is rejected by name, never shipped as "done".
+    return { artifacts: expertiseFloor(charter, m), message: `The generated plan was too thin in: ${gate.thin.join(', ')} — rejected it rather than ship filler. Added the strategy framework; press again (a direction helps).`, grounded: false };
+  } catch { /* fall to the floor */ }
+  return { artifacts: expertiseFloor(charter, m), message: 'Added the strategy framework (AI unavailable — press again for the full plan).', grounded: false };
+}
+
+export function producerFor(toolId: string): ((worldId: string, charter: Charter, opts?: ProduceOpts) => Promise<ProduceResult>) | null {
   switch (toolId) {
     case 'research': return produceResearch;
     case 'gen-social': return produceSocial;
     case 'gen-video-script': return produceVideo;
     case 'gen-angle': return produceAngle;
     case 'gen-ads': return produceAds;
+    case 'gen-ideas': return produceIdeas;
+    case 'gen-plan': return produceBusinessPlan;
     default: return null;
   }
 }
