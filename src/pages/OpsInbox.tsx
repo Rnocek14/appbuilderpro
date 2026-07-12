@@ -11,6 +11,9 @@ import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { loadInbox, composeReply, markLeadAnswered, type InboxItem } from '../lib/garvis/inboxRun';
 import { rawComplete } from '../lib/aiClient';
+import { useNavigate, Link } from 'react-router-dom';
+import { listApprovals, approveAndExecute, rejectApproval, type Approval } from '../lib/garvis/execution';
+import { useInbox } from '../hooks/useAutopilot';
 
 export default function OpsInbox() {
   const { toast } = useToast();
@@ -20,11 +23,41 @@ export default function OpsInbox() {
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
+  // ONE INBOX (UX redesign part 3): everything awaiting a human, three lanes — DECISIONS
+  // (approvals, actionable inline; the Approvals page remains the audit ledger), QUESTIONS
+  // (build agents waiting on an answer), MESSAGES (leads + replies, below).
+  const navigate = useNavigate();
+  const { questions } = useInbox();
+  const pendingQuestions = questions.filter((q) => (q as { status?: string }).status === 'pending');
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [actingId, setActingId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try { setItems(await loadInbox()); } catch { setItems([]); }
+    try { setApprovals(await listApprovals('pending')); } catch { /* lane renders empty */ }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Same semantics as the Approvals page (deploy URLs open, bundle-less deploys route to the
+  // workspace, non-executing kinds say "recorded" honestly) — the decision just lives HERE now.
+  const decide = async (a: Approval, approve: boolean) => {
+    setActingId(a.id);
+    try {
+      if (!approve) { await rejectApproval(a.id); toast('success', 'Rejected.'); }
+      else {
+        const res = await approveAndExecute(a);
+        if (res.ok) {
+          const r = res.result as { executed?: boolean; url?: string | null; needsWorkspace?: boolean; projectId?: string } | undefined;
+          if (a.kind === 'deploy_site' && r?.url) { toast('success', `Deployed — live at ${r.url}`); window.open(r.url, '_blank'); }
+          else if (r?.needsWorkspace && r.projectId) { toast('info', 'Approved — open the project and Publish to complete.'); navigate(`/project/${r.projectId}`); }
+          else if (r?.executed !== false) toast('success', a.kind === 'send_email' ? 'Approved and sent.' : 'Approved and executed.');
+          else toast('success', 'Approved — recorded for you to run where the capability lives.');
+        } else toast('error', res.error ?? 'Execution failed — see the ledger.');
+      }
+      await refresh();
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not act on that.'); }
+    finally { setActingId(null); }
+  };
 
   /** UX audit fix: hand-typing replies in an AI OS. Garvis drafts from THEIR actual message —
    *  grounded in the thread only; unknowable facts (prices, dates) become visible [YOU FILL: …]
@@ -85,6 +118,50 @@ export default function OpsInbox() {
           </div>
         </div>
 
+        {/* LANE 1 — DECISIONS: approvals actionable right here (no pilgrimage; the Approvals
+            page remains the audit ledger). Renders only when something is waiting. */}
+        {approvals.length > 0 && (
+          <div className="mb-5">
+            <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-dim">Decisions — waiting on you</h2>
+            <ul className="space-y-2">
+              {approvals.map((a) => (
+                <li key={a.id} className="rounded-xl border border-forge-warn/30 bg-forge-panel/40 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded border border-forge-warn/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-forge-warn">{String(a.kind).replace(/_/g, ' ')}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{a.title}</span>
+                    <span className="text-[10px] text-forge-dim">{timeAgo(a.created_at)}</span>
+                    <button onClick={() => void decide(a, true)} disabled={actingId === a.id}
+                      className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1 text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">
+                      {actingId === a.id ? <Loader2 size={11} className="animate-spin" /> : null} Approve
+                    </button>
+                    <button onClick={() => void decide(a, false)} disabled={actingId === a.id}
+                      className="rounded-lg border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim hover:border-forge-err/60 hover:text-forge-err disabled:opacity-50">
+                      Reject
+                    </button>
+                  </div>
+                  {a.preview && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border border-forge-border bg-forge-panel/60 p-2 text-[11px] text-forge-dim">{a.preview}</pre>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* LANE 2 — QUESTIONS: build agents waiting on an answer. Count + link (the full
+            answering flow lives at Build questions); renders only when non-empty. */}
+        {pendingQuestions.length > 0 && (
+          <div className="mb-5">
+            <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-dim">Questions — agents are blocked</h2>
+            <Link to="/inbox" className="flex items-center justify-between rounded-xl border border-forge-border bg-forge-panel/40 p-3 text-sm text-forge-ink transition-colors hover:border-forge-ember/40">
+              <span>{pendingQuestions.length} build question{pendingQuestions.length === 1 ? '' : 's'} waiting — answer them and the builds resume.</span>
+              <span className="text-xs text-forge-ember">Answer →</span>
+            </Link>
+          </div>
+        )}
+
+        {/* LANE 3 — MESSAGES: humans who wrote to you. */}
+        {(approvals.length > 0 || pendingQuestions.length > 0) && (
+          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-forge-dim">Messages — leads &amp; replies</h2>
+        )}
         {items === null ? (
           <div className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading…</div>
         ) : items.length === 0 ? (
