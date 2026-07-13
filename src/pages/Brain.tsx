@@ -1,12 +1,13 @@
 // src/pages/Brain.tsx
 // The persistent-brain surface: drop a document, Garvis reads it, summarizes it, and files it into
 // your universe — proposing where it belongs and surfacing "Garvis noticed…" connections. This is the
-// file-intake half of the living brain (app_0021). Upload a .txt/.md/.docx; Garvis does the rest.
+// file-intake half of the living brain (app_0021). Upload a .txt/.md/.docx/.pdf; Garvis does the rest.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain as BrainIcon, Upload, Loader2, Sparkles, FileText, Link2, X, Check } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { AskGarvis } from '../components/garvis/AskGarvis';
+import { DocBriefPanel } from '../components/garvis/DocBriefPanel';
 import { Button, Card, Badge, EmptyState, Spinner } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { timeAgo } from '../lib/utils';
@@ -183,7 +184,7 @@ export function BrainContent() {
           className={`cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${dragOver ? 'border-forge-ember bg-forge-ember/5' : 'border-forge-border hover:border-forge-ember/40'}`}
         >
           <input
-            ref={fileInput} type="file" multiple accept=".txt,.md,.docx,image/*" className="hidden"
+            ref={fileInput} type="file" multiple accept=".txt,.md,.docx,.pdf,image/*" className="hidden"
             onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) void ingestMany(fs); e.target.value = ''; }}
           />
           {uploading ? (
@@ -327,6 +328,8 @@ export function BrainContent() {
                     </select>
                   )}
                   <span className="text-[11px] text-forge-dim">{timeAgo(d.created_at)}</span>
+                  {/* BRIEF-THIS-UPLOAD — read the document end-to-end, grounded in its own text. */}
+                  <DocBriefPanel docId={d.id} meta={d.meta} />
                 </Card>
               ))}
             </div>
