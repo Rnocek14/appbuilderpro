@@ -260,11 +260,14 @@ export async function rejectApproval(id: string): Promise<void> {
   if (error) throw new Error(error.message);
   if (!rejected) throw new Error('This was already decided elsewhere — refresh the queue.');
 
-  // If this was an invoice send, the invoice was optimistically stamped 'sent' at queue time.
-  // Rejecting the send means it never went out — return it to draft so it doesn't linger as "sent"
-  // forever and so the chaser stops treating it as delivered (deep scan P0/P1, theme 3).
+  // If this was the INITIAL invoice send, the invoice was optimistically stamped 'sent' at queue
+  // time. Rejecting it means it never went out — return it to draft so it doesn't linger as "sent"
+  // forever and the chaser stops treating it as delivered (deep scan theme 3). Crucially, only the
+  // initial send reverts: chase reminders (payload.chase_stage set) exist ONLY for an
+  // already-sent, still-owed invoice, so rejecting a reminder must never demote that invoice.
   const inv = (rejected as { kind: string; payload: Record<string, unknown> | null });
-  const invoiceId = inv.kind === 'send_email' ? (inv.payload?.invoice_id as string | undefined) : undefined;
+  const isInitialInvoiceSend = inv.kind === 'send_email' && inv.payload?.invoice_id != null && inv.payload?.chase_stage == null;
+  const invoiceId = isInitialInvoiceSend ? (inv.payload?.invoice_id as string) : undefined;
   if (invoiceId) {
     await supabase.from('invoices').update({ status: 'draft', sent_at: null, updated_at: new Date().toISOString() })
       .eq('id', invoiceId).eq('status', 'sent').then(() => {}, () => {});
