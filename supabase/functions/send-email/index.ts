@@ -15,6 +15,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
+import { payloadMatches } from '../_shared/payloadHash.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -54,10 +55,14 @@ Deno.serve(async (req) => {
 
     // The approval is the authority to send. Verify it: correct kind, approved, and owned.
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status, payload, result, requested_by').eq('id', approval_id).single();
+      .select('id, owner_id, kind, status, payload, payload_hash, result, requested_by').eq('id', approval_id).single();
     if (!approval) return json({ error: 'Approval not found' }, 404);
     if (approval.kind !== 'send_email') return json({ error: 'Approval is not a send_email.' }, 400);
     if (approval.status !== 'approved') return json({ error: `Approval is ${approval.status}, not approved.` }, 409);
+    // Tamper-evidence: refuse if the payload changed since it was approved (null hash = grandfathered).
+    if (!(await payloadMatches(approval.payload, approval.payload_hash as string | null))) {
+      return json({ error: 'Approval payload changed since it was approved — refusing to send.' }, 409);
+    }
 
     let uid: string;
     if (byWorker) {

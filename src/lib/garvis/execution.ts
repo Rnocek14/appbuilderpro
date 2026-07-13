@@ -6,6 +6,7 @@
 // the vision's "approval required before sending/posting/deploying/charging + external actions logged".
 
 import { supabase } from '../supabase';
+import { hashPayload } from './payloadHash';
 
 export type ApprovalKind =
   | 'send_email' | 'publish_post' | 'deploy_site' | 'deploy_backend'
@@ -47,12 +48,17 @@ export async function enqueueApproval(input: {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
+  const payload = input.payload ?? {};
+  // Bind the approval to a hash of its payload — the executor refuses if the payload changes after
+  // this decision is made (tamper-evidence; RLS already scopes the row to this owner).
+  const payload_hash = await hashPayload(payload);
   const { data, error } = await supabase.from('approvals').insert({
     owner_id: uid,
     kind: input.kind,
     title: input.title,
     preview: input.preview ?? '',
-    payload: input.payload ?? {},
+    payload,
+    payload_hash,
     requested_by: input.requestedBy ?? 'user',
   }).select('id').single();
   if (error) throw new Error(error.message);

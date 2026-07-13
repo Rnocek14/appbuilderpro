@@ -17,6 +17,7 @@ import {
   mergePaperwork, decideSendable, chunkedBase64, docHtml, envelopeRequest,
   mapDocusignStatus, mapRecipientStatus, type EsignRecipient,
 } from '../_shared/esignCore.ts';
+import { payloadMatches } from '../_shared/payloadHash.ts';
 
 const AUTH_BASE = Deno.env.get('DOCUSIGN_AUTH_BASE') ?? 'https://account-d.docusign.com';
 
@@ -97,10 +98,14 @@ Deno.serve(async (req) => {
     if (!approvalId) return json({ error: 'approval_id is required.' }, 400);
 
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status, payload, result').eq('id', approvalId).single();
+      .select('id, owner_id, kind, status, payload, payload_hash, result').eq('id', approvalId).single();
     if (!approval || approval.owner_id !== uid) return json({ error: 'Approval not found' }, 404);
     if (approval.kind !== 'send_for_signature') return json({ error: 'Approval is not a send_for_signature.' }, 400);
     if (approval.status !== 'approved') return json({ error: `Approval is ${approval.status}, not approved.` }, 409);
+    // Tamper-evidence: refuse if the payload changed since it was approved (null hash = grandfathered).
+    if (!(await payloadMatches(approval.payload, approval.payload_hash as string | null))) {
+      return json({ error: 'Approval payload changed since it was approved — refusing to send.' }, 409);
+    }
 
     const rowId = (approval.payload as { envelope_row_id?: string })?.envelope_row_id;
     if (!rowId) return json({ error: 'Approval payload is missing envelope_row_id.' }, 400);
