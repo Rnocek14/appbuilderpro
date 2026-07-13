@@ -22,7 +22,8 @@ export type Archetype = 'intel' | 'audience' | 'studio' | 'launch' | 'loop' | 'l
 export type Flavor =
   | 'generic' | 'direct_mail' | 'email' | 'social' | 'video' | 'landing'
   | 'market' | 'brand' | 'crm' | 'lists' | 'ads'
-  | 'feature_lab'; // PRODUCT work: feature ideation + specs for a platform the owner builds or works for
+  | 'feature_lab' // PRODUCT work: feature ideation + specs for a platform the owner builds or works for
+  | 'assist';     // OPERATOR ASSISTANT: an answering desk — paste an item, get a reply grounded in this world's knowledge base
 export type CharterStatus = 'dormant' | 'active' | 'waiting' | 'done';
 
 export interface CharterRef { type: string; id: string; label?: string }
@@ -52,7 +53,7 @@ export function parseCharter(raw: unknown): Charter | null {
 }
 
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist',
 ];
 
 export interface ArchetypeMeta {
@@ -93,7 +94,7 @@ export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
   'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec',
   'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
-  'import-docs', 'view-results',
+  'import-docs', 'view-results', 'open-answering',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
@@ -107,6 +108,9 @@ const STUDIO_BY_FLAVOR: Partial<Record<Flavor, WorkTool[]>> = {
   feature_lab: [
     T('gen-features', 'Generate feature concepts', 'Distinct, buildable feature concepts for THIS platform land here — diversity-gated, grounded in the research.', 'generate'),
     T('gen-spec', 'Write feature spec', 'A full spec (problem → v1 scope → success metric → risks) lands here. Steer it with a direction.', 'generate'),
+  ],
+  assist: [
+    T('open-answering', 'Open the answering desk', 'Paste an incoming message — Garvis drafts a reply grounded ONLY in this world\'s knowledge base, cites what it used, and refuses when it has nothing on record. You copy and send.', 'view'),
   ],
 };
 

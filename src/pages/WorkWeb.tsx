@@ -30,6 +30,7 @@ import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { VideoStudio } from '../components/garvis/VideoStudio';
+import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
@@ -126,6 +127,11 @@ export default function WorkWeb() {
     && web.clusters.some((c) => c.charter?.flavor === 'feature_lab')
     && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
 
+  // ANSWERING DESK = an assist studio, no outreach. Its ledger measures drafts kept vs rewritten,
+  // not sends — so it shares the product lab's "no send/reply chrome" framing.
+  const assistDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'assist'), [web]);
+  const noOutreach = productLab || assistDesk;
+
   const doRunPlay = async () => {
     if (!templatePlay) return;
     setRunning(true);
@@ -146,6 +152,8 @@ export default function WorkWeb() {
     if (tool.id === 'view-contacts') { setShowContacts(true); return; }
     if (tool.id === 'import-docs') { navigate('/garvis/brain'); return; }
     if (tool.id === 'view-results') { setSelected(cluster.slug); return; }
+    // The answering desk is already rendered inline for the assist studio — the tool just focuses it.
+    if (tool.id === 'open-answering') { setSelected(cluster.slug); return; }
     if (tool.id === 'upload-list') { setUploadFor(cluster); return; }
     if (tool.id === 'queue-sequence') { setQueueFor(cluster); return; }
 
@@ -213,9 +221,9 @@ export default function WorkWeb() {
             <StatChip label="made" value={web.rollup.artifacts} />
             <StatChip label="playbooks" value={web.clusters.reduce((n, c) => n + c.playbookArtifacts, 0)} />
             <StatChip label="waiting" value={web.rollup.pendingApprovals} tone="warn" />
-            {/* outreach chips only where outreach exists — a product lab's "sent 0" is not a stat, it's noise */}
-            {!productLab && <StatChip label="sent" value={web.rollup.messagesSent} />}
-            {!productLab && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
+            {/* outreach chips only where outreach exists — a product lab's or answering desk's "sent 0" is not a stat, it's noise */}
+            {!noOutreach && <StatChip label="sent" value={web.rollup.messagesSent} />}
+            {!noOutreach && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
             {templatePlay && (
               <button
                 onClick={() => void doRunPlay()} disabled={running}
@@ -237,7 +245,9 @@ export default function WorkWeb() {
 
         {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
         <div className="mb-4">
-          <AskGarvis worldId={worldId} placeholder={productLab
+          <AskGarvis worldId={worldId} placeholder={assistDesk
+            ? `Ask about ${web.title} — "what's our return policy?", "what do we tell people about shipping times?"`
+            : productLab
             ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
         </div>
@@ -288,6 +298,7 @@ export default function WorkWeb() {
                 onTool={(t) => void doTool(selectedCluster, t)}
                 onChanged={() => void refresh()}
                 productLab={productLab}
+                assistDesk={assistDesk}
               />
             )}
           </div>
@@ -365,6 +376,7 @@ const SPARKS: Record<string, string[]> = {
   video: ['30-second transformation cut', 'day-in-the-life', 'answer the #1 question on camera', 'before/after with captions only'],
   direct_mail: ['the neighbor story', 'lead with the offer', 'a question they already ask', 'why this season matters'],
   feature_lab: ['for the power user', 'fix the first five minutes', 'what makes people come back daily', 'steal the best idea from an adjacent product', 'smallest shippable version'],
+  assist: ['the questions we get most', 'a canned answer for refunds', 'tighten the tone', 'where the knowledge base keeps coming up short', 'a policy we should write down'],
   default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
 };
 
@@ -456,11 +468,12 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
   );
 }
 
-function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab }: {
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
   productLab?: boolean;
+  assistDesk?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -527,7 +540,15 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* G5/G6 — the honest per-channel results, the adaptive read, and platform connections.
           A PRODUCT LAB's ledger counts shipped thinking, not sends — the 5-channel marketing
           table ("Email: no campaigns yet · Meta ads: not running") was noise wearing a dashboard. */}
-      {cluster.charter?.archetype === 'ledger' && (productLab ? (
+      {cluster.charter?.archetype === 'ledger' && (assistDesk ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This desk measures answered, not sent.</p>
+          <p>Nothing here goes out on its own — you copy and send. Saved drafts land on the desk's
+          shelf so this ledger can learn which replies you keep as-is versus rewrite, and where the
+          knowledge base keeps coming up short. Feed those gaps back into the vault and the desk gets
+          sharper.</p>
+        </div>
+      ) : productLab ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This lab measures shipped thinking.</p>
           <p>Concepts and specs live on each studio's shelf; the progress ledger doc here tracks
@@ -552,6 +573,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           plays in the browser now, renders a real mp4 when a render key is set. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'video' && (
         <VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded
+          only in this world's knowledge base, cited, with its gaps flagged. Refuses over an empty
+          corpus. The human copies and sends; nothing is auto-sent. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'assist' && (
+        <AnsweringDesk worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile

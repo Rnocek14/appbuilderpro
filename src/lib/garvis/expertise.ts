@@ -346,6 +346,36 @@ Evidence beats opinion: run Research on user complaints/competitor moves before 
   },
 ];
 
+// ANSWERING a message is not composing a campaign: the assist desk's born-with knowledge is a
+// grounding discipline — reply only from the knowledge base, refuse over an empty one, and keep
+// the knowledge base fed. This is the honest floor for the answering studio.
+const ASSIST_PACK: SeedArtifact[] = [
+  {
+    slug: 'answering-discipline', kind: 'doc', title: 'How this desk answers',
+    detail: `${H('The rule that makes replies safe for {{business_name}}')}
+GROUND EVERY REPLY IN THE KNOWLEDGE BASE. The desk drafts only from what's on record here — your
+policies, past answers, and facts. It does NOT invent a price, a date, an order detail, a name, or
+a promise. If the knowledge base has nothing on the question, the desk REFUSES and tells you to add
+an entry — a confident wrong answer is worse than none.
+WHAT YOU DO: paste the incoming message → press "Draft the reply" → read it. Anything the knowledge
+base couldn't cover comes back marked "[needs your input: …]" for you to fill. YOU copy and send —
+the desk never sends for you, and nothing is automated.
+VOICE: {{tone}}. Answer the person's actual question, courteous and specific, never "as an AI".${NOTE}`,
+  },
+  {
+    slug: 'knowledge-base-starter', kind: 'doc', title: 'What to put in the knowledge base',
+    detail: `${H('Feed the vault so the desk can answer')}
+The desk is only as good as what it can stand on. Drop these into this world's vault (as documents
+or artifacts) and each reply gets grounded in them:
+□ Your policies — returns, refunds, shipping/turnaround, warranty, cancellation.
+□ Canned answers to the questions you get most (write the reply you'd actually send).
+□ Facts people ask for — hours, service area, what's included, what isn't.
+□ Past replies you were happy with — they teach the desk your voice and your specifics.
+KEEP IT CURRENT: when a reply comes back refused or you had to rewrite it, that's the signal — add
+the missing entry. The ledger tracks kept-vs-rewritten so you can see where the base is thin.${NOTE}`,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The registry
 // ---------------------------------------------------------------------------
@@ -353,7 +383,7 @@ Evidence beats opinion: run Research on user complaints/competitor moves before 
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
-  feature_lab: FEATURE_LAB_PACK,
+  feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */

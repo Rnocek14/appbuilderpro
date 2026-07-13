@@ -148,6 +148,29 @@ async function resolveSources(hits: RawHit[]): Promise<AskSource[]> {
   return out;
 }
 
+/** The RETRIEVAL half of askGarvis, exposed for surfaces that want the SOURCES and do their own
+ *  synthesis — the answering desk drafts a reply (not a Q&A answer) grounded in these. World-scoped
+ *  when a worldId is given (the answering desk grounds ONLY in its own world's knowledge base).
+ *  Returns [] on any failure, never throws. */
+export async function retrieveSources(question: string, opts?: { worldId?: string; k?: number }): Promise<AskSource[]> {
+  try {
+    const q = question.trim();
+    if (q.length < 3) return [];
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) return [];
+    const clusterIds = opts?.worldId ? await clusterIdsForWorld(opts.worldId) : null;
+    const [vhits, lArts, lDocs] = await Promise.all([
+      vectorHits(q, uid),
+      lexicalHits(q, clusterIds),
+      documentLexicalHits(q, opts?.worldId),
+    ]);
+    const merged = mergeHits(vhits, [...lArts, ...lDocs], opts?.k ?? 8);
+    const sources = await resolveSources(merged);
+    return opts?.worldId ? sources.filter((s) => s.worldId === opts.worldId) : sources;
+  } catch { return []; }
+}
+
 /** ONE BRAIN (UX redesign): reflexive retrieval for the FRONT DOOR. The same hybrid engine
  *  (vector + lexical over the owner's artifacts) compiled into one labeled prompt block, so the
  *  Command conversation is grounded in what the owner actually has on record — the audit's

@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 12 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 13 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -143,7 +143,7 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 12): generic direct_mail email social video landing market brand crm lists ads feature_lab
+FLAVORS (exactly 13): generic direct_mail email social video landing market brand crm lists ads feature_lab assist
 
 THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
 - MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
@@ -154,6 +154,16 @@ THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
   with flavor feature_lab (feature concepts + specs), vault (source material, screenshots,
   docs), ledger. OMIT audience/launch/loop entirely unless the intent explicitly asks for
   outreach — a feature lab has nothing to mail.
+- OPERATOR-ASSISTANT / STANDING-JOB intent (the user has a RECURRING TASK over a body of
+  knowledge — "answer my support emails from a database of answers", "triage tickets", "reply
+  to inquiries using our policies", "draft responses from our docs"): design an ANSWERING DESK.
+  The knowledge base is the whole point, so vault is central (the policies, canned answers, past
+  replies, docs the drafts stand on). Add intel (flavor generic: the domain — who writes in and
+  what they ask), exactly one studio with flavor assist (the desk where an incoming item becomes
+  a grounded draft), and ledger (which drafts were kept vs rewritten — the desk learns its gaps).
+  OMIT audience/launch/loop — there is no outreach list and nothing is auto-sent; the human
+  always copies and sends. Seed the vault's play with the FIRST knowledge entries to add (a
+  return policy, a shipping FAQ, a canned answer), never fake outreach emails: "emails": [].
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",
