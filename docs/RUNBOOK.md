@@ -17,7 +17,7 @@ In the Supabase SQL editor, run each file's full contents:
 
 1. `schema.sql` — the app-builder base.
 2. `schema_v2_autopilot.sql` — jobs/autopilot tables.
-3. `supabase/_apply_garvis_all.sql` — **every Garvis migration (app_0003 → app_0060), concatenated
+3. `supabase/_apply_garvis_all.sql` — **every Garvis migration (app_0003 → app_0061), concatenated
    in order.** All migrations are additive + idempotent; re-running is safe. (Regenerate this file
    after adding a migration — the command is in its header.)
 
@@ -86,6 +86,21 @@ Then `npm run build` and host `dist/`.
    "baseline recorded" line.
 4. Optional: Settings → paste a Discord/Slack webhook URL so the morning pulse and watch alerts
    reach you outside the app.
+
+## Optional: the forward-in mailbox (Tier 2)
+
+Give Garvis a real inbox without OAuth:
+
+1. In Resend: add an **inbound domain** (set its MX record as Resend instructs).
+2. Point the domain's inbound webhook at
+   `https://<project-ref>.supabase.co/functions/v1/resend-inbound` with header
+   `x-inbound-secret: <your INBOUND_SECRET>`.
+3. Your personal forward-in address is on **Settings → Forward-in mailbox**
+   (`in-xxxxxxxxxx@yourdomain`). Forward any email there — or add a Gmail auto-forward rule.
+
+Forwarded mail lands in **Queue → Messages** (badge + waking moment + webhook ping), where
+"Draft with Garvis" writes a reply from your own record and "Queue reply" sends it through
+Approvals like every other send. Mail to an unknown alias is ignored, never misfiled.
 
 ## What works with NO AI key (the deterministic floor)
 

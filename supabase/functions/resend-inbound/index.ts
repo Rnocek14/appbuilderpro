@@ -69,12 +69,19 @@ Deno.serve(async (req) => {
   if (!secret || !provided || !constantTimeEqual(provided, secret)) return json({ error: 'Unauthorized' }, 401);
 
   const payload = (await req.json().catch(() => ({}))) as {
-    from?: string; subject?: string; text?: string; body?: string;
-    in_reply_to?: string; references?: string; provider_message_id?: string;
+    from?: string; to?: string | string[]; subject?: string; text?: string; body?: string;
+    in_reply_to?: string; references?: string; provider_message_id?: string; message_id?: string;
   };
   const from = (payload.from ?? '').toLowerCase().trim();
   const subject = payload.subject ?? '';
   const text = (payload.text ?? payload.body ?? '').trim();
+
+  // "Name <addr>" → { name, address } — the from field arrives in either shape.
+  const parseAddr = (raw: string): { name: string | null; address: string } => {
+    const m = /^\s*"?([^"<]*)"?\s*<([^>]+)>\s*$/.exec(raw);
+    if (m) return { name: m[1].trim() || null, address: m[2].toLowerCase().trim() };
+    return { name: null, address: raw.toLowerCase().trim() };
+  };
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
@@ -94,7 +101,38 @@ Deno.serve(async (req) => {
       .order('sent_at', { ascending: false }).limit(1).maybeSingle();
     msg = data ?? null;
   }
-  if (!msg) return json({ ok: true, note: 'no matching message; reply ignored' });
+  if (!msg) {
+    // FORWARD-IN MAILBOX (Tier 2): mail that matches no outreach thread used to be silently
+    // discarded. If it was addressed to an owner's forward-in alias (in-xxxxxxxxxx@…), it lands in
+    // their inbox — the Queue's Messages lane — and surfaces in the waking moment. Mail to no known
+    // alias stays honestly ignored: a stray address must not land in anyone's inbox.
+    const toRaw = Array.isArray(payload.to) ? payload.to : payload.to ? [payload.to] : [];
+    const aliases = toRaw.map((t) => parseAddr(String(t)).address).map((a) => a.split('@')[0]).filter((l) => /^in-[a-z0-9]{6,}$/.test(l));
+    if (aliases.length === 0) return json({ ok: true, note: 'no matching message or alias; ignored' });
+    const { data: prof } = await admin.from('profiles')
+      .select('id, webhook_url').eq('inbound_alias', aliases[0]).maybeSingle();
+    if (!prof) return json({ ok: true, note: 'alias unknown; ignored' });
+    const ownerId = (prof as { id: string }).id;
+    const sender = parseAddr(payload.from ?? '');
+    await admin.from('inbound_mail').insert({
+      owner_id: ownerId,
+      from_address: sender.address, from_name: sender.name,
+      to_address: toRaw[0] ? parseAddr(String(toRaw[0])).address : null,
+      subject: subject.slice(0, 300),
+      body_text: text.slice(0, 16000),
+      message_id: (payload.message_id ?? payload.provider_message_id ?? '').replace(/[<>]/g, '') || null,
+    });
+    await admin.from('mind_events').insert({
+      owner_id: ownerId, event_type: 'note', source: 'inbound-mail',
+      subject: `Mail from ${sender.name || sender.address}: ${subject.slice(0, 120) || '(no subject)'}`,
+      payload: { from: sender.address },
+    }).then(() => {}, () => {});
+    await notifyText(
+      (prof as { webhook_url?: string } | null)?.webhook_url,
+      `📥 Mail from ${sender.name || sender.address} — "${subject.slice(0, 120)}"\nIt's in your Queue → Messages.`,
+    ).catch(() => {});
+    return json({ ok: true, note: 'landed in the inbox' });
+  }
 
   // Strip QUOTED content before any intent detection: the original outreach footer says
   // 'reply "unsubscribe"', so a quoted copy of it in an interested reply must never read as
