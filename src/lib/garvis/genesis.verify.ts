@@ -5,8 +5,8 @@
 // floor on every play step), token merging that shows holes instead of hiding them, and — the
 // contamination assertion — nothing genesis produces ever speaks another world's copy.
 
-import { parseDNA, parseGenesis, mergeTokens, type DnaDraft } from './genesis';
-import { flattenTemplate } from './workweb';
+import { parseDNA, parseGenesis, mergeTokens, structuralViolations, type DnaDraft } from './genesis';
+import { flattenTemplate, type WebTemplate, type TemplateNode, type Archetype } from './workweb';
 
 let passed = 0;
 let failed = 0;
@@ -182,6 +182,34 @@ check('DNA arrays are capped at 8', (() => {
   check('unknown tokens stay VISIBLE — a hole is shown, never papered over', merged.includes('{{budget}}'));
   const noPrincipal = mergeTokens('From {{principal}}.', { ...ctx, principal: null });
   check('a null fact leaves its token visible too', noPrincipal.includes('{{principal}}'));
+}
+
+// 7 — structural invariants (deep scan): approveDraft re-checks these so a pruned draft can't
+// instantiate a broken world.
+{
+  const node = (slug: string, archetype: Archetype, children?: TemplateNode[]): TemplateNode => ({ slug, title: slug, summary: '', archetype, flavor: 'generic', children });
+  const sound = { name: 'W', description: '', nodes: [
+    node('brand', 'vault'), node('intel', 'intel'), node('results', 'ledger'), node('studio', 'studio'),
+  ] } as unknown as WebTemplate;
+  check('a sound draft has no violations', structuralViolations(sound).length === 0);
+
+  const noVault = { name: 'W', description: '', nodes: [node('intel', 'intel'), node('results', 'ledger'), node('a', 'studio')] } as unknown as WebTemplate;
+  check('missing vault is caught', structuralViolations(noVault).some((v) => v.includes('vault')));
+
+  const launchNoAudience = { name: 'W', description: '', nodes: [
+    node('brand', 'vault'), node('intel', 'intel'), node('results', 'ledger'), node('out', 'launch'),
+  ] } as unknown as WebTemplate;
+  check('launch without audience is caught', structuralViolations(launchNoAudience).some((v) => v.includes('audience')));
+
+  const empty = { name: 'W', description: '', nodes: [] } as unknown as WebTemplate;
+  check('an empty draft is caught (too few + no coverage)', structuralViolations(empty).length >= 3);
+
+  // audience satisfied by a CHILD node still counts (flatten covers one level deep)
+  const childAudience = { name: 'W', description: '', nodes: [
+    node('brand', 'vault'), node('intel', 'intel'), node('results', 'ledger'),
+    node('out', 'launch', [node('aud', 'audience')]),
+  ] } as unknown as WebTemplate;
+  check('a child audience satisfies the launch rule', structuralViolations(childAudience).every((v) => !v.includes('audience')));
 }
 
 console.log(`\ngenesis.verify: ${passed} passed, ${failed} failed`);

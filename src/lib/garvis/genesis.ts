@@ -420,3 +420,19 @@ export function mergeTokens(text: string, ctx: BusinessContext, extra: Record<st
     return v ? v : whole;
   });
 }
+
+/** Structural invariants every world must satisfy before it can be instantiated. The parse gauntlet
+ *  auto-repairs these on synthesis, but a user can prune a draft below them via removeDraftNode — so
+ *  approveDraft re-checks here (deep scan): no zero/thin worlds, and every world can know, hold, and
+ *  learn. Returns a list of human-readable violations ([] means the draft is sound). */
+export function structuralViolations(t: WebTemplate): string[] {
+  const flat = (t.nodes ?? []).flatMap((n) => [n, ...(n.children ?? [])]);
+  const has = (a: Archetype) => flat.some((n) => n.archetype === a);
+  const v: string[] = [];
+  if (flat.length < 3) v.push('a world needs at least a few areas — this draft has too few');
+  if (!has('vault')) v.push('no vault to hold identity and assets');
+  if (!has('intel')) v.push('no intel area to know the market');
+  if (!has('ledger')) v.push('no ledger to learn what happened');
+  if (has('launch') && !has('audience')) v.push('a launch area needs an audience to reach');
+  return v;
+}

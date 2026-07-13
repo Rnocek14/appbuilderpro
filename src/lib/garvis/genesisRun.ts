@@ -10,7 +10,7 @@
 import { supabase } from '../supabase';
 import { recordMindEvent } from './mindStore';
 import {
-  DNA_SYSTEM, GENESIS_SYSTEM, parseDNA, parseGenesis,
+  DNA_SYSTEM, GENESIS_SYSTEM, parseDNA, parseGenesis, structuralViolations,
   type GenesisDraft, type WorldDNA, type BusinessContext, type PlayData, type GenesisRationale,
 } from './genesis';
 import { instantiateWeb, type WebSummary } from './workwebRun';
@@ -155,6 +155,15 @@ export async function approveDraft(id: string): Promise<WebSummary> {
   if (claimErr) throw new Error(claimErr.message);
   const row = (claimed?.[0] as unknown as DraftRow | undefined) ?? null;
   if (!row) throw new Error('This draft was already approved or discarded.');
+
+  // Re-check the structural invariants the parser enforced at synthesis (deep scan): removeDraftNode
+  // can prune a draft below them — a launch with no audience, or no vault/intel/ledger, or nearly
+  // empty. Release the claim and refuse rather than instantiate a broken world.
+  const violations = structuralViolations(row.template);
+  if (violations.length) {
+    await supabase.from('web_templates').update({ status: 'draft' }).eq('id', id);
+    throw new Error(`This draft can't become a world yet — ${violations.join('; ')}. Add the missing area(s) or start over.`);
+  }
 
   let summary: WebSummary;
   try {

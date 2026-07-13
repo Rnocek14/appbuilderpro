@@ -146,6 +146,24 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     setGraph(next);
   };
 
+  // Commit a lab/nav op's whole-graph result, but PRESERVE any focus-cluster artifacts (media/video)
+  // that landed via a slow entry load while the op was in flight — the op computed from a call-time
+  // graph and would otherwise drop them on setGraph (deep scan residual: recoverable media loss).
+  // Additive: only re-adds focus artifacts the result is missing; never removes anything.
+  const commitGraph = (result: ClusterGraph) => {
+    const fid = focusRef.current;
+    const liveFocus = fid ? liveGraph.current.clusters.find((c) => c.id === fid) : undefined;
+    const resFocus = fid ? result.clusters.find((c) => c.id === fid) : undefined;
+    let next = result;
+    if (liveFocus && resFocus) {
+      const resIds = new Set(resFocus.artifacts.map((a) => a.id));
+      const missing = liveFocus.artifacts.filter((a) => !resIds.has(a.id));
+      if (missing.length) next = { ...result, clusters: result.clusters.map((c) => (c.id === fid ? { ...c, artifacts: [...c.artifacts, ...missing] } : c)) };
+    }
+    liveGraph.current = next;
+    setGraph(next);
+  };
+
   const ancestors = focus ? trail(byId, focus.id) : [];
   const children = focus ? graph.clusters.filter((c) => c.parentId === focus.id).sort((a, b) => b.salience - a.salience) : [];
   const related = focus ? (similar ?? relatedClusters(graph, focus.id)) : [];
@@ -213,8 +231,8 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     if (p && p !== 'loading') {
       const arts: Artifact[] = [...(p.understanding ? [p.understanding] : []), ...p.images];
       leadsCache.current[id] = p.leads; done.current.add(id);
-      setGraph({ ...g2, clusters: g2.clusters.map((c) => (c.id === id ? { ...c, summary: p.summary || c.summary, trajectory: p.trajectory ?? c.trajectory, artifacts: [...arts, ...c.artifacts] } : c)) });
-    } else setGraph(g2);
+      commitGraph({ ...g2, clusters: g2.clusters.map((c) => (c.id === id ? { ...c, summary: p.summary || c.summary, trajectory: p.trajectory ?? c.trajectory, artifacts: [...arts, ...c.artifacts] } : c)) });
+    } else commitGraph(g2);
     travel(id);
   };
   // ONE op at a time: every lab/nav op reads `graph` at call time and writes it back on resolve,
@@ -224,7 +242,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const run = async (label: string, fn: () => Promise<{ graph?: ClusterGraph; costUsd?: number } | RelatedCluster[]>) => {
     if (busy) return;
     setBusy(label); setLabErr('');
-    try { const res = await fn(); if (Array.isArray(res)) setSimilar(res); else { if (res.graph) setGraph(res.graph); if (res.costUsd) onCost?.(res.costUsd); } }
+    try { const res = await fn(); if (Array.isArray(res)) setSimilar(res); else { if (res.graph) commitGraph(res.graph); if (res.costUsd) onCost?.(res.costUsd); } }
     catch (e) { setLabErr(e instanceof Error ? e.message : "That didn't go through — try again."); }
     finally { setBusy(null); }
   };
@@ -239,13 +257,13 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     if (!twist) return;
     const { graph: g2, id } = whatIfChild(graph, focus.id, twist);
     if (!id) return;
-    setGraph(g2);
+    commitGraph(g2);
     travel(id);
   };
 
   // Lab Bench runs land as simulation-record artifacts ON this branch (same id = same inputs —
   // an identical re-run replaces nothing and adds nothing).
-  const saveArtifact = (a: Artifact) => setGraph({
+  const saveArtifact = (a: Artifact) => commitGraph({
     ...graph,
     clusters: graph.clusters.map((c) => c.id === focus.id
       ? (c.artifacts.some((x) => x.id === a.id) ? c : { ...c, artifacts: [...c.artifacts, a] })
@@ -253,7 +271,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   });
 
   const setEpistemic = (e: Epistemic | undefined) => {
-    setGraph({ ...graph, clusters: graph.clusters.map((c) => (c.id === focus.id ? { ...c, epistemic: e } : c)) });
+    commitGraph({ ...graph, clusters: graph.clusters.map((c) => (c.id === focus.id ? { ...c, epistemic: e } : c)) });
     setPickStatus(false);
   };
 
@@ -267,7 +285,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     try {
       const r = await compareNodes(graph, focus.id, bId);
       if (r.costUsd) onCost?.(r.costUsd);
-      if (r.cmp) { setGraph(r.graph); setComparison({ withTitle: byId.get(bId)?.title ?? 'the other', cmp: r.cmp }); }
+      if (r.cmp) { commitGraph(r.graph); setComparison({ withTitle: byId.get(bId)?.title ?? 'the other', cmp: r.cmp }); }
       else setLabErr(r.error ?? 'The comparison came back too thin to trust.');
     } catch (e) { setLabErr(e instanceof Error ? e.message : 'Comparison failed.'); }
     finally { setBusy(null); setComparingWith(null); }
@@ -283,7 +301,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     try {
       const r = await formalizeTheory(graph, focus.id);
       if (r.costUsd) onCost?.(r.costUsd);
-      if (r.scaffold) { setGraph(r.graph); setShowTheory(true); }
+      if (r.scaffold) { commitGraph(r.graph); setShowTheory(true); }
       else setLabErr(r.error ?? 'The scaffold came back too thin to trust.');
     } catch (e) { setLabErr(e instanceof Error ? e.message : 'Scaffolding failed.'); }
     finally { setBusy(null); }
