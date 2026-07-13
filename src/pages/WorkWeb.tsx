@@ -32,6 +32,7 @@ import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { FarmPanel } from '../components/garvis/FarmPanel';
 import { PaperworkStudio } from '../components/garvis/PaperworkStudio';
+import { MarketDataPanel } from '../components/garvis/MarketDataPanel';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
@@ -652,6 +653,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           from this world's saved postcard design. Lives on both the lists desk and the mail studio. */}
       {cluster.charter?.archetype === 'studio' && (cluster.charter.flavor === 'lists' || cluster.charter.flavor === 'direct_mail') && (
         <FarmPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* MARKET DATA from the owner's own RESO/MLS feed — computed stats, honest empty state,
+          and the sold-by-zip number the Farm's turnover math needs. */}
+      {cluster.charter?.flavor === 'market' && (
+        <MarketDataPanel onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
