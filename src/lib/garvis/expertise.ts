@@ -376,6 +376,36 @@ the missing entry. The ledger tracks kept-vs-rewritten so you can see where the 
   },
 ];
 
+// PRODUCING a document is not writing a campaign: the document studio's born-with knowledge is a
+// document-craft discipline — structure it, ground the facts, flag what's missing, export it clean.
+const DELIVER_PACK: SeedArtifact[] = [
+  {
+    slug: 'document-craft', kind: 'doc', title: 'How this studio builds a document',
+    detail: `${H('Producing a hand-over document for {{business_name}}')}
+PICK THE TYPE, THEN THE SHAPE. Each document has a job and a skeleton: a PROPOSAL wins the work
+(overview → scope → approach → timeline → investment → next steps); a REPORT informs (summary →
+background → findings → recommendations); a ONE-PAGER orients at a glance; a BRIEF aligns people; a
+LETTER speaks to one person. Start from the skeleton, drop a section the document doesn't need.
+GROUND EVERY FACT. Prices, dates, terms, names, quantities come from the vault (rate card, terms,
+past documents) or from your brief — NEVER invented. Anything missing is marked "[needs your input:
+…]" so you fill it before it leaves. A confident wrong number in a proposal is worse than a blank.
+EXPORT IT. The document leaves as Markdown, a printed/PDF page, or a real .docx — pick what the
+recipient expects. You review and hand it off; nothing is auto-delivered.
+BATCH IT. Same type + one line per recipient = a document each, personalized from the shared brief.${NOTE}`,
+  },
+  {
+    slug: 'document-source-starter', kind: 'doc', title: 'What to put in the vault',
+    detail: `${H('Feed the studio so documents ground themselves')}
+The stronger the source material, the less you fill in by hand. Drop these into this world's vault:
+□ Your rate card / pricing so "investment" sections cite real numbers.
+□ Your standard terms, scope language, and warranty so proposals and contracts stay consistent.
+□ Past documents you were happy with — they teach structure and your voice.
+□ Credentials, case studies, and results you cite as proof.
+KEEP IT CURRENT: when a document keeps coming back with "[needs your input: …]" in the same spot,
+that's the signal — add the missing source, and the next document fills it automatically.${NOTE}`,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The registry
 // ---------------------------------------------------------------------------
@@ -383,7 +413,7 @@ the missing entry. The ledger tracks kept-vs-rewritten so you can see where the 
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
-  feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK,
+  feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */

@@ -31,6 +31,7 @@ import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
+import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
@@ -127,10 +128,12 @@ export default function WorkWeb() {
     && web.clusters.some((c) => c.charter?.flavor === 'feature_lab')
     && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
 
-  // ANSWERING DESK = an assist studio, no outreach. Its ledger measures drafts kept vs rewritten,
-  // not sends — so it shares the product lab's "no send/reply chrome" framing.
+  // ANSWERING DESK = an assist studio; DOCUMENT STUDIO = a deliver studio. Both make things you hand
+  // off yourself, not campaigns you send — so they share the product lab's "no send/reply chrome"
+  // framing and a "measures made, not sent" ledger.
   const assistDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'assist'), [web]);
-  const noOutreach = productLab || assistDesk;
+  const docStudio = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'deliver'), [web]);
+  const noOutreach = productLab || assistDesk || docStudio;
 
   const doRunPlay = async () => {
     if (!templatePlay) return;
@@ -154,6 +157,8 @@ export default function WorkWeb() {
     if (tool.id === 'view-results') { setSelected(cluster.slug); return; }
     // The answering desk is already rendered inline for the assist studio — the tool just focuses it.
     if (tool.id === 'open-answering') { setSelected(cluster.slug); return; }
+    // Likewise the document studio is inline for the deliver flavor — the tool focuses it.
+    if (tool.id === 'open-documents') { setSelected(cluster.slug); return; }
     if (tool.id === 'upload-list') { setUploadFor(cluster); return; }
     if (tool.id === 'queue-sequence') { setQueueFor(cluster); return; }
 
@@ -247,6 +252,8 @@ export default function WorkWeb() {
         <div className="mb-4">
           <AskGarvis worldId={worldId} placeholder={assistDesk
             ? `Ask about ${web.title} — "what's our return policy?", "what do we tell people about shipping times?"`
+            : docStudio
+            ? `Ask about ${web.title} — "what's in our rate card?", "what did we say in the last proposal?"`
             : productLab
             ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
@@ -299,6 +306,7 @@ export default function WorkWeb() {
                 onChanged={() => void refresh()}
                 productLab={productLab}
                 assistDesk={assistDesk}
+                docStudio={docStudio}
               />
             )}
           </div>
@@ -377,6 +385,7 @@ const SPARKS: Record<string, string[]> = {
   direct_mail: ['the neighbor story', 'lead with the offer', 'a question they already ask', 'why this season matters'],
   feature_lab: ['for the power user', 'fix the first five minutes', 'what makes people come back daily', 'steal the best idea from an adjacent product', 'smallest shippable version'],
   assist: ['the questions we get most', 'a canned answer for refunds', 'tighten the tone', 'where the knowledge base keeps coming up short', 'a policy we should write down'],
+  deliver: ['a boilerplate proposal template', 'the sections clients always ask about', 'a stronger one-pager', 'what to standardize across documents', 'a cover letter tone'],
   default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
 };
 
@@ -468,12 +477,13 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
   );
 }
 
-function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk }: {
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk, docStudio }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
   productLab?: boolean;
   assistDesk?: boolean;
+  docStudio?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -548,6 +558,14 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           knowledge base keeps coming up short. Feed those gaps back into the vault and the desk gets
           sharper.</p>
         </div>
+      ) : docStudio ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This studio measures documents made, not sent.</p>
+          <p>Nothing is auto-delivered — you review and hand each document off yourself. Saved
+          documents land on the studio's shelf so this ledger can learn which ones you keep as-is
+          versus rewrite, and which sections keep needing your input. Those gaps point at what to add
+          to the vault next.</p>
+        </div>
       ) : productLab ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This lab measures shipped thinking.</p>
@@ -580,6 +598,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           corpus. The human copies and sends; nothing is auto-sent. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'assist' && (
         <AnsweringDesk worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* DELIVERABLE GENERATOR — the document studio: produce a finished, exportable document
+          (proposal / report / one-pager) grounded in this world's knowledge, one or a batch. You
+          review and send; nothing is auto-delivered. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
+        <DeliverableStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile

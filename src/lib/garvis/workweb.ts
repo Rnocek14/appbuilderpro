@@ -23,7 +23,8 @@ export type Flavor =
   | 'generic' | 'direct_mail' | 'email' | 'social' | 'video' | 'landing'
   | 'market' | 'brand' | 'crm' | 'lists' | 'ads'
   | 'feature_lab' // PRODUCT work: feature ideation + specs for a platform the owner builds or works for
-  | 'assist';     // OPERATOR ASSISTANT: an answering desk — paste an item, get a reply grounded in this world's knowledge base
+  | 'assist'      // OPERATOR ASSISTANT: an answering desk — paste an item, get a reply grounded in this world's knowledge base
+  | 'deliver';    // DELIVERABLE GENERATOR: a document studio — produce a portable, exportable proposal/report/one-pager
 export type CharterStatus = 'dormant' | 'active' | 'waiting' | 'done';
 
 export interface CharterRef { type: string; id: string; label?: string }
@@ -53,7 +54,7 @@ export function parseCharter(raw: unknown): Charter | null {
 }
 
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver',
 ];
 
 export interface ArchetypeMeta {
@@ -94,7 +95,7 @@ export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
   'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec',
   'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
-  'import-docs', 'view-results', 'open-answering',
+  'import-docs', 'view-results', 'open-answering', 'open-documents',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
@@ -111,6 +112,9 @@ const STUDIO_BY_FLAVOR: Partial<Record<Flavor, WorkTool[]>> = {
   ],
   assist: [
     T('open-answering', 'Open the answering desk', 'Paste an incoming message — Garvis drafts a reply grounded ONLY in this world\'s knowledge base, cites what it used, and refuses when it has nothing on record. You copy and send.', 'view'),
+  ],
+  deliver: [
+    T('open-documents', 'Open the document studio', 'Generate a finished, exportable document — proposal, report, one-pager, brief — grounded in this world\'s knowledge. Export to Markdown, print/PDF, or .docx; batch one per name in a list. You review and send.', 'view'),
   ],
 };
 

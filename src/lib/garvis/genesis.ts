@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 13 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 14 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -143,7 +143,7 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 13): generic direct_mail email social video landing market brand crm lists ads feature_lab assist
+FLAVORS (exactly 14): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver
 
 THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
 - MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
@@ -164,6 +164,15 @@ THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
   OMIT audience/launch/loop — there is no outreach list and nothing is auto-sent; the human
   always copies and sends. Seed the vault's play with the FIRST knowledge entries to add (a
   return policy, a shipping FAQ, a canned answer), never fake outreach emails: "emails": [].
+- DELIVERABLE / DOCUMENT-PRODUCTION intent (the user regularly PRODUCES FORMATTED DOCUMENTS to
+  hand to someone — "help me write proposals for my clients", "generate reports from our data",
+  "make me one-pagers", "draft contracts from our terms"): design a DOCUMENT STUDIO. The vault
+  holds the raw material the documents draw on (rate cards, terms, past proposals, boilerplate).
+  Add intel (flavor generic: the recipients and what a strong document for them contains), exactly
+  one studio with flavor deliver (where a finished, exportable document is produced — one or a
+  batch), and ledger (which documents were kept vs rewritten). OMIT audience/launch/loop — the
+  user hands the document off themselves; nothing is auto-delivered. Seed the vault's play with
+  the FIRST source materials to add (a rate card, a terms sheet, a past proposal), "emails": [].
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",
