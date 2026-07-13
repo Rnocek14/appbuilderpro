@@ -342,6 +342,36 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
       };
     }
 
+    // --- THE CLOCK: a recurring read-and-record check. Safe to create directly (it never sends,
+    // posts, or spends — findings land in the waking moment; anything outward still stops at
+    // Approvals). Digests need a world; watches may be world-less. ---
+    case 'create_standing_order': {
+      const kind = String(input.kind ?? '');
+      if (kind !== 'watch_url' && kind !== 'cadence_digest') throw new Error('kind must be watch_url or cadence_digest.');
+      const cadence = String(input.cadence ?? '');
+      if (!['hourly', 'daily', 'weekly'].includes(cadence)) throw new Error('cadence must be hourly, daily, or weekly.');
+      let worldId: string | null = null;
+      const worldName = String(input.world ?? '').trim();
+      if (worldName && worldName.toLowerCase() !== 'null') {
+        const { data: w } = await supabase.from('knowledge_worlds')
+          .select('id, title').ilike('title', `%${worldName}%`).limit(1).maybeSingle();
+        if (w) worldId = (w as { id: string }).id;
+        else if (kind === 'cadence_digest') throw new Error(`No world named "${worldName}" — a digest needs one. Create the world first, or name an existing one.`);
+      } else if (kind === 'cadence_digest') {
+        throw new Error('A digest needs a world — pass its name.');
+      }
+      const { createOrder } = await import('./standingRun');
+      const order = await createOrder({
+        worldId, kind, label: String(input.label ?? ''), cadence: cadence as 'hourly' | 'daily' | 'weekly',
+        url: input.url ? String(input.url) : undefined,
+      });
+      return {
+        ok: true, order_id: order.id, label: order.label, cadence: order.cadence,
+        first_run_at: order.nextRunAt,
+        note: 'Standing order set. It runs on the heartbeat; real findings land in the waking moment. It only reads and records — nothing is ever sent automatically.',
+      };
+    }
+
     // --- MONEY (flow audit): the invoice loop's conversational door. Draft freely; anything
     // outward stops at Approvals — queueInvoiceSend writes a PENDING approval, never an email. ---
     case 'list_invoices': {

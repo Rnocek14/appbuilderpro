@@ -34,6 +34,7 @@ import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
 import { DataWorkspace } from '../components/garvis/DataWorkspace';
+import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
@@ -254,6 +255,12 @@ export default function WorkWeb() {
         {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
         <div className="mb-4">
           <WorldGoalPanel worldId={worldId} />
+        </div>
+
+        {/* THE CLOCK — this world's standing orders: watch a page, digest on a cadence. Read-and-
+            record only; findings surface in the waking moment, never auto-sent anywhere. */}
+        <div className="mb-4">
+          <StandingOrdersPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
         </div>
 
         {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
