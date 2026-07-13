@@ -123,6 +123,21 @@ export async function listDoNotMail(): Promise<DoNotMailRow[]> {
   return (data ?? []) as DoNotMailRow[];
 }
 
+/** The FULL do-not-mail key set — used at merge time so suppression is never capped. The list-view
+ *  above pages to 500 for display; a merge must check every suppressed household, always. */
+export async function loadDoNotMailKeys(): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase.from('do_not_mail')
+      .select('household_key').range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as { household_key: string }[]) keys.add(r.household_key);
+    if (!data || data.length < PAGE) break;
+  }
+  return keys;
+}
+
 /** Suppression is sacred: select-first-insert so a re-add never resets the original record. */
 export async function addDoNotMail(input: { householdKey: string; addressLabel: string; reason?: string }): Promise<void> {
   const owner = await uid();

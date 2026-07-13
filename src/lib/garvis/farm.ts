@@ -127,7 +127,7 @@ export function parseFarmCsv(text: string): FarmParseResult {
   const headers = rows[0].map((h) => h.trim().toLowerCase());
   const notMail = /mail|owner/;
   const col = {
-    name: findCol(headers, ['owner name', 'owner 1 name', 'owner1 name', 'full name', 'owner', 'name'], /street|city|state|zip|company|business/),
+    name: findCol(headers, ['owner name', 'owner 1 name', 'owner1 name', 'full name', 'owner', 'name'], /street|city|state|zip|company|business|address|addr|mail/),
     situs1: findCol(headers, ['situs address', 'property address', 'site address', 'street address', 'situs addr', 'address'], notMail),
     situsCity: findCol(headers, ['situs city', 'property city', 'site city', 'city'], notMail),
     situsState: findCol(headers, ['situs state', 'property state', 'site state', 'state'], notMail),

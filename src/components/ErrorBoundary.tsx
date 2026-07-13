@@ -3,11 +3,20 @@ import { supabase } from '../lib/supabase';
 
 interface State { error: Error | null }
 
-export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
+export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, State> {
   state: State = { error: null };
 
   static getDerivedStateFromError(error: Error): State {
     return { error };
+  }
+
+  // Route-level recovery: when resetKey (the pathname) changes after a crash, clear the error so
+  // the next screen renders — a crash in one page no longer strands the whole app. Navigating with
+  // no error present does nothing here, so pages are NOT remounted on every navigation.
+  componentDidUpdate(prev: { resetKey?: string }) {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
   }
 
   componentDidCatch(error: Error) {

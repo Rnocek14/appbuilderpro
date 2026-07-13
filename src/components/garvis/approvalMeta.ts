@@ -3,7 +3,7 @@
 // the same decision the same way (flow audit: the lane showed raw snake_case while the ledger had
 // icons + labels).
 
-import { Mail, Users, Globe, Rocket, CreditCard, Database } from 'lucide-react';
+import { Mail, Users, Globe, Rocket, CreditCard, Database, FileSignature } from 'lucide-react';
 import type { ApprovalKind } from '../../lib/garvis/execution';
 
 export const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string }> = {
@@ -15,4 +15,5 @@ export const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string 
   apply_migration: { icon: Database, label: 'Apply migration' },
   crm_action: { icon: Users, label: 'CRM action' },
   send_batch: { icon: Mail, label: 'Send batch' },
+  send_for_signature: { icon: FileSignature, label: 'Send for signature' },
 };

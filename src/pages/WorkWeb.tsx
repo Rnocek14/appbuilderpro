@@ -31,6 +31,10 @@ import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { FarmPanel } from '../components/garvis/FarmPanel';
+import { PaperworkStudio } from '../components/garvis/PaperworkStudio';
+import { MarketDataPanel } from '../components/garvis/MarketDataPanel';
+import { TimelinePanel } from '../components/garvis/TimelinePanel';
+import { SocialPublisher } from '../components/garvis/SocialPublisher';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
@@ -653,10 +657,21 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <FarmPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
       )}
 
+      {/* MARKET DATA from the owner's own RESO/MLS feed — computed stats, honest empty state,
+          and the sold-by-zip number the Farm's turnover math needs. */}
+      {cluster.charter?.flavor === 'market' && (
+        <MarketDataPanel onToast={(k, m) => toast(k, m)} />
+      )}
+
       {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
           plays in the browser now, renders a real mp4 when a render key is set. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'video' && (
         <VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* AUTO-POST to her real connected social accounts (Ayrshare), scheduled + approval-gated. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'social' && (
+        <SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded
@@ -673,6 +688,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <DeliverableStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
       )}
 
+      {/* AUTO-PAPERWORK: the operator's own templates merged from real records — unfilled fields
+          refuse to send, and every envelope goes through Approvals to docusign-send. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
+        <PaperworkStudio worldId={worldId} onToast={(k, m) => toast(k, m)} />
+      )}
+
       {/* DATA & NUMBERS WORKSPACE — a CSV becomes a typed table, honest per-column stats, and a chart
           drawn only from a real aggregation. Every number is computed in pure code; the optional read
           narrates only those figures, never inventing one. */}
@@ -684,6 +705,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           automations: nothing is computed or sent from them unless the owner asks. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
         <TrackerRegistry worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onChanged={onChanged} />
+      )}
+
+      {/* TRANSACTION TIMELINES: contract-to-close checklists whose dated steps can become firing
+          reminders — deadlines that ring, not rows that wait. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
+        <TimelinePanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile

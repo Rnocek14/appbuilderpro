@@ -6,10 +6,11 @@
 // the vision's "approval required before sending/posting/deploying/charging + external actions logged".
 
 import { supabase } from '../supabase';
+import { hashPayload } from './payloadHash';
 
 export type ApprovalKind =
   | 'send_email' | 'publish_post' | 'deploy_site' | 'deploy_backend'
-  | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch';
+  | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface Approval {
@@ -47,12 +48,17 @@ export async function enqueueApproval(input: {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
+  const payload = input.payload ?? {};
+  // Bind the approval to a hash of its payload — the executor refuses if the payload changes after
+  // this decision is made (tamper-evidence; RLS already scopes the row to this owner).
+  const payload_hash = await hashPayload(payload);
   const { data, error } = await supabase.from('approvals').insert({
     owner_id: uid,
     kind: input.kind,
     title: input.title,
     preview: input.preview ?? '',
-    payload: input.payload ?? {},
+    payload,
+    payload_hash,
     requested_by: input.requestedBy ?? 'user',
   }).select('id').single();
   if (error) throw new Error(error.message);
@@ -97,6 +103,16 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     return { ok: !!res?.ok, error: res?.error, result: res };
   }
 
+  if (a.kind === 'send_for_signature') {
+    const { data, error } = await supabase.functions.invoke('docusign-send', { body: { approval_id: a.id } });
+    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    const res = data as { ok?: boolean; error?: string };
+    // docusign-send releases its per-approval claim on soft failure — return to pending so a
+    // legitimate retry stays possible (the send-email semantics, exactly).
+    if (!res?.ok) await revertToPending(a.id);
+    return { ok: !!res?.ok, error: res?.error, result: res };
+  }
+
   if (a.kind === 'send_batch') {
     // The CLOCK is the executor: the standing worker re-verifies this approval server-side on
     // every tick and drains the batch through THE ONE SEND PATH — suppression, contact status,
@@ -115,7 +131,15 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
   // server-side and writes the execution_runs row itself.
   if (a.kind === 'deploy_backend') return await executeBackendDeploy(a);
 
-  // Remaining kinds (publish_post/spend/…): the DECISION is recorded; execution happens
+  if (a.kind === 'publish_post') {
+    const { data, error } = await supabase.functions.invoke('social-publish', { body: { approval_id: a.id } });
+    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    const res = data as { ok?: boolean; error?: string; status?: string };
+    if (!res?.ok) await revertToPending(a.id);
+    return { ok: !!res?.ok, error: res?.error, result: res };
+  }
+
+  // Remaining kinds (spend/…): the DECISION is recorded; execution happens
   // where the capability lives (these need a client-built bundle we don't capture yet). Ledger
   // the approved-but-not-executed state honestly — visible, never silent.
   const { data: sess } = await supabase.auth.getUser();

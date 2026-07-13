@@ -95,12 +95,14 @@ Deno.serve(async (req) => {
       const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
       const PER_TICK = 10;
       const { data: batches } = await admin.from('outreach_batches')
-        .select('id, owner_id, subject, body_text, recipients, status, approval_id, sent_count, skipped_count')
-        .in('status', ['queued', 'draining']).order('created_at', { ascending: true }).limit(3);
+        .select('id, owner_id, subject, body_text, recipients, status, approval_id, sent_count, skipped_count, created_at')
+        // Approved batches first so a stuck-unapproved backlog can't starve batches the human OK'd.
+        .in('status', ['queued', 'draining']).order('approval_id', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: true }).limit(5);
       for (const b of (batches ?? []) as {
         id: string; owner_id: string; subject: string; body_text: string;
         recipients: BatchRecipient[]; status: string; approval_id: string | null;
-        sent_count: number; skipped_count: number;
+        sent_count: number; skipped_count: number; created_at: string;
       }[]) {
         const cancel = async (note: string) => {
           await admin.from('outreach_batches').update({ status: 'canceled', finished_at: nowIso }).eq('id', b.id);
@@ -110,7 +112,13 @@ Deno.serve(async (req) => {
             payload: { key: `batch-cancel:${b.id}`, batch_id: b.id },
           }).then(() => {}, () => {});
         };
-        if (!b.approval_id) { await cancel('no approval attached'); continue; }
+        // A just-created batch has a brief window where the row exists but its approval_id hasn't
+        // been written yet (createBatch inserts, enqueues, then links). Only cancel a no-approval
+        // batch once it's clearly abandoned (>2 min old), never one mid-creation.
+        if (!b.approval_id) {
+          if (Date.now() - new Date(b.created_at).getTime() > 120_000) await cancel('no approval attached');
+          continue;
+        }
         const { data: ap } = await admin.from('approvals')
           .select('id, owner_id, kind, status').eq('id', b.approval_id).single();
         if (!ap || ap.kind !== 'send_batch' || ap.owner_id !== b.owner_id) { await cancel('approval record invalid'); continue; }
@@ -132,13 +140,18 @@ Deno.serve(async (req) => {
         if (b.status !== 'draining') await admin.from('outreach_batches').update({ status: 'draining' }).eq('id', b.id);
 
         let sentNow = 0; let skippedNow = 0;
+        // Persist each recipient's outcome IMMEDIATELY, not after the whole slice: a worker crash
+        // then re-sends at most the one in-flight recipient, never the batch already delivered.
+        // The write is guarded on status so a cancel that lands mid-tick can't be resurrected.
+        const persistRecips = () => admin.from('outreach_batches')
+          .update({ recipients: recips }).eq('id', b.id).in('status', ['queued', 'draining']);
         for (const ix of slice) {
           const r = recips[ix];
           const { data: msg, error: msgErr } = await admin.from('outreach_messages').insert({
             owner_id: b.owner_id, contact_id: r.contactId, subject: mergeTemplate(b.subject, r.name),
             body_text: mergeTemplate(b.body_text, r.name), to_address: r.email, status: 'approved',
           }).select('id').single();
-          if (msgErr || !msg) { r.state = 'skipped'; r.reason = `message row failed: ${msgErr?.message ?? 'unknown'}`.slice(0, 200); skippedNow++; continue; }
+          if (msgErr || !msg) { r.state = 'skipped'; r.reason = `message row failed: ${msgErr?.message ?? 'unknown'}`.slice(0, 200); skippedNow++; await persistRecips(); continue; }
           // Pre-authorized per-recipient approval: the HUMAN authority is the batch approval,
           // recorded in payload.batch_id; requested_by 'garvis-auto' is the class send-email
           // accepts from the worker. Every gate still re-checks inside send-email.
@@ -148,31 +161,36 @@ Deno.serve(async (req) => {
             payload: { message_id: msg.id, batch_id: b.id }, requested_by: 'garvis-auto',
             status: 'approved', decided_at: nowIso, decided_via: 'batch',
           }).select('id').single();
-          if (apErr || !apRow) { r.state = 'skipped'; r.reason = `approval row failed: ${apErr?.message ?? 'unknown'}`.slice(0, 200); skippedNow++; continue; }
+          if (apErr || !apRow) { r.state = 'skipped'; r.reason = `approval row failed: ${apErr?.message ?? 'unknown'}`.slice(0, 200); skippedNow++; await persistRecips(); continue; }
           try {
             const res = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
               method: 'POST',
               headers: { 'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '' },
               body: JSON.stringify({ approval_id: apRow.id }),
             });
-            if (res.ok) { r.state = 'sent'; sentNow++; }
+            if (res.ok) { r.state = 'sent'; sentNow++; await persistRecips(); }
             else {
               const out = await res.json().catch(() => ({} as { error?: string }));
               const why = String((out as { error?: string })?.error ?? `HTTP ${res.status}`);
-              if (why.includes('Daily send cap')) break; // cap reached — the rest waits for tomorrow's ticks, honestly pending
-              r.state = 'skipped'; r.reason = why.slice(0, 200); skippedNow++;
+              if (why.includes('Daily send cap')) {
+                // Cap reached: this recipient stays pending for a later tick. send-email already
+                // marked its message 'blocked' and released the claim; reject the now-unused
+                // approval so no live garvis-auto send_email row is left dangling, then stop.
+                await admin.from('approvals').update({ status: 'rejected', decided_via: 'batch-cap' }).eq('id', apRow.id);
+                break;
+              }
+              r.state = 'skipped'; r.reason = why.slice(0, 200); skippedNow++; await persistRecips();
             }
           } catch (e) {
-            r.state = 'skipped'; r.reason = `send call failed: ${e instanceof Error ? e.message : 'network'}`.slice(0, 200); skippedNow++;
+            r.state = 'skipped'; r.reason = `send call failed: ${e instanceof Error ? e.message : 'network'}`.slice(0, 200); skippedNow++; await persistRecips();
           }
         }
         const prog = batchProgress(recips);
         await admin.from('outreach_batches').update({
-          recipients: recips,
           sent_count: b.sent_count + sentNow,
           skipped_count: b.skipped_count + skippedNow,
           ...(prog.pending === 0 ? { status: 'done', finished_at: nowIso } : {}),
-        }).eq('id', b.id);
+        }).eq('id', b.id).in('status', ['queued', 'draining']);
         if (prog.pending === 0) {
           await admin.from('mind_events').insert({
             owner_id: b.owner_id, event_type: 'note', source: 'execution',

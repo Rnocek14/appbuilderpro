@@ -47,6 +47,20 @@ export async function probeProvider(provider: string, token: string): Promise<{ 
       const orgs = await r.json() as { name?: string }[];
       return { ok: true, label: orgs?.[0]?.name ?? 'Supabase org' };
     }
+    if (provider === 'docusign') {
+      const base = Deno.env.get('DOCUSIGN_AUTH_BASE') ?? 'https://account-d.docusign.com';
+      const r = await fetch(`${base}/oauth/userinfo`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return { ok: false, error: `DocuSign ${r.status}` };
+      const u = await r.json() as { name?: string; email?: string };
+      return { ok: true, label: u.name || u.email || 'DocuSign account' };
+    }
+    if (provider === 'ayrshare') {
+      const r = await fetch('https://app.ayrshare.com/api/user', { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) return { ok: false, error: `Ayrshare ${r.status} — check the API key` };
+      const u = await r.json() as { title?: string; email?: string; displayNames?: { platform?: string }[] };
+      const n = (u.displayNames ?? []).length;
+      return { ok: true, label: u.title || u.email || `${n} account${n === 1 ? '' : 's'} linked` };
+    }
     return { ok: true }; // unknown provider — accept without a probe
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };

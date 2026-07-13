@@ -45,7 +45,8 @@ export function BatchSendCard({ onToast }: { onToast: (k: 'success' | 'error' | 
       setBusy(true);
       const res = await createBatch({ segment, subject, body });
       const exNote = res.excluded.length > 0 ? ` (${res.excluded.length} excluded: ${res.excluded[0].reason}${res.excluded.length > 1 ? ', …' : ''})` : '';
-      onToast('success', `Batch queued: ${res.queued} recipients${exNote}. Approve it in the Queue — then the clock drains it under your daily cap.`);
+      const capNote = res.truncatedFrom ? ` This batch covers the first ${res.queued} of ${res.truncatedFrom} — queue another for the rest.` : '';
+      onToast(res.truncatedFrom ? 'info' : 'success', `Batch queued: ${res.queued} recipients${exNote}. Approve it in the Queue — then the clock drains it under your daily cap.${capNote}`);
       setSubject(''); setBody('');
       setBatches(await listBatches());
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not create the batch.'); }

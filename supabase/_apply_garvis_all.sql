@@ -3653,3 +3653,202 @@ create policy "outreach_batches owner all" on public.outreach_batches
   );
 create index if not exists idx_outreach_batches_active on public.outreach_batches(status, created_at) where status in ('queued', 'draining');
 create index if not exists idx_outreach_batches_owner on public.outreach_batches(owner_id, created_at desc);
+
+-- ======== supabase/migrations/app_0065_esign.sql ========
+-- app_0065_esign.sql — AUTO-PAPERWORK + E-SIGNATURE. Rebuilt on Garvis's spines from the lakegen
+-- audit (the source's send path was real; its OAuth UI, webhook wiring, and refresh flow were not):
+--   paperwork_templates — the operator's own document templates ({{tokens}} merge with honest gaps)
+--   esign_envelopes     — one row per signature request, driven ONLY through the approval spine
+-- The enum value is added here and only USED at runtime. Owner RLS; world pinned when set.
+-- Additive + idempotent.
+
+alter type public.approval_kind add value if not exists 'send_for_signature';
+
+create table if not exists public.paperwork_templates (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.profiles(id) on delete cascade,
+  world_id    uuid references public.knowledge_worlds(id) on delete set null,
+  name        text not null,
+  doc_kind    text not null default 'agreement',
+  body        text not null default '',
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+alter table public.paperwork_templates enable row level security;
+drop policy if exists "paperwork_templates owner all" on public.paperwork_templates;
+create policy "paperwork_templates owner all" on public.paperwork_templates
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_paperwork_templates_owner on public.paperwork_templates(owner_id, updated_at desc);
+
+create table if not exists public.esign_envelopes (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles(id) on delete cascade,
+  world_id     uuid references public.knowledge_worlds(id) on delete set null,
+  template_id  uuid references public.paperwork_templates(id) on delete set null,
+  title        text not null,
+  merged_body  text not null,                  -- the exact text queued for signature (the record)
+  recipients   jsonb not null default '[]',    -- [{name,email,status?,signedAt?}]
+  provider     text not null default 'docusign',
+  envelope_id  text,                           -- provider envelope id once sent
+  status       text not null default 'queued' check (status in ('queued','sent','delivered','completed','declined','voided','failed')),
+  approval_id  uuid references public.approvals(id) on delete set null,
+  sent_at      timestamptz,
+  completed_at timestamptz,
+  created_at   timestamptz not null default now()
+);
+alter table public.esign_envelopes enable row level security;
+drop policy if exists "esign_envelopes owner all" on public.esign_envelopes;
+create policy "esign_envelopes owner all" on public.esign_envelopes
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_esign_envelopes_owner on public.esign_envelopes(owner_id, created_at desc);
+create index if not exists idx_esign_envelopes_envelope on public.esign_envelopes(envelope_id) where envelope_id is not null;
+
+-- ======== supabase/migrations/app_0066_mls.sql ========
+-- app_0066_mls.sql — MLS DATA RAIL. The audit's "every number-shaped artifact says 'fill from your
+-- MLS'" gap: a RESO Web API feed (credentials sealed server-side in provider_connections) syncs
+-- listings into mls_listings, and market stats are COMPUTED from these real rows — never from the
+-- model's memory. No feed configured = honest empty state, never sample data.
+-- Additive + idempotent. Owner RLS (world pin when set).
+
+create table if not exists public.mls_listings (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.profiles(id) on delete cascade,
+  world_id      uuid references public.knowledge_worlds(id) on delete set null,
+  listing_key   text not null,                 -- RESO ListingKey (the feed's identity)
+  status        text not null default '',      -- RESO StandardStatus, as the feed said it
+  list_price    numeric,
+  close_price   numeric,
+  address1      text not null default '',
+  city          text not null default '',
+  zip           text not null default '',
+  property_type text not null default '',
+  beds          numeric,
+  baths         numeric,
+  sqft          numeric,
+  list_date     date,
+  close_date    date,
+  dom           int,
+  modified_at   timestamptz,                   -- RESO ModificationTimestamp (sync cursor)
+  synced_at     timestamptz not null default now()
+);
+alter table public.mls_listings enable row level security;
+drop policy if exists "mls_listings owner all" on public.mls_listings;
+create policy "mls_listings owner all" on public.mls_listings
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create unique index if not exists uq_mls_listings_key on public.mls_listings(owner_id, listing_key);
+create index if not exists idx_mls_listings_status on public.mls_listings(owner_id, status);
+create index if not exists idx_mls_listings_close on public.mls_listings(owner_id, close_date desc) where close_date is not null;
+
+-- ======== supabase/migrations/app_0067_timelines.sql ========
+-- app_0067_timelines.sql — TRANSACTION TIMELINES. The lakegen harvest's most authentically
+-- real-estate-shaped idea, rebuilt in house style: a contract-to-close (or listing-to-live)
+-- checklist instantiated from a template with offset days against an anchor date. Steps can become
+-- REMINDERS (app_0039/app_0062) so the clock fires them — deadlines that actually ring, not rows
+-- that wait to be noticed. Owner RLS; world pinned. Additive + idempotent.
+
+create table if not exists public.transaction_timelines (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.profiles(id) on delete cascade,
+  world_id    uuid not null references public.knowledge_worlds(id) on delete cascade,
+  title       text not null,
+  kind        text not null check (kind in ('listing', 'purchase')),
+  anchor_date date not null,
+  status      text not null default 'active' check (status in ('active', 'closed')),
+  created_at  timestamptz not null default now()
+);
+alter table public.transaction_timelines enable row level security;
+drop policy if exists "transaction_timelines owner all" on public.transaction_timelines;
+create policy "transaction_timelines owner all" on public.transaction_timelines
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid())
+  );
+create index if not exists idx_timelines_world on public.transaction_timelines(world_id, created_at desc);
+
+create table if not exists public.timeline_steps (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles(id) on delete cascade,
+  timeline_id  uuid not null references public.transaction_timelines(id) on delete cascade,
+  title        text not null,
+  due_date     date,
+  offset_days  int not null default 0,
+  position     int not null default 0,
+  done         boolean not null default false,
+  done_at      timestamptz
+);
+alter table public.timeline_steps enable row level security;
+drop policy if exists "timeline_steps owner all" on public.timeline_steps;
+create policy "timeline_steps owner all" on public.timeline_steps
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create index if not exists idx_timeline_steps_timeline on public.timeline_steps(timeline_id, position);
+
+-- ======== supabase/migrations/app_0068_mail_recipients_territory_pin.sql ========
+-- app_0068_mail_recipients_territory_pin.sql — close the double-check finding: mail_recipients'
+-- with-check pinned world ownership but NOT territory ownership. Because FKs bypass RLS, a user
+-- could insert recipients referencing a territory they don't own (or one in a different world than
+-- the row's world_id), and another owner's deleteTerritory cascade would then remove those rows.
+-- Adds the territory-ownership pin so every recipient's territory_id must belong to the caller.
+-- Additive + idempotent.
+
+drop policy if exists "mail_recipients owner all" on public.mail_recipients;
+create policy "mail_recipients owner all" on public.mail_recipients
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid())
+    and exists (select 1 from public.farm_territories t where t.id = territory_id and t.owner_id = auth.uid())
+  );
+
+-- ======== supabase/migrations/app_0069_approval_payload_hash.sql ========
+-- app_0069_approval_payload_hash.sql — tamper-evidence binding for approvals. An approval records a
+-- human decision about a SPECIFIC payload; this stores a deterministic SHA-256 of that payload at
+-- creation so the executor can refuse if the payload changed after it was approved. Null-grandfathered
+-- (older + worker-minted rows have no hash and skip the check). Additive + idempotent.
+
+alter table public.approvals add column if not exists payload_hash text;
+
+-- ======== supabase/migrations/app_0070_social_posts.sql ========
+-- app_0070_social_posts.sql — SOCIAL AUTO-POSTING. Her real accounts, connected once through a
+-- provider (Ayrshare), posted to (or scheduled) from inside Garvis — nothing goes out without an
+-- approval. Each row is one post; the edge function fills provider_post_id + status after sending.
+-- Owner RLS; world pinned when set. Additive + idempotent.
+
+create table if not exists public.social_posts (
+  id               uuid primary key default gen_random_uuid(),
+  owner_id         uuid not null references public.profiles(id) on delete cascade,
+  world_id         uuid references public.knowledge_worlds(id) on delete set null,
+  body             text not null default '',
+  platforms        text[] not null default '{}',
+  media_urls       text[] not null default '{}',
+  scheduled_for    timestamptz,                    -- null = post immediately on approval
+  status           text not null default 'queued'
+                     check (status in ('queued', 'scheduled', 'posted', 'failed', 'canceled')),
+  provider         text not null default 'ayrshare',
+  provider_post_id text,
+  approval_id      uuid references public.approvals(id) on delete set null,
+  error            text,
+  posted_at        timestamptz,
+  created_at       timestamptz not null default now()
+);
+alter table public.social_posts enable row level security;
+drop policy if exists "social_posts owner all" on public.social_posts;
+create policy "social_posts owner all" on public.social_posts
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_social_posts_owner on public.social_posts(owner_id, created_at desc);
