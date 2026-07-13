@@ -18,6 +18,7 @@ import { templateForWeb } from '../lib/garvis/workweb';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
+import { uploadAndIngest } from '../lib/garvis/brain';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, maybeReflect, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld, SITE_DIRECTIONS } from '../lib/garvis/buildBridge';
 import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
@@ -101,7 +102,10 @@ export default function WorkWeb() {
         setSelected((prev) => {
           if (prev && w.clusters.some((c) => c.slug === prev && c.charter)) return prev;
           if (area && w.clusters.some((c) => c.slug === area && c.charter)) return area;
-          return w.clusters.find((c) => c.charter)?.slug ?? null;
+          // Single-purpose worlds (answering desk / document studio / data workspace) should OPEN on
+          // their studio — the working surface — not on the vault/intel the model emitted first.
+          const studio = w.clusters.find((c) => c.charter?.flavor === 'assist' || c.charter?.flavor === 'deliver' || c.charter?.flavor === 'data');
+          return studio?.slug ?? w.clusters.find((c) => c.charter)?.slug ?? null;
         });
       }
     } catch (e) {
@@ -521,8 +525,20 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
   const bumpChanged = useCallback(() => { void reload(); onChanged(); }, [reload, onChanged]);
 
   const upload = async (file: File) => {
-    try { await uploadClusterFile(cluster.id, file); toast('success', `Added ${file.name}.`); await reload(); }
-    catch (e) { toast('error', e instanceof Error ? e.message : 'Upload failed.'); }
+    // Images/binaries the studios RENDER go to cluster_files. Text/docs/CSVs are KNOWLEDGE — they must
+    // be ingested into THIS world (world-scoped + embedded) or retrieval can never see them, and the
+    // grounded studios would refuse forever. This is the difference between "stored" and "usable".
+    const isImage = file.type.startsWith('image/');
+    try {
+      if (isImage) {
+        await uploadClusterFile(cluster.id, file);
+        toast('success', `Added ${file.name}.`);
+      } else {
+        await uploadAndIngest(file, { worldId });
+        toast('success', `Added ${file.name} to this world’s knowledge — the studios can use it now.`);
+      }
+      await reload();
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Upload failed.'); }
   };
 
   return (
@@ -564,16 +580,16 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           <p className="mb-1 font-medium text-forge-ink">This desk measures answered, not sent.</p>
           <p>Nothing here goes out on its own — you copy and send. Saved drafts land on the desk's
           shelf so this ledger can learn which replies you keep as-is versus rewrite, and where the
-          knowledge base keeps coming up short. Feed those gaps back into the vault and the desk gets
-          sharper.</p>
+          knowledge base keeps coming up short. When a reply comes back refused, add the missing
+          answer with the “Add knowledge” box on the desk — and the next draft can stand on it.</p>
         </div>
       ) : docStudio ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This studio measures documents made, not sent.</p>
           <p>Nothing is auto-delivered — you review and hand each document off yourself. Saved
           documents land on the studio's shelf so this ledger can learn which ones you keep as-is
-          versus rewrite, and which sections keep needing your input. Those gaps point at what to add
-          to the vault next.</p>
+          versus rewrite, and which sections keep needing your input. When a section keeps asking for
+          the same input, add that source material with the “Add source material” box on the studio.</p>
         </div>
       ) : dataStudio ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
@@ -693,7 +709,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           </button>
         </div>
         {files.length === 0 ? (
-          <p className="text-xs text-forge-dim/60">No files. Add photos, a logo, or a CSV the studio can use.</p>
+          <p className="text-xs text-forge-dim/60">No files. Images are stored for the studios to use; a dropped document, text file, or CSV is ingested into this world’s knowledge so the studios can ground on it.</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {files.map((f) => (

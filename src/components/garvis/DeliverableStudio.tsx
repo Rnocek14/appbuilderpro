@@ -11,6 +11,7 @@ import { Markdown } from '../Markdown';
 import { generateDeliverable, generateBatch, buildDocxBlob } from '../../lib/garvis/deliverableRun';
 import { DOC_TYPES, toMarkdown, toPlainText, deliverableArtifact, type Deliverable, type DocType } from '../../lib/garvis/deliverable';
 import { createArtifact } from '../../lib/garvis/artifacts';
+import { AddKnowledge } from './AddKnowledge';
 
 const DOC_ORDER: DocType[] = ['proposal', 'report', 'one_pager', 'brief', 'letter', 'summary'];
 
@@ -67,6 +68,11 @@ export function DeliverableStudio({ worldId, clusterId, onToast }: {
       <p className="text-xs text-forge-dim">
         A finished document, grounded in this world's knowledge and exportable. <span className="text-forge-ink/80">You review and send — nothing goes out on its own.</span>
       </p>
+
+      {/* Documents cite real numbers only if the source material is on record — paste your rate card,
+          terms, or a past proposal here so "[needs your input]" gaps fill themselves. */}
+      <AddKnowledge worldId={worldId} label="Add source material (rate card, terms, past docs)" placeholder="Paste your rate card, standard terms, warranty language, or a past proposal — documents ground their facts in what's here." onToast={onToast} />
+
 
       {/* Document type */}
       <div className="mt-3 flex flex-wrap gap-1.5">

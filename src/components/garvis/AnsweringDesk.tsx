@@ -10,6 +10,7 @@ import { Loader2, Copy, Check, ShieldAlert, MailQuestion, BookOpen } from 'lucid
 import { draftReply } from '../../lib/garvis/assistRun';
 import { assistArtifact, type AssistDraft } from '../../lib/garvis/assist';
 import { createArtifact } from '../../lib/garvis/artifacts';
+import { AddKnowledge } from './AddKnowledge';
 
 export function AnsweringDesk({ worldId, clusterId, onToast }: {
   worldId: string; clusterId: string; onToast: (kind: 'success' | 'error', msg: string) => void;
@@ -59,6 +60,11 @@ export function AnsweringDesk({ worldId, clusterId, onToast }: {
         Paste an incoming message. Garvis drafts a reply grounded only in this world's knowledge base,
         cites what it used, and refuses when it has nothing on record. <span className="text-forge-ink/80">You copy and send — it never sends for you.</span>
       </p>
+
+      {/* The knowledge-in path, right where it's needed: the desk refuses over an empty base, so the
+          first move is to feed it. Paste a policy or a past answer and the next draft can stand on it. */}
+      <AddKnowledge worldId={worldId} label="Add answers & policies to this desk's knowledge" onToast={onToast} />
+
 
       <textarea
         value={incoming} onChange={(e) => setIncoming(e.target.value)}
