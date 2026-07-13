@@ -520,6 +520,130 @@ export function isProductLab(charters: { archetype: Archetype; flavor: Flavor }[
     && !charters.some((c) => c.archetype === 'launch' || c.archetype === 'audience');
 }
 
+// ---------------------------------------------------------------------------
+// SINGLE-PURPOSE pack sets — an answering desk / document studio / data workspace is NOT a marketing
+// operation, so its vault/intel/ledger must not be seeded with hero-photo checklists, competitor
+// scans, and send-KPI trees (which describe an outreach business the user does not run). Each kind
+// gets born-with content that matches what its areas actually hold and do. Mirrors productLab.
+// ---------------------------------------------------------------------------
+
+type SinglePurposeKind = 'assist' | 'deliver' | 'data';
+
+const SINGLE_PURPOSE: Record<SinglePurposeKind, { vault: SeedArtifact[]; intel: SeedArtifact[]; ledger: SeedArtifact[] }> = {
+  assist: {
+    vault: [{
+      slug: 'kb-vault', kind: 'doc', title: 'The knowledge base — what lives here',
+      detail: `${H('This is what the desk answers from')}
+The answering desk grounds every reply ONLY in what's here, and refuses when it finds nothing — so an
+empty knowledge base means an empty desk. Put in: your policies (returns, shipping, refunds), canned
+answers to the questions you get most, key facts (hours, service area, what's included), and past
+replies you were happy with (they teach your voice). Add them fast with the "Add knowledge" box on the
+desk, or drop a document/text file into any area's Files and it's ingested here automatically.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'who-writes-in', kind: 'doc', title: 'Who writes in — the question map',
+      detail: `${H('The shape of your inbound, not a market')}
+This isn't competitor research — it's understanding what people actually ask so the knowledge base can
+cover it. List the TOP 10 questions you get, verbatim, and who asks them (new customers? existing?
+vendors?). Each recurring question is a knowledge entry waiting to be written. When the desk refuses,
+that's a new line for this list — and a new entry for the vault.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'answered-log', kind: 'doc', title: 'Answered, not sent',
+      detail: `${H('What this desk measures')}
+Nothing is sent from here — you copy and send. Track instead: drafts KEPT as-is vs. rewritten (a high
+rewrite rate means the knowledge base is thin there), and questions that came back REFUSED (the desk
+had nothing on record). Both point at the same fix — add the missing answer. The desk gets sharper
+because you feed it, never because it guessed.${NOTE}`,
+    }],
+  },
+  deliver: {
+    vault: [{
+      slug: 'source-vault', kind: 'doc', title: 'Source material — what lives here',
+      detail: `${H('What the documents draw on')}
+Documents cite real numbers and terms only if the source is on record here. Put in: your rate card /
+pricing (so "investment" sections are real), your standard terms, scope language, and warranty (so
+proposals stay consistent), and past documents you were happy with (they teach structure and voice).
+Add them with the "Add source material" box on the studio, or drop a file into any area's Files.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'the-recipient', kind: 'doc', title: 'Who receives this — what a strong one contains',
+      detail: `${H('Aim the document, don\'t scan a market')}
+This isn't a competitor scan — it's knowing your reader. For each kind of recipient (a prospect, a
+client, an investor), note: the sections they actually care about, the proof they want to see, the
+objection they arrive with, and the one outcome the document must drive. A document written to a real
+reader beats a generic template — capture that here so every draft aims true.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'documents-log', kind: 'doc', title: 'Documents made',
+      detail: `${H('What this studio measures')}
+Nothing is auto-delivered — you review and hand each off. Track: documents KEPT as-is vs. rewritten,
+and the sections that keep coming back with "[needs your input: …]" — those mark exactly which source
+material is missing from the vault. Add it, and the next document fills that section itself.${NOTE}`,
+    }],
+  },
+  data: {
+    vault: [{
+      slug: 'datasets-vault', kind: 'doc', title: 'Datasets — what lives here',
+      detail: `${H('The data you analyze')}
+Keep the CSVs, exports, and logs you work from here — sales/orders, a metrics log, survey or form
+results, anything you'd otherwise open in a spreadsheet. Tidy beats pretty: one thing per row, one
+measure per column, real headers, no totals rows mixed in. Paste a CSV straight into the workspace, or
+drop the file into Files. The cleaner the shape, the sharper the read.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'the-question', kind: 'doc', title: 'What you\'re answering with the data',
+      detail: `${H('Frame the question, don\'t scan a market')}
+Before the numbers, name what you want them to tell you: the decision you're trying to make, the
+metric you actually care about, and what "good" would look like. A sharp question turns a table into an
+answer; a vague one turns it into a wall of stats. Write the two or three questions this data should
+settle — the workspace's charts and reads are only as useful as the question behind them.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'analyses-log', kind: 'doc', title: 'Analyses run',
+      detail: `${H('What this workspace measures')}
+Every figure here is computed from your data, never guessed. Save the summaries you run so you can
+compare them over time — the same metric month over month, or before-and-after a change. This log is
+the honest record of what the numbers actually showed, kept so you can watch it move.${NOTE}`,
+    }],
+  },
+};
+
+/** A single-purpose world = an answering desk / document studio / data workspace: one grounded studio
+ *  of that flavor and no outreach machinery. Returns the kind, or null for anything else. */
+export function singlePurposeKind(charters: { archetype: Archetype; flavor: Flavor }[]): SinglePurposeKind | null {
+  const studio = charters.find((c) => c.archetype === 'studio' && (c.flavor === 'assist' || c.flavor === 'deliver' || c.flavor === 'data'));
+  if (!studio) return null;
+  if (charters.some((c) => c.archetype === 'launch' || c.archetype === 'audience')) return null;
+  return studio.flavor as SinglePurposeKind;
+}
+
+/** Pack selection for a single-purpose world: the studio keeps its craft pack; vault/intel/ledger get
+ *  the kind-matched content instead of the marketing defaults. No industry overlay (like productLab). */
+export function singlePurposeExpertiseFor(archetype: Archetype, flavor: Flavor, kind: SinglePurposeKind): SeedArtifact[] {
+  const p = SINGLE_PURPOSE[kind];
+  switch (archetype) {
+    case 'vault': return p.vault;
+    case 'intel': return p.intel;
+    case 'ledger': return p.ledger;
+    default: return basePack(archetype, flavor);
+  }
+}
+
+/** The ONE born-with-pack selector, given the whole world's charters. Routes a cluster to the right
+ *  pack by the world's SHAPE — product lab, single-purpose (answering desk / document studio / data
+ *  workspace), or a marketing operation (with its industry overlay). Every seed/regenerate site uses
+ *  this so a world never gets marketing packs in one place and coherent ones in another. */
+export function seedPackFor(
+  charters: { archetype: Archetype; flavor: Flavor }[],
+  archetype: Archetype, flavor: Flavor, vertical: Vertical = 'generic',
+): SeedArtifact[] {
+  if (isProductLab(charters)) return productLabExpertiseFor(archetype, flavor);
+  const sp = singlePurposeKind(charters);
+  if (sp) return singlePurposeExpertiseFor(archetype, flavor, sp);
+  return expertiseFor(archetype, flavor, vertical);
+}
+
 /** Every (archetype, flavor) gets a NON-EMPTY expert pack — verified exhaustively.
  *  With a vertical, the pack is COMPOSED: the functional base (how to run a social studio,
  *  a mail campaign, a KPI ledger) plus the industry overlay (what a real estate / finance /
