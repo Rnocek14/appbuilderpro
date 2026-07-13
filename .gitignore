@@ -10,3 +10,8 @@ supabase/.temp
 .design-e2e/
 _pdf_streams.txt
 *.tsbuildinfo
+test-results/
+playwright-report/
+e2e/.auth/
+/blob-report/
+.playwright/
