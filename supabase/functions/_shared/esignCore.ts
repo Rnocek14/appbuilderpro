@@ -118,9 +118,12 @@ export function envelopeRequest(input: {
   };
   if (input.webhookUrl) {
     req.eventNotification = {
-      url: input.webhookUrl, loggingEnabled: 'true', requireAcknowledgment: 'true',
+      // includeHMAC makes DocuSign sign each callback (X-DocuSign-Signature-1); without it the
+      // fail-closed webhook rejects 100% of notifications. includeData ['recipients'] is what puts
+      // per-signer status into the payload the webhook reads.
+      url: input.webhookUrl, loggingEnabled: 'true', requireAcknowledgment: 'true', includeHMAC: 'true',
       envelopeEvents: ['sent', 'delivered', 'completed', 'declined', 'voided'].map((e) => ({ envelopeEventStatusCode: e })),
-      eventData: { version: 'restv2.1', format: 'json' },
+      eventData: { version: 'restv2.1', format: 'json', includeData: ['recipients'] },
     };
   }
   return req;

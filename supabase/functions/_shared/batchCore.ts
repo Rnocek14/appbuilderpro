@@ -54,8 +54,11 @@ export const TEMPLATE_TOKENS = ['name', 'first_name'] as const;
 
 export function unknownTokens(template: string): string[] {
   const found = new Set<string>();
-  for (const m of template.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)) {
-    if (!(TEMPLATE_TOKENS as readonly string[]).includes(m[1])) found.add(m[1]);
+  // Catch ANY double-brace residue, not just well-formed word tokens — a typo'd '{{first-name}}'
+  // or '{{}}' must be refused too, or the refusal promise ('anything else sends literally') breaks.
+  for (const m of template.matchAll(/\{\{([^}]*)\}\}/g)) {
+    const tok = m[1].trim();
+    if (!(TEMPLATE_TOKENS as readonly string[]).includes(tok)) found.add(tok || '(empty)');
   }
   return [...found];
 }
@@ -65,9 +68,11 @@ export function unknownTokens(template: string): string[] {
 export function mergeTemplate(template: string, name: string): string {
   const full = name.trim() || 'there';
   const first = full === 'there' ? 'there' : full.split(/\s+/)[0];
+  // Function replacements — a name containing $ patterns ("AT&T $$ Deals") must NOT be
+  // reinterpreted as a replacement directive and corrupt the sent body.
   return template
-    .replace(/\{\{\s*name\s*\}\}/g, full)
-    .replace(/\{\{\s*first_name\s*\}\}/g, first);
+    .replace(/\{\{\s*name\s*\}\}/g, () => full)
+    .replace(/\{\{\s*first_name\s*\}\}/g, () => first);
 }
 
 export function batchProgress(recipients: BatchRecipient[]): { pending: number; sent: number; skipped: number } {

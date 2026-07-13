@@ -26,9 +26,11 @@ export async function segmentCount(segment: BatchSegment): Promise<number> {
 }
 
 /** Create the batch + its ONE approval. Returns honest compose results. */
+const SNAPSHOT_CAP = 2000;
+
 export async function createBatch(input: {
   segment: BatchSegment; subject: string; body: string; worldId?: string | null;
-}): Promise<{ batchId: string; queued: number; excluded: { email: string; reason: string }[] }> {
+}): Promise<{ batchId: string; queued: number; excluded: { email: string; reason: string }[]; truncatedFrom: number | null }> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
@@ -42,10 +44,13 @@ export async function createBatch(input: {
     throw new Error(`Unsupported merge tokens: ${bad.map((t) => `{{${t}}}`).join(', ')}. Only {{name}} and {{first_name}} merge — anything else would send literally.`);
   }
 
-  let q = supabase.from('contacts').select('id, email, full_name, email_status').limit(2000);
+  // True segment size first, so the caller can be told honestly when the snapshot is truncated.
+  const total = await segmentCount(input.segment);
+  let q = supabase.from('contacts').select('id, email, full_name, email_status').limit(SNAPSHOT_CAP);
   if (input.segment !== 'all') q = q.eq('stage', input.segment);
   const { data: contacts, error } = await q;
   if (error) throw new Error(error.message);
+  const truncatedFrom = total > SNAPSHOT_CAP ? total : null;
 
   const { recipients, excluded } = composeBatchRecipients(contacts ?? []);
   if (recipients.length === 0) {
@@ -68,7 +73,7 @@ export async function createBatch(input: {
   });
   await supabase.from('outreach_batches').update({ approval_id: approvalId }).eq('id', batch.id);
 
-  return { batchId: batch.id as string, queued: recipients.length, excluded };
+  return { batchId: batch.id as string, queued: recipients.length, excluded, truncatedFrom };
 }
 
 export async function listBatches(limit = 10): Promise<BatchRow[]> {

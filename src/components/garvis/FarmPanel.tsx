@@ -16,7 +16,7 @@ import {
 import type { MailerSpec } from '../../lib/garvis/mailer';
 import {
   listTerritories, createTerritory, deleteTerritory, territoryStats, importRecipients,
-  listRecipients, listDoNotMail, addDoNotMail, removeDoNotMail, RECIPIENT_LOAD_CAP,
+  listRecipients, listDoNotMail, loadDoNotMailKeys, addDoNotMail, removeDoNotMail, RECIPIENT_LOAD_CAP,
   type TerritoryRow, type TerritoryStats, type DoNotMailRow,
 } from '../../lib/garvis/farmRun';
 import { logMailBatch } from '../../lib/garvis/mailerRun';
@@ -157,7 +157,10 @@ export function FarmPanel({ worldId, onToast }: { worldId: string; onToast: Toas
       setBusy(true);
       const all = await ensureRecipients();
       const pool = absOnly ? all.filter((r) => r.isAbsentee) : all;
-      const part = partitionMailable(pool, dnmKeys);
+      // Suppression is checked against the FULL do-not-mail set at merge time (the panel's dnm list
+      // is display-capped at 500) — a suppressed household must never slip through past that cap.
+      const fullKeys = await loadDoNotMailKeys();
+      const part = partitionMailable(pool, fullKeys);
       if (part.mailable.length === 0) {
         onToast('error', pool.length === 0
           ? (absOnly ? 'No absentee owners on file in this territory.' : 'No households on file — import a list first.')

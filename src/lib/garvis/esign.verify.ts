@@ -66,6 +66,10 @@ check('subject clipped to 100', req.emailSubject.length <= 100);
 check('html document, status sent', req.documents[0].fileExtension === 'html' && req.status === 'sent');
 check('per-signer anchors match the doc', req.recipients.signers[1].tabs.signHereTabs[0].anchorString === '/sig2/');
 check('webhook registered per-envelope when given', req.eventNotification?.url.includes('docusign-webhook') === true && (req.eventNotification?.envelopeEvents.length ?? 0) === 5);
+// Regression (double-check): without includeHMAC the fail-closed webhook rejects every callback;
+// without includeData recipients, per-signer status is dead.
+const evt = req.eventNotification as { includeHMAC?: string; eventData?: { includeData?: string[] } };
+check('eventNotification enables HMAC signing + recipient data', evt.includeHMAC === 'true' && (evt.eventData?.includeData ?? []).includes('recipients'));
 check('no webhook → no eventNotification', !('eventNotification' in envelopeRequest({ title: 't', docBase64: 'QQ==', signers: [signer] })));
 
 // --- status maps: unknown is unknown ---------------------------------------------------

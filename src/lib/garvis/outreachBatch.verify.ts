@@ -39,6 +39,12 @@ check('missing name → "there", never invented', mergeTemplate('Hi {{first_name
 check('unknown tokens are named for refusal', JSON.stringify(unknownTokens('Hi {{name}}, your {{ city }} home {{price}}')) === '["city","price"]');
 check('a clean template has no unknown tokens', unknownTokens('Hi {{name}}').length === 0);
 check('token with spaces inside braces still matches', mergeTemplate('{{ name }}', 'Bo') === 'Bo');
+// Regression (double-check): a name with $ replacement patterns must not corrupt the body.
+check('$-pattern name does not corrupt the merge', mergeTemplate('Hi {{name}}, tail', "$'") === "Hi $', tail"
+  && mergeTemplate('Hi {{name}}', '$&') === 'Hi $&');
+// Regression (double-check): malformed tokens are refused too, not silently sent literally.
+check('malformed {{first-name}} is flagged unknown', unknownTokens('Hi {{first-name}}').includes('first-name'));
+check('empty {{}} is flagged', unknownTokens('x {{}} y').includes('(empty)'));
 
 // --- progress + drain picking ---------------------------------------------------
 const recips: BatchRecipient[] = [

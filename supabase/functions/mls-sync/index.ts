@@ -14,6 +14,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { getConnection, upsertConnection } from '../_shared/connections.ts';
+import { safeFetch } from '../_shared/safeFetch.ts';
 
 const PAGE = 200;
 const MAX_PAGES = 5; // one sync call moves at most 1000 listings — run it again to continue (said in the result)
@@ -71,7 +72,8 @@ Deno.serve(async (req) => {
       if (!/^https:\/\//.test(base)) return json({ error: 'The feed base URL must be https.' }, 400);
       if (!token) return json({ error: 'The feed token is required.' }, 400);
       // Probe with the cheapest possible real query — a feed that can't answer this can't sync.
-      const probe = await fetch(`${base}/Property?$top=1`, {
+      // safeFetch blocks private/link-local/cloud-metadata hosts (SSRF) and re-validates redirects.
+      const probe = await safeFetch(`${base}/Property?$top=1`, {
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
       }).catch(() => null);
       if (!probe || !probe.ok) {
@@ -104,7 +106,7 @@ Deno.serve(async (req) => {
       let cursor = since;
       for (let page = 0; page < MAX_PAGES; page++) {
         const url = `${base}/Property?$filter=${encodeURIComponent(`ModificationTimestamp gt ${cursor}`)}&$orderby=${encodeURIComponent('ModificationTimestamp asc')}&$top=${PAGE}`;
-        const r = await fetch(url, { headers: { Authorization: `Bearer ${conn.access_token}`, Accept: 'application/json' } });
+        const r = await safeFetch(url, { headers: { Authorization: `Bearer ${conn.access_token}`, Accept: 'application/json' } });
         if (!r.ok) {
           const txt = await r.text().catch(() => '');
           return json({ error: `Feed error on page ${page + 1} (HTTP ${r.status}): ${txt.slice(0, 200)}. Synced ${upserted} rows before failing — they are kept.`, fetched, upserted }, 502);

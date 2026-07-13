@@ -60,6 +60,15 @@ check('no mailing columns → mailingDataPresent false (absentee unknowable, not
   p2.mailingDataPresent === false && p2.recipients.every((r) => !r.isAbsentee));
 check('parcel id kept as attr', p2.recipients[0].attrs['parcel id'] === 'AB-123');
 
+// Regression (double-check): with a mailing-address column but NO name column, the name must stay
+// blank ("Current Resident"), never bind to the mailing street.
+const noName = parseFarmCsv([
+  'Situs Address,Situs City,Situs Zip,Owner Mailing Address,Mailing City,Mailing State,Mailing Zip',
+  '5 Fir Rd,Elkhorn,53121,PO Box 7,Chicago,IL,60601',
+].join('\n'));
+check('mailing column does NOT become the recipient name', noName.recipients.length === 1
+  && noName.recipients[0].fullName === '');
+
 // --- honest failures ----------------------------------------------------------
 const noAddr = parseFarmCsv('Name,Phone\nJo,555-1212');
 check('missing address column named honestly', noAddr.recipients.length === 0
