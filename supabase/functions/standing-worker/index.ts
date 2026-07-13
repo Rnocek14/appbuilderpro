@@ -24,6 +24,7 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { pickNextPending, mergeTemplate, batchProgress, type BatchRecipient } from '../_shared/batchCore.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
@@ -83,6 +84,104 @@ Deno.serve(async (req) => {
         await admin.from('reminders').update({ notified_at: nowIso }).eq('id', r.id);
       }
     } catch { /* reminder firing must never wedge the order tick */ }
+
+    // ---- BULK SEND DRAIN (app_0064) ----------------------------------------------------------
+    // One human approval covers a snapshotted batch; the clock drains it a slice per tick by
+    // pushing each recipient through THE ONE SEND PATH (send-email), so suppression, contact
+    // status, kill switch, and the daily cap re-check per recipient AT SEND TIME. The worker
+    // re-verifies the batch approval server-side on every tick — a rejected approval cancels
+    // the batch; a pending one waits. Never wedges the order tick.
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const PER_TICK = 10;
+      const { data: batches } = await admin.from('outreach_batches')
+        .select('id, owner_id, subject, body_text, recipients, status, approval_id, sent_count, skipped_count')
+        .in('status', ['queued', 'draining']).order('created_at', { ascending: true }).limit(3);
+      for (const b of (batches ?? []) as {
+        id: string; owner_id: string; subject: string; body_text: string;
+        recipients: BatchRecipient[]; status: string; approval_id: string | null;
+        sent_count: number; skipped_count: number;
+      }[]) {
+        const cancel = async (note: string) => {
+          await admin.from('outreach_batches').update({ status: 'canceled', finished_at: nowIso }).eq('id', b.id);
+          await admin.from('mind_events').insert({
+            owner_id: b.owner_id, event_type: 'note', source: 'execution',
+            subject: `Batch "${b.subject.slice(0, 100)}" canceled — ${note}`,
+            payload: { key: `batch-cancel:${b.id}`, batch_id: b.id },
+          }).then(() => {}, () => {});
+        };
+        if (!b.approval_id) { await cancel('no approval attached'); continue; }
+        const { data: ap } = await admin.from('approvals')
+          .select('id, owner_id, kind, status').eq('id', b.approval_id).single();
+        if (!ap || ap.kind !== 'send_batch' || ap.owner_id !== b.owner_id) { await cancel('approval record invalid'); continue; }
+        if (ap.status === 'rejected' || ap.status === 'expired') { await cancel(`approval ${ap.status}`); continue; }
+        if (ap.status !== 'approved') continue; // still awaiting the human — not our call to make
+
+        const recips: BatchRecipient[] = Array.isArray(b.recipients) ? b.recipients : [];
+        const slice = pickNextPending(recips, PER_TICK);
+        if (slice.length === 0) {
+          const prog = batchProgress(recips);
+          await admin.from('outreach_batches').update({ status: 'done', finished_at: nowIso }).eq('id', b.id);
+          await admin.from('mind_events').insert({
+            owner_id: b.owner_id, event_type: 'note', source: 'execution',
+            subject: `Batch "${b.subject.slice(0, 100)}" done — ${prog.sent} sent${prog.skipped > 0 ? `, ${prog.skipped} skipped` : ''}`,
+            payload: { key: `batch-done:${b.id}`, batch_id: b.id, sent: prog.sent, skipped: prog.skipped },
+          }).then(() => {}, () => {});
+          continue;
+        }
+        if (b.status !== 'draining') await admin.from('outreach_batches').update({ status: 'draining' }).eq('id', b.id);
+
+        let sentNow = 0; let skippedNow = 0;
+        for (const ix of slice) {
+          const r = recips[ix];
+          const { data: msg, error: msgErr } = await admin.from('outreach_messages').insert({
+            owner_id: b.owner_id, contact_id: r.contactId, subject: mergeTemplate(b.subject, r.name),
+            body_text: mergeTemplate(b.body_text, r.name), to_address: r.email, status: 'approved',
+          }).select('id').single();
+          if (msgErr || !msg) { r.state = 'skipped'; r.reason = `message row failed: ${msgErr?.message ?? 'unknown'}`.slice(0, 200); skippedNow++; continue; }
+          // Pre-authorized per-recipient approval: the HUMAN authority is the batch approval,
+          // recorded in payload.batch_id; requested_by 'garvis-auto' is the class send-email
+          // accepts from the worker. Every gate still re-checks inside send-email.
+          const { data: apRow, error: apErr } = await admin.from('approvals').insert({
+            owner_id: b.owner_id, kind: 'send_email',
+            title: `Batch: ${b.subject.slice(0, 80)} → ${r.email}`, preview: '',
+            payload: { message_id: msg.id, batch_id: b.id }, requested_by: 'garvis-auto',
+            status: 'approved', decided_at: nowIso, decided_via: 'batch',
+          }).select('id').single();
+          if (apErr || !apRow) { r.state = 'skipped'; r.reason = `approval row failed: ${apErr?.message ?? 'unknown'}`.slice(0, 200); skippedNow++; continue; }
+          try {
+            const res = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '' },
+              body: JSON.stringify({ approval_id: apRow.id }),
+            });
+            if (res.ok) { r.state = 'sent'; sentNow++; }
+            else {
+              const out = await res.json().catch(() => ({} as { error?: string }));
+              const why = String((out as { error?: string })?.error ?? `HTTP ${res.status}`);
+              if (why.includes('Daily send cap')) break; // cap reached — the rest waits for tomorrow's ticks, honestly pending
+              r.state = 'skipped'; r.reason = why.slice(0, 200); skippedNow++;
+            }
+          } catch (e) {
+            r.state = 'skipped'; r.reason = `send call failed: ${e instanceof Error ? e.message : 'network'}`.slice(0, 200); skippedNow++;
+          }
+        }
+        const prog = batchProgress(recips);
+        await admin.from('outreach_batches').update({
+          recipients: recips,
+          sent_count: b.sent_count + sentNow,
+          skipped_count: b.skipped_count + skippedNow,
+          ...(prog.pending === 0 ? { status: 'done', finished_at: nowIso } : {}),
+        }).eq('id', b.id);
+        if (prog.pending === 0) {
+          await admin.from('mind_events').insert({
+            owner_id: b.owner_id, event_type: 'note', source: 'execution',
+            subject: `Batch "${b.subject.slice(0, 100)}" done — ${prog.sent} sent${prog.skipped > 0 ? `, ${prog.skipped} skipped` : ''}`,
+            payload: { key: `batch-done:${b.id}`, batch_id: b.id, sent: prog.sent, skipped: prog.skipped },
+          }).then(() => {}, () => {});
+        }
+      }
+    } catch { /* batch drain must never wedge the order tick */ }
   }
 
   // --- pick the work: one forced order, or the due set --------------------------------------------

@@ -8,6 +8,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { EmptyState, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
+import { BatchSendCard } from '../components/garvis/BatchSendCard';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import {
   getContact, updateContact, deleteContact, suppressContact, unsuppressContact, listNotes, addNote, contactTimeline,
@@ -92,6 +93,8 @@ export default function Contacts() {
             </div>
           </div>
         )}
+
+        <BatchSendCard onToast={(k, m) => toast(k, m)} />
       </div>
     </AppShell>
   );

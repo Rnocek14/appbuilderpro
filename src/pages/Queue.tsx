@@ -118,6 +118,7 @@ export default function Queue() {
           if (a.kind === 'deploy_site' && r?.url) { toast('success', `Deployed — live at ${r.url}`); window.open(r.url, '_blank'); }
           else if (r?.needsWorkspace && r.projectId) { toast('info', 'Approved — open the project and Publish to complete.'); navigate(`/project/${r.projectId}`); }
           else if (r?.executed !== false) toast('success', a.kind === 'send_email' ? 'Approved and sent.' : 'Approved and executed.');
+          else if ((r as { drains?: boolean } | undefined)?.drains) toast('success', 'Approved — the clock drains it under your daily cap; watch progress on Contacts.');
           else toast('success', 'Approved — recorded for you to run where the capability lives.');
         } else toast('error', res.error ?? 'Execution failed — see History.');
       }

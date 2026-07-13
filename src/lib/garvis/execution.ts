@@ -9,7 +9,7 @@ import { supabase } from '../supabase';
 
 export type ApprovalKind =
   | 'send_email' | 'publish_post' | 'deploy_site' | 'deploy_backend'
-  | 'spend' | 'apply_migration' | 'crm_action';
+  | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface Approval {
@@ -95,6 +95,14 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     // return the row to pending instead of stranding it "approved" in History (deep scan P1).
     if (!res?.ok) await revertToPending(a.id);
     return { ok: !!res?.ok, error: res?.error, result: res };
+  }
+
+  if (a.kind === 'send_batch') {
+    // The CLOCK is the executor: the standing worker re-verifies this approval server-side on
+    // every tick and drains the batch through THE ONE SEND PATH — suppression, contact status,
+    // kill switch, and the daily cap re-check per recipient at send time. Approving here only
+    // records the human decision; nothing sends in this call.
+    return { ok: true, result: { approved: true, executed: false, drains: true } };
   }
 
   // deploy_site: a REAL executor. The build ran client-side; its bundle was captured into

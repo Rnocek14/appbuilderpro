@@ -14,4 +14,5 @@ export const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string 
   spend: { icon: CreditCard, label: 'Spend' },
   apply_migration: { icon: Database, label: 'Apply migration' },
   crm_action: { icon: Users, label: 'CRM action' },
+  send_batch: { icon: Mail, label: 'Send batch' },
 };
