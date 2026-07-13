@@ -351,12 +351,17 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
       const cadence = String(input.cadence ?? '');
       if (!['hourly', 'daily', 'weekly'].includes(cadence)) throw new Error('cadence must be hourly, daily, or weekly.');
       let worldId: string | null = null;
+      let matchedWorld: string | null = null;
       const worldName = String(input.world ?? '').trim();
       if (worldName && worldName.toLowerCase() !== 'null') {
-        const { data: w } = await supabase.from('knowledge_worlds')
-          .select('id, title').ilike('title', `%${worldName}%`).limit(1).maybeSingle();
-        if (w) worldId = (w as { id: string }).id;
-        else if (kind === 'cadence_digest') throw new Error(`No world named "${worldName}" — a digest needs one. Create the world first, or name an existing one.`);
+        // Never silently drop or fuzz the binding: a named world that doesn't match is an ERROR for
+        // BOTH kinds (the model retries with the right name or explicitly omits world), and the
+        // match that was used is reported back so the narration says which world the order joined.
+        const { data: ws } = await supabase.from('knowledge_worlds')
+          .select('id, title').ilike('title', `%${worldName}%`).limit(2);
+        const rows = (ws ?? []) as { id: string; title: string }[];
+        if (rows.length === 0) throw new Error(`No world named "${worldName}" — name an existing world exactly, or omit it for a world-less watch.`);
+        worldId = rows[0].id; matchedWorld = rows[0].title;
       } else if (kind === 'cadence_digest') {
         throw new Error('A digest needs a world — pass its name.');
       }
@@ -368,7 +373,8 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
       return {
         ok: true, order_id: order.id, label: order.label, cadence: order.cadence,
         first_run_at: order.nextRunAt,
-        note: 'Standing order set. It runs on the heartbeat; real findings land in the waking moment. It only reads and records — nothing is ever sent automatically.',
+        world: matchedWorld,
+        note: `Standing order set${matchedWorld ? ` on the world "${matchedWorld}"` : ' (no world attached — it appears in the Ventures page\'s standing-orders panel)'}. It runs on the heartbeat; real findings land in the waking moment. It only reads and records — nothing is ever sent automatically.`,
       };
     }
 

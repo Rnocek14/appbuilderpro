@@ -5,6 +5,7 @@
 // prompt contracts, coverage honesty, and refusal gate live in briefDoc.ts (verified).
 
 import { supabase } from '../supabase';
+import { exploreComplete } from './explorerAI';
 import {
   chunkForBrief, buildMapUser, buildReduceContext, coverageLine, decideBrief,
   BRIEF_MAP_SYSTEM, BRIEF_REDUCE_SYSTEM, MAX_MAP_CHUNKS, type DocBrief,
@@ -12,15 +13,15 @@ import {
 
 interface DocRow { id: string; title: string; extracted_text: string | null; meta: Record<string, unknown> | null }
 
-async function callChat(system: string, context: string, message: string): Promise<{ text: string; costUsd: number }> {
-  const { data, error } = await supabase.functions.invoke('cluster-chat', {
-    body: { system, context, history: [], message },
-  });
-  if (error) throw new Error(error.message);
-  return {
-    text: ((data as { text?: string })?.text ?? '').trim(),
-    costUsd: ((data as { costUsd?: number })?.costUsd) ?? 0,
-  };
+// Free-form map/reduce goes through exploreComplete (the metered plain-completion seam), NOT
+// cluster-chat — cluster-chat appends a "return one decision JSON" instruction to every call,
+// which would corrupt both the section notes and the composed brief (same rule as producers.ts).
+async function callChat(system: string, context: string, message: string, maxOut: number): Promise<{ text: string; costUsd: number }> {
+  const r = await exploreComplete(
+    [{ role: 'system', content: system }, { role: 'user', content: context ? `${context}\n\n${message}` : message }],
+    maxOut,
+  );
+  return { text: r.text.trim(), costUsd: r.costUsd };
 }
 
 /** Brief one stored document. Computes map-reduce over its own text; persists to meta.brief. */
@@ -44,20 +45,23 @@ export async function briefDocument(documentId: string): Promise<DocBrief & { ti
   // MAP — each section to notes. Sections run sequentially (gentle on the gateway); a single failed
   // section becomes an honest placeholder rather than sinking the whole brief.
   const notes: string[] = [];
+  let readCount = 0; // COVERAGE HONESTY: only sections whose map call actually returned notes count as read
   for (let i = 0; i < mapped.length; i++) {
     try {
-      const r = await callChat(BRIEF_MAP_SYSTEM, mapped[i], buildMapUser(i, mapped.length));
+      const r = await callChat(BRIEF_MAP_SYSTEM, mapped[i], buildMapUser(i, mapped.length), 700);
       costUsd += r.costUsd;
+      if (r.text) readCount++;
       notes.push(r.text || '(no notes returned for this section)');
     } catch (e) {
       notes.push(`(section ${i + 1} could not be read: ${e instanceof Error ? e.message.slice(0, 80) : 'error'})`);
     }
   }
 
-  // REDUCE — one brief from the notes; the context builder marks anything that didn't fit.
+  // REDUCE — one brief from the notes; the context builder marks anything that didn't fit, and the
+  // coverage line counts only sections that were actually read (failed maps are not "covered").
   const { context, dropped } = buildReduceContext(notes);
-  const coverage = coverageLine(allChunks.length, mapped.length, dropped);
-  const r = await callChat(BRIEF_REDUCE_SYSTEM, context, `Compose the brief of "${doc.title}" now. ${coverage}`);
+  const coverage = coverageLine(allChunks.length, readCount, dropped);
+  const r = await callChat(BRIEF_REDUCE_SYSTEM, context, `Compose the brief of "${doc.title}" now. ${coverage}`, 1600);
   costUsd += r.costUsd;
 
   const brief = decideBrief({ sourceLength: text.length, reply: r.text, coverage, costUsd });

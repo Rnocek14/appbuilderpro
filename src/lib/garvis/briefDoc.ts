@@ -19,7 +19,8 @@ export interface DocBrief {
   costUsd: number;
 }
 
-// cluster-chat caps: context ≤ 12000 chars per call. Chunks and the reduce context both stay under.
+// Per-call budget for the completion seam (exploreComplete): chunks and the reduce context stay
+// bounded so a section always fits one call with headroom for the instruction.
 export const CHUNK_SIZE = 10_000;
 export const CHUNK_OVERLAP = 400;
 export const MAX_MAP_CHUNKS = 8;      // ~80k chars ≈ a 40-50 page document fully covered

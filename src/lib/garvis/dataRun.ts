@@ -5,7 +5,7 @@
 // fact sheet, and DATA_SYSTEM forbids it from stating or computing any number that isn't there. So a
 // hallucinated figure can't reach a chart or a stat — the model never touches the arithmetic.
 
-import { supabase } from '../supabase';
+import { exploreComplete } from './explorerAI';
 import { describe, dataFacts, DATA_SYSTEM, buildDataUser, type Table } from './data';
 
 export interface Analysis {
@@ -18,11 +18,12 @@ export interface Analysis {
  *  so the workspace can show it honestly rather than fabricate a reading. */
 export async function narrateData(input: { table: Table; question?: string }): Promise<Analysis> {
   const facts = dataFacts(input.table, describe(input.table));
-  const { data, error } = await supabase.functions.invoke('cluster-chat', {
-    body: { system: DATA_SYSTEM, context: '', history: [], message: buildDataUser(input.question ?? '', facts) },
-  });
-  if (error) throw new Error(error.message);
-  const narrative = ((data as { text?: string })?.text ?? '').trim();
-  const costUsd = ((data as { costUsd?: number })?.costUsd) ?? 0;
-  return { narrative, facts, costUsd };
+  // Free-form narration goes through exploreComplete (the metered plain-completion seam), NOT
+  // cluster-chat — cluster-chat appends a "return one decision JSON" instruction that would
+  // corrupt a plain-language reading (same rule as producers.ts).
+  const r = await exploreComplete(
+    [{ role: 'system', content: DATA_SYSTEM }, { role: 'user', content: buildDataUser(input.question ?? '', facts) }],
+    800,
+  );
+  return { narrative: r.text.trim(), facts, costUsd: r.costUsd };
 }

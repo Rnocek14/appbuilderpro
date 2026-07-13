@@ -106,7 +106,7 @@ export default function WorkWeb() {
           if (area && w.clusters.some((c) => c.slug === area && c.charter)) return area;
           // Single-purpose worlds (answering desk / document studio / data workspace) should OPEN on
           // their studio — the working surface — not on the vault/intel the model emitted first.
-          const studio = w.clusters.find((c) => c.charter?.flavor === 'assist' || c.charter?.flavor === 'deliver' || c.charter?.flavor === 'data');
+          const studio = w.clusters.find((c) => c.charter?.flavor === 'assist' || c.charter?.flavor === 'deliver' || c.charter?.flavor === 'data' || c.charter?.flavor === 'tracker');
           return studio?.slug ?? w.clusters.find((c) => c.charter)?.slug ?? null;
         });
       }

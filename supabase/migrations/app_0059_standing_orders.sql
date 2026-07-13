@@ -37,8 +37,17 @@ create table if not exists public.standing_orders (
 
 alter table public.standing_orders enable row level security;
 drop policy if exists "standing_orders owner all" on public.standing_orders;
+-- The with-check also pins world_id to a world THIS owner owns: without it, a crafted insert could
+-- point a digest at another tenant's world and the service-role worker would read it (IDOR). The
+-- worker re-verifies ownership at run time too (defense in depth).
 create policy "standing_orders owner all" on public.standing_orders
-  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (
+      select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()
+    ))
+  );
 
 create index if not exists idx_standing_orders_due on public.standing_orders(status, next_run_at);
 create index if not exists idx_standing_orders_owner on public.standing_orders(owner_id, created_at desc);

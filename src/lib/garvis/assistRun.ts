@@ -6,6 +6,7 @@
 // can never turn into an invented answer.
 
 import { supabase } from '../supabase';
+import { exploreComplete } from './explorerAI';
 import { retrieveSources } from './ask';
 import { ASSIST_SYSTEM, buildAssistUser, decideAssist, type AssistDraft, type AssistSource } from './assist';
 
@@ -32,11 +33,12 @@ export async function draftReply(input: { worldId: string; incoming: string }): 
   if (sources.length === 0) return decideAssist({ incoming, sources, reply: '' });
 
   const tone = await worldTone(input.worldId).catch(() => null);
-  const { data, error } = await supabase.functions.invoke('cluster-chat', {
-    body: { system: ASSIST_SYSTEM, context: '', history: [], message: buildAssistUser(incoming, sources, tone) },
-  });
-  if (error) throw new Error(error.message);
-  const reply = ((data as { text?: string })?.text ?? '').trim();
-  const costUsd = ((data as { costUsd?: number })?.costUsd) ?? 0;
-  return decideAssist({ incoming, sources, reply, costUsd });
+  // Free-form drafting goes through exploreComplete (the metered plain-completion seam), NOT
+  // cluster-chat — cluster-chat appends a "return one decision JSON" instruction to every call,
+  // which would corrupt a reply meant to be pasted verbatim (same rule as producers.ts).
+  const r = await exploreComplete(
+    [{ role: 'system', content: ASSIST_SYSTEM }, { role: 'user', content: buildAssistUser(incoming, sources, tone) }],
+    1000,
+  );
+  return decideAssist({ incoming, sources, reply: r.text.trim(), costUsd: r.costUsd });
 }

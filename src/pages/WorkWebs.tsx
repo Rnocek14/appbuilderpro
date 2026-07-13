@@ -13,6 +13,7 @@ import { cn } from '../lib/utils';
 import { WEB_TEMPLATES, ARCHETYPES, flattenTemplate } from '../lib/garvis/workweb';
 import { listWebs, instantiateWeb, type WebSummary } from '../lib/garvis/workwebRun';
 import { generateDraft, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
+import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 
 const TEMPLATE_ICON: Record<string, typeof Building2> = { 'mom-real-estate': Building2, 'app-launch': Rocket };
 
@@ -131,6 +132,12 @@ export default function WorkWebs() {
             </ul>
           )}
         </Card>
+
+        {/* THE CLOCK, globally: every standing order the owner has — including world-less watches
+            created in conversation, which would otherwise be invisible and unstoppable. */}
+        <div className="mb-8">
+          <StandingOrdersPanel onToast={(k, m) => toast(k, m)} />
+        </div>
 
         {/* Drafts awaiting review */}
         {drafts.map((d) => (

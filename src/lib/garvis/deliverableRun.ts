@@ -5,6 +5,7 @@
 
 import JSZip from 'jszip';
 import { supabase } from '../supabase';
+import { exploreComplete } from './explorerAI';
 import { retrieveSources } from './ask';
 import {
   DELIVER_SYSTEM, buildDeliverUser, parseDocument, decideDeliverable, docxDocumentXml,
@@ -37,15 +38,16 @@ export async function generateDeliverable(input: {
   const sources = await groundFor(input.worldId, subject, brief);
   const tone = await worldTone(input.worldId).catch(() => null);
 
-  const { data, error } = await supabase.functions.invoke('cluster-chat', {
-    body: { system: DELIVER_SYSTEM, context: '', history: [], message: buildDeliverUser(input.docType, subject, brief, sources, tone) },
-  });
-  if (error) throw new Error(error.message);
-  const reply = ((data as { text?: string })?.text ?? '').trim();
-  const costUsd = ((data as { costUsd?: number })?.costUsd) ?? 0;
+  // Free-form document generation goes through exploreComplete (the metered plain-completion
+  // seam), NOT cluster-chat — cluster-chat appends a "return one decision JSON" instruction that
+  // would corrupt a markdown document (same rule as producers.ts).
+  const r = await exploreComplete(
+    [{ role: 'system', content: DELIVER_SYSTEM }, { role: 'user', content: buildDeliverUser(input.docType, subject, brief, sources, tone) }],
+    2500,
+  );
 
-  const { title, sections } = parseDocument(reply, input.docType, subject);
-  return decideDeliverable({ docType: input.docType, subject, title, sections, sources, costUsd });
+  const { title, sections } = parseDocument(r.text.trim(), input.docType, subject);
+  return decideDeliverable({ docType: input.docType, subject, title, sections, sources, costUsd: r.costUsd });
 }
 
 /** Generate the SAME document type across a LIST of subjects — "twenty proposals from a list". Runs
