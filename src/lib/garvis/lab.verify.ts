@@ -22,11 +22,13 @@ const out = (id: string, values: Record<string, number>, key: string) => {
 
 // 1. Every template carries its full honesty layer — structurally, not optionally.
 {
-  check('4 templates ship', SIM_TEMPLATES.length === 4);
+  check('5 templates ship', SIM_TEMPLATES.length === 5);
   check('every template states basis + assumptions + limits', SIM_TEMPLATES.every(
     (t) => t.basis.length > 20 && t.assumptions.length >= 1 && t.limits.length >= 1));
   check('every template declares a model type', SIM_TEMPLATES.every(
     (t) => t.modelType === 'equation' || t.modelType === 'deterministic-model'));
+  check('every template carries at least one substantive scale anchor', SIM_TEMPLATES.every(
+    (t) => (t.anchors ?? []).length >= 1 && (t.anchors ?? []).every((a) => a.length >= 30)));
   check('every param has a sane range containing its default', SIM_TEMPLATES.every(
     (t) => t.params.every((p) => p.min < p.max && p.def >= p.min && p.def <= p.max)));
 }
@@ -103,7 +105,8 @@ const out = (id: string, values: Record<string, number>, key: string) => {
 
 // 8. Suggestion + clamping — a convenience default, never a hidden decision.
 {
-  check('physics words → time dilation', suggestTemplate('exploring time near a black hole').id === 'time-dilation');
+  check('black hole → the gravity well, not the train', suggestTemplate('exploring time near a black hole').id === 'gravity-well');
+  check('relativity words → time dilation', suggestTemplate('einstein moving clocks and light speed').id === 'time-dilation');
   check('business words → rollout model', suggestTemplate('hyperlocal news sponsors per city').id === 'rollout-model');
   check('investing words → compound growth', suggestTemplate('compound interest on savings').id === 'compound-growth');
   check('outreach words → reach odds', suggestTemplate('response rate on 50 pitches').id === 'reach-odds');
@@ -111,6 +114,25 @@ const out = (id: string, values: Record<string, number>, key: string) => {
   check('no match → the business rollout bench (a business OS defaults to business math)', suggestTemplate('the roman empire').id === 'rollout-model');
   const t = simTemplateById('time-dilation')!;
   check('clampValues pins out-of-range + fills defaults', clampValues(t, { v: 5 }).v === 0.999 && clampValues(t, {}).years === 5);
+}
+
+// 9. Gravity well (Schwarzschild) — the black-hole bench, honest at the horizon.
+{
+  const g = simTemplateById('gravity-well')!;
+  const at = (r: number) => g.compute({ r, hours: 24 });
+  const val = (r: number, k: string) => at(r).find((o) => o.key === k)?.value ?? null;
+  check('r = 2rs → factor √2 ≈ 1.4142 (textbook value)', val(2, 'factor') === 1.4142);
+  check('far time = near hours × factor', near(val(2, 'far'), 33.94, 0.01));
+  check('closer → slower: factor grows monotonically toward the horizon',
+    (val(1.1, 'factor') as number) > (val(1.5, 'factor') as number) && (val(1.5, 'factor') as number) > (val(4, 'factor') as number));
+  check('far from the hole the effect vanishes (factor → 1)', (val(20, 'factor') as number) < 1.03);
+  check('at/inside the horizon the model REFUSES (nulls, never a fake number)',
+    at(1).every((o) => o.value === null) && at(0.5).every((o) => o.value === null));
+  check('clamp keeps the dial outside the horizon', clampValues(g, { r: 0.2 }).r >= 1.02);
+  check('a saved black-hole run round-trips', (() => {
+    const rec = parseSimRecord(simRecordArtifact(g, { r: 2, hours: 24 }).detail);
+    return !!rec && rec.templateId === 'gravity-well' && rec.outputs.some((o) => o.key === 'factor' && o.value === 1.4142);
+  })());
 }
 
 console.log(`\nlab.verify: ${passed} passed, ${failed} failed`);

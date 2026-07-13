@@ -158,8 +158,11 @@ export async function produceResearch(worldId: string, charter: Charter): Promis
     };
   }
 
-  // Synthesize a cited brief grounded ONLY in the snippets.
-  let brief: string;
+  // Synthesize a brief grounded ONLY in the snippets. The LABEL must match what actually happened
+  // (deep scan theme 6): "cited brief / grounded" only when synthesis succeeded AND the text
+  // actually carries [n] citations — never on the stub-failure path, which used to still claim it.
+  let brief = '';
+  let synthesized = false;
   try {
     brief = await reason(
       RESEARCH_SYSTEM,
@@ -167,14 +170,27 @@ export async function produceResearch(worldId: string, charter: Charter): Promis
       'Write the market brief now, grounded only in these results. Cite with [n]. Plain text.',
       1400,
     );
-    if (brief.length < 120) throw new Error('thin');
-  } catch {
-    brief = `MARKET BRIEF (sources found; synthesis unavailable — read the sources directly).`;
+    synthesized = brief.trim().length >= 120;
+  } catch { synthesized = false; }
+
+  if (!synthesized) {
+    // The sources are real, but there is no written brief — say exactly that, and don't count this
+    // as grounded research on record (so downstream "grounded in your research" claims stay honest).
+    const detail = appendSources('Live sources were found, but the written synthesis was unavailable — read them directly below.', sources.slice(0, 10));
+    return {
+      artifacts: [{ slug: 'market-research-brief', kind: 'research', title: `Market research — ${sources.length} sources found`, detail }],
+      message: `Found ${sources.length} live sources; the written synthesis was unavailable, so the sources are attached to read directly.`,
+      grounded: false,
+    };
   }
+
+  const cited = /\[\d+\]/.test(brief); // a genuinely cited brief carries [n] markers
   const detail = appendSources(brief, sources.slice(0, 10));
   return {
-    artifacts: [{ slug: 'market-research-brief', kind: 'research', title: 'Market research — live, with sources', detail }],
-    message: `Researched the market across ${sources.length} live sources and wrote a cited brief.`,
+    artifacts: [{ slug: 'market-research-brief', kind: 'research', title: cited ? 'Market research — live, with sources' : 'Market research — live sources, brief attached', detail }],
+    message: cited
+      ? `Researched the market across ${sources.length} live sources and wrote a cited brief.`
+      : `Researched the market across ${sources.length} live sources and wrote a brief (uncited — the sources are attached to check).`,
     grounded: true,
   };
 }

@@ -65,11 +65,27 @@ export function WakingMoment({ name }: { name: string }) {
 
   // FIRST RUN (cold sky): nothing has ever happened. The invitation is a welcome — never a line
   // under "While you were away" (nothing happened, they were never here), never "1 update".
+  // ORIENTATION (design review): name the three moves once, instead of three overlapping "say
+  // anything" prompts. Each chip is a real door, not a tutorial.
   if (coldSky) {
     return (
       <div className="mb-4 rounded-2xl border border-forge-border bg-forge-panel/60 p-5">
         <p className="font-display text-lg font-semibold text-forge-ink">{greeting}</p>
         <p className="mt-1 text-sm text-forge-dim">{awayLines[0]?.text ?? 'Say anything — a question, a business, a thing you want to build — and I\'ll make it a world.'}</p>
+        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+          <button onClick={() => navigate('/garvis/webs')}
+            className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
+            <b className="font-medium text-forge-ink">Start a venture</b> — a business or product with studios
+          </button>
+          <button onClick={() => navigate('/garvis/explore')}
+            className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
+            <b className="font-medium text-forge-ink">Chase a rabbit hole</b> — explore an idea as a galaxy
+          </button>
+          <button onClick={() => navigate('/new')}
+            className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
+            <b className="font-medium text-forge-ink">Build an app</b> — describe it, watch it generate
+          </button>
+        </div>
       </div>
     );
   }

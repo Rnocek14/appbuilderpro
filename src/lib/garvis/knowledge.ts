@@ -21,10 +21,10 @@ export function selectApproved(rows: GarvisKnowledge[]): GarvisKnowledge[] {
 export function buildKnowledgeDigest(rows: GarvisKnowledge[], max = 12): string {
   const approved = selectApproved(rows).slice(0, max);
   if (approved.length === 0) return '';
-  const lines = approved.map((r) => {
-    const conf = typeof r.confidence === 'number' ? ` (confidence ${r.confidence.toFixed(2)})` : '';
-    return `- [${r.kind}] ${r.title}: ${r.body}${conf}`;
-  });
+  // No "(confidence 0.85)" here — that number is a model hunch, not a measurement, and these are
+  // human-approved lessons anyway; grounding the model with a fake metric is exactly the theater
+  // the house rules forbid (deep scan, no-invented-numbers).
+  const lines = approved.map((r) => `- [${r.kind}] ${r.title}: ${r.body}`);
   return `APPROVED LESSONS & DECISIONS (your accumulated, human-approved knowledge — weigh these):\n${lines.join('\n')}`;
 }
 

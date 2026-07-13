@@ -49,6 +49,12 @@ Deno.serve(async (req) => {
       if (!code || !state) return json({ error: 'code and state are required.' }, 400);
       const { data: row } = await admin.from('oauth_states').select('*').eq('state', state).maybeSingle();
       if (!row || row.user_id !== user.id || row.provider !== provider) return json({ error: 'Invalid or expired OAuth state — start the connection again.' }, 400);
+      // Expire stale states (deep scan P2): a leaked/abandoned state row had no TTL and stayed valid
+      // forever. An auth round-trip is minutes; reject anything older than 15.
+      if (row.created_at && Date.now() - new Date(row.created_at as string).getTime() > 15 * 60_000) {
+        await admin.from('oauth_states').delete().eq('state', state);
+        return json({ error: 'This connection request expired — start it again.' }, 400);
+      }
       const tok = await exchangeCode(p, { code, redirectUri: row.redirect_uri, verifier: row.code_verifier, id: creds.id, secret: creds.secret });
       await admin.from('oauth_states').delete().eq('state', state);
       if (!tok.ok || !tok.access_token) {

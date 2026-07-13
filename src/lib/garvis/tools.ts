@@ -202,6 +202,42 @@ export const GARVIS_TOOLS: GarvisTool[] = [
     modes: ['act'],
   },
   {
+    name: 'create_reminder',
+    description:
+      'Set a REMINDER for the owner ("remind me Friday to chase Acme"). due_at is an ISO timestamp ' +
+      '— resolve natural phrasing ("Friday 9am", "in 2 hours") into a concrete future ISO time ' +
+      'yourself; omit due_at only when no time was implied. Due reminders surface in the waking ' +
+      'moment AND fire a webhook ping at the due time (when the heartbeat is armed).',
+    inputSchema: {
+      type: 'object',
+      properties: { title: { type: 'string' }, due_at: { type: 'string' }, detail: { type: 'string' } },
+      required: ['title'],
+    },
+    modes: ['act'],
+  },
+  {
+    name: 'create_standing_order',
+    description:
+      'Set a RECURRING check that runs on Garvis\'s clock: kind "watch_url" fetches a page on a ' +
+      'cadence and reports honestly when its content actually changes ("keep an eye on their pricing ' +
+      'page"); kind "cadence_digest" counts what was really made in a world each period ("weekly ' +
+      'digest of this venture"). Orders only READ and RECORD — findings land in the waking moment ' +
+      'and on the shelf; nothing is ever sent, posted, or spent. cadence is hourly|daily|weekly. ' +
+      'Pass world as the venture/world NAME when the order belongs to one (digests require it).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['watch_url', 'cadence_digest'] },
+        label: { type: 'string' },
+        url: { type: 'string' },
+        cadence: { type: 'string', enum: ['hourly', 'daily', 'weekly'] },
+        world: { type: 'string' },
+      },
+      required: ['kind', 'label', 'cadence'],
+    },
+    modes: ['act'],
+  },
+  {
     name: 'propose_goal',
     description:
       'Propose a GOAL for the owner to consider (e.g. "Get FableForge to $5k MRR"). Written as a ' +

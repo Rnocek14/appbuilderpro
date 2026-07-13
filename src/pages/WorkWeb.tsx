@@ -18,6 +18,7 @@ import { templateForWeb } from '../lib/garvis/workweb';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
+import { uploadAndIngest } from '../lib/garvis/brain';
 import { refreshWorldIntelligence, reflectOnWorld, getWorldIntelligence, maybeReflect, type WorldIntelligenceRow } from '../lib/garvis/worldIntelRun';
 import { buildFromWorld, SITE_DIRECTIONS } from '../lib/garvis/buildBridge';
 import { worldPlan, listProspects, setProspectStatus, scanCategory, prospectToAudience, scanProspectEmails, type ProspectRow } from '../lib/garvis/marketIntelRun';
@@ -29,7 +30,14 @@ import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
+import { FarmPanel } from '../components/garvis/FarmPanel';
 import { VideoStudio } from '../components/garvis/VideoStudio';
+import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
+import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
+import { DataWorkspace } from '../components/garvis/DataWorkspace';
+import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
+import { TrackerRegistry } from '../components/garvis/TrackerRegistry';
+import { VerdictReadout } from '../components/garvis/VerdictReadout';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
@@ -98,7 +106,10 @@ export default function WorkWeb() {
         setSelected((prev) => {
           if (prev && w.clusters.some((c) => c.slug === prev && c.charter)) return prev;
           if (area && w.clusters.some((c) => c.slug === area && c.charter)) return area;
-          return w.clusters.find((c) => c.charter)?.slug ?? null;
+          // Single-purpose worlds (answering desk / document studio / data workspace) should OPEN on
+          // their studio — the working surface — not on the vault/intel the model emitted first.
+          const studio = w.clusters.find((c) => c.charter?.flavor === 'assist' || c.charter?.flavor === 'deliver' || c.charter?.flavor === 'data' || c.charter?.flavor === 'tracker');
+          return studio?.slug ?? w.clusters.find((c) => c.charter)?.slug ?? null;
         });
       }
     } catch (e) {
@@ -126,6 +137,15 @@ export default function WorkWeb() {
     && web.clusters.some((c) => c.charter?.flavor === 'feature_lab')
     && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
 
+  // ANSWERING DESK = an assist studio; DOCUMENT STUDIO = a deliver studio. Both make things you hand
+  // off yourself, not campaigns you send — so they share the product lab's "no send/reply chrome"
+  // framing and a "measures made, not sent" ledger.
+  const assistDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'assist'), [web]);
+  const docStudio = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'deliver'), [web]);
+  const dataStudio = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'data'), [web]);
+  const trackerDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'tracker'), [web]);
+  const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk;
+
   const doRunPlay = async () => {
     if (!templatePlay) return;
     setRunning(true);
@@ -146,6 +166,14 @@ export default function WorkWeb() {
     if (tool.id === 'view-contacts') { setShowContacts(true); return; }
     if (tool.id === 'import-docs') { navigate('/garvis/brain'); return; }
     if (tool.id === 'view-results') { setSelected(cluster.slug); return; }
+    // The answering desk is already rendered inline for the assist studio — the tool just focuses it.
+    if (tool.id === 'open-answering') { setSelected(cluster.slug); return; }
+    // Likewise the document studio is inline for the deliver flavor — the tool focuses it.
+    if (tool.id === 'open-documents') { setSelected(cluster.slug); return; }
+    // And the data workspace is inline for the data flavor — the tool focuses it.
+    if (tool.id === 'open-data') { setSelected(cluster.slug); return; }
+    // And the registry is inline for the tracker flavor — the tool focuses it.
+    if (tool.id === 'open-tracker') { setSelected(cluster.slug); return; }
     if (tool.id === 'upload-list') { setUploadFor(cluster); return; }
     if (tool.id === 'queue-sequence') { setQueueFor(cluster); return; }
 
@@ -153,7 +181,9 @@ export default function WorkWeb() {
     try {
       const res = await runTool(worldId, cluster, tool.id);
       if (res.message) toast(res.ok ? 'success' : 'error', res.message);
-      if (res.ok) await refresh();
+      // Non-blocking reconcile (design review): the tool's real work is done and announced — the
+      // button unlocks NOW; the full web reload lands in the background instead of holding the UI.
+      if (res.ok) void refresh();
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Tool failed.');
     } finally {
@@ -167,7 +197,7 @@ export default function WorkWeb() {
       <AppShell>
         <div className="mx-auto max-w-2xl px-4 py-16 text-center">
           <p className="text-forge-dim">This web could not be loaded.</p>
-          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to webs</Link>
+          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Ventures</Link>
         </div>
       </AppShell>
     );
@@ -211,9 +241,9 @@ export default function WorkWeb() {
             <StatChip label="made" value={web.rollup.artifacts} />
             <StatChip label="playbooks" value={web.clusters.reduce((n, c) => n + c.playbookArtifacts, 0)} />
             <StatChip label="waiting" value={web.rollup.pendingApprovals} tone="warn" />
-            {/* outreach chips only where outreach exists — a product lab's "sent 0" is not a stat, it's noise */}
-            {!productLab && <StatChip label="sent" value={web.rollup.messagesSent} />}
-            {!productLab && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
+            {/* outreach chips only where outreach exists — a product lab's or answering desk's "sent 0" is not a stat, it's noise */}
+            {!noOutreach && <StatChip label="sent" value={web.rollup.messagesSent} />}
+            {!noOutreach && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
             {templatePlay && (
               <button
                 onClick={() => void doRunPlay()} disabled={running}
@@ -233,9 +263,23 @@ export default function WorkWeb() {
           <WorldGoalPanel worldId={worldId} />
         </div>
 
+        {/* THE CLOCK — this world's standing orders: watch a page, digest on a cadence. Read-and-
+            record only; findings surface in the waking moment, never auto-sent anywhere. */}
+        <div className="mb-4">
+          <StandingOrdersPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
+        </div>
+
         {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
         <div className="mb-4">
-          <AskGarvis worldId={worldId} placeholder={productLab
+          <AskGarvis worldId={worldId} placeholder={assistDesk
+            ? `Ask about ${web.title} — "what's our return policy?", "what do we tell people about shipping times?"`
+            : docStudio
+            ? `Ask about ${web.title} — "what's in our rate card?", "what did we say in the last proposal?"`
+            : dataStudio
+            ? `Ask about ${web.title} — "what did the last analysis find?", "which dataset covered Q3?"`
+            : trackerDesk
+            ? `Ask about ${web.title} — "what do I know about Jane?", "what did I log about June?"`
+            : productLab
             ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
         </div>
@@ -286,6 +330,10 @@ export default function WorkWeb() {
                 onTool={(t) => void doTool(selectedCluster, t)}
                 onChanged={() => void refresh()}
                 productLab={productLab}
+                assistDesk={assistDesk}
+                docStudio={docStudio}
+                dataStudio={dataStudio}
+                trackerDesk={trackerDesk}
               />
             )}
           </div>
@@ -363,6 +411,10 @@ const SPARKS: Record<string, string[]> = {
   video: ['30-second transformation cut', 'day-in-the-life', 'answer the #1 question on camera', 'before/after with captions only'],
   direct_mail: ['the neighbor story', 'lead with the offer', 'a question they already ask', 'why this season matters'],
   feature_lab: ['for the power user', 'fix the first five minutes', 'what makes people come back daily', 'steal the best idea from an adjacent product', 'smallest shippable version'],
+  assist: ['the questions we get most', 'a canned answer for refunds', 'tighten the tone', 'where the knowledge base keeps coming up short', 'a policy we should write down'],
+  deliver: ['a boilerplate proposal template', 'the sections clients always ask about', 'a stronger one-pager', 'what to standardize across documents', 'a cover letter tone'],
+  data: ['what the numbers actually show', 'which column to group by', 'the outlier worth a look', 'a metric we should track', 'what data we\'re missing'],
+  tracker: ['what to log about each client', 'a recurring expense to watch', 'what I always forget to write down', 'the fields every entry should carry', 'what last month\'s entries say'],
   default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
 };
 
@@ -454,11 +506,15 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
   );
 }
 
-function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab }: {
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk, docStudio, dataStudio, trackerDesk }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
   productLab?: boolean;
+  assistDesk?: boolean;
+  docStudio?: boolean;
+  dataStudio?: boolean;
+  trackerDesk?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -487,8 +543,20 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
   const bumpChanged = useCallback(() => { void reload(); onChanged(); }, [reload, onChanged]);
 
   const upload = async (file: File) => {
-    try { await uploadClusterFile(cluster.id, file); toast('success', `Added ${file.name}.`); await reload(); }
-    catch (e) { toast('error', e instanceof Error ? e.message : 'Upload failed.'); }
+    // Images/binaries the studios RENDER go to cluster_files. Text/docs/CSVs are KNOWLEDGE — they must
+    // be ingested into THIS world (world-scoped + embedded) or retrieval can never see them, and the
+    // grounded studios would refuse forever. This is the difference between "stored" and "usable".
+    const isImage = file.type.startsWith('image/');
+    try {
+      if (isImage) {
+        await uploadClusterFile(cluster.id, file);
+        toast('success', `Added ${file.name}.`);
+      } else {
+        await uploadAndIngest(file, { worldId });
+        toast('success', `Added ${file.name} to this world’s knowledge — the studios can use it now.`);
+      }
+      await reload();
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Upload failed.'); }
   };
 
   return (
@@ -525,7 +593,39 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* G5/G6 — the honest per-channel results, the adaptive read, and platform connections.
           A PRODUCT LAB's ledger counts shipped thinking, not sends — the 5-channel marketing
           table ("Email: no campaigns yet · Meta ads: not running") was noise wearing a dashboard. */}
-      {cluster.charter?.archetype === 'ledger' && (productLab ? (
+      {cluster.charter?.archetype === 'ledger' && (assistDesk ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This desk measures answered, not sent.</p>
+          <p>Nothing here goes out on its own — you copy and send. After each copied draft, the desk
+          asks whether you sent it as-is or rewrote it — and this ledger counts the real answers.
+          When a reply comes back refused, add the missing answer with the “Add knowledge” box on
+          the desk — and the next draft can stand on it.</p>
+          <VerdictReadout worldId={worldId} kind="assist" />
+        </div>
+      ) : docStudio ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This studio measures documents made, not sent.</p>
+          <p>Nothing is auto-delivered — you review and hand each document off yourself. After each
+          copy or export, the studio asks whether you sent it as-is or rewrote it — and this ledger
+          counts the real answers. When a section keeps asking for the same input, add that source
+          material with the “Add source material” box on the studio.</p>
+          <VerdictReadout worldId={worldId} kind="deliver" />
+        </div>
+      ) : trackerDesk ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This registry measures what's on record.</p>
+          <p>Entries you log accumulate as this world's memory — nothing is sent or automated from
+          them. The honest measure here is coverage: when an answer comes back "nothing on record",
+          that's the entry to log next.</p>
+        </div>
+      ) : dataStudio ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This studio measures analyses, not sends.</p>
+          <p>Every figure here is computed from your data, never guessed. Saved summaries land on the
+          workspace's shelf — the fact sheet stands on its own, and any written read is grounded only
+          in those numbers. This ledger keeps the analyses you've run so you can compare them over time.</p>
+        </div>
+      ) : productLab ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This lab measures shipped thinking.</p>
           <p>Concepts and specs live on each studio's shelf; the progress ledger doc here tracks
@@ -546,10 +646,44 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
       )}
 
+      {/* THE FARM — neighborhood prospecting: territories, address-first household lists (columns
+          kept), farm-viability math, do-not-mail suppression, and an addressed merged print run
+          from this world's saved postcard design. Lives on both the lists desk and the mail studio. */}
+      {cluster.charter?.archetype === 'studio' && (cluster.charter.flavor === 'lists' || cluster.charter.flavor === 'direct_mail') && (
+        <FarmPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
+      )}
+
       {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
           plays in the browser now, renders a real mp4 when a render key is set. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'video' && (
         <VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded
+          only in this world's knowledge base, cited, with its gaps flagged. Refuses over an empty
+          corpus. The human copies and sends; nothing is auto-sent. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'assist' && (
+        <AnsweringDesk worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* DELIVERABLE GENERATOR — the document studio: produce a finished, exportable document
+          (proposal / report / one-pager) grounded in this world's knowledge, one or a batch. You
+          review and send; nothing is auto-delivered. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
+        <DeliverableStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* DATA & NUMBERS WORKSPACE — a CSV becomes a typed table, honest per-column stats, and a chart
+          drawn only from a real aggregation. Every number is computed in pure code; the optional read
+          narrates only those figures, never inventing one. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'data' && (
+        <DataWorkspace worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* PERSONAL/INTERNAL REGISTRY — log entries that become queryable memory. Records, not
+          automations: nothing is computed or sent from them unless the owner asks. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
+        <TrackerRegistry worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onChanged={onChanged} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
@@ -615,7 +749,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           </button>
         </div>
         {files.length === 0 ? (
-          <p className="text-xs text-forge-dim/60">No files. Add photos, a logo, or a CSV the studio can use.</p>
+          <p className="text-xs text-forge-dim/60">No files. Images are stored for the studios to use; a dropped document, text file, or CSV is ingested into this world’s knowledge so the studios can ground on it.</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {files.map((f) => (
@@ -634,7 +768,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         {loadingArts ? (
           <p className="text-sm text-forge-dim/70">Loading…</p>
         ) : artifacts.length === 0 ? (
-          <p className="text-sm text-forge-dim/70">Nothing here yet. Use a tool above, run the play from the header, or just ask the studio below.</p>
+          <p className="text-sm text-forge-dim/70">Nothing here yet. Use a tool above, or just ask the studio below.</p>
         ) : (
           <div className="space-y-2">
             {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} onChanged={bumpChanged} />)}

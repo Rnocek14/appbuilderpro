@@ -6,18 +6,21 @@
 // own confirmation, and every outgoing email waits in the queue.
 
 import { useCallback, useEffect, useState } from 'react';
+import { ClockStatus } from '../components/garvis/ClockStatus';
 import { CircleDollarSign, Plus, Send, Check, Ban, Loader2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { Card, Badge, EmptyState, Spinner, Button, Input } from '../components/ui';
+import { Card, Badge, EmptyState, Button, Input, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { useUndoBar } from '../components/garvis/UndoBar';
 import { invoiceTotal, chaseStage, type LineItem } from '../lib/garvis/money';
-import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, voidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
+import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, unmarkInvoicePaid, voidInvoice, unvoidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
 
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 const STAGE_LABEL = ['', 'reminder queued window', 'due', 'past due', 'final notice'];
 
 export default function Money() {
   const { toast } = useToast();
+  const { offerUndo, undoBar } = useUndoBar((e) => toast('error', e instanceof Error ? e.message : 'Could not undo that.'));
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -53,12 +56,13 @@ export default function Money() {
 
   // Optimistic (system scan): the row's status flips NOW ("Mark paid" lights instantly, like it
   // should); the background refresh reconciles, and a failure restores the truthful row.
-  const act = async (id: string, fn: () => Promise<void>, ok: string, optimistic?: Partial<InvoiceRow>) => {
+  // Returns whether the action landed — Undo must only be offered for a void that actually took.
+  const act = async (id: string, fn: () => Promise<void>, ok: string, optimistic?: Partial<InvoiceRow>): Promise<boolean> => {
     setBusyId(id);
     const prev = rows;
     if (optimistic) setRows((cur) => cur.map((r) => (r.id === id ? { ...r, ...optimistic } : r)));
-    try { await fn(); toast('success', ok); void refresh(); }
-    catch (e) { setRows(prev); toast('error', e instanceof Error ? e.message : 'Action failed.'); }
+    try { await fn(); toast('success', ok); void refresh(); return true; }
+    catch (e) { setRows(prev); toast('error', e instanceof Error ? e.message : 'Action failed.'); return false; }
     finally { setBusyId(null); }
   };
 
@@ -77,8 +81,15 @@ export default function Money() {
             <h1 className="text-xl font-semibold text-forge-ink">Money</h1>
             <p className="text-sm text-forge-dim">Invoice → gated send → the chaser asks so you don't have to → paid = real revenue.</p>
           </div>
+
+        {/* The chase ladder runs on the clock — if the clock is dead, say so here (quiet when healthy). */}
+        <ClockStatus quiet />
           <div className="ml-auto flex items-center gap-3 text-sm">
-            <span className="text-forge-dim">Outstanding <b className="text-forge-warn">{usd(outstanding)}</b></span>
+            {/* Totals sum the loaded invoices (newest 200). Say so when we're at the cap, rather than
+                showing a silently-undercounted number (deep scan P2, no-invented-numbers). */}
+            <span className="text-forge-dim" title={rows.length >= 200 ? 'across the latest 200 invoices' : undefined}>
+              Outstanding <b className="text-forge-warn">{usd(outstanding)}</b>{rows.length >= 200 && <span className="ml-0.5 text-[10px] text-forge-dim/60">(latest 200)</span>}
+            </span>
             <span className="text-forge-dim">Collected <b className="text-forge-ok">{usd(collected)}</b></span>
             {!creating && <Button onClick={() => setCreating(true)}><Plus size={14} /> New invoice</Button>}
           </div>
@@ -121,7 +132,17 @@ export default function Money() {
           </Card>
         )}
 
-        {loading ? <Spinner label="Loading the ledger…" /> : rows.length === 0 ? (
+        {loading ? (
+          // Skeletons over spinners (design review): the page keeps its shape while it loads.
+          <div className="space-y-2">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex items-center gap-3 rounded-xl border border-forge-border bg-forge-panel p-3">
+                <div className="flex-1 space-y-2"><Skeleton className="h-4 w-2/5" /><Skeleton className="h-3 w-1/4" /></div>
+                <Skeleton className="h-7 w-24 rounded-lg" />
+              </div>
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
           <EmptyState icon={<CircleDollarSign size={20} />} title="No invoices yet"
             body="Create one in a minute — Garvis sends it through your approval queue, chases it politely while you sleep, and counts it as revenue the moment you mark it paid." />
         ) : (
@@ -148,14 +169,28 @@ export default function Money() {
                       </button>
                     )}
                     {r.status === 'sent' && (
-                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => markInvoicePaid(r.id), 'Paid — recorded as revenue. 🎉', { status: 'paid' })}
+                      <button disabled={busyId === r.id} onClick={() => {
+                        // Mark paid is a money mutation — it gets an Undo too (parity with void), so a
+                        // mis-click doesn't permanently book revenue with no way back. This button only
+                        // shows for a 'sent' invoice, so Undo restores it to 'sent'.
+                        void act(r.id, () => markInvoicePaid(r.id), 'Paid — recorded as revenue. 🎉', { status: 'paid' }).then((ok) => {
+                          if (ok) offerUndo(`Marked ${r.number} paid`, async () => { await unmarkInvoicePaid(r.id, 'sent'); await refresh(); });
+                        });
+                      }}
                         className="flex items-center gap-1 rounded-lg border border-forge-ok/50 bg-forge-ok/10 px-2.5 py-1.5 text-xs text-forge-ok hover:bg-forge-ok/20 disabled:opacity-50">
                         {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Mark paid
                       </button>
                     )}
                     {r.status !== 'paid' && r.status !== 'void' && (
-                      <button disabled={busyId === r.id} title="Void (kept on record, never chased)"
-                        onClick={() => { if (window.confirm(`Void ${r.number}? It stays on record but will never be chased.`)) void act(r.id, () => voidInvoice(r.id), 'Voided.', { status: 'void' }); }}
+                      <button disabled={busyId === r.id} title="Void — kept on record, never chased (Undo for 6s)"
+                        onClick={() => {
+                          // UNDO LAYER (design review): the confirm dialog is gone — void acts
+                          // instantly, and Undo restores exactly the status it took away.
+                          const restoreTo = r.status === 'sent' ? 'sent' as const : 'draft' as const;
+                          void act(r.id, () => voidInvoice(r.id), `Voided ${r.number}.`, { status: 'void' }).then((ok) => {
+                            if (ok) offerUndo(`Voided ${r.number}`, async () => { await unvoidInvoice(r.id, restoreTo); await refresh(); });
+                          });
+                        }}
                         className="rounded-lg border border-forge-border p-1.5 text-forge-dim hover:text-forge-err disabled:opacity-50"><Ban size={12} /></button>
                     )}
                   </div>
@@ -165,6 +200,7 @@ export default function Money() {
           </div>
         )}
       </div>
+      {undoBar}
     </AppShell>
   );
 }

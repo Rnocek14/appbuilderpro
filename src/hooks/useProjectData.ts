@@ -42,13 +42,15 @@ export function useProjects() {
   };
 
   const archiveProject = async (id: string, archived: boolean) => {
-    await supabase.from('projects').update({ archived }).eq('id', id);
+    const { error } = await supabase.from('projects').update({ archived }).eq('id', id);
+    if (error) throw new Error(error.message);
     await refresh();
   };
 
   const deleteProject = async (id: string) => {
-    // soft delete
-    await supabase.from('projects').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    // soft delete — the delete itself must surface failure; the audit row stays best-effort
+    const { error } = await supabase.from('projects').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw new Error(error.message);
     await supabase.from('audit_logs').insert({
       actor_id: session!.user.id, action: 'project.delete', entity_type: 'project', entity_id: id,
     });
@@ -62,7 +64,7 @@ export function useProjects() {
       .from('projects')
       .insert({ owner_id: session!.user.id, name: `${original.name} (copy)`, description: original.description, status: original.status })
       .select().single();
-    if (error) return null;
+    if (error) throw new Error(error.message);
     const { data: files } = await supabase
       .from('project_files').select('path, content').eq('project_id', id).is('deleted_at', null);
     if (files?.length) {

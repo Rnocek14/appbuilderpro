@@ -12,6 +12,7 @@ import {
   type VideoMaterials,
 } from '../../lib/garvis/videoRun';
 import { cn } from '../../lib/utils';
+import { useUnsavedGuard } from '../../hooks/useUnsavedGuard';
 
 const ASPECTS: { id: Aspect; label: string; box: string }[] = [
   { id: '9:16', label: 'Reel / TikTok', box: 'aspect-[9/16] max-w-[240px]' },
@@ -34,6 +35,10 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   const [busy, setBusy] = useState(false);
   const [renderMsg, setRenderMsg] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Unsaved-edit guard: hand-edited lines live only in state until Save/Render — leaving the
+  // browser with edits pending must ask first (design review).
+  const [dirty, setDirty] = useState(false);
+  useUnsavedGuard(dirty);
 
   useEffect(() => {
     let live = true;
@@ -70,6 +75,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
 
   const editScene = (i: number, patch: Partial<{ onScreen: string; voiceover: string }>) => {
     if (!sb) return;
+    setDirty(true);
     const scenes = sb.scenes.map((s, j) => (j === i ? { ...s, ...patch } : s));
     rebuild({ scenes });
   };
@@ -85,7 +91,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   const doSave = async () => {
     if (!sb) return;
     setBusy(true);
-    try { await saveStoryboard(clusterId, sb); onToast('success', 'Storyboard saved into this area.'); }
+    try { await saveStoryboard(clusterId, sb); setDirty(false); onToast('success', 'Storyboard saved into this area.'); }
     catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not save.'); }
     finally { setBusy(false); }
   };
@@ -97,7 +103,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
       const start = await startRender(sb);
       if (start.available === false) { setRenderMsg(null); onToast('info', 'Video rendering isn\'t configured on the server yet — the preview above is fully usable. (Add a render key: see the system health page.)'); return; }
       if (!start.ok || !start.id) { setRenderMsg(null); onToast('error', start.error ?? 'Render could not start.'); return; }
-      await saveStoryboard(clusterId, sb).catch(() => {});
+      await saveStoryboard(clusterId, sb).then(() => setDirty(false)).catch(() => {});
       // Poll to completion (renders take ~10-40s for short clips).
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 4000));

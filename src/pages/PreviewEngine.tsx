@@ -86,7 +86,7 @@ export default function PreviewEngine() {
   const queueSend = async (r: PreviewSiteRow) => {
     try {
       const prefill = (await lookupProfileEmail(r.profile_id)) ?? '';
-      const to = window.prompt(`Send this pitch to which email?\n\nGarvis will draft the message and put it in the Approvals queue — nothing sends until you approve it.`, prefill);
+      const to = window.prompt(`Send this pitch to which email?\n\nGarvis will draft the message and put it in the Queue — nothing sends until you approve it.`, prefill);
       if (!to) return;
       setQueuingId(r.id);
       await queuePitch({
@@ -98,7 +98,7 @@ export default function PreviewEngine() {
         previewUrl: previewUrlFor(r.slug),
         toEmail: to,
       });
-      toast('success', 'Queued for approval. Review it in Approvals → send when ready.');
+      toast('success', 'Queued for approval. Review it in the Queue → send when ready.');
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not queue the pitch.');
     } finally {

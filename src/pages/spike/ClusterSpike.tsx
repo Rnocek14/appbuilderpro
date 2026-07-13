@@ -368,10 +368,10 @@ export default function ClusterSpike({ embedded = false, seed: seedProp }: { emb
 
       <div className="relative min-h-0 flex-1">
         {view === 'universe' ? (
-          <GalaxyView graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={setCost} worldKey={meta.current.id || 'local'} />
+          <GalaxyView graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={(usd) => setCost((c) => c + usd)} worldKey={meta.current.id || 'local'} />
         ) : view === 'room' ? (
           <div className="h-full overflow-y-auto px-4 py-3">
-            <IdeaRoom graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={setCost} onOpenMap={() => setView('universe')} />
+            <IdeaRoom graph={graph} setGraph={setGraph} focusId={focusId} setFocusId={setFocusId} onCost={(usd) => setCost((c) => c + usd)} onOpenMap={() => setView('universe')} />
           </div>
         ) : (
           <div className="grid h-full gap-4 overflow-auto p-4 md:grid-cols-2">

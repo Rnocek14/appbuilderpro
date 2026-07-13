@@ -15,7 +15,7 @@ import {
 import { SCAFFOLD_FILES, SCAFFOLD_PATHS } from '../_shared/scaffold.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { buildIndexCssForDesign, parseDesignSpec } from '../_shared/themePresets.ts';
-import { validateProject, issuesToFixRequest } from '../_shared/qa.ts';
+import { validateProject, issuesToFixRequest, looksTruncated } from '../_shared/qa.ts';
 import { parseProtocol } from '../_shared/streamparse.ts';
 
 const STAGES = [
@@ -218,8 +218,14 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
     { role: 'system', content: GENERATE_FILES_STREAM },
     { role: 'user', content: filesPromptStream(JSON.stringify(blueprint), hasBackend, hasIntegrations) },
   ], 32000);
-  const appFiles = parseProtocol(filesText).changes.filter((f) => f.path && f.content.trim() && keepable(f.path));
-  if (!appFiles.length) throw new Error('The model produced no source files.');
+  const parsedFiles = parseProtocol(filesText).changes.filter((f) => f.path && f.content.trim() && keepable(f.path));
+  if (!parsedFiles.length) throw new Error('The model produced no source files.');
+  // Drop a max_tokens-truncated TAIL file instead of persisting half a file (deep scan P2: the edge
+  // pipeline lacked the guard the client path has). Only the last file can be cut by the cap; a
+  // truncated file earlier would be re-emitted, so guard the tail. The QA/heal pass catches the rest.
+  const appFiles = parsedFiles.length > 1 && looksTruncated(parsedFiles[parsedFiles.length - 1].content)
+    ? parsedFiles.slice(0, -1)
+    : parsedFiles;
   for (const f of appFiles) await writeFile(f.path, f.content);
   if (hasIntegrations) {
     await writeFile('/supabase/.fableforge/secrets.json', JSON.stringify({ secrets: manifestSecrets, integrations }, null, 2) + '\n');

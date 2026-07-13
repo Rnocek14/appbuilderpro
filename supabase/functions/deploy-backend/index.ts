@@ -37,32 +37,47 @@ Deno.serve(async (req) => {
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
-    const body = (await req.json().catch(() => ({}))) as {
-      projectId?: string; projectRef?: string; functions?: DeployFn[]; secrets?: DeploySecret[]; approval_id?: string;
-    };
-    const { projectId, projectRef, functions, secrets, approval_id } = body;
-    if (!projectId) return json({ error: 'projectId is required.' }, 400);
-    if (!projectRef) return json({ error: 'projectRef is required.' }, 400);
-    if (!/^[a-z0-9]{16,40}$/i.test(projectRef)) return json({ error: `Invalid project ref "${projectRef}".` }, 400);
-
-    // Verify the caller owns this FableForge project (mirrors generate-app's ownership check).
+    const body = (await req.json().catch(() => ({}))) as { approval_id?: string };
+    const { approval_id } = body;
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: project } = await admin.from('projects').select('id, owner_id, supabase_managed').eq('id', projectId).single();
-    if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
 
     // APPROVAL SPINE — this is the most privileged external action in the system (it pushes code +
-    // secrets with the Management token), so it requires an APPROVED approval row owned by the
-    // caller, and every outcome lands in execution_runs (same discipline as send-email/deploy-site).
+    // secrets with the Management token), so it requires an APPROVED approval row owned by the caller.
+    // The APPROVAL is the sole source of truth for WHAT deploys and WHERE (deep scan verification):
+    // both the target project and the functions/secrets come from the approved payload, never from
+    // the request body — otherwise a caller could point an approval-for-project-B at project A.
     if (!approval_id) return json({ error: 'This deploy must go through Approvals — deploy from the project workspace.' }, 400);
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status').eq('id', approval_id).single();
+      .select('id, owner_id, kind, status, payload, result').eq('id', approval_id).single();
     if (!approval || approval.owner_id !== user.id || approval.kind !== 'deploy_backend' || approval.status !== 'approved') {
       return json({ error: 'No approved deploy_backend approval found for this deploy.' }, 403);
     }
+    // Idempotency: a fully-executed approval is spent — never replay it (deep scan: approvals were
+    // never consumed, so one approved id could drive repeated real deploys).
+    if ((approval.result as { executed?: boolean } | null)?.executed) {
+      return json({ error: 'This deploy was already executed — start a new deploy from the workspace.' }, 409);
+    }
+
+    // BIND target + payload to the approval. project_id, functions, secrets all come from what the
+    // owner actually saw and approved (deployRun.ts captures them at authorization time).
+    const payload = (approval.payload ?? {}) as { project_id?: string; functions?: DeployFn[]; secrets?: DeploySecret[] };
+    const projectId = payload.project_id;
+    if (!projectId) return json({ error: 'This approval has no target project — re-create the deploy.' }, 400);
+    const functions = Array.isArray(payload.functions) ? payload.functions : [];
+    const secrets = Array.isArray(payload.secrets) ? payload.secrets : [];
+
+    // Verify the caller owns the APPROVED target project, and DERIVE its ref from the owned row —
+    // never from any client-supplied value (deep scan P0). The privileged ref columns are pinned by
+    // a trigger (app_0057) so the owner can't forge them on their own project row either.
+    const { data: project } = await admin.from('projects').select('id, owner_id, supabase_project_ref, supabase_managed').eq('id', projectId).single();
+    if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
+    const projectRef = project.supabase_project_ref as string | null;
+    if (!projectRef) return json({ error: 'This app has no database yet — run "Set up database" first.' }, 400);
+
     const ledger = async (status: 'ok' | 'failed', error: string | null, extra: Record<string, unknown> = {}) => {
       await admin.from('execution_runs').insert({
         owner_id: user.id, approval_id, connector: 'supabase', action: 'deploy_backend', status,
-        request: { project_id: projectId, project_ref: projectRef, functions: (functions ?? []).map((f) => f.slug), ...extra }, error,
+        request: { project_id: projectId, project_ref: projectRef, functions: functions.map((f) => f.slug), ...extra }, error,
       }).then(() => {}, () => {});
     };
 
@@ -187,6 +202,11 @@ select cron.schedule(
     const allOk = results.every((r) => r.ok);
     const failedSteps = results.filter((r) => !r.ok).map((r) => `${r.step}: ${r.detail ?? 'failed'}`);
     await ledger(allOk ? 'ok' : 'failed', allOk ? null : failedSteps.join(' | ').slice(0, 800), { steps: results.length });
+    // Consume the approval only on a clean deploy — a partial failure stays retryable (idempotent
+    // upserts), a full success can never be replayed.
+    if (allOk) {
+      await admin.from('approvals').update({ result: { executed: true, steps: results.length } }).eq('id', approval_id).then(() => {}, () => {});
+    }
     return json({ ok: allOk, results }, allOk ? 200 : 207);
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

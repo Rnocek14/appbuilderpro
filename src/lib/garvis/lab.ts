@@ -46,6 +46,8 @@ export interface SimTemplate {
   params: SimParam[];
   assumptions: string[]; // what the model takes as given (the user's dials are listed separately)
   limits: string[];      // what it does NOT model — shown next to every result
+  anchors?: string[];    // scale anchors — REAL reference points that make the numbers mean something,
+                         // each labeled for what it is (a measurement, a reported range, an average)
   compute: (values: Record<string, number>) => SimOutput[];
 }
 
@@ -88,7 +90,11 @@ const timeDilation: SimTemplate = {
     'Does not model the turnaround of a real round trip (the full twin paradox needs acceleration)',
     'No gravity: near a massive body the effect compounds differently',
   ],
-  compute: (v0) => {
+
+  anchors: [
+    'γ ≈ 5 is a real muon at 0.98c — the reason cosmic-ray muons survive to the ground',
+    'GPS satellite clocks run ~38 μs/day fast (−7 special, +45 general); uncorrected, fixes would drift ~10 km per day',
+  ],  compute: (v0) => {
     const { v, years } = v0;
     const gamma = 1 / Math.sqrt(1 - v * v);
     const home = years * gamma;
@@ -96,6 +102,48 @@ const timeDilation: SimTemplate = {
       { key: 'gamma', label: 'Time factor (γ)', value: round(gamma, 4), note: 'each traveler-hour is this many home-hours' },
       { key: 'home', label: 'Years passed at home', value: round(home, 2), unit: 'yr' },
       { key: 'skipped', label: 'Extra years the traveler skipped', value: round(home - years, 2), unit: 'yr' },
+    ];
+  },
+};
+
+const gravityWell: SimTemplate = {
+  id: 'gravity-well',
+  title: 'Black hole time dilation',
+  domain: 'physics',
+  tagline: 'How much slower a clock ticks the closer it hovers to a black hole.',
+  modelType: 'equation',
+  basis: 'Schwarzschild static observer: far time = near time ÷ √(1 − rs/r) (Schwarzschild, 1916; the Interstellar effect).',
+  params: [
+    { key: 'r', label: 'Hover distance (in horizon radii, r/rs)', min: 1.02, max: 20, step: 0.02, def: 2 },
+    { key: 'hours', label: 'Hours experienced near the hole', min: 1, max: 8760, step: 1, def: 24 },
+  ],
+  assumptions: [
+    'Hovering at a fixed distance (static observer) — not orbiting, not falling in',
+    'Non-rotating, uncharged black hole (Schwarzschild); the far clock sits effectively at infinity',
+  ],
+  limits: [
+    'Inside the horizon (r ≤ rs) no static observer can exist — the model refuses rather than pretend',
+    'Real black holes spin (Kerr): frame dragging changes these numbers',
+  ],
+
+  anchors: [
+    'Interstellar\'s 1-hour-costs-7-years planet needs r a whisker outside a fast-spinning hole\'s horizon (Kerr, not this simple model)',
+    'Earth\'s own well is shallow by comparison: surface clocks run ~0.7 ns/s slower than deep space — about 22 ms per year',
+  ],  compute: (v0) => {
+    const { r, hours } = v0;
+    if (r <= 1) {
+      return [
+        { key: 'factor', label: 'Time factor (far ÷ near)', value: null, note: 'no static observer exists at or inside the horizon' },
+        { key: 'far', label: 'Hours passed far away', value: null },
+        { key: 'skipped', label: 'Extra hours the hoverer skipped', value: null },
+      ];
+    }
+    const factor = 1 / Math.sqrt(1 - 1 / r);
+    const far = hours * factor;
+    return [
+      { key: 'factor', label: 'Time factor (far ÷ near)', value: round(factor, 4), note: 'each near-hour is this many far-hours' },
+      { key: 'far', label: 'Hours passed far away', value: round(far, 2), unit: 'hr' },
+      { key: 'skipped', label: 'Extra hours the hoverer skipped', value: round(far - hours, 2), unit: 'hr' },
     ];
   },
 };
@@ -118,7 +166,11 @@ const compoundGrowth: SimTemplate = {
     'Additions arrive at the end of each month; nothing is ever withdrawn',
   ],
   limits: ['No volatility, taxes, fees, or inflation — subtract those before believing the number'],
-  compute: (v0) => {
+
+  anchors: [
+    'The S&P 500\'s long-run average is ~10%/yr nominal (~7% real) — a decades-long average, never a promise for any given decade',
+    'Rule of 72: at 7%, money doubles roughly every 10.3 years',
+  ],  compute: (v0) => {
     const { principal, monthly, rate, years } = v0;
     const i = rate / 100 / 12;
     const n = years * 12;
@@ -155,7 +207,10 @@ const rolloutModel: SimTemplate = {
     'No churn, no ramp-up time, no seasonality, no price pressure as you scale',
     'This is a calculator over your assumptions, not a market forecast',
   ],
-  compute: (v0) => {
+
+  anchors: [
+    'Local-sponsorship price points commonly reported across niche newsletters: $100–500/mo — validate in YOUR market before believing the dial',
+  ],  compute: (v0) => {
     const { cities, sponsors, price, cost, launch } = v0;
     const mrr = cities * sponsors * price;
     const monthlyCost = cities * cost;
@@ -191,7 +246,11 @@ const reachOdds: SimTemplate = {
     'The response rate is YOUR estimate until your own send data replaces it',
   ],
   limits: ['Says nothing about the QUALITY of a response — only whether any arrives'],
-  compute: (v0) => {
+
+  anchors: [
+    'Commonly reported cold-email reply rates: 1–5%; warm introductions: 20–40% — industry-reported ranges, not your data',
+    'At 5% per try it takes 14 tries to pass a coin flip (51%) for at least one yes',
+  ],  compute: (v0) => {
     const { p, n } = v0;
     const q = p / 100;
     return [
@@ -201,7 +260,7 @@ const reachOdds: SimTemplate = {
   },
 };
 
-export const SIM_TEMPLATES: SimTemplate[] = [timeDilation, compoundGrowth, rolloutModel, reachOdds];
+export const SIM_TEMPLATES: SimTemplate[] = [timeDilation, gravityWell, compoundGrowth, rolloutModel, reachOdds];
 
 export const simTemplateById = (id: string): SimTemplate | undefined => SIM_TEMPLATES.find((t) => t.id === id);
 
@@ -209,7 +268,11 @@ export const simTemplateById = (id: string): SimTemplate | undefined => SIM_TEMP
  *  a convenience default, freely overridable in the bench (never a hidden decision). */
 export function suggestTemplate(text: string): SimTemplate {
   const s = text.toLowerCase();
-  if (/(light ?speed|relativit|time dilat|spacetime|black hole|twin paradox|physics)/.test(s)) return timeDilation;
+  // Gravity FIRST — 'black hole' must land on the hole, not the train.
+  if (/(black ?hole|event horizon|schwarzschild|gravit|interstellar|neutron star|singularity)/.test(s)) return gravityWell;
+  // ('einstein clock speed' fell through to the business bench in the full-product exercise —
+  // the physicist's own name and the experiment's instrument belong in the physics matcher.)
+  if (/(light ?speed|speed of light|relativit|time dilat|spacetime|twin paradox|physics|einstein|lorentz|(moving|atomic) clock)/.test(s)) return timeDilation;
   if (/(sponsor|city|cities|rollout|revenue|pricing|price|mrr|unit econ|business model|franchise|market|customer)/.test(s)) return rolloutModel;
   if (/(invest|compound|interest|saving|grow(th)? rate|retire)/.test(s)) return compoundGrowth;
   if (/(odds|probabilit|response rate|conversion|chance|outreach|reply rate|lead)/.test(s)) return reachOdds;

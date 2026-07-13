@@ -45,12 +45,32 @@ async function vectorHits(question: string, uid: string): Promise<RawHit[]> {
   const vecs = await embedTexts([question]);
   if (!vecs || !vecs[0]?.length) return [];
   const literal = `[${vecs[0].join(',')}]`;
-  const { data, error } = await supabase.rpc('match_embeddings', {
-    _owner: uid, _query: literal, _k: 8, _subject_type: 'artifact', _min_similarity: 0.15,
-  });
-  if (error) return [];
-  return ((data ?? []) as { subject_id: string; content: string; similarity: number }[])
-    .map((r) => ({ subjectId: r.subject_id, content: r.content, similarity: r.similarity, via: 'vector' as const }));
+  // Match BOTH artifacts and uploaded documents (deep scan P1: Ask was locked to 'artifact', so an
+  // ingested paper — embedded as subject_type 'document' — was never retrievable by the ask box).
+  const call = async (subjectType: 'artifact' | 'document'): Promise<RawHit[]> => {
+    const { data, error } = await supabase.rpc('match_embeddings', {
+      _owner: uid, _query: literal, _k: 8, _subject_type: subjectType, _min_similarity: 0.15,
+    });
+    if (error) return [];
+    return ((data ?? []) as { subject_id: string; content: string; similarity: number }[])
+      .map((r) => ({ subjectId: r.subject_id, content: r.content, similarity: r.similarity, via: 'vector' as const, kind: subjectType }));
+  };
+  const [arts, docs] = await Promise.all([call('artifact'), call('document')]);
+  return [...arts, ...docs];
+}
+
+/** Lexical hits over uploaded documents (title + summary + extracted_text), owner-scoped by RLS,
+ *  optionally one world. The document twin of lexicalHits, so search works with zero embeddings. */
+async function documentLexicalHits(question: string, worldId?: string): Promise<RawHit[]> {
+  const terms = question.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+    .filter((w) => w.length > 3).slice(0, 6);
+  if (!terms.length) return [];
+  const ors = terms.flatMap((t) => [`title.ilike.%${t}%`, `summary.ilike.%${t}%`, `extracted_text.ilike.%${t}%`]).join(',');
+  let q = supabase.from('documents').select('id, title, summary, extracted_text').or(ors).limit(12);
+  if (worldId) q = q.eq('world_id', worldId);
+  const { data } = await q;
+  return ((data ?? []) as { id: string; title: string; summary: string | null; extracted_text: string | null }[])
+    .map((r) => ({ subjectId: r.id, content: `${r.title}\n\n${r.summary ?? r.extracted_text ?? ''}`.slice(0, 1200), similarity: null, via: 'lexical' as const, kind: 'document' as const }));
 }
 
 /** Lexical hits over knowledge_artifacts (title + detail ILIKE), owner-scoped by RLS. Always runs,
@@ -67,28 +87,52 @@ async function lexicalHits(question: string, clusterIds: string[] | null): Promi
     .map((r) => ({ subjectId: r.id, content: `${r.title}\n\n${r.detail ?? ''}`.slice(0, 1200), similarity: null, via: 'lexical' as const }));
 }
 
-/** Resolve artifact hits into display sources (title + area + world). */
+/** Resolve artifact AND document hits into display sources (title + area/kind + world). */
 async function resolveSources(hits: RawHit[]): Promise<AskSource[]> {
-  const ids = hits.map((h) => h.subjectId);
-  if (!ids.length) return [];
-  const { data: arts } = await supabase.from('knowledge_artifacts')
-    .select('id, title, cluster_id').in('id', ids);
+  if (!hits.length) return [];
+  const artHits = hits.filter((h) => (h.kind ?? 'artifact') === 'artifact');
+  const docHits = hits.filter((h) => h.kind === 'document');
+
+  const artIds = artHits.map((h) => h.subjectId);
+  const { data: arts } = artIds.length
+    ? await supabase.from('knowledge_artifacts').select('id, title, cluster_id').in('id', artIds)
+    : { data: [] };
   const artRows = (arts ?? []) as { id: string; title: string; cluster_id: string }[];
   const clusterIds = [...new Set(artRows.map((a) => a.cluster_id))];
   const { data: clusters } = clusterIds.length
     ? await supabase.from('knowledge_clusters').select('id, title, world_id').in('id', clusterIds)
     : { data: [] };
   const clusterRows = (clusters ?? []) as { id: string; title: string; world_id: string }[];
-  const worldIds = [...new Set(clusterRows.map((c) => c.world_id))];
+
+  const docIds = docHits.map((h) => h.subjectId);
+  const { data: docs } = docIds.length
+    ? await supabase.from('documents').select('id, title, world_id').in('id', docIds)
+    : { data: [] };
+  const docRows = (docs ?? []) as { id: string; title: string; world_id: string | null }[];
+
+  // World titles for BOTH artifact clusters and documents.
+  const worldIds = [...new Set([...clusterRows.map((c) => c.world_id), ...docRows.map((d) => d.world_id).filter(Boolean) as string[]])];
   const { data: worlds } = worldIds.length
     ? await supabase.from('knowledge_worlds').select('id, title').in('id', worldIds)
     : { data: [] };
   const worldTitle = new Map((worlds ?? []).map((w) => [(w as { id: string }).id, (w as { title: string }).title]));
   const clusterOf = new Map(clusterRows.map((c) => [c.id, c]));
   const artOf = new Map(artRows.map((a) => [a.id, a]));
+  const docOf = new Map(docRows.map((d) => [d.id, d]));
 
   const out: AskSource[] = [];
   for (const h of hits) {
+    if (h.kind === 'document') {
+      const d = docOf.get(h.subjectId);
+      if (!d) continue;
+      out.push({
+        id: d.id, title: d.title, area: 'Document',
+        world: d.world_id ? (worldTitle.get(d.world_id) ?? null) : null,
+        worldId: d.world_id ?? null,
+        snippet: h.content.slice(0, 400), similarity: h.similarity,
+      });
+      continue;
+    }
     const a = artOf.get(h.subjectId);
     if (!a) continue;
     const c = clusterOf.get(a.cluster_id);
@@ -104,6 +148,29 @@ async function resolveSources(hits: RawHit[]): Promise<AskSource[]> {
   return out;
 }
 
+/** The RETRIEVAL half of askGarvis, exposed for surfaces that want the SOURCES and do their own
+ *  synthesis — the answering desk drafts a reply (not a Q&A answer) grounded in these. World-scoped
+ *  when a worldId is given (the answering desk grounds ONLY in its own world's knowledge base).
+ *  Returns [] on any failure, never throws. */
+export async function retrieveSources(question: string, opts?: { worldId?: string; k?: number }): Promise<AskSource[]> {
+  try {
+    const q = question.trim();
+    if (q.length < 3) return [];
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) return [];
+    const clusterIds = opts?.worldId ? await clusterIdsForWorld(opts.worldId) : null;
+    const [vhits, lArts, lDocs] = await Promise.all([
+      vectorHits(q, uid),
+      lexicalHits(q, clusterIds),
+      documentLexicalHits(q, opts?.worldId),
+    ]);
+    const merged = mergeHits(vhits, [...lArts, ...lDocs], opts?.k ?? 8);
+    const sources = await resolveSources(merged);
+    return opts?.worldId ? sources.filter((s) => s.worldId === opts.worldId) : sources;
+  } catch { return []; }
+}
+
 /** ONE BRAIN (UX redesign): reflexive retrieval for the FRONT DOOR. The same hybrid engine
  *  (vector + lexical over the owner's artifacts) compiled into one labeled prompt block, so the
  *  Command conversation is grounded in what the owner actually has on record — the audit's
@@ -116,8 +183,8 @@ export async function retrieveForPrompt(question: string, k = 5): Promise<string
     const { data: sess } = await supabase.auth.getUser();
     const uid = sess.user?.id;
     if (!uid) return '';
-    const [vhits, lhits] = await Promise.all([vectorHits(q, uid), lexicalHits(q, null)]);
-    const merged = mergeHits(vhits, lhits, k);
+    const [vhits, lArts, lDocs] = await Promise.all([vectorHits(q, uid), lexicalHits(q, null), documentLexicalHits(q)]);
+    const merged = mergeHits(vhits, [...lArts, ...lDocs], k);
     if (!merged.length) return '';
     const sources = await resolveSources(merged);
     if (!sources.length) return '';
@@ -137,10 +204,12 @@ export async function askGarvis(question: string, opts?: { worldId?: string }): 
   if (!uid) return { answer: 'Sign in to ask about your worlds.', sources: [], grounded: false, searched: 0 };
 
   const clusterIds = opts?.worldId ? await clusterIdsForWorld(opts.worldId) : null;
-  const [vhits, lhits] = await Promise.all([
+  const [vhits, lArts, lDocs] = await Promise.all([
     opts?.worldId ? Promise.resolve([]) : vectorHits(q, uid),  // vector is account-wide; world scope uses lexical
     lexicalHits(q, clusterIds),
+    documentLexicalHits(q, opts?.worldId), // uploaded docs are lexically searchable too
   ]);
+  const lhits = [...lArts, ...lDocs];
   // When scoped to a world, still run vector but filter to the world's clusters after resolving.
   const vScoped = opts?.worldId ? await vectorHits(q, uid) : vhits;
   const merged = mergeHits(vScoped, lhits, 8);

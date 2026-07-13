@@ -34,20 +34,33 @@ Deno.serve(async (req) => {
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
-    const { projectId, projectRef, sql } = await req.json().catch(() => ({} as { projectId?: string; projectRef?: string; sql?: string }));
+    const { projectId, sql } = await req.json().catch(() => ({} as { projectId?: string; sql?: string }));
     if (!projectId) return json({ error: 'projectId is required.' }, 400);
-    if (!projectRef || !sql) return json({ error: 'projectRef and sql are required.' }, 400);
-    if (!/^[a-z0-9]{16,40}$/i.test(projectRef)) return json({ error: `Invalid project ref "${projectRef}".` }, 400);
+    if (!sql) return json({ error: 'sql is required.' }, 400);
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: project } = await admin.from('projects').select('id, owner_id, supabase_managed').eq('id', projectId).single();
+    const { data: project } = await admin.from('projects').select('id, owner_id, supabase_project_ref, supabase_managed').eq('id', projectId).single();
     if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
+
+    // The project ref is DERIVED from the owned project row — NEVER taken from the caller. A
+    // client-supplied ref was a confused-deputy vector (deep scan P0): a managed-tier user could
+    // pass another tenant's ref and the shared platform token would run this SQL on their DB.
+    const projectRef = project.supabase_project_ref as string | null;
+    if (!projectRef) return json({ error: 'This app has no database yet — run "Set up database" first.' }, 400);
 
     // Managed (FableForge Cloud) DBs use the platform token; user-owned DBs use the user's OAuth token.
     const token = await projectSupabaseToken(admin, user.id, (project.supabase_managed as boolean) ?? false);
     if (!token) {
       return json({ error: 'Connect Supabase (Settings → Connections), or set the SB_MANAGEMENT_TOKEN edge secret.' }, 400);
     }
+
+    // Log every privileged migration to the shared execution ledger (honest audit trail; the
+    // "external actions logged" half of the spine). Best-effort — a ledger hiccup never blocks setup.
+    const ledger = (status: 'ok' | 'failed', error: string | null) =>
+      admin.from('execution_runs').insert({
+        owner_id: user.id, approval_id: null, connector: 'supabase', action: 'apply_migration', status,
+        request: { project_id: projectId, project_ref: projectRef, sql_bytes: sql.length }, error,
+      }).then(() => {}, () => {});
 
     const res = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
       method: 'POST',
@@ -57,8 +70,10 @@ Deno.serve(async (req) => {
 
     const text = await res.text();
     if (!res.ok) {
+      await ledger('failed', `Supabase Management API ${res.status}: ${text.slice(0, 400)}`);
       return json({ error: `Supabase Management API ${res.status}: ${text.slice(0, 600)}` }, res.status === 401 ? 401 : 502);
     }
+    await ledger('ok', null);
     let result: unknown = null;
     try { result = text ? JSON.parse(text) : null; } catch { result = text; }
     return json({ ok: true, result });

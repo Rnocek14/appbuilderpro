@@ -9,6 +9,7 @@ import { Loader2, Activity, Check, X, HelpCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { cn } from '../lib/utils';
 import { loadHealth, type HealthReport, type Probe } from '../lib/garvis/healthRun';
+import { ClockStatus } from '../components/garvis/ClockStatus';
 
 const PROBE_META: Record<Probe, { icon: typeof Check; cls: string; label: string }> = {
   deployed: { icon: Check, cls: 'text-forge-ok', label: 'deployed' },
@@ -19,12 +20,17 @@ const PROBE_META: Record<Probe, { icon: typeof Check; cls: string; label: string
 
 export default function Health() {
   const [report, setReport] = useState<HealthReport | null>(null);
+  // A failed probe must be a visible state — null is "loading", so a rejection that resets to null
+  // spun forever on exactly the page meant to diagnose a broken backend.
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
-    void loadHealth().then((r) => { if (live) setReport(r); }).catch(() => { if (live) setReport(null); });
+    setFailed(false); setReport(null);
+    void loadHealth().then((r) => { if (live) setReport(r); }).catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
-  }, []);
+  }, [attempt]);
 
   const groups = report ? [...new Set(report.functions.map((f) => f.group))] : [];
 
@@ -41,7 +47,15 @@ export default function Health() {
           </div>
         </div>
 
-        {!report ? (
+        {/* The clock: deployment says functions EXIST; this says the heartbeat actually TICKS. */}
+        <div className="mb-5"><ClockStatus /></div>
+
+        {!report && failed ? (
+          <div className="rounded-xl border border-forge-warn/40 bg-forge-warn/10 p-4 text-sm text-forge-warn">
+            <p>The health probe itself failed — the backend may be unreachable or Supabase isn't configured.</p>
+            <button onClick={() => setAttempt((a) => a + 1)} className="mt-2 rounded-lg border border-forge-warn/50 px-3 py-1.5 text-xs text-forge-warn hover:bg-forge-warn/10">Retry the probe</button>
+          </div>
+        ) : !report ? (
           <div className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Probing…</div>
         ) : (
           <div className="space-y-5">

@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import type { IdentitySlot, MindBelief, MindDecision, MindEvent, MindIdentityDoc } from '../types';
 import type { MindEventInput } from '../lib/garvis/mind';
-import { compileMindContext } from '../lib/garvis/mind';
+import { compileMindContext, attachEvidence } from '../lib/garvis/mind';
 import { recordMindEvent } from '../lib/garvis/mindStore';
 
 const EVENT_WINDOW = 100; // recent events kept in memory; the full log stays in the DB
@@ -123,8 +123,22 @@ export function useMind() {
     await refresh();
   };
 
+  /** Link a REAL event to a belief as supporting/contradicting evidence (deep scan: attachEvidence
+   *  was dead code, so beliefs could never earn their standing). The user picks which event bears on
+   *  the belief — evidence is declared, never invented. Idempotent via attachEvidence. */
+  const linkEvidence = async (beliefId: string, eventId: string, kind: 'supports' | 'contradicts'): Promise<void> => {
+    const b = beliefs.find((x) => x.id === beliefId);
+    if (!b) return;
+    const next = attachEvidence(b, eventId, kind);
+    const { error } = await supabase.from('mind_beliefs')
+      .update({ supporting_event_ids: next.supporting_event_ids, contradicting_event_ids: next.contradicting_event_ids })
+      .eq('id', beliefId);
+    must(error);
+    await refresh();
+  };
+
   return {
     identity, beliefs, decisions, events, loading, refresh,
-    emit, mindContext, saveIdentity, openDecision, closeDecision, addNote, addBelief, retireBelief,
+    emit, mindContext, saveIdentity, openDecision, closeDecision, addNote, addBelief, retireBelief, linkEvidence,
   };
 }

@@ -81,6 +81,7 @@ export async function listMailBatches(worldId: string): Promise<MailBatchRow[]> 
 export async function logMailBatch(input: {
   worldId: string; clusterId: string | null; artifactSlug: string | null;
   title: string; pieceCount: number; status: MailBatchRow['status']; vendor?: string; costUsd?: number | null; notes?: string;
+  territoryId?: string | null;
 }): Promise<MailBatchRow> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
@@ -91,7 +92,7 @@ export async function logMailBatch(input: {
     owner_id: uid, world_id: input.worldId, cluster_id: input.clusterId, artifact_slug: input.artifactSlug,
     title: input.title, piece_count: Math.floor(input.pieceCount), channel: 'postcard',
     status: input.status, vendor: input.vendor ?? null, cost_usd: input.costUsd ?? null,
-    notes: input.notes ?? null, mailed_at: mailedAt,
+    notes: input.notes ?? null, mailed_at: mailedAt, territory_id: input.territoryId ?? null,
   }).select('id, title, piece_count, channel, status, vendor, cost_usd, mailed_at, created_at').single();
   if (error || !data) throw new Error(`Could not log the batch: ${error?.message ?? 'unknown error'}`);
 

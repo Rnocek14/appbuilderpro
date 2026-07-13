@@ -10,7 +10,7 @@ import { Badge, Button, Card, EmptyState, Input, Spinner, StatCard } from '../co
 import { useMind } from '../hooks/useMind';
 import { beliefEvidence, decisionHitRate, isDecisionOpen } from '../lib/garvis/mind';
 import type { BeliefVerdict } from '../lib/garvis/mind';
-import type { IdentitySlot, MindDecision } from '../types';
+import type { IdentitySlot, MindBelief, MindDecision, MindEvent } from '../types';
 
 const SLOTS: { slot: IdentitySlot; label: string; hint: string }[] = [
   { slot: 'goals', label: 'Goals', hint: 'What are you building toward? Garvis optimizes for this.' },
@@ -73,8 +73,54 @@ function IdentityPanel() {
   );
 }
 
+function BeliefRow({ b, events, onLink, onRetire }: {
+  b: MindBelief; events: MindEvent[];
+  onLink: (beliefId: string, eventId: string, kind: 'supports' | 'contradicts') => Promise<void>;
+  onRetire: (id: string) => void;
+}) {
+  const e = beliefEvidence(b);
+  const [picking, setPicking] = useState<null | 'supports' | 'contradicts'>(null);
+  const linked = new Set([...b.supporting_event_ids, ...b.contradicting_event_ids]);
+  const candidates = events.filter((ev) => !linked.has(ev.id)).slice(0, 8);
+  return (
+    <li className="rounded-lg border border-forge-border bg-forge-panel/40 px-3 py-2">
+      <div className="flex items-start gap-2">
+        <Badge tone={VERDICT_TONE[e.verdict]}>{e.verdict}</Badge>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm text-forge-ink">{b.statement}</p>
+          <p className="text-[11px] text-forge-dim/70">{b.scope} · {e.supports} for / {e.contradicts} against</p>
+        </div>
+        {/* Beliefs earn their standing from linked events — the user declares which real event bears
+            on the belief (deep scan: this was dead code, so every belief was stuck "tentative"). */}
+        <button onClick={() => setPicking((p) => (p === 'supports' ? null : 'supports'))} className="text-[11px] text-forge-ok/70 hover:text-forge-ok" title="Link an event that supports this">+ for</button>
+        <button onClick={() => setPicking((p) => (p === 'contradicts' ? null : 'contradicts'))} className="text-[11px] text-forge-warn/70 hover:text-forge-warn" title="Link an event that contradicts this">+ against</button>
+        <button onClick={() => onRetire(b.id)} className="text-[11px] text-forge-dim/50 hover:text-forge-ink">retire</button>
+      </div>
+      {picking && (
+        <div className="mt-2 rounded-lg border border-forge-border bg-forge-bg/60 p-2">
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-forge-dim/70">Pick the event that {picking === 'supports' ? 'supports' : 'contradicts'} this</p>
+          {candidates.length === 0 ? (
+            <p className="text-[11px] italic text-forge-dim/50">No unlinked events yet — record decisions and notes, and they'll show here.</p>
+          ) : (
+            <ul className="space-y-1">
+              {candidates.map((ev) => (
+                <li key={ev.id}>
+                  <button onClick={() => { void onLink(b.id, ev.id, picking); setPicking(null); }}
+                    className="w-full truncate rounded px-1.5 py-1 text-left text-[11px] text-forge-dim hover:bg-forge-raised hover:text-forge-ink">
+                    {ev.subject || ev.event_type}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
 function BeliefsPanel() {
-  const { beliefs, addBelief, retireBelief } = useMind();
+  const { beliefs, events, addBelief, retireBelief, linkEvidence } = useMind();
   const [draft, setDraft] = useState('');
   const active = beliefs.filter((b) => b.status === 'active');
 
@@ -98,19 +144,9 @@ function BeliefsPanel() {
         <p className="text-sm italic text-forge-dim/50">No beliefs yet. They start tentative and earn their standing from events.</p>
       ) : (
         <ul className="space-y-2">
-          {active.map((b) => {
-            const e = beliefEvidence(b);
-            return (
-              <li key={b.id} className="flex items-start gap-2 rounded-lg border border-forge-border bg-forge-panel/40 px-3 py-2">
-                <Badge tone={VERDICT_TONE[e.verdict]}>{e.verdict}</Badge>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-forge-ink">{b.statement}</p>
-                  <p className="text-[11px] text-forge-dim/70">{b.scope} · {e.supports} for / {e.contradicts} against</p>
-                </div>
-                <button onClick={() => void retireBelief(b.id)} className="text-[11px] text-forge-dim/50 hover:text-forge-ink">retire</button>
-              </li>
-            );
-          })}
+          {active.map((b) => (
+            <BeliefRow key={b.id} b={b} events={events} onLink={linkEvidence} onRetire={(id) => void retireBelief(id)} />
+          ))}
         </ul>
       )}
     </Card>

@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles, ArrowRight, Home, Layers, HelpCircle, Shuffle, Wand2, Clapperboard, Play, Loader2,
   Telescope, CircleHelp, FolderKanban, BookOpen, CheckCircle2, Moon, Map as MapIcon, Link2,
-  Split, FlaskConical, Scale, Atom, ClipboardCheck, Lightbulb, GitCompare, Microscope,
+  Split, FlaskConical, Scale, Atom, ClipboardCheck, Lightbulb, GitCompare, Microscope, Waypoints,
 } from 'lucide-react';
 import {
   relatedClusters, addChild, whatIfChild, slugify, EPISTEMICS,
@@ -22,6 +22,9 @@ import { compareNodes, formalizeTheory } from '../../lib/garvis/inquiryRun';
 import { THEORY_ARTIFACT_ID, type Comparison } from '../../lib/garvis/inquiry';
 import { recordPick, kindBias } from '../../lib/garvis/currents';
 import { LabBench } from '../../components/garvis/LabBench';
+import { MechanismCanvas } from '../../components/garvis/MechanismCanvas';
+import { designVisual, type DesignedVisual } from '../../lib/garvis/visualRun';
+import { clampSpecValues, specDefaults, specArtifact } from '../../lib/garvis/visualGrammar';
 
 const PREFETCH_N = 3;
 
@@ -93,7 +96,20 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const [showTheory, setShowTheory] = useState(false);
   const [viewArt, setViewArt] = useState<Artifact | null>(null); // made-here chip re-opened
   const [labErr, setLabErr] = useState('');
+  // PICTURE IT — the designed mechanism visual for THIS branch (visual grammar). The spec's dials
+  // live here (assumptions the user owns); 'starter' means the offline heuristic designed it.
+  const [picture, setPicture] = useState<DesignedVisual | null>(null);
+  const [pictureVals, setPictureVals] = useState<Record<string, number>>({});
+  const [pictureSavedId, setPictureSavedId] = useState<string | null>(null);
   const [, setReadyTick] = useState(0);
+  // A designed visual resolving after the user has stepped to another branch must be dropped,
+  // not painted onto whatever branch is focused now.
+  const focusRef = useRef<string | null>(null);
+  // The LIVE graph, read at merge time. The three entry loads (answer, media, video) resolve at
+  // different times; each used to setGraph(its-own-snapshot), so the last to land wiped the others —
+  // videos (slowest) erased the composed answer, forcing a paid recompose (deep scan P0, theme 4).
+  // GalaxyView already solved this with a live-ref merge; IdeaRoom now does the same.
+  const liveGraph = useRef(graph);
   const leadsCache = useRef<Record<string, Lead[]>>({});
   const done = useRef<Set<string>>(new Set());
   const prefetch = useRef<Record<string, Prospect | 'loading'>>({});
@@ -101,6 +117,52 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const byId = useMemo(() => new Map(graph.clusters.map((c) => [c.id, c])), [graph]);
   const roots = useMemo(() => graph.clusters.filter((c) => !c.parentId), [graph]);
   const focus = (focusId && byId.get(focusId)) || roots[0] || graph.clusters[0] || null;
+
+  focusRef.current = focus?.id ?? null;
+  liveGraph.current = graph;
+
+  // Merge a slow load's result for cluster `id` into the LIVE graph instead of replacing it. Always
+  // unions new artifacts (never drop what another load already added). Only the ANSWER load
+  // (isAnswer) carries an authoritative summary/trajectory; media/video carry the entry-time base,
+  // so they must NOT touch those fields or they'd wipe the answer that landed first.
+  const mergeInto = (id: string, res: ClusterGraph, isAnswer = false) => {
+    const upd = res.clusters.find((c) => c.id === id);
+    if (!upd) return;
+    const live = liveGraph.current;
+    let changed = false;
+    const merged = live.clusters.map((c) => {
+      if (c.id !== id) return c;
+      const have = new Set(c.artifacts.map((a) => a.id));
+      const fresh = upd.artifacts.filter((a) => !have.has(a.id));
+      const summary = isAnswer && upd.summary ? upd.summary : c.summary;
+      const trajectory = isAnswer && upd.trajectory ? upd.trajectory : c.trajectory;
+      if (!fresh.length && summary === c.summary && trajectory === c.trajectory) return c;
+      changed = true;
+      return { ...c, summary, trajectory, artifacts: [...fresh, ...c.artifacts] };
+    });
+    if (!changed) return;
+    const next = { ...live, clusters: merged };
+    liveGraph.current = next;
+    setGraph(next);
+  };
+
+  // Commit a lab/nav op's whole-graph result, but PRESERVE any focus-cluster artifacts (media/video)
+  // that landed via a slow entry load while the op was in flight — the op computed from a call-time
+  // graph and would otherwise drop them on setGraph (deep scan residual: recoverable media loss).
+  // Additive: only re-adds focus artifacts the result is missing; never removes anything.
+  const commitGraph = (result: ClusterGraph) => {
+    const fid = focusRef.current;
+    const liveFocus = fid ? liveGraph.current.clusters.find((c) => c.id === fid) : undefined;
+    const resFocus = fid ? result.clusters.find((c) => c.id === fid) : undefined;
+    let next = result;
+    if (liveFocus && resFocus) {
+      const resIds = new Set(resFocus.artifacts.map((a) => a.id));
+      const missing = liveFocus.artifacts.filter((a) => !resIds.has(a.id));
+      if (missing.length) next = { ...result, clusters: result.clusters.map((c) => (c.id === fid ? { ...c, artifacts: [...c.artifacts, ...missing] } : c)) };
+    }
+    liveGraph.current = next;
+    setGraph(next);
+  };
 
   const ancestors = focus ? trail(byId, focus.id) : [];
   const children = focus ? graph.clusters.filter((c) => c.parentId === focus.id).sort((a, b) => b.salience - a.salience) : [];
@@ -112,6 +174,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     setLeads(leadsCache.current[id] ?? []); setSimilar(null);
     setWhatIf(null); setShowBench(false); setPickStatus(false); // lab state is per-branch
     setComparePick(false); setCompareQ(''); setComparison(null); setShowTheory(false); setLabErr(''); setViewArt(null);
+    setPicture(null); setPictureVals({}); setPictureSavedId(null);
     if (done.current.has(id)) return;
     done.current.add(id);
     let cancelled = false;
@@ -122,9 +185,9 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     setLoading({ answer: needAnswer, media: needMedia, video: needVideo });
     // The composed answer failing must SAY so (labErr + a retry path via re-entering); media and
     // videos are enrichment — they fail quiet, but never as unhandled rejections.
-    if (needAnswer) exploreLeads(graph, id, ancestors.map((a) => a.title)).then((r) => { if (cancelled) return; leadsCache.current[id] = r.leads; setLeads(r.leads); setGraph(r.graph); if (r.costUsd) onCost?.(r.costUsd); }).catch((e) => { if (!cancelled) { done.current.delete(id); setLabErr(e instanceof Error ? e.message : "Couldn't compose this thought — step out and back in to retry."); } }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); });
-    if (needMedia) gatherWikiMedia(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, media: false })); });
-    if (needVideo) gatherVideos(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, video: false })); });
+    if (needAnswer) exploreLeads(graph, id, ancestors.map((a) => a.title)).then((r) => { if (cancelled) return; leadsCache.current[id] = r.leads; setLeads(r.leads); mergeInto(id, r.graph, true); if (r.costUsd) onCost?.(r.costUsd); }).catch((e) => { if (!cancelled) { done.current.delete(id); setLabErr(e instanceof Error ? e.message : "Couldn't compose this thought — step out and back in to retry."); } }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); });
+    if (needMedia) gatherWikiMedia(graph, id).then((r) => { if (!cancelled && r.found) mergeInto(id, r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, media: false })); });
+    if (needVideo) gatherVideos(graph, id).then((r) => { if (!cancelled && r.found) mergeInto(id, r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, video: false })); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.id]);
@@ -168,8 +231,8 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     if (p && p !== 'loading') {
       const arts: Artifact[] = [...(p.understanding ? [p.understanding] : []), ...p.images];
       leadsCache.current[id] = p.leads; done.current.add(id);
-      setGraph({ ...g2, clusters: g2.clusters.map((c) => (c.id === id ? { ...c, summary: p.summary || c.summary, trajectory: p.trajectory ?? c.trajectory, artifacts: [...arts, ...c.artifacts] } : c)) });
-    } else setGraph(g2);
+      commitGraph({ ...g2, clusters: g2.clusters.map((c) => (c.id === id ? { ...c, summary: p.summary || c.summary, trajectory: p.trajectory ?? c.trajectory, artifacts: [...arts, ...c.artifacts] } : c)) });
+    } else commitGraph(g2);
     travel(id);
   };
   // ONE op at a time: every lab/nav op reads `graph` at call time and writes it back on resolve,
@@ -179,7 +242,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const run = async (label: string, fn: () => Promise<{ graph?: ClusterGraph; costUsd?: number } | RelatedCluster[]>) => {
     if (busy) return;
     setBusy(label); setLabErr('');
-    try { const res = await fn(); if (Array.isArray(res)) setSimilar(res); else { if (res.graph) setGraph(res.graph); if (res.costUsd) onCost?.(res.costUsd); } }
+    try { const res = await fn(); if (Array.isArray(res)) setSimilar(res); else { if (res.graph) commitGraph(res.graph); if (res.costUsd) onCost?.(res.costUsd); } }
     catch (e) { setLabErr(e instanceof Error ? e.message : "That didn't go through — try again."); }
     finally { setBusy(null); }
   };
@@ -194,13 +257,13 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     if (!twist) return;
     const { graph: g2, id } = whatIfChild(graph, focus.id, twist);
     if (!id) return;
-    setGraph(g2);
+    commitGraph(g2);
     travel(id);
   };
 
   // Lab Bench runs land as simulation-record artifacts ON this branch (same id = same inputs —
   // an identical re-run replaces nothing and adds nothing).
-  const saveArtifact = (a: Artifact) => setGraph({
+  const saveArtifact = (a: Artifact) => commitGraph({
     ...graph,
     clusters: graph.clusters.map((c) => c.id === focus.id
       ? (c.artifacts.some((x) => x.id === a.id) ? c : { ...c, artifacts: [...c.artifacts, a] })
@@ -208,7 +271,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   });
 
   const setEpistemic = (e: Epistemic | undefined) => {
-    setGraph({ ...graph, clusters: graph.clusters.map((c) => (c.id === focus.id ? { ...c, epistemic: e } : c)) });
+    commitGraph({ ...graph, clusters: graph.clusters.map((c) => (c.id === focus.id ? { ...c, epistemic: e } : c)) });
     setPickStatus(false);
   };
 
@@ -222,7 +285,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     try {
       const r = await compareNodes(graph, focus.id, bId);
       if (r.costUsd) onCost?.(r.costUsd);
-      if (r.cmp) { setGraph(r.graph); setComparison({ withTitle: byId.get(bId)?.title ?? 'the other', cmp: r.cmp }); }
+      if (r.cmp) { commitGraph(r.graph); setComparison({ withTitle: byId.get(bId)?.title ?? 'the other', cmp: r.cmp }); }
       else setLabErr(r.error ?? 'The comparison came back too thin to trust.');
     } catch (e) { setLabErr(e instanceof Error ? e.message : 'Comparison failed.'); }
     finally { setBusy(null); setComparingWith(null); }
@@ -238,7 +301,7 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     try {
       const r = await formalizeTheory(graph, focus.id);
       if (r.costUsd) onCost?.(r.costUsd);
-      if (r.scaffold) { setGraph(r.graph); setShowTheory(true); }
+      if (r.scaffold) { commitGraph(r.graph); setShowTheory(true); }
       else setLabErr(r.error ?? 'The scaffold came back too thin to trust.');
     } catch (e) { setLabErr(e instanceof Error ? e.message : 'Scaffolding failed.'); }
     finally { setBusy(null); }
@@ -368,6 +431,28 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             <span className="mx-1 inline-block h-3 w-px self-center bg-forge-border" aria-hidden />{/* learn ↑ · test ↓ */}
             <button onClick={() => setWhatIf(whatIf === null ? '' : null)} className={`inline-flex items-center gap-1 ${whatIf !== null ? 'text-orange-400' : 'hover:text-orange-400'}`}><Split size={11} /> what if…</button>
             <button onClick={() => setShowBench((v) => !v)} className={`inline-flex items-center gap-1 ${showBench ? 'text-cyan-300' : 'hover:text-cyan-300'}`}><FlaskConical size={11} /> lab bench</button>
+            <button
+              onClick={() => {
+                if (picture) { setPicture(null); return; }
+                const focusIdAtCall = focus.id;
+                void run('pic', async () => {
+                  const r = await designVisual(focus.title, focus.summary);
+                  if (focusRef.current !== focusIdAtCall) return {}; // stale — user moved on
+                  if ('visual' in r) {
+                    setPicture(r.visual);
+                    setPictureVals(specDefaults(r.visual.spec));
+                    setPictureSavedId(null);
+                    return { costUsd: r.visual.costUsd };
+                  }
+                  if ('refusal' in r) throw new Error(`No honest mechanism for this one: ${r.refusal}`);
+                  throw new Error(r.error);
+                });
+              }}
+              className={`inline-flex items-center gap-1 ${picture ? 'text-emerald-300' : 'hover:text-emerald-300'}`}
+              title="Design the mechanism visual for this branch — an animated model whose dials are your assumptions"
+            >
+              {busy === 'pic' ? <Loader2 size={11} className="animate-spin" /> : <Waypoints size={11} />} picture it
+            </button>
             <button onClick={() => setComparePick((v) => !v)} className={`inline-flex items-center gap-1 ${comparePick || comparison ? 'text-sky-400' : 'hover:text-sky-400'}`}>{busy === 'cmp' ? <Loader2 size={11} className="animate-spin" /> : <GitCompare size={11} />} compare</button>
             <button onClick={runTheory} className={`inline-flex items-center gap-1 ${theoryArt ? 'text-violet-400' : 'hover:text-violet-400'}`}>{busy === 'theory' ? <Loader2 size={11} className="animate-spin" /> : <Microscope size={11} />} {theoryArt ? 'rigor ✓' : 'make it rigorous'}</button>
           </div>
@@ -425,6 +510,50 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
 
           {/* THE LAB BENCH — manipulate the idea: known equations + your dials, honestly labeled */}
           {showBench && <LabBench cluster={focus} onSave={saveArtifact} />}
+
+          {/* THE DESIGNED MECHANISM — picture-it's output: an archetype animation whose dials are
+              the user's assumptions. 'starter' is plainly labeled; save writes a diagram artifact. */}
+          {picture && (() => {
+            const clampedVals = clampSpecValues(picture.spec, pictureVals);
+            return (
+              <div className="ku-rise mt-5 rounded-2xl border border-forge-border bg-forge-panel/50 p-4 backdrop-blur">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <Waypoints size={15} className="text-emerald-300" />
+                  <span className="text-sm font-semibold text-forge-ink">{picture.spec.title}</span>
+                  <span className="rounded-full border border-forge-border px-2 py-0.5 text-[9px] uppercase tracking-wide text-forge-dim">{picture.spec.archetype}</span>
+                  {picture.source === 'starter' && (
+                    <span className="rounded-full border border-forge-warn/40 px-2 py-0.5 text-[9px] uppercase tracking-wide text-forge-warn" title="The designer was unreachable — this is the offline starter mechanism; every dial is yours to set.">
+                      starter — dials are assumptions
+                    </span>
+                  )}
+                </div>
+                <MechanismCanvas spec={picture.spec} values={clampedVals} />
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {picture.spec.params.map((p) => (
+                    <div key={p.key}>
+                      <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                        <span className="text-forge-dim">{p.label}</span>
+                        <span className="font-mono text-forge-ink">{clampedVals[p.key]}{p.unit ? ` ${p.unit}` : ''}</span>
+                      </div>
+                      <input
+                        type="range" min={p.min} max={p.max} step={p.step} value={clampedVals[p.key]}
+                        onChange={(e) => { setPictureVals((v) => ({ ...v, [p.key]: Number(e.target.value) })); setPictureSavedId(null); }}
+                        className="w-full accent-[#34d399]"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[10px] text-forge-dim/70">{picture.spec.caption}</p>
+                <p className="mt-0.5 text-[10px] text-forge-dim/60"><span className="text-forge-dim">Basis:</span> {picture.spec.basis}</p>
+                <button
+                  onClick={() => { const a = specArtifact(picture.spec, clampedVals); saveArtifact(a); setPictureSavedId(a.id); }}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-emerald-400/40 px-3 py-1.5 text-xs text-forge-ink transition-colors hover:bg-emerald-400/10"
+                >
+                  {pictureSavedId ? <CheckCircle2 size={12} className="text-forge-ok" /> : <BookOpen size={12} />} {pictureSavedId ? 'Saved to this branch' : 'Save this mechanism'}
+                </button>
+              </div>
+            );
+          })()}
 
           {/* comparing… — the feedback renders exactly where the readout will land */}
           {comparingWith && (

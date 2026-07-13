@@ -25,7 +25,7 @@ import {
 } from './workweb';
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
 import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail, type WorldDNA } from './genesis';
-import { expertiseFor, productLabExpertiseFor, isProductLab, detectVertical, type Vertical } from './expertise';
+import { seedPackFor, detectVertical, type Vertical } from './expertise';
 import { producerFor } from './producers';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
@@ -336,6 +336,14 @@ function worldVertical(ctx: BusinessContext, dna?: WorldDNA | null): Vertical {
  *  FAIL-SOFT by design: a seeding failure never fails world creation — the world just starts
  *  emptier, and any area's generator tool writes the same pack on demand. Idempotent (upsert on
  *  cluster_id+slug), so re-running never duplicates. */
+/** The whole world's charter set — so pack selection can route by the world's SHAPE, not one cluster
+ *  in isolation (a vault only knows it's a vault; whether it's a support KB or a brand vault depends
+ *  on the studio next door). Best-effort; an empty result just means the marketing default applies. */
+async function worldCharterSet(worldId: string): Promise<Charter[]> {
+  const { data } = await supabase.from('knowledge_clusters').select('charter').eq('world_id', worldId).not('charter', 'is', null);
+  return (data ?? []).map((r) => parseCharter((r as { charter: unknown }).charter)).filter((c): c is Charter => !!c);
+}
+
 export async function seedWorld(worldId: string, ctx: BusinessContext, dna?: WorldDNA | null): Promise<number> {
   try {
     const { data: sess } = await supabase.auth.getUser();
@@ -348,14 +356,15 @@ export async function seedWorld(worldId: string, ctx: BusinessContext, dna?: Wor
     // PRODUCT LABS get product knowledge (flow audit H1): a feature lab born full of marketing
     // playbooks and finance go-to-market advice ("trust is the product — referrals first") is
     // noise wearing an expert costume. Product variants for intel/vault/ledger, no industry overlay.
-    const productLab = isProductLab(parsed.filter((p) => p.charter).map((p) => p.charter!));
+    // The world's SHAPE decides its born-with knowledge (flow audit H1 + the environment stress test):
+    // a product lab gets product packs; an answering desk / document studio / data workspace gets
+    // kind-matched knowledge content (not hero-photo checklists, competitor scans, and send-KPI trees
+    // for outreach it never does); a marketing world gets the functional pack + its industry overlay.
+    const charters = parsed.filter((p) => p.charter).map((p) => p.charter!);
     let seeded = 0;
     for (const r of parsed) {
       if (!r.charter) continue;
-      const pack = productLab
-        ? productLabExpertiseFor(r.charter.archetype, r.charter.flavor)
-        : expertiseFor(r.charter.archetype, r.charter.flavor, vertical);
-      const arts: PlayArtifact[] = pack
+      const arts: PlayArtifact[] = seedPackFor(charters, r.charter.archetype, r.charter.flavor, vertical)
         .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
       seeded += await writeArtifacts(uid, r.id, arts, SEED_SOURCE);
     }
@@ -544,7 +553,9 @@ export async function runTool(
         // makes this a refresh, not a dupe.)
         if (cluster.charter) {
           const vertical = worldVertical(voice.ctx, voice.dna);
-          const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
+          // Route by the WHOLE world's shape so a single-purpose world's intel/ledger regenerate their
+          // coherent packs on a tool click, never the marketing ones (which would re-pollute the world).
+          const arts: PlayArtifact[] = seedPackFor(await worldCharterSet(worldId), cluster.charter.archetype, cluster.charter.flavor, vertical)
             .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, voice.ctx!) }));
           const n = await writeArtifacts(uid, cluster.id, arts, SEED_SOURCE);
           return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}) in this world's voice.` : 'Nothing generated.', artifacts: n };
@@ -576,7 +587,7 @@ export async function runTool(
       if (cluster.charter) {
         const ctx = minimalContext(voice.title ?? cluster.title);
         const vertical = worldVertical(ctx, voice.dna);
-        const arts: PlayArtifact[] = expertiseFor(cluster.charter.archetype, cluster.charter.flavor, vertical)
+        const arts: PlayArtifact[] = seedPackFor(await worldCharterSet(worldId), cluster.charter.archetype, cluster.charter.flavor, vertical)
           .map((s) => ({ slug: s.slug, kind: s.kind, title: s.title, detail: mergeTokens(s.detail, ctx) }));
         const n = await writeArtifacts(uid, cluster.id, arts, SEED_SOURCE);
         return { ok: n > 0, message: n > 0 ? `Wrote the ${cluster.title} playbook (${n} doc${n === 1 ? '' : 's'}).` : 'Nothing generated.', artifacts: n };

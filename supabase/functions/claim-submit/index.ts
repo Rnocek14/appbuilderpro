@@ -31,6 +31,14 @@ Deno.serve(async (req) => {
       .select('id, slug, business_name, user_id').eq('id', previewSiteId).single();
     if (!site) return json({ error: 'Preview not found.' }, 404);
 
+    // RATE LIMIT (deep scan P1): this is anon and rings the owner's webhook, so cap the burst per
+    // preview — otherwise anyone with a preview id could flood publish_requests and spam the owner.
+    // Fail-open on a count error so a real claim never gets blocked by a metrics hiccup.
+    const since = new Date(Date.now() - 60_000).toISOString();
+    const { count: recent, error: rlErr } = await admin.from('publish_requests')
+      .select('id', { count: 'exact', head: true }).eq('preview_site_id', previewSiteId).gte('created_at', since);
+    if (!rlErr && (recent ?? 0) >= 5) return json({ error: 'Too many requests — try again shortly.' }, 429);
+
     const { error: insErr } = await admin.from('publish_requests').insert({
       preview_site_id: previewSiteId,
       name: name.trim().slice(0, 120),

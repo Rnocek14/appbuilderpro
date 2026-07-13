@@ -59,7 +59,7 @@ export function RemindersCard() {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void add(); }}
             placeholder="Remind me to…" className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)}
+          <input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} title="With the heartbeat armed, due reminders also ping your webhook at the due time"
             className="rounded-lg border border-forge-border bg-forge-bg px-2 py-1 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
           <button onClick={() => void add()} className="rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10">Save</button>
         </div>

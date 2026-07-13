@@ -3,14 +3,15 @@
 // timeline (messages sent / replies / leads / notes). The audit's "no contacts CRUD" gap, closed.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Users, Trash2, ChevronRight } from 'lucide-react';
+import { Loader2, Users, Trash2, ChevronRight, Ban, RotateCcw } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { EmptyState } from '../components/ui';
+import { EmptyState, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
+import { BatchSendCard } from '../components/garvis/BatchSendCard';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import {
-  getContact, updateContact, deleteContact, listNotes, addNote, contactTimeline,
+  getContact, updateContact, deleteContact, suppressContact, unsuppressContact, listNotes, addNote, contactTimeline,
   type ContactDetail, type ContactNote, type ContactStage,
 } from '../lib/garvis/contactsRun';
 import type { TimelineItem } from '../lib/garvis/contactsCore';
@@ -49,7 +50,23 @@ export default function Contacts() {
         </div>
 
         {rows === null ? (
-          <div className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+          // Skeletons over spinners (design review): the list keeps its shape while it loads.
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,320px)_1fr]">
+            <div className="space-y-2">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="flex items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+                  <Skeleton className="h-8 w-8 rounded-full" />
+                  <div className="flex-1 space-y-1.5"><Skeleton className="h-3.5 w-3/5" /><Skeleton className="h-3 w-2/5" /></div>
+                </div>
+              ))}
+            </div>
+            <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-5">
+              <Skeleton className="h-5 w-1/3" />
+              <Skeleton className="mt-3 h-3 w-1/2" />
+              <Skeleton className="mt-6 h-3 w-full" />
+              <Skeleton className="mt-2 h-3 w-4/5" />
+            </div>
+          </div>
         ) : loadFailed ? (
           <div className="rounded-xl border border-forge-err/30 bg-forge-err/10 p-4 text-sm text-forge-err">
             Couldn't load your contacts — this is a connection problem, not an empty list.{' '}
@@ -76,6 +93,8 @@ export default function Contacts() {
             </div>
           </div>
         )}
+
+        <BatchSendCard onToast={(k, m) => toast(k, m)} />
       </div>
     </AppShell>
   );
@@ -122,8 +141,19 @@ function ContactDetailPane({ id, onDeleted, onStageChanged }: { id: string; onDe
     finally { setSavingNote(false); }
   };
   const remove = async () => {
+    // Delete cascades notes irrecoverably (deep scan) — confirm before it's gone.
+    if (!window.confirm(`Delete ${c?.full_name || c?.email}? Their notes and history go with them and can't be recovered.`)) return;
     try { await deleteContact(id); toast('success', 'Contact deleted.'); onDeleted(); }
     catch (e) { toast('error', e instanceof Error ? e.message : 'Could not delete.'); }
+  };
+  const suppressed = c?.email_status === 'unsubscribed';
+  const toggleSuppress = async () => {
+    if (!c) return;
+    try {
+      if (suppressed) { await unsuppressContact(id, c.email); setC((p) => p ? { ...p, email_status: 'unknown' } : p); toast('success', 'Suppression lifted — this address can be emailed again.'); }
+      else { await suppressContact(id, c.email); setC((p) => p ? { ...p, email_status: 'unsubscribed' } : p); toast('success', 'Added to your suppression list — no more emails will go to this address.'); }
+      onStageChanged();
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update suppression.'); }
   };
 
   if (detailFailed) return <div className="rounded-2xl border border-forge-err/30 bg-forge-err/10 p-6 text-sm text-forge-err">Couldn't load this contact — try selecting them again.</div>;
@@ -134,9 +164,14 @@ function ContactDetailPane({ id, onDeleted, onStageChanged }: { id: string; onDe
         <div className="flex items-start gap-2">
           <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onBlur={() => void saveName()}
             placeholder="Name" className="flex-1 rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-lg font-semibold text-forge-ink hover:border-forge-border focus:border-forge-ember/60 focus:outline-none" />
+          <button onClick={() => void toggleSuppress()}
+            title={suppressed ? 'Lift suppression — allow emails to this address again' : 'Suppress — record that they opted out (e.g. asked you by phone). No email can ever go to this address.'}
+            className={cn('transition-colors', suppressed ? 'text-forge-ok hover:text-forge-ink' : 'text-forge-dim hover:text-forge-warn')}>
+            {suppressed ? <RotateCcw size={15} /> : <Ban size={15} />}
+          </button>
           <button onClick={() => void remove()} title="Delete contact" className="text-forge-dim hover:text-forge-warn"><Trash2 size={15} /></button>
         </div>
-        <p className="text-sm text-forge-dim">{c.email} · {c.email_status}</p>
+        <p className="text-sm text-forge-dim">{c.email} · <span className={suppressed ? 'text-forge-warn' : ''}>{c.email_status}</span></p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {STAGES.map((s) => (
             <button key={s} onClick={() => void saveStage(s)}

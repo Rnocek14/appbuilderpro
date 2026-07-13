@@ -342,6 +342,61 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
       };
     }
 
+    case 'create_reminder': {
+      const title = String(input.title ?? '').trim();
+      if (title.length < 2) throw new Error('create_reminder needs a title.');
+      let dueAt: string | null = null;
+      if (input.due_at) {
+        const t = Date.parse(String(input.due_at));
+        if (!Number.isFinite(t)) throw new Error('due_at must be an ISO timestamp — resolve the phrasing to a concrete time first.');
+        dueAt = new Date(t).toISOString();
+      }
+      const { addReminder } = await import('./remindersRun');
+      const r = await addReminder({ title, dueAt, detail: input.detail ? String(input.detail) : undefined });
+      return {
+        ok: true, reminder_id: r.id, title: r.title, due_at: r.due_at,
+        note: dueAt
+          ? 'Reminder set — it surfaces in the waking moment and pings the webhook at the due time (heartbeat permitting).'
+          : 'Reminder set (no time given) — it sits in the reminders list until done.',
+      };
+    }
+
+    // --- THE CLOCK: a recurring read-and-record check. Safe to create directly (it never sends,
+    // posts, or spends — findings land in the waking moment; anything outward still stops at
+    // Approvals). Digests need a world; watches may be world-less. ---
+    case 'create_standing_order': {
+      const kind = String(input.kind ?? '');
+      if (kind !== 'watch_url' && kind !== 'cadence_digest') throw new Error('kind must be watch_url or cadence_digest.');
+      const cadence = String(input.cadence ?? '');
+      if (!['hourly', 'daily', 'weekly'].includes(cadence)) throw new Error('cadence must be hourly, daily, or weekly.');
+      let worldId: string | null = null;
+      let matchedWorld: string | null = null;
+      const worldName = String(input.world ?? '').trim();
+      if (worldName && worldName.toLowerCase() !== 'null') {
+        // Never silently drop or fuzz the binding: a named world that doesn't match is an ERROR for
+        // BOTH kinds (the model retries with the right name or explicitly omits world), and the
+        // match that was used is reported back so the narration says which world the order joined.
+        const { data: ws } = await supabase.from('knowledge_worlds')
+          .select('id, title').ilike('title', `%${worldName}%`).limit(2);
+        const rows = (ws ?? []) as { id: string; title: string }[];
+        if (rows.length === 0) throw new Error(`No world named "${worldName}" — name an existing world exactly, or omit it for a world-less watch.`);
+        worldId = rows[0].id; matchedWorld = rows[0].title;
+      } else if (kind === 'cadence_digest') {
+        throw new Error('A digest needs a world — pass its name.');
+      }
+      const { createOrder } = await import('./standingRun');
+      const order = await createOrder({
+        worldId, kind, label: String(input.label ?? ''), cadence: cadence as 'hourly' | 'daily' | 'weekly',
+        url: input.url ? String(input.url) : undefined,
+      });
+      return {
+        ok: true, order_id: order.id, label: order.label, cadence: order.cadence,
+        first_run_at: order.nextRunAt,
+        world: matchedWorld,
+        note: `Standing order set${matchedWorld ? ` on the world "${matchedWorld}"` : ' (no world attached — it appears in the Ventures page\'s standing-orders panel)'}. It runs on the heartbeat; real findings land in the waking moment. It only reads and records — nothing is ever sent automatically.`,
+      };
+    }
+
     // --- MONEY (flow audit): the invoice loop's conversational door. Draft freely; anything
     // outward stops at Approvals — queueInvoiceSend writes a PENDING approval, never an email. ---
     case 'list_invoices': {

@@ -21,10 +21,13 @@ const SCAN_THROTTLE_MS = 12 * 60 * 60 * 1000; // proactive scan at most twice a 
 
 // First-screen chips exist FOR the empty-thread user (they render only before the first message),
 // so every one must produce real value on a zero-data account — no chips that need an existing
-// portfolio. The three first moves are all here: venture, rabbit hole, build.
+// portfolio. Every objective class gets a door here: venture, rabbit hole, build, and the three
+// single-purpose desks (answering / documents / data) that nothing else in the UI advertises.
 const SUGGESTIONS = [
   'Design a business for me — I\'ll describe the idea',
-  'Help my mom grow her Lake Geneva real-estate business',
+  'Set up a desk that answers my emails from my saved answers',
+  'Set me up to write proposals for my clients',
+  'Help me analyze a spreadsheet of numbers',
   'Take me down the rabbit hole on local lead generation',
   'Build me an app for tracking client appointments',
   'What can you do?',

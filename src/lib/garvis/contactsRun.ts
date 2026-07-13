@@ -31,6 +31,39 @@ export async function deleteContact(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Manually suppress a contact — the "they asked me by phone / in person" opt-out (deep scan P1:
+ *  there was no client path to write suppression at all). Writes the sacred per-address suppression
+ *  row AND flips the contact so both gates block future sends; fail-closed and idempotent. */
+export async function suppressContact(id: string, email: string): Promise<void> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const addr = email.trim().toLowerCase();
+  if (!addr) throw new Error('This contact has no email to suppress.');
+  const { error } = await supabase.from('suppression').upsert(
+    { owner_id: uid, email: addr, domain: null, reason: 'manual' }, // per-address; never the whole domain
+    { onConflict: 'owner_id,email' },
+  );
+  if (error) throw new Error(`Could not add to the suppression list: ${error.message}`);
+  await supabase.from('contacts').update({ email_status: 'unsubscribed' }).eq('id', id).then(() => {}, () => {});
+}
+
+/** Undo a manual suppression (the row was added by mistake). Removes the suppression row and clears
+ *  the unsubscribed flag. Only lifts a 'manual' suppression — an inbound unsubscribe stays sacred. */
+export async function unsuppressContact(id: string, email: string): Promise<void> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const addr = email.trim().toLowerCase();
+  const { error } = await supabase.from('suppression').delete()
+    .eq('owner_id', uid).eq('email', addr).eq('reason', 'manual');
+  if (error) throw new Error(error.message);
+  // 'unknown' — the neutral pre-contact status (NOT 'active', which isn't a valid contact_email_status
+  // enum value; every other reset site uses 'unknown'). A bad value here would error and silently
+  // leave the contact blocked.
+  await supabase.from('contacts').update({ email_status: 'unknown' }).eq('id', id).then(() => {}, () => {});
+}
+
 export async function listNotes(contactId: string): Promise<ContactNote[]> {
   const { data } = await supabase.from('contact_notes')
     .select('id, body, created_at').eq('contact_id', contactId).order('created_at', { ascending: false }).limit(100);

@@ -48,7 +48,7 @@ with JSON: {"summary": "2-3 sentence overview", "built": ["..."], "concerns": ["
 type Job = {
   id: string; owner_id: string; project_id: string; title: string; brief: string;
   status: string; phase: string; milestone_index: number; fix_attempts: number;
-  budget_usd: number; spent_usd: number; max_fix_attempts: number;
+  budget_usd: number; spent_usd: number; max_fix_attempts: number; retry_count: number;
 };
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -302,15 +302,39 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ idle: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 
+  const MAX_RETRIES = 4;
+  // A transient AI/network blip should not kill a whole build (deep scan). These substrings mark
+  // errors worth retrying; anything else (a real logic/validation failure) fails terminally.
+  const isTransient = (m: string) => /\b(429|50[0-9]|52[0-9]|timeout|timed ?out|overloaded|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|fetch failed|temporarily|rate.?limit(ed)?|service unavailable)\b/i.test(m);
+
   let more = false;
   try {
     more = await step(job);
     if (more) {
-      await admin.from('jobs').update({ lease_until: null }).eq('id', job.id);
+      // Progress was made — free the lease for the next step and reset the transient-retry counter.
+      await admin.from('jobs').update({ lease_until: null, retry_count: 0 }).eq('id', job.id);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await admin.from('jobs').update({ status: 'failed', pause_reason: msg.slice(0, 500), lease_until: null }).eq('id', job.id);
+    const attempts = (job.retry_count ?? 0) + 1;
+    if (isTransient(msg) && attempts <= MAX_RETRIES) {
+      // Requeue with an exponential backoff lease (3s→6s→12s→24s, capped 5m). claim_next_job only
+      // re-picks a job once lease_until has passed, so the future lease IS the backoff; the job is
+      // checkpointed, so the re-claim resumes the same step rather than restarting the build.
+      const backoffMs = Math.min(300_000, 3000 * 2 ** (attempts - 1));
+      await admin.from('jobs').update({
+        status: 'queued', retry_count: attempts,
+        lease_until: new Date(Date.now() + backoffMs).toISOString(),
+        pause_reason: `transient error — retry ${attempts}/${MAX_RETRIES} after backoff: ${msg.slice(0, 260)}`,
+        updated_at: new Date().toISOString(),
+      }).eq('id', job.id);
+      // Do NOT self-chain; the cron/app tick re-claims once the lease expires.
+      return new Response(JSON.stringify({ jobId: job.id, retrying: attempts }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    // Terminal: a non-transient error, or retries exhausted.
+    await admin.from('jobs').update({ status: 'failed', retry_count: attempts, pause_reason: msg.slice(0, 500), lease_until: null }).eq('id', job.id);
     await admin.from('error_logs').insert({
       project_id: job.project_id, user_id: job.owner_id, source: 'job-worker', message: msg.slice(0, 1000),
     });

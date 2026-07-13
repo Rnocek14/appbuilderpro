@@ -380,6 +380,58 @@ function OutreachCard() {
   );
 }
 
+
+/** TIER 2 — the forward-in mailbox address. Forward (or auto-forward) mail here and it lands in
+ *  the Queue's Messages lane: draftable with your own record, replied through Approvals, and never
+ *  silently dropped. The alias only routes — the webhook still requires INBOUND_SECRET. */
+function ForwardInCard() {
+  const [alias, setAlias] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const { data: sess } = await supabase.auth.getUser();
+      if (!sess.user) return;
+      const { data } = await supabase.from('profiles').select('inbound_alias').eq('id', sess.user.id).maybeSingle();
+      if (live) setAlias((data as { inbound_alias?: string | null } | null)?.inbound_alias ?? null);
+    })();
+    return () => { live = false; };
+  }, []);
+
+  const copy = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* manual copy */ }
+  };
+
+  return (
+    <Card className="mt-4 p-5">
+      <h2 className="text-sm font-semibold text-forge-ink">Forward-in mailbox</h2>
+      <p className="mt-1 text-xs text-forge-dim">
+        Forward an email here (or add a Gmail auto-forward rule) and it lands in your Queue's
+        Messages lane — draftable with your own record, replied through Approvals. Mail to this
+        address is never silently dropped.
+      </p>
+      {alias ? (
+        <div className="mt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="rounded-lg border border-forge-border bg-forge-panel px-3 py-1.5 font-mono text-xs text-forge-ink">{alias}@&lt;your-inbound-domain&gt;</code>
+            <button onClick={() => void copy(alias)} className="rounded-lg border border-forge-border px-2.5 py-1.5 text-[11px] text-forge-dim hover:text-forge-ink">
+              {copied ? 'Copied' : 'Copy alias'}
+            </button>
+          </div>
+          <p className="mt-2 text-[11px] text-forge-dim/70">
+            Setup once: add an inbound domain in Resend (MX record), point its webhook at the
+            <code className="mx-1">resend-inbound</code> function with your INBOUND_SECRET header, and use
+            <code className="mx-1">{alias}@yourdomain</code> as the forward target. Full steps: docs/RUNBOOK.md.
+          </p>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs text-forge-dim/70">No alias yet — apply the latest migrations (app_0061) and reload; every account gets one automatically.</p>
+      )}
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { profile, refreshProfile } = useAuth();
   const { toast } = useToast();
@@ -459,6 +511,8 @@ export default function Settings() {
         <AIProviderCard />
 
         <OutreachCard />
+
+        <ForwardInCard />
 
         <Card className="mt-4 p-5">
           <h2 className="text-sm font-medium">Connections</h2>

@@ -346,6 +346,126 @@ Evidence beats opinion: run Research on user complaints/competitor moves before 
   },
 ];
 
+// ANSWERING a message is not composing a campaign: the assist desk's born-with knowledge is a
+// grounding discipline — reply only from the knowledge base, refuse over an empty one, and keep
+// the knowledge base fed. This is the honest floor for the answering studio.
+const ASSIST_PACK: SeedArtifact[] = [
+  {
+    slug: 'answering-discipline', kind: 'doc', title: 'How this desk answers',
+    detail: `${H('The rule that makes replies safe for {{business_name}}')}
+GROUND EVERY REPLY IN THE KNOWLEDGE BASE. The desk drafts only from what's on record here — your
+policies, past answers, and facts. It does NOT invent a price, a date, an order detail, a name, or
+a promise. If the knowledge base has nothing on the question, the desk REFUSES and tells you to add
+an entry — a confident wrong answer is worse than none.
+WHAT YOU DO: paste the incoming message → press "Draft the reply" → read it. Anything the knowledge
+base couldn't cover comes back marked "[needs your input: …]" for you to fill. YOU copy and send —
+the desk never sends for you, and nothing is automated.
+VOICE: {{tone}}. Answer the person's actual question, courteous and specific, never "as an AI".${NOTE}`,
+  },
+  {
+    slug: 'knowledge-base-starter', kind: 'doc', title: 'What to put in the knowledge base',
+    detail: `${H('Feed the vault so the desk can answer')}
+The desk is only as good as what it can stand on. Drop these into this world's vault (as documents
+or artifacts) and each reply gets grounded in them:
+□ Your policies — returns, refunds, shipping/turnaround, warranty, cancellation.
+□ Canned answers to the questions you get most (write the reply you'd actually send).
+□ Facts people ask for — hours, service area, what's included, what isn't.
+□ Past replies you were happy with — they teach the desk your voice and your specifics.
+KEEP IT CURRENT: when a reply comes back refused or you had to rewrite it, that's the signal — add
+the missing entry. The ledger tracks kept-vs-rewritten so you can see where the base is thin.${NOTE}`,
+  },
+];
+
+// PRODUCING a document is not writing a campaign: the document studio's born-with knowledge is a
+// document-craft discipline — structure it, ground the facts, flag what's missing, export it clean.
+const DELIVER_PACK: SeedArtifact[] = [
+  {
+    slug: 'document-craft', kind: 'doc', title: 'How this studio builds a document',
+    detail: `${H('Producing a hand-over document for {{business_name}}')}
+PICK THE TYPE, THEN THE SHAPE. Each document has a job and a skeleton: a PROPOSAL wins the work
+(overview → scope → approach → timeline → investment → next steps); a REPORT informs (summary →
+background → findings → recommendations); a ONE-PAGER orients at a glance; a BRIEF aligns people; a
+LETTER speaks to one person. Start from the skeleton, drop a section the document doesn't need.
+GROUND EVERY FACT. Prices, dates, terms, names, quantities come from the vault (rate card, terms,
+past documents) or from your brief — NEVER invented. Anything missing is marked "[needs your input:
+…]" so you fill it before it leaves. A confident wrong number in a proposal is worse than a blank.
+EXPORT IT. The document leaves as Markdown, a printed/PDF page, or a real .docx — pick what the
+recipient expects. You review and hand it off; nothing is auto-delivered.
+BATCH IT. Same type + one line per recipient = a document each, personalized from the shared brief.${NOTE}`,
+  },
+  {
+    slug: 'document-source-starter', kind: 'doc', title: 'What to put in the vault',
+    detail: `${H('Feed the studio so documents ground themselves')}
+The stronger the source material, the less you fill in by hand. Drop these into this world's vault:
+□ Your rate card / pricing so "investment" sections cite real numbers.
+□ Your standard terms, scope language, and warranty so proposals and contracts stay consistent.
+□ Past documents you were happy with — they teach structure and your voice.
+□ Credentials, case studies, and results you cite as proof.
+KEEP IT CURRENT: when a document keeps coming back with "[needs your input: …]" in the same spot,
+that's the signal — add the missing source, and the next document fills it automatically.${NOTE}`,
+  },
+];
+
+// ANALYZING data is not writing copy: the data studio's born-with knowledge is a numeracy
+// discipline — bring clean data, read the computed stats honestly, chart only what's real.
+const DATA_PACK: SeedArtifact[] = [
+  {
+    slug: 'data-workspace-craft', kind: 'doc', title: 'How this workspace reads data',
+    detail: `${H('Making honest sense of numbers for {{business_name}}')}
+BRING A CLEAN CSV. First row is the header (column names); one record per row. Paste it or upload
+the file. The workspace types each column (number / date / text) and computes the stats itself.
+READ THE SUMMARY FIRST. For every numeric column you get count, sum, mean, MEDIAN, min, max, and
+spread (stddev). Two honest tells: mean far from median means the data is skewed (a few big values
+pulling the average); a large stddev next to the mean means the values are all over the place.
+Missing cells are counted, never silently zeroed.
+CHART ONLY WHAT'S REAL. Pick a category (or date) to group by and a number to aggregate — sum,
+mean, count, min, max. The bar chart is drawn straight from that computation; there is no decorative
+or invented data anywhere.
+THE NUMBERS ARE COMPUTED, NEVER GUESSED. The optional "Interpret" read narrates only the figures on
+the summary — it cannot state a number that wasn't computed. A wrong number is worse than none.${NOTE}`,
+  },
+  {
+    slug: 'data-source-starter', kind: 'doc', title: 'What data to bring in',
+    detail: `${H('Feed the workspace something worth analyzing')}
+Export to CSV from wherever your numbers already live and drop it in the vault or straight into the
+workspace:
+□ Sales / orders — one row per sale, with amount, date, and a category (region, product, channel).
+□ A metrics log — dates down the side, the numbers you track across the top.
+□ Survey or form results — one row per response.
+□ Any spreadsheet you keep by hand — save a sheet as CSV.
+TIDY BEATS PRETTY: one thing per row, one measure per column, real headers, no merged cells or
+totals rows mixed in. The cleaner the shape, the sharper the read.${NOTE}`,
+  },
+];
+
+// KEEPING RECORDS is not producing content: the registry's born-with knowledge is a logging
+// discipline — write it down the way you'll want to find it, and let retrieval do the remembering.
+const TRACKER_PACK: SeedArtifact[] = [
+  {
+    slug: 'registry-craft', kind: 'doc', title: 'How this registry remembers',
+    detail: `${H('Logging so future-you can find it — {{business_name}}')}
+EVERY ENTRY BECOMES QUERYABLE MEMORY. What you log here is embedded into this world's knowledge —
+ask "what do I know about Jane?" or "what did I log about June?" and the answer cites your entries.
+WRITE FOR RECALL: put the name/subject in the TITLE ("Jane Miller — kitchen client"), the specifics
+in the detail (amounts, dates, decisions, quirks — verbatim). One entry per thing; a new development
+is a NEW entry, not an edit — the trail is the value.
+BE CONSISTENT: pick the handful of things every entry of a kind should carry (for a client: how they
+came in, what they bought, what they care about; for an expense: amount, category, what for) and log
+them the same way every time. Retrieval rewards consistency.
+RECORDS, NOT AUTOMATIONS: nothing is computed, sent, or inferred from entries unless you ask. For
+sums and charts, export to CSV and use a data workspace — this registry is the memory, not the math.${NOTE}`,
+  },
+  {
+    slug: 'registry-starter', kind: 'doc', title: 'What to log first',
+    detail: `${H('Seed the memory with what you already know')}
+The registry pays off from the first question it can answer. Start with:
+□ The 5-10 records you reach for most (your active clients, this month's expenses, open decisions).
+□ The backstory future-you will want ("how did this client find us?", "why did we pick X?").
+□ Anything currently living in your head, a notes app, or a spreadsheet nobody opens.
+When an Ask comes back "nothing on record" — that's the next entry to log.${NOTE}`,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The registry
 // ---------------------------------------------------------------------------
@@ -353,7 +473,8 @@ Evidence beats opinion: run Research on user complaints/competitor moves before 
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
-  feature_lab: FEATURE_LAB_PACK,
+  feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK, data: DATA_PACK,
+  tracker: TRACKER_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */
@@ -426,6 +547,154 @@ export function productLabExpertiseFor(archetype: Archetype, flavor: Flavor): Se
 export function isProductLab(charters: { archetype: Archetype; flavor: Flavor }[]): boolean {
   return charters.some((c) => c.archetype === 'studio' && c.flavor === 'feature_lab')
     && !charters.some((c) => c.archetype === 'launch' || c.archetype === 'audience');
+}
+
+// ---------------------------------------------------------------------------
+// SINGLE-PURPOSE pack sets — an answering desk / document studio / data workspace is NOT a marketing
+// operation, so its vault/intel/ledger must not be seeded with hero-photo checklists, competitor
+// scans, and send-KPI trees (which describe an outreach business the user does not run). Each kind
+// gets born-with content that matches what its areas actually hold and do. Mirrors productLab.
+// ---------------------------------------------------------------------------
+
+type SinglePurposeKind = 'assist' | 'deliver' | 'data' | 'tracker';
+
+const SINGLE_PURPOSE: Record<SinglePurposeKind, { vault: SeedArtifact[]; intel: SeedArtifact[]; ledger: SeedArtifact[] }> = {
+  assist: {
+    vault: [{
+      slug: 'kb-vault', kind: 'doc', title: 'The knowledge base — what lives here',
+      detail: `${H('This is what the desk answers from')}
+The answering desk grounds every reply ONLY in what's here, and refuses when it finds nothing — so an
+empty knowledge base means an empty desk. Put in: your policies (returns, shipping, refunds), canned
+answers to the questions you get most, key facts (hours, service area, what's included), and past
+replies you were happy with (they teach your voice). Add them fast with the "Add knowledge" box on the
+desk, or drop a document/text file into any area's Files and it's ingested here automatically.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'who-writes-in', kind: 'doc', title: 'Who writes in — the question map',
+      detail: `${H('The shape of your inbound, not a market')}
+This isn't competitor research — it's understanding what people actually ask so the knowledge base can
+cover it. List the TOP 10 questions you get, verbatim, and who asks them (new customers? existing?
+vendors?). Each recurring question is a knowledge entry waiting to be written. When the desk refuses,
+that's a new line for this list — and a new entry for the vault.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'answered-log', kind: 'doc', title: 'Answered, not sent',
+      detail: `${H('What this desk measures')}
+Nothing is sent from here — you copy and send. Track instead: drafts KEPT as-is vs. rewritten (a high
+rewrite rate means the knowledge base is thin there), and questions that came back REFUSED (the desk
+had nothing on record). Both point at the same fix — add the missing answer. The desk gets sharper
+because you feed it, never because it guessed.${NOTE}`,
+    }],
+  },
+  deliver: {
+    vault: [{
+      slug: 'source-vault', kind: 'doc', title: 'Source material — what lives here',
+      detail: `${H('What the documents draw on')}
+Documents cite real numbers and terms only if the source is on record here. Put in: your rate card /
+pricing (so "investment" sections are real), your standard terms, scope language, and warranty (so
+proposals stay consistent), and past documents you were happy with (they teach structure and voice).
+Add them with the "Add source material" box on the studio, or drop a file into any area's Files.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'the-recipient', kind: 'doc', title: 'Who receives this — what a strong one contains',
+      detail: `${H('Aim the document, don\'t scan a market')}
+This isn't a competitor scan — it's knowing your reader. For each kind of recipient (a prospect, a
+client, an investor), note: the sections they actually care about, the proof they want to see, the
+objection they arrive with, and the one outcome the document must drive. A document written to a real
+reader beats a generic template — capture that here so every draft aims true.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'documents-log', kind: 'doc', title: 'Documents made',
+      detail: `${H('What this studio measures')}
+Nothing is auto-delivered — you review and hand each off. Track: documents KEPT as-is vs. rewritten,
+and the sections that keep coming back with "[needs your input: …]" — those mark exactly which source
+material is missing from the vault. Add it, and the next document fills that section itself.${NOTE}`,
+    }],
+  },
+  tracker: {
+    vault: [{
+      slug: 'records-vault', kind: 'doc', title: 'Source records — what lives here',
+      detail: `${H('The paper trail behind the entries')}
+Keep the originals here — receipts, contracts, statements, screenshots, exported notes. An entry in
+the registry says what happened; the vault holds the thing itself, so an answer can point back to
+the source. Drop a document into Files and it's ingested into this world's knowledge automatically.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'recall-map', kind: 'doc', title: 'What you need to recall — and when',
+      detail: `${H('Design the memory around the moments you reach for it')}
+This isn't research — it's naming the QUESTIONS this registry must answer: "what did I promise this
+client?", "how much have I spent on X?", "why did we decide Y?". Write the top 5 down. Each one tells
+you what every entry must capture for the answer to exist later — that list is this registry's real
+schema.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'record-log', kind: 'doc', title: 'What\'s on record',
+      detail: `${H('The registry\'s honest measure is coverage')}
+Entries accumulate; nothing is sent or automated from them. The number that matters: how often an
+Ask comes back "nothing on record" — every miss is the next entry to log. A registry gets valuable
+by being fed, never by guessing.${NOTE}`,
+    }],
+  },
+  data: {
+    vault: [{
+      slug: 'datasets-vault', kind: 'doc', title: 'Datasets — what lives here',
+      detail: `${H('The data you analyze')}
+Keep the CSVs, exports, and logs you work from here — sales/orders, a metrics log, survey or form
+results, anything you'd otherwise open in a spreadsheet. Tidy beats pretty: one thing per row, one
+measure per column, real headers, no totals rows mixed in. Paste a CSV straight into the workspace, or
+drop the file into Files. The cleaner the shape, the sharper the read.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'the-question', kind: 'doc', title: 'What you\'re answering with the data',
+      detail: `${H('Frame the question, don\'t scan a market')}
+Before the numbers, name what you want them to tell you: the decision you're trying to make, the
+metric you actually care about, and what "good" would look like. A sharp question turns a table into an
+answer; a vague one turns it into a wall of stats. Write the two or three questions this data should
+settle — the workspace's charts and reads are only as useful as the question behind them.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'analyses-log', kind: 'doc', title: 'Analyses run',
+      detail: `${H('What this workspace measures')}
+Every figure here is computed from your data, never guessed. Save the summaries you run so you can
+compare them over time — the same metric month over month, or before-and-after a change. This log is
+the honest record of what the numbers actually showed, kept so you can watch it move.${NOTE}`,
+    }],
+  },
+};
+
+/** A single-purpose world = an answering desk / document studio / data workspace: one grounded studio
+ *  of that flavor and no outreach machinery. Returns the kind, or null for anything else. */
+export function singlePurposeKind(charters: { archetype: Archetype; flavor: Flavor }[]): SinglePurposeKind | null {
+  const studio = charters.find((c) => c.archetype === 'studio' && (c.flavor === 'assist' || c.flavor === 'deliver' || c.flavor === 'data' || c.flavor === 'tracker'));
+  if (!studio) return null;
+  if (charters.some((c) => c.archetype === 'launch' || c.archetype === 'audience')) return null;
+  return studio.flavor as SinglePurposeKind;
+}
+
+/** Pack selection for a single-purpose world: the studio keeps its craft pack; vault/intel/ledger get
+ *  the kind-matched content instead of the marketing defaults. No industry overlay (like productLab). */
+export function singlePurposeExpertiseFor(archetype: Archetype, flavor: Flavor, kind: SinglePurposeKind): SeedArtifact[] {
+  const p = SINGLE_PURPOSE[kind];
+  switch (archetype) {
+    case 'vault': return p.vault;
+    case 'intel': return p.intel;
+    case 'ledger': return p.ledger;
+    default: return basePack(archetype, flavor);
+  }
+}
+
+/** The ONE born-with-pack selector, given the whole world's charters. Routes a cluster to the right
+ *  pack by the world's SHAPE — product lab, single-purpose (answering desk / document studio / data
+ *  workspace), or a marketing operation (with its industry overlay). Every seed/regenerate site uses
+ *  this so a world never gets marketing packs in one place and coherent ones in another. */
+export function seedPackFor(
+  charters: { archetype: Archetype; flavor: Flavor }[],
+  archetype: Archetype, flavor: Flavor, vertical: Vertical = 'generic',
+): SeedArtifact[] {
+  if (isProductLab(charters)) return productLabExpertiseFor(archetype, flavor);
+  const sp = singlePurposeKind(charters);
+  if (sp) return singlePurposeExpertiseFor(archetype, flavor, sp);
+  return expertiseFor(archetype, flavor, vertical);
 }
 
 /** Every (archetype, flavor) gets a NON-EMPTY expert pack — verified exhaustively.

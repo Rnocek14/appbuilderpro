@@ -15,13 +15,16 @@ export interface InboxLead {
   kind: 'lead'; id: string; name: string | null; email: string; message: string | null;
   source: string; worldId: string; status: string; contactId: string | null; at: string;
 }
-export type InboxItem = InboxReply | InboxLead;
+export interface InboxMail {
+  kind: 'mail'; id: string; from: string; fromName: string | null; subject: string; body: string; at: string;
+}
+export type InboxItem = InboxReply | InboxLead | InboxMail;
 
 /** Everything that came in, newest first — replies and leads merged into one cross-world stream.
  *  Handled replies (app_0050 handled_at) leave the lane: done = gone, like any inbox. The replies
  *  select is '*' + a client-side filter so a server that pre-dates the column still loads. */
 export async function loadInbox(limit = 40): Promise<InboxItem[]> {
-  const [repliesQ, leadsQ] = await Promise.all([
+  const [repliesQ, leadsQ, mailQ] = await Promise.all([
     supabase.from('replies')
       .select('*')
       .order('received_at', { ascending: false }).limit(limit),
@@ -31,6 +34,12 @@ export async function loadInbox(limit = 40): Promise<InboxItem[]> {
     supabase.from('leads')
       .select('id, name, email, message, source, world_id, status, contact_id, created_at')
       .eq('status', 'new').order('created_at', { ascending: false }).limit(limit),
+    // FORWARD-IN MAIL (Tier 2): real inbound email, landed by resend-inbound via the owner's
+    // forward-in alias. Same lane, same reply-through-approvals path as everything else. A missing
+    // table (migration not applied yet) fails soft to an empty list.
+    supabase.from('inbound_mail')
+      .select('id, from_address, from_name, subject, body_text, received_at')
+      .eq('status', 'new').order('received_at', { ascending: false }).limit(limit),
   ]);
   const replies: InboxItem[] = ((repliesQ.data ?? []) as Record<string, unknown>[])
     .filter((r) => !r.handled_at)
@@ -47,7 +56,13 @@ export async function loadInbox(limit = 40): Promise<InboxItem[]> {
     status: (l.status as string) ?? 'new', contactId: (l.contact_id as string | null) ?? null,
     at: l.created_at as string,
   }));
-  return [...replies, ...leads].sort((a, b) => (a.at < b.at ? 1 : -1));
+  const mail: InboxItem[] = ((mailQ.data ?? []) as Record<string, unknown>[]).map((m) => ({
+    kind: 'mail', id: m.id as string, from: (m.from_address as string) ?? '',
+    fromName: (m.from_name as string | null) ?? null,
+    subject: (m.subject as string) ?? '', body: (m.body_text as string) ?? '',
+    at: m.received_at as string,
+  }));
+  return [...replies, ...leads, ...mail].sort((a, b) => (a.at < b.at ? 1 : -1));
 }
 
 /** Compose a reply to a reply/lead. Creates a real outreach_message and enqueues a send_email
@@ -124,6 +139,20 @@ export async function markReplyHandled(id: string): Promise<void> {
 /** Undo for "done" — the reply returns to the lane. */
 export async function unmarkReplyHandled(id: string): Promise<void> {
   const { error } = await supabase.from('replies').update({ handled_at: null }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/** Mark a forward-in mail handled — it leaves the Messages lane. Never deletes. */
+export async function markMailHandled(id: string): Promise<void> {
+  const { error } = await supabase.from('inbound_mail')
+    .update({ status: 'handled', handled_at: new Date().toISOString() }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/** Undo for a handled mail — it returns to the lane. */
+export async function unmarkMailHandled(id: string): Promise<void> {
+  const { error } = await supabase.from('inbound_mail')
+    .update({ status: 'new', handled_at: null }).eq('id', id);
   if (error) throw new Error(error.message);
 }
 

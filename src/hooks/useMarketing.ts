@@ -82,20 +82,23 @@ export function useMarketing() {
   }, [session, refresh]);
 
   // ---- asset lifecycle (the approve-to-publish gate) ----
-  const setAssetChannel = async (id: string, channel: string) => { await supabase.from('marketing_assets').update({ channel }).eq('id', id); await refresh(); };
-  const approveAsset = async (id: string) => { await supabase.from('marketing_assets').update({ status: 'approved' }).eq('id', id); await refresh(); };
-  const rejectAsset = async (id: string) => { await supabase.from('marketing_assets').update({ status: 'rejected' }).eq('id', id); await refresh(); };
-  const scheduleAsset = async (id: string, whenISO: string) => { await supabase.from('marketing_assets').update({ status: 'scheduled', scheduled_for: whenISO }).eq('id', id); await refresh(); };
+  // MUTATIONS THROW ON FAILURE (design review): these swallowed supabase errors, so a failed
+  // status flip looked identical to a successful one — the UI moved on while the row never changed.
+  const must = (error: { message: string } | null) => { if (error) throw new Error(error.message); };
+  const setAssetChannel = async (id: string, channel: string) => { must((await supabase.from('marketing_assets').update({ channel }).eq('id', id)).error); await refresh(); };
+  const approveAsset = async (id: string) => { must((await supabase.from('marketing_assets').update({ status: 'approved' }).eq('id', id)).error); await refresh(); };
+  const rejectAsset = async (id: string) => { must((await supabase.from('marketing_assets').update({ status: 'rejected' }).eq('id', id)).error); await refresh(); };
+  const scheduleAsset = async (id: string, whenISO: string) => { must((await supabase.from('marketing_assets').update({ status: 'scheduled', scheduled_for: whenISO }).eq('id', id)).error); await refresh(); };
 
   /** Publish: open the channel's prefilled composer (X intent / mailto) if any, then mark published. */
   const publishAsset = async (asset: MarketingAsset) => {
     const url = buildShareUrl((asset.channel ?? 'manual') as 'x' | 'email' | 'linkedin' | 'manual', asset.kind, asset.content);
     if (url && typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
-    await supabase.from('marketing_assets').update({ status: 'published', published_at: new Date().toISOString() }).eq('id', asset.id);
+    must((await supabase.from('marketing_assets').update({ status: 'published', published_at: new Date().toISOString() }).eq('id', asset.id)).error);
     await refresh();
   };
 
-  const deleteCampaign = async (id: string) => { await supabase.from('marketing_campaigns').delete().eq('id', id); await refresh(); };
+  const deleteCampaign = async (id: string) => { must((await supabase.from('marketing_campaigns').delete().eq('id', id)).error); await refresh(); };
 
   return {
     campaigns, assets, assetsByCampaign, loading, runningId, refresh,

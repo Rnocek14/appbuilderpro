@@ -8,9 +8,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck, Undo2 } from 'lucide-react';
+import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
+import { useUndoBar } from '../components/garvis/UndoBar';
 import { AppShell } from '../components/layout/AppShell';
-import { Badge, Button, EmptyState, Input, Spinner } from '../components/ui';
+import { Badge, Button, EmptyState, Input, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { rawComplete } from '../lib/aiClient';
@@ -23,15 +24,13 @@ import {
 } from '../lib/garvis/execution';
 import {
   loadInbox, composeReply, markLeadAnswered, markReplyHandled, unmarkReplyHandled, reopenLead,
-  draftContext, type InboxItem,
+  markMailHandled, unmarkMailHandled, draftContext, type InboxItem,
 } from '../lib/garvis/inboxRun';
 
 type Row =
   | { key: string; lane: 'decision'; a: Approval }
   | { key: string; lane: 'question'; q: AgentQuestion }
   | { key: string; lane: 'message'; m: InboxItem };
-
-type Undoable = { label: string; run: () => Promise<void> };
 
 export default function Queue() {
   const { toast } = useToast();
@@ -55,15 +54,8 @@ export default function Queue() {
   const [sending, setSending] = useState(false);
   const [drafting, setDrafting] = useState(false);
 
-  // undo bar — one at a time; a new undoable replaces the last (its window has passed its moment)
-  const [undoable, setUndoable] = useState<Undoable | null>(null);
-  const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const offerUndo = (label: string, run: () => Promise<void>) => {
-    if (undoTimer.current) clearTimeout(undoTimer.current);
-    setUndoable({ label, run });
-    undoTimer.current = setTimeout(() => setUndoable(null), 6000);
-  };
-  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
+  // Undo bar — the shared layer (components/garvis/UndoBar): act instantly, regret politely.
+  const { offerUndo, undoBar } = useUndoBar(() => toast('error', 'Could not undo that.'));
 
   // history tab — refetched on EVERY entry (review fix: a one-time latch meant "see History"
   // after a failed execution pointed at a stale list that didn't contain the failure).
@@ -75,6 +67,16 @@ export default function Queue() {
     try { setItems(await loadInbox()); } catch { setItems((prev) => prev ?? []); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Re-pull when the tab regains focus (deep scan P2): the queue used to refresh only on mount and
+  // after its own actions, so a decision made in another tab left this one stale — the exact
+  // precondition the CAS guards defend against. A focus refetch keeps the lanes honest.
+  useEffect(() => {
+    const onFocus = () => { if (document.visibilityState !== 'hidden') void refresh(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
+  }, [refresh]);
 
   useEffect(() => {
     if (tab !== 'history') return;
@@ -116,6 +118,7 @@ export default function Queue() {
           if (a.kind === 'deploy_site' && r?.url) { toast('success', `Deployed — live at ${r.url}`); window.open(r.url, '_blank'); }
           else if (r?.needsWorkspace && r.projectId) { toast('info', 'Approved — open the project and Publish to complete.'); navigate(`/project/${r.projectId}`); }
           else if (r?.executed !== false) toast('success', a.kind === 'send_email' ? 'Approved and sent.' : 'Approved and executed.');
+          else if ((r as { drains?: boolean } | undefined)?.drains) toast('success', 'Approved — the clock drains it under your daily cap; watch progress on Contacts.');
           else toast('success', 'Approved — recorded for you to run where the capability lives.');
         } else toast('error', res.error ?? 'Execution failed — see History.');
       }
@@ -133,6 +136,9 @@ export default function Queue() {
       if (m.kind === 'reply') {
         await markReplyHandled(m.id);
         offerUndo('Marked handled', async () => { await unmarkReplyHandled(m.id); await refresh(); });
+      } else if (m.kind === 'mail') {
+        await markMailHandled(m.id);
+        offerUndo('Mail marked handled', async () => { await unmarkMailHandled(m.id); await refresh(); });
       } else {
         await markLeadAnswered(m.id);
         offerUndo('Lead marked answered', async () => { await reopenLead(m.id); await refresh(); });
@@ -145,7 +151,7 @@ export default function Queue() {
 
   const openReply = (m: InboxItem) => {
     setReplyTo(m);
-    if (m.kind === 'reply') setSubject(m.subject.startsWith('Re:') ? m.subject : `Re: ${m.subject}`);
+    if (m.kind === 'reply' || m.kind === 'mail') setSubject(m.subject.startsWith('Re:') ? m.subject : `Re: ${m.subject || '(no subject)'}`);
     else setSubject('Thanks for reaching out');
     setBody('');
   };
@@ -156,9 +162,9 @@ export default function Queue() {
   const draftWithGarvis = async (m: InboxItem) => {
     setDrafting(true);
     try {
-      const theirText = (m.kind === 'reply' ? m.body : m.message) || '(no message text)';
-      const email = m.kind === 'reply' ? m.from : m.email;
-      const who = m.kind === 'lead' ? (m.name || m.email) : m.from;
+      const theirText = (m.kind === 'lead' ? m.message : m.body) || '(no message text)';
+      const email = m.kind === 'lead' ? m.email : m.from;
+      const who = m.kind === 'lead' ? (m.name || m.email) : m.kind === 'mail' ? (m.fromName || m.from) : m.from;
       const ctx = await draftContext(email);
       const known = [
         ctx.name ? `Their name on record: ${ctx.name}.` : null,
@@ -166,7 +172,7 @@ export default function Queue() {
       ].filter(Boolean).join(' ');
       const r = await rawComplete([
         { role: 'system', content: 'You draft a reply to a warm inbound message for a small-business owner. Warm, direct, under 110 words, plain text. Answer ONLY what their message supports; for anything you cannot know (prices, availability, dates) insert [YOU FILL: what is needed] instead of inventing. One clear next step. No "hope this finds you well".' + (ctx.toneExample ? `\n\nMatch the owner's actual voice. A real email they approved and sent:\n"""${ctx.toneExample}"""` : '') },
-        { role: 'user', content: `They ${m.kind === 'lead' ? 'submitted the website form' : 'replied to our email'}.\nFrom: ${who}\n${known}\nTheir message:\n"""${theirText.slice(0, 1200)}"""\n\nWrite the reply body only (no subject line).` },
+        { role: 'user', content: `They ${m.kind === 'lead' ? 'submitted the website form' : m.kind === 'mail' ? 'emailed you directly' : 'replied to our email'}.\nFrom: ${who}\n${known}\nTheir message:\n"""${theirText.slice(0, 1200)}"""\n\nWrite the reply body only (no subject line).` },
       ], 500);
       const text = r.text.trim();
       if (text) { setBody(text); toast('success', 'Drafted — edit anything, then queue. Holes marked [YOU FILL] are yours.'); }
@@ -178,7 +184,7 @@ export default function Queue() {
 
   const send = async () => {
     if (!replyTo) return;
-    const to = replyTo.kind === 'reply' ? replyTo.from : replyTo.email;
+    const to = replyTo.kind === 'lead' ? replyTo.email : replyTo.from;
     setSending(true);
     try {
       await composeReply({
@@ -187,7 +193,8 @@ export default function Queue() {
       });
       if (replyTo.kind === 'lead') await markLeadAnswered(replyTo.id).catch(() => {});
       if (replyTo.kind === 'reply') await markReplyHandled(replyTo.id).catch(() => {});
-      toast('success', 'Reply staged — approve the send in Decisions above.');
+      if (replyTo.kind === 'mail') await markMailHandled(replyTo.id).catch(() => {});
+      toast('success', 'Reply staged — approve the send in the Decisions lane above.');
       setReplyTo(null); setBody('');
       await refresh();
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not queue the reply.'); }
@@ -301,7 +308,19 @@ export default function Queue() {
             )}
           </div>
         ) : loading ? (
-          <Spinner label="Loading the queue…" />
+          // Skeletons over spinners (design review): the queue keeps its shape while it loads.
+          <div className="space-y-2">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-16 rounded-full" />
+                  <Skeleton className="h-4 flex-1" />
+                  <Skeleton className="h-6 w-20 rounded-lg" />
+                </div>
+                <Skeleton className="mt-2 h-3 w-3/4" />
+              </div>
+            ))}
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear"
             body="Approvals, blocked build questions, replies, and website leads all land here. Right now: nothing needs you." />
@@ -349,10 +368,10 @@ export default function Queue() {
                   className={selectable(`m-${m.kind}-${m.id}`)} onMouseEnter={() => setSel(rows.findIndex((r) => r.key === `m-${m.kind}-${m.id}`))}>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={cn('rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide',
-                      m.kind === 'lead' ? 'border-forge-ok/40 text-forge-ok' : 'border-forge-ember/40 text-forge-ember')}>
-                      {m.kind === 'lead' ? 'lead' : m.classification}
+                      m.kind === 'lead' ? 'border-forge-ok/40 text-forge-ok' : m.kind === 'mail' ? 'border-forge-cyan/40 text-forge-cyan' : 'border-forge-ember/40 text-forge-ember')}>
+                      {m.kind === 'lead' ? 'lead' : m.kind === 'mail' ? 'mail' : m.classification}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{m.kind === 'reply' ? m.from : (m.name || m.email)}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{m.kind === 'reply' ? m.from : m.kind === 'mail' ? (m.fromName || m.from) : (m.name || m.email)}</span>
                     <span className="text-[10px] text-forge-dim">{timeAgo(m.at)}</span>
                     <button onClick={() => openReply(m)} className="flex items-center gap-1 text-[11px] text-forge-ember hover:underline">
                       <MessageSquareReply size={12} /> reply
@@ -360,8 +379,8 @@ export default function Queue() {
                     <button onClick={() => void done(m)} title="Handled — leaves the lane; the record keeps the row (Undo below for 6s)"
                       className="text-[11px] text-forge-dim hover:text-forge-ink">done</button>
                   </div>
-                  {m.kind === 'reply' && m.subject && <p className="mt-1 text-xs font-medium text-forge-ink/80">{m.subject}</p>}
-                  <p className="mt-0.5 whitespace-pre-wrap text-xs text-forge-dim">{(m.kind === 'reply' ? m.body : m.message) || '(no message body)'}</p>
+                  {(m.kind === 'reply' || m.kind === 'mail') && m.subject && <p className="mt-1 text-xs font-medium text-forge-ink/80">{m.subject}</p>}
+                  <p className="mt-0.5 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-forge-dim">{(m.kind === 'lead' ? m.message : m.body) || '(no message body)'}</p>
                   {replyTo && replyTo.kind === m.kind && replyTo.id === m.id && (
                     <div className="mt-2 space-y-2 border-t border-forge-border/60 pt-2">
                       <input autoFocus value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
@@ -400,16 +419,7 @@ export default function Queue() {
       </div>
 
       {/* Undo bar — reversible actions act instantly and regret politely. */}
-      {undoable && (
-        <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-forge-border bg-forge-raised px-4 py-2.5 shadow-lift animate-fadeInUp [animation-duration:0.15s]">
-          <span className="text-sm text-forge-ink">{undoable.label}</span>
-          <button
-            onClick={() => { const u = undoable; setUndoable(null); if (undoTimer.current) clearTimeout(undoTimer.current); void u.run().catch(() => toast('error', 'Could not undo that.')); }}
-            className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1 text-xs font-medium text-forge-ember hover:bg-forge-ember/20">
-            <Undo2 size={12} /> Undo
-          </button>
-        </div>
-      )}
+      {undoBar}
     </AppShell>
   );
 }

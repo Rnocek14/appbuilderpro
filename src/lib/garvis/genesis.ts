@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 12 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 16 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -131,8 +131,11 @@ the way a sharp operator sizes up a venture before designing anything. Return ST
 HARD RULES:
 - NEVER invent facts: names, prices, locations, URLs. Unknown → null/empty AND a question.
 - 3-8 idealCustomers, concrete segments — never "everyone". If the intent has NO external
-  customers (a personal system, an internal operation), name the real stakeholders/beneficiaries
-  instead and SAY SO in questions — never fabricate a market that doesn't exist.
+  customers (a personal system, an internal operation, a private registry), name the real
+  stakeholders/beneficiaries instead and SAY SO in questions — never fabricate a market that
+  doesn't exist. For such intents ALSO write revenueModel as "none — personal/internal system",
+  growthChannels as [], and salesCycle as "n/a" — commercial machinery must not be invented for a
+  system that has none.
 - Every DNA field must follow from the stated intent or the common structure of that business
   type; when you generalize, generalize about the TYPE, not this specific business.
 - No markdown fences. JSON only.`;
@@ -143,7 +146,7 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 12): generic direct_mail email social video landing market brand crm lists ads feature_lab
+FLAVORS (exactly 16): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data tracker
 
 THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
 - MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
@@ -154,6 +157,42 @@ THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
   with flavor feature_lab (feature concepts + specs), vault (source material, screenshots,
   docs), ledger. OMIT audience/launch/loop entirely unless the intent explicitly asks for
   outreach — a feature lab has nothing to mail.
+- OPERATOR-ASSISTANT / STANDING-JOB intent (the user has a RECURRING TASK over a body of
+  knowledge — "answer my support emails from a database of answers", "triage tickets", "reply
+  to inquiries using our policies", "draft responses from our docs"): design an ANSWERING DESK.
+  The knowledge base is the whole point, so vault is central (the policies, canned answers, past
+  replies, docs the drafts stand on). Add intel (flavor generic: the domain — who writes in and
+  what they ask), exactly one studio with flavor assist (the desk where an incoming item becomes
+  a grounded draft), and ledger (which drafts were kept vs rewritten — the desk learns its gaps).
+  OMIT audience/launch/loop — there is no outreach list and nothing is auto-sent; the human
+  always copies and sends. Seed the vault's play with the FIRST knowledge entries to add (a
+  return policy, a shipping FAQ, a canned answer), never fake outreach emails: "emails": [].
+- DELIVERABLE / DOCUMENT-PRODUCTION intent (the user regularly PRODUCES FORMATTED DOCUMENTS to
+  hand to someone — "help me write proposals for my clients", "generate reports from our data",
+  "make me one-pagers", "draft contracts from our terms"): design a DOCUMENT STUDIO. The vault
+  holds the raw material the documents draw on (rate cards, terms, past proposals, boilerplate).
+  Add intel (flavor generic: the recipients and what a strong document for them contains), exactly
+  one studio with flavor deliver (where a finished, exportable document is produced — one or a
+  batch), and ledger (which documents were kept vs rewritten). OMIT audience/launch/loop — the
+  user hands the document off themselves; nothing is auto-delivered. Seed the vault's play with
+  the FIRST source materials to add (a rate card, a terms sheet, a past proposal), "emails": [].
+- DATA / NUMBERS-ANALYSIS intent (the user wants to WORK WITH STRUCTURED DATA — "analyze my sales
+  spreadsheet", "help me make sense of these numbers", "track metrics from a CSV", "summarize
+  survey results"): design a DATA WORKSPACE. The vault holds the datasets (CSV uploads). Add intel
+  (flavor generic: what questions they're trying to answer with the data), exactly one studio with
+  flavor data (where a CSV becomes a typed table, computed statistics, and honest charts), and
+  ledger (the analyses run over time). OMIT audience/launch/loop — this is analysis, not outreach.
+  Seed the vault's play with what data to bring in first (the spreadsheet, the export, the log),
+  "emails": [].
+- PERSONAL / INTERNAL REGISTRY intent (the user wants to KEEP RECORDS for themselves or their
+  operation — "remember everything about my clients", "track my expenses", "keep a log of my
+  decisions / jobs / workouts"): design a REGISTRY. There is no market and no audience — never
+  invent one. The vault holds source records (receipts, contracts, exported notes). Add intel
+  (flavor generic: the QUESTIONS this registry must answer and when — that list is its real
+  schema), exactly one studio with flavor tracker (the registry where entries are logged and
+  become queryable memory), and ledger (what's on record over time). OMIT audience/launch/loop.
+  Seed the vault's play with the FIRST records to log (the active clients, this month's expenses,
+  the open decisions), "emails": [].
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",
@@ -419,4 +458,20 @@ export function mergeTokens(text: string, ctx: BusinessContext, extra: Record<st
     const v = table[key];
     return v ? v : whole;
   });
+}
+
+/** Structural invariants every world must satisfy before it can be instantiated. The parse gauntlet
+ *  auto-repairs these on synthesis, but a user can prune a draft below them via removeDraftNode — so
+ *  approveDraft re-checks here (deep scan): no zero/thin worlds, and every world can know, hold, and
+ *  learn. Returns a list of human-readable violations ([] means the draft is sound). */
+export function structuralViolations(t: WebTemplate): string[] {
+  const flat = (t.nodes ?? []).flatMap((n) => [n, ...(n.children ?? [])]);
+  const has = (a: Archetype) => flat.some((n) => n.archetype === a);
+  const v: string[] = [];
+  if (flat.length < 3) v.push('a world needs at least a few areas — this draft has too few');
+  if (!has('vault')) v.push('no vault to hold identity and assets');
+  if (!has('intel')) v.push('no intel area to know the market');
+  if (!has('ledger')) v.push('no ledger to learn what happened');
+  if (has('launch') && !has('audience')) v.push('a launch area needs an audience to reach');
+  return v;
 }

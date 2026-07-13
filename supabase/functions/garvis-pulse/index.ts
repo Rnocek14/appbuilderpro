@@ -16,6 +16,7 @@
 // Deploy: supabase functions deploy garvis-pulse --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { notifyText } from '../_shared/notify.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
@@ -43,6 +44,7 @@ Deno.serve(async (req) => {
   if (!secret || req.headers.get('x-worker-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  await stampHeartbeat(admin, 'garvis-pulse'); // liveness: the hourly pulse is the clock's proof of life
   const now = new Date();
 
   // Owners who can receive a brief (webhook set). Paged conservatively.

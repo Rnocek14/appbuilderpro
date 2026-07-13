@@ -13,6 +13,7 @@ import { cn } from '../lib/utils';
 import { WEB_TEMPLATES, ARCHETYPES, flattenTemplate } from '../lib/garvis/workweb';
 import { listWebs, instantiateWeb, type WebSummary } from '../lib/garvis/workwebRun';
 import { generateDraft, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
+import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 
 const TEMPLATE_ICON: Record<string, typeof Building2> = { 'mom-real-estate': Building2, 'app-launch': Rocket };
 
@@ -93,6 +94,25 @@ export default function WorkWebs() {
             <h2 className="text-sm font-semibold text-forge-ink">Start from intent</h2>
             <span className="text-xs text-forge-dim">— describe the business or mission; Garvis designs the work web and shows you why</span>
           </div>
+          {/* THE FRONT DOOR the reachability audit found missing: nothing advertised that a world can
+              be a growth op, a product lab, an answering desk, a document studio, or a data workspace.
+              One chip per shape prefills a well-formed intent — the user edits the specifics and drafts. */}
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {[
+              { label: 'Grow a business', intent: 'Grow my business — I sell ' },
+              { label: 'Answer my messages', intent: 'Set up a desk that answers my incoming emails from a knowledge base of my saved answers and policies. The messages are about ' },
+              { label: 'Produce documents', intent: 'Set me up to produce documents I hand to people — proposals and reports for my clients. My work is ' },
+              { label: 'Analyze my numbers', intent: 'Set up a workspace to analyze my spreadsheets and numbers. The data I track is ' },
+              { label: 'A product lab', intent: 'I work on a product and want to explore ideas and write feature specs for it. The product is ' },
+            ].map((c) => (
+              <button
+                key={c.label}
+                onClick={() => setIntent(c.intent)}
+                className="rounded-full border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember"
+                title="Starts the intent for this kind of world — finish the sentence and draft"
+              >{c.label}</button>
+            ))}
+          </div>
           <textarea
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
@@ -112,6 +132,12 @@ export default function WorkWebs() {
             </ul>
           )}
         </Card>
+
+        {/* THE CLOCK, globally: every standing order the owner has — including world-less watches
+            created in conversation, which would otherwise be invisible and unstoppable. */}
+        <div className="mb-8">
+          <StandingOrdersPanel onToast={(k, m) => toast(k, m)} />
+        </div>
 
         {/* Drafts awaiting review */}
         {drafts.map((d) => (
