@@ -25,7 +25,8 @@ export type Flavor =
   | 'feature_lab' // PRODUCT work: feature ideation + specs for a platform the owner builds or works for
   | 'assist'      // OPERATOR ASSISTANT: an answering desk — paste an item, get a reply grounded in this world's knowledge base
   | 'deliver'     // DELIVERABLE GENERATOR: a document studio — produce a portable, exportable proposal/report/one-pager
-  | 'data';       // DATA & NUMBERS: an analysis workspace — a CSV becomes a typed table, real stats, honest charts
+  | 'data'        // DATA & NUMBERS: an analysis workspace — a CSV becomes a typed table, real stats, honest charts
+  | 'tracker';    // PERSONAL/INTERNAL REGISTRY: log entries about clients/expenses/anything — each becomes queryable memory
 export type CharterStatus = 'dormant' | 'active' | 'waiting' | 'done';
 
 export interface CharterRef { type: string; id: string; label?: string }
@@ -55,7 +56,7 @@ export function parseCharter(raw: unknown): Charter | null {
 }
 
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker',
 ];
 
 export interface ArchetypeMeta {
@@ -96,7 +97,7 @@ export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
   'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec',
   'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
-  'import-docs', 'view-results', 'open-answering', 'open-documents', 'open-data',
+  'import-docs', 'view-results', 'open-answering', 'open-documents', 'open-data', 'open-tracker',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
@@ -119,6 +120,9 @@ const STUDIO_BY_FLAVOR: Partial<Record<Flavor, WorkTool[]>> = {
   ],
   data: [
     T('open-data', 'Open the data workspace', 'Paste or upload a CSV — Garvis types the columns, computes honest per-column stats, and charts a real aggregation. Every number is computed, never guessed; the optional read narrates only those figures.', 'view'),
+  ],
+  tracker: [
+    T('open-tracker', 'Open the registry', 'Log an entry — a client note, an expense, a decision. Every entry becomes part of this world\'s queryable memory: ask "what do I know about Jane?" and the answer cites your own records.', 'view'),
   ],
 };
 

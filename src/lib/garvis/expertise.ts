@@ -438,6 +438,34 @@ totals rows mixed in. The cleaner the shape, the sharper the read.${NOTE}`,
   },
 ];
 
+// KEEPING RECORDS is not producing content: the registry's born-with knowledge is a logging
+// discipline — write it down the way you'll want to find it, and let retrieval do the remembering.
+const TRACKER_PACK: SeedArtifact[] = [
+  {
+    slug: 'registry-craft', kind: 'doc', title: 'How this registry remembers',
+    detail: `${H('Logging so future-you can find it — {{business_name}}')}
+EVERY ENTRY BECOMES QUERYABLE MEMORY. What you log here is embedded into this world's knowledge —
+ask "what do I know about Jane?" or "what did I log about June?" and the answer cites your entries.
+WRITE FOR RECALL: put the name/subject in the TITLE ("Jane Miller — kitchen client"), the specifics
+in the detail (amounts, dates, decisions, quirks — verbatim). One entry per thing; a new development
+is a NEW entry, not an edit — the trail is the value.
+BE CONSISTENT: pick the handful of things every entry of a kind should carry (for a client: how they
+came in, what they bought, what they care about; for an expense: amount, category, what for) and log
+them the same way every time. Retrieval rewards consistency.
+RECORDS, NOT AUTOMATIONS: nothing is computed, sent, or inferred from entries unless you ask. For
+sums and charts, export to CSV and use a data workspace — this registry is the memory, not the math.${NOTE}`,
+  },
+  {
+    slug: 'registry-starter', kind: 'doc', title: 'What to log first',
+    detail: `${H('Seed the memory with what you already know')}
+The registry pays off from the first question it can answer. Start with:
+□ The 5-10 records you reach for most (your active clients, this month's expenses, open decisions).
+□ The backstory future-you will want ("how did this client find us?", "why did we pick X?").
+□ Anything currently living in your head, a notes app, or a spreadsheet nobody opens.
+When an Ask comes back "nothing on record" — that's the next entry to log.${NOTE}`,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The registry
 // ---------------------------------------------------------------------------
@@ -446,6 +474,7 @@ const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
   feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK, data: DATA_PACK,
+  tracker: TRACKER_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */
@@ -527,7 +556,7 @@ export function isProductLab(charters: { archetype: Archetype; flavor: Flavor }[
 // gets born-with content that matches what its areas actually hold and do. Mirrors productLab.
 // ---------------------------------------------------------------------------
 
-type SinglePurposeKind = 'assist' | 'deliver' | 'data';
+type SinglePurposeKind = 'assist' | 'deliver' | 'data' | 'tracker';
 
 const SINGLE_PURPOSE: Record<SinglePurposeKind, { vault: SeedArtifact[]; intel: SeedArtifact[]; ledger: SeedArtifact[] }> = {
   assist: {
@@ -582,6 +611,30 @@ and the sections that keep coming back with "[needs your input: …]" — those 
 material is missing from the vault. Add it, and the next document fills that section itself.${NOTE}`,
     }],
   },
+  tracker: {
+    vault: [{
+      slug: 'records-vault', kind: 'doc', title: 'Source records — what lives here',
+      detail: `${H('The paper trail behind the entries')}
+Keep the originals here — receipts, contracts, statements, screenshots, exported notes. An entry in
+the registry says what happened; the vault holds the thing itself, so an answer can point back to
+the source. Drop a document into Files and it's ingested into this world's knowledge automatically.${NOTE}`,
+    }],
+    intel: [{
+      slug: 'recall-map', kind: 'doc', title: 'What you need to recall — and when',
+      detail: `${H('Design the memory around the moments you reach for it')}
+This isn't research — it's naming the QUESTIONS this registry must answer: "what did I promise this
+client?", "how much have I spent on X?", "why did we decide Y?". Write the top 5 down. Each one tells
+you what every entry must capture for the answer to exist later — that list is this registry's real
+schema.${NOTE}`,
+    }],
+    ledger: [{
+      slug: 'record-log', kind: 'doc', title: 'What\'s on record',
+      detail: `${H('The registry\'s honest measure is coverage')}
+Entries accumulate; nothing is sent or automated from them. The number that matters: how often an
+Ask comes back "nothing on record" — every miss is the next entry to log. A registry gets valuable
+by being fed, never by guessing.${NOTE}`,
+    }],
+  },
   data: {
     vault: [{
       slug: 'datasets-vault', kind: 'doc', title: 'Datasets — what lives here',
@@ -612,7 +665,7 @@ the honest record of what the numbers actually showed, kept so you can watch it 
 /** A single-purpose world = an answering desk / document studio / data workspace: one grounded studio
  *  of that flavor and no outreach machinery. Returns the kind, or null for anything else. */
 export function singlePurposeKind(charters: { archetype: Archetype; flavor: Flavor }[]): SinglePurposeKind | null {
-  const studio = charters.find((c) => c.archetype === 'studio' && (c.flavor === 'assist' || c.flavor === 'deliver' || c.flavor === 'data'));
+  const studio = charters.find((c) => c.archetype === 'studio' && (c.flavor === 'assist' || c.flavor === 'deliver' || c.flavor === 'data' || c.flavor === 'tracker'));
   if (!studio) return null;
   if (charters.some((c) => c.archetype === 'launch' || c.archetype === 'audience')) return null;
   return studio.flavor as SinglePurposeKind;

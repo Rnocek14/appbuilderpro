@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 15 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 16 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -131,8 +131,11 @@ the way a sharp operator sizes up a venture before designing anything. Return ST
 HARD RULES:
 - NEVER invent facts: names, prices, locations, URLs. Unknown → null/empty AND a question.
 - 3-8 idealCustomers, concrete segments — never "everyone". If the intent has NO external
-  customers (a personal system, an internal operation), name the real stakeholders/beneficiaries
-  instead and SAY SO in questions — never fabricate a market that doesn't exist.
+  customers (a personal system, an internal operation, a private registry), name the real
+  stakeholders/beneficiaries instead and SAY SO in questions — never fabricate a market that
+  doesn't exist. For such intents ALSO write revenueModel as "none — personal/internal system",
+  growthChannels as [], and salesCycle as "n/a" — commercial machinery must not be invented for a
+  system that has none.
 - Every DNA field must follow from the stated intent or the common structure of that business
   type; when you generalize, generalize about the TYPE, not this specific business.
 - No markdown fences. JSON only.`;
@@ -143,7 +146,7 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 15): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data
+FLAVORS (exactly 16): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data tracker
 
 THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
 - MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
@@ -181,6 +184,15 @@ THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
   ledger (the analyses run over time). OMIT audience/launch/loop — this is analysis, not outreach.
   Seed the vault's play with what data to bring in first (the spreadsheet, the export, the log),
   "emails": [].
+- PERSONAL / INTERNAL REGISTRY intent (the user wants to KEEP RECORDS for themselves or their
+  operation — "remember everything about my clients", "track my expenses", "keep a log of my
+  decisions / jobs / workouts"): design a REGISTRY. There is no market and no audience — never
+  invent one. The vault holds source records (receipts, contracts, exported notes). Add intel
+  (flavor generic: the QUESTIONS this registry must answer and when — that list is its real
+  schema), exactly one studio with flavor tracker (the registry where entries are logged and
+  become queryable memory), and ledger (what's on record over time). OMIT audience/launch/loop.
+  Seed the vault's play with the FIRST records to log (the active clients, this month's expenses,
+  the open decisions), "emails": [].
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",
