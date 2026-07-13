@@ -32,6 +32,7 @@ import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
+import { DataWorkspace } from '../components/garvis/DataWorkspace';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
@@ -133,7 +134,8 @@ export default function WorkWeb() {
   // framing and a "measures made, not sent" ledger.
   const assistDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'assist'), [web]);
   const docStudio = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'deliver'), [web]);
-  const noOutreach = productLab || assistDesk || docStudio;
+  const dataStudio = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'data'), [web]);
+  const noOutreach = productLab || assistDesk || docStudio || dataStudio;
 
   const doRunPlay = async () => {
     if (!templatePlay) return;
@@ -159,6 +161,8 @@ export default function WorkWeb() {
     if (tool.id === 'open-answering') { setSelected(cluster.slug); return; }
     // Likewise the document studio is inline for the deliver flavor — the tool focuses it.
     if (tool.id === 'open-documents') { setSelected(cluster.slug); return; }
+    // And the data workspace is inline for the data flavor — the tool focuses it.
+    if (tool.id === 'open-data') { setSelected(cluster.slug); return; }
     if (tool.id === 'upload-list') { setUploadFor(cluster); return; }
     if (tool.id === 'queue-sequence') { setQueueFor(cluster); return; }
 
@@ -254,6 +258,8 @@ export default function WorkWeb() {
             ? `Ask about ${web.title} — "what's our return policy?", "what do we tell people about shipping times?"`
             : docStudio
             ? `Ask about ${web.title} — "what's in our rate card?", "what did we say in the last proposal?"`
+            : dataStudio
+            ? `Ask about ${web.title} — "what did the last analysis find?", "which dataset covered Q3?"`
             : productLab
             ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
@@ -307,6 +313,7 @@ export default function WorkWeb() {
                 productLab={productLab}
                 assistDesk={assistDesk}
                 docStudio={docStudio}
+                dataStudio={dataStudio}
               />
             )}
           </div>
@@ -386,6 +393,7 @@ const SPARKS: Record<string, string[]> = {
   feature_lab: ['for the power user', 'fix the first five minutes', 'what makes people come back daily', 'steal the best idea from an adjacent product', 'smallest shippable version'],
   assist: ['the questions we get most', 'a canned answer for refunds', 'tighten the tone', 'where the knowledge base keeps coming up short', 'a policy we should write down'],
   deliver: ['a boilerplate proposal template', 'the sections clients always ask about', 'a stronger one-pager', 'what to standardize across documents', 'a cover letter tone'],
+  data: ['what the numbers actually show', 'which column to group by', 'the outlier worth a look', 'a metric we should track', 'what data we\'re missing'],
   default: ['bolder', 'warmer and more personal', 'for the premium buyer', 'radically simpler', 'contrarian take'],
 };
 
@@ -477,13 +485,14 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
   );
 }
 
-function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk, docStudio }: {
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk, docStudio, dataStudio }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
   productLab?: boolean;
   assistDesk?: boolean;
   docStudio?: boolean;
+  dataStudio?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -566,6 +575,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           versus rewrite, and which sections keep needing your input. Those gaps point at what to add
           to the vault next.</p>
         </div>
+      ) : dataStudio ? (
+        <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
+          <p className="mb-1 font-medium text-forge-ink">This studio measures analyses, not sends.</p>
+          <p>Every figure here is computed from your data, never guessed. Saved summaries land on the
+          workspace's shelf — the fact sheet stands on its own, and any written read is grounded only
+          in those numbers. This ledger keeps the analyses you've run so you can compare them over time.</p>
+        </div>
       ) : productLab ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This lab measures shipped thinking.</p>
@@ -605,6 +621,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           review and send; nothing is auto-delivered. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
         <DeliverableStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* DATA & NUMBERS WORKSPACE — a CSV becomes a typed table, honest per-column stats, and a chart
+          drawn only from a real aggregation. Every number is computed in pure code; the optional read
+          narrates only those figures, never inventing one. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'data' && (
+        <DataWorkspace worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile

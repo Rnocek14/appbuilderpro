@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 14 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 15 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -143,7 +143,7 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 14): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver
+FLAVORS (exactly 15): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data
 
 THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
 - MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
@@ -173,6 +173,14 @@ THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
   batch), and ledger (which documents were kept vs rewritten). OMIT audience/launch/loop — the
   user hands the document off themselves; nothing is auto-delivered. Seed the vault's play with
   the FIRST source materials to add (a rate card, a terms sheet, a past proposal), "emails": [].
+- DATA / NUMBERS-ANALYSIS intent (the user wants to WORK WITH STRUCTURED DATA — "analyze my sales
+  spreadsheet", "help me make sense of these numbers", "track metrics from a CSV", "summarize
+  survey results"): design a DATA WORKSPACE. The vault holds the datasets (CSV uploads). Add intel
+  (flavor generic: what questions they're trying to answer with the data), exactly one studio with
+  flavor data (where a CSV becomes a typed table, computed statistics, and honest charts), and
+  ledger (the analyses run over time). OMIT audience/launch/loop — this is analysis, not outreach.
+  Seed the vault's play with what data to bring in first (the spreadsheet, the export, the log),
+  "emails": [].
 
 Return STRICT JSON:
 {"template":{"nodes":[{"slug":"kebab-case","title":"...","summary":"one line",

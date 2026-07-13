@@ -406,6 +406,38 @@ that's the signal — add the missing source, and the next document fills it aut
   },
 ];
 
+// ANALYZING data is not writing copy: the data studio's born-with knowledge is a numeracy
+// discipline — bring clean data, read the computed stats honestly, chart only what's real.
+const DATA_PACK: SeedArtifact[] = [
+  {
+    slug: 'data-workspace-craft', kind: 'doc', title: 'How this workspace reads data',
+    detail: `${H('Making honest sense of numbers for {{business_name}}')}
+BRING A CLEAN CSV. First row is the header (column names); one record per row. Paste it or upload
+the file. The workspace types each column (number / date / text) and computes the stats itself.
+READ THE SUMMARY FIRST. For every numeric column you get count, sum, mean, MEDIAN, min, max, and
+spread (stddev). Two honest tells: mean far from median means the data is skewed (a few big values
+pulling the average); a large stddev next to the mean means the values are all over the place.
+Missing cells are counted, never silently zeroed.
+CHART ONLY WHAT'S REAL. Pick a category (or date) to group by and a number to aggregate — sum,
+mean, count, min, max. The bar chart is drawn straight from that computation; there is no decorative
+or invented data anywhere.
+THE NUMBERS ARE COMPUTED, NEVER GUESSED. The optional "Interpret" read narrates only the figures on
+the summary — it cannot state a number that wasn't computed. A wrong number is worse than none.${NOTE}`,
+  },
+  {
+    slug: 'data-source-starter', kind: 'doc', title: 'What data to bring in',
+    detail: `${H('Feed the workspace something worth analyzing')}
+Export to CSV from wherever your numbers already live and drop it in the vault or straight into the
+workspace:
+□ Sales / orders — one row per sale, with amount, date, and a category (region, product, channel).
+□ A metrics log — dates down the side, the numbers you track across the top.
+□ Survey or form results — one row per response.
+□ Any spreadsheet you keep by hand — save a sheet as CSV.
+TIDY BEATS PRETTY: one thing per row, one measure per column, real headers, no merged cells or
+totals rows mixed in. The cleaner the shape, the sharper the read.${NOTE}`,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The registry
 // ---------------------------------------------------------------------------
@@ -413,7 +445,7 @@ that's the signal — add the missing source, and the next document fills it aut
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
-  feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK,
+  feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK, data: DATA_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */
