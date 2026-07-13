@@ -178,12 +178,19 @@ Deno.serve(async (req) => {
     if ((count ?? 0) >= cap) return block(`Daily send cap (${cap}) reached.`);
 
     // ----- compose + send -----
-    const unsub = settings.unsubscribe_url_template?.trim()
-      || `mailto:${settings.from_email}?subject=unsubscribe&body=Please%20remove%20${encodeURIComponent(to)}`;
-    // CAN-SPAM requires a clear, conspicuous opt-out IN THE BODY — headers alone aren't enough.
-    const optOut = settings.unsubscribe_url_template?.trim()
-      ? `To stop receiving these emails, visit ${settings.unsubscribe_url_template.trim()} or reply "unsubscribe".`
-      : 'To stop receiving these emails, reply "unsubscribe".';
+    // A REAL one-click opt-out: the HTTPS endpoint (deep scan P0) actually writes suppression, so
+    // List-Unsubscribe-Post: One-Click is honest (RFC 8058 requires an https URI — a mailto can't
+    // satisfy it). We advertise the https target first, then the mailto as a fallback. A custom
+    // template, if the owner set one, takes precedence as the primary.
+    const httpsUnsub = `${Deno.env.get('SUPABASE_URL')}/functions/v1/unsubscribe?m=${messageId}`;
+    const mailtoUnsub = `mailto:${settings.from_email}?subject=unsubscribe&body=Please%20remove%20${encodeURIComponent(to)}`;
+    const primaryUnsub = settings.unsubscribe_url_template?.trim() || httpsUnsub;
+    const listUnsub = settings.unsubscribe_url_template?.trim()
+      ? `<${settings.unsubscribe_url_template.trim()}>, <${mailtoUnsub}>`
+      : `<${httpsUnsub}>, <${mailtoUnsub}>`;
+    // CAN-SPAM requires a clear, conspicuous opt-out IN THE BODY — headers alone aren't enough. The
+    // body link now points at the working endpoint too, so a click actually unsubscribes.
+    const optOut = `To stop receiving these emails, click ${primaryUnsub} or reply "unsubscribe".`;
     const footer = `\n\n--\n${settings.company_name ?? ''}\n${settings.physical_address}\n${optOut}`;
     const finalText = (msg.body_text ?? '') + footer;
     const bodyHtml = paragraphsToHtml(msg.body_text ?? '') + paragraphsToHtml(footer);
@@ -198,7 +205,7 @@ Deno.serve(async (req) => {
         subject: (msg.subject ?? '').trim(),
         text: finalText,
         html: bodyHtml,
-        headers: { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+        headers: { 'List-Unsubscribe': listUnsub, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
         tags: [{ name: 'campaign_id', value: msg.campaign_id ?? 'none' }],
       }),
     });

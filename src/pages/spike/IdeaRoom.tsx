@@ -105,6 +105,11 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   // A designed visual resolving after the user has stepped to another branch must be dropped,
   // not painted onto whatever branch is focused now.
   const focusRef = useRef<string | null>(null);
+  // The LIVE graph, read at merge time. The three entry loads (answer, media, video) resolve at
+  // different times; each used to setGraph(its-own-snapshot), so the last to land wiped the others —
+  // videos (slowest) erased the composed answer, forcing a paid recompose (deep scan P0, theme 4).
+  // GalaxyView already solved this with a live-ref merge; IdeaRoom now does the same.
+  const liveGraph = useRef(graph);
   const leadsCache = useRef<Record<string, Lead[]>>({});
   const done = useRef<Set<string>>(new Set());
   const prefetch = useRef<Record<string, Prospect | 'loading'>>({});
@@ -114,6 +119,32 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const focus = (focusId && byId.get(focusId)) || roots[0] || graph.clusters[0] || null;
 
   focusRef.current = focus?.id ?? null;
+  liveGraph.current = graph;
+
+  // Merge a slow load's result for cluster `id` into the LIVE graph instead of replacing it. Always
+  // unions new artifacts (never drop what another load already added). Only the ANSWER load
+  // (isAnswer) carries an authoritative summary/trajectory; media/video carry the entry-time base,
+  // so they must NOT touch those fields or they'd wipe the answer that landed first.
+  const mergeInto = (id: string, res: ClusterGraph, isAnswer = false) => {
+    const upd = res.clusters.find((c) => c.id === id);
+    if (!upd) return;
+    const live = liveGraph.current;
+    let changed = false;
+    const merged = live.clusters.map((c) => {
+      if (c.id !== id) return c;
+      const have = new Set(c.artifacts.map((a) => a.id));
+      const fresh = upd.artifacts.filter((a) => !have.has(a.id));
+      const summary = isAnswer && upd.summary ? upd.summary : c.summary;
+      const trajectory = isAnswer && upd.trajectory ? upd.trajectory : c.trajectory;
+      if (!fresh.length && summary === c.summary && trajectory === c.trajectory) return c;
+      changed = true;
+      return { ...c, summary, trajectory, artifacts: [...fresh, ...c.artifacts] };
+    });
+    if (!changed) return;
+    const next = { ...live, clusters: merged };
+    liveGraph.current = next;
+    setGraph(next);
+  };
 
   const ancestors = focus ? trail(byId, focus.id) : [];
   const children = focus ? graph.clusters.filter((c) => c.parentId === focus.id).sort((a, b) => b.salience - a.salience) : [];
@@ -136,9 +167,9 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
     setLoading({ answer: needAnswer, media: needMedia, video: needVideo });
     // The composed answer failing must SAY so (labErr + a retry path via re-entering); media and
     // videos are enrichment — they fail quiet, but never as unhandled rejections.
-    if (needAnswer) exploreLeads(graph, id, ancestors.map((a) => a.title)).then((r) => { if (cancelled) return; leadsCache.current[id] = r.leads; setLeads(r.leads); setGraph(r.graph); if (r.costUsd) onCost?.(r.costUsd); }).catch((e) => { if (!cancelled) { done.current.delete(id); setLabErr(e instanceof Error ? e.message : "Couldn't compose this thought — step out and back in to retry."); } }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); });
-    if (needMedia) gatherWikiMedia(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, media: false })); });
-    if (needVideo) gatherVideos(graph, id).then((r) => { if (!cancelled && r.found) setGraph(r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, video: false })); });
+    if (needAnswer) exploreLeads(graph, id, ancestors.map((a) => a.title)).then((r) => { if (cancelled) return; leadsCache.current[id] = r.leads; setLeads(r.leads); mergeInto(id, r.graph, true); if (r.costUsd) onCost?.(r.costUsd); }).catch((e) => { if (!cancelled) { done.current.delete(id); setLabErr(e instanceof Error ? e.message : "Couldn't compose this thought — step out and back in to retry."); } }).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, answer: false })); });
+    if (needMedia) gatherWikiMedia(graph, id).then((r) => { if (!cancelled && r.found) mergeInto(id, r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, media: false })); });
+    if (needVideo) gatherVideos(graph, id).then((r) => { if (!cancelled && r.found) mergeInto(id, r.graph); }).catch(() => {}).finally(() => { if (!cancelled) setLoading((l) => ({ ...l, video: false })); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.id]);

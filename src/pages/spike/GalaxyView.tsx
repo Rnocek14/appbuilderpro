@@ -341,20 +341,27 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
     updateLoops((l) => closeLoopsPure(l, lead.label).kept);
     travel(id);
   };
+  // Every action surfaces its failure. These were try/finally with no catch (deep scan P1): a
+  // signed-out or out-of-credits throw became an unhandled rejection — the spinner stopped and
+  // nothing happened, with no word to the user. setErr paints the banner at the top of the map.
+  const say = (e: unknown, fallback: string) => setErr(e instanceof Error ? e.message : fallback);
   const run = async (label: string, fn: () => Promise<{ graph?: ClusterGraph; costUsd?: number }>) => {
-    setBusy(label);
+    setBusy(label); setErr('');
     try { const res = await fn(); if (res.graph) setGraph(res.graph); if (res.costUsd) onCost?.(res.costUsd); }
+    catch (e) { say(e, 'That didn\'t go through — try again in a moment.'); }
     finally { setBusy(null); }
   };
   const expand = (m: ExpandMode) => run(`x:${m}`, () => expandCluster(graph, focus.id, m));
   const surprise = async () => {
-    setBusy('bridge');
+    setBusy('bridge'); setErr('');
     try { const b = await findBridge(graph, focus.id); if (b) { setBridge(b); if (b.costUsd) onCost?.(b.costUsd); } }
+    catch (e) { say(e, 'Couldn\'t find a surprising connection right now.'); }
     finally { setBusy(null); }
   };
   const runInvestigation = async () => {
-    setBusy('investigate');
+    setBusy('investigate'); setErr('');
     try { const r = await investigate(graph, focus.id, (g) => setGraph(g)); if (r.costUsd) onCost?.(r.costUsd); }
+    catch (e) { say(e, 'The investigation stalled — try again in a moment.'); }
     finally { setBusy(null); }
   };
   const think = async () => {
@@ -386,11 +393,13 @@ export default function GalaxyView({ graph, setGraph, focusId, setFocusId, onCos
         travel(res.focusId);
       }
       lastMind.current = 0; void refreshMind(); // re-read the mind after a thought
-    } finally { setThinking(false); }
+    } catch (e) { say(e, 'Couldn\'t work that thought through — try rephrasing.'); }
+    finally { setThinking(false); }
   };
   const reframeFocus = async () => {
-    setBusy('reframe'); setStreamText('');
+    setBusy('reframe'); setStreamText(''); setErr('');
     try { const r = await reframe(graph, focus.id, (t) => setStreamText(t)); if (r.costUsd) onCost?.(r.costUsd); setGraph(r.graph); }
+    catch (e) { say(e, 'Couldn\'t reframe this one right now.'); }
     finally { setBusy(null); }
   };
   const actSuggestion = (s: ThinkSuggestion) => {

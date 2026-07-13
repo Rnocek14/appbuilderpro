@@ -115,7 +115,11 @@ Deno.serve(async (req) => {
   // Explicit unsubscribe intent → suppression + contact status, so this address can NEVER be
   // emailed again. This was the missing ingestion path: the 'unsubscribe' suppression reason
   // existed in the schema but nothing ever wrote it.
-  const wantsOut = /\b(unsubscribe|remove me|stop emailing( me)?|take me off|do not (contact|email))\b/i.test(ownWords);
+  // Opt-out intent is read from BOTH the subject and the body (deep scan P0): the default
+  // List-Unsubscribe mailto carries subject "unsubscribe" with the address in the body
+  // ("Please remove <addr>"), so a body-only check missed real unsubscribes entirely.
+  const outRe = /\b(unsubscribe|remove me|remove this|please remove|stop emailing( me)?|take me off|do not (contact|email)|opt[ -]?out)\b/i;
+  const wantsOut = outRe.test(ownWords) || outRe.test(subject ?? '');
   if (wantsOut && from) {
     await admin.from('suppression').upsert(
       { owner_id: msg.owner_id, email: from, domain: null, reason: 'unsubscribe' }, // per-address; never silences the whole domain

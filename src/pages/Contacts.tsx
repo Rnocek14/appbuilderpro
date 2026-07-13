@@ -3,14 +3,14 @@
 // timeline (messages sent / replies / leads / notes). The audit's "no contacts CRUD" gap, closed.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Users, Trash2, ChevronRight } from 'lucide-react';
+import { Loader2, Users, Trash2, ChevronRight, Ban, RotateCcw } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { EmptyState, Skeleton } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import {
-  getContact, updateContact, deleteContact, listNotes, addNote, contactTimeline,
+  getContact, updateContact, deleteContact, suppressContact, unsuppressContact, listNotes, addNote, contactTimeline,
   type ContactDetail, type ContactNote, type ContactStage,
 } from '../lib/garvis/contactsRun';
 import type { TimelineItem } from '../lib/garvis/contactsCore';
@@ -138,8 +138,19 @@ function ContactDetailPane({ id, onDeleted, onStageChanged }: { id: string; onDe
     finally { setSavingNote(false); }
   };
   const remove = async () => {
+    // Delete cascades notes irrecoverably (deep scan) — confirm before it's gone.
+    if (!window.confirm(`Delete ${c?.full_name || c?.email}? Their notes and history go with them and can't be recovered.`)) return;
     try { await deleteContact(id); toast('success', 'Contact deleted.'); onDeleted(); }
     catch (e) { toast('error', e instanceof Error ? e.message : 'Could not delete.'); }
+  };
+  const suppressed = c?.email_status === 'unsubscribed';
+  const toggleSuppress = async () => {
+    if (!c) return;
+    try {
+      if (suppressed) { await unsuppressContact(id, c.email); setC((p) => p ? { ...p, email_status: 'active' } : p); toast('success', 'Suppression lifted — this address can be emailed again.'); }
+      else { await suppressContact(id, c.email); setC((p) => p ? { ...p, email_status: 'unsubscribed' } : p); toast('success', 'Added to your suppression list — no more emails will go to this address.'); }
+      onStageChanged();
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update suppression.'); }
   };
 
   if (detailFailed) return <div className="rounded-2xl border border-forge-err/30 bg-forge-err/10 p-6 text-sm text-forge-err">Couldn't load this contact — try selecting them again.</div>;
@@ -150,9 +161,14 @@ function ContactDetailPane({ id, onDeleted, onStageChanged }: { id: string; onDe
         <div className="flex items-start gap-2">
           <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} onBlur={() => void saveName()}
             placeholder="Name" className="flex-1 rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-lg font-semibold text-forge-ink hover:border-forge-border focus:border-forge-ember/60 focus:outline-none" />
+          <button onClick={() => void toggleSuppress()}
+            title={suppressed ? 'Lift suppression — allow emails to this address again' : 'Suppress — record that they opted out (e.g. asked you by phone). No email can ever go to this address.'}
+            className={cn('transition-colors', suppressed ? 'text-forge-ok hover:text-forge-ink' : 'text-forge-dim hover:text-forge-warn')}>
+            {suppressed ? <RotateCcw size={15} /> : <Ban size={15} />}
+          </button>
           <button onClick={() => void remove()} title="Delete contact" className="text-forge-dim hover:text-forge-warn"><Trash2 size={15} /></button>
         </div>
-        <p className="text-sm text-forge-dim">{c.email} · {c.email_status}</p>
+        <p className="text-sm text-forge-dim">{c.email} · <span className={suppressed ? 'text-forge-warn' : ''}>{c.email_status}</span></p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {STAGES.map((s) => (
             <button key={s} onClick={() => void saveStage(s)}

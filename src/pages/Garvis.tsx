@@ -516,9 +516,8 @@ export default function Garvis() {
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge tone="dim">{k.kind}</Badge>
                       <span className="font-medium text-sm text-forge-ink">{k.title}</span>
-                      {typeof k.confidence === 'number' && (
-                        <span className="text-[11px] text-forge-dim/70">confidence {k.confidence.toFixed(2)}</span>
-                      )}
+                      {/* the model's extraction confidence is a hunch, not a measurement — not
+                          shown as a bare metric (deep scan, no-invented-numbers). */}
                     </div>
                     <p className="mt-1 whitespace-pre-wrap text-xs text-forge-dim">{k.body}</p>
                     {k.source && <p className="mt-1 text-[10px] text-forge-dim/60">source: {k.source}</p>}

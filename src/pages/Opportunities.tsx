@@ -54,7 +54,9 @@ export default function Opportunities() {
                   <Badge tone={TYPE_TONE[o.type]}>{TYPE_LABEL[o.type]}</Badge>
                   <span className="font-display text-sm font-semibold text-forge-ink">{o.title}</span>
                   {o.status === 'saved' && <Badge tone="dim">saved</Badge>}
-                  {typeof o.confidence === 'number' && <span className="text-[10px] text-forge-dim/60">confidence {o.confidence.toFixed(2)}</span>}
+                  {/* No bare "confidence 0.85": that number is the model's own hunch, not a
+                      measurement (deep scan, no-invented-numbers). It stays an internal ordering
+                      hint only — never displayed as a metric. */}
                   <span className="ml-auto text-[10px] text-forge-dim/60">{timeAgo(o.created_at)}</span>
                 </div>
                 {o.related_apps.length > 0 && (

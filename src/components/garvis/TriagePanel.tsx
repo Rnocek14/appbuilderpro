@@ -84,9 +84,8 @@ export function TriagePanel({ report, apps, onArchive, onSetImportance, onClose 
                         {item.guarded && (
                           <span className="text-[10px] text-forge-ember" title="Operational signals said otherwise; your strategic importance overrode them.">strategic override</span>
                         )}
-                        {typeof item.confidence === 'number' && (
-                          <span className="text-[10px] text-forge-dim/70">confidence {item.confidence.toFixed(2)}</span>
-                        )}
+                        {/* confidence is the model's own hunch, not a measurement — kept for
+                            internal ordering, never shown as a metric (deep scan, no-invented-numbers). */}
                       </div>
                       {item.reason && <p className="mt-0.5 text-xs text-forge-dim">{item.reason}</p>}
                       {/* For unclassified apps, let Garvis's suggested importance be set in one click. */}

@@ -188,13 +188,37 @@ Deno.serve(async (req) => {
           content: embedText.slice(0, 8000), embedding: toVectorLiteral(vec), model: EMBED_MODEL,
         }, { onConflict: 'owner_id,subject_type,subject_id,chunk_ix' });
 
+        // 3b) CHUNK THE REST — chunk 0 covers only the head (title+summary+first 6k), so semantic
+        // recall over anything past ~page 3 was silently zero (deep scan P2). Split the remaining
+        // text into overlapping windows and embed each. Bounded (MAX_CHUNKS) to cap cost/time.
+        const CHUNK = 1800, OVERLAP = 200, MAX_CHUNKS = 11;
+        if (text.length > 6000) {
+          const body = text.slice(6000);
+          let ix = 1;
+          for (let pos = 0; pos < body.length && ix <= MAX_CHUNKS; pos += (CHUNK - OVERLAP)) {
+            const piece = body.slice(pos, pos + CHUNK).trim();
+            if (piece.length < 80) break;
+            const cvec = await embedOne(piece);
+            if (!cvec) break; // embedding hiccup — stop rather than spin; the head is already indexed
+            await admin.from('embeddings').upsert({
+              owner_id: user.id, subject_type: 'document', subject_id: documentId, chunk_ix: ix,
+              content: piece.slice(0, 8000), embedding: toVectorLiteral(cvec), model: EMBED_MODEL,
+            }, { onConflict: 'owner_id,subject_type,subject_id,chunk_ix' });
+            ix++;
+          }
+        }
+
         // 4) CLASSIFY — nearest neighbors across the brain (excluding this doc). The nearest doc/artifact
         //    that already has a world becomes the suggested home; the rest are surfaced as connections.
         const { data: matches } = await admin.rpc('match_embeddings', {
           _owner: user.id, _query: toVectorLiteral(vec), _k: 8,
           _subject_type: null, _min_similarity: 0.3, _exclude_subject: documentId,
         });
-        connections = ((matches ?? []) as typeof connections).slice(0, 5);
+        // Dedup by subject_id — a neighbor doc now has multiple chunks, so keep only its best hit.
+        const seenSubj = new Set<string>();
+        connections = ((matches ?? []) as typeof connections)
+          .filter((mtch) => (seenSubj.has(mtch.subject_id) ? false : (seenSubj.add(mtch.subject_id), true)))
+          .slice(0, 5);
 
         // Resolve a suggested world from the nearest document/cluster that has one.
         for (const mtch of connections) {

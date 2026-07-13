@@ -3,7 +3,7 @@
 // hits that hybrid retrieval produces. Kept separate from ask.ts so it can be exercised in
 // isolation — the impure retrieval/synthesis lives in ask.ts and imports these.
 
-export interface RawHit { subjectId: string; content: string; similarity: number | null; via: 'vector' | 'lexical' }
+export interface RawHit { subjectId: string; content: string; similarity: number | null; via: 'vector' | 'lexical'; kind?: 'artifact' | 'document' }
 
 /** Merge two hit lists into one, deduped by subjectId. A subject found BOTH ways keeps the vector
  *  similarity (semantic score is the more trustworthy signal) and is boosted for appearing twice.
