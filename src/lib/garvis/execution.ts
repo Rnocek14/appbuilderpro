@@ -131,7 +131,15 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
   // server-side and writes the execution_runs row itself.
   if (a.kind === 'deploy_backend') return await executeBackendDeploy(a);
 
-  // Remaining kinds (publish_post/spend/…): the DECISION is recorded; execution happens
+  if (a.kind === 'publish_post') {
+    const { data, error } = await supabase.functions.invoke('social-publish', { body: { approval_id: a.id } });
+    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    const res = data as { ok?: boolean; error?: string; status?: string };
+    if (!res?.ok) await revertToPending(a.id);
+    return { ok: !!res?.ok, error: res?.error, result: res };
+  }
+
+  // Remaining kinds (spend/…): the DECISION is recorded; execution happens
   // where the capability lives (these need a client-built bundle we don't capture yet). Ledger
   // the approved-but-not-executed state honestly — visible, never silent.
   const { data: sess } = await supabase.auth.getUser();

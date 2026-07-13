@@ -34,6 +34,7 @@ import { FarmPanel } from '../components/garvis/FarmPanel';
 import { PaperworkStudio } from '../components/garvis/PaperworkStudio';
 import { MarketDataPanel } from '../components/garvis/MarketDataPanel';
 import { TimelinePanel } from '../components/garvis/TimelinePanel';
+import { SocialPublisher } from '../components/garvis/SocialPublisher';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
@@ -666,6 +667,11 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           plays in the browser now, renders a real mp4 when a render key is set. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'video' && (
         <VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* AUTO-POST to her real connected social accounts (Ayrshare), scheduled + approval-gated. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'social' && (
+        <SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded
