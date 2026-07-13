@@ -37,25 +37,15 @@ Deno.serve(async (req) => {
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
-    const body = (await req.json().catch(() => ({}))) as { projectId?: string; approval_id?: string };
-    const { projectId, approval_id } = body;
-    if (!projectId) return json({ error: 'projectId is required.' }, 400);
-
-    // Verify the caller owns this FableForge project (mirrors generate-app's ownership check).
+    const body = (await req.json().catch(() => ({}))) as { approval_id?: string };
+    const { approval_id } = body;
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data: project } = await admin.from('projects').select('id, owner_id, supabase_project_ref, supabase_managed').eq('id', projectId).single();
-    if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
-
-    // The project ref is DERIVED from the owned project row — NEVER from the caller. A client ref
-    // was a confused-deputy vector (deep scan P0): a managed-tier user could target another tenant's
-    // backend with the shared platform token. Functions + secrets are read from the APPROVED payload
-    // below, not the request body, so what deploys is exactly what the human approved.
-    const projectRef = project.supabase_project_ref as string | null;
-    if (!projectRef) return json({ error: 'This app has no database yet — run "Set up database" first.' }, 400);
 
     // APPROVAL SPINE — this is the most privileged external action in the system (it pushes code +
-    // secrets with the Management token), so it requires an APPROVED approval row owned by the
-    // caller, and every outcome lands in execution_runs (same discipline as send-email/deploy-site).
+    // secrets with the Management token), so it requires an APPROVED approval row owned by the caller.
+    // The APPROVAL is the sole source of truth for WHAT deploys and WHERE (deep scan verification):
+    // both the target project and the functions/secrets come from the approved payload, never from
+    // the request body — otherwise a caller could point an approval-for-project-B at project A.
     if (!approval_id) return json({ error: 'This deploy must go through Approvals — deploy from the project workspace.' }, 400);
     const { data: approval } = await admin.from('approvals')
       .select('id, owner_id, kind, status, payload, result').eq('id', approval_id).single();
@@ -68,11 +58,21 @@ Deno.serve(async (req) => {
       return json({ error: 'This deploy was already executed — start a new deploy from the workspace.' }, 409);
     }
 
-    // BIND to the approved payload. functions/secrets come from what the owner actually saw and
-    // approved (deployRun.ts captures them at authorization time), never from the request body.
-    const payload = (approval.payload ?? {}) as { functions?: DeployFn[]; secrets?: DeploySecret[] };
+    // BIND target + payload to the approval. project_id, functions, secrets all come from what the
+    // owner actually saw and approved (deployRun.ts captures them at authorization time).
+    const payload = (approval.payload ?? {}) as { project_id?: string; functions?: DeployFn[]; secrets?: DeploySecret[] };
+    const projectId = payload.project_id;
+    if (!projectId) return json({ error: 'This approval has no target project — re-create the deploy.' }, 400);
     const functions = Array.isArray(payload.functions) ? payload.functions : [];
     const secrets = Array.isArray(payload.secrets) ? payload.secrets : [];
+
+    // Verify the caller owns the APPROVED target project, and DERIVE its ref from the owned row —
+    // never from any client-supplied value (deep scan P0). The privileged ref columns are pinned by
+    // a trigger (app_0057) so the owner can't forge them on their own project row either.
+    const { data: project } = await admin.from('projects').select('id, owner_id, supabase_project_ref, supabase_managed').eq('id', projectId).single();
+    if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
+    const projectRef = project.supabase_project_ref as string | null;
+    if (!projectRef) return json({ error: 'This app has no database yet — run "Set up database" first.' }, 400);
 
     const ledger = async (status: 'ok' | 'failed', error: string | null, extra: Record<string, unknown> = {}) => {
       await admin.from('execution_runs').insert({

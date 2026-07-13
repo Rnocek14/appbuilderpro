@@ -184,10 +184,17 @@ Deno.serve(async (req) => {
     // template, if the owner set one, takes precedence as the primary.
     const httpsUnsub = `${Deno.env.get('SUPABASE_URL')}/functions/v1/unsubscribe?m=${messageId}`;
     const mailtoUnsub = `mailto:${settings.from_email}?subject=unsubscribe&body=Please%20remove%20${encodeURIComponent(to)}`;
-    const primaryUnsub = settings.unsubscribe_url_template?.trim() || httpsUnsub;
-    const listUnsub = settings.unsubscribe_url_template?.trim()
-      ? `<${settings.unsubscribe_url_template.trim()}>, <${mailtoUnsub}>`
+    const customUnsub = settings.unsubscribe_url_template?.trim();
+    const primaryUnsub = customUnsub || httpsUnsub;
+    const listUnsub = customUnsub
+      ? `<${customUnsub}>, <${mailtoUnsub}>`
       : `<${httpsUnsub}>, <${mailtoUnsub}>`;
+    // One-Click (RFC 8058) is only HONEST when the primary is OUR endpoint, which is a real POST
+    // handler. A custom template may be a GET-only page, so we don't claim one-click for it (deep
+    // scan verification) — the mailto + body reply path still works.
+    const unsubHeaders: Record<string, string> = customUnsub
+      ? { 'List-Unsubscribe': listUnsub }
+      : { 'List-Unsubscribe': listUnsub, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' };
     // CAN-SPAM requires a clear, conspicuous opt-out IN THE BODY — headers alone aren't enough. The
     // body link now points at the working endpoint too, so a click actually unsubscribes.
     const optOut = `To stop receiving these emails, click ${primaryUnsub} or reply "unsubscribe".`;
@@ -205,7 +212,7 @@ Deno.serve(async (req) => {
         subject: (msg.subject ?? '').trim(),
         text: finalText,
         html: bodyHtml,
-        headers: { 'List-Unsubscribe': listUnsub, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+        headers: unsubHeaders,
         tags: [{ name: 'campaign_id', value: msg.campaign_id ?? 'none' }],
       }),
     });

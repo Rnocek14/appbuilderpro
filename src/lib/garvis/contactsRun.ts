@@ -58,7 +58,10 @@ export async function unsuppressContact(id: string, email: string): Promise<void
   const { error } = await supabase.from('suppression').delete()
     .eq('owner_id', uid).eq('email', addr).eq('reason', 'manual');
   if (error) throw new Error(error.message);
-  await supabase.from('contacts').update({ email_status: 'active' }).eq('id', id).then(() => {}, () => {});
+  // 'unknown' — the neutral pre-contact status (NOT 'active', which isn't a valid contact_email_status
+  // enum value; every other reset site uses 'unknown'). A bad value here would error and silently
+  // leave the contact blocked.
+  await supabase.from('contacts').update({ email_status: 'unknown' }).eq('id', id).then(() => {}, () => {});
 }
 
 export async function listNotes(contactId: string): Promise<ContactNote[]> {

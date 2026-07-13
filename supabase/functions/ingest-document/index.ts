@@ -210,8 +210,11 @@ Deno.serve(async (req) => {
 
         // 4) CLASSIFY — nearest neighbors across the brain (excluding this doc). The nearest doc/artifact
         //    that already has a world becomes the suggested home; the rest are surfaced as connections.
+        // _k is raised (was 8) to offset chunk fan-out: a neighbor doc now owns up to ~12 chunk
+        // vectors, so a small _k could be filled by one dominant doc and starve distinct neighbors
+        // after the dedup-by-subject below (deep scan verification).
         const { data: matches } = await admin.rpc('match_embeddings', {
-          _owner: user.id, _query: toVectorLiteral(vec), _k: 8,
+          _owner: user.id, _query: toVectorLiteral(vec), _k: 24,
           _subject_type: null, _min_similarity: 0.3, _exclude_subject: documentId,
         });
         // Dedup by subject_id — a neighbor doc now has multiple chunks, so keep only its best hit.

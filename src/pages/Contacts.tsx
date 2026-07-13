@@ -147,7 +147,7 @@ function ContactDetailPane({ id, onDeleted, onStageChanged }: { id: string; onDe
   const toggleSuppress = async () => {
     if (!c) return;
     try {
-      if (suppressed) { await unsuppressContact(id, c.email); setC((p) => p ? { ...p, email_status: 'active' } : p); toast('success', 'Suppression lifted — this address can be emailed again.'); }
+      if (suppressed) { await unsuppressContact(id, c.email); setC((p) => p ? { ...p, email_status: 'unknown' } : p); toast('success', 'Suppression lifted — this address can be emailed again.'); }
       else { await suppressContact(id, c.email); setC((p) => p ? { ...p, email_status: 'unsubscribed' } : p); toast('success', 'Added to your suppression list — no more emails will go to this address.'); }
       onStageChanged();
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not update suppression.'); }

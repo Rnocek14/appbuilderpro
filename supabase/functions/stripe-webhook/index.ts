@@ -48,8 +48,11 @@ Deno.serve(async (req) => {
           const credits = Number(session.metadata?.credits ?? 0);
           if (userId && credits > 0) {
             // Atomic increment (deep scan): the old read-modify-write could interleave with a
-            // concurrent grant and lose credits. grant_credits does it in one UPDATE.
-            await admin.rpc('grant_credits', { p_user: userId, p_credits: credits });
+            // concurrent grant and lose credits. grant_credits does it in one UPDATE. THROW on error
+            // so the outer catch deletes the idempotency marker and returns 500 — otherwise a DB
+            // fault would silently drop a PAID top-up while the event is marked processed (verify REG).
+            const { error: grantErr } = await admin.rpc('grant_credits', { p_user: userId, p_credits: credits });
+            if (grantErr) throw new Error(`grant_credits failed: ${grantErr.message}`);
             await admin.from('usage_events').insert({
               user_id: userId, event_type: 'credit_topup', provider: 'stripe',
               model: null, input_tokens: 0, output_tokens: 0, cost_usd: 0,

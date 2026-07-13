@@ -222,8 +222,11 @@ async function executeBackendDeploy(a: Approval): Promise<{ ok: boolean; error?:
   if (res?.error) return { ok: false, error: res.error };
 
   const failed = (res?.results ?? []).filter((r) => !r.ok);
+  // Mark executed ONLY on a fully-clean deploy — the server deliberately leaves a partial (207)
+  // unconsumed so it stays retryable; stamping executed:true here would defeat that and trip the
+  // server's 409 replay guard on retry (deep scan verification).
   await supabase.from('approvals').update({
-    result: { executed: true, ok: !!res?.ok, steps: (res?.results ?? []).length, failed: failed.map((f) => f.step) },
+    result: { executed: !!res?.ok, ok: !!res?.ok, steps: (res?.results ?? []).length, failed: failed.map((f) => f.step) },
   }).eq('id', a.id);
   await supabase.from('mind_events').insert({
     owner_id: uid, event_type: 'note', source: 'execution',
