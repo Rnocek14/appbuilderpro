@@ -63,7 +63,27 @@ Deno.serve(async (req) => {
 
   // Liveness: only a WORKER-authenticated hit is the cron clock (a signed-in "Run now" proves the
   // function is deployed, not that the heartbeat is armed).
-  if (isWorker) await stampHeartbeat(admin, 'standing-worker');
+  if (isWorker) {
+    await stampHeartbeat(admin, 'standing-worker');
+    // TIMED REMINDERS (Tier 2): fire due, unfired reminders exactly once — a reminder must reach
+    // the owner when it's due, not when they next open a tab. Best-effort per row; a failure just
+    // retries next tick because notified_at only sets on success.
+    try {
+      const { data: due } = await admin.from('reminders')
+        .select('id, owner_id, title, due_at').eq('done', false).is('notified_at', null)
+        .not('due_at', 'is', null).lte('due_at', nowIso).limit(50);
+      for (const r of (due ?? []) as { id: string; owner_id: string; title: string }[]) {
+        await admin.from('mind_events').insert({
+          owner_id: r.owner_id, event_type: 'note', source: 'reminder',
+          subject: `Reminder due: ${r.title.slice(0, 200)}`,
+          payload: { key: `reminder:${r.id}`, reminder_id: r.id },
+        });
+        const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', r.owner_id).maybeSingle();
+        await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, `⏰ Reminder: ${r.title}`).catch(() => {});
+        await admin.from('reminders').update({ notified_at: nowIso }).eq('id', r.id);
+      }
+    } catch { /* reminder firing must never wedge the order tick */ }
+  }
 
   // --- pick the work: one forced order, or the due set --------------------------------------------
   let q = admin.from('standing_orders')

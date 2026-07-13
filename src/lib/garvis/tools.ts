@@ -202,6 +202,20 @@ export const GARVIS_TOOLS: GarvisTool[] = [
     modes: ['act'],
   },
   {
+    name: 'create_reminder',
+    description:
+      'Set a REMINDER for the owner ("remind me Friday to chase Acme"). due_at is an ISO timestamp ' +
+      '— resolve natural phrasing ("Friday 9am", "in 2 hours") into a concrete future ISO time ' +
+      'yourself; omit due_at only when no time was implied. Due reminders surface in the waking ' +
+      'moment AND fire a webhook ping at the due time (when the heartbeat is armed).',
+    inputSchema: {
+      type: 'object',
+      properties: { title: { type: 'string' }, due_at: { type: 'string' }, detail: { type: 'string' } },
+      required: ['title'],
+    },
+    modes: ['act'],
+  },
+  {
     name: 'create_standing_order',
     description:
       'Set a RECURRING check that runs on Garvis\'s clock: kind "watch_url" fetches a page on a ' +

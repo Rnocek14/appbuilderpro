@@ -17,7 +17,7 @@ In the Supabase SQL editor, run each file's full contents:
 
 1. `schema.sql` — the app-builder base.
 2. `schema_v2_autopilot.sql` — jobs/autopilot tables.
-3. `supabase/_apply_garvis_all.sql` — **every Garvis migration (app_0003 → app_0061), concatenated
+3. `supabase/_apply_garvis_all.sql` — **every Garvis migration (app_0003 → app_0062), concatenated
    in order.** All migrations are additive + idempotent; re-running is safe. (Regenerate this file
    after adding a migration — the command is in its header.)
 

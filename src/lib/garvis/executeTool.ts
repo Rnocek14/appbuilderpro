@@ -342,6 +342,25 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
       };
     }
 
+    case 'create_reminder': {
+      const title = String(input.title ?? '').trim();
+      if (title.length < 2) throw new Error('create_reminder needs a title.');
+      let dueAt: string | null = null;
+      if (input.due_at) {
+        const t = Date.parse(String(input.due_at));
+        if (!Number.isFinite(t)) throw new Error('due_at must be an ISO timestamp — resolve the phrasing to a concrete time first.');
+        dueAt = new Date(t).toISOString();
+      }
+      const { addReminder } = await import('./remindersRun');
+      const r = await addReminder({ title, dueAt, detail: input.detail ? String(input.detail) : undefined });
+      return {
+        ok: true, reminder_id: r.id, title: r.title, due_at: r.due_at,
+        note: dueAt
+          ? 'Reminder set — it surfaces in the waking moment and pings the webhook at the due time (heartbeat permitting).'
+          : 'Reminder set (no time given) — it sits in the reminders list until done.',
+      };
+    }
+
     // --- THE CLOCK: a recurring read-and-record check. Safe to create directly (it never sends,
     // posts, or spends — findings land in the waking moment; anything outward still stops at
     // Approvals). Digests need a world; watches may be world-less. ---
