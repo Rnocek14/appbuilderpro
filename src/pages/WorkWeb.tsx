@@ -33,6 +33,7 @@ import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { FarmPanel } from '../components/garvis/FarmPanel';
 import { PaperworkStudio } from '../components/garvis/PaperworkStudio';
 import { MarketDataPanel } from '../components/garvis/MarketDataPanel';
+import { TimelinePanel } from '../components/garvis/TimelinePanel';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
@@ -698,6 +699,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           automations: nothing is computed or sent from them unless the owner asks. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
         <TrackerRegistry worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onChanged={onChanged} />
+      )}
+
+      {/* TRANSACTION TIMELINES: contract-to-close checklists whose dated steps can become firing
+          reminders — deadlines that ring, not rows that wait. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
+        <TimelinePanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
