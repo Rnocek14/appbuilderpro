@@ -30,6 +30,7 @@ import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
+import { FarmPanel } from '../components/garvis/FarmPanel';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
@@ -643,6 +644,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           mail log so mailed batches count as real outreach. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'direct_mail' && (
         <MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* THE FARM — neighborhood prospecting: territories, address-first household lists (columns
+          kept), farm-viability math, do-not-mail suppression, and an addressed merged print run
+          from this world's saved postcard design. Lives on both the lists desk and the mail studio. */}
+      {cluster.charter?.archetype === 'studio' && (cluster.charter.flavor === 'lists' || cluster.charter.flavor === 'direct_mail') && (
+        <FarmPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
