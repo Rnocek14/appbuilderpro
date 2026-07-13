@@ -31,6 +31,7 @@ import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { FarmPanel } from '../components/garvis/FarmPanel';
+import { PaperworkStudio } from '../components/garvis/PaperworkStudio';
 import { VideoStudio } from '../components/garvis/VideoStudio';
 import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
 import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
@@ -671,6 +672,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           review and send; nothing is auto-delivered. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
         <DeliverableStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+      )}
+
+      {/* AUTO-PAPERWORK: the operator's own templates merged from real records — unfilled fields
+          refuse to send, and every envelope goes through Approvals to docusign-send. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
+        <PaperworkStudio worldId={worldId} onToast={(k, m) => toast(k, m)} />
       )}
 
       {/* DATA & NUMBERS WORKSPACE — a CSV becomes a typed table, honest per-column stats, and a chart

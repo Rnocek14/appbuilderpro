@@ -11,7 +11,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { getConnection, upsertConnection, probeProvider } from '../_shared/connections.ts';
 
-const PROVIDERS = new Set(['supabase', 'github', 'netlify', 'vercel']);
+const PROVIDERS = new Set(['supabase', 'github', 'netlify', 'vercel', 'docusign']);
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });

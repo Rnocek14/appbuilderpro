@@ -9,7 +9,7 @@ import { supabase } from '../supabase';
 
 export type ApprovalKind =
   | 'send_email' | 'publish_post' | 'deploy_site' | 'deploy_backend'
-  | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch';
+  | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface Approval {
@@ -93,6 +93,16 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     const res = data as { ok?: boolean; error?: string };
     // send-email releases its per-approval claim on a soft failure, so a failed send is retryable —
     // return the row to pending instead of stranding it "approved" in History (deep scan P1).
+    if (!res?.ok) await revertToPending(a.id);
+    return { ok: !!res?.ok, error: res?.error, result: res };
+  }
+
+  if (a.kind === 'send_for_signature') {
+    const { data, error } = await supabase.functions.invoke('docusign-send', { body: { approval_id: a.id } });
+    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    const res = data as { ok?: boolean; error?: string };
+    // docusign-send releases its per-approval claim on soft failure — return to pending so a
+    // legitimate retry stays possible (the send-email semantics, exactly).
     if (!res?.ok) await revertToPending(a.id);
     return { ok: !!res?.ok, error: res?.error, result: res };
   }

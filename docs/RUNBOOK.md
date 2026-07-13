@@ -17,7 +17,7 @@ In the Supabase SQL editor, run each file's full contents:
 
 1. `schema.sql` — the app-builder base.
 2. `schema_v2_autopilot.sql` — jobs/autopilot tables.
-3. `supabase/_apply_garvis_all.sql` — **every Garvis migration (app_0003 → app_0064), concatenated
+3. `supabase/_apply_garvis_all.sql` — **every Garvis migration (app_0003 → app_0065), concatenated
    in order.** All migrations are additive + idempotent; re-running is safe. (Regenerate this file
    after adding a migration — the command is in its header.)
 
@@ -48,7 +48,13 @@ Per-feature (add when you use the feature; every one degrades with a named messa
 `RESEND_API_KEY` (+`RESEND_WEBHOOK_SECRET`, `INBOUND_SECRET`) for email · `STRIPE_SECRET_KEY`
 (+webhook secret, price ids, `VITE_STRIPE_PUBLISHABLE_KEY`) for billing · `SERPER_API_KEY` for live
 research · `SHOTSTACK_API_KEY` for mp4 render · Meta/Google ads tokens for ad sync ·
-`NETLIFY_AUTH_TOKEN` / `GITHUB_TOKEN` for deploys/exports.
+`NETLIFY_AUTH_TOKEN` / `GITHUB_TOKEN` for deploys/exports. · `DOCUSIGN_OAUTH_CLIENT_ID` +
+`DOCUSIGN_OAUTH_CLIENT_SECRET` (+ optional `DOCUSIGN_AUTH_BASE` — defaults to the developer
+sandbox `https://account-d.docusign.com`, where signatures are for testing and NOT legally
+binding; production flips this to `https://account.docusign.com` after DocuSign go-live review —
+and `DOCUSIGN_WEBHOOK_SECRET`, the Connect HMAC key; without it the webhook rejects everything
+fail-closed and statuses arrive via the poll button) for e-signature. Register
+`<your-app-origin>/oauth/callback` as the integration key's redirect URI.
 
 Note: overnight `inbox-draft` currently requires `OPENAI_API_KEY` or `LOVABLE_API_KEY` specifically.
 

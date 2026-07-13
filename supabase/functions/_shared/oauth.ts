@@ -12,6 +12,7 @@ export interface OAuthProvider {
   clientSecretEnv: string;
   scope: string;
   pkce: boolean; // Supabase requires PKCE; GitHub OAuth apps use the client secret instead.
+  tokenAuth?: 'body' | 'basic'; // DocuSign requires HTTP Basic on the token endpoint; default 'body'.
 }
 
 export const OAUTH_PROVIDERS: Record<string, OAuthProvider> = {
@@ -30,6 +31,17 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProvider> = {
     clientSecretEnv: 'GITHUB_OAUTH_CLIENT_SECRET',
     scope: 'repo',
     pkce: false,
+  },
+  // DocuSign: demo (developer sandbox) by default; production flips DOCUSIGN_AUTH_BASE to
+  // https://account.docusign.com by CONFIG, never by code (the lakegen audit's hardcoded-demo trap).
+  docusign: {
+    authorizeUrl: `${Deno.env.get('DOCUSIGN_AUTH_BASE') ?? 'https://account-d.docusign.com'}/oauth/auth`,
+    tokenUrl: `${Deno.env.get('DOCUSIGN_AUTH_BASE') ?? 'https://account-d.docusign.com'}/oauth/token`,
+    clientIdEnv: 'DOCUSIGN_OAUTH_CLIENT_ID',
+    clientSecretEnv: 'DOCUSIGN_OAUTH_CLIENT_SECRET',
+    scope: 'signature',
+    pkce: false,
+    tokenAuth: 'basic',
   },
   // C4 adds: netlify
 };
@@ -64,15 +76,17 @@ export function clientCreds(p: OAuthProvider): { id: string; secret: string } | 
 
 /** Exchange an authorization code (with PKCE verifier) for tokens. */
 export async function exchangeCode(p: OAuthProvider, args: { code: string; redirectUri: string; verifier: string; id: string; secret: string }): Promise<{ ok: boolean; access_token?: string; refresh_token?: string; expires_in?: number; error?: string }> {
+  const basic = p.tokenAuth === 'basic';
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code: args.code,
     redirect_uri: args.redirectUri,
-    client_id: args.id,
-    client_secret: args.secret,
   });
+  if (!basic) { body.set('client_id', args.id); body.set('client_secret', args.secret); }
   if (args.verifier) body.set('code_verifier', args.verifier); // PKCE providers only
-  const r = await fetch(p.tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body });
+  const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
+  if (basic) headers.Authorization = `Basic ${btoa(`${args.id}:${args.secret}`)}`;
+  const r = await fetch(p.tokenUrl, { method: 'POST', headers, body });
   const t = await r.text();
   if (!r.ok) return { ok: false, error: `${r.status}: ${t.slice(0, 300)}` };
   try {
@@ -120,8 +134,12 @@ export async function projectSupabaseToken(admin: SupabaseClient, userId: string
 
 /** Refresh an access token. */
 export async function refreshToken(p: OAuthProvider, args: { refresh_token: string; id: string; secret: string }): Promise<{ ok: boolean; access_token?: string; refresh_token?: string; expires_in?: number; error?: string }> {
-  const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: args.refresh_token, client_id: args.id, client_secret: args.secret });
-  const r = await fetch(p.tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body });
+  const basic = p.tokenAuth === 'basic';
+  const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: args.refresh_token });
+  if (!basic) { body.set('client_id', args.id); body.set('client_secret', args.secret); }
+  const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
+  if (basic) headers.Authorization = `Basic ${btoa(`${args.id}:${args.secret}`)}`;
+  const r = await fetch(p.tokenUrl, { method: 'POST', headers, body });
   const t = await r.text();
   if (!r.ok) return { ok: false, error: `${r.status}: ${t.slice(0, 200)}` };
   try { return { ok: true, ...(JSON.parse(t) as object) }; } catch { return { ok: false, error: 'Bad refresh response' }; }
