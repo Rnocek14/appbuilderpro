@@ -51,6 +51,12 @@ test('another protected route (contacts) also gates to /auth', async ({ page }) 
   expect(page.url()).toContain('/auth');
 });
 
+test('the setup console route loads (lazy boundary) and gates to /auth', async ({ page }) => {
+  await page.goto('/garvis/setup');
+  await page.waitForURL(/\/auth/, { timeout: 15_000 });
+  expect(page.url()).toContain('/auth');
+});
+
 test('public preview route does not throw on an unknown slug', async ({ page }) => {
   const errors = trackErrors(page);
   await page.goto('/preview-site/does-not-exist-xyz');

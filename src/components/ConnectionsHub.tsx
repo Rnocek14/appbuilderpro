@@ -3,7 +3,7 @@
 // the token is stored server-side (never in the browser) and reused by every project. This is the
 // foundation the OAuth phases plug into: today you paste a token; later a "Connect" button does OAuth.
 import { useState } from 'react';
-import { Check, Github, Globe, Database, Loader2, ExternalLink, X } from 'lucide-react';
+import { Check, Github, Globe, Database, Loader2, ExternalLink, X, FileSignature } from 'lucide-react';
 import { useConnections } from '../hooks/useConnections';
 import { useToast } from '../context/ToastContext';
 import { Button, Input } from './ui';
@@ -12,6 +12,7 @@ const PROVIDERS = [
   { id: 'supabase', label: 'Supabase', icon: Database, oauth: true, hint: 'One-click OAuth — provisions a database per app in your org', url: '' },
   { id: 'github', label: 'GitHub', icon: Github, oauth: true, hint: 'One-click OAuth — export your projects to a repo', url: '' },
   { id: 'netlify', label: 'Netlify', icon: Globe, oauth: false, hint: 'Personal access token (publish the live site)', url: 'https://app.netlify.com/user/applications#personal-access-tokens' },
+  { id: 'docusign', label: 'DocuSign', icon: FileSignature, oauth: true, hint: 'One-click OAuth — send paperwork for e-signature (sandbox by default)', url: '' },
 ] as const;
 
 export function ConnectionsHub() {

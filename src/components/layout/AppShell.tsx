@@ -2,8 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign,
-} from 'lucide-react';
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign, KeyRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase } from '../../lib/supabase';
@@ -35,6 +34,7 @@ const navSections = [
     // (Universe/System) stay reachable from Ventures and the palette, not as destinations.
     title: 'Garvis',
     items: [
+      { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
       // ONE QUEUE (design review P0): approvals + replies/leads + build questions, one room.
       // The old Inbox/Approvals/Build-questions routes redirect here; the badge sums all lanes.
