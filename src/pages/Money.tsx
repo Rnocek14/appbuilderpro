@@ -12,7 +12,7 @@ import { Card, Badge, EmptyState, Button, Input, Skeleton } from '../components/
 import { useToast } from '../context/ToastContext';
 import { useUndoBar } from '../components/garvis/UndoBar';
 import { invoiceTotal, chaseStage, type LineItem } from '../lib/garvis/money';
-import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, voidInvoice, unvoidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
+import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, unmarkInvoicePaid, voidInvoice, unvoidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
 
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 const STAGE_LABEL = ['', 'reminder queued window', 'due', 'past due', 'final notice'];
@@ -161,7 +161,14 @@ export default function Money() {
                       </button>
                     )}
                     {r.status === 'sent' && (
-                      <button disabled={busyId === r.id} onClick={() => void act(r.id, () => markInvoicePaid(r.id), 'Paid — recorded as revenue. 🎉', { status: 'paid' })}
+                      <button disabled={busyId === r.id} onClick={() => {
+                        // Mark paid is a money mutation — it gets an Undo too (parity with void), so a
+                        // mis-click doesn't permanently book revenue with no way back. This button only
+                        // shows for a 'sent' invoice, so Undo restores it to 'sent'.
+                        void act(r.id, () => markInvoicePaid(r.id), 'Paid — recorded as revenue. 🎉', { status: 'paid' }).then((ok) => {
+                          if (ok) offerUndo(`Marked ${r.number} paid`, async () => { await unmarkInvoicePaid(r.id, 'sent'); await refresh(); });
+                        });
+                      }}
                         className="flex items-center gap-1 rounded-lg border border-forge-ok/50 bg-forge-ok/10 px-2.5 py-1.5 text-xs text-forge-ok hover:bg-forge-ok/20 disabled:opacity-50">
                         {busyId === r.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} Mark paid
                       </button>

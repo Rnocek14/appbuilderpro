@@ -82,31 +82,49 @@ export async function queueInvoiceSend(invoice: InvoiceRow): Promise<void> {
     sequence_step: 0, subject: email.subject, body_text: email.body, to_address: invoice.to_email, status: 'draft',
   }).select('id').single();
   if (mErr || !msg) throw new Error(mErr?.message ?? 'Could not draft the invoice email.');
-  await supabase.from('approvals').insert({
+  // The approval MUST land before we stamp the invoice sent (deep scan P0): if this insert silently
+  // failed, the invoice would read "sent" with nothing in the queue, and the chaser would dun a
+  // client who was never billed. Checked, like the campaign/message inserts above.
+  const { error: apErr } = await supabase.from('approvals').insert({
     owner_id: uid, kind: 'send_email', status: 'pending', requested_by: 'user',
     title: `Send invoice ${invoice.number} (${invoice.title}) → ${invoice.to_email}`,
     preview: `${email.subject}\n\n${email.body.slice(0, 400)}`,
     payload: { message_id: (msg as { id: string }).id, invoice_id: invoice.id },
   });
-  // 'sent' is stamped optimistically at queue time so the chaser can see it; the approval queue +
-  // ledger remain the source of truth for whether the email actually left. The stamp's failure
-  // must SURFACE (system scan): if it silently failed, the invoice stayed 'draft' and a second
-  // press queued a duplicate approval for the same money.
+  if (apErr) throw new Error(`Could not queue the invoice for approval (${apErr.message}) — it was NOT marked sent; try again.`);
+  // 'sent' is stamped optimistically now that the approval exists, so the chaser can see it; the
+  // approval queue + ledger remain the source of truth for whether the email actually left. Guarded
+  // on status='draft' so a stale second press can't double-stamp.
   const { error: stampErr } = await supabase.from('invoices')
     .update({ status: 'sent', sent_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', invoice.id);
   if (stampErr) throw new Error(`Queued for approval, but the invoice could not be marked sent (${stampErr.message}) — do NOT queue it again; check Approvals.`);
 }
 
-/** YOU confirm payment (it landed in your processor/bank) — Garvis records the fact as revenue. */
+/** Reject any still-pending send/chase approvals for an invoice. Called when the invoice is paid or
+ *  voided so a settled bill never gets a "final notice" from an approval drafted earlier (deep scan
+ *  theme 3). Approvals carry payload.invoice_id (queueInvoiceSend + invoice-chase). */
+async function cancelPendingInvoiceOutreach(uid: string, invoiceId: string): Promise<void> {
+  await supabase.from('approvals')
+    .update({ status: 'rejected', decided_at: new Date().toISOString(), decided_via: 'auto' })
+    .eq('owner_id', uid).eq('status', 'pending').eq('kind', 'send_email')
+    .contains('payload', { invoice_id: invoiceId })
+    .then(() => {}, () => {});
+}
+
+/** YOU confirm payment (it landed in your processor/bank) — Garvis records the fact as revenue.
+ *  Guarded so only a draft/sent invoice can become paid (never void→paid, never a re-flip). */
 export async function markInvoicePaid(id: string): Promise<void> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
   const { data, error } = await supabase.from('invoices')
     .update({ status: 'paid', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-    .eq('id', id).select('number, title, amount_usd').single();
-  if (error || !data) throw new Error(error?.message ?? 'Could not mark it paid.');
+    .eq('id', id).in('status', ['draft', 'sent']).select('number, title, amount_usd').maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('Only a draft or sent invoice can be marked paid.');
   const inv = data as { number: string; title: string; amount_usd: number };
+  // A paid invoice must not keep getting chased — cancel any pending reminders already drafted.
+  await cancelPendingInvoiceOutreach(uid, id);
   await supabase.from('mind_events').insert({
     owner_id: uid, event_type: 'note', source: 'money',
     subject: `PAID: ${inv.number} — ${inv.title} ($${Number(inv.amount_usd).toFixed(2)})`,
@@ -114,10 +132,31 @@ export async function markInvoicePaid(id: string): Promise<void> {
   }).then(() => {}, () => {});
 }
 
+/** Undo for "mark paid" (parity with void): revert to the prior status and drop the PAID record.
+ *  Only flips rows that are actually paid. */
+export async function unmarkInvoicePaid(id: string, restoreTo: 'draft' | 'sent'): Promise<void> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const { data, error } = await supabase.from('invoices')
+    .update({ status: restoreTo, paid_at: null, updated_at: new Date().toISOString() })
+    .eq('id', id).eq('status', 'paid').select('id').maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return; // already not paid — nothing to undo
+  // Retract the revenue mind_event so the scorecard doesn't double-count a reversed payment.
+  await supabase.from('mind_events').delete()
+    .eq('owner_id', uid).eq('source', 'money').contains('payload', { invoice_id: id })
+    .then(() => {}, () => {});
+}
+
 export async function voidInvoice(id: string): Promise<void> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
   const { error } = await supabase.from('invoices')
     .update({ status: 'void', updated_at: new Date().toISOString() }).eq('id', id);
   if (error) throw new Error(error.message);
+  // A voided invoice must not keep getting chased either.
+  if (uid) await cancelPendingInvoiceOutreach(uid, id);
 }
 
 /** Undo for void (design review: act instantly, regret politely — the confirm dialog is gone).

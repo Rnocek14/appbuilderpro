@@ -77,13 +77,23 @@ export async function listApprovals(status: ApprovalStatus | 'all' = 'pending', 
  * writes the execution_runs ledger entry.
  */
 export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; error?: string; result?: unknown }> {
-  // Flip to approved first so the record reflects the decision even if execution then fails.
-  await supabase.from('approvals').update({ status: 'approved', decided_at: new Date().toISOString(), decided_via: 'ui' }).eq('id', a.id);
+  // CAS: claim the approval only while it is still pending. A bare .eq('id') let a stale tab
+  // overwrite an already-rejected/expired row and execute it (deep scan P1). If no row is claimed,
+  // the decision was already made elsewhere — refuse rather than double-act.
+  const { data: claimed, error: claimErr } = await supabase.from('approvals')
+    .update({ status: 'approved', decided_at: new Date().toISOString(), decided_via: 'ui' })
+    .eq('id', a.id).eq('status', 'pending')
+    .select('id').maybeSingle();
+  if (claimErr) return { ok: false, error: claimErr.message };
+  if (!claimed) return { ok: false, error: 'This was already decided elsewhere — refresh the queue.' };
 
   if (a.kind === 'send_email') {
     const { data, error } = await supabase.functions.invoke('send-email', { body: { approval_id: a.id } });
-    if (error) return { ok: false, error: error.message };
+    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
     const res = data as { ok?: boolean; error?: string };
+    // send-email releases its per-approval claim on a soft failure, so a failed send is retryable —
+    // return the row to pending instead of stranding it "approved" in History (deep scan P1).
+    if (!res?.ok) await revertToPending(a.id);
     return { ok: !!res?.ok, error: res?.error, result: res };
   }
 
@@ -201,8 +211,11 @@ async function executeBackendDeploy(a: Approval): Promise<{ ok: boolean; error?:
     return { ok: true, result: { approved: true, executed: false, needsWorkspace: true, projectId } };
   }
 
+  // deploy-backend derives the project ref and reads functions/secrets from the APPROVED payload
+  // server-side (deep scan P0) — we send only the identifiers; projectRef/functions/secrets above
+  // are used only for the local "nothing captured" guard.
   const { data, error } = await supabase.functions.invoke('deploy-backend', {
-    body: { approval_id: a.id, projectId, projectRef, functions, secrets },
+    body: { approval_id: a.id, projectId },
   });
   if (error) return { ok: false, error: error.message };
   const res = data as { ok?: boolean; error?: string; results?: { step: string; ok: boolean; detail?: string }[] };
@@ -232,9 +245,30 @@ async function clusterIdsForProjectWorld(projectId: string): Promise<string[] | 
   return (clusters ?? []).map((c) => (c as { id: string }).id);
 }
 
+/** Return an approval to the pending lane (used when execution soft-fails, so it can be retried). */
+async function revertToPending(id: string): Promise<void> {
+  await supabase.from('approvals').update({ status: 'pending', decided_at: null }).eq('id', id).then(() => {}, () => {});
+}
+
 export async function rejectApproval(id: string): Promise<void> {
-  const { error } = await supabase.from('approvals').update({ status: 'rejected', decided_at: new Date().toISOString(), decided_via: 'ui' }).eq('id', id);
+  // CAS on pending (deep scan P1: a bare .eq('id') let a stale tab flip an already-decided row and
+  // falsify the record). Only a still-pending approval can be rejected.
+  const { data: rejected, error } = await supabase.from('approvals')
+    .update({ status: 'rejected', decided_at: new Date().toISOString(), decided_via: 'ui' })
+    .eq('id', id).eq('status', 'pending')
+    .select('id, kind, payload').maybeSingle();
   if (error) throw new Error(error.message);
+  if (!rejected) throw new Error('This was already decided elsewhere — refresh the queue.');
+
+  // If this was an invoice send, the invoice was optimistically stamped 'sent' at queue time.
+  // Rejecting the send means it never went out — return it to draft so it doesn't linger as "sent"
+  // forever and so the chaser stops treating it as delivered (deep scan P0/P1, theme 3).
+  const inv = (rejected as { kind: string; payload: Record<string, unknown> | null });
+  const invoiceId = inv.kind === 'send_email' ? (inv.payload?.invoice_id as string | undefined) : undefined;
+  if (invoiceId) {
+    await supabase.from('invoices').update({ status: 'draft', sent_at: null, updated_at: new Date().toISOString() })
+      .eq('id', invoiceId).eq('status', 'sent').then(() => {}, () => {});
+  }
 }
 
 /** Undo a REJECTION — the row returns to pending. Only rejected rows reopen (an approved row has
