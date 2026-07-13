@@ -31,14 +31,15 @@ export default function Landing() {
       <main className="mx-auto max-w-5xl px-6">
         <section className="py-20 text-center stagger">
           <p className="mx-auto mb-4 inline-block rounded-full border border-forge-ember/40 bg-forge-ember/10 px-3 py-1 text-xs text-forge-ember shadow-ember">
-            Your own AI app builder — no credits, no meter
+            Your own AI app builder — on your own Supabase, with your own keys
           </p>
           <h1 className="mx-auto max-w-2xl font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
             Apps are forged here, <span className="bg-ember-gradient bg-clip-text text-transparent">not prompted into the void</span>
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-forge-dim">
             FableForge turns a sentence into a working app: blueprint, database, files, live preview.
-            You run it on your own Supabase project with your own model keys.
+            Inside lives Garvis — an AI chief of staff that runs ventures, documents, watches, and an
+            honest approval queue for everything outbound. Your Supabase, your keys.
           </p>
           <div className="mt-8 flex justify-center gap-3">
             <Link to={session ? '/new' : '/auth'} className="group inline-flex items-center gap-2 rounded-lg bg-ember-gradient px-6 py-3 font-medium text-[#1A0E04] shadow-soft transition-all duration-150 ease-forge hover:-translate-y-px hover:shadow-liftEmber active:scale-[0.98]">

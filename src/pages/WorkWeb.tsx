@@ -36,6 +36,7 @@ import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
 import { DataWorkspace } from '../components/garvis/DataWorkspace';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 import { TrackerRegistry } from '../components/garvis/TrackerRegistry';
+import { VerdictReadout } from '../components/garvis/VerdictReadout';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
 
@@ -195,7 +196,7 @@ export default function WorkWeb() {
       <AppShell>
         <div className="mx-auto max-w-2xl px-4 py-16 text-center">
           <p className="text-forge-dim">This web could not be loaded.</p>
-          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to webs</Link>
+          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Ventures</Link>
         </div>
       </AppShell>
     );
@@ -594,18 +595,20 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {cluster.charter?.archetype === 'ledger' && (assistDesk ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This desk measures answered, not sent.</p>
-          <p>Nothing here goes out on its own — you copy and send. Saved drafts land on the desk's
-          shelf so this ledger can learn which replies you keep as-is versus rewrite, and where the
-          knowledge base keeps coming up short. When a reply comes back refused, add the missing
-          answer with the “Add knowledge” box on the desk — and the next draft can stand on it.</p>
+          <p>Nothing here goes out on its own — you copy and send. After each copied draft, the desk
+          asks whether you sent it as-is or rewrote it — and this ledger counts the real answers.
+          When a reply comes back refused, add the missing answer with the “Add knowledge” box on
+          the desk — and the next draft can stand on it.</p>
+          <VerdictReadout worldId={worldId} kind="assist" />
         </div>
       ) : docStudio ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This studio measures documents made, not sent.</p>
-          <p>Nothing is auto-delivered — you review and hand each document off yourself. Saved
-          documents land on the studio's shelf so this ledger can learn which ones you keep as-is
-          versus rewrite, and which sections keep needing your input. When a section keeps asking for
-          the same input, add that source material with the “Add source material” box on the studio.</p>
+          <p>Nothing is auto-delivered — you review and hand each document off yourself. After each
+          copy or export, the studio asks whether you sent it as-is or rewrote it — and this ledger
+          counts the real answers. When a section keeps asking for the same input, add that source
+          material with the “Add source material” box on the studio.</p>
+          <VerdictReadout worldId={worldId} kind="deliver" />
         </div>
       ) : trackerDesk ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
@@ -757,7 +760,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         {loadingArts ? (
           <p className="text-sm text-forge-dim/70">Loading…</p>
         ) : artifacts.length === 0 ? (
-          <p className="text-sm text-forge-dim/70">Nothing here yet. Use a tool above, run the play from the header, or just ask the studio below.</p>
+          <p className="text-sm text-forge-dim/70">Nothing here yet. Use a tool above, or just ask the studio below.</p>
         ) : (
           <div className="space-y-2">
             {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} onChanged={bumpChanged} />)}

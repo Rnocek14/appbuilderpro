@@ -23,6 +23,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
@@ -59,6 +60,10 @@ Deno.serve(async (req) => {
 
   const body = (await req.json().catch(() => ({}))) as { order_id?: string };
   const nowIso = new Date().toISOString();
+
+  // Liveness: only a WORKER-authenticated hit is the cron clock (a signed-in "Run now" proves the
+  // function is deployed, not that the heartbeat is armed).
+  if (isWorker) await stampHeartbeat(admin, 'standing-worker');
 
   // --- pick the work: one forced order, or the due set --------------------------------------------
   let q = admin.from('standing_orders')

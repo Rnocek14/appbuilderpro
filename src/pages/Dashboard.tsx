@@ -109,13 +109,13 @@ export default function Dashboard() {
                 </button>
                 {menuFor === p.id && (
                   <div className="absolute right-2 top-8 z-20 w-36 rounded-lg border border-forge-border bg-forge-raised py-1 shadow-xl" onClick={(e) => e.stopPropagation()}>
-                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-forge-panel" onClick={async () => { const copy = await duplicateProject(p.id); setMenuFor(null); if (copy) { toast('success', 'Project duplicated.'); navigate(`/project/${copy.id}`); } }}>
+                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-forge-panel" onClick={async () => { setMenuFor(null); try { const copy = await duplicateProject(p.id); if (copy) { toast('success', 'Project duplicated.'); navigate(`/project/${copy.id}`); } } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not duplicate the project.'); } }}>
                       <Copy size={12} /> Duplicate
                     </button>
-                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-forge-panel" onClick={async () => { await archiveProject(p.id, !p.archived); setMenuFor(null); toast('success', p.archived ? 'Project restored.' : 'Project archived.'); }}>
+                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-forge-panel" onClick={async () => { setMenuFor(null); try { await archiveProject(p.id, !p.archived); toast('success', p.archived ? 'Project restored.' : 'Project archived.'); } catch (e) { toast('error', e instanceof Error ? e.message : 'That failed — nothing was changed.'); } }}>
                       <Archive size={12} /> {p.archived ? 'Restore' : 'Archive'}
                     </button>
-                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-forge-err hover:bg-forge-panel" onClick={async () => { await deleteProject(p.id); setMenuFor(null); toast('success', 'Project deleted.'); }}>
+                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-forge-err hover:bg-forge-panel" onClick={async () => { setMenuFor(null); try { await deleteProject(p.id); toast('success', 'Project deleted.'); } catch (e) { toast('error', e instanceof Error ? e.message : 'Delete failed — the project is untouched.'); } }}>
                       <Trash2 size={12} /> Delete
                     </button>
                   </div>

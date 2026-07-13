@@ -6,6 +6,7 @@
 // own confirmation, and every outgoing email waits in the queue.
 
 import { useCallback, useEffect, useState } from 'react';
+import { ClockStatus } from '../components/garvis/ClockStatus';
 import { CircleDollarSign, Plus, Send, Check, Ban, Loader2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Button, Input, Skeleton } from '../components/ui';
@@ -80,6 +81,9 @@ export default function Money() {
             <h1 className="text-xl font-semibold text-forge-ink">Money</h1>
             <p className="text-sm text-forge-dim">Invoice → gated send → the chaser asks so you don't have to → paid = real revenue.</p>
           </div>
+
+        {/* The chase ladder runs on the clock — if the clock is dead, say so here (quiet when healthy). */}
+        <ClockStatus quiet />
           <div className="ml-auto flex items-center gap-3 text-sm">
             {/* Totals sum the loaded invoices (newest 200). Say so when we're at the cap, rather than
                 showing a silently-undercounted number (deep scan P2, no-invented-numbers). */}

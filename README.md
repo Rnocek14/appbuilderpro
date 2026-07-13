@@ -1,8 +1,19 @@
-# FableForge 🔨
+# FableForge 🔨 + Garvis
 
-Your own Lovable-style AI app builder. Describe an app in plain language; FableForge drafts a
-blueprint, generates the files, renders a sandboxed live preview, and lets you iterate
-conversationally — on **your** Supabase project, with **your** model keys, with no per-credit meter.
+Two halves of one system:
+
+- **FableForge** — your own Lovable-style AI app builder. Describe an app in plain language; it
+  drafts a blueprint, generates the files, renders a sandboxed live preview, and iterates
+  conversationally — on **your** Supabase project, with **your** model keys.
+- **Garvis** — an AI chief of staff living at `/garvis/command`: ventures (growth ops, answering
+  desks, document studios, data workspaces, trackers, product labs), a grounded knowledge brain,
+  standing orders on a real clock, money + invoice chasing, and ONE approval queue for everything
+  outbound. Honest by construction: no invented numbers, refusals over fabrication, nothing sent
+  without your yes.
+
+> **Setting it up?** The complete zero-to-ticking guide is **[docs/RUNBOOK.md](docs/RUNBOOK.md)** —
+> three SQL pastes, two deploy commands, the secrets table, and the one heartbeat-arm call that
+> turns on everything scheduled. The sections below document the app-builder half in depth.
 
 ## What's inside
 

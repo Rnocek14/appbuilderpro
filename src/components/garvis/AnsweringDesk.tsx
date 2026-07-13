@@ -11,6 +11,7 @@ import { draftReply } from '../../lib/garvis/assistRun';
 import { assistArtifact, type AssistDraft } from '../../lib/garvis/assist';
 import { createArtifact } from '../../lib/garvis/artifacts';
 import { AddKnowledge } from './AddKnowledge';
+import { VerdictPrompt } from './VerdictPrompt';
 
 export function AnsweringDesk({ worldId, clusterId, onToast }: {
   worldId: string; clusterId: string; onToast: (kind: 'success' | 'error', msg: string) => void;
@@ -25,7 +26,7 @@ export function AnsweringDesk({ worldId, clusterId, onToast }: {
   const run = async () => {
     const text = incoming.trim();
     if (text.length < 3 || busy) return;
-    setBusy(true); setDraft(null); setErr(null); setCopied(false); setSaved(false);
+    setBusy(true); setDraft(null); setErr(null); setCopied(false); setSaved(false); setAskVerdict(false);
     try {
       setDraft(await draftReply({ worldId, incoming: text }));
     } catch (e) {
@@ -34,9 +35,14 @@ export function AnsweringDesk({ worldId, clusterId, onToast }: {
     } finally { setBusy(false); }
   };
 
+  const [askVerdict, setAskVerdict] = useState(false);
   const copy = async () => {
     if (!draft?.reply) return;
-    try { await navigator.clipboard.writeText(draft.reply); setCopied(true); setTimeout(() => setCopied(false), 1600); }
+    try {
+      await navigator.clipboard.writeText(draft.reply);
+      setCopied(true); setTimeout(() => setCopied(false), 1600);
+      setAskVerdict(true); // a copied draft is (probably) about to be sent — ask for the real verdict
+    }
     catch { onToast('error', 'Could not copy — select the text and copy manually.'); }
   };
 
@@ -127,6 +133,9 @@ export function AnsweringDesk({ worldId, clusterId, onToast }: {
           <div className="whitespace-pre-line rounded-lg border border-forge-border bg-forge-raised/30 px-3 py-2.5 text-sm leading-relaxed text-forge-ink">
             {draft.reply}
           </div>
+
+          {/* The verdict that makes the ledger's kept-vs-rewritten REAL — one tap, one counted row. */}
+          {askVerdict && <VerdictPrompt worldId={worldId} kind="assist" topic={incoming.trim().slice(0, 80)} onToast={onToast} />}
 
           {/* GAPS — the parts the knowledge base didn't cover, surfaced as a checklist to fill
               before this goes out. Honest incompleteness beats a confident guess. */}

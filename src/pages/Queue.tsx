@@ -189,7 +189,7 @@ export default function Queue() {
       });
       if (replyTo.kind === 'lead') await markLeadAnswered(replyTo.id).catch(() => {});
       if (replyTo.kind === 'reply') await markReplyHandled(replyTo.id).catch(() => {});
-      toast('success', 'Reply staged — approve the send in Decisions above.');
+      toast('success', 'Reply staged — approve the send in the Decisions lane above.');
       setReplyTo(null); setBody('');
       await refresh();
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not queue the reply.'); }

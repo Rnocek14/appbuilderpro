@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlarmClock, Loader2, Play, Pause, Trash2, Plus, Eye, CalendarClock } from 'lucide-react';
 import { listOrders, createOrder, setOrderStatus, deleteOrder, runOrderNow } from '../../lib/garvis/standingRun';
 import { orderStatusLine, type Cadence, type OrderKind, type StandingOrder } from '../../lib/garvis/standing';
+import { ClockStatus } from './ClockStatus';
 
 export function StandingOrdersPanel({ worldId, onToast }: {
   worldId?: string; onToast: (kind: 'success' | 'error', msg: string) => void;
@@ -67,6 +68,9 @@ export function StandingOrdersPanel({ worldId, onToast }: {
           ? <>Every recurring check you have, across all worlds — including watches created in conversation. <span className="text-forge-ink/80">They only read and record; nothing is ever sent for you.</span></>
           : <>Recurring checks that run on their own — watch a page for changes, or digest this world on a cadence. <span className="text-forge-ink/80">They only read and record; nothing is ever sent for you.</span></>}
       </p>
+
+      {/* The clock's honest pulse — orders are promises the heartbeat keeps; if it isn't ticking, say so HERE. */}
+      <ClockStatus />
 
       {showForm && (
         <div className="mt-3 rounded-lg border border-forge-border bg-forge-raised/20 p-3">

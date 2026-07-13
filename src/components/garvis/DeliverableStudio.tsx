@@ -12,6 +12,7 @@ import { generateDeliverable, generateBatch, buildDocxBlob } from '../../lib/gar
 import { DOC_TYPES, toMarkdown, toPlainText, deliverableArtifact, type Deliverable, type DocType } from '../../lib/garvis/deliverable';
 import { createArtifact } from '../../lib/garvis/artifacts';
 import { AddKnowledge } from './AddKnowledge';
+import { VerdictPrompt } from './VerdictPrompt';
 
 const DOC_ORDER: DocType[] = ['proposal', 'report', 'one_pager', 'brief', 'letter', 'summary'];
 
@@ -134,7 +135,7 @@ export function DeliverableStudio({ worldId, clusterId, onToast }: {
         <div className="mt-4 space-y-3">
           {docs.length > 1 && <p className="text-[11px] uppercase tracking-wide text-forge-dim">{docs.length} documents · export or save each</p>}
           {docs.map((doc, i) => (
-            <DocCard key={`${doc.subject}-${i}`} doc={doc} clusterId={clusterId} defaultOpen={docs.length === 1} onToast={onToast} />
+            <DocCard key={`${doc.subject}-${i}`} doc={doc} worldId={worldId} clusterId={clusterId} defaultOpen={docs.length === 1} onToast={onToast} />
           ))}
         </div>
       )}
@@ -142,12 +143,13 @@ export function DeliverableStudio({ worldId, clusterId, onToast }: {
   );
 }
 
-function DocCard({ doc, clusterId, defaultOpen, onToast }: {
-  doc: Deliverable; clusterId: string; defaultOpen: boolean; onToast: (kind: 'success' | 'error', msg: string) => void;
+function DocCard({ doc, worldId, clusterId, defaultOpen, onToast }: {
+  doc: Deliverable; worldId: string; clusterId: string; defaultOpen: boolean; onToast: (kind: 'success' | 'error', msg: string) => void;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [askVerdict, setAskVerdict] = useState(false);
 
   // A refused document shows the honest reason, not an empty shell.
   if (doc.refusal) {
@@ -165,12 +167,16 @@ function DocCard({ doc, clusterId, defaultOpen, onToast }: {
   const base = slugify(doc.title);
 
   const copy = async () => {
-    try { await navigator.clipboard.writeText(toPlainText(doc)); setCopied(true); setTimeout(() => setCopied(false), 1600); }
+    try {
+      await navigator.clipboard.writeText(toPlainText(doc));
+      setCopied(true); setTimeout(() => setCopied(false), 1600);
+      setAskVerdict(true); // a copied/handed-off document gets the real kept-vs-rewritten verdict
+    }
     catch { onToast('error', 'Could not copy — select the text and copy manually.'); }
   };
-  const dlMarkdown = () => download(new Blob([md], { type: 'text/markdown' }), `${base}.md`);
+  const dlMarkdown = () => { download(new Blob([md], { type: 'text/markdown' }), `${base}.md`); setAskVerdict(true); };
   const dlDocx = async () => {
-    try { download(await buildDocxBlob(doc), `${base}.docx`); }
+    try { download(await buildDocxBlob(doc), `${base}.docx`); setAskVerdict(true); }
     catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not build the .docx.'); }
   };
   const print = () => {
@@ -228,6 +234,7 @@ function DocCard({ doc, clusterId, defaultOpen, onToast }: {
 
       {open && (
         <div className="border-t border-forge-border/60 px-4 py-3">
+          {askVerdict && <div className="mb-3"><VerdictPrompt worldId={worldId} kind="deliver" topic={doc.title.slice(0, 80)} onToast={onToast} /></div>}
           {doc.gaps.length > 0 && (
             <div className="mb-3 rounded-lg border border-forge-cyan/30 bg-forge-cyan/5 px-3 py-2">
               <div className="text-[11px] uppercase tracking-wide text-forge-cyan">Fill before sending ({doc.gaps.length})</div>
