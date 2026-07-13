@@ -52,8 +52,17 @@ function discTexture(inner = 'rgba(255,255,255,1)', outer = 'rgba(255,255,255,0)
   return t;
 }
 
+// Canvas textures are hand-made, so R3F's auto-dispose never reaches them — without this they leak
+// one GPU texture per body on every visit to /garvis/universe (deep scan P2). This memoizes the
+// texture and disposes it when the component unmounts.
+function useManagedTexture(make: () => THREE.Texture): THREE.Texture {
+  const tex = useMemo(make, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => tex.dispose(), [tex]);
+  return tex;
+}
+
 function useDisc(): THREE.Texture {
-  return useMemo(() => discTexture(), []);
+  return useManagedTexture(() => discTexture());
 }
 
 /** A 4-point diffraction-spike star texture — the "telescope photo" signal on bright stars. */
@@ -229,7 +238,7 @@ function GalaxyDisk() {
 
 /** Sparse bright stars with diffraction spikes — the power-law top of the field. */
 function BrightStars() {
-  const tex = useMemo(() => spikeTexture(), []);
+  const tex = useManagedTexture(spikeTexture);
   const [positions] = useMemo(() => {
     const N = 110;
     const p = new Float32Array(N * 3);
@@ -527,6 +536,9 @@ function Sky({ scene, onSelect, selected, system, planet, onPlanet, arts, onArt 
 export default function UniverseSky() {
   const [params, setParams] = useSearchParams();
   const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Reset the pointer cursor on unmount — navigating away mid-hover left it stuck as a pointer
+  // (deep scan P2), since onPointerOut never fires when the whole scene unmounts.
+  useEffect(() => () => { document.body.style.cursor = ''; }, []);
   const webgl = useMemo(() => {
     try {
       const c = document.createElement('canvas');
@@ -534,7 +546,10 @@ export default function UniverseSky() {
     } catch { return false; }
   }, []);
   const mode = params.get('mode');
-  const flat = mode === 'flat' || (mode !== '3d' && (!webgl || reduced));
+  // No-WebGL ALWAYS falls back to the flat map (deep scan P2): a ?mode=3d deep link used to bypass
+  // the guard and throw into the error boundary on a machine that can't do WebGL. mode=3d still
+  // overrides reduced-motion (an explicit opt-in), but never the hardware capability check.
+  const flat = mode === 'flat' || !webgl || (mode !== '3d' && reduced);
   const setMode = (m: 'flat' | '3d') => {
     const next = new URLSearchParams(params);
     next.set('mode', m);

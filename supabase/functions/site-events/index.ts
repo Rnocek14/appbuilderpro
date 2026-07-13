@@ -51,6 +51,21 @@ Deno.serve(async (req) => {
 
     const ownerId = channel.owner_id as string;
     const worldId = channel.world_id as string;
+
+    // RATE LIMIT (deep scan P1): the token is visible in the public site source, so cap the burst —
+    // otherwise anyone could flood site_events and, for leads, drive unbounded contact creation and
+    // owner webhook spam. Count this channel's recent rows; over the cap, refuse. Fail-open on a
+    // count error so a metrics hiccup never blocks a real visitor.
+    const since = new Date(Date.now() - 60_000).toISOString();
+    const { count: recent, error: rlErr } = await admin.from('site_events')
+      .select('id', { count: 'exact', head: true }).eq('channel_id', channel.id).gte('created_at', since);
+    if (!rlErr && (recent ?? 0) >= 60) return json({ error: 'Too many events — slow down.' }, 429);
+    if (kind === 'lead' && !rlErr) {
+      const { count: recentLeads } = await admin.from('site_events')
+        .select('id', { count: 'exact', head: true }).eq('channel_id', channel.id).eq('kind', 'lead').gte('created_at', since);
+      if ((recentLeads ?? 0) >= 10) return json({ error: 'Too many submissions — try again shortly.' }, 429);
+    }
+
     const path = cap(body.path, 300);
     const source = cap(body.source, 60);
 

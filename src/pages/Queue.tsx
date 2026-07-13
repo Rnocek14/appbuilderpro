@@ -68,6 +68,16 @@ export default function Queue() {
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
+  // Re-pull when the tab regains focus (deep scan P2): the queue used to refresh only on mount and
+  // after its own actions, so a decision made in another tab left this one stale — the exact
+  // precondition the CAS guards defend against. A focus refetch keeps the lanes honest.
+  useEffect(() => {
+    const onFocus = () => { if (document.visibilityState !== 'hidden') void refresh(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => { window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onFocus); };
+  }, [refresh]);
+
   useEffect(() => {
     if (tab !== 'history') return;
     void (async () => {

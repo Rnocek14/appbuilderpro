@@ -10,6 +10,7 @@ import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } fro
 // Canonical edit prompt — the SAME modern Vite + TS + design-token + integrations knowledge the client
 // uses (was a divergent Sandpack/plain-JS prompt here). Single source: _shared/prompts.ts.
 import { EDIT_SYSTEM_STREAM as SYSTEM } from '../_shared/prompts.ts';
+import { looksTruncated } from '../_shared/qa.ts';
 
 interface ParsedEdit {
   action: string;
@@ -190,7 +191,13 @@ Deno.serve(async (req) => {
           return;
         }
 
-        for (const c of parsed.changes) {
+        // Drop a max_tokens-truncated TAIL file rather than upserting half a file over the real one
+        // (deep scan P2: this edge path lacked the guard the client path has). Only the last change
+        // can be cut by the cap; earlier ones would be re-emitted.
+        const changes = parsed.changes.length > 1 && looksTruncated(parsed.changes[parsed.changes.length - 1].content)
+          ? parsed.changes.slice(0, -1)
+          : parsed.changes;
+        for (const c of changes) {
           await admin.from('project_files').upsert(
             { project_id: projectId, path: c.path, content: c.content, updated_by_ai: true },
             { onConflict: 'project_id,path' },
@@ -202,7 +209,7 @@ Deno.serve(async (req) => {
             .eq('project_id', projectId).eq('path', path);
         }
 
-        const changedPaths = parsed.changes.map((c) => c.path);
+        const changedPaths = changes.map((c) => c.path);
         const explanation = parsed.explanation || 'Done.';
         await admin.from('ai_messages').insert({
           project_id: projectId, user_id: user.id, generation_id: gen?.id,

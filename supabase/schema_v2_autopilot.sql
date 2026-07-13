@@ -6,14 +6,30 @@
 -- ---------- security hardening (upgrade for existing installs) ----------
 -- Close a privilege-escalation hole: users could previously update their own
 -- plan / generation limit directly. role was already protected.
-drop policy if exists "update own profile" on public.profiles;
-create policy "update own profile" on public.profiles for update using (id = auth.uid())
-  with check (
-    id = auth.uid()
-    and role = (select role from public.profiles where id = auth.uid())
-    and plan = (select plan from public.profiles where id = auth.uid())
-    and monthly_generation_limit = (select monthly_generation_limit from public.profiles where id = auth.uid())
-  );
+-- Recreate the profile-update policy pinning every privileged column. CRITICAL (deep scan P1): this
+-- file is loose and re-runnable, and it used to omit the credits pins app_0017 added — re-applying
+-- it silently reopened "set your own credits to 999999". It now pins credits WHEN the column exists
+-- (this file may be applied before app_0017 adds them), so re-running it is always safe.
+do $$
+begin
+  drop policy if exists "update own profile" on public.profiles;
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'profiles' and column_name = 'credits_balance') then
+    execute $p$create policy "update own profile" on public.profiles for update using (id = auth.uid())
+      with check (id = auth.uid()
+        and role = (select role from public.profiles where id = auth.uid())
+        and plan = (select plan from public.profiles where id = auth.uid())
+        and monthly_generation_limit = (select monthly_generation_limit from public.profiles where id = auth.uid())
+        and credits_balance = (select credits_balance from public.profiles where id = auth.uid())
+        and credits_period_start = (select credits_period_start from public.profiles where id = auth.uid()))$p$;
+  else
+    execute $p$create policy "update own profile" on public.profiles for update using (id = auth.uid())
+      with check (id = auth.uid()
+        and role = (select role from public.profiles where id = auth.uid())
+        and plan = (select plan from public.profiles where id = auth.uid())
+        and monthly_generation_limit = (select monthly_generation_limit from public.profiles where id = auth.uid()))$p$;
+  end if;
+end $$;
 
 -- ---------- jobs (background build queue) ----------
 create table public.jobs (

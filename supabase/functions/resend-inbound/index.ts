@@ -55,7 +55,9 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   const secret = Deno.env.get('INBOUND_SECRET');
-  const provided = req.headers.get('x-inbound-secret') ?? new URL(req.url).searchParams.get('secret');
+  // Header only (deep scan): the ?secret= query fallback leaked the shared secret into proxy/edge
+  // access logs and Referer headers. The inbound provider is configured to send the header.
+  const provided = req.headers.get('x-inbound-secret');
   // Constant-time compare (same discipline as resend-webhook) — a plain !== leaks timing.
   const constantTimeEqual = (a: string, b: string): boolean => {
     const ab = new TextEncoder().encode(a), bb = new TextEncoder().encode(b);

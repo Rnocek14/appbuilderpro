@@ -81,7 +81,11 @@ export default function Money() {
             <p className="text-sm text-forge-dim">Invoice → gated send → the chaser asks so you don't have to → paid = real revenue.</p>
           </div>
           <div className="ml-auto flex items-center gap-3 text-sm">
-            <span className="text-forge-dim">Outstanding <b className="text-forge-warn">{usd(outstanding)}</b></span>
+            {/* Totals sum the loaded invoices (newest 200). Say so when we're at the cap, rather than
+                showing a silently-undercounted number (deep scan P2, no-invented-numbers). */}
+            <span className="text-forge-dim" title={rows.length >= 200 ? 'across the latest 200 invoices' : undefined}>
+              Outstanding <b className="text-forge-warn">{usd(outstanding)}</b>{rows.length >= 200 && <span className="ml-0.5 text-[10px] text-forge-dim/60">(latest 200)</span>}
+            </span>
             <span className="text-forge-dim">Collected <b className="text-forge-ok">{usd(collected)}</b></span>
             {!creating && <Button onClick={() => setCreating(true)}><Plus size={14} /> New invoice</Button>}
           </div>

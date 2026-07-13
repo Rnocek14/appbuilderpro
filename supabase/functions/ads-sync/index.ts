@@ -188,11 +188,17 @@ Deno.serve(async (req) => {
     // Upsert — idempotent re-syncs; world stamped on insert, metrics refreshed on conflict.
     let upserts = 0;
     for (let i = 0; i < rows.length; i += 200) {
-      const batch = rows.slice(i, i + 200).map((r) => ({
-        owner_id: uid, world_id: body.world_id ?? null, provider,
-        date: r.date, campaign_name: r.campaign_name,
-        spend_usd: r.spend_usd, impressions: r.impressions, clicks: r.clicks,
-      }));
+      const batch = rows.slice(i, i + 200).map((r) => {
+        const row: Record<string, unknown> = {
+          owner_id: uid, provider, date: r.date, campaign_name: r.campaign_name,
+          spend_usd: r.spend_usd, impressions: r.impressions, clicks: r.clicks,
+        };
+        // Stamp world_id ONLY when this sync is explicitly scoped to a world (deep scan P1): the
+        // nightly refresh syncs with no world_id, and including `null` on conflict wiped the
+        // attribution set at sync time. Omitting the column preserves the existing value.
+        if (body.world_id) row.world_id = body.world_id;
+        return row;
+      });
       const { error } = await admin.from('ad_metrics').upsert(batch, { onConflict: 'owner_id,provider,date,campaign_name' });
       if (!error) upserts += batch.length;
     }

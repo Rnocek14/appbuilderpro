@@ -24,7 +24,18 @@ Deno.serve(async (req) => {
 
     const body = (await req.json().catch(() => ({}))) as { kind?: 'subscription' | 'credits'; returnUrl?: string };
     const kind = body.kind === 'credits' ? 'credits' : 'subscription';
-    const origin = (body.returnUrl && /^https?:\/\//.test(body.returnUrl)) ? body.returnUrl : (req.headers.get('origin') ?? '');
+    // A client returnUrl is honored ONLY when it is the SAME origin as the request (deep scan): an
+    // arbitrary http(s) value was a small open-redirect for the post-checkout landing. Otherwise the
+    // request's own Origin is the base.
+    const reqOrigin = req.headers.get('origin') ?? '';
+    let origin = reqOrigin;
+    if (body.returnUrl) {
+      try {
+        const u = new URL(body.returnUrl);
+        if (reqOrigin && u.origin === reqOrigin) origin = body.returnUrl;
+        else if (!reqOrigin && u.protocol === 'https:') origin = body.returnUrl; // headless caller: require https
+      } catch { /* malformed returnUrl — fall back to the request origin */ }
+    }
     if (!origin) return json({ error: 'returnUrl is required.' }, 400);
 
     const stripe = stripeClient();

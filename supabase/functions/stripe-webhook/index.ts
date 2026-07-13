@@ -47,9 +47,9 @@ Deno.serve(async (req) => {
           const userId = session.metadata?.user_id ?? session.client_reference_id;
           const credits = Number(session.metadata?.credits ?? 0);
           if (userId && credits > 0) {
-            const { data: prof } = await admin.from('profiles').select('credits_balance').eq('id', userId).single();
-            const balance = Number((prof as { credits_balance?: number } | null)?.credits_balance ?? 0);
-            await admin.from('profiles').update({ credits_balance: balance + credits }).eq('id', userId);
+            // Atomic increment (deep scan): the old read-modify-write could interleave with a
+            // concurrent grant and lose credits. grant_credits does it in one UPDATE.
+            await admin.rpc('grant_credits', { p_user: userId, p_credits: credits });
             await admin.from('usage_events').insert({
               user_id: userId, event_type: 'credit_topup', provider: 'stripe',
               model: null, input_tokens: 0, output_tokens: 0, cost_usd: 0,
