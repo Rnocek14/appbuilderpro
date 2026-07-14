@@ -180,6 +180,20 @@ export async function generateDraftFromRepo(repoInput: string): Promise<RepoDraf
   return { ...result, signal, intent };
 }
 
+/** Bring a WHOLE portfolio in at once: draft a world from each repo, sequentially (gentle on rate
+ *  limits + credits), each isolated so one bad repo never sinks the batch. */
+export async function generateDraftsFromRepos(inputs: string[]): Promise<{ input: string; result: RepoDraftResult }[]> {
+  const out: { input: string; result: RepoDraftResult }[] = [];
+  for (const input of inputs) {
+    try {
+      out.push({ input, result: await generateDraftFromRepo(input) });
+    } catch (e) {
+      out.push({ input, result: { id: null, draft: null, problems: [e instanceof Error ? e.message : 'Reading the repo failed.'], warnings: [] } });
+    }
+  }
+  return out;
+}
+
 export async function listDrafts(): Promise<DraftRow[]> {
   // Owner-scoped explicitly: the admin-read RLS policy exists for support, but an admin's own
   // WorkWebs page must never render other people's business DNA as approvable drafts.

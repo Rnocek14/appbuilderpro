@@ -13,7 +13,7 @@ import { cn } from '../lib/utils';
 import { WEB_TEMPLATES, ARCHETYPES, flattenTemplate } from '../lib/garvis/workweb';
 import { growthPlan, planMoneyVerdict } from '../lib/garvis/genesis';
 import { listWebs, instantiateWeb, type WebSummary } from '../lib/garvis/workwebRun';
-import { generateDraft, generateDraftFromRepo, parseRepoRef, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
+import { generateDraft, generateDraftFromRepo, generateDraftsFromRepos, parseRepoRef, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 
 const TEMPLATE_ICON: Record<string, typeof Building2> = { 'mom-real-estate': Building2, 'app-launch': Rocket };
@@ -60,21 +60,34 @@ export default function WorkWebs() {
   };
 
   const draftFromRepo = async () => {
+    const refs = repoUrl.split(/[\s,]+/).map((s) => s.trim()).filter((s) => parseRepoRef(s));
+    if (!refs.length) return;
     setRepoDrafting(true);
     setGenesisWarnings([]);
     try {
-      const r = await generateDraftFromRepo(repoUrl);
-      if (!r.id) { toast('error', r.problems[0] ?? 'Couldn’t spin up a world from that repo.'); setGenesisWarnings(r.warnings); return; }
-      setRepoUrl('');
-      setGenesisWarnings(r.warnings);
-      toast('success', `Read the repo and drafted "${r.draft?.title}" — review it below. Nothing exists until you approve.`);
+      if (refs.length === 1) {
+        const r = await generateDraftFromRepo(refs[0]);
+        if (!r.id) { toast('error', r.problems[0] ?? 'Couldn’t spin up a world from that repo.'); setGenesisWarnings(r.warnings); return; }
+        setRepoUrl('');
+        setGenesisWarnings(r.warnings);
+        toast('success', `Read the repo and drafted "${r.draft?.title}" — review it below. Nothing exists until you approve.`);
+      } else {
+        const results = await generateDraftsFromRepos(refs);
+        const ok = results.filter((x) => x.result.id);
+        const failed = results.filter((x) => !x.result.id);
+        setRepoUrl('');
+        toast(ok.length ? 'success' : 'error',
+          `Drafted ${ok.length} of ${refs.length} apps — review them below.${failed.length ? ` ${failed.length} couldn’t be read (likely private or too little product info).` : ''} Nothing exists until you approve each.`);
+      }
       await refresh();
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Reading the repo failed.');
+      toast('error', e instanceof Error ? e.message : 'Reading the repo(s) failed.');
     } finally {
       setRepoDrafting(false);
     }
   };
+
+  const repoRefCount = repoUrl.split(/[\s,]+/).map((s) => s.trim()).filter((s) => parseRepoRef(s)).length;
 
   const create = async (templateId: string) => {
     setCreating(templateId);
@@ -157,23 +170,23 @@ export default function WorkWebs() {
           <div className="mt-4 border-t border-forge-border/60 pt-3">
             <div className="flex items-center gap-2">
               <Building2 size={14} className="text-forge-ember" />
-              <span className="text-xs font-medium text-forge-ink">Or spin one up from a GitHub repo</span>
-              <span className="text-[11px] text-forge-dim">— Garvis reads the repo and drafts the marketing world for it</span>
+              <span className="text-xs font-medium text-forge-ink">Or spin up from your GitHub repos</span>
+              <span className="text-[11px] text-forge-dim">— Garvis reads each repo and drafts its marketing world; paste several to bring your whole portfolio in at once</span>
             </div>
             <div className="mt-2 flex items-center gap-2">
               <input
                 value={repoUrl}
                 onChange={(e) => setRepoUrl(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && parseRepoRef(repoUrl)) { e.preventDefault(); void draftFromRepo(); } }}
-                placeholder="github.com/owner/repo"
+                onKeyDown={(e) => { if (e.key === 'Enter' && repoRefCount > 0) { e.preventDefault(); void draftFromRepo(); } }}
+                placeholder="github.com/owner/repo  (or several, separated by spaces or commas)"
                 className="flex-1 rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/50"
-                aria-label="GitHub repo URL"
+                aria-label="GitHub repo URL(s)"
               />
-              <Button variant="outline" onClick={() => void draftFromRepo()} loading={repoDrafting} disabled={!parseRepoRef(repoUrl)}>
-                {repoDrafting ? 'Reading…' : 'Read repo'}
+              <Button variant="outline" onClick={() => void draftFromRepo()} loading={repoDrafting} disabled={repoRefCount === 0}>
+                {repoDrafting ? 'Reading…' : repoRefCount > 1 ? `Read ${repoRefCount} repos` : 'Read repo'}
               </Button>
             </div>
-            <span className="mt-1 block text-[11px] text-forge-dim">Public repos for now. Nothing is created until you approve the draft.</span>
+            <span className="mt-1 block text-[11px] text-forge-dim">Public repos for now. Each comes in as its own draft — nothing is created until you approve it.</span>
           </div>
           {genesisWarnings.length > 0 && (
             <ul className="mt-2 space-y-0.5">
