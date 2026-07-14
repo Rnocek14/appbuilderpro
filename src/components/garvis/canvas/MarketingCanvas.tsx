@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   Loader2, X, Printer, Save, Upload, Sparkles, Copy, Send, CheckCircle2, MapPin, ArrowRight, Info,
+  Play, Pause, Film, Clapperboard,
 } from 'lucide-react';
 import { CanvasScene, type CanvasNode, type Satellite } from './CanvasScene';
 import {
@@ -23,6 +24,11 @@ import { PostcardViewer, PostcardFront, PostcardBack } from '../Postcard';
 import { SocialMock, composePostText, providerPlatform } from './SocialMock';
 import { buildImagePrompt, canGenerateImage } from '../../../lib/garvis/imagegen';
 import { generateImageAsset } from '../../../lib/garvis/imagegenRun';
+import { VIDEO_CONCEPTS, type Aspect, type Storyboard, type VideoConcept } from '../../../lib/garvis/storyboard';
+import {
+  loadVideoMaterials, defaultStoryboardFor, startRender, pollRender, saveStoryboard, saveRenderedVideo,
+  type VideoMaterials,
+} from '../../../lib/garvis/videoRun';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
@@ -78,7 +84,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     { key: 'social', emoji: '📱', label: 'Social posts', sub: 'FB & Instagram', dim: !ready },
     { key: 'email', emoji: '✉️', label: 'Email', sub: 'to your list', dim: !ready },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
-    { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel', dim: !ready },
+    { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
     { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers', dim: !ready },
   ];
 
@@ -86,7 +92,9 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
 
   const onOpen = (k: string) => {
     const key = k as NodeKey;
-    if (key !== 'center' && key !== 'people' && !ready) { setOpen('center'); return; }
+    // people + video work from the world's own data (a mail list, the world's photos), so they don't
+    // require the campaign details to be filled first.
+    if (key !== 'center' && key !== 'people' && key !== 'video' && !ready) { setOpen('center'); return; }
     setOpen(key);
   };
 
@@ -118,8 +126,13 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
       {open === 'people' && (
         <PeopleSheet realEstate={realEstate} onToast={onToast} onClose={() => setOpen(null)} />
       )}
-      {(open === 'video' || open === 'analysis') && (
-        <ComingSheet kind={open} onClose={() => setOpen(null)} />
+      {open === 'video' && (
+        <VideoSheet worldId={worldId} clusterId={targetCluster}
+          title={(details ? centerTitle(details) : agent) || 'Your business'}
+          onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('video')} />
+      )}
+      {open === 'analysis' && (
+        <ComingSheet kind="analysis" onClose={() => setOpen(null)} />
       )}
     </div>
   );
@@ -423,6 +436,112 @@ function PeopleSheet({ realEstate, onToast, onClose }: { realEstate: boolean; on
   );
 }
 
+// ---------- Video ----------
+const KEN: Record<string, string> = { zoomIn: 'vsk-zin', zoomOut: 'vsk-zout', panLeft: 'vsk-pl', panRight: 'vsk-pr', still: '' };
+const V_ASPECTS: { id: Aspect; label: string; ratio: string; max: number }[] = [
+  { id: '9:16', label: 'Reel', ratio: '9 / 16', max: 250 },
+  { id: '1:1', label: 'Square', ratio: '1 / 1', max: 320 },
+  { id: '16:9', label: 'Landscape', ratio: '16 / 9', max: 460 },
+];
+
+function VideoSheet({ worldId, clusterId, title, onToast, onClose, onSpin }: {
+  worldId: string; clusterId: string | null; title: string; onToast: Toast; onClose: () => void; onSpin: () => void;
+}) {
+  const [materials, setMaterials] = useState<VideoMaterials | null>(null);
+  const [sb, setSb] = useState<Storyboard | null>(null);
+  const [aspect, setAspect] = useState<Aspect>('9:16');
+  const [concept, setConcept] = useState<VideoConcept>('proof_first');
+  const [playing, setPlaying] = useState(false);
+  const [scene, setScene] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [renderMsg, setRenderMsg] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let live = true, done = false;
+    const seed = (m: VideoMaterials) => { if (live && !done) { done = true; setMaterials(m); setSb(defaultStoryboardFor(m, title, aspect, concept)); } };
+    void loadVideoMaterials(worldId).then(seed).catch(() => seed({ ctx: null, accent: '#E4631C', photos: [] }));
+    // Never trap on the spinner: if materials don't load quickly, seed a card-only board so the
+    // sheet is usable (photo-less scenes show the shot to film — honest, never fake footage).
+    const fb = setTimeout(() => seed({ ctx: null, accent: '#E4631C', photos: [] }), 5000);
+    return () => { live = false; clearTimeout(fb); };
+  }, [worldId, title]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!playing || !sb || !sb.scenes.length) return;
+    timer.current = setTimeout(() => {
+      setScene((i) => { if (i + 1 >= sb.scenes.length) { setPlaying(false); return 0; } return i + 1; });
+    }, (sb.scenes[scene]?.durationS ?? 3) * 1000);
+    return () => { if (timer.current) clearTimeout(timer.current); };
+  }, [playing, scene, sb]);
+
+  const pickCut = (c: VideoConcept) => { if (!materials || c === concept) return; setConcept(c); setSb(defaultStoryboardFor(materials, title, aspect, c)); setScene(0); setPlaying(false); };
+  const pickAspect = (a: Aspect) => { if (!materials) return; setAspect(a); setSb(defaultStoryboardFor(materials, title, a, concept)); setScene(0); };
+
+  const doRender = async () => {
+    if (!sb) return;
+    setBusy(true); setRenderMsg('Starting render…');
+    try {
+      const start = await startRender(sb);
+      if (start.available === false) { setRenderMsg(null); onToast('info', 'Video rendering isn’t set up on the server yet — the preview here is fully usable. (Add a render key in Settings.)'); return; }
+      if (!start.ok || !start.id) { setRenderMsg(null); onToast('error', start.error ?? 'Render could not start.'); return; }
+      if (clusterId) await saveStoryboard(clusterId, sb).catch(() => {});
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 4000));
+        const st = await pollRender(start.id);
+        setRenderMsg(`Rendering… (${st.status ?? 'working'})`);
+        if (st.status === 'done' && st.url) {
+          if (clusterId) await saveRenderedVideo(clusterId, sb.title, st.url).catch(() => {});
+          setRenderMsg(null); onSpin(); onToast('success', 'Video rendered — saved to this world.'); window.open(st.url, '_blank'); return;
+        }
+        if (st.status === 'failed') { setRenderMsg(null); onToast('error', 'The render failed on the provider.'); return; }
+      }
+      setRenderMsg(null); onToast('info', 'Render is taking longer than expected — it’ll appear in your world when done.');
+    } catch (e) { setRenderMsg(null); onToast('error', e instanceof Error ? e.message : 'Render failed.'); }
+    finally { setBusy(false); }
+  };
+
+  const asp = V_ASPECTS.find((a) => a.id === aspect)!;
+  const cur = sb?.scenes[scene];
+  return (
+    <Sheet emoji="🎬" title="Video" lead="A 30-second reel from your photos — it plays here now; render a real MP4 when you want the file." onClose={onClose}>
+      <style>{VIDEO_CSS}</style>
+      {!sb ? (
+        <div className="mkc-vloading"><Loader2 size={15} className="animate-spin" /> Loading your photos…</div>
+      ) : (
+        <div className="mkc-vwrap">
+          <div className="mkc-vplayer">
+            <div className="mkc-vframe" style={{ aspectRatio: asp.ratio, maxWidth: asp.max }}>
+              {cur?.imageUrl ? (
+                <img key={scene} src={cur.imageUrl} alt="" className={cn('mkc-vimg', playing && KEN[cur.motion])} style={playing ? { animationDuration: `${cur.durationS}s` } : undefined} />
+              ) : (
+                <div className="mkc-vcard">{cur?.shoot ?? 'Add photos to your world to fill this scene'}</div>
+              )}
+              {cur?.onScreen && <div className="mkc-vcap"><span style={{ color: sb.accent }}>{cur.onScreen}</span></div>}
+              <div className="mkc-vdots">{sb.scenes.map((_, i) => <span key={i} className={i <= scene ? 'on' : ''} />)}</div>
+            </div>
+            <div className="mkc-vctrl">
+              <button className="mkc-a pri" onClick={() => { setScene(0); setPlaying((p) => !p); }}>{playing ? <Pause size={14} /> : <Play size={14} />} {playing ? 'Pause' : 'Play'}</button>
+              <span className="mkc-vmeta">{sb.totalDurationS}s · {sb.scenes.length} scenes</span>
+            </div>
+          </div>
+          <div className="mkc-vside">
+            <div className="mkc-vlabel">Cut — same photos, a different story</div>
+            <div className="mkc-vchips">{VIDEO_CONCEPTS.map((c) => <button key={c.id} className={cn('mkc-vchip', concept === c.id && 'on')} onClick={() => pickCut(c.id)}>{c.label}</button>)}</div>
+            <div className="mkc-vlabel">Shape</div>
+            <div className="mkc-vchips">{V_ASPECTS.map((a) => <button key={a.id} className={cn('mkc-vchip', aspect === a.id && 'on')} onClick={() => pickAspect(a.id)}>{a.label}</button>)}</div>
+            <div className="mkc-acts">
+              <button className="mkc-a pri" onClick={() => void doRender()} disabled={busy}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Film size={15} />} Render MP4</button>
+            </div>
+            {renderMsg && <p className="mkc-vmsg"><Clapperboard size={12} /> {renderMsg}</p>}
+            <p className="mkc-vnote">The preview plays your real photos with motion + captions — usable now. Render makes a downloadable MP4 when a render key is set. Photo-less scenes show the shot to film — never fake footage.</p>
+          </div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
 function ComingSheet({ kind, onClose }: { kind: 'video' | 'analysis'; onClose: () => void }) {
   const map = {
     video: { em: '🎬', t: 'Video', l: 'A 30-second reel from this world’s photos — plays in the browser, renders to MP4.' },
@@ -439,6 +558,37 @@ function ComingSheet({ kind, onClose }: { kind: 'video' | 'analysis'; onClose: (
 const PRINT_CSS = `.mkc-print{ display:none; }
 @media print{ body *{ visibility:hidden !important; } .mkc-print,.mkc-print *{ visibility:visible !important; } .mkc-print{ display:block !important; position:absolute; left:0; top:0; width:100%; }
   .mailer-card{ page-break-after:always; box-shadow:none !important; } @page{ size:9.25in 6.25in; margin:0; } }`;
+
+const VIDEO_CSS = `
+@keyframes vskZin{ from{ transform:scale(1) } to{ transform:scale(1.15) } }
+@keyframes vskZout{ from{ transform:scale(1.15) } to{ transform:scale(1) } }
+@keyframes vskPl{ from{ transform:scale(1.12) translateX(3%) } to{ transform:scale(1.12) translateX(-3%) } }
+@keyframes vskPr{ from{ transform:scale(1.12) translateX(-3%) } to{ transform:scale(1.12) translateX(3%) } }
+.vsk-zin{ animation:vskZin linear both } .vsk-zout{ animation:vskZout linear both }
+.vsk-pl{ animation:vskPl linear both } .vsk-pr{ animation:vskPr linear both }
+.mkc-vloading{ display:flex; align-items:center; gap:8px; color:#8A8076; font-size:14px; padding:8px 0; }
+.mkc-vwrap{ display:grid; grid-template-columns:auto 1fr; gap:18px; align-items:start; }
+.mkc-vplayer{ display:flex; flex-direction:column; gap:9px; }
+.mkc-vframe{ position:relative; width:100%; overflow:hidden; border-radius:14px; background:#000; box-shadow:0 10px 30px -12px rgba(0,0,0,.5); }
+.mkc-vimg{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.mkc-vcard{ position:absolute; inset:0; display:grid; place-items:center; padding:10%; text-align:center; font-size:12px; color:#C9BDB0; background:#221B2B; }
+.mkc-vcap{ position:absolute; inset-inline:0; bottom:0; padding:16px 12px 12px; background:linear-gradient(to top, rgba(0,0,0,.82), transparent); }
+.mkc-vcap span{ font-size:14px; font-weight:700; line-height:1.15; }
+.mkc-vdots{ position:absolute; inset-inline:0; top:6px; display:flex; gap:4px; padding:0 8px; }
+.mkc-vdots span{ height:2px; flex:1; border-radius:99px; background:rgba(255,255,255,.28); }
+.mkc-vdots span.on{ background:rgba(255,255,255,.85); }
+.mkc-vctrl{ display:flex; align-items:center; gap:10px; justify-content:center; }
+.mkc-vmeta{ font-size:11px; color:#8A8076; }
+.mkc-vside{ display:flex; flex-direction:column; gap:8px; }
+.mkc-vlabel{ font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#8A8076; margin-top:4px; }
+.mkc-vchips{ display:flex; flex-wrap:wrap; gap:7px; }
+.mkc-vchip{ font:inherit; font-size:12.5px; cursor:pointer; border:1px solid #E7E0D6; background:#fff; color:#2A2320; border-radius:9px; padding:6px 11px; }
+.mkc-vchip:hover{ border-color:#E4631C; color:#B44A12; }
+.mkc-vchip.on{ border-color:#E4631C; background:#FBEDE2; box-shadow:0 0 0 1px #E4631C inset; color:#B44A12; }
+.mkc-vmsg{ display:flex; align-items:center; gap:6px; font-size:12px; color:#8A8076; }
+.mkc-vnote{ font-size:11px; color:#A89F94; line-height:1.5; }
+@media (max-width:560px){ .mkc-vwrap{ grid-template-columns:1fr; } }
+`;
 
 const SHEET_CSS = `
 .mkc-scrim{ position:fixed; inset:0; z-index:60; background:rgba(12,8,16,.62); backdrop-filter:blur(3px); display:grid; place-items:center; padding:18px; animation:mkc-fade .18s ease; }
