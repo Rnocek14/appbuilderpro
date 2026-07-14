@@ -14,6 +14,7 @@ import {
   type GenesisDraft, type WorldDNA, type BusinessContext, type PlayData, type GenesisRationale,
 } from './genesis';
 import { instantiateWeb, type WebSummary } from './workwebRun';
+import { distillRepo, hasEnoughSignal, repoIntent, type RepoFile, type RepoSignal } from './repoGenesis';
 import type { WebTemplate } from './workweb';
 
 export interface DraftRow {
@@ -99,6 +100,75 @@ export async function generateDraft(intent: string): Promise<GenerateDraftResult
     payload: { draft_id: (row as { id: string }).id },
   });
   return { id: (row as { id: string }).id, draft: d, problems: [], warnings: parsed.warnings };
+}
+
+// ---------------------------------------------------------------------------
+// Genesis from a GitHub repo — read the repo's real signal, distill an intent, run the SAME
+// two-stage synthesis. No new engine: the repo just becomes the intent generateDraft consumes.
+// ---------------------------------------------------------------------------
+
+/** Pull {owner, repo} from a github URL or a bare "owner/repo". Null when it isn't one. */
+export function parseRepoRef(input: string): { owner: string; repo: string } | null {
+  const s = input.trim().replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/^github\.com\//i, '');
+  const m = /^([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i.exec(s.split(/[?#]/)[0]);
+  if (!m) return null;
+  const owner = m[1]; const repo = m[2];
+  if (!owner || !repo || /^https?:?$/i.test(owner)) return null;
+  return { owner, repo };
+}
+
+/** Fetch one repo file through the fetch-url edge fn, keeping title + description + text (fetchLinks
+ *  drops description, which is the strongest product signal). Best-effort — '' on any failure. */
+async function fetchRepoFile(url: string): Promise<{ title: string; description: string; text: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('fetch-url', { body: { url } });
+    if (error) return { title: '', description: '', text: '' };
+    const d = data as { title?: string; description?: string; text?: string; error?: string };
+    if (d.error) return { title: '', description: '', text: '' };
+    return { title: d.title ?? '', description: d.description ?? '', text: d.text ?? '' };
+  } catch { return { title: '', description: '', text: '' }; }
+}
+
+export interface RepoDraftResult extends GenerateDraftResult {
+  signal?: RepoSignal | null;   // what was read from the repo (shown so the draft is inspectable)
+  intent?: string;              // the distilled brief that Genesis synthesized from
+}
+
+/** Read a PUBLIC GitHub repo → distill a product brief → run Genesis. Private repos need a connected
+ *  GitHub token (a later slice); here we read what's public via raw.githubusercontent.com/HEAD. */
+export async function generateDraftFromRepo(repoInput: string): Promise<RepoDraftResult> {
+  const ref = parseRepoRef(repoInput);
+  if (!ref) return { id: null, draft: null, problems: ['That doesn’t look like a GitHub repo — paste a URL like github.com/owner/repo.'], warnings: [] };
+
+  // HEAD resolves the default branch, so we don't have to guess main vs master.
+  const base = `https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/HEAD`;
+  const [readme, pkg, html] = await Promise.all([
+    fetchRepoFile(`${base}/README.md`),
+    fetchRepoFile(`${base}/package.json`),
+    fetchRepoFile(`${base}/index.html`),
+  ]);
+
+  const files: RepoFile[] = [];
+  if (readme.text) files.push({ path: 'README.md', text: readme.text });
+  if (pkg.text) files.push({ path: 'package.json', text: pkg.text });
+  // fetch-url pre-extracts <title>/<meta description> from HTML — rebuild a minimal head so the pure
+  // distiller reads them exactly as it would from a raw index.html.
+  if (html.title || html.description) {
+    files.push({ path: 'index.html', text: `<title>${html.title}</title><meta name="description" content="${html.description.replace(/"/g, '&quot;')}">` });
+  }
+
+  if (!files.length) {
+    return { id: null, draft: null, problems: [`Couldn’t read ${ref.owner}/${ref.repo} — if it’s private, connect GitHub first, or paste a short description of the product instead.`], warnings: [] };
+  }
+
+  const signal = distillRepo(files, ref);
+  if (!hasEnoughSignal(signal)) {
+    return { id: null, draft: null, signal, problems: [`Read ${ref.owner}/${ref.repo}, but its README/site didn’t say what the product does. Add a description to the repo, or tell me in a sentence what it is.`], warnings: [] };
+  }
+
+  const intent = repoIntent(signal, ref);
+  const result = await generateDraft(intent);
+  return { ...result, signal, intent };
 }
 
 export async function listDrafts(): Promise<DraftRow[]> {

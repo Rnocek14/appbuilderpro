@@ -12,7 +12,7 @@ import { useToast } from '../context/ToastContext';
 import { cn } from '../lib/utils';
 import { WEB_TEMPLATES, ARCHETYPES, flattenTemplate } from '../lib/garvis/workweb';
 import { listWebs, instantiateWeb, type WebSummary } from '../lib/garvis/workwebRun';
-import { generateDraft, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
+import { generateDraft, generateDraftFromRepo, parseRepoRef, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 
 const TEMPLATE_ICON: Record<string, typeof Building2> = { 'mom-real-estate': Building2, 'app-launch': Rocket };
@@ -25,6 +25,8 @@ export default function WorkWebs() {
   const [creating, setCreating] = useState<string | null>(null);
   const [intent, setIntent] = useState('');
   const [drafting, setDrafting] = useState(false);
+  const [repoUrl, setRepoUrl] = useState('');
+  const [repoDrafting, setRepoDrafting] = useState(false);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [genesisWarnings, setGenesisWarnings] = useState<string[]>([]);
 
@@ -53,6 +55,23 @@ export default function WorkWebs() {
       toast('error', e instanceof Error ? e.message : 'Genesis failed.');
     } finally {
       setDrafting(false);
+    }
+  };
+
+  const draftFromRepo = async () => {
+    setRepoDrafting(true);
+    setGenesisWarnings([]);
+    try {
+      const r = await generateDraftFromRepo(repoUrl);
+      if (!r.id) { toast('error', r.problems[0] ?? 'Couldn’t spin up a world from that repo.'); setGenesisWarnings(r.warnings); return; }
+      setRepoUrl('');
+      setGenesisWarnings(r.warnings);
+      toast('success', `Read the repo and drafted "${r.draft?.title}" — review it below. Nothing exists until you approve.`);
+      await refresh();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Reading the repo failed.');
+    } finally {
+      setRepoDrafting(false);
     }
   };
 
@@ -129,6 +148,31 @@ export default function WorkWebs() {
               {drafting ? 'Synthesizing…' : 'Draft the web'}
             </Button>
             <span className="text-[11px] text-forge-dim">Two passes: business DNA first, then the web — every area arrives with its reason.</span>
+          </div>
+
+          {/* Or point Garvis at a GitHub repo: it reads the repo's real signal (README, the site
+              title/description, package.json, docs) and distills the intent for you. Public repos for
+              now; a private repo needs a connected GitHub token. Still just a draft — you approve it. */}
+          <div className="mt-4 border-t border-forge-border/60 pt-3">
+            <div className="flex items-center gap-2">
+              <Building2 size={14} className="text-forge-ember" />
+              <span className="text-xs font-medium text-forge-ink">Or spin one up from a GitHub repo</span>
+              <span className="text-[11px] text-forge-dim">— Garvis reads the repo and drafts the marketing world for it</span>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && parseRepoRef(repoUrl)) { e.preventDefault(); void draftFromRepo(); } }}
+                placeholder="github.com/owner/repo"
+                className="flex-1 rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/50"
+                aria-label="GitHub repo URL"
+              />
+              <Button variant="outline" onClick={() => void draftFromRepo()} loading={repoDrafting} disabled={!parseRepoRef(repoUrl)}>
+                {repoDrafting ? 'Reading…' : 'Read repo'}
+              </Button>
+            </div>
+            <span className="mt-1 block text-[11px] text-forge-dim">Public repos for now. Nothing is created until you approve the draft.</span>
           </div>
           {genesisWarnings.length > 0 && (
             <ul className="mt-2 space-y-0.5">
