@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/repoGenesis.verify.ts
 import {
   parsePkgJson, parseHtmlMeta, parseRouteHead, readmeLead, detectStack, distillRepo, hasEnoughSignal,
-  repoIntent, classifyApp,
+  repoIntent, classifyApp, moneyReadiness,
   type RepoFile, type RepoSignal,
 } from './repoGenesis';
 
@@ -119,7 +119,7 @@ const FILES: RepoFile[] = [
 }
 // --- app classifier: each app type gets a FITTING, adaptable money model (real portfolio) -----
 {
-  const sig = (over: Partial<RepoSignal>): RepoSignal => ({ name: null, title: null, tagline: null, readmeLead: null, stack: [], docTopics: [], surfaces: [], ...over });
+  const sig = (over: Partial<RepoSignal>): RepoSignal => ({ name: null, title: null, tagline: null, readmeLead: null, stack: [], docTopics: [], surfaces: [], money: { hasBilling: false, hasPricing: false, stage: 'no-offer', nextMove: '' }, ...over });
 
   const health = classifyApp(sig({ name: 'NeuroRecover', tagline: 'AI-guided stroke rehabilitation to rebuild motor skills from home' }));
   check('health app → subscription + clinician/caregiver channels', /health/i.test(health.category) && health.revenueModel === 'subscription' && health.channels.join(' ').toLowerCase().includes('clinician'));
@@ -145,6 +145,27 @@ const FILES: RepoFile[] = [
   // the classification reaches the intent so the plan adapts per app
   const intent = repoIntent(sig({ name: 'NeuroRecover', tagline: 'AI-guided stroke rehabilitation from home' }), { owner: 'rnocek14', repo: 'mind-weave-recover' });
   check('the app classification is folded into the Genesis intent as a hypothesis', /looks like a .*health/i.test(intent) && /STARTING HYPOTHESIS/i.test(intent));
+}
+// --- money readiness: the honest gate between marketing and revenue (right now none earn) -----
+{
+  const wired = moneyReadiness(['react', 'stripe', '@supabase/supabase-js'], 'Pro Annual $79/yr. Subscribe to unlock.');
+  check('a Stripe dependency means it CAN charge today', wired.stage === 'can-charge' && wired.hasBilling && /traffic/i.test(wired.nextMove));
+
+  const offerOnly = moneyReadiness(['react', 'vite'], 'Upgrade to Pro for $9/mo to get more.');
+  check('priced offer but no billing SDK → wire the till first', offerOnly.stage === 'offer-not-wired' && !offerOnly.hasBilling && /wire stripe|checkout/i.test(offerOnly.nextMove));
+
+  const nothing = moneyReadiness(['react', 'vite', 'tailwindcss'], 'A free tool for tracking your habits.');
+  check('no offer + no billing → decide the paid tier before marketing', nothing.stage === 'no-offer' && /paid tier|cannot charge|earns nothing/i.test(nothing.nextMove));
+
+  // distill wires it end to end, and the intent carries the readiness so the plan is money-honest
+  const files: RepoFile[] = [
+    { path: 'package.json', text: JSON.stringify({ name: 'footprint', dependencies: { react: '^18', stripe: '^14' } }) },
+    { path: 'index.html', text: '<title>Footprint Finder</title><meta name="description" content="find and delete your data broker listings">' },
+  ];
+  const distilled = distillRepo(files, { owner: 'rnocek14', repo: 'launch-buddy-bot' });
+  check('distill computes money readiness from the real deps', distilled.money.stage === 'can-charge');
+  const fpIntent = repoIntent(distilled, { owner: 'rnocek14', repo: 'launch-buddy-bot' });
+  check('intent tells Genesis the app can charge → focus on traffic', /MONETIZATION READINESS/i.test(fpIntent) && /can take money today|CAN take money/i.test(fpIntent));
 }
 
 console.log(`\nrepoGenesis.verify: ${passed} passed, ${failed} failed`);

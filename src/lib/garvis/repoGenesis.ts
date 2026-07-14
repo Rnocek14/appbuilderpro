@@ -21,6 +21,30 @@ export interface RepoSignal {
   stack: string[];           // detected frameworks/libraries, human-readable
   docTopics: string[];       // doc/*.md filenames → domain hints
   surfaces: string[];        // src/pages names → product surfaces
+  money: MoneySignal;        // can this app actually take money yet, and what's the next move
+}
+
+// Can the app CHARGE today? The honest gate between marketing and revenue: a product with no way to
+// take money earns nothing no matter how good the marketing is.
+export interface MoneySignal {
+  hasBilling: boolean;   // a payment SDK (Stripe/Paddle/…) is a dependency
+  hasPricing: boolean;   // a priced offer is described (price text / "subscription" / "freemium")
+  stage: 'no-offer' | 'offer-not-wired' | 'can-charge';
+  nextMove: string;      // the single next step toward first dollars
+}
+
+const BILLING_DEP_RE = /^(stripe|@stripe\/|paddle|@paddle\/|lemonsqueezy|@lemonsqueezy\/|@paypal\/|braintree|razorpay|@revenuecat\/)/i;
+
+/** Read whether an app can take money yet, and name the one blocker. hasBilling (a payment SDK in the
+ *  deps) is the strong signal — it means money can actually move; pricing text without it means the
+ *  offer exists but the till doesn't. */
+export function moneyReadiness(deps: string[], text: string): MoneySignal {
+  const hasBilling = deps.some((d) => BILLING_DEP_RE.test(d));
+  const t = (text || '').toLowerCase();
+  const hasPricing = /\$\d|\bper month\b|\/mo\b|\/yr\b|\bpricing\b|\bsubscription\b|\bfreemium\b|\bpaid (plan|tier)\b|\bupgrade to pro\b|\boffers?\b/.test(t);
+  if (hasBilling) return { hasBilling, hasPricing, stage: 'can-charge', nextMove: 'Billing is already wired — the blocker to first dollars is TRAFFIC. Point the marketing engine at buyers with intent.' };
+  if (hasPricing) return { hasBilling, hasPricing, stage: 'offer-not-wired', nextMove: 'There is a priced offer but no payment SDK in the app — wire Stripe/checkout so it can actually take money, THEN drive traffic.' };
+  return { hasBilling, hasPricing, stage: 'no-offer', nextMove: 'No paid offer found — decide the paid tier and wire billing in the app FIRST; marketing a product that cannot charge earns nothing.' };
 }
 
 // README scaffolding that carries ZERO product meaning — recognize and skip it so a template README
@@ -181,6 +205,7 @@ export function distillRepo(files: RepoFile[], ref: RepoRef): RepoSignal {
     stack: detectStack(pkgInfo.deps),
     docTopics: docTopicsFrom(files),
     surfaces: surfacesFrom(files),
+    money: moneyReadiness(pkgInfo.deps, [meta.title, meta.description, lead, readme?.text].filter(Boolean).join(' ')),
   };
 }
 
@@ -241,6 +266,12 @@ export function repoIntent(s: RepoSignal, ref: RepoRef): string {
   if (cls.category !== 'unclear from the repo') {
     parts.push(`This looks like a ${cls.category}${cls.revenueModel ? `; a fitting money model is ${cls.revenueModel}` : ''}${cls.channels.length ? `, with the strongest channels likely: ${cls.channels.join('; ')}` : ''}. Treat this as a STARTING HYPOTHESIS to validate against the actual product — refine or correct it, and if it's wrong, say so.`);
   }
+  const stageLine = s.money.stage === 'can-charge'
+    ? 'MONETIZATION READINESS: the app already has billing wired, so it CAN take money today — the plan should focus on driving qualified traffic to the paid offer.'
+    : s.money.stage === 'offer-not-wired'
+      ? 'MONETIZATION READINESS: a priced offer exists but billing may not be wired — the plan must flag that the paid path has to work before spending on traffic.'
+      : 'MONETIZATION READINESS: no clear paid offer was found in the repo — the plan should state the revenue model AND note that a way to charge must exist before marketing can earn.';
+  parts.push(stageLine);
   parts.push('Design a marketing operation to GROW this product AND make money from it. Be specific about how it makes money (the revenue model), WHO pays (the ideal customer), a pricing approach (as a hypothesis to validate from real comparables — never an invented number), and the 2-3 best marketing channels for THIS kind of product and buyer. Infer these from what the product is; where the audience, pricing, or revenue model is not evident from the above, ASK rather than invent — do not fabricate customers, prices, results, or claims.');
   return parts.join('\n');
 }
