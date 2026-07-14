@@ -12,6 +12,8 @@ import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { findBusinesses, auditBusiness, findContactEmail, type FoundBusiness } from '../lib/garvis/clientHuntRun';
 import { auditIssues, type Verdict } from '../lib/garvis/siteAudit';
+import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
+import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
 import { ingestBusinessProfile } from '../lib/preview/engine';
 import { queuePitch } from '../lib/garvis/outreach';
 import { cn } from '../lib/utils';
@@ -19,6 +21,12 @@ import { cn } from '../lib/utils';
 type Row = FoundBusiness & { built?: { previewUrl: string; queued: boolean; email: string | null }; building?: boolean };
 
 const VERDICT_RANK: Record<Verdict, number> = { weak: 0, dated: 1, unknown: 2, solid: 3 };
+const WEB_GROUPS: WebGroupDef[] = [
+  { key: 'weak', label: 'Weak sites', color: '#FF8A3D' },
+  { key: 'dated', label: 'Dated', color: '#E7B45A' },
+  { key: 'solid', label: 'Already solid', color: '#5FC08A' },
+  { key: 'unknown', label: 'Couldn’t load', color: '#8A8076' },
+];
 const VERDICT_STYLE: Record<Verdict, { label: string; cls: string }> = {
   weak: { label: 'Weak site', cls: 'bg-forge-ember/15 text-forge-ember border-forge-ember/40' },
   dated: { label: 'Dated', cls: 'bg-forge-warn/15 text-forge-warn border-forge-warn/40' },
@@ -33,6 +41,8 @@ export default function WinClients() {
   const [rows, setRows] = useState<Row[]>([]);
   const [finding, setFinding] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [view, setView] = useState<'list' | 'web'>('list');
+  const [selected, setSelected] = useState<number | null>(null);
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
 
   const find = async () => {
@@ -90,6 +100,13 @@ export default function WinClients() {
   };
 
   const weakCount = rows.filter((r) => r.audit?.verdict === 'weak').length;
+  // The same rows as a web: clustered by verdict, orb size = opportunity (weaker site → bigger orb).
+  const webNodes: WebNode[] = rows.map((b, i) => {
+    const v = b.audit?.verdict ?? 'unknown';
+    const score = b.audit?.score ?? null;
+    const metric = v === 'unknown' ? 30 : Math.max(6, 100 - (score ?? 50));
+    return { id: String(i), label: b.name, group: v, metric, badge: score ?? '?' };
+  });
 
   return (
     <AppShell>
@@ -130,8 +147,18 @@ export default function WinClients() {
               <>
                 <div className="mb-3 flex items-center justify-between text-xs text-forge-dim">
                   <span>{rows.length} found{weakCount > 0 && <span className="text-forge-ember"> · {weakCount} with weak sites</span>}</span>
-                  <span>weakest first</span>
+                  <span className="inline-flex overflow-hidden rounded-lg border border-forge-border">
+                    <button onClick={() => setView('list')} className={cn('px-2.5 py-1', view === 'list' ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>List</button>
+                    <button onClick={() => setView('web')} className={cn('px-2.5 py-1', view === 'web' ? 'bg-forge-ember/15 text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>Web</button>
+                  </span>
                 </div>
+                {view === 'web' ? (
+                  <>
+                    <ConstellationWeb nodes={webNodes} groups={WEB_GROUPS} height="440px"
+                      title="Bigger orb = weaker site = more opportunity" onOpen={(id) => setSelected(Number(id))} />
+                    {selected != null && rows[selected] && <FocusedProspect b={rows[selected]} building={!!rows[selected].building} onBuild={() => void build(selected)} onClose={() => setSelected(null)} />}
+                  </>
+                ) : (
                 <div className="space-y-2.5">
                   {rows.map((b, i) => (
                     <div key={`${b.url ?? b.name}-${i}`} className="rounded-xl border border-forge-border bg-forge-panel/40 p-3.5">
@@ -171,6 +198,7 @@ export default function WinClients() {
                     </div>
                   ))}
                 </div>
+                )}
                 {rows.some((r) => r.built?.queued) && (
                   <NavLink to="/garvis/queue" className="mt-4 inline-flex items-center gap-1.5 text-sm text-forge-ember hover:underline">
                     Review your pitches in the Queue <ArrowRight size={14} />
@@ -188,5 +216,45 @@ export default function WinClients() {
         )}
       </div>
     </AppShell>
+  );
+}
+
+/** The focused card shown when you tap an orb in the web — the business, its real weaknesses, and
+ *  the one action (build them a site). Mirrors a list row so the two views feel like one thing. */
+function FocusedProspect({ b, building, onBuild, onClose }: { b: Row; building: boolean; onBuild: () => void; onClose: () => void }) {
+  return (
+    <div className="mt-3 rounded-xl border border-forge-ember/40 bg-forge-panel/60 p-4">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-forge-ink">{b.name}</span>
+            {b.audit && <span className={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium', VERDICT_STYLE[b.audit.verdict].cls)}>{VERDICT_STYLE[b.audit.verdict].label}{b.audit.score != null ? ` · ${b.audit.score}` : ''}</span>}
+          </div>
+          {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-[11px] text-forge-dim hover:text-forge-ember">{b.url.replace(/^https?:\/\//, '')} <ExternalLink size={10} /></a>}
+          {b.audit && b.audit.signals.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {b.audit.signals.map((s) => (
+                <span key={s.id} className="inline-flex items-center gap-1 rounded-md bg-forge-raised px-1.5 py-0.5 text-[10.5px] text-forge-dim" title={s.detail}>
+                  <AlertTriangle size={9} className={s.severity === 'high' ? 'text-forge-ember' : 'text-forge-warn'} /> {s.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="shrink-0 text-right">
+          {b.built ? (
+            <>
+              <a href={b.built.previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">Open site <ExternalLink size={11} /></a>
+              <div className={cn('mt-1 text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · no email found'}</div>
+            </>
+          ) : (
+            <button onClick={onBuild} disabled={building || !b.url} className="inline-flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-2 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+              {building ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Build their site
+            </button>
+          )}
+          <button onClick={onClose} className="mt-1 block text-[10.5px] text-forge-dim hover:text-forge-ink">close</button>
+        </div>
+      </div>
+    </div>
   );
 }
