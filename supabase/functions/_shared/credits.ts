@@ -21,7 +21,9 @@ export type CreditKind =
   | 'generation' | 'edit' | 'agent' | 'garvis' | 'short_script' | 'research' | 'plan' | 'discover' | 'explore'
   | 'app_ai'   // a generated app's runtime AI call through the FableForge AI gateway
   | 'render' | 'screenshot' | 'ads_sync'  // operator-paid media/reporting seams (audit M2: unmetered before)
-  | 'image';   // one AI image generation (OpenAI gpt-image-1)
+  | 'image'    // one AI image generation (OpenAI gpt-image-1)
+  | 'video_clip'  // one AI video clip (Sora/Runway/Luma) — the reel factory's per-scene generation
+  | 'voiceover';  // one ElevenLabs narration for a reel scene/reel
 
 // Conservative pre-call estimate (in credits; 1 credit ≈ $0.01 of cost). Used ONLY to reject a start
 // when the balance clearly can't cover it — the real charge uses actual cost after the call.
@@ -40,6 +42,8 @@ const KIND_ESTIMATE: Record<CreditKind, number> = {
   screenshot: 3,    // one server screenshot (ScreenshotOne)
   ads_sync: 2,      // one ad-platform metrics pull
   image: 10,        // one AI image (gpt-image-1, medium) — conservative reject threshold
+  video_clip: 200,  // one AI video clip — AI video is dollars/clip; conservative reject floor (~$2)
+  voiceover: 5,     // one ElevenLabs narration — small, but metered like every paid call
 };
 
 export class InsufficientCreditsError extends Error {
