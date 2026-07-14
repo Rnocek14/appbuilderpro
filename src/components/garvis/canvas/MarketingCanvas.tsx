@@ -15,10 +15,12 @@ import {
 } from 'lucide-react';
 import { CanvasScene, type CanvasNode, type Satellite } from './CanvasScene';
 import {
-  composeCampaign, campaignsFor, metaFor, type CampaignType, type CampaignInput, type CampaignSet,
+  composeCampaign, campaignsFor, metaFor, PLATFORM_LABEL,
+  type CampaignType, type CampaignInput, type CampaignSet, type SocialPost,
 } from '../../../lib/garvis/campaignCore';
 import { compileMailer, type MailerConcept, type MailerSpec } from '../../../lib/garvis/mailer';
 import { PostcardViewer, PostcardFront, PostcardBack } from '../Postcard';
+import { SocialMock, composePostText, providerPlatform } from './SocialMock';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
@@ -105,6 +107,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
       )}
       {open === 'social' && set && (
         <SocialSheet set={set} accent={accent} photoUrl={details!.photoUrl ?? null} worldId={worldId}
+          brandName={(details!.businessName || details!.agentName || agent || 'Your brand').trim()}
           onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('social')} />
       )}
       {open === 'email' && set && (
@@ -319,31 +322,35 @@ function PostcardSheet({ set, details, brand, accent, targetCluster, onToast, on
 }
 
 // ---------- Social ----------
-function SocialSheet({ set, accent, photoUrl, worldId, onToast, onClose, onSpin }: {
-  set: CampaignSet; accent: string; photoUrl: string | null; worldId: string; onToast: Toast; onClose: () => void; onSpin: () => void;
+function SocialSheet({ set, accent, photoUrl, brandName, worldId, onToast, onClose, onSpin }: {
+  set: CampaignSet; accent: string; photoUrl: string | null; brandName: string; worldId: string; onToast: Toast; onClose: () => void; onSpin: () => void;
 }) {
   const [posted, setPosted] = useState<Record<number, boolean>>({});
-  const post = async (i: number, caption: string) => {
+  const post = async (i: number, p: SocialPost) => {
+    if (p.platform === 'instagram' && !photoUrl) { onToast('info', 'Instagram needs an image — add a photo in the details (or generate one) first.'); return; }
     try {
-      const media = photoUrl ? [photoUrl] : [];
-      const platforms = photoUrl ? ['facebook', 'instagram'] : ['facebook'];
-      await queueSocialPost({ text: caption, platforms, mediaUrls: media, worldId });
-      setPosted((p) => ({ ...p, [i]: true })); onSpin();
-      onToast('success', 'Queued for your approval — approve it in the Queue and it posts.');
+      const text = composePostText(p.platform, p.caption, p.hashtags);
+      await queueSocialPost({ text, platforms: [providerPlatform(p.platform)], mediaUrls: photoUrl ? [photoUrl] : [], worldId });
+      setPosted((s) => ({ ...s, [i]: true })); onSpin();
+      onToast('success', `Queued for ${PLATFORM_LABEL[p.platform]} — approve it in the Queue and it posts.`);
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not queue the post.'); }
   };
-  const copy = async (t: string) => { try { await navigator.clipboard.writeText(t); onToast('success', 'Copied.'); } catch { onToast('info', 'Select and copy the text.'); } };
+  const copy = async (p: SocialPost) => {
+    try { await navigator.clipboard.writeText(composePostText(p.platform, p.caption, p.hashtags)); onToast('success', 'Copied — ready to paste.'); }
+    catch { onToast('info', 'Select and copy the text.'); }
+  };
   return (
-    <Sheet emoji="📱" title="Social posts" lead="Ready for Facebook & Instagram — Post queues for your approval first." onClose={onClose}>
-      <div className="mkc-social">
+    <Sheet emoji="📱" title="Social posts" lead="One post tailored to each network — see it exactly as it'll look, then post (queues for your approval) or copy it." onClose={onClose}>
+      <div className="mkc-socgrid">
         {set.socialPosts.map((p, i) => (
-          <div key={i} className="mkc-igcard">
-            <StudioPreviewFrame medium="social" content={p.caption} accent={accent} />
+          <div key={i} className="mkc-soccard">
+            <div className="mkc-socplat">{PLATFORM_LABEL[p.platform]}</div>
+            <SocialMock platform={p.platform} brandName={brandName} caption={p.caption} hashtags={p.hashtags} accent={accent} imageUrl={photoUrl} headline={set.headline} />
             <div className="mkc-igbtns">
-              <button className={cn('mkc-sbtn p', posted[i] && 'done')} onClick={() => void post(i, p.caption)} disabled={posted[i]}>
+              <button className={cn('mkc-sbtn p', posted[i] && 'done')} onClick={() => void post(i, p)} disabled={posted[i]}>
                 {posted[i] ? <><CheckCircle2 size={14} /> Queued</> : <><Send size={14} /> Post</>}
               </button>
-              <button className="mkc-sbtn" onClick={() => void copy(p.caption)}><Copy size={14} /></button>
+              <button className="mkc-sbtn" onClick={() => void copy(p)}><Copy size={14} /> Copy</button>
             </div>
           </div>
         ))}
@@ -446,9 +453,10 @@ const SHEET_CSS = `
 .mkc-spin{ font:inherit; font-size:13px; font-weight:600; cursor:pointer; border:1.5px dashed #D9D1C5; background:none; color:#2A2320; border-radius:9px; padding:9px 13px; display:inline-flex; align-items:center; gap:7px; }
 .mkc-spin:hover{ border-color:#E4631C; color:#B44A12; }
 
-.mkc-social{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; }
-.mkc-igcard{ border:1px solid #EDE6DC; border-radius:14px; padding:10px; background:#fff; }
-.mkc-igbtns{ display:flex; gap:7px; margin-top:9px; }
+.mkc-socgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+.mkc-soccard{ display:flex; flex-direction:column; gap:9px; }
+.mkc-socplat{ font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#8A8076; }
+.mkc-igbtns{ display:flex; gap:7px; }
 .mkc-sbtn{ font:inherit; font-size:12.5px; font-weight:600; cursor:pointer; border:1px solid #E7E0D6; background:#fff; color:#2A2320; border-radius:10px; padding:8px 10px; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 .mkc-sbtn.p{ flex:1; background:linear-gradient(150deg,#E4631C,#EE7A38); color:#fff; border-color:transparent; }
 .mkc-sbtn.done{ background:#E9F3EC; color:#3C8A5B; border-color:#bfe0cb; }

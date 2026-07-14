@@ -67,7 +67,15 @@ export interface CampaignInput {
   link?: string | null;         // tracking link → QR
 }
 
-export interface SocialPost { platformHint: string; caption: string }
+export type SocialPlatform = 'instagram' | 'facebook' | 'linkedin' | 'x';
+export const SOCIAL_PLATFORMS: SocialPlatform[] = ['instagram', 'facebook', 'linkedin', 'x'];
+export const PLATFORM_LABEL: Record<SocialPlatform, string> = {
+  instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X',
+};
+/** A post tailored to ONE platform. `caption` is the body in that network's voice; `hashtags` are
+ *  shown separately and appended (per platform) when posting or copying. Deterministic + honest —
+ *  every word derives from the operator's inputs; missing facts stay visible [EDIT] holes. */
+export interface SocialPost { platform: SocialPlatform; caption: string; hashtags: string[] }
 export interface CampaignSet {
   type: CampaignType;
   headline: string;
@@ -171,39 +179,105 @@ export function composeCampaign(input: CampaignInput): CampaignSet {
 
 interface Bits { addr: string; price: string; area: string; highlight: string; specs: string }
 
+// A platform-neutral kit of message parts, built once from the real facts. Each platform renderer
+// then shapes these into that network's voice + length. Everything derives from operator input;
+// missing facts stay visible [EDIT] holes.
+interface MessageKit {
+  emoji: string;      // lead emoji for the casual networks
+  hook: string;       // the punchy attention line
+  body: string;       // the substance (specs, the highlight)
+  cta: string;        // the ask
+  authority: string;  // the professional / market-insight framing (LinkedIn), self-contained
+  tags: string[];     // candidate hashtags, most-relevant first (already #-prefixed)
+}
+
+/** A #-safe token from free text: "Lake Geneva" → "LakeGeneva"; empty → "". */
+function tagToken(s: string): string { return (s || '').replace(/[^a-zA-Z0-9]+/g, ''); }
+
+/** Dedupe + drop empties, order preserved. */
+function tidyTags(tags: string[]): string[] {
+  return tags.map((t) => t.trim()).filter((t, i, a) => !!t && a.indexOf(t) === i);
+}
+
+/** Render one kit into a platform-tailored post. Instagram = visual + hashtag-rich; Facebook =
+ *  conversational; LinkedIn = professional/insight; X = terse and ≤280 including its tags. */
+function renderPost(platform: SocialPlatform, kit: MessageKit): SocialPost {
+  switch (platform) {
+    case 'instagram':
+      return { platform, caption: `${kit.emoji} ${kit.hook}\n\n${kit.body}\n\n${kit.cta}`.trim(), hashtags: kit.tags.slice(0, 6) };
+    case 'facebook':
+      return { platform, caption: `${kit.hook}\n\n${kit.body}\n\n${kit.cta}`.trim(), hashtags: kit.tags.slice(0, 2) };
+    case 'linkedin':
+      return { platform, caption: `${kit.authority}\n\n${kit.cta}`.trim(), hashtags: kit.tags.slice(0, 3) };
+    case 'x':
+    default: {
+      const tags = kit.tags.slice(0, 2);
+      const tagLen = tags.length ? tags.join(' ').length + 1 : 0;
+      let c = `${kit.hook} ${kit.cta}`.replace(/\s+/g, ' ').trim();
+      const room = 280 - tagLen;
+      if (c.length > room) c = `${c.slice(0, Math.max(0, room - 1)).trimEnd()}…`;
+      return { platform, caption: c, hashtags: tags };
+    }
+  }
+}
+
+/** The whole set: one tailored post per platform, same real facts, each in its own voice. */
+function renderAll(kit: MessageKit): SocialPost[] { return SOCIAL_PLATFORMS.map((p) => renderPost(p, kit)); }
+
 function socialFor(input: CampaignInput, b: Bits): SocialPost[] {
-  const where = b.addr || (b.area ? `${b.area}` : '');
+  const where = b.addr || b.area || '';
   const specLine = b.specs ? `${b.specs}. ` : '';
   const highlight = b.highlight || EDIT('one line about what makes this special');
+  const areaTag = tagToken(b.area);
+  // Real-estate hashtag base: area-specific first (strongest reach), then evergreen.
+  const reTags = (lead: string[]) => tidyTags([
+    ...lead,
+    areaTag ? `#${areaTag}RealEstate` : '#RealEstate',
+    areaTag ? `#${areaTag}Homes` : '#HomesForSale',
+    '#Realtor',
+  ]);
+
   if (input.type === 'find_sellers') {
     const area = b.area || EDIT('the neighborhood');
-    return [
-      { platformHint: 'facebook/instagram', caption: `Thinking of selling in ${area}? Homes here are moving. Curious what yours is worth — no pressure, no obligation. DM me “VALUE”. 🏡` },
-      { platformHint: 'facebook/instagram', caption: `Life in ${area} is good. ${b.highlight || 'If a move has crossed your mind, I can walk you through what your home would sell for today.'} Let’s talk.` },
-      { platformHint: 'facebook/instagram', caption: `Free home-value estimate for ${area} homeowners. Five minutes, real numbers, zero pressure. Comment “ESTIMATE” or DM me. 📈` },
-    ];
+    return renderAll({
+      emoji: '🏡',
+      hook: `Thinking of selling in ${area}?`,
+      body: b.highlight || 'Homes here are moving, and a lot of owners are surprised by what theirs would sell for today.',
+      cta: `Curious what yours is worth? DM me “VALUE” — no pressure, no obligation.`,
+      authority: `${area} continues to see steady demand. ${b.highlight || 'If you’re weighing a move, the first question is always what your home would sell for today.'} I’m glad to run those numbers for anyone considering it.`,
+      tags: reTags(['#HomeValue', '#ThinkingOfSelling', '#SellersMarket']),
+    });
   }
   if (input.type === 'just_sold') {
-    return [
-      { platformHint: 'facebook/instagram', caption: `SOLD${b.addr ? ` — ${b.addr}` : ''}! 🎉 Another happy seller${b.area ? ` in ${b.area}` : ''}. Thinking of selling? Let’s find out what your home is worth.` },
-      { platformHint: 'facebook/instagram', caption: `Just closed${b.area ? ` in ${b.area}` : ''}. ${highlight} Homes are moving — if you’ve wondered about your timing, message me.` },
-      { platformHint: 'facebook/instagram', caption: `Another one sold. If you’re curious what your${b.area ? ` ${b.area}` : ''} home would go for in today’s market, I’ll run the numbers for you — free.` },
-    ];
+    return renderAll({
+      emoji: '🎉',
+      hook: `JUST SOLD${b.addr ? ` — ${b.addr}` : ''}`,
+      body: `Another happy seller${b.area ? ` in ${b.area}` : ''}. ${highlight}`,
+      cta: `Thinking of selling? Let’s find out what your home is worth.`,
+      authority: `Just closed${b.area ? ` in ${b.area}` : ''}. ${b.highlight || 'The right marketing brought the right buyer.'} Homes are moving — happy to share what I’m seeing for owners weighing a sale.`,
+      tags: reTags(['#JustSold', '#SoldHome', '#ThinkingOfSelling']),
+    });
   }
   if (input.type === 'open_house') {
     const when = input.openWhen?.trim() || EDIT('open house day & time');
-    return [
-      { platformHint: 'facebook/instagram', caption: `🚪 OPEN HOUSE ${when}${b.addr ? ` · ${b.addr}` : ''}. ${specLine}Come take a look — bring a friend who’s house-hunting!` },
-      { platformHint: 'facebook/instagram', caption: `You’re invited 👋 ${b.addr || 'This one'} is open ${when}. ${highlight} Stop by, no appointment needed.` },
-      { platformHint: 'facebook/instagram', caption: `Know someone looking${b.area ? ` in ${b.area}` : ''}? Send them our way — open house ${when}${b.addr ? ` at ${b.addr}` : ''}.` },
-    ];
+    return renderAll({
+      emoji: '🚪',
+      hook: `OPEN HOUSE ${when}${b.addr ? ` · ${b.addr}` : ''}`,
+      body: `${specLine}${highlight}`,
+      cta: `Come take a look — bring a friend who’s house-hunting!`,
+      authority: `Hosting an open house${b.addr ? ` at ${b.addr}` : ''} ${when}. ${specLine}Open to buyers and fellow agents — please stop by.`,
+      tags: reTags(['#OpenHouse', '#HouseHunting', '#HomeForSale']),
+    });
   }
   // just_listed
-  return [
-    { platformHint: 'facebook/instagram', caption: `🏡 JUST LISTED${where ? ` — ${where}` : ''}${b.price ? ` · ${b.price}` : ''}\n${specLine}${highlight}\nDM me for a private showing.` },
-    { platformHint: 'facebook/instagram', caption: `New on the market${b.area ? ` in ${b.area}` : ''}! ${specLine}${b.highlight || 'Move-in ready and priced to sell.'} Link for photos & details.` },
-    { platformHint: 'facebook/instagram', caption: `Know someone house-hunting${b.area ? ` in ${b.area}` : ''}? Tag them 👇 ${b.addr ? `${b.addr} ` : 'This one '}just hit the market${b.price ? ` at ${b.price}` : ''}.` },
-  ];
+  return renderAll({
+    emoji: '🏡',
+    hook: `JUST LISTED${where ? ` — ${where}` : ''}${b.price ? ` · ${b.price}` : ''}`,
+    body: `${specLine}${highlight}`,
+    cta: `DM me for a private showing.`,
+    authority: `New to market${b.area ? ` in ${b.area}` : ''}${b.price ? ` at ${b.price}` : ''}. ${specLine}${b.highlight || 'Move-in ready.'} Reach out if you or someone in your network is looking.`,
+    tags: reTags(['#JustListed', '#HomeForSale', '#HouseHunting']),
+  });
 }
 
 function emailFor(input: CampaignInput, b: Bits & { agent: string; phone: string }): { subject: string; body: string } {
@@ -294,33 +368,47 @@ function socialForGeneric(input: CampaignInput, g: GBits): SocialPost[] {
   const subj = g.subject || EDIT('what you’re announcing');
   const at = g.biz ? ` at ${g.biz}` : '';
   const det = g.details ? ` ${g.details}` : '';
-  const fb = 'facebook/instagram';
+  const why = g.why ? ` ${g.why}` : '';
+  const bizTag = tagToken(g.biz);
+  const gTags = (lead: string[]) => tidyTags([...lead, bizTag ? `#${bizTag}` : '', '#SmallBusiness']);
   switch (input.type) {
     case 'promo':
-      return [
-        { platformHint: fb, caption: `🎉 ${subj}!${det} For a limited time — don’t miss it.` },
-        { platformHint: fb, caption: `Deal alert${at}: ${subj}.${det} ${g.why}`.trim() },
-        { platformHint: fb, caption: `Tag a friend who needs this 👇 ${subj}${det}` },
-      ];
+      return renderAll({
+        emoji: '🎉',
+        hook: subj,
+        body: `${g.details || 'For a limited time.'}${why}`.trim(),
+        cta: `Don’t miss it${at}.`,
+        authority: `${g.biz ? `${g.biz}: ` : ''}${subj}.${det}${why}`.trim(),
+        tags: gTags(['#Deal', '#Offer']),
+      });
     case 'event':
-      return [
-        { platformHint: fb, caption: `📅 You’re invited: ${subj}.${det} Hope to see you there!` },
-        { platformHint: fb, caption: `Save the date${at} — ${subj}.${det} ${g.why}`.trim() },
-        { platformHint: fb, caption: `Know someone who’d enjoy this? Bring them along 👋 ${subj}${det}` },
-      ];
+      return renderAll({
+        emoji: '📅',
+        hook: `You’re invited: ${subj}`,
+        body: `${g.details || EDIT('when & where')}${why}`.trim(),
+        cta: `Hope to see you there${at}!`,
+        authority: `We’re hosting ${subj}.${det}${why} Everyone’s welcome.`.trim(),
+        tags: gTags(['#Event', '#Community']),
+      });
     case 'reach':
-      return [
-        { platformHint: fb, caption: `${g.biz ? `${g.biz} — ` : ''}${g.why || 'here to help.'}${det}`.trim() },
-        { platformHint: fb, caption: `New here? Here’s what we do${at}: ${g.why || subj}.` },
-        { platformHint: fb, caption: `Have a question? DM us — we’re happy to help${at}.` },
-      ];
+      return renderAll({
+        emoji: '👋',
+        hook: g.biz ? `Meet ${g.biz}` : 'Hello',
+        body: `${g.why || subj}.${det}`.trim(),
+        cta: `Have a question? DM us — we’re happy to help.`,
+        authority: `${g.biz ? `${g.biz} — ` : ''}${g.why || subj}.${det}`.trim(),
+        tags: gTags(['#Local', '#NewInTown']),
+      });
     case 'announce':
     default:
-      return [
-        { platformHint: fb, caption: `📣 ${subj}!${det}${g.biz ? ` — ${g.biz}` : ''}` },
-        { platformHint: fb, caption: `Something new${at}: ${subj}.${det} ${g.why}`.trim() },
-        { platformHint: fb, caption: `Have you seen this yet? ${subj}.${det} 👇` },
-      ];
+      return renderAll({
+        emoji: '📣',
+        hook: subj,
+        body: `${g.details || ''}${why}`.trim() || subj,
+        cta: `Come see what’s new${at}.`,
+        authority: `${g.biz ? `${g.biz} has something new: ` : ''}${subj}.${det}${why}`.trim(),
+        tags: gTags(['#New', '#JustIn']),
+      });
   }
 }
 
