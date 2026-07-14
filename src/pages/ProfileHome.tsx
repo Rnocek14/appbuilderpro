@@ -6,8 +6,8 @@
 // areas, listClusterArtifacts → an area's work); this page invents no state. It shares the
 // businesses scene with the 3D "cinematic" galaxy — one truth, drawn two ways.
 
-import { useCallback, useRef, useState } from 'react';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Telescope } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useAuth } from '../context/AuthContext';
@@ -31,7 +31,6 @@ function madeCount(massEvidence: string): number | undefined {
 
 export default function ProfileHome() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { businessId, areaSlug } = useParams();
   const { profile } = useAuth();
 
@@ -43,6 +42,10 @@ export default function ProfileHome() {
   const sceneCache = useRef(new Map<string, SystemScene | null>());
   const artifactsById = useRef(new Map<string, StudioArtifact>());
 
+  // A work-item sheet is off-URL local state — close it whenever the canvas level changes (e.g. the
+  // browser Back button), so the sheet never floats over a different level than it was opened from.
+  useEffect(() => { setSheet(null); }, [businessId, areaSlug]);
+
   const bumpReload = useCallback(() => {
     sceneCache.current.clear();
     artifactsById.current.clear();
@@ -50,7 +53,7 @@ export default function ProfileHome() {
   }, []);
 
   const errorLevel = useCallback((key: string, crumb: string): LevelSpec => ({
-    key, crumb,
+    key, crumb, transient: true,   // never cached — the "Try again" reload re-attempts the load
     center: { kicker: 'Offline', title: 'Couldn’t load' },
     nodes: [],
     empty: { emoji: '⚠️', title: 'Couldn’t load', body: 'Something went wrong reaching your data. Check your connection and try again.', ctaLabel: 'Try again', onCta: bumpReload },
@@ -129,11 +132,12 @@ export default function ProfileHome() {
 
   const onPathChange = useCallback((next: string[]) => {
     const url = '/garvis/home' + next.map((s) => '/' + encodeURIComponent(s)).join('');
-    if (next.length > path.length) navigate(url);                                  // descend → push (Back = up)
-    else if (next.length === path.length) navigate(url, { replace: true });        // lateral → replace
-    else if (next.length === path.length - 1 && location.key !== 'default') navigate(-1); // up one → mirror the push
-    else navigate(url);                                                            // multi-level jump / cold → push
-  }, [path.length, navigate, location.key]);
+    // Descend & up-navigation both PUSH — so browser Back always walks to the previous location and
+    // the URL never lies. (navigate(-1) can't prove the entry behind is the parent — it may be a
+    // replaced entry or nothing, escaping the app — so we never use it.) Lateral moves replace.
+    if (next.length === path.length) navigate(url, { replace: true });
+    else navigate(url);
+  }, [path.length, navigate]);
 
   const onLeaf = useCallback((p: string[], key: string) => {
     if (p.length === 0) {

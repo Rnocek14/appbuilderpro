@@ -24,6 +24,7 @@ export interface LevelSpec {
   nodes: BranchNode[];
   sats?: Satellite[];
   empty?: LevelEmpty;   // shown (instead of the ring) when nodes is empty
+  transient?: boolean;  // an error/placeholder level — never cache it, so re-navigation retries the load
 }
 export type ResolveLevel = (path: string[]) => LevelSpec | Promise<LevelSpec>;
 
@@ -44,7 +45,14 @@ export function BranchCanvas({ path, resolveLevel, onPathChange, onLeaf, height,
   height?: string;
   trailing?: ReactNode;   // the right side of the breadcrumb bar (e.g. a "Cinematic view" chip)
 }) {
-  const [reduced] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const [reduced, setReduced] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  useEffect(() => {
+    const mql = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!mql) return;
+    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
   const [chain, setChain] = useState<LevelSpec[] | null>(null);   // resolved levels [root … current]
   const [outLevel, setOutLevel] = useState<LevelSpec | null>(null);
   const [ghost, setGhost] = useState<Ghost | null>(null);
@@ -61,9 +69,13 @@ export function BranchCanvas({ path, resolveLevel, onPathChange, onLeaf, height,
     const hit = cacheRef.current.get(k);
     if (hit) return hit;
     const spec = await resolveLevel(p);
-    cacheRef.current.set(k, spec);
+    if (!spec.transient) cacheRef.current.set(k, spec);   // never cache an error/placeholder — retry next time
     return spec;
   }, [resolveLevel]);
+
+  // The resolver's identity changes when the data it closes over changes (e.g. the operator's name
+  // arriving after auth) — drop cached levels so identity-derived labels (the root title) refresh.
+  useEffect(() => { cacheRef.current.clear(); }, [resolveCached]);
 
   const clearTimers = () => { timersRef.current.forEach(clearTimeout); timersRef.current = []; };
 
@@ -79,12 +91,21 @@ export function BranchCanvas({ path, resolveLevel, onPathChange, onLeaf, height,
       for (let i = 0; i <= path.length; i++) prefixes.push(path.slice(0, i));
       let levels: LevelSpec[];
       try { levels = await Promise.all(prefixes.map(resolveCached)); }
-      catch { return; } // a resolve threw — leave the last good chain up rather than blanking
+      catch {
+        // a resolve threw — clear any in-flight transition so we never strand the ghost / out layer
+        if (!cancelled && token === reqRef.current) { setOutLevel(null); setGhost(null); setAnim(false); }
+        return;
+      }
       if (cancelled || token !== reqRef.current) return;
 
       const target = levels[levels.length - 1];
       const prevChain = chainRef.current;
-      const dir = path.length > prev.length ? 'in' : path.length < prev.length ? 'out' : 'same';
+      // Direction from the actual prefix relationship, not just length — a warm jump whose prev is
+      // NOT an ancestor of path (e.g. Back after a breadcrumb jump) is a lateral swap, not a branch.
+      const isPrefix = (a: string[], b: string[]) => a.length <= b.length && a.every((s, i) => s === b[i]);
+      const dir = isPrefix(prev, path) && path.length > prev.length ? 'in'
+        : isPrefix(path, prev) && path.length < prev.length ? 'out'
+        : 'same';
 
       // No animation: first paint, lateral move, or reduced-motion — just show the destination.
       if (reduced || dir === 'same' || !prevChain) {
