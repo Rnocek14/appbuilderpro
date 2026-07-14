@@ -1,27 +1,81 @@
 // src/pages/dev/ProfileHomePreview.tsx
-// DEV-ONLY preview of the profile "You" home — the top of the canvas spine — at /dev/profile-home.
-// Sample businesses (illustrative, not real data). Not linked anywhere in the app.
+// DEV-ONLY preview of the whole canvas spine at /dev/profile-home — drives BranchCanvas with a static
+// three-level resolveLevel (sample data, no network) so the branch-in-place transition is drivable and
+// screenshottable. Not linked anywhere in the app.
 
-import { ProfileCanvas, type BusinessNode } from '../../components/garvis/canvas/ProfileCanvas';
+import { useState } from 'react';
+import { Telescope } from 'lucide-react';
+import { BranchCanvas, type LevelSpec } from '../../components/garvis/canvas/BranchCanvas';
 
-const businesses: BusinessNode[] = [
-  { id: 'w1', title: 'Mom’s Real Estate', sub: 'accelerating', count: 24 },
-  { id: 'w2', title: 'Lakeside Roofing', sub: 'steady', count: 8 },
-  { id: 'w3', title: 'Corner Bakery', sub: 'nothing made yet', dim: true },
-];
+// ── Sample tree (illustrative, not real data) ─────────────────────────────────
+const BUSINESSES: Record<string, { title: string; momentum: string; areas: { slug: string; emoji: string; title: string; sub: string; count?: number; dim?: boolean }[] }> = {
+  w1: {
+    title: 'Mom’s Real Estate', momentum: 'accelerating',
+    areas: [
+      { slug: 'social', emoji: '🎨', title: 'Social', sub: '6 posts · 2 this week', count: 6 },
+      { slug: 'website', emoji: '🚀', title: 'Website', sub: '1 site · live', count: 1 },
+      { slug: 'mail', emoji: '📊', title: 'Direct mail', sub: '3 mailers', count: 3 },
+      { slug: 'contacts', emoji: '👥', title: 'Contacts', sub: 'nothing yet', dim: true },
+    ],
+  },
+  w2: { title: 'Lakeside Roofing', momentum: 'steady', areas: [{ slug: 'social', emoji: '🎨', title: 'Social', sub: '3 posts', count: 3 }] },
+  w3: { title: 'Corner Bakery', momentum: 'quiet', areas: [] },
+};
+const WORK: Record<string, { id: string; emoji: string; title: string; sub: string }[]> = {
+  'w1/social': [
+    { id: 'a1', emoji: '📣', title: 'Just Listed — 48 Lakeshore Dr', sub: 'post' },
+    { id: 'a2', emoji: '🎬', title: 'Walkthrough reel', sub: 'video' },
+    { id: 'a3', emoji: '🖼️', title: 'Open house graphic', sub: 'image' },
+  ],
+};
 
 export default function ProfileHomePreview() {
+  const [path, setPath] = useState<string[]>([]);
+
+  const resolveLevel = (p: string[]): LevelSpec => {
+    if (p.length === 0) {
+      return {
+        key: '', crumb: 'You',
+        center: { kicker: 'Your command', title: 'Riley', sub: '3 businesses' },
+        nodes: [
+          ...Object.entries(BUSINESSES).map(([id, b]) => ({ key: id, emoji: '🏢', label: b.title, sub: b.momentum, count: b.areas.length || undefined, dim: b.areas.length === 0, accent: 'ember' as const })),
+          { key: 'today', emoji: '🌅', label: 'Today', sub: 'what needs you', accent: 'violet' as const, leaf: true },
+          { key: 'queue', emoji: '✅', label: 'Queue', sub: 'approve & reply', accent: 'violet' as const, leaf: true },
+          { key: 'money', emoji: '💵', label: 'Money', sub: 'invoices', accent: 'violet' as const, leaf: true },
+          { key: 'new', emoji: '＋', label: 'New business', sub: 'start one', dim: true, leaf: true },
+        ],
+      };
+    }
+    if (p.length === 1) {
+      const b = BUSINESSES[p[0]];
+      return {
+        key: p[0], crumb: b.title,
+        center: { kicker: b.momentum, title: b.title, sub: `${b.areas.length} area${b.areas.length === 1 ? '' : 's'}` },
+        nodes: b.areas.map((a) => ({ key: a.slug, emoji: a.emoji, label: a.title, sub: a.sub, count: a.count, dim: a.dim, accent: 'ember' as const })),
+        empty: b.areas.length ? undefined : { emoji: '🗂', title: 'No areas yet', body: 'Nothing set up in this business yet.' },
+      };
+    }
+    const key = `${p[0]}/${p[1]}`;
+    const work = WORK[key] ?? [];
+    const area = BUSINESSES[p[0]].areas.find((a) => a.slug === p[1]);
+    return {
+      key, crumb: area?.title ?? p[1],
+      center: { kicker: 'active', title: area?.title ?? p[1], sub: area?.sub ?? '' },
+      nodes: work.map((w) => ({ key: w.id, emoji: w.emoji, label: w.title, sub: w.sub, accent: 'ember' as const, leaf: true })),
+      empty: work.length ? undefined : { emoji: '🎨', title: 'Nothing made here yet', body: 'Open the studio to make the first piece.' },
+    };
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#0f0b14', padding: 20 }}>
       <div style={{ maxWidth: 1000, margin: '0 auto' }}>
-        <p style={{ color: '#A99BB0', font: '13px system-ui', textAlign: 'center', marginBottom: 12 }}>dev preview · your command — tap a business to branch into it (sample data)</p>
-        <ProfileCanvas
-          operatorName="Riley"
-          businesses={businesses}
-          onOpenBusiness={(id) => console.log('[open business]', id)}
-          onOpenAmbient={(k) => console.log('[ambient]', k)}
-          onNewBusiness={() => console.log('[new business]')}
-          onCinematic={() => console.log('[cinematic]')}
+        <p style={{ color: '#A99BB0', font: '13px system-ui', textAlign: 'center', marginBottom: 12 }}>dev preview · branch the spine — tap a business, then an area (sample data)</p>
+        <BranchCanvas
+          path={path}
+          resolveLevel={resolveLevel}
+          onPathChange={setPath}
+          onLeaf={(_p, k) => console.log('[leaf]', k)}
+          trailing={<button className="bc-cine"><Telescope size={14} /> Cinematic view</button>}
         />
       </div>
     </div>

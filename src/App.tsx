@@ -77,8 +77,9 @@ function AppRoutes() {
           <Route path="/oauth/callback" element={<OAuthCallback />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/garvis" element={<Protected><Garvis /></Protected>} />
-          {/* The canvas spine's front door: you at the center, your businesses orbiting. */}
-          <Route path="/garvis/home" element={<Protected><ProfileHome /></Protected>} />
+          {/* The canvas spine: you → a business → an area → a made thing, all one route so the
+              stage never remounts as you branch; the params ARE the path (Back walks up, deep-links work). */}
+          <Route path="/garvis/home/:businessId?/:areaSlug?" element={<Protected><ProfileHome /></Protected>} />
           <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
           {/* ONE MEMORY (design review P2): the nav door; the old rooms stay routable below. */}
           <Route path="/garvis/memory" element={<Protected><Memory /></Protected>} />
