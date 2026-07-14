@@ -21,6 +21,8 @@ import {
 import { compileMailer, type MailerConcept, type MailerSpec } from '../../../lib/garvis/mailer';
 import { PostcardViewer, PostcardFront, PostcardBack } from '../Postcard';
 import { SocialMock, composePostText, providerPlatform } from './SocialMock';
+import { buildImagePrompt, canGenerateImage } from '../../../lib/garvis/imagegen';
+import { generateImageAsset } from '../../../lib/garvis/imagegenRun';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
@@ -185,6 +187,20 @@ function DetailsSheet({ realEstate, initial, agent, phone, brand, targetCluster,
     catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not add the photo.'); }
     finally { setUploading(false); }
   };
+  const [genning, setGenning] = useState(false);
+  const genImage = async () => {
+    if (!type) return;
+    const built = buildImagePrompt({ campaignType: type, area, subject, businessName: agentName, highlight });
+    if (!built.ok) { onToast('info', built.reason); return; }
+    setGenning(true);
+    try {
+      const r = await generateImageAsset({ prompt: built.prompt, size: '1536x1024', clusterId: targetCluster, caption: built.note });
+      if (!r.available) { onToast('info', 'AI images need an OpenAI key — set OPENAI_API_KEY in your project, then try again.'); return; }
+      if (!r.ok || !r.url) { onToast('error', r.error || 'Could not generate the image.'); return; }
+      setPhotoUrl(r.url); onToast('success', 'Image generated — an AI illustration, not a photo of a real place.');
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not generate the image.'); }
+    finally { setGenning(false); }
+  };
 
   const canSave = !!type && (!realEstate ? !!subject.trim() : type === 'find_sellers' ? !!area.trim() : !!address.trim());
   const save = () => {
@@ -227,15 +243,25 @@ function DetailsSheet({ realEstate, initial, agent, phone, brand, targetCluster,
           <label className="full">Open house — when<input className={f} value={openWhen} onChange={(e) => setOpenWhen(e.target.value)} placeholder="Sat 1–3pm" /></label>
         )}
         <label className="full">{!realEstate ? 'Why it matters (optional)' : type === 'find_sellers' ? 'Your angle' : "What's special? (one line)"}<input className={f} value={highlight} onChange={(e) => setHighlight(e.target.value)} placeholder={realEstate ? 'Walk to the water · remodeled kitchen' : 'Fresh, local, made this morning'} /></label>
-        {type !== 'find_sellers' && (
+        {type && (
           <div className="full">
-            <span style={{ fontSize: 12, color: '#8A8076' }}>{realEstate ? 'Photo of the home' : 'Photo (optional)'}</span>
+            <span style={{ fontSize: 12, color: '#8A8076' }}>{realEstate && type !== 'find_sellers' ? 'Photo of the home' : type === 'find_sellers' ? 'Lifestyle image (optional)' : 'Photo (optional)'}</span>
             <input ref={photoInput} type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => { const fl = e.target.files?.[0]; if (fl) void addPhoto(fl); e.target.value = ''; }} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 5 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
               {photoUrl && <img src={photoUrl} alt="" style={{ width: 48, height: 48, borderRadius: 9, objectFit: 'cover' }} />}
-              <button type="button" className="mkc-spin" onClick={() => photoInput.current?.click()} disabled={uploading}>
-                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {photoUrl ? 'Change photo' : 'Add a photo'}
-              </button>
+              {type !== 'find_sellers' && (
+                <button type="button" className="mkc-spin" onClick={() => photoInput.current?.click()} disabled={uploading || genning}>
+                  {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {photoUrl ? 'Change photo' : 'Add a photo'}
+                </button>
+              )}
+              {canGenerateImage(type) && (
+                <button type="button" className="mkc-spin" onClick={() => void genImage()} disabled={uploading || genning}>
+                  {genning ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {photoUrl ? 'Regenerate with AI' : 'Generate an image'}
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: '#A89F94', marginTop: 6 }}>
+              {canGenerateImage(type) ? 'AI images are lifestyle & brand pieces — clearly illustrations, never a specific property.' : 'Your real photo of the home — never stock, never AI.'}
             </div>
           </div>
         )}
