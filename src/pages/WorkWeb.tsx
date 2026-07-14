@@ -270,14 +270,14 @@ export default function WorkWeb() {
                 still empty. Once any real work exists it disappears, so it never competes with each
                 studio's own Generate button. */}
             {templatePlay && web.rollup.artifacts === 0 && (
-              <button
+              <Button
+                variant="primary" size="md"
                 onClick={() => void doRunPlay()} disabled={running}
                 title="One-time head start: puts a starter into every studio in this business at once. After that, use each studio's own Generate."
-                className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-60"
               >
                 {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
                 Fill all studios to start
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -786,13 +786,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           into ONE brief and open the app builder. Real photos, never placeholders. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'landing' && (
         <div className="mt-4">
-          <button
+          <Button
+            variant="primary" size="md"
             onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
-            className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px"
             title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
           >
             <Sparkles size={15} /> Build the website — with this world's artwork
-          </button>
+          </Button>
           {/* SITE RENDITIONS — pick the design mechanism before the generator runs; same real
               materials, a genuinely different site. Rebuild under another direction any time. */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">

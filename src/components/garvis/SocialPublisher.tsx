@@ -11,6 +11,7 @@ import { KNOWN_PLATFORMS, PLATFORM_LABEL, checkDraft, type Platform } from '../.
 import { queueSocialPost, listSocialPosts, cancelSocialPost, type SocialPostRow } from '../../lib/garvis/socialRun';
 import { useConnections } from '../../hooks/useConnections';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
@@ -106,11 +107,10 @@ export function SocialPublisher({ worldId, onToast }: { worldId: string; onToast
           </div>
         )}
 
-        <button onClick={() => void doQueue()} disabled={busy || !chk.ok}
-          className="mt-2 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+        <Button variant='primary' size='sm' onClick={() => void doQueue()} disabled={busy || !chk.ok} className="mt-2">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
           {draft.scheduleAt ? 'Queue scheduled post (goes to Approvals)' : 'Queue post (goes to Approvals)'}
-        </button>
+        </Button>
 
         {posts.length > 0 && (
           <ul className="mt-3 space-y-1 border-t border-forge-border pt-2">

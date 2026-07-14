@@ -11,6 +11,7 @@ import {
   type BatchSegment, type BatchRow,
 } from '../../lib/garvis/outreachBatchRun';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui';
 
 const SEGMENTS: { id: BatchSegment; label: string }[] = [
   { id: 'all', label: 'Everyone' },
@@ -82,10 +83,10 @@ export function BatchSendCard({ onToast }: { onToast: (k: 'success' | 'error' | 
         className="mt-2 w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
       <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder={'Hi {{first_name}},\n\n…'}
         className="mt-2 w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
-      <button onClick={() => void doCreate()} disabled={busy || !subject.trim() || !body.trim()}
-        className="mt-2 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+      <Button variant='primary' size='sm' onClick={() => void doCreate()} disabled={busy || !subject.trim() || !body.trim()}
+        className="mt-2">
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue batch for approval
-      </button>
+      </Button>
 
       {batches.length > 0 && (
         <ul className="mt-3 space-y-1 border-t border-forge-border pt-2">

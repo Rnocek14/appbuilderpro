@@ -22,6 +22,7 @@ import {
 import { logMailBatch } from '../../lib/garvis/mailerRun';
 import { loadWorldPostcardDesigns, type WorldPostcardDesign } from '../../lib/garvis/farmDesigns';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
@@ -254,10 +255,9 @@ export function FarmPanel({ worldId, onToast }: { worldId: string; onToast: Toas
                 {!parsed.mailingDataPresent && parsed.recipients.length > 0 && (
                   <p className="text-forge-warn">This file has no mailing-address columns — absentee owners can't be detected from it (unknowable, not zero).</p>
                 )}
-                <button onClick={() => void doImport()} disabled={busy || parsed.recipients.length === 0}
-                  className="rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+                <Button variant='primary' size='sm' onClick={() => void doImport()} disabled={busy || parsed.recipients.length === 0}>
                   {busy ? 'Importing…' : `Import ${parsed.recipients.length} households`}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -334,10 +334,9 @@ export function FarmPanel({ worldId, onToast }: { worldId: string; onToast: Toas
                     <input type="checkbox" checked={absOnly} onChange={(e) => setAbsOnly(e.target.checked)} className="accent-[#FF8A3D]" />
                     absentee owners only{stats && stats.absentee === 0 ? ' (none on file)' : ''}
                   </label>
-                  <button onClick={() => void doMerge()} disabled={busy}
-                    className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+                  <Button variant='primary' size='sm' onClick={() => void doMerge()} disabled={busy}>
                     <Printer size={13} /> Merge &amp; print
-                  </button>
+                  </Button>
                 </div>
                 {merge && (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-forge-dim">

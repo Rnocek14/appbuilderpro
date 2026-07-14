@@ -16,6 +16,7 @@ import { uploadClusterFile } from '../../lib/garvis/artifacts';
 import { PostcardFront, PostcardBack } from './Postcard';
 import { cn } from '../../lib/utils';
 import { useUnsavedGuard } from '../../hooks/useUnsavedGuard';
+import { Button } from '../ui';
 
 // SEVEN renditions of the same real materials — different persuasion mechanisms, one click each.
 // Pick one, then hand-edit any line; [EDIT] holes mark what only you can supply.
@@ -210,9 +211,9 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
           </div>
 
           <div className="flex gap-2">
-            <button onClick={doPrint} disabled={busy} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-2 text-sm font-medium text-[#1A0E04] disabled:opacity-60">
+            <Button variant='primary' size='md' onClick={doPrint} disabled={busy} className="flex-1">
               <Printer size={14} /> Print / PDF
-            </button>
+            </Button>
             <button onClick={() => void doSave()} disabled={busy} className="flex items-center justify-center gap-1.5 rounded-lg border border-forge-border px-3 py-2 text-sm text-forge-ink hover:border-forge-ember/50 disabled:opacity-60">
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
             </button>

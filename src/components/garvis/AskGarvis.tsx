@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Loader2, Search, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { askGarvis, type AskResult } from '../../lib/garvis/ask';
+import { Button } from '../ui';
 
 export function AskGarvis({ worldId, placeholder }: { worldId?: string; placeholder?: string }) {
   const [q, setQ] = useState('');
@@ -34,12 +35,12 @@ export function AskGarvis({ worldId, placeholder }: { worldId?: string; placehol
           placeholder={placeholder ?? 'Ask Garvis about your business — "what\'s our direct-mail plan?", "who did we find in the finance segment?"'}
           className="min-w-0 flex-1 bg-transparent text-sm text-forge-ink placeholder:text-forge-dim/70 focus:outline-none"
         />
-        <button
+        <Button
+          variant='primary' size='sm'
           onClick={() => void ask()} disabled={busy || q.trim().length < 3}
-          className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50"
         >
           {busy ? <Loader2 size={13} className="animate-spin" /> : 'Ask'}
-        </button>
+        </Button>
       </div>
 
       {result && (

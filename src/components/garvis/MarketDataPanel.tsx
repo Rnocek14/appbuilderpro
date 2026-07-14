@@ -9,6 +9,7 @@ import { BarChart3, Loader2, RefreshCw, Link2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { marketStats, soldLast12ByZip, statsLine, type MlsRow } from '../../lib/garvis/mlsStats';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
@@ -88,10 +89,9 @@ export function MarketDataPanel({ onToast }: { onToast: Toast }) {
             Every number below is computed from these rows — never remembered.
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button onClick={() => void doSync()} disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+            <Button variant='primary' size='sm' onClick={() => void doSync()} disabled={busy}>
               {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} Sync now
-            </button>
+            </Button>
             <input value={zip} onChange={(e) => setZip(e.target.value)} placeholder="Filter by ZIP…" inputMode="numeric"
               className="w-28 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
           </div>

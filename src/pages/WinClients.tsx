@@ -13,6 +13,7 @@ import { useToast } from '../context/ToastContext';
 import { findBusinesses, auditBusiness, findContactEmail, type FoundBusiness } from '../lib/garvis/clientHuntRun';
 import { auditIssues, type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
+import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
 import { ProspectCanvas } from '../components/garvis/canvas/ProspectCanvas';
 import { CanvasScene, type CanvasNode } from '../components/garvis/canvas/CanvasScene';
@@ -161,10 +162,9 @@ export default function WinClients() {
             <input value={area} onChange={(e) => setArea(e.target.value)} placeholder="Town or area — e.g. Lake Geneva, WI"
               onKeyDown={(e) => { if (e.key === 'Enter') void find(); }}
               className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
-            <button onClick={() => void find()} disabled={finding || !niche.trim()}
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-ember-gradient px-4 py-2 text-sm font-medium text-[#1A0E04] disabled:opacity-60">
+            <Button variant="primary" size="md" onClick={() => void find()} disabled={finding || !niche.trim()}>
               {finding ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Find businesses
-            </button>
+            </Button>
           </div>
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores).</p>
         </div>
@@ -220,10 +220,9 @@ export default function WinClients() {
                               <div className={cn('mt-1 text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · no email found'}</div>
                             </div>
                           ) : (
-                            <button onClick={() => void build(i)} disabled={b.building || !b.url}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-2 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+                            <Button variant="primary" size="sm" onClick={() => void build(i)} disabled={b.building || !b.url}>
                               {b.building ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Build their site
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </div>

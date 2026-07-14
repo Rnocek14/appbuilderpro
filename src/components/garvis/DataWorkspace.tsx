@@ -11,6 +11,7 @@ import { Table2, Upload, Loader2, ShieldAlert, BarChart3, Sparkles, Download, Ch
 import { parseCSV, describe, groupBy, dataFacts, fmtNum, analysisArtifact, type Table, type ColumnStats, type Agg } from '../../lib/garvis/data';
 import { narrateData } from '../../lib/garvis/dataRun';
 import { createArtifact } from '../../lib/garvis/artifacts';
+import { Button } from '../ui';
 
 const AGGS: Agg[] = ['sum', 'mean', 'count', 'min', 'max'];
 
@@ -56,12 +57,9 @@ export function DataWorkspace({ worldId: _worldId, clusterId, onToast }: {
         className="mt-3 w-full resize-y rounded-lg border border-forge-border bg-forge-raised/30 px-3 py-2 font-mono text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/50 focus:outline-none"
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => load(raw)} disabled={raw.trim().length < 3}
-          className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-50"
-        >
+        <Button variant='primary' size='md' onClick={() => load(raw)} disabled={raw.trim().length < 3}>
           <Table2 size={14} /> Load the data
-        </button>
+        </Button>
         <input ref={fileInput} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
         <button onClick={() => fileInput.current?.click()} className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim hover:text-forge-ink">
           <Upload size={13} /> Upload CSV

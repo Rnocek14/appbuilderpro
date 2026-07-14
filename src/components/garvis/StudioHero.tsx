@@ -24,6 +24,7 @@ import {
 import type { Flavor } from '../../lib/garvis/workweb';
 import { runTool, type WebCluster } from '../../lib/garvis/workwebRun';
 import { GenerationReadiness } from './GenerationReadiness';
+import { Button } from '../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
@@ -95,13 +96,13 @@ export function StudioHero({ cluster, worldId, hasEarnedWork, onDone, onToast }:
 
           {cfg.primaryTool && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button
+              <Button
+                variant='primary' size='md'
                 onClick={() => void generate()} disabled={busy}
-                className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-4 py-2 text-sm font-semibold text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-60"
               >
                 {busy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
                 {hasEarnedWork ? 'Generate another' : cfg.cta}
-              </button>
+              </Button>
               <span className="text-[11px] text-forge-dim">
                 Grounded in this world’s brand & files. Anything that sends or posts goes through Approvals first — never straight out.
               </span>

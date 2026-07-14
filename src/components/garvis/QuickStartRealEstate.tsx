@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router-dom';
 import { Building2, Loader2, ArrowRight } from 'lucide-react';
 import { listWebs, instantiateWeb } from '../../lib/garvis/workwebRun';
 import { GenerationReadiness } from './GenerationReadiness';
+import { Button } from '../ui';
 
 export function QuickStartRealEstate({ onToast }: { onToast: (k: 'success' | 'error' | 'info', m: string) => void }) {
   const navigate = useNavigate();
@@ -61,13 +62,10 @@ export function QuickStartRealEstate({ onToast }: { onToast: (k: 'success' | 'er
             video, landing pages, and a contacts book — each studio pre-loaded with a starter playbook.
             No setup, works right now.
           </p>
-          <button
-            onClick={() => void start()} disabled={busy}
-            className="mt-3 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-4 py-2 text-sm font-semibold text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-60"
-          >
+          <Button variant='primary' size='md' onClick={() => void start()} disabled={busy} className="mt-3">
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Building2 size={15} />}
             {busy ? 'Setting it up…' : 'Set it up'} {!busy && <ArrowRight size={15} />}
-          </button>
+          </Button>
           <GenerationReadiness compact />
         </div>
       </div>

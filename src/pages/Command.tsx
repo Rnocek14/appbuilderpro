@@ -165,7 +165,7 @@ export default function Command() {
           {messages.map((m) => (
             <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-fadeInUp`}>
               {m.role === 'user'
-                ? <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-ember-gradient px-3.5 py-2.5 text-sm text-white">{m.text}</div>
+                ? <div className="max-w-[85%] rounded-2xl rounded-tr-sm bg-ember-gradient px-3.5 py-2.5 text-sm text-[#1A0E04]">{m.text}</div>
                 : renderGarvis(m)}
             </div>
           ))}

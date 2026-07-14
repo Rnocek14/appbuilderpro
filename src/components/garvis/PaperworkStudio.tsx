@@ -15,6 +15,7 @@ import {
 } from '../../lib/garvis/esignRun';
 import { useConnections } from '../../hooks/useConnections';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
@@ -228,10 +229,10 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
               : tplBody.trim() ? 'Every field filled — ready to queue.' : 'Pick or write a template.'}
           </p>
 
-          <button onClick={() => void doQueue()} disabled={busy || merged.gaps.length > 0 || !tplBody.trim() || signers.length === 0 || !title.trim()}
-            className="mt-1 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+          <Button variant='primary' size='sm' onClick={() => void doQueue()} disabled={busy || merged.gaps.length > 0 || !tplBody.trim() || signers.length === 0 || !title.trim()}
+            className="mt-1">
             <Send size={13} /> Queue for signature (goes to Approvals)
-          </button>
+          </Button>
 
           {envelopes.length > 0 && (
             <ul className="mt-3 space-y-1 border-t border-forge-border pt-2">
