@@ -11,13 +11,13 @@ import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTria
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { findBusinesses, auditBusiness, findContactEmail, type FoundBusiness } from '../lib/garvis/clientHuntRun';
-import { auditIssues, type Verdict } from '../lib/garvis/siteAudit';
+import { type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
 import { ProspectCanvas } from '../components/garvis/canvas/ProspectCanvas';
 import { CanvasScene, type CanvasNode } from '../components/garvis/canvas/CanvasScene';
-import { ingestBusinessProfile } from '../lib/preview/engine';
+import { profileFromScrape } from '../lib/preview/scrapeProfile';
 import { queuePitch } from '../lib/garvis/outreach';
 import { cn } from '../lib/utils';
 
@@ -41,6 +41,8 @@ export default function WinClients() {
   const { toast } = useToast();
   const [niche, setNiche] = useState('');
   const [area, setArea] = useState('');
+  const [scanUrl, setScanUrl] = useState('');
+  const [scanning, setScanning] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [finding, setFinding] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -73,34 +75,51 @@ export default function WinClients() {
 
   const build = async (idx: number) => {
     const b = rows[idx];
+    if (!b.url) { toast('error', 'No website to scan for this one.'); return; }
     setRows((r) => r.map((x, j) => (j === idx ? { ...x, building: true } : x)));
     try {
-      const industry = niche.trim() || 'Local business';
-      const res = await ingestBusinessProfile({
-        business_name: b.name, industry, services: [industry],
-        location: area.trim() || undefined, website: b.url || undefined, description: b.snippet || undefined,
-        current_website_score: b.audit?.score ?? undefined,
-        issues: b.audit ? auditIssues(b.audit) : undefined,
-      });
-      if (!res.ok) { toast('error', res.errors.join(' ')); return; }
-      // Find a public email and draft the pitch into the Queue (approval-gated; nothing sends).
-      const email = b.url ? await findContactEmail(b.url) : null;
+      // DEEP SCRAPE: read their real site — services, their own photos, hours, published email — and
+      // build the demo from THAT (not just their name + niche), so the pitch shows a real rebuild.
+      const res = await profileFromScrape(b.url);
+      if (!res.ok) { toast('error', (res.errors ?? ['Couldn’t build from that site.']).join(' ')); return; }
+      const bizName = res.profile?.business_name || b.name;
+      const industry = res.profile?.industry || niche.trim() || 'Local business';
+      // The scrape already found a published email; fall back to a dedicated contact scan.
+      const email = res.profile?.email ?? (b.url ? await findContactEmail(b.url) : null);
       let queued = false;
       if (email) {
         try {
           await queuePitch({
-            previewSiteId: res.row.id, businessProfileId: res.row.profile_id ?? null,
-            businessName: b.name, industry, pitch: res.row.pitch, previewUrl: res.previewUrl, toEmail: email,
+            previewSiteId: res.row!.id, businessProfileId: res.row!.profile_id ?? null,
+            businessName: bizName, industry, pitch: res.row!.pitch, previewUrl: res.previewUrl!, toEmail: email,
           });
           queued = true;
         } catch (e) { toast('error', emsg(e)); }
       }
-      setRows((r) => r.map((x, j) => (j === idx ? { ...x, built: { previewUrl: res.previewUrl, queued, email } } : x)));
+      setRows((r) => r.map((x, j) => (j === idx ? { ...x, built: { previewUrl: res.previewUrl!, queued, email } } : x)));
       toast('success', queued
-        ? `Built ${b.name} a site + queued the pitch — review it in the Queue.`
-        : `Built ${b.name} a site. No public email found — add one in the Queue to send.`);
+        ? `Built ${bizName} a demo from their real site + queued the pitch — review it in the Queue.`
+        : `Built ${bizName} a demo from their real site. No public email found — add one in the Queue to send.`);
     } catch (e) { toast('error', emsg(e)); }
     finally { setRows((r) => r.map((x, j) => (j === idx ? { ...x, building: false } : x))); }
+  };
+
+  // Scan ONE known URL directly (paste a prospect you already have) — audits it and drops it into the
+  // list so you can Build the demo from it, same as a discovered business.
+  const scanOne = async () => {
+    const raw = scanUrl.trim();
+    if (!raw) return;
+    let host: string; let href: string;
+    try { const u = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`); host = u.hostname.replace(/^www\./, ''); href = u.toString(); }
+    catch { toast('error', 'That doesn’t look like a website URL.'); return; }
+    setScanning(true); setSearched(true);
+    try {
+      const audit = await auditBusiness(href);
+      setRows((r) => [{ name: host, url: href, snippet: '', audit }, ...r]);
+      setScanUrl('');
+      toast('success', `Scanned ${host} — ${audit.reachable ? 'audited. Press Build to make their demo.' : 'couldn’t load it; worth a manual look.'}`);
+    } catch (e) { toast('error', emsg(e)); }
+    finally { setScanning(false); }
   };
 
   const weakCount = rows.filter((r) => r.audit?.verdict === 'weak').length;
@@ -166,7 +185,17 @@ export default function WinClients() {
               {finding ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Find businesses
             </Button>
           </div>
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores).</p>
+          {/* Or scan a prospect you already have — paste their site and Garvis reads it, audits it, and
+              (on Build) rebuilds it from their own real content + photos. */}
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <input value={scanUrl} onChange={(e) => setScanUrl(e.target.value)} placeholder="Or paste a site to scan — e.g. joesroofing.com"
+              onKeyDown={(e) => { if (e.key === 'Enter') void scanOne(); }}
+              className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
+            <Button variant="outline" size="md" onClick={() => void scanOne()} disabled={scanning || !scanUrl.trim()}>
+              {scanning ? <Loader2 size={15} className="animate-spin" /> : <Globe size={15} />} Scan a URL
+            </Button>
+          </div>
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores). Build reads their real content + photos; the demo is theirs, and nothing emails until you approve it in the Queue.</p>
         </div>
 
         {/* Results */}
