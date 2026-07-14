@@ -5,19 +5,23 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Channel-var form so /alpha modifiers work (bg-forge-ember/10) AND the palette is
+        // theme-aware: the values live in index.css (:root dark, html.light warm paper).
         forge: {
-          bg: '#0C0E13',
-          panel: '#12151D',
-          raised: '#1A1E29',
-          border: '#262B3A',
-          ink: '#E8E6E1',
-          dim: '#8B90A0',
-          ember: '#FF8A3D',
-          emberDeep: '#E5631F',
-          heat: '#FFB573',
-          ok: '#4ADE80',
-          warn: '#FACC15',
-          err: '#F87171'
+          bg: 'rgb(var(--forge-bg) / <alpha-value>)',
+          panel: 'rgb(var(--forge-panel) / <alpha-value>)',
+          raised: 'rgb(var(--forge-raised) / <alpha-value>)',
+          border: 'rgb(var(--forge-border) / <alpha-value>)',
+          ink: 'rgb(var(--forge-ink) / <alpha-value>)',
+          dim: 'rgb(var(--forge-dim) / <alpha-value>)',
+          ember: 'rgb(var(--forge-ember) / <alpha-value>)',
+          emberDeep: 'rgb(var(--forge-ember-deep) / <alpha-value>)',
+          heat: 'rgb(var(--forge-heat) / <alpha-value>)',
+          ok: 'rgb(var(--forge-ok) / <alpha-value>)',
+          warn: 'rgb(var(--forge-warn) / <alpha-value>)',
+          err: 'rgb(var(--forge-err) / <alpha-value>)',
+          violet: 'rgb(var(--forge-violet) / <alpha-value>)',
+          violetDeep: 'rgb(var(--forge-violet-deep) / <alpha-value>)'
         }
       },
       fontFamily: {
