@@ -44,6 +44,7 @@ const Universe3D = lazy(() => import('./pages/Universe3D'));
 const PreviewEngine = lazy(() => import('./pages/PreviewEngine'));
 const PreviewSite = lazy(() => import('./pages/PreviewSite'));
 const PreviewReport = lazy(() => import('./pages/PreviewReport'));
+const CanvasPreview = lazy(() => import('./pages/dev/CanvasPreview'));
 
 function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: boolean }) {
   const { session, profile, loading } = useAuth();
@@ -106,6 +107,9 @@ function AppRoutes() {
           <Route path="/admin" element={<Protected adminOnly><AdminDashboard /></Protected>} />
           {/* /spike/clusters removed — same component as /garvis/explore (audit: one page, two doors). */}
           <Route path="/business-preview-engine" element={<Protected><PreviewEngine /></Protected>} />
+          {/* DEV-ONLY — unauthed preview of in-progress surfaces, for screenshot-driven building.
+              Gated to dev builds so it never ships to production. */}
+          {import.meta.env.DEV && <Route path="/dev/marketing-canvas" element={<CanvasPreview />} />}
           {/* PUBLIC — the link business owners open from the outreach email (no login). */}
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />

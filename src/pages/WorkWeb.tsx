@@ -52,7 +52,7 @@ const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').th
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
 const DataWorkspace = lazy(() => import('../components/garvis/DataWorkspace').then((m) => ({ default: m.DataWorkspace })));
 const TrackerRegistry = lazy(() => import('../components/garvis/TrackerRegistry').then((m) => ({ default: m.TrackerRegistry })));
-const CampaignComposer = lazy(() => import('../components/garvis/CampaignComposer').then((m) => ({ default: m.CampaignComposer })));
+const MarketingCanvas = lazy(() => import('../components/garvis/canvas/MarketingCanvas').then((m) => ({ default: m.MarketingCanvas })));
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -314,13 +314,15 @@ export default function WorkWeb() {
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
         </div>
 
-        {/* THE SIMPLE FLOW: for a marketing business, "Make my marketing" is the whole front page —
-            one form → a postcard, social posts, and an email you can look at. The studio areas move
-            behind an "Advanced" toggle so the first thing you see is one action, not a map. */}
+        {/* THE HOME: for a marketing business, the marketing canvas IS the front page — what you're
+            marketing glows in the center and everything you can make branches around it. Tap a node
+            to open a focused sheet that makes that piece (postcard, social, email) from one set of
+            details. The studio areas move behind an "Advanced" toggle so the first thing you see is
+            an inviting canvas, not a map of buttons. */}
         {hasCampaign && (
           <div className="mb-5">
-            <PanelBoundary name="marketing maker">
-              <CampaignComposer worldId={worldId} realEstate={realEstate} onToast={(k, m) => toast(k, m)} />
+            <PanelBoundary name="marketing canvas">
+              <MarketingCanvas worldId={worldId} realEstate={realEstate} onToast={(k, m) => toast(k, m)} />
             </PanelBoundary>
             <button
               onClick={() => setShowAdvanced((v) => !v)}

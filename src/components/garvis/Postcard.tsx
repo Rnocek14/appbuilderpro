@@ -12,27 +12,55 @@ import { useState } from 'react';
 import { RotateCw } from 'lucide-react';
 import type { MailerSpec } from '../../lib/garvis/mailer';
 
-/** 6×9 front. Photo full-bleed if present; otherwise a designed brand-gradient card. */
-export function PostcardFront({ spec, accent }: { spec: MailerSpec; accent: string }) {
+/** 6×9 front. Photo full-bleed if present; otherwise a designed brand-gradient card. `variant`
+ *  cycles genuinely different LOOKS (gradient, headline placement, scrim) so "spin another" gives a
+ *  visibly different design from the same real materials — not the same card twice. */
+export function PostcardFront({ spec, accent, variant = 0 }: { spec: MailerSpec; accent: string; variant?: number }) {
   const hasPhoto = !!spec.front.imageUrl;
-  return (
-    <div className="mailer-card relative w-full overflow-hidden rounded-lg shadow-soft" style={{ aspectRatio: '9 / 6', background: hasPhoto ? '#000' : `linear-gradient(135deg, ${accent} 0%, ${shade(accent, -28)} 100%)` }}>
-      {hasPhoto ? (
-        <>
-          <img src={spec.front.imageUrl!} alt={spec.front.imageAlt} className="absolute inset-0 h-full w-full object-cover" />
+  const v = ((variant % 3) + 3) % 3;
+  // Brand-card gradients (no photo) — three distinct fields.
+  const grad = [
+    `linear-gradient(145deg, ${accent} 0%, ${shade(accent, -30)} 100%)`,
+    `linear-gradient(30deg, ${shade(accent, -34)} 0%, ${accent} 100%)`,
+    `radial-gradient(120% 120% at 15% 0%, ${shade(accent, 14)} 0%, ${shade(accent, -40)} 70%)`,
+  ][v];
+
+  if (hasPhoto) {
+    // v0 bottom scrim · v1 full scrim, centered · v2 top kicker band + bottom headline
+    return (
+      <div className="mailer-card relative w-full overflow-hidden rounded-lg bg-black shadow-soft" style={{ aspectRatio: '9 / 6' }}>
+        <img src={spec.front.imageUrl!} alt={spec.front.imageAlt} className="absolute inset-0 h-full w-full object-cover" />
+        {v === 1 ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-[6%] text-center" style={{ background: 'rgba(20,14,8,.5)' }}>
+            {spec.front.kicker && <div className="text-[2.4vw] uppercase tracking-widest lg:text-[13px]" style={{ color: '#fff' }}>{spec.front.kicker}</div>}
+            <div className="mt-[2%] text-[4.6vw] font-bold leading-tight text-white lg:text-[27px]">{spec.front.headline}</div>
+          </div>
+        ) : v === 2 ? (
+          <>
+            {spec.front.kicker && <div className="absolute inset-x-0 top-0 px-[5%] py-[3%] text-[2.4vw] font-semibold uppercase tracking-widest text-white lg:text-[13px]" style={{ background: accent }}>{spec.front.kicker}</div>}
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-[5%] pt-[14%]">
+              <div className="text-[4.4vw] font-bold leading-tight text-white lg:text-[26px]">{spec.front.headline}</div>
+            </div>
+          </>
+        ) : (
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-[5%] pt-[15%]">
             {spec.front.kicker && <div className="text-[2.6vw] uppercase tracking-widest lg:text-[13px]" style={{ color: accent }}>{spec.front.kicker}</div>}
             <div className="text-[4.4vw] font-bold leading-tight text-white lg:text-[26px]">{spec.front.headline}</div>
           </div>
-        </>
-      ) : (
-        // Designed brand card — no photo. Big type on the brand field, a thin rule, the kicker.
-        <div className="absolute inset-0 flex flex-col justify-center p-[8%] text-white">
-          {spec.front.kicker && <div className="text-[2.4vw] font-medium uppercase tracking-widest text-white/85 lg:text-[13px]">{spec.front.kicker}</div>}
-          <div className="mt-[3%] text-[5vw] font-bold leading-[1.05] lg:text-[30px]">{spec.front.headline}</div>
-          <div className="mt-[5%] h-[3px] w-[22%] rounded-full bg-white/70" />
-        </div>
-      )}
+        )}
+      </div>
+    );
+  }
+
+  // Brand card (no photo) — v0 left/centered, v1 centered, v2 top-aligned editorial.
+  const align = v === 1 ? 'items-center justify-center text-center' : v === 2 ? 'items-start justify-start pt-[12%]' : 'items-start justify-center';
+  return (
+    <div className="mailer-card relative w-full overflow-hidden rounded-lg shadow-soft" style={{ aspectRatio: '9 / 6', background: grad }}>
+      <div className={`absolute inset-0 flex flex-col p-[8%] text-white ${align}`}>
+        {spec.front.kicker && <div className="text-[2.4vw] font-medium uppercase tracking-widest text-white/85 lg:text-[13px]">{spec.front.kicker}</div>}
+        <div className="mt-[3%] text-[5vw] font-bold leading-[1.05] lg:text-[30px]">{spec.front.headline}</div>
+        <div className={`mt-[5%] h-[3px] w-[22%] rounded-full bg-white/70 ${v === 1 ? 'mx-auto' : ''}`} />
+      </div>
     </div>
   );
 }
@@ -64,7 +92,7 @@ export function PostcardBack({ spec, accent, qr }: { spec: MailerSpec; accent: s
 
 /** A postcard you can look at: one card in view, tap to flip front↔back. Both still print (the
  *  print CSS targets .mailer-card), so the flip is only for looking. */
-export function PostcardViewer({ spec, accent, qr }: { spec: MailerSpec; accent: string; qr: string | null }) {
+export function PostcardViewer({ spec, accent, qr, variant = 0 }: { spec: MailerSpec; accent: string; qr: string | null; variant?: number }) {
   const [side, setSide] = useState<'front' | 'back'>('front');
   return (
     <div>
@@ -76,7 +104,7 @@ export function PostcardViewer({ spec, accent, qr }: { spec: MailerSpec; accent:
         <button onClick={() => setSide((s) => (s === 'front' ? 'back' : 'front'))} className="inline-flex items-center gap-1 text-[11px] text-forge-dim hover:text-forge-ink"><RotateCw size={12} /> flip</button>
       </div>
       {/* Both render (so both print); only the selected side is shown on screen. */}
-      <div className={side === 'front' ? '' : 'hidden'}><PostcardFront spec={spec} accent={accent} /></div>
+      <div className={side === 'front' ? '' : 'hidden'}><PostcardFront spec={spec} accent={accent} variant={variant} /></div>
       <div className={side === 'back' ? '' : 'hidden'}><PostcardBack spec={spec} accent={accent} qr={qr} /></div>
     </div>
   );
