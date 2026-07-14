@@ -14,7 +14,7 @@ import {
   type GenesisDraft, type WorldDNA, type BusinessContext, type PlayData, type GenesisRationale,
 } from './genesis';
 import { instantiateWeb, type WebSummary } from './workwebRun';
-import { distillRepo, hasEnoughSignal, repoIntent, type RepoFile, type RepoSignal } from './repoGenesis';
+import { distillRepo, hasEnoughSignal, repoIntent, parseRouteHead, type RepoFile, type RepoSignal } from './repoGenesis';
 import type { WebTemplate } from './workweb';
 
 export interface DraftRow {
@@ -142,10 +142,13 @@ export async function generateDraftFromRepo(repoInput: string): Promise<RepoDraf
 
   // HEAD resolves the default branch, so we don't have to guess main vs master.
   const base = `https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/HEAD`;
-  const [readme, pkg, html] = await Promise.all([
+  const [readme, pkg, html, root, routeIndex] = await Promise.all([
     fetchRepoFile(`${base}/README.md`),
     fetchRepoFile(`${base}/package.json`),
     fetchRepoFile(`${base}/index.html`),
+    // Route-based apps (TanStack Start / Remix) keep their head in a route file, not index.html.
+    fetchRepoFile(`${base}/src/routes/__root.tsx`),
+    fetchRepoFile(`${base}/src/routes/index.tsx`),
   ]);
 
   const files: RepoFile[] = [];
@@ -153,8 +156,14 @@ export async function generateDraftFromRepo(repoInput: string): Promise<RepoDraf
   if (pkg.text) files.push({ path: 'package.json', text: pkg.text });
   // fetch-url pre-extracts <title>/<meta description> from HTML — rebuild a minimal head so the pure
   // distiller reads them exactly as it would from a raw index.html.
+  const mkHead = (title: string, description: string): RepoFile =>
+    ({ path: 'index.html', text: `<title>${title}</title><meta name="description" content="${description.replace(/"/g, '&quot;')}">` });
   if (html.title || html.description) {
-    files.push({ path: 'index.html', text: `<title>${html.title}</title><meta name="description" content="${html.description.replace(/"/g, '&quot;')}">` });
+    files.push(mkHead(html.title, html.description));
+  } else {
+    // No index.html head → recover it from the route files (TanStack/Remix), so no app reads blank.
+    const head = parseRouteHead([root.text, routeIndex.text].filter(Boolean).join('\n'));
+    if (head.title || head.description) files.push(mkHead(head.title ?? '', head.description ?? ''));
   }
 
   if (!files.length) {

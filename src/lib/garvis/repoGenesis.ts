@@ -80,6 +80,21 @@ export function parseHtmlMeta(text: string): { title: string | null; description
   return { title: title, description: (metaDesc || ogDesc || null) };
 }
 
+/** Route-based apps (TanStack Start, Remix, some Next) keep their head in a route file, NOT index.html
+ *  — head() returns { title, meta:[{name:'description',content}] } objects. Pull title + description
+ *  from that source so those apps aren't read as blank. Fuzzy on purpose: real string literals only. */
+export function parseRouteHead(text: string): { title: string | null; description: string | null } {
+  const title =
+    /<title[^>]*>([\s\S]*?)<\/title>/i.exec(text)?.[1]?.trim() ||
+    /\btitle\s*:\s*['"`]([^'"`]{3,})['"`]/i.exec(text)?.[1]?.trim() ||
+    null;
+  const description =
+    /name\s*:\s*['"`]description['"`][\s\S]{0,80}?content\s*:\s*['"`]([^'"`]{8,})['"`]/i.exec(text)?.[1]?.trim() ||
+    /content\s*:\s*['"`]([^'"`]{8,})['"`][\s\S]{0,80}?name\s*:\s*['"`]description['"`]/i.exec(text)?.[1]?.trim() ||
+    null;
+  return { title, description };
+}
+
 /** The README's first substantive paragraph, with template scaffolding removed. Null if it's all
  *  boilerplate (a Lovable/CRA README that says nothing about the actual product). */
 export function readmeLead(text: string): string | null {
@@ -175,6 +190,40 @@ export function hasEnoughSignal(s: RepoSignal): boolean {
   return !!(s.tagline || s.readmeLead || (s.title && s.title !== s.name) || s.docTopics.length);
 }
 
+// The adaptive money layer: read the app's signal and classify it into a monetization archetype so
+// the plan fits THIS kind of app. It's a HYPOTHESIS the DNA synthesis refines — where the signal is
+// too thin, it declines to classify and lets Genesis ask. Grounded in the real portfolio scan:
+// health SaaS, privacy freemium, career/edu, newsletter media, research tool, B2B vertical CRM.
+export interface AppClass { category: string; revenueModel: string | null; channels: string[]; rationale: string }
+
+export function classifyApp(s: RepoSignal): AppClass {
+  const text = [s.name, s.title, s.tagline, s.readmeLead, ...s.docTopics, ...s.surfaces].filter(Boolean).join(' ').toLowerCase();
+  const stack = s.stack.map((x) => x.toLowerCase());
+  const hasStripe = stack.includes('stripe');
+  const any = (...keys: string[]) => keys.some((k) => text.includes(k));
+
+  if (any('privacy', 'data broker', 'breach', 'delete my', 'footprint', 'unsubscribe', 'gdpr', 'ccpa'))
+    return { category: 'B2C privacy/security SaaS', revenueModel: 'freemium subscription', channels: ['intent SEO (e.g. "remove me from data brokers", breach-check)', 'Product Hunt + privacy subreddits', 'paid search on privacy/safety intent'], rationale: 'privacy tooling with clear paid tiers' };
+  if (any('stroke', 'rehab', 'therapy', 'clinical', 'patient', 'health', 'medical', 'recovery', 'motor skill'))
+    return { category: 'B2C health SaaS', revenueModel: 'subscription', channels: ['clinician / therapist referrals', 'condition-specific content + SEO', 'caregiver & patient communities'], rationale: 'health/rehab product — trust- and evidence-led, special ad-category rules apply' };
+  if (any('career', 'roadmap', 'resume', 'interview', 'profession'))
+    return { category: 'B2C career/education SaaS', revenueModel: 'freemium subscription', channels: ['short-form video (TikTok/Reels/YouTube) on career pivots', 'long-tail career-path SEO', 'career & job subreddits/communities'], rationale: 'career guidance for individuals' };
+  if (any('exam', 'prep', 'study', 'quiz', 'course', 'tutor', 'learn', 'flashcard', 'student'))
+    return { category: 'education / test-prep', revenueModel: 'freemium subscription', channels: ['short-form + YouTube study content', 'SEO on the exam/subject', 'student communities (Discord/Reddit)'], rationale: 'learning product for students' };
+  if (any('newsletter', 'news', 'brief', 'digest', ' media', 'local ', 'daily '))
+    return { category: 'content / newsletter media', revenueModel: 'advertiser sponsorships (+ optional paid tier)', channels: ['local/topic SEO', 'community social + relevant groups', 'cross-promotion & referral'], rationale: 'audience-first media — monetize the audience, not a checkout' };
+  if (any('research', 'scientific', 'papers', 'literature', 'discovery engine', 'academic', ' lab', 'hypothes'))
+    return { category: 'B2B / research tool', revenueModel: 'B2B/academic seat subscription', channels: ['academic outbound (conferences, PIs, lab lists)', 'content / preprints proving value', 'enterprise sales to R&D'], rationale: 'research intelligence for teams/institutions' };
+  if (any('crm', 'leads', 'outbound', 'pipeline', ' sales', 'quotes', 'tickets', 'campaigns'))
+    return { category: 'B2B vertical SaaS / CRM', revenueModel: 'B2B SaaS seats or usage-based', channels: ['direct outbound + cold email', 'industry trade shows / associations', 'LinkedIn ABM'], rationale: 'B2B sales/ops tool' };
+  if (any('api', 'sdk', 'cli', 'developer', 'devtool'))
+    return { category: 'developer tool', revenueModel: hasStripe ? 'usage-based / freemium' : 'usage-based', channels: ['docs + dev-content SEO', 'GitHub / Hacker News / dev communities', 'integrations & partnerships'], rationale: 'tool for developers' };
+  if (any('shop', 'store', 'marketplace', 'checkout', 'commerce', 'sellers', 'buyers'))
+    return { category: 'marketplace / commerce', revenueModel: 'transaction fee / commission', channels: ['SEO + paid social', 'seed both supply and demand', 'referral / marketplace ops'], rationale: 'two-sided or commerce' };
+
+  return { category: 'unclear from the repo', revenueModel: hasStripe ? 'paid (Stripe present) — exact model unclear' : null, channels: [], rationale: 'signal too thin to classify — Genesis should ask what it is and who pays' };
+}
+
 /** Compose the Genesis INTENT from the signal — natural language, grounded ONLY in what was read.
  *  Inferences are flagged as inferences and gaps are handed to Genesis (which turns unknowns into
  *  questions rather than fabricating a market). This string is what generateDraft() consumes. */
@@ -188,6 +237,10 @@ export function repoIntent(s: RepoSignal, ref: RepoRef): string {
   if (s.stack.length) parts.push(`It is a software product built with ${s.stack.join(', ')}.`);
   if (s.docTopics.length) parts.push(`Its own documentation covers: ${s.docTopics.slice(0, 6).join('; ')} — use these as domain signal for what the product actually does.`);
   if (s.surfaces.length) parts.push(`Product surfaces (screens): ${s.surfaces.slice(0, 8).join(', ')}.`);
+  const cls = classifyApp(s);
+  if (cls.category !== 'unclear from the repo') {
+    parts.push(`This looks like a ${cls.category}${cls.revenueModel ? `; a fitting money model is ${cls.revenueModel}` : ''}${cls.channels.length ? `, with the strongest channels likely: ${cls.channels.join('; ')}` : ''}. Treat this as a STARTING HYPOTHESIS to validate against the actual product — refine or correct it, and if it's wrong, say so.`);
+  }
   parts.push('Design a marketing operation to GROW this product AND make money from it. Be specific about how it makes money (the revenue model), WHO pays (the ideal customer), a pricing approach (as a hypothesis to validate from real comparables — never an invented number), and the 2-3 best marketing channels for THIS kind of product and buyer. Infer these from what the product is; where the audience, pricing, or revenue model is not evident from the above, ASK rather than invent — do not fabricate customers, prices, results, or claims.');
   return parts.join('\n');
 }

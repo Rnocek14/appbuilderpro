@@ -1,7 +1,8 @@
 // Run: npx tsx src/lib/garvis/repoGenesis.verify.ts
 import {
-  parsePkgJson, parseHtmlMeta, readmeLead, detectStack, distillRepo, hasEnoughSignal, repoIntent,
-  type RepoFile,
+  parsePkgJson, parseHtmlMeta, parseRouteHead, readmeLead, detectStack, distillRepo, hasEnoughSignal,
+  repoIntent, classifyApp,
+  type RepoFile, type RepoSignal,
 } from './repoGenesis';
 
 let passed = 0; let failed = 0;
@@ -98,6 +99,52 @@ const FILES: RepoFile[] = [
   const thin = distillRepo([{ path: 'README.md', text: LOVABLE_README }, { path: 'package.json', text: PKG }], { owner: 'x', repo: 'y' });
   check('a repo with only boilerplate + scaffold pkg has no real tagline/lead', !thin.tagline && !thin.readmeLead);
   check('hasEnoughSignal is false when there is nothing real to stand on', hasEnoughSignal(thin) === false);
+}
+
+// --- route-based head (TanStack Start / Remix): the apps with NO index.html -----------------
+{
+  // Shaped like swift-prep-pros / theory-thread — head lives in a route file, not index.html.
+  const routeSrc = `export const Route = createRootRoute({
+    head: () => ({
+      meta: [
+        { title: 'TheoryForge - The Scientific Connection Engine' },
+        { name: 'description', content: 'AI research-discovery platform that surfaces novel connections across scientific papers.' },
+      ],
+    }),
+  })`;
+  const h = parseRouteHead(routeSrc);
+  check('route head extracts the title from a head() object', h.title === 'TheoryForge - The Scientific Connection Engine');
+  check('route head extracts the meta description', !!h.description && h.description.includes('scientific papers'));
+  check('a non-route file yields nothing (no false positives)', parseRouteHead('const x = 1;').title === null);
+}
+// --- app classifier: each app type gets a FITTING, adaptable money model (real portfolio) -----
+{
+  const sig = (over: Partial<RepoSignal>): RepoSignal => ({ name: null, title: null, tagline: null, readmeLead: null, stack: [], docTopics: [], surfaces: [], ...over });
+
+  const health = classifyApp(sig({ name: 'NeuroRecover', tagline: 'AI-guided stroke rehabilitation to rebuild motor skills from home' }));
+  check('health app → subscription + clinician/caregiver channels', /health/i.test(health.category) && health.revenueModel === 'subscription' && health.channels.join(' ').toLowerCase().includes('clinician'));
+
+  const privacy = classifyApp(sig({ name: 'Footprint Finder', tagline: 'find every data broker holding your email and delete it', stack: ['Stripe'] }));
+  check('privacy app → freemium subscription + intent-SEO channel', /privacy/i.test(privacy.category) && /freemium/i.test(privacy.revenueModel!) && privacy.channels.join(' ').toLowerCase().includes('seo'));
+
+  const news = classifyApp(sig({ name: 'Lake Geneva Brief', tagline: 'a five-minute local newsletter covering city hall, schools, and events' }));
+  check('newsletter → sponsorships, NOT a checkout model', /newsletter|media/i.test(news.category) && /sponsor/i.test(news.revenueModel!));
+
+  const career = classifyApp(sig({ name: 'PathfindAI', tagline: 'personalized AI career roadmaps to reach your professional goals' }));
+  check('career app → freemium + short-form video channel', /career/i.test(career.category) && /freemium/i.test(career.revenueModel!) && career.channels.join(' ').toLowerCase().includes('video'));
+
+  const research = classifyApp(sig({ name: 'TheoryForge', tagline: 'reads across scientific papers to surface novel research connections' }));
+  check('research tool → B2B/academic seats, not consumer', /research|b2b/i.test(research.category) && /academic|b2b/i.test(research.revenueModel!));
+
+  const crm = classifyApp(sig({ name: 'CMP Intelligence', tagline: 'lead discovery, scoring, and outbound campaigns for contractors', surfaces: ['Leads', 'Campaigns', 'Quotes', 'Tickets'] }));
+  check('B2B outbound tool → B2B SaaS + outbound/ABM channels', /b2b/i.test(crm.category) && crm.channels.join(' ').toLowerCase().includes('outbound'));
+
+  const thin = classifyApp(sig({ name: 'mystery-repo' }));
+  check('a thin/unknown repo is NOT force-classified (defers to Genesis)', thin.category === 'unclear from the repo' && thin.revenueModel === null);
+
+  // the classification reaches the intent so the plan adapts per app
+  const intent = repoIntent(sig({ name: 'NeuroRecover', tagline: 'AI-guided stroke rehabilitation from home' }), { owner: 'rnocek14', repo: 'mind-weave-recover' });
+  check('the app classification is folded into the Genesis intent as a hypothesis', /looks like a .*health/i.test(intent) && /STARTING HYPOTHESIS/i.test(intent));
 }
 
 console.log(`\nrepoGenesis.verify: ${passed} passed, ${failed} failed`);
