@@ -26,7 +26,8 @@ export type Flavor =
   | 'assist'      // OPERATOR ASSISTANT: an answering desk — paste an item, get a reply grounded in this world's knowledge base
   | 'deliver'     // DELIVERABLE GENERATOR: a document studio — produce a portable, exportable proposal/report/one-pager
   | 'data'        // DATA & NUMBERS: an analysis workspace — a CSV becomes a typed table, real stats, honest charts
-  | 'tracker';    // PERSONAL/INTERNAL REGISTRY: log entries about clients/expenses/anything — each becomes queryable memory
+  | 'tracker'     // PERSONAL/INTERNAL REGISTRY: log entries about clients/expenses/anything — each becomes queryable memory
+  | 'content_growth'; // FACELESS AI-VIDEO GROWTH: a reel factory — a niche idea becomes a multi-scene vertical storyboard (shot prompts + captions + VO), the seed the clip engine fills. Generation-first, the deliberate inverse of `video` (which never fabricates real footage).
 export type CharterStatus = 'dormant' | 'active' | 'waiting' | 'done';
 
 export interface CharterRef { type: string; id: string; label?: string }
@@ -56,7 +57,7 @@ export function parseCharter(raw: unknown): Charter | null {
 }
 
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker', 'content_growth',
 ];
 
 export interface ArchetypeMeta {
@@ -95,7 +96,7 @@ const T = (id: string, label: string, hint: string, kind: ToolKind): WorkTool =>
 // Executable tool ids (workwebRun.ts implements exactly these; verified in workweb.verify.ts).
 export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
-  'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec',
+  'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec', 'gen-reel',
   'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
   'import-docs', 'view-results', 'open-answering', 'open-documents', 'open-data', 'open-tracker',
 ] as const;
@@ -108,6 +109,7 @@ const STUDIO_BY_FLAVOR: Partial<Record<Flavor, WorkTool[]>> = {
   landing:     [T('gen-landing', 'Generate landing page', 'A page outline lands here — build it in the Preview Engine.', 'generate')],
   email:       [T('gen-email-seq', 'Generate email sequence', 'A 3-touch sequence lands here as drafts.', 'generate')],
   ads:         [T('gen-ads', 'Generate ad campaign', 'Launch-ready Meta + Google assets — copy at platform limits, keywords, tracking URLs.', 'generate')],
+  content_growth: [T('gen-reel', 'Generate reel storyboard', 'A niche idea becomes a multi-scene vertical reel — a hook, per-scene shot prompts + on-screen captions, and a voiceover script. The honest seed the clip engine fills; nothing is fabricated as real footage.', 'generate')],
   feature_lab: [
     T('gen-features', 'Generate feature concepts', 'Distinct, buildable feature concepts for THIS platform land here — diversity-gated, grounded in the research.', 'generate'),
     T('gen-spec', 'Write feature spec', 'A full spec (problem → v1 scope → success metric → risks) lands here. Steer it with a direction.', 'generate'),

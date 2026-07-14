@@ -21,6 +21,7 @@ import {
   researchQueries, formatSources, appendSources, parseSocialPosts, postToDetail, researchContext,
   parseAdAssets, isLaunchReady, metaAdDetail, googleAdDetail,
   steerBlock, IDEAS_SYSTEM, parseIdeas, ideasToDetail, PLAN_SYSTEM, parsePlan, SPEC_SYSTEM, parseSpec,
+  REEL_SYSTEM, parseReel, reelToDetail,
   type ResearchSource,
 } from './producersCore';
 
@@ -252,6 +253,33 @@ export async function produceVideo(worldId: string, charter: Charter, opts?: Pro
     }
   } catch { /* fall to the floor */ }
   return { artifacts: expertiseFloor(charter, m), message: 'Added the video formats guide (AI unavailable — press again for a full script).', grounded: false };
+}
+
+// ---------------------------------------------------------------------------
+// 3b. Reel — a multi-scene vertical storyboard for a faceless AI-video account
+// ---------------------------------------------------------------------------
+
+export async function produceReel(worldId: string, charter: Charter, opts?: ProduceOpts): Promise<ProduceResult> {
+  const m = await gather(worldId);
+  const steering = await steer(worldId, ['video'], opts);
+  try {
+    const text = await reason(
+      REEL_SYSTEM,
+      [businessContext(m), steering].filter(Boolean).join('\n\n'),
+      'Write the HOOK line then the SCENE blocks now. Nothing else.',
+      1400,
+    );
+    const sb = parseReel(text);
+    if (sb && sb.scenes.length >= 2) {
+      const title = sb.hook ? `Reel — ${sb.hook.slice(0, 44)}` : `Reel storyboard — ${sb.scenes.length} scenes`;
+      return {
+        artifacts: [{ slug: 'reel-storyboard', kind: 'video', title, detail: reelToDetail(sb) }],
+        message: `Storyboarded a ${sb.scenes.length}-scene reel — the seed the clip engine fills. Nothing renders or posts until you say so.`,
+        grounded: true,
+      };
+    }
+  } catch { /* fall to the floor */ }
+  return { artifacts: expertiseFloor(charter, m), message: 'Added the reel format system (AI unavailable — the playbook stands; press again for a full storyboard).', grounded: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -513,6 +541,7 @@ export function producerFor(toolId: string): ((worldId: string, charter: Charter
     case 'research': return produceResearch;
     case 'gen-social': return produceSocial;
     case 'gen-video-script': return produceVideo;
+    case 'gen-reel': return produceReel;
     case 'gen-angle': return produceAngle;
     case 'gen-ads': return produceAds;
     case 'gen-ideas': return produceIdeas;

@@ -2,6 +2,7 @@
 import {
   researchQueries, formatSources, appendSources, parseSocialPosts, postToDetail,
   researchContext, parseAdAssets, isLaunchReady, metaAdDetail, googleAdDetail, AD_LIMITS,
+  parseReel, reelToDetail,
   type ResearchSource,
 } from './producersCore';
 import type { WorldDNA, BusinessContext } from './genesis';
@@ -64,6 +65,33 @@ tags: #a`;
   const detail = postToDetail(posts[0]);
   check('post detail is copy-paste ready (caption then tags then visual)', detail.startsWith('Your shoreline') && detail.includes('#lakegeneva') && detail.includes('VISUAL:'));
   check('garbage in → empty out, no throw', parseSocialPosts('not a post at all').length === 0);
+}
+// --- reel: a multi-scene storyboard parsed from HOOK + SCENE blocks ------------------------
+{
+  const model = `HOOK: 3 desk gadgets that feel illegal to use
+SCENE
+prompt: overhead macro shot of a tiny kinetic desk toy spinning, soft studio light, shallow depth
+caption: #1 — the one that never stops
+vo: This first one runs for hours.
+
+SCENE
+prompt: a satisfying magnetic sand timer flipping in slow motion, dark backdrop, rim light
+caption: #2 — hypnotic on a Monday
+vo: —
+
+SCENE
+prompt: hands snapping a modular puzzle cube together, bright pop colors, fast cuts
+caption: #3 — the desk flex
+vo: Save this before it sells out.`;
+  const sb = parseReel(model);
+  check('reel parses the hook + all three scenes', !!sb && sb.hook.includes('feel illegal') && sb.scenes.length === 3);
+  check('each scene keeps its generation prompt + caption', !!sb && sb.scenes[0].prompt.includes('kinetic desk toy') && sb.scenes[0].caption.includes('#1'));
+  check('an em-dash vo becomes empty (no fake narration)', !!sb && sb.scenes[1].vo === '');
+  const detail = sb ? reelToDetail(sb) : '';
+  check('reel detail lists scenes + the full voiceover script', detail.includes('SCENE 1') && detail.includes('FULL VOICEOVER SCRIPT') && detail.includes('runs for hours'));
+  check('reel detail carries the honest "not yet a video" + AI-label line', detail.includes('not yet a video') && detail.includes('made-with-AI'));
+  check('the pre-HOOK preamble is not counted as a scene', !!sb && sb.scenes.length === 3);
+  check('garbage in → null out, no throw', parseReel('nothing structured here') === null);
 }
 // --- ads: platform limits ENFORCED, tracking URLs attributed, compliance rides along -------
 {

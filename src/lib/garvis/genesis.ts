@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 16 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 17 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -146,11 +146,23 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 16): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data tracker
+FLAVORS (exactly 17): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data tracker content_growth
 
 THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
 - MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
   studios for the growth channels, launch, loop, ledger, vault.
+- CONTENT-GROWTH / FACELESS-VIDEO-NETWORK intent (the user runs a PORTFOLIO of faceless niche
+  accounts and grows them with AI-generated short video — "brainrot accounts", "faceless AI reels",
+  "grow and sell Instagram/TikTok accounts", "a content farm", "post AI videos to a bunch of niche
+  pages"): design a CONTENT NETWORK. The content itself is the product (entertainment), so AI-
+  generated video is honest here — it is the deliberate inverse of a real-business marketing world.
+  Shape it as: intel (flavor generic OR market: niche + trend research and an idea backlog), audience
+  (flavor lists: the ACCOUNT ROSTER — each account a distinct niche persona), one or more studio areas
+  with flavor content_growth (the reel factory — an idea becomes a multi-scene vertical storyboard),
+  launch (flavor social: approval-gated posting to the accounts), loop (per-account posting cadence),
+  ledger (per-account growth + cost-vs-revenue), and vault (flavor brand: a brand kit per persona).
+  Every account is a GENUINE distinct brand, never a sockpuppet clone; keep audience+launch because
+  this world posts. Seed the vault/intel play with the FIRST personas + niches to define.
 - PRODUCT/PLATFORM intent (the user BUILDS or WORKS FOR a product — "I work at X", feature
   ideation, improving a platform, internal tooling): design a PRODUCT LAB instead — intel
   (flavor market: the platform, its users, competitors, complaints), one or more studio areas
