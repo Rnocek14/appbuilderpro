@@ -33,6 +33,8 @@ import {
   listTerritories, createTerritory, importRecipients, listRecipients, loadDoNotMailKeys, type TerritoryRow,
 } from '../../../lib/garvis/farmRun';
 import { parseFarmCsv, partitionMailable, farmMath, type FarmRecipient, type FarmParseResult } from '../../../lib/garvis/farm';
+import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
+import { supabase } from '../../../lib/supabase';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
@@ -89,16 +91,16 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     { key: 'email', emoji: '✉️', label: 'Email', sub: 'to your list', dim: !ready },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
-    { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers', dim: !ready },
+    { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers' },
   ];
 
   const addSat = (nodeKey: string) => setSats((s) => [...s, { nodeKey, id: `${nodeKey}-${s.length}-${(s.length * 7 + 3) % 97}` }]);
 
   const onOpen = (k: string) => {
     const key = k as NodeKey;
-    // people + video work from the world's own data (a mail list, the world's photos), so they don't
-    // require the campaign details to be filled first.
-    if (key !== 'center' && key !== 'people' && key !== 'video' && !ready) { setOpen('center'); return; }
+    // people + video + analysis work from the world's own data (a mail list, the world's photos, the
+    // MLS), so they don't require the campaign details to be filled first.
+    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && !ready) { setOpen('center'); return; }
     setOpen(key);
   };
 
@@ -136,7 +138,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
           onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('video')} />
       )}
       {open === 'analysis' && (
-        <ComingSheet kind="analysis" onClose={() => setOpen(null)} />
+        <AnalysisSheet realEstate={realEstate} area={details?.area ?? ''} onClose={() => setOpen(null)} />
       )}
     </div>
   );
@@ -627,16 +629,82 @@ function VideoSheet({ worldId, clusterId, title, onToast, onClose, onSpin }: {
   );
 }
 
-function ComingSheet({ kind, onClose }: { kind: 'video' | 'analysis'; onClose: () => void }) {
-  const map = {
-    video: { em: '🎬', t: 'Video', l: 'A 30-second reel from this world’s photos — plays in the browser, renders to MP4.' },
-    analysis: { em: '📊', t: 'Market analysis', l: 'Real numbers from your MLS/RESO feed — never guessed.' },
-  }[kind];
+// ---------- Market analysis (real MLS numbers, never guessed) ----------
+function AnalysisSheet({ realEstate, area, onClose }: { realEstate: boolean; area: string; onClose: () => void }) {
+  const [rows, setRows] = useState<MlsRow[] | null>(null);
+  const [zip, setZip] = useState('');
+  const nowIso = useMemo(() => new Date().toISOString(), []);
+
+  useEffect(() => {
+    if (!realEstate) { setRows([]); return; }
+    let live = true;
+    const done = (r: MlsRow[]) => { if (live) { live = false; setRows(r); } };
+    void supabase.from('mls_listings')
+      .select('listing_key, status, list_price, close_price, address1, city, zip, property_type, beds, baths, sqft, list_date, close_date, dom')
+      .order('modified_at', { ascending: false }).limit(5000)
+      .then(({ data }) => done((data ?? []) as MlsRow[]), () => done([]));
+    // Never trap on the spinner — fall to the honest empty state if the read stalls.
+    const fb = setTimeout(() => done([]), 5000);
+    return () => { live = false; clearTimeout(fb); };
+  }, [realEstate]);
+
+  const filtered = useMemo(() => {
+    if (!rows) return [];
+    const z = zip.trim().slice(0, 5);
+    return z.length >= 3 ? rows.filter((r) => r.zip.startsWith(z)) : rows;
+  }, [rows, zip]);
+  const stats = useMemo(() => (filtered.length ? marketStats(filtered, nowIso) : null), [filtered, nowIso]);
+  const money = (n: number | null) => (n == null ? null : `$${Math.round(n).toLocaleString('en-US')}`);
+
+  if (!realEstate) {
+    return (
+      <Sheet emoji="📊" title="Market analysis" lead="Real numbers from your own data — never guessed." onClose={onClose}>
+        <div className="mkc-note"><Info size={15} /><div>Market analysis here reads a real-estate MLS feed. For your business, the numbers that matter live in your own data (sales, bookings, site traffic) — connect a source in <b>Advanced</b> and Garvis reads from it. It never makes a number up.</div></div>
+      </Sheet>
+    );
+  }
   return (
-    <Sheet emoji={map.em} title={map.t} lead={map.l} onClose={onClose}>
-      <p className="mkc-coming">This one lives in <b>Advanced → studios</b> for now — I’m bringing it onto the canvas next. Everything you make there still shows up here.</p>
-      <div className="mkc-acts"><button className="mkc-a" onClick={onClose}>Got it</button></div>
+    <Sheet emoji="📊" title="Market analysis" lead="Every number is computed from your MLS listings — never remembered, never guessed." onClose={onClose}>
+      {rows === null ? (
+        <div className="mkc-vloading"><Loader2 size={15} className="animate-spin" /> Reading your MLS…</div>
+      ) : rows.length === 0 ? (
+        <div className="mkc-note"><Info size={15} /><div>No MLS data yet. Connect your MLS / RESO feed in <b>Advanced → Market data</b> and Garvis pulls active + sold listings; every stat here is then computed from those real rows.</div></div>
+      ) : (
+        <>
+          <div className="mkc-locrow2">
+            <input className="mkc-in" value={zip} onChange={(e) => setZip(e.target.value)} placeholder={`ZIP to focus${area ? ` on ${area}` : ''} (or leave blank for all ${rows.length.toLocaleString()})`} />
+            <span className="mkc-vmeta">{filtered.length.toLocaleString()} listings</span>
+          </div>
+          {stats ? (
+            <>
+              <div className="mkc-stats">
+                <Stat label="Active" value={stats.activeCount.toLocaleString()} />
+                <Stat label="Sold · 12 mo" value={stats.soldLast12.toLocaleString()} />
+                <Stat label="Median close" value={money(stats.medianClose)} />
+                <Stat label="Median days on market" value={stats.medianDom != null ? `${stats.medianDom} days` : null} />
+                <Stat label="Price / sqft" value={money(stats.medianPricePerSqft)} />
+                <Stat label="Months of supply" value={stats.monthsOfSupply != null ? String(stats.monthsOfSupply) : null} />
+              </div>
+              {stats.notes.length > 0 && (
+                <div className="mkc-anote">{stats.notes.map((n, i) => <div key={i}>• {n}</div>)}</div>
+              )}
+            </>
+          ) : (
+            <div className="mkc-note"><Info size={15} /><div>No listings match that ZIP yet — clear it to see the whole feed.</div></div>
+          )}
+        </>
+      )}
     </Sheet>
+  );
+}
+
+/** A KPI tile. A null value shows an honest "not enough data" — never a smoothed-over number. */
+function Stat({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="mkc-stat">
+      <div className="mkc-statv" style={value == null ? { color: '#B8AEA2', fontSize: 13, fontWeight: 500 } : undefined}>{value ?? 'not enough data'}</div>
+      <div className="mkc-statl">{label}</div>
+    </div>
   );
 }
 
@@ -741,7 +809,13 @@ const SHEET_CSS = `
 .mkc-vdot{ width:9px; height:9px; border-radius:99px; flex:0 0 auto; margin-top:5px; }
 .mkc-note{ display:flex; gap:10px; font-size:13px; color:#7A7066; background:#FBF3E9; border:1px solid #F0DFC8; border-radius:12px; padding:12px 14px; }
 .mkc-note b{ color:#2A2320; } .mkc-note svg{ color:#B44A12; flex:0 0 auto; margin-top:1px; }
-.mkc-coming{ font-size:14px; color:#7A7066; } .mkc-coming b{ color:#2A2320; }
+.mkc-locrow2{ display:flex; align-items:center; gap:10px; margin-bottom:14px; } .mkc-locrow2 .mkc-in{ flex:1; }
+.mkc-stats{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.mkc-stat{ border:1px solid #E7E0D6; border-radius:12px; padding:13px 14px; background:#fff; }
+.mkc-statv{ font-size:20px; font-weight:700; color:#2A2320; font-variant-numeric:tabular-nums; line-height:1.1; }
+.mkc-statl{ font-size:11.5px; color:#8A8076; margin-top:4px; }
+.mkc-anote{ margin-top:12px; font-size:11.5px; color:#A89F94; line-height:1.6; }
+@media (max-width:520px){ .mkc-stats{ grid-template-columns:repeat(2,1fr); } }
 
 @media (max-width:560px){ .mkc-form{ grid-template-columns:1fr; } .mkc-pcwrap{ grid-template-columns:1fr; } .mkc-side{ flex-direction:row; } }
 `;
