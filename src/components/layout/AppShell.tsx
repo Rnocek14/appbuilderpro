@@ -22,6 +22,8 @@ const navSections = [
     // live off-nav — their jobs are inside Command, Businesses, Queue, and Settings.
     title: 'Operate',
     items: [
+      // The canvas spine's front door: you at the center, your businesses orbiting. Branch in from here.
+      { to: '/garvis/home', label: 'Home', icon: Compass },
       { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
       // ONE QUEUE (design review P0): approvals + replies/leads + build questions, one room.

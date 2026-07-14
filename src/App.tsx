@@ -45,7 +45,9 @@ const Universe3D = lazy(() => import('./pages/Universe3D'));
 const PreviewEngine = lazy(() => import('./pages/PreviewEngine'));
 const PreviewSite = lazy(() => import('./pages/PreviewSite'));
 const PreviewReport = lazy(() => import('./pages/PreviewReport'));
+const ProfileHome = lazy(() => import('./pages/ProfileHome'));
 const CanvasPreview = lazy(() => import('./pages/dev/CanvasPreview'));
+const ProfileHomePreview = lazy(() => import('./pages/dev/ProfileHomePreview'));
 const WebPreview = lazy(() => import('./pages/dev/WebPreview'));
 const ProspectWebPreview = lazy(() => import('./pages/dev/ProspectWebPreview'));
 const WinHubPreview = lazy(() => import('./pages/dev/WinHubPreview'));
@@ -75,6 +77,8 @@ function AppRoutes() {
           <Route path="/oauth/callback" element={<OAuthCallback />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/garvis" element={<Protected><Garvis /></Protected>} />
+          {/* The canvas spine's front door: you at the center, your businesses orbiting. */}
+          <Route path="/garvis/home" element={<Protected><ProfileHome /></Protected>} />
           <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
           {/* ONE MEMORY (design review P2): the nav door; the old rooms stay routable below. */}
           <Route path="/garvis/memory" element={<Protected><Memory /></Protected>} />
@@ -115,6 +119,7 @@ function AppRoutes() {
           {/* DEV-ONLY — unauthed preview of in-progress surfaces, for screenshot-driven building.
               Gated to dev builds so it never ships to production. */}
           {import.meta.env.DEV && <Route path="/dev/marketing-canvas" element={<CanvasPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/profile-home" element={<ProfileHomePreview />} />}
           {import.meta.env.DEV && <Route path="/dev/web" element={<WebPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/prospect-web" element={<ProspectWebPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/win-hub" element={<WinHubPreview />} />}
