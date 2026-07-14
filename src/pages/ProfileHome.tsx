@@ -11,9 +11,11 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { Telescope } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { BranchCanvas, type LevelSpec, type BranchNode } from '../components/garvis/canvas/BranchCanvas';
 import { ArtifactSheet } from '../components/garvis/canvas/ArtifactSheet';
 import { CanvasChat } from '../components/garvis/canvas/CanvasChat';
+import { StudioDock } from '../components/garvis/canvas/StudioDock';
 import { loadUniverseScene } from '../lib/garvis/universeViewRun';
 import { loadSystemScene } from '../lib/garvis/systemViewRun';
 import type { SystemScene } from '../lib/garvis/systemView';
@@ -36,6 +38,7 @@ export default function ProfileHome() {
   const navigate = useNavigate();
   const { businessId, areaSlug } = useParams();
   const { profile } = useAuth();
+  const { toast } = useToast();
 
   const path = areaSlug ? [businessId!, areaSlug] : businessId ? [businessId!] : [];
   const first = (profile?.full_name || profile?.email || 'You').split(/\s+/)[0];
@@ -48,6 +51,20 @@ export default function ProfileHome() {
   // A work-item sheet is off-URL local state — close it whenever the canvas level changes (e.g. the
   // browser Back button), so the sheet never floats over a different level than it was opened from.
   useEffect(() => { setSheet(null); }, [businessId, areaSlug]);
+
+  // At an area, resolve its cluster so the studio dock can summon the real studios seeded with it.
+  const [areaCtx, setAreaCtx] = useState<{ clusterId: string; title: string } | null>(null);
+  useEffect(() => {
+    if (!businessId || !areaSlug) { setAreaCtx(null); return; }
+    let live = true;
+    void getScene(businessId).then((scene) => {
+      if (!live) return;
+      const planet = scene?.planets.find((p) => p.slug === areaSlug) ?? null;
+      setAreaCtx(planet ? { clusterId: planet.id, title: planet.title } : null);
+    }).catch(() => { if (live) setAreaCtx(null); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [businessId, areaSlug, reloadKey]);
 
   const bumpReload = useCallback(() => {
     sceneCache.current.clear();
@@ -211,6 +228,9 @@ export default function ProfileHome() {
           onLeaf={onLeaf}
           trailing={<button className="bc-cine" onClick={() => navigate('/garvis/universe')}><Telescope size={14} /> Cinematic view</button>}
         />
+        {areaCtx && businessId && (
+          <StudioDock worldId={businessId} clusterId={areaCtx.clusterId} title={areaCtx.title} onToast={toast} onClosed={bumpReload} />
+        )}
         <CanvasChat onSend={onGarvisSend} hint={chatHint} />
       </div>
       {sheet && <ArtifactSheet artifact={sheet} onClose={() => setSheet(null)} onAsk={(text) => onArtifactAsk(sheet, text)} />}

@@ -8,6 +8,7 @@ import { Telescope } from 'lucide-react';
 import { BranchCanvas, type LevelSpec } from '../../components/garvis/canvas/BranchCanvas';
 import { CanvasChat } from '../../components/garvis/canvas/CanvasChat';
 import { ArtifactSheet } from '../../components/garvis/canvas/ArtifactSheet';
+import { StudioDock } from '../../components/garvis/canvas/StudioDock';
 import type { StudioArtifact } from '../../lib/garvis/artifacts';
 
 // A canned Garvis reply so the docked chat + the workbench are drivable/screenshottable with no auth.
@@ -91,6 +92,7 @@ export default function ProfileHomePreview() {
           onLeaf={(p, k) => { if (p.length === 2) setSheet({ ...SAMPLE_ARTIFACT, id: k }); }}
           trailing={<button className="bc-cine"><Telescope size={14} /> Cinematic view</button>}
         />
+        {path.length === 2 && <StudioDock worldId="w1" clusterId="c1" title={path[1]} onToast={(_k, m) => console.log('[toast]', m)} onClosed={() => console.log('[studio closed]')} />}
         <CanvasChat onSend={stubSend} hint={path.length === 2 ? 'Ask about this area, or tell Garvis to make something…' : 'Ask Garvis…'} />
       </div>
       {sheet && <ArtifactSheet artifact={sheet} onClose={() => setSheet(null)} onAsk={stubSend} />}
