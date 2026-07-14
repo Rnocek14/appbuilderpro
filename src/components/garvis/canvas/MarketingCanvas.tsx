@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
-  Loader2, X, Printer, Save, Upload, Sparkles, Copy, Send, CheckCircle2, MapPin, ArrowRight, Info,
+  Loader2, X, Printer, Save, Upload, Sparkles, Copy, Send, CheckCircle2, Info,
   Play, Pause, Film, Clapperboard,
 } from 'lucide-react';
 import { CanvasScene, type CanvasNode, type Satellite } from './CanvasScene';
@@ -29,6 +29,10 @@ import {
   loadVideoMaterials, defaultStoryboardFor, startRender, pollRender, saveStoryboard, saveRenderedVideo,
   type VideoMaterials,
 } from '../../../lib/garvis/videoRun';
+import {
+  listTerritories, createTerritory, importRecipients, listRecipients, loadDoNotMailKeys, type TerritoryRow,
+} from '../../../lib/garvis/farmRun';
+import { parseFarmCsv, partitionMailable, farmMath, type FarmRecipient, type FarmParseResult } from '../../../lib/garvis/farm';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
@@ -124,7 +128,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
         <EmailSheet set={set} accent={accent} onToast={onToast} onClose={() => setOpen(null)} />
       )}
       {open === 'people' && (
-        <PeopleSheet realEstate={realEstate} onToast={onToast} onClose={() => setOpen(null)} />
+        <PeopleSheet realEstate={realEstate} worldId={worldId} onToast={onToast} onClose={() => setOpen(null)} />
       )}
       {open === 'video' && (
         <VideoSheet worldId={worldId} clusterId={targetCluster}
@@ -410,28 +414,109 @@ function EmailSheet({ set, accent, onToast, onClose }: { set: CampaignSet; accen
   );
 }
 
-// ---------- People nearby ----------
-function PeopleSheet({ realEstate, onToast, onClose }: { realEstate: boolean; onToast: Toast; onClose: () => void }) {
-  const [place, setPlace] = useState('');
+// ---------- People nearby (the real farm: pick an area, build the list, see the honest reach) ----------
+const VERDICT_COLOR: Record<string, string> = { strong: '#3C8A5B', viable: '#3C8A5B', thin: '#B8860B', dont: '#C0492B', unknown: '#8A8076' };
+
+function PeopleSheet({ realEstate, worldId, onToast, onClose }: { realEstate: boolean; worldId: string; onToast: Toast; onClose: () => void }) {
+  const [terrs, setTerrs] = useState<TerritoryRow[]>([]);
+  const [sel, setSel] = useState<TerritoryRow | null>(null);
+  const [newName, setNewName] = useState('');
+  const [recips, setRecips] = useState<FarmRecipient[] | null>(null);
+  const [dnm, setDnm] = useState<ReadonlySet<string>>(new Set());
+  const [parsed, setParsed] = useState<FarmParseResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [piece, setPiece] = useState('0.73');
+  const [drops, setDrops] = useState('4');
+  const [sold, setSold] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
+
+  useEffect(() => {
+    void listTerritories(worldId).then(setTerrs).catch(() => {});
+    void loadDoNotMailKeys().then(setDnm).catch(() => {});
+  }, [worldId]);
+
+  const selectTerr = async (t: TerritoryRow) => {
+    setSel(t); setParsed(null); setRecips(null);
+    try { setRecips(await listRecipients(t.id)); } catch { setRecips([]); }
+  };
+  const createT = async () => {
+    if (!newName.trim()) return;
+    setBusy(true);
+    try { const t = await createTerritory({ worldId, name: newName.trim() }); setTerrs((a) => [t, ...a]); setNewName(''); await selectTerr(t); onToast('success', `Area “${t.name}” created — now add households.`); }
+    catch (e) { onToast('error', emsg(e)); }
+    finally { setBusy(false); }
+  };
+  const onCsv = async (file: File) => {
+    try { const res = parseFarmCsv(await file.text()); setParsed(res); if (!res.recipients.length) onToast('info', 'No usable addresses found in that file.'); }
+    catch (e) { onToast('error', emsg(e)); }
+  };
+  const doImport = async () => {
+    if (!sel || !parsed) return;
+    setBusy(true);
+    try {
+      const r = await importRecipients({ territoryId: sel.id, worldId, recipients: parsed.recipients });
+      onToast('success', `Imported ${r.inserted} address${r.inserted === 1 ? '' : 'es'}${r.skippedExisting ? ` (${r.skippedExisting} already on file)` : ''}.`);
+      setParsed(null); setRecips(await listRecipients(sel.id));
+    } catch (e) { onToast('error', emsg(e)); }
+    finally { setBusy(false); }
+  };
+
+  const reach = recips ? partitionMailable(recips, dnm) : null;
+  const homes = recips?.length ?? 0;
+  const absentee = recips?.filter((r) => r.isAbsentee).length ?? 0;
+  const math = farmMath({ homes, pieceCostUsd: parseFloat(piece) || 0, dropsPerYear: parseInt(drops, 10) || 0, soldLast12: sold.trim() ? (parseInt(sold, 10) || 0) : null });
+
   return (
-    <Sheet emoji="📍" title="People nearby" lead="Build a mailing list by area, then send it straight to a postcard." onClose={onClose}>
-      <div className="mkc-locrow">
-        <MapPin size={16} className="mkc-loc-ic" />
-        <input className="mkc-in" value={place} onChange={(e) => setPlace(e.target.value)} placeholder={realEstate ? 'Neighborhood, town, or ZIP' : 'Area or ZIP to reach'} />
+    <Sheet emoji="📍" title="People nearby" lead="Pick an area, build the mailing list, and see exactly how many real households will get a postcard." onClose={onClose}>
+      <div className="mkc-vlabel">Your areas</div>
+      <div className="mkc-terrs">
+        {terrs.map((t) => <button key={t.id} className={cn('mkc-vchip', sel?.id === t.id && 'on')} onClick={() => void selectTerr(t)}>{t.name}</button>)}
+        <span className="mkc-terrnew">
+          <input className="mkc-in" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={realEstate ? 'New area (e.g. Maple Grove)' : 'New area to reach'} onKeyDown={(e) => { if (e.key === 'Enter') void createT(); }} />
+          <button className="mkc-spin" onClick={() => void createT()} disabled={busy || !newName.trim()}>+ Add</button>
+        </span>
       </div>
-      <div className="mkc-filters">
-        {(realEstate ? ['Owned 5+ yrs', 'Single-family', 'Absentee owners', 'Skip do-not-mail'] : ['Within 3 miles', 'Skip do-not-mail']).map((x) => (
-          <span key={x} className="mkc-filt">{x}</span>
-        ))}
-      </div>
-      <div className="mkc-note">
-        <Info size={15} />
-        <div><b>How Garvis gets the list:</b> connect a property-data source (PropertyRadar / ATTOM) and it pulls real households by area — or drop in a CSV you already have. Either way it de-dupes and honors do-not-mail before anything prints. It never invents addresses.</div>
-      </div>
-      <div className="mkc-acts">
-        <button className="mkc-a pri" onClick={() => onToast('info', 'Connect a data source in Settings, or upload a CSV in the Advanced → Farm panel.')}>Connect a data source</button>
-        <button className="mkc-a" onClick={() => onToast('info', 'Open Advanced → the Farm panel to upload a CSV list.')}><Upload size={15} /> Upload a CSV</button>
-      </div>
+
+      {sel ? (
+        <>
+          <div className="mkc-reach">
+            <div className="mkc-reachbig"><b>{reach ? reach.mailable.length.toLocaleString() : '—'}</b> will get mail</div>
+            <div className="mkc-reachsub">{homes.toLocaleString()} household{homes === 1 ? '' : 's'} · {absentee.toLocaleString()} absentee{reach && reach.suppressed.length ? ` · ${reach.suppressed.length} held back (do-not-mail / incomplete address)` : ''}</div>
+          </div>
+
+          <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onCsv(f); e.target.value = ''; }} />
+          {!parsed ? (
+            <button className="mkc-spin" onClick={() => fileRef.current?.click()}><Upload size={14} /> Add households from a CSV</button>
+          ) : (
+            <div className="mkc-parse">
+              <div><b>{parsed.recipients.length.toLocaleString()}</b> addresses ready{parsed.duplicatesInFile ? ` · ${parsed.duplicatesInFile} duplicates removed` : ''}{parsed.rejected.length ? ` · ${parsed.rejected.length} rows skipped (incomplete)` : ''}</div>
+              <div className="mkc-parsesub">{parsed.mailingDataPresent ? 'Owner mailing addresses detected — absentee owners flagged.' : 'No mailing-address column — absentee status unknown (not zero).'}</div>
+              <div className="mkc-igbtns">
+                <button className="mkc-a pri" onClick={() => void doImport()} disabled={busy}>{busy ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Import {parsed.recipients.length.toLocaleString()}</button>
+                <button className="mkc-a" onClick={() => setParsed(null)}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          <div className="mkc-vlabel">Cost &amp; fit</div>
+          <div className="mkc-costrow">
+            <label>$ / piece<input className="mkc-in" value={piece} onChange={(e) => setPiece(e.target.value)} /></label>
+            <label>Drops / yr<input className="mkc-in" value={drops} onChange={(e) => setDrops(e.target.value)} /></label>
+            {realEstate && <label>Sold last 12mo<input className="mkc-in" value={sold} onChange={(e) => setSold(e.target.value)} placeholder="from MLS" /></label>}
+          </div>
+          <div className="mkc-verdict" style={{ borderColor: VERDICT_COLOR[math.verdict] }}>
+            <span className="mkc-vdot" style={{ background: VERDICT_COLOR[math.verdict] }} />{math.line}
+          </div>
+
+          <div className="mkc-note">
+            <Info size={15} />
+            <div>Households come from a CSV you export (PropertyRadar / Cole / county) — Garvis de-dupes and honors do-not-mail before anything prints, and never invents an address. Print the addressed run in <b>Advanced → Farm</b> (it uses this exact list under the same gate).</div>
+          </div>
+        </>
+      ) : (
+        <div className="mkc-note"><Info size={15} /><div>No area selected yet — name your first {realEstate ? 'neighborhood' : 'area'} above, then add households from a CSV.</div></div>
+      )}
     </Sheet>
   );
 }
@@ -580,11 +665,6 @@ const VIDEO_CSS = `
 .mkc-vctrl{ display:flex; align-items:center; gap:10px; justify-content:center; }
 .mkc-vmeta{ font-size:11px; color:#8A8076; }
 .mkc-vside{ display:flex; flex-direction:column; gap:8px; }
-.mkc-vlabel{ font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#8A8076; margin-top:4px; }
-.mkc-vchips{ display:flex; flex-wrap:wrap; gap:7px; }
-.mkc-vchip{ font:inherit; font-size:12.5px; cursor:pointer; border:1px solid #E7E0D6; background:#fff; color:#2A2320; border-radius:9px; padding:6px 11px; }
-.mkc-vchip:hover{ border-color:#E4631C; color:#B44A12; }
-.mkc-vchip.on{ border-color:#E4631C; background:#FBEDE2; box-shadow:0 0 0 1px #E4631C inset; color:#B44A12; }
 .mkc-vmsg{ display:flex; align-items:center; gap:6px; font-size:12px; color:#8A8076; }
 .mkc-vnote{ font-size:11px; color:#A89F94; line-height:1.5; }
 @media (max-width:560px){ .mkc-vwrap{ grid-template-columns:1fr; } }
@@ -639,10 +719,26 @@ const SHEET_CSS = `
 
 .mkc-emsubj{ font-size:14px; margin:0 0 12px; } .mkc-emsubj span{ color:#8A8076; margin-right:6px; }
 
-.mkc-locrow{ display:flex; align-items:center; gap:9px; margin-bottom:12px; } .mkc-loc-ic{ color:#8A8076; }
-.mkc-locrow .mkc-in{ flex:1; }
-.mkc-filters{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-.mkc-filt{ font-size:12.5px; color:#8A8076; border:1px solid #E7E0D6; background:#fff; padding:6px 11px; border-radius:999px; }
+/* shared chips/labels (used by the video + people sheets) */
+.mkc-vlabel{ font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:#8A8076; margin-top:4px; }
+.mkc-vchips{ display:flex; flex-wrap:wrap; gap:7px; }
+.mkc-vchip{ font:inherit; font-size:12.5px; cursor:pointer; border:1px solid #E7E0D6; background:#fff; color:#2A2320; border-radius:9px; padding:6px 11px; }
+.mkc-vchip:hover{ border-color:#E4631C; color:#B44A12; }
+.mkc-vchip.on{ border-color:#E4631C; background:#FBEDE2; box-shadow:0 0 0 1px #E4631C inset; color:#B44A12; }
+/* people / farm */
+.mkc-terrs{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:6px 0 14px; }
+.mkc-terrnew{ display:inline-flex; gap:6px; align-items:center; }
+.mkc-terrnew .mkc-in{ width:190px; padding:7px 10px; }
+.mkc-reach{ background:#FBF3E9; border:1px solid #F0DFC8; border-radius:12px; padding:13px 15px; margin-bottom:12px; }
+.mkc-reachbig{ font-size:15px; color:#2A2320; } .mkc-reachbig b{ font-size:26px; font-weight:700; color:#B44A12; margin-right:6px; font-variant-numeric:tabular-nums; }
+.mkc-reachsub{ font-size:12.5px; color:#8A8076; margin-top:3px; }
+.mkc-parse{ border:1px solid #E7E0D6; border-radius:12px; padding:12px 14px; background:#fff; font-size:13px; display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+.mkc-parsesub{ font-size:12px; color:#8A8076; }
+.mkc-costrow{ display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 10px; }
+.mkc-costrow label{ font-size:12px; color:#8A8076; display:flex; flex-direction:column; gap:4px; }
+.mkc-costrow .mkc-in{ width:120px; }
+.mkc-verdict{ display:flex; gap:9px; align-items:flex-start; font-size:13px; color:#2A2320; border:1px solid; border-radius:11px; padding:11px 13px; background:#fff; line-height:1.45; margin-bottom:14px; }
+.mkc-vdot{ width:9px; height:9px; border-radius:99px; flex:0 0 auto; margin-top:5px; }
 .mkc-note{ display:flex; gap:10px; font-size:13px; color:#7A7066; background:#FBF3E9; border:1px solid #F0DFC8; border-radius:12px; padding:12px 14px; }
 .mkc-note b{ color:#2A2320; } .mkc-note svg{ color:#B44A12; flex:0 0 auto; margin-top:1px; }
 .mkc-coming{ font-size:14px; color:#7A7066; } .mkc-coming b{ color:#2A2320; }
