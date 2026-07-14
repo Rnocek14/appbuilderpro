@@ -219,8 +219,11 @@ export default function WorkWeb() {
     );
   }
 
-  // A marketing business (has a direct-mail studio) leads with the simple "Make my marketing" flow.
-  const hasCampaign = web.clusters.some((c) => c.charter?.flavor === 'direct_mail');
+  // Any marketing/outreach business leads with the simple "Make my marketing" flow (the single-
+  // purpose desks — answering / documents / data / tracker / product lab — keep the studio view).
+  // Real-estate businesses get listing-shaped announcements; everyone else gets generic ones.
+  const hasCampaign = !noOutreach;
+  const realEstate = /real.?estate|realtor|realty|listing|propert|broker|\bhomes?\b/i.test(web.title);
 
   return (
     <AppShell>
@@ -317,7 +320,7 @@ export default function WorkWeb() {
         {hasCampaign && (
           <div className="mb-5">
             <PanelBoundary name="marketing maker">
-              <CampaignComposer worldId={worldId} onToast={(k, m) => toast(k, m)} />
+              <CampaignComposer worldId={worldId} realEstate={realEstate} onToast={(k, m) => toast(k, m)} />
             </PanelBoundary>
             <button
               onClick={() => setShowAdvanced((v) => !v)}

@@ -10,8 +10,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { Loader2, Printer, Save, Upload, Sparkles, Copy, Send, ArrowLeft, Home, CheckCircle2 } from 'lucide-react';
-import { composeCampaign, CAMPAIGN_TYPES, type CampaignType, type CampaignSet } from '../../lib/garvis/campaignCore';
+import { Loader2, Printer, Save, Upload, Sparkles, Copy, Send, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { composeCampaign, campaignsFor, metaFor, type CampaignType, type CampaignSet } from '../../lib/garvis/campaignCore';
 import { getBrandKit, uploadClusterFile } from '../../lib/garvis/artifacts';
 import { loadWeb } from '../../lib/garvis/workwebRun';
 import { saveMailerDesign } from '../../lib/garvis/mailerRun';
@@ -23,7 +23,7 @@ import { cn } from '../../lib/utils';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
-export function CampaignComposer({ worldId, onToast }: { worldId: string; onToast: Toast }) {
+export function CampaignComposer({ worldId, onToast, realEstate = false }: { worldId: string; onToast: Toast; realEstate?: boolean }) {
   // Where to save the postcard design + the uploaded photo (any studio cluster in this world works,
   // since the mailer reads photos world-wide). Prefer the direct-mail area.
   const [targetCluster, setTargetCluster] = useState<string | null>(null);
@@ -39,6 +39,8 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
   const [area, setArea] = useState('');
   const [highlight, setHighlight] = useState('');
   const [openWhen, setOpenWhen] = useState('');
+  const [subject, setSubject] = useState('');   // generic: what you're announcing
+  const [details, setDetails] = useState('');    // generic: the specifics
   const [agentName, setAgentName] = useState('');
   const [agentPhone, setAgentPhone] = useState('');
   const [link, setLink] = useState('');
@@ -70,7 +72,8 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
     return () => { live = false; };
   }, [worldId]);
 
-  const cfg = CAMPAIGN_TYPES.find((t) => t.id === type) ?? null;
+  const types = campaignsFor(realEstate);
+  const cfg = type ? metaFor(type) : null;
 
   const addPhoto = async (file: File) => {
     if (!file.type.startsWith('image/')) { onToast('error', 'Pick an image (JPG or PNG).'); return; }
@@ -88,11 +91,12 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
     if (!type) return;
     setBusy(true);
     const s = composeCampaign({
-      type, brand, businessName: defaultAgent || null,
+      type, brand, businessName: defaultAgent || agentName || null,
       agentName: agentName || null, agentPhone: agentPhone || null,
       address: address || null, price: price || null, beds: beds || null, baths: baths || null,
       area: area || null, highlight: highlight || null, openWhen: openWhen || null,
-      photoUrl, photoAlt: address || area || null, link: link || null,
+      subject: subject || null, details: details || null,
+      photoUrl, photoAlt: address || subject || area || null, link: link || null,
     });
     setSet(s);
     setPosted({});
@@ -115,7 +119,7 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
     if (!set || !targetCluster) return;
     setBusy(true);
     try {
-      await saveMailerDesign(targetCluster, set.postcard, `${CAMPAIGN_TYPES.find((t) => t.id === set.type)?.label} postcard`);
+      await saveMailerDesign(targetCluster, set.postcard, `${metaFor(set.type)?.label ?? 'Campaign'} postcard`);
       onToast('success', 'Postcard saved. Print it, or send to a mail vendor.');
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not save.'); }
     finally { setBusy(false); }
@@ -223,19 +227,23 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
 
   // ---------- FORM ----------
   const field = 'w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none';
-  const canMake = !!type && (type === 'find_sellers' ? !!area.trim() : !!address.trim());
+  const canMake = !!type && (
+    !realEstate ? !!subject.trim()
+    : type === 'find_sellers' ? !!area.trim()
+    : !!address.trim()
+  );
 
   return (
     <div className="rounded-2xl border border-forge-ember/25 bg-gradient-to-br from-forge-ember/8 to-forge-panel/30 p-4">
       <div className="mb-1 flex items-center gap-2">
-        <Home size={18} className="text-forge-ember" />
+        <Sparkles size={18} className="text-forge-ember" />
         <h2 className="text-base font-semibold text-forge-ink">Make my marketing</h2>
       </div>
       <p className="mb-3 text-sm text-forge-dim">Tell me what you're announcing and I'll make the whole set — a postcard, social posts, and an email — from the same details.</p>
 
       {/* 1) What are we announcing? */}
       <div className="flex flex-wrap gap-2">
-        {CAMPAIGN_TYPES.map((t) => (
+        {types.map((t) => (
           <button key={t.id} onClick={() => setType(t.id)}
             className={cn('rounded-lg border px-3 py-2 text-left transition-colors', type === t.id ? 'border-forge-ember/60 bg-forge-ember/10' : 'border-forge-border hover:border-forge-ember/40')}>
             <div className="text-sm font-medium text-forge-ink">{t.label}</div>
@@ -247,7 +255,20 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
       {/* 2) The short form */}
       {type && (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          {type === 'find_sellers' ? (
+          {/* GENERIC (any business): what + details. */}
+          {!realEstate && (
+            <>
+              <label className="sm:col-span-2 text-xs text-forge-dim">What are you announcing?
+                <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="e.g. Our new fall menu · 20% off this weekend · Grand opening Sat" className={cn(field, 'mt-1')} />
+              </label>
+              <label className="sm:col-span-2 text-xs text-forge-dim">The details (date, price, what’s included)
+                <input value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Saturday 10–4 · $15 · while supplies last" className={cn(field, 'mt-1')} />
+              </label>
+            </>
+          )}
+
+          {/* REAL ESTATE: listing vs prospecting. */}
+          {realEstate && (type === 'find_sellers' ? (
             <label className="sm:col-span-2 text-xs text-forge-dim">Neighborhood / town
               <input value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Lake Geneva" className={cn(field, 'mt-1')} />
             </label>
@@ -267,28 +288,28 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
                 <label className="text-xs text-forge-dim">Baths<input value={baths} onChange={(e) => setBaths(e.target.value)} placeholder="3" className={cn(field, 'mt-1')} /></label>
               </div>
             </>
-          )}
+          ))}
 
-          {type === 'open_house' && (
+          {realEstate && type === 'open_house' && (
             <label className="sm:col-span-2 text-xs text-forge-dim">Open house — when
               <input value={openWhen} onChange={(e) => setOpenWhen(e.target.value)} placeholder="Sat 1–3pm" className={cn(field, 'mt-1')} />
             </label>
           )}
 
-          <label className="sm:col-span-2 text-xs text-forge-dim">{type === 'find_sellers' ? 'Your angle (what to say)' : "What's special? (one line)"}
-            <input value={highlight} onChange={(e) => setHighlight(e.target.value)} placeholder={type === 'find_sellers' ? 'Homes here are moving — curious what yours is worth?' : 'Remodeled kitchen, big backyard'} className={cn(field, 'mt-1')} />
+          <label className="sm:col-span-2 text-xs text-forge-dim">{!realEstate ? 'Why it matters (optional)' : type === 'find_sellers' ? 'Your angle (what to say)' : "What's special? (one line)"}
+            <input value={highlight} onChange={(e) => setHighlight(e.target.value)} placeholder={!realEstate ? 'Fresh, local, made this morning' : type === 'find_sellers' ? 'Homes here are moving — curious what yours is worth?' : 'Remodeled kitchen, big backyard'} className={cn(field, 'mt-1')} />
           </label>
 
-          {/* Photo (listings) */}
-          {cfg?.needsPhoto && (
+          {/* Photo — required-ish for listings, optional for everything else. */}
+          {(cfg?.needsPhoto || !realEstate) && (
             <div className="sm:col-span-2">
-              <span className="text-xs text-forge-dim">Photo of the home</span>
+              <span className="text-xs text-forge-dim">{realEstate ? 'Photo of the home' : 'Photo (optional)'}</span>
               <input ref={photoInput} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void addPhoto(f); e.target.value = ''; }} />
               <div className="mt-1 flex items-center gap-2">
                 {photoUrl && <img src={photoUrl} alt="" className="h-14 w-14 rounded object-cover" />}
                 <button onClick={() => photoInput.current?.click()} disabled={uploading}
                   className="flex items-center gap-1.5 rounded-lg border border-dashed border-forge-border px-3 py-2 text-xs text-forge-dim hover:border-forge-ember/60 hover:text-forge-ember disabled:opacity-60">
-                  {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {photoUrl ? 'Change photo' : 'Add a photo of the home'}
+                  {uploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} {photoUrl ? 'Change photo' : realEstate ? 'Add a photo of the home' : 'Add a photo'}
                 </button>
               </div>
             </div>
@@ -307,7 +328,7 @@ export function CampaignComposer({ worldId, onToast }: { worldId: string; onToas
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} Make my marketing →
         </button>
       )}
-      {type && !canMake && <p className="mt-2 text-[11px] text-forge-dim">{type === 'find_sellers' ? 'Add the neighborhood to continue.' : 'Add the address to continue.'}</p>}
+      {type && !canMake && <p className="mt-2 text-[11px] text-forge-dim">{!realEstate ? 'Add what you’re announcing to continue.' : type === 'find_sellers' ? 'Add the neighborhood to continue.' : 'Add the address to continue.'}</p>}
     </div>
   );
 }

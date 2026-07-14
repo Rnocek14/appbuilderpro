@@ -14,14 +14,38 @@
 import { compileMailer, type MailerBrand, type MailerConcept, type MailerSpec } from './mailer';
 import type { BusinessContext } from './genesis';
 
-export type CampaignType = 'just_listed' | 'just_sold' | 'open_house' | 'find_sellers';
+// Real-estate announcements and generic ones. The composer shows one set OR the other based on the
+// business; the SAME machine (headline + offer + photo → postcard + social + email) drives both.
+export type RealEstateType = 'just_listed' | 'just_sold' | 'open_house' | 'find_sellers';
+export type GenericType = 'announce' | 'promo' | 'event' | 'reach';
+export type CampaignType = RealEstateType | GenericType;
 
-export const CAMPAIGN_TYPES: { id: CampaignType; label: string; blurb: string; needsPhoto: boolean; needsAddress: boolean }[] = [
+export interface CampaignTypeMeta { id: CampaignType; label: string; blurb: string; needsPhoto: boolean; needsAddress: boolean }
+
+export const CAMPAIGN_TYPES: CampaignTypeMeta[] = [
   { id: 'just_listed', label: 'Just Listed', blurb: 'A new listing hits the market.', needsPhoto: true, needsAddress: true },
   { id: 'just_sold',   label: 'Just Sold',   blurb: 'A recent sale — proof you move homes.', needsPhoto: true, needsAddress: true },
   { id: 'open_house',  label: 'Open House',  blurb: 'Invite the neighborhood in.', needsPhoto: true, needsAddress: true },
   { id: 'find_sellers', label: 'Find sellers', blurb: 'Prospect a neighborhood — no listing needed.', needsPhoto: false, needsAddress: false },
 ];
+
+// Works for ANY business — a bakery, a consultant, a shop, a launch.
+export const GENERIC_CAMPAIGNS: CampaignTypeMeta[] = [
+  { id: 'announce', label: 'Announce something', blurb: 'Something new — a product, service, or update.', needsPhoto: false, needsAddress: false },
+  { id: 'promo',    label: 'Offer / sale',       blurb: 'A special offer, sale, or discount.',           needsPhoto: false, needsAddress: false },
+  { id: 'event',    label: 'Event',              blurb: 'An event, opening, class, or launch.',          needsPhoto: false, needsAddress: false },
+  { id: 'reach',    label: 'Find customers',     blurb: 'Reach new people — brand & awareness.',         needsPhoto: false, needsAddress: false },
+];
+
+const GENERIC_IDS = new Set<CampaignType>(['announce', 'promo', 'event', 'reach']);
+
+/** The right type list for a business. */
+export function campaignsFor(realEstate: boolean): CampaignTypeMeta[] {
+  return realEstate ? CAMPAIGN_TYPES : GENERIC_CAMPAIGNS;
+}
+export function metaFor(type: CampaignType): CampaignTypeMeta | null {
+  return [...CAMPAIGN_TYPES, ...GENERIC_CAMPAIGNS].find((t) => t.id === type) ?? null;
+}
 
 export interface CampaignInput {
   type: CampaignType;
@@ -33,8 +57,10 @@ export interface CampaignInput {
   beds?: string | null;
   baths?: string | null;
   area?: string | null;         // neighborhood / town
-  highlight?: string | null;    // "what's special" / the angle line
+  highlight?: string | null;    // "what's special" / the angle / why it matters
   openWhen?: string | null;     // "Sat 1–3pm"
+  subject?: string | null;      // generic: what you're announcing ("Our new fall menu")
+  details?: string | null;      // generic: the specifics (date, price, what's included)
   brand?: MailerBrand | null;
   photoUrl?: string | null;
   photoAlt?: string | null;
@@ -57,8 +83,8 @@ function ctxFor(input: CampaignInput): BusinessContext {
   return {
     business_name: (input.businessName || input.agentName || '').trim(),
     principal: (input.agentName || '').trim() || null,
-    craft: 'real estate',
-    offerings: [],
+    craft: null,   // never hard-code the trade — a bakery's card must not say "our real real estate"
+    offerings: (input.subject || '').trim() ? [(input.subject as string).trim()] : [],
     audience: input.area ? `${input.area} homeowners` : null,
     locale: (input.area || '').trim() || null,
     links: input.link ? { site: input.link } : {},
@@ -75,8 +101,10 @@ function specsLine(input: CampaignInput): string {
   return bits.join(' · ');
 }
 
-/** Compose the whole set. Deterministic; honest holes for anything missing. */
+/** Compose the whole set. Deterministic; honest holes for anything missing. Routes real-estate
+ *  announcements and generic ones through the same postcard/social/email machine. */
 export function composeCampaign(input: CampaignInput): CampaignSet {
+  if (GENERIC_IDS.has(input.type)) return composeGeneric(input);
   const warnings: string[] = [];
   const addr = (input.address || '').trim();
   const price = (input.price || '').trim();
@@ -129,6 +157,7 @@ export function composeCampaign(input: CampaignInput): CampaignSet {
     offer,
     linkUrl: input.link ?? null,
     headline,
+    phone: input.agentPhone ?? null,
   });
 
   // ---- social: three distinct, ready-to-post captions from the same facts ----
@@ -205,4 +234,110 @@ function emailFor(input: CampaignInput, b: Bits & { agent: string; phone: string
     subject: `Just listed${b.addr ? `: ${b.addr}` : ''}${b.price ? ` (${b.price})` : ''}`,
     body: `Hi there,\n\nA new home just hit the market${b.area ? ` in ${b.area}` : ''}${b.addr ? `: ${b.addr}` : ''}${b.price ? `, listed at ${b.price}` : ''}.\n${specLine}${b.highlight || EDIT('a line about what makes this home special')}\n\nWant a private showing, or know someone who might be interested? Just reply and I’ll set it up.\n\n${sign}`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// GENERIC — the same machine for any business (bakery, consultant, shop, launch).
+// ---------------------------------------------------------------------------
+
+function composeGeneric(input: CampaignInput): CampaignSet {
+  const warnings: string[] = [];
+  const biz = (input.businessName || input.agentName || '').trim();
+  const subject = (input.subject || '').trim();
+  const details = (input.details || '').trim();
+  const why = (input.highlight || '').trim();
+  const agent = (input.agentName || input.businessName || '').trim();
+  const phone = (input.agentPhone || '').trim();
+
+  if (!subject) warnings.push('Tell me what you’re announcing — one short line.');
+  if (!biz && !agent) warnings.push('Add your business name so people know who this is from.');
+  if (input.type === 'event' && !details) warnings.push('Add the event details (when & where), or the pieces leave a fill-in.');
+
+  // With a photo → 'proof' (photo-forward). Without → 'local_authority', which builds a clean brand
+  // card from the business name + what-you-do (offerings := subject) with no photo reference.
+  const concept: MailerConcept = input.photoUrl ? 'proof' : 'local_authority';
+  let headline: string;
+  let offer: string;
+  switch (input.type) {
+    case 'promo':
+      headline = subject || 'A special offer';
+      offer = details || 'For a limited time — mention this card.';
+      break;
+    case 'event':
+      headline = subject || 'You’re invited';
+      offer = details || EDIT('when and where the event is');
+      break;
+    case 'reach':
+      headline = subject || (biz ? `Meet ${biz}` : 'Say hello');
+      offer = why || details || 'Get in touch — we’d love to help.';
+      break;
+    case 'announce':
+    default:
+      headline = subject || (biz ? `New at ${biz}` : 'Something new');
+      offer = details || why || 'Come see what’s new.';
+      break;
+  }
+
+  const postcard = compileMailer({
+    ctx: ctxFor(input), brand: input.brand ?? null, concept,
+    imageUrl: input.photoUrl ?? null, imageAlt: input.photoAlt ?? (subject || biz || null),
+    offer, linkUrl: input.link ?? null, headline, phone: input.agentPhone ?? null,
+  });
+
+  const g = { biz, subject, details, why, agent, phone };
+  return { type: input.type, headline, postcard, socialPosts: socialForGeneric(input, g), email: emailForGeneric(input, g), warnings };
+}
+
+interface GBits { biz: string; subject: string; details: string; why: string; agent: string; phone: string }
+
+function socialForGeneric(input: CampaignInput, g: GBits): SocialPost[] {
+  const subj = g.subject || EDIT('what you’re announcing');
+  const at = g.biz ? ` at ${g.biz}` : '';
+  const det = g.details ? ` ${g.details}` : '';
+  const fb = 'facebook/instagram';
+  switch (input.type) {
+    case 'promo':
+      return [
+        { platformHint: fb, caption: `🎉 ${subj}!${det} For a limited time — don’t miss it.` },
+        { platformHint: fb, caption: `Deal alert${at}: ${subj}.${det} ${g.why}`.trim() },
+        { platformHint: fb, caption: `Tag a friend who needs this 👇 ${subj}${det}` },
+      ];
+    case 'event':
+      return [
+        { platformHint: fb, caption: `📅 You’re invited: ${subj}.${det} Hope to see you there!` },
+        { platformHint: fb, caption: `Save the date${at} — ${subj}.${det} ${g.why}`.trim() },
+        { platformHint: fb, caption: `Know someone who’d enjoy this? Bring them along 👋 ${subj}${det}` },
+      ];
+    case 'reach':
+      return [
+        { platformHint: fb, caption: `${g.biz ? `${g.biz} — ` : ''}${g.why || 'here to help.'}${det}`.trim() },
+        { platformHint: fb, caption: `New here? Here’s what we do${at}: ${g.why || subj}.` },
+        { platformHint: fb, caption: `Have a question? DM us — we’re happy to help${at}.` },
+      ];
+    case 'announce':
+    default:
+      return [
+        { platformHint: fb, caption: `📣 ${subj}!${det}${g.biz ? ` — ${g.biz}` : ''}` },
+        { platformHint: fb, caption: `Something new${at}: ${subj}.${det} ${g.why}`.trim() },
+        { platformHint: fb, caption: `Have you seen this yet? ${subj}.${det} 👇` },
+      ];
+  }
+}
+
+function emailForGeneric(input: CampaignInput, g: GBits): { subject: string; body: string } {
+  const sign = `${g.agent || g.biz || EDIT('your name')}${g.phone ? `\n${g.phone}` : ''}`;
+  const subj = g.subject || EDIT('what you’re announcing');
+  const detLine = g.details ? `${g.details}\n` : '';
+  const whyLine = g.why ? `${g.why}\n` : '';
+  switch (input.type) {
+    case 'promo':
+      return { subject: subj, body: `Hi there,\n\nFor a limited time: ${subj}.\n${detLine}${whyLine}\nReply anytime — happy to help.\n\n${sign}` };
+    case 'event':
+      return { subject: `You’re invited: ${subj}`, body: `Hi there,\n\nYou’re invited to ${subj}.\n${detLine}${whyLine}\nHope to see you there — feel free to bring a friend.\n\n${sign}` };
+    case 'reach':
+      return { subject: g.biz ? `A quick hello from ${g.biz}` : 'A quick hello', body: `Hi there,\n\n${g.why || (g.biz ? `I wanted to introduce ${g.biz}.` : 'I wanted to reach out.')}\n${detLine}\nIf there’s ever anything I can help with, just reply.\n\n${sign}` };
+    case 'announce':
+    default:
+      return { subject: subj, body: `Hi there,\n\n${g.biz ? `${g.biz} has something new: ` : ''}${subj}.\n${detLine}${whyLine}\nWant to know more? Just reply.\n\n${sign}` };
+  }
 }
