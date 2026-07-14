@@ -38,7 +38,7 @@ interface HeroConfig {
 // One entry per studio flavor. Tool ids match the generators in workwebRun.runTool / workweb tools.
 const HERO: Partial<Record<Flavor, HeroConfig>> = {
   generic:     { icon: PenLine,      makes: 'campaign copy, angles, and messaging for this part of the business.', primaryTool: 'gen-copy',          cta: 'Generate copy' },
-  direct_mail: { icon: Mail,         makes: 'postcard concepts and mailer copy — then a print-ready, addressed run.', primaryTool: 'gen-postcard',      cta: 'Generate postcard concepts' },
+  direct_mail: { icon: Mail,         makes: 'a real designed postcard — your photo on a print-ready card you can Print or save as PDF. Use the designer below.', primaryTool: null, cta: '' },
   social:      { icon: Share2,       makes: 'platform-ready posts for Facebook, Instagram, and more — then posts them.', primaryTool: 'gen-social',        cta: 'Generate social posts' },
   video:       { icon: Clapperboard, makes: 'a 30-second script + shot list — then a captioned storyboard you can play.', primaryTool: 'gen-video-script',  cta: 'Generate a video script' },
   ads:         { icon: Megaphone,    makes: 'launch-ready ad copy, keywords, and tracking URLs for Meta and Google.', primaryTool: 'gen-ads',           cta: 'Generate an ad campaign' },

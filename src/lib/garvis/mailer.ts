@@ -31,6 +31,7 @@ export interface MailerInput {
   imageAlt?: string | null;
   offer: string;                   // ONE offer per campaign (the 40/40/20 rule) — operator-editable
   linkUrl?: string | null;         // tracking destination; becomes the QR when present
+  headline?: string | null;        // operator override for the front headline (e.g. "Just Listed — 123 Maple St")
 }
 
 export interface MailerSpec {
@@ -152,12 +153,16 @@ export function compileMailer(input: MailerInput): MailerSpec {
   const link = (input.linkUrl ?? '').trim() || firstLink(ctx) || null;
   const contactBits = [name, link ? shortUrl(link) : null].filter(Boolean);
 
+  // Operator override wins over the concept's auto headline — this is what lets a listing card say
+  // exactly "Just Listed — 123 Maple St, $450,000" instead of the generic concept line.
+  const frontHeadline = (input.headline ?? '').trim() ? clip((input.headline as string).trim(), 48) : headline;
+
   return {
     concept,
     front: {
       imageUrl: input.imageUrl,
       imageAlt: (input.imageAlt ?? '').trim() || (craft ? `${name} — ${craft}` : name),
-      headline,
+      headline: frontHeadline,
       kicker,
     },
     back: {

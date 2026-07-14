@@ -256,14 +256,17 @@ export default function WorkWeb() {
             {/* outreach chips only where outreach exists — a product lab's or answering desk's "sent 0" is not a stat, it's noise */}
             {!noOutreach && <StatChip label="sent" value={web.rollup.messagesSent} />}
             {!noOutreach && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
-            {templatePlay && (
+            {/* First-run convenience only: fill EVERY studio at once, and only while the business is
+                still empty. Once any real work exists it disappears, so it never competes with each
+                studio's own Generate button. */}
+            {templatePlay && web.rollup.artifacts === 0 && (
               <button
                 onClick={() => void doRunPlay()} disabled={running}
-                title="Generates starter content across every studio in this business at once"
+                title="One-time head start: puts a starter into every studio in this business at once. After that, use each studio's own Generate."
                 className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-60"
               >
                 {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
-                Generate starter content
+                Fill all studios to start
               </button>
             )}
           </div>
@@ -470,14 +473,13 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
     <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs text-forge-dim">
         <Sparkles size={13} className="text-forge-ember" />
-        <span className="font-medium text-forge-ink">Create more</span>
-        <span className="hidden sm:inline">— every take is added to the shelf, never overwritten; regenerations avoid repeating prior work</span>
+        <span className="font-medium text-forge-ink">Want a different version?</span>
+        <span className="hidden sm:inline">— each one is added to the shelf, never replaces what you have</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={direction} onChange={(e) => setDirection(e.target.value)} maxLength={200}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void go(takeTool); }}
-          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”… (↵ runs a take)"
+          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”…"
           className="min-w-[220px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
         />
         <button onClick={() => void go('gen-ideas')} disabled={!!busy} className={btn} title="10 distinct concepts for this studio — near-duplicates collapsed, each with its first step">
@@ -774,32 +776,40 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         </div>
       )}
 
-      {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. Renditions add,
-          never overwrite; regenerations diverge from prior work by default. */}
-      {cluster.charter && <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} ideaTitles={ideaTitles} />}
+      {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. HIDDEN until the
+          studio has real work: an empty studio shows exactly ONE way to make something (the hero /
+          its dedicated panel). Once there's a piece on the shelf, this appears as an opt-in
+          "want a different version?" — so the first-time view is never a wall of buttons. */}
+      {cluster.charter && cluster.earnedArtifacts > 0 && (
+        <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} ideaTitles={ideaTitles} />
+      )}
 
-      {/* Tools */}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {cluster.tools.map((t) => {
-          const Icon = TOOL_ICON[t.kind] ?? Sparkles;
-          const busy = busyTool === `${cluster.slug}:${t.id}`;
-          return (
-            <button
-              key={t.id}
-              onClick={() => onTool(t)} disabled={busy}
-              title={t.hint}
-              className={cn(
-                'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50',
-                t.kind === 'queue' ? 'border-forge-ember/50 bg-forge-ember/10 text-forge-ember hover:bg-forge-ember/20'
-                  : 'border-forge-border text-forge-ink hover:border-forge-ember/50 hover:bg-forge-raised',
-              )}
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* Tools — only for NON-studio areas (audience lists, launch/queue, vault imports…). A studio's
+          one action is its hero Generate button or its dedicated panel above, so its tool row would
+          just be the same producer under a second label — hidden here to keep one obvious action. */}
+      {cluster.charter?.archetype !== 'studio' && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {cluster.tools.map((t) => {
+            const Icon = TOOL_ICON[t.kind] ?? Sparkles;
+            const busy = busyTool === `${cluster.slug}:${t.id}`;
+            return (
+              <button
+                key={t.id}
+                onClick={() => onTool(t)} disabled={busy}
+                title={t.hint}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50',
+                  t.kind === 'queue' ? 'border-forge-ember/50 bg-forge-ember/10 text-forge-ember hover:bg-forge-ember/20'
+                    : 'border-forge-border text-forge-ink hover:border-forge-ember/50 hover:bg-forge-raised',
+                )}
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Files */}
       <div className="mt-5">
@@ -832,8 +842,8 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         ) : artifacts.length === 0 ? (
           <p className="text-sm text-forge-dim/70">
             {cluster.charter?.archetype === 'studio'
-              ? 'Nothing on the shelf yet. Press the Generate button at the top of this studio — its work lands here. You can also just ask the studio below.'
-              : 'Nothing here yet. Use a tool above, or just ask the studio below.'}
+              ? 'Nothing here yet — use the studio above to make your first piece. It lands here.'
+              : 'Nothing here yet. Use a tool above to get started.'}
           </p>
         ) : (
           <div className="space-y-2">
