@@ -88,6 +88,18 @@ html.light body {
   }
 }
 
+/* ── Overlay primitive: one scrim for every modal / sheet / palette (see ui/Overlay.tsx) ── */
+.gv-ov {
+  position: fixed; inset: 0; display: flex; padding: 18px;
+  background: var(--gv-scrim);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  animation: gv-ov-fade .18s ease;
+}
+.gv-ov.center { align-items: center; justify-content: center; }
+.gv-ov.top { align-items: flex-start; justify-content: center; padding-top: 15vh; }
+.gv-ov.bare { background: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+@keyframes gv-ov-fade { from { opacity: 0 } to { opacity: 1 } }
+
 /* thin scrollbars for panels */
 .panel-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .panel-scroll::-webkit-scrollbar-thumb { background: #262b3a; border-radius: 8px; }

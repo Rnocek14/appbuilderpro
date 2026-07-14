@@ -15,6 +15,7 @@ import {
   Play, Pause, Film, Clapperboard,
 } from 'lucide-react';
 import { CanvasScene, type CanvasNode, type Satellite } from './CanvasScene';
+import { Overlay } from '../../ui/Overlay';
 import {
   composeCampaign, campaignsFor, metaFor, PLATFORM_LABEL,
   type CampaignType, type CampaignInput, type CampaignSet, type SocialPost,
@@ -158,14 +159,11 @@ function centerSub(d: CampaignInput): string {
 }
 
 // ---------- Sheet shell ----------
+// The cream paper sheet that opens over the night canvas. Scrim + Escape + focus-trap + scroll-lock
+// all come from the shared Overlay primitive; this owns only the paper panel.
 function Sheet({ emoji, title, lead, onClose, children }: { emoji: string; title: string; lead?: string; onClose: () => void; children: React.ReactNode }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
   return (
-    <div className="mkc-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <Overlay onClose={onClose} z={60}>
       <div className="mkc-sheet" role="dialog" aria-modal="true">
         <div className="mkc-top">
           <span className="mkc-em">{emoji}</span>
@@ -177,7 +175,7 @@ function Sheet({ emoji, title, lead, onClose, children }: { emoji: string; title
           {children}
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 
@@ -743,8 +741,6 @@ const VIDEO_CSS = `
 `;
 
 const SHEET_CSS = `
-.mkc-scrim{ position:fixed; inset:0; z-index:60; background:var(--gv-scrim); backdrop-filter:blur(3px); display:grid; place-items:center; padding:18px; animation:mkc-fade .18s ease; }
-@keyframes mkc-fade{ from{ opacity:0 } to{ opacity:1 } }
 .mkc-sheet{ width:min(660px,100%); max-height:90vh; overflow:auto; background:var(--gv-paper); color:var(--gv-paper-ink); border-radius:20px; box-shadow:0 30px 80px -20px rgba(0,0,0,.7); animation:mkc-rise .22s cubic-bezier(.2,.7,.2,1); }
 @keyframes mkc-rise{ from{ transform:translateY(14px) scale(.98); opacity:0 } to{ transform:none; opacity:1 } }
 .mkc-top{ position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:10px; padding:15px 18px; background:var(--gv-paper); border-bottom:1px solid var(--gv-paper-line2); }

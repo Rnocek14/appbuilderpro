@@ -4,10 +4,11 @@
 // current site, the new site you build, the pitch, their contact. Tap a node → a focused sheet.
 // It reuses CanvasScene directly — proving that canvas IS the reusable "web" for any entity.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { X, ExternalLink, Sparkles, Loader2, AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { CanvasScene, type CanvasNode } from './CanvasScene';
+import { Overlay } from '../../ui/Overlay';
 import type { SiteAudit, Verdict } from '../../../lib/garvis/siteAudit';
 
 const VERDICT_LABEL: Record<Verdict, string> = { weak: 'Weak site', dated: 'Dated site', solid: 'Solid site', unknown: 'Site unknown' };
@@ -25,12 +26,6 @@ export function ProspectCanvas({ data, building, onBuild, onClose }: {
   const { name, url, audit, built } = data;
   const [open, setOpen] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { open ? setOpen(null) : onClose(); } };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
   const center = {
     kicker: audit ? VERDICT_LABEL[audit.verdict] : 'Prospect',
     title: name,
@@ -44,14 +39,15 @@ export function ProspectCanvas({ data, building, onBuild, onClose }: {
   ];
 
   return (
-    <div className="pcw-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <Overlay onClose={onClose} z={70}>
       <style>{PCW_CSS}</style>
       <div className="pcw-shell">
         <button className="pcw-close" onClick={onClose} aria-label="Close"><X size={18} /></button>
         <CanvasScene center={center} nodes={nodes} onOpen={setOpen} height="min(68vh,520px)" />
+      </div>
 
-        {open && (
-          <div className="pcw-sheetscrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(null); }}>
+      {open && (
+        <Overlay onClose={() => setOpen(null)} z={78} bare>
             <div className="pcw-sheet" role="dialog" aria-modal="true">
               <button className="pcw-x" onClick={() => setOpen(null)} aria-label="Close"><X size={16} /></button>
 
@@ -112,10 +108,9 @@ export function ProspectCanvas({ data, building, onBuild, onClose }: {
                 </Facet>
               )}
             </div>
-          </div>
-        )}
-      </div>
-    </div>
+        </Overlay>
+      )}
+    </Overlay>
   );
 }
 
@@ -130,13 +125,10 @@ function Facet({ emoji, title, lead, children }: { emoji: string; title: string;
 }
 
 const PCW_CSS = `
-.pcw-scrim{ position:fixed; inset:0; z-index:70; background:var(--gv-scrim); backdrop-filter:blur(4px); display:grid; place-items:center; padding:18px; animation:pcw-fade .18s ease; }
-@keyframes pcw-fade{ from{ opacity:0 } to{ opacity:1 } }
 .pcw-shell{ position:relative; width:min(880px,100%); }
 .pcw-close{ position:absolute; top:-2px; right:-2px; z-index:5; width:34px; height:34px; border-radius:10px; border:1px solid var(--gv-night-line); background:var(--gv-night-2); color:var(--gv-night-dim); cursor:pointer; display:grid; place-items:center; }
 .pcw-close:hover{ color:var(--gv-night-ink); border-color:var(--gv-ember); }
 
-.pcw-sheetscrim{ position:absolute; inset:0; z-index:8; display:grid; place-items:center; padding:14px; }
 .pcw-sheet{ position:relative; width:min(460px,100%); background:var(--gv-paper); color:var(--gv-paper-ink); border-radius:18px; box-shadow:0 30px 80px -20px rgba(0,0,0,.7); animation:pcw-rise .2s cubic-bezier(.2,.7,.2,1); }
 @keyframes pcw-rise{ from{ transform:translateY(12px) scale(.98); opacity:0 } to{ transform:none; opacity:1 } }
 .pcw-x{ position:absolute; top:12px; right:12px; border:none; background:none; cursor:pointer; color:var(--gv-paper-dim); width:28px; height:28px; border-radius:8px; display:grid; place-items:center; }
