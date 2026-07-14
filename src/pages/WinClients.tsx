@@ -5,12 +5,14 @@
 // (review-each-batch; nothing emails a real business without your OK). Deploy + monthly SEO retainer
 // come after a "yes" — this is the top of the funnel, made into one legible screen.
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info } from 'lucide-react';
+import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info, Radar, Square } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
-import { findBusinesses, auditBusiness, findContactEmail, type FoundBusiness } from '../lib/garvis/clientHuntRun';
+import { findBusinesses, auditBusiness, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
+import { US_CITIES, US_STATES, citiesFor } from '../lib/garvis/usCities';
+import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
 import { type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
@@ -43,6 +45,10 @@ export default function WinClients() {
   const [area, setArea] = useState('');
   const [scanUrl, setScanUrl] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [scope, setScope] = useState('top50');
+  const [sweeping, setSweeping] = useState(false);
+  const [sweepProg, setSweepProg] = useState<{ done: number; total: number; found: number; city: string } | null>(null);
+  const stopSweep = useRef(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [finding, setFinding] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -122,6 +128,34 @@ export default function WinClients() {
     finally { setScanning(false); }
   };
 
+  // Resolve the chosen scope to the cities to sweep.
+  const scopeCities = () => {
+    if (scope === 'all') return US_CITIES;
+    if (scope.startsWith('top')) return citiesFor({ mode: 'topN', n: parseInt(scope.slice(3), 10) || 50 });
+    return citiesFor({ mode: 'state', state: scope });
+  };
+
+  // NATIONAL SWEEP — fan the niche search across the chosen cities. Discovery only: streams unique
+  // businesses into the list (capped so the page stays snappy); Build audits + rebuilds on demand.
+  const sweepNationwide = async () => {
+    const n = niche.trim();
+    if (!n) { toast('error', 'Enter a niche first — e.g. roofers, dentists, plumbers.'); return; }
+    const cities = scopeCities();
+    stopSweep.current = false;
+    setSweeping(true); setSearched(true); setRows([]); setSweepProg({ done: 0, total: cities.length, found: 0, city: '' });
+    const MAX_ROWS = 400;
+    try {
+      const all = await sweepNation(n, cities, {
+        concurrency: 3,
+        onFound: (b) => setRows((r) => (r.length >= MAX_ROWS ? r : [...r, { name: b.name, url: b.url, snippet: b.snippet, audit: null }])),
+        onProgress: (p) => setSweepProg(p),
+        shouldStop: () => stopSweep.current,
+      });
+      toast('success', `Swept ${cities.length === US_CITIES.length ? 'the country' : scope.startsWith('top') ? `the top ${scope.slice(3)} markets` : scope} — found ${all.length} unique ${n}. Build the strong prospects; nothing is emailed until you approve it.`);
+    } catch (e) { toast('error', emsg(e)); }
+    finally { setSweeping(false); }
+  };
+
   const weakCount = rows.filter((r) => r.audit?.verdict === 'weak').length;
   // The same rows as a web: clustered by verdict, orb size = opportunity (weaker site → bigger orb).
   const webNodes: WebNode[] = rows.map((b, i) => {
@@ -195,7 +229,37 @@ export default function WinClients() {
               {scanning ? <Loader2 size={15} className="animate-spin" /> : <Globe size={15} />} Scan a URL
             </Button>
           </div>
-          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores). Build reads their real content + photos; the demo is theirs, and nothing emails until you approve it in the Queue.</p>
+          {/* Go national: fan the niche search across the country (or a state). Discovery only —
+              one Google search per city, deduped nationwide, streamed in. */}
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <span className="flex items-center gap-1.5 text-xs font-medium text-forge-ink"><Radar size={13} className="text-forge-ember" /> Or sweep the nation</span>
+            <select value={scope} onChange={(e) => setScope(e.target.value)}
+              className="rounded-lg border border-forge-border bg-forge-bg px-2.5 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+              <option value="top25">Top 25 markets</option>
+              <option value="top50">Top 50 markets</option>
+              <option value="top100">Top 100 markets</option>
+              <option value="all">All {US_CITIES.length} cities</option>
+              <optgroup label="By state">
+                {US_STATES.map((st) => <option key={st} value={st}>{st}</option>)}
+              </optgroup>
+            </select>
+            {sweeping ? (
+              <Button variant="outline" size="md" onClick={() => { stopSweep.current = true; }}>
+                <Square size={13} /> Stop
+              </Button>
+            ) : (
+              <Button variant="primary" size="md" onClick={() => void sweepNationwide()} disabled={!niche.trim()}>
+                <Radar size={15} /> Sweep the nation
+              </Button>
+            )}
+            {sweepProg && (
+              <span className="text-[11px] text-forge-dim">
+                {sweeping && <Loader2 size={11} className="mr-1 inline animate-spin" />}
+                {sweepProg.done}/{sweepProg.total} cities · {sweepProg.found} found{sweepProg.city ? ` · ${sweepProg.city}` : ''}
+              </span>
+            )}
+          </div>
+          <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores). A national sweep runs {sweepCostLine(citiesFor(scope === 'all' ? { mode: 'topN', n: US_CITIES.length } : scope.startsWith('top') ? { mode: 'topN', n: parseInt(scope.slice(3), 10) || 50 } : { mode: 'state', state: scope }).length)} Build reads their real content + photos; nothing emails until you approve it in the Queue.</p>
         </div>
 
         {/* Results */}

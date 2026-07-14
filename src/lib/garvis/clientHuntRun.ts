@@ -6,6 +6,8 @@
 import { supabase } from '../supabase';
 import { parseSerperOrganic } from './marketIntel';
 import { auditSite, type SiteAudit } from './siteAudit';
+import { sweepPlan, registerDomain } from './nationalSweepCore';
+import type { UsCity } from './usCities';
 
 export interface FoundBusiness {
   name: string;
@@ -42,6 +44,48 @@ export async function findBusinesses(niche: string, area: string): Promise<Found
     if (out.length >= 12) break;
   }
   return out;
+}
+
+export interface SweepProgress { done: number; total: number; found: number; city: string }
+
+/** NATIONAL SWEEP — fan the same honest "niche + city" Google search across many US cities, dedupe
+ *  the businesses nationwide (a shop found in two cities is one prospect), and stream them back as
+ *  they arrive. One search per city; a small concurrency pool + the cap keep it gentle + bounded.
+ *  Discovery only — nothing is built or emailed here. Returns every unique business found. */
+export async function sweepNation(
+  niche: string,
+  cities: UsCity[],
+  opts: {
+    cap?: number;                              // max cities to search (= max Google searches)
+    concurrency?: number;                      // parallel searches (1-5; default 3, gentle on the API)
+    onFound?: (b: FoundBusiness) => void;      // stream each NEW business as it's discovered
+    onProgress?: (p: SweepProgress) => void;   // per-city progress
+    shouldStop?: () => boolean;                // cooperative cancel (checked before each city)
+  } = {},
+): Promise<FoundBusiness[]> {
+  const plan = sweepPlan(niche, cities, opts.cap ?? cities.length);
+  const seen = new Set<string>();              // registrable domains found so far (national dedupe)
+  const found: FoundBusiness[] = [];
+  const conc = Math.max(1, Math.min(opts.concurrency ?? 3, 5));
+  let i = 0; let done = 0;
+  const worker = async () => {
+    while (i < plan.length) {
+      if (opts.shouldStop?.()) return;
+      const qy = plan[i++];
+      try {
+        const biz = await findBusinesses(qy.niche, qy.area);
+        for (const b of biz) {
+          if (!registerDomain(seen, b.url)) continue;   // already found nationwide → skip
+          found.push(b);
+          opts.onFound?.(b);
+        }
+      } catch { /* one city's search failing never sinks the national sweep */ }
+      done++;
+      opts.onProgress?.({ done, total: plan.length, found: found.length, city: `${qy.city}, ${qy.state}` });
+    }
+  };
+  await Promise.all(Array.from({ length: conc }, () => worker()));
+  return found;
 }
 
 /** The first publicly-listed email on a business's site (or its contact page), or null. Never
