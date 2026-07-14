@@ -86,13 +86,17 @@ export default function WorkWebs() {
           ><Telescope size={13} /> Universe</button>
         </div>
 
+        {/* THE ALWAYS-WORKS PATH FIRST: deterministic templates build a whole venture in one click,
+            no AI required. Kept ABOVE the AI genesis box so the primary door never dead-ends. */}
+        <TemplatesSection creating={creating} onCreate={(id) => void create(id)} />
+
         {/* Genesis — describe a mission; Garvis synthesizes the DNA, then designs the web.
-            Drafts are proposals: nothing becomes a world until approved. */}
+            Drafts are proposals: nothing becomes a world until approved. Needs an AI key. */}
         <Card className="mb-8 p-4">
           <div className="flex items-center gap-2">
             <Sparkles size={16} className="text-forge-ember" />
-            <h2 className="text-sm font-semibold text-forge-ink">Start from intent</h2>
-            <span className="text-xs text-forge-dim">— describe the business or mission; Garvis designs the work web and shows you why</span>
+            <h2 className="text-sm font-semibold text-forge-ink">Or start from intent</h2>
+            <span className="text-xs text-forge-dim">— describe the business or mission; Garvis designs the work web and shows you why (needs an AI key)</span>
           </div>
           {/* THE FRONT DOOR the reachability audit found missing: nothing advertised that a world can
               be a growth op, a product lab, an answering desk, a document studio, or a data workspace.
@@ -160,7 +164,7 @@ export default function WorkWebs() {
         {loading ? (
           <Spinner label="Loading your webs…" />
         ) : webs.length === 0 ? (
-          <EmptyState icon={<Waypoints size={20} />} title="No ventures yet" body="Describe yours in 'Start from intent' above — Garvis designs the whole territory and its tools around your objective. (Templates below work too.)" />
+          <EmptyState icon={<Waypoints size={20} />} title="No ventures yet" body="Pick a template above to build the whole operation in one click — it works right now, no setup. Or describe your own in 'Start from intent' and Garvis designs it around your objective." />
         ) : (
           <div className="mb-10 grid gap-3 sm:grid-cols-2">
             {webs.map((w) => (
@@ -182,32 +186,43 @@ export default function WorkWebs() {
           </div>
         )}
 
-        {/* Templates */}
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-forge-dim">Start a new venture</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {WEB_TEMPLATES.map((t) => {
-            const Icon = TEMPLATE_ICON[t.id] ?? Plus;
-            return (
-              <Card key={t.id} className="flex flex-col p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <Icon size={18} className="text-forge-ember" />
-                  <span className="font-medium text-forge-ink">{t.title}</span>
-                  {t.playIds.length > 0 && <Badge tone="ember">{t.playIds.length} play{t.playIds.length === 1 ? '' : 's'}</Badge>}
-                </div>
-                <p className="flex-1 text-sm text-forge-dim">{t.description}</p>
-                <button
-                  onClick={() => void create(t.id)} disabled={creating !== null}
-                  className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-2 text-sm font-medium text-forge-ember transition-colors hover:bg-forge-ember/20 disabled:opacity-50"
-                >
-                  {creating === t.id ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                  Create venture
-                </button>
-              </Card>
-            );
-          })}
-        </div>
       </div>
     </AppShell>
+  );
+}
+
+/** The always-works path: instantiate a fully-built venture from a template with ZERO AI. Rendered
+ *  ABOVE the AI genesis box because it is deterministic — it never dead-ends, offline or not. */
+function TemplatesSection({ creating, onCreate }: { creating: string | null; onCreate: (id: string) => void }) {
+  return (
+    <div className="mb-6">
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-forge-ink">Build in one click</h2>
+        <span className="text-xs text-forge-dim">— a ready-made venture, fully set up. Works right now, no AI key needed.</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {WEB_TEMPLATES.map((t) => {
+          const Icon = TEMPLATE_ICON[t.id] ?? Plus;
+          return (
+            <Card key={t.id} className="flex flex-col p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Icon size={18} className="text-forge-ember" />
+                <span className="font-medium text-forge-ink">{t.title}</span>
+                {t.playIds.length > 0 && <Badge tone="ember">{t.playIds.length} play{t.playIds.length === 1 ? '' : 's'}</Badge>}
+              </div>
+              <p className="flex-1 text-sm text-forge-dim">{t.description}</p>
+              <button
+                onClick={() => onCreate(t.id)} disabled={creating !== null}
+                className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-2 text-sm font-medium text-forge-ember transition-colors hover:bg-forge-ember/20 disabled:opacity-50"
+              >
+                {creating === t.id ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+                Create venture
+              </button>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

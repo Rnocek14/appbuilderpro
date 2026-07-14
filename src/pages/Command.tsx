@@ -14,6 +14,8 @@ import type { ChatMessage } from '../hooks/useCommander';
 import { useToast } from '../context/ToastContext';
 import { MailerDesigner } from '../components/garvis/MailerDesigner';
 import { VideoStudio } from '../components/garvis/VideoStudio';
+import { QuickStartRealEstate } from '../components/garvis/QuickStartRealEstate';
+import { GenerationReadiness } from '../components/garvis/GenerationReadiness';
 import ClusterSpike from './spike/ClusterSpike';
 import type { GarvisMission, GarvisTask } from '../types';
 
@@ -134,11 +136,19 @@ export default function Command() {
             <h1 className="font-display text-xl font-semibold">Garvis</h1>
             <p className="text-sm text-forge-dim">Tell me what you want to accomplish. I'll figure out the rest.</p>
           </div>
+          {/* Honest, self-hiding: only speaks in DIRECT mode with no AI key — the reason generation
+              might feel empty. Silent when ready or when readiness can't be verified. */}
+          <div className="ml-auto"><GenerationReadiness compact /></div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <WakingMoment name={firstName} />
           <RemindersCard />
+          {/* THE FRONT DOOR: for a brand-new operator (no venture yet), the one deterministic click
+              that builds the whole Mom Real Estate marketing operation and lands them in a studio.
+              Renders itself only when there are zero ventures. */}
+          {messages.length === 0 && <QuickStartRealEstate onToast={toast} />}
+
           {messages.length === 0 && (
             <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-5">
               <div className="mb-3 flex items-center gap-2 text-forge-dim"><Boxes size={16} className="text-forge-ember" /> <span className="text-sm">Try one of these — or just say what's on your mind:</span></div>
