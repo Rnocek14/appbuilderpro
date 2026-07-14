@@ -5,7 +5,8 @@
 // presentational (data + onOpen come in as props, layout is deterministic via layoutWeb) so it drops
 // onto a page or a dev-preview route unchanged. Shares the marketing-canvas aesthetic → one language.
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo } from 'react';
+import { StarfieldStage } from './StarfieldStage';
 import { layoutWeb, type WebNode, type WebGroupDef } from '../../../lib/garvis/webLayout';
 
 export function ConstellationWeb({ nodes, groups, onOpen, title, height, emptyLabel }: {
@@ -16,34 +17,12 @@ export function ConstellationWeb({ nodes, groups, onOpen, title, height, emptyLa
   height?: string;
   emptyLabel?: string;
 }) {
-  const starRef = useRef<HTMLCanvasElement>(null);
   const layout = useMemo(() => layoutWeb(nodes, groups, { rMin: 15, rMax: 40, nodeGap: 4.5, hubRadius: 25 }), [nodes, groups]);
   const hubByKey = useMemo(() => new Map(layout.hubs.map((h) => [h.key, h])), [layout]);
 
-  useEffect(() => {
-    const cv = starRef.current; if (!cv) return;
-    const ctx = cv.getContext('2d'); if (!ctx) return;
-    const root = getComputedStyle(document.documentElement);
-    const warm = root.getPropertyValue('--gv-star-warm').trim() || '#F5C9A6';
-    const cool = root.getPropertyValue('--gv-star-cool').trim() || '#C9B6D8';
-    const draw = () => {
-      const w = cv.clientWidth, h = cv.clientHeight;
-      cv.width = w; cv.height = h; ctx.clearRect(0, 0, w, h);
-      for (let i = 0; i < 90; i++) {
-        ctx.globalAlpha = Math.random() * 0.5 + 0.06;
-        ctx.fillStyle = Math.random() > 0.5 ? warm : cool;
-        ctx.beginPath(); ctx.arc(Math.random() * w, Math.random() * h, Math.random() * 1.3 + 0.2, 0, 7); ctx.fill();
-      }
-    };
-    draw();
-    const ro = new ResizeObserver(draw); ro.observe(cv);
-    return () => ro.disconnect();
-  }, []);
-
   return (
-    <div className="cw-root" style={height ? { height } : undefined}>
+    <StarfieldStage height={height ?? 'min(72vh,620px)'} density={90}>
       <style>{CW_CSS}</style>
-      <canvas ref={starRef} className="cw-stars" aria-hidden="true" />
 
       {/* legend */}
       {!layout.empty && (
@@ -96,18 +75,11 @@ export function ConstellationWeb({ nodes, groups, onOpen, title, height, emptyLa
           ))}
         </>
       )}
-    </div>
+    </StarfieldStage>
   );
 }
 
 const CW_CSS = `
-.cw-root{ position:relative; width:100%; height:min(72vh,620px); border-radius:22px; overflow:hidden;
-  background:
-    radial-gradient(1000px 640px at 50% 46%, rgba(var(--gv-ember-rgb),.10), transparent 60%),
-    radial-gradient(820px 520px at 82% 84%, rgba(var(--gv-violet-rgb),.10), transparent 55%),
-    linear-gradient(160deg,var(--gv-night-1),var(--gv-night-2));
-  border:1px solid var(--gv-night-line); }
-.cw-stars{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; opacity:.5; }
 .cw-links{ position:absolute; inset:0; width:100%; height:100%; }
 .cw-line{ stroke-width:1; opacity:.22; vector-effect:non-scaling-stroke; }
 
@@ -135,6 +107,4 @@ const CW_CSS = `
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .cw-lab.show{ opacity:.85; }
 .cw-node:hover .cw-lab{ opacity:1; }
-
-@media (max-width:600px){ .cw-root{ height:64vh; } }
 `;

@@ -5,7 +5,7 @@
 // in as props, clicks go out via onOpen) so it renders in a dev preview route for screenshotting —
 // the doing (opening a node) happens in the container's focused sheets, not here.
 
-import { useEffect, useRef } from 'react';
+import { StarfieldStage } from './StarfieldStage';
 
 export interface CanvasNode {
   key: string;
@@ -32,36 +32,11 @@ export function CanvasScene({ center, nodes, sats = [], onOpen, height }: {
   onOpen: (key: string) => void;
   height?: string;
 }) {
-  const starRef = useRef<HTMLCanvasElement>(null);
-
-  // A quiet starfield — drawn once, redrawn on resize. Deterministic-ish; purely decorative.
-  useEffect(() => {
-    const cv = starRef.current; if (!cv) return;
-    const ctx = cv.getContext('2d'); if (!ctx) return;
-    // Star colors come from the shared tokens (single source of truth), read once per draw.
-    const root = getComputedStyle(document.documentElement);
-    const warm = root.getPropertyValue('--gv-star-warm').trim() || '#F5C9A6';
-    const cool = root.getPropertyValue('--gv-star-cool').trim() || '#C9B6D8';
-    const draw = () => {
-      const w = cv.clientWidth, h = cv.clientHeight;
-      cv.width = w; cv.height = h; ctx.clearRect(0, 0, w, h);
-      for (let i = 0; i < 70; i++) {
-        ctx.globalAlpha = Math.random() * 0.5 + 0.08;
-        ctx.fillStyle = Math.random() > 0.5 ? warm : cool;
-        ctx.beginPath(); ctx.arc(Math.random() * w, Math.random() * h, Math.random() * 1.3 + 0.2, 0, 7); ctx.fill();
-      }
-    };
-    draw();
-    const ro = new ResizeObserver(draw); ro.observe(cv);
-    return () => ro.disconnect();
-  }, []);
-
   const pos = nodes.map((_, i) => ringPos(i, nodes.length));
 
   return (
-    <div className="mc-root" style={height ? { height } : undefined}>
+    <StarfieldStage height={height} density={70}>
       <style>{MC_CSS}</style>
-      <canvas ref={starRef} className="mc-stars" aria-hidden="true" />
 
       {/* connector threads (behind nodes) */}
       <svg className="mc-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -111,18 +86,11 @@ export function CanvasScene({ center, nodes, sats = [], onOpen, height }: {
           {n.sub && <span className="mc-sub">{n.sub}</span>}
         </button>
       ))}
-    </div>
+    </StarfieldStage>
   );
 }
 
 const MC_CSS = `
-.mc-root{ position:relative; width:100%; height:min(72vh,640px); border-radius:22px; overflow:hidden;
-  background:
-    radial-gradient(1000px 640px at 50% 44%, rgba(var(--gv-ember-rgb),.12), transparent 60%),
-    radial-gradient(820px 520px at 80% 82%, rgba(var(--gv-violet-rgb),.10), transparent 55%),
-    linear-gradient(160deg,var(--gv-night-1),var(--gv-night-2));
-  border:1px solid var(--gv-night-line); }
-.mc-stars{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; opacity:.55; }
 .mc-links{ position:absolute; inset:0; width:100%; height:100%; }
 .mc-line{ stroke:url(#mc-lg); stroke-width:1.6; opacity:.45; stroke-dasharray:2 6; stroke-linecap:round;
   vector-effect:non-scaling-stroke; animation:mc-flow 24s linear infinite; }
