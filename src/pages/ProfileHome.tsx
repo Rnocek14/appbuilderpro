@@ -13,11 +13,14 @@ import { AppShell } from '../components/layout/AppShell';
 import { useAuth } from '../context/AuthContext';
 import { BranchCanvas, type LevelSpec, type BranchNode } from '../components/garvis/canvas/BranchCanvas';
 import { ArtifactSheet } from '../components/garvis/canvas/ArtifactSheet';
+import { CanvasChat } from '../components/garvis/canvas/CanvasChat';
 import { loadUniverseScene } from '../lib/garvis/universeViewRun';
 import { loadSystemScene } from '../lib/garvis/systemViewRun';
 import type { SystemScene } from '../lib/garvis/systemView';
 import { listClusterArtifacts, type StudioArtifact } from '../lib/garvis/artifacts';
-import { SEED_SOURCE } from '../lib/garvis/workwebRun';
+import { SEED_SOURCE, loadWeb } from '../lib/garvis/workwebRun';
+import { loadStudioContext, runStudioTurn } from '../lib/garvis/studioChat';
+import { askGarvis } from '../lib/garvis/ask';
 
 // Authored, deterministic presentation (emoji is NOT a data field anywhere) — driven by real fields
 // (archetype / kind) with a plain fallback, never framed as state.
@@ -153,6 +156,50 @@ export default function ProfileHome() {
     }
   }, [navigate]);
 
+  // Run a real studio turn against one area's cluster — the proven decide-only path (cluster-chat →
+  // create_artifact / revise_artifact / propose_approval). A turn that makes something flips
+  // res.changed, and bumpReload re-reads the level so the new artifact blooms in as a node. Nothing
+  // is fabricated (the model gets the area's real context) and nothing outward-facing is executed —
+  // only proposed into the approval queue.
+  const runAreaTurn = useCallback(async (worldId: string, clusterId: string, message: string): Promise<{ reply: string; note?: string }> => {
+    const web = await loadWeb(worldId);
+    const cluster = web?.clusters.find((c) => c.id === clusterId) ?? null;
+    if (!web || !cluster || !cluster.charter) {
+      const a = await askGarvis(message, { worldId });   // no chartered workspace here — answer, don't fake making
+      return { reply: a.answer };
+    }
+    const scene = await getScene(worldId);
+    const ctx = await loadStudioContext({ worldId, webTitle: web.title, objective: scene?.star.objective ?? null, cluster: { title: cluster.title, summary: cluster.summary, charter: cluster.charter }, clusterId, tools: cluster.tools });
+    const res = await runStudioTurn(clusterId, ctx, message);
+    if (res.changed) bumpReload();
+    const note = res.decision.kind === 'propose_approval' ? 'Queued for approval — nothing sent.'
+      : res.changed ? 'Made it — it’s on your canvas.' : undefined;
+    return { reply: res.reply, note };
+  }, [getScene, bumpReload]);
+
+  // The docked canvas chat. At an area (level 2) it's make-capable; at You / a business it answers
+  // from the record (making needs a chosen area, so we never fake it — you branch in, then make).
+  const onGarvisSend = useCallback(async (text: string): Promise<{ reply: string; note?: string }> => {
+    if (path.length === 2) {
+      const scene = await getScene(path[0]);
+      const planet = scene?.planets.find((p) => p.slug === path[1]) ?? null;
+      if (planet) return runAreaTurn(path[0], planet.id, text);
+    }
+    const worldId = path.length === 1 ? path[0] : undefined;
+    const a = await askGarvis(text, worldId ? { worldId } : undefined);
+    return { reply: a.answer };
+  }, [path, getScene, runAreaTurn]);
+
+  // "Do it differently" on a made thing: a turn seeded with the artifact that branches a fresh take.
+  const onArtifactAsk = useCallback((artifact: StudioArtifact, text: string): Promise<{ reply: string; note?: string }> => {
+    const instruction = `About the ${artifact.kind} titled "${artifact.title}": ${text}. If I'm asking for a different version or a variation, CREATE A NEW artifact (a fresh take) rather than overwriting this one.`;
+    return runAreaTurn(businessId ?? '', artifact.cluster_id, instruction);
+  }, [businessId, runAreaTurn]);
+
+  const chatHint = path.length === 2 ? 'Ask about this area, or tell Garvis to make something…'
+    : path.length === 1 ? 'Ask Garvis about this business…'
+    : 'Ask Garvis about your businesses…';
+
   return (
     <AppShell>
       <div className="mx-auto max-w-5xl px-4 py-8">
@@ -164,8 +211,9 @@ export default function ProfileHome() {
           onLeaf={onLeaf}
           trailing={<button className="bc-cine" onClick={() => navigate('/garvis/universe')}><Telescope size={14} /> Cinematic view</button>}
         />
+        <CanvasChat onSend={onGarvisSend} hint={chatHint} />
       </div>
-      {sheet && <ArtifactSheet artifact={sheet} onClose={() => setSheet(null)} />}
+      {sheet && <ArtifactSheet artifact={sheet} onClose={() => setSheet(null)} onAsk={(text) => onArtifactAsk(sheet, text)} />}
     </AppShell>
   );
 }

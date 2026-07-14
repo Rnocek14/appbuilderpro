@@ -6,6 +6,19 @@
 import { useState } from 'react';
 import { Telescope } from 'lucide-react';
 import { BranchCanvas, type LevelSpec } from '../../components/garvis/canvas/BranchCanvas';
+import { CanvasChat } from '../../components/garvis/canvas/CanvasChat';
+import { ArtifactSheet } from '../../components/garvis/canvas/ArtifactSheet';
+import type { StudioArtifact } from '../../lib/garvis/artifacts';
+
+// A canned Garvis reply so the docked chat + the workbench are drivable/screenshottable with no auth.
+const stubSend = (text: string) => new Promise<{ reply: string; note?: string }>((res) =>
+  setTimeout(() => res({ reply: `On it — I made a fresh take on that ("${text.slice(0, 40)}"). It's on your canvas as a new node.`, note: 'Made it — it’s on your canvas.' }), 500));
+
+const SAMPLE_ARTIFACT: StudioArtifact = {
+  id: 'a1', cluster_id: 'c1', slug: 'postcard-proof', kind: 'post',
+  title: 'Just Listed — 48 Lakeshore Dr', detail: 'A proof-first postcard: the home’s best photo, the price, and one line on the lakefront lifestyle. Front headline: “Just Listed on Geneva Lake.”',
+  source: 'garvis-chat', revision: 1, created_at: '2026-06-01T00:00:00Z',
+};
 
 // ── Sample tree (illustrative, not real data) ─────────────────────────────────
 const BUSINESSES: Record<string, { title: string; momentum: string; areas: { slug: string; emoji: string; title: string; sub: string; count?: number; dim?: boolean }[] }> = {
@@ -31,6 +44,7 @@ const WORK: Record<string, { id: string; emoji: string; title: string; sub: stri
 
 export default function ProfileHomePreview() {
   const [path, setPath] = useState<string[]>([]);
+  const [sheet, setSheet] = useState<StudioArtifact | null>(null);
 
   const resolveLevel = (p: string[]): LevelSpec => {
     if (p.length === 0) {
@@ -74,10 +88,12 @@ export default function ProfileHomePreview() {
           path={path}
           resolveLevel={resolveLevel}
           onPathChange={setPath}
-          onLeaf={(_p, k) => console.log('[leaf]', k)}
+          onLeaf={(p, k) => { if (p.length === 2) setSheet({ ...SAMPLE_ARTIFACT, id: k }); }}
           trailing={<button className="bc-cine"><Telescope size={14} /> Cinematic view</button>}
         />
+        <CanvasChat onSend={stubSend} hint={path.length === 2 ? 'Ask about this area, or tell Garvis to make something…' : 'Ask Garvis…'} />
       </div>
+      {sheet && <ArtifactSheet artifact={sheet} onClose={() => setSheet(null)} onAsk={stubSend} />}
     </div>
   );
 }
