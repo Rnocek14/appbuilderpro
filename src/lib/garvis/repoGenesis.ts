@@ -188,6 +188,6 @@ export function repoIntent(s: RepoSignal, ref: RepoRef): string {
   if (s.stack.length) parts.push(`It is a software product built with ${s.stack.join(', ')}.`);
   if (s.docTopics.length) parts.push(`Its own documentation covers: ${s.docTopics.slice(0, 6).join('; ')} — use these as domain signal for what the product actually does.`);
   if (s.surfaces.length) parts.push(`Product surfaces (screens): ${s.surfaces.slice(0, 8).join(', ')}.`);
-  parts.push('Design a marketing operation to GROW this product. Infer the likely buyers and channels from what the product is, but where the audience, pricing, or revenue model is not evident from the above, ASK rather than invent — do not fabricate customers, results, or claims.');
+  parts.push('Design a marketing operation to GROW this product AND make money from it. Be specific about how it makes money (the revenue model), WHO pays (the ideal customer), a pricing approach (as a hypothesis to validate from real comparables — never an invented number), and the 2-3 best marketing channels for THIS kind of product and buyer. Infer these from what the product is; where the audience, pricing, or revenue model is not evident from the above, ASK rather than invent — do not fabricate customers, prices, results, or claims.');
   return parts.join('\n');
 }

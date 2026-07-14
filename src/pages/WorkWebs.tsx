@@ -11,6 +11,7 @@ import { Card, Badge, EmptyState, Spinner, Button } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../lib/utils';
 import { WEB_TEMPLATES, ARCHETYPES, flattenTemplate } from '../lib/garvis/workweb';
+import { growthPlan, planMoneyVerdict } from '../lib/garvis/genesis';
 import { listWebs, instantiateWeb, type WebSummary } from '../lib/garvis/workwebRun';
 import { generateDraft, generateDraftFromRepo, parseRepoRef, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
@@ -306,6 +307,36 @@ function DraftReview({ draft, onApprove, onDiscard, onRemoveNode }: {
           ))}
         </div>
       )}
+
+      {/* THE MONEY QUESTION, ANSWERED BEFORE YOU APPROVE: turn the DNA into a real go-to-market plan
+          and an honest read on whether it can actually earn. Deterministic from the DNA — visible
+          [holes] where it's thin, never an invented number. */}
+      {dna && (() => {
+        const verdict = planMoneyVerdict(dna);
+        const plan = growthPlan(dna);
+        return (
+          <div className="mt-3 rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+            <div className="flex items-center gap-2">
+              <span className={cn('rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                verdict.canMakeMoney ? 'bg-forge-ok/15 text-forge-ok' : 'bg-forge-warn/15 text-forge-warn')}>
+                {verdict.canMakeMoney ? 'Can make money' : 'Money model incomplete'}
+              </span>
+              <span className="text-xs text-forge-dim">{verdict.line}</span>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {plan.map((s) => (
+                <div key={s.heading} className="rounded-lg border border-forge-border/60 p-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-forge-ember/90">{s.heading}</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {s.lines.map((l, i) => <li key={i} className="text-xs leading-snug text-forge-ink/85">{l}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-forge-dim">This plan is read straight from the synthesized DNA above — a check on the money model and channels BEFORE you commit. If it looks wrong, edit the intent and re-draft. Nothing here is an invented figure; visible [holes] mark what the DNA still needs.</p>
+          </div>
+        );
+      })()}
 
       <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         {/* Areas, each with its why */}

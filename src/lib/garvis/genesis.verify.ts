@@ -5,7 +5,7 @@
 // floor on every play step), token merging that shows holes instead of hiding them, and — the
 // contamination assertion — nothing genesis produces ever speaks another world's copy.
 
-import { parseDNA, parseGenesis, mergeTokens, structuralViolations, type DnaDraft } from './genesis';
+import { parseDNA, parseGenesis, mergeTokens, structuralViolations, growthPlan, planMoneyVerdict, type DnaDraft, type WorldDNA } from './genesis';
 import { flattenTemplate, type WebTemplate, type TemplateNode, type Archetype } from './workweb';
 
 let passed = 0;
@@ -210,6 +210,36 @@ check('DNA arrays are capped at 8', (() => {
     node('out', 'launch', [node('aud', 'audience')]),
   ] } as unknown as WebTemplate;
   check('a child audience satisfies the launch rule', structuralViolations(childAudience).every((v) => !v.includes('audience')));
+}
+
+// --- go-to-market plan: turns the DNA into a money + marketing plan, honest about holes ---------
+{
+  const strong: WorldDNA = {
+    businessType: 'digital health SaaS', revenueModel: 'monthly subscription', idealCustomers: ['stroke survivors', 'outpatient clinics'],
+    valueProposition: 'at-home AI-guided rehab that tracks progress', salesCycle: 'considered', brandPersonality: 'calm, credible',
+    coreAssets: ['the app'], growthChannels: ['clinician referrals', 'content/SEO', 'caregiver Facebook groups'],
+    operationalLoop: 'publish → capture leads → nurture → convert', successMetrics: ['activated users', 'trial→paid rate'], constraints: ['health advertising rules'],
+  };
+  const plan = growthPlan(strong);
+  const headings = plan.map((s) => s.heading);
+  check('plan covers positioning, money, marketing, 90-day, and metrics', ['Positioning', 'How it makes money', 'Marketing — best channels first', 'First 90 days', 'What to measure'].every((h) => headings.includes(h)));
+  const money = plan.find((s) => s.heading === 'How it makes money')!;
+  check('the money section names the revenue model AND who pays', money.lines.join(' ').includes('monthly subscription') && money.lines.join(' ').includes('stroke survivors'));
+  check('pricing is a hypothesis to validate, never an invented number', money.lines.some((l) => /never guess a number/i.test(l)));
+  const mkt = plan.find((s) => s.heading === 'Marketing — best channels first')!;
+  check('marketing lists the real channels, best first', mkt.lines[0].includes('clinician referrals'));
+  check('what-to-measure always includes cost per lead', plan.find((s) => s.heading === 'What to measure')!.lines.some((l) => /cost per lead/i.test(l)));
+
+  const verdict = planMoneyVerdict(strong);
+  check('a complete DNA is judged able to make money', verdict.canMakeMoney && /Can make money/i.test(verdict.line));
+
+  const thin: WorldDNA = { ...strong, revenueModel: null, idealCustomers: [], growthChannels: [], valueProposition: null, successMetrics: [] };
+  const thinPlan = growthPlan(thin);
+  check('a thin DNA shows visible [holes], never fabricated facts', JSON.stringify(thinPlan).includes('[') && JSON.stringify(thinPlan).includes(']'));
+  check('a thin DNA is honestly judged NOT able to make money yet', planMoneyVerdict(thin).canMakeMoney === false);
+
+  const internal: WorldDNA = { ...strong, revenueModel: 'none — personal/internal system', growthChannels: [] };
+  check('an internal/no-revenue world is called out, not force-monetized', planMoneyVerdict(internal).canMakeMoney === false && /internal|non-commercial/i.test(planMoneyVerdict(internal).line));
 }
 
 console.log(`\ngenesis.verify: ${passed} passed, ${failed} failed`);
