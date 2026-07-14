@@ -28,6 +28,8 @@ const navSections = [
       // The old Inbox/Approvals/Build-questions routes redirect here; the badge sums all lanes.
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
       { to: '/garvis/webs', label: 'Businesses', icon: Waypoints },
+      // The agency loop's front door: find businesses with weak sites → build + pitch (approval-gated).
+      { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
       { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
       { to: '/garvis/contacts', label: 'Contacts', icon: Users },
       // ONE MEMORY (design review P2): Library + Mind, one door. Old routes stay reachable.

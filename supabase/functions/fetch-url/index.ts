@@ -246,7 +246,16 @@ Deno.serve(async (req) => {
       return json({ url: res.url || url.href, title: url.hostname, description: '', text: bodyRaw.slice(0, MAX_TEXT), contentType: type });
     }
     const { title, description, text } = extractText(bodyRaw);
-    return json({ url: res.url || url.href, title: title || url.hostname, description, text, contentType: type });
+    // Raw-HTML signals for the honest site audit (computed here, before the HTML is stripped):
+    // did the page declare a mobile viewport, is there any contact affordance, is it served over TLS.
+    const finalUrl = res.url || url.href;
+    const checks = {
+      viewport: /<meta[^>]+name=["']?\s*viewport/i.test(bodyRaw),
+      form: /<form[\s>]/i.test(bodyRaw) || /mailto:/i.test(bodyRaw),
+      email: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(bodyRaw),
+      https: finalUrl.startsWith('https://'),
+    };
+    return json({ url: finalUrl, title: title || url.hostname, description, text, contentType: type, checks });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return json({ error: /abort/i.test(msg) ? 'The page took too long to load.' : msg }, 200);
