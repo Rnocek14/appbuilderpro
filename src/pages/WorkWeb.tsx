@@ -52,6 +52,7 @@ const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').th
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
 const DataWorkspace = lazy(() => import('../components/garvis/DataWorkspace').then((m) => ({ default: m.DataWorkspace })));
 const TrackerRegistry = lazy(() => import('../components/garvis/TrackerRegistry').then((m) => ({ default: m.TrackerRegistry })));
+const CampaignComposer = lazy(() => import('../components/garvis/CampaignComposer').then((m) => ({ default: m.CampaignComposer })));
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -75,6 +76,9 @@ export default function WorkWeb() {
   const [intel, setIntel] = useState<WorldIntelligenceRow | null>(null);
   const [reflecting, setReflecting] = useState(false);
   const [showIntel, setShowIntel] = useState(false);
+  // Marketing-first businesses (they have a direct-mail studio) open on the simple "Make my
+  // marketing" flow; the studio tree + areas move behind an "Advanced" toggle.
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // The heartbeat updates when observed: refresh the deterministic Living State on open, then read.
   // Learning is no longer manual-only — if reflection is genuinely due (enough real activity, not
@@ -215,6 +219,9 @@ export default function WorkWeb() {
     );
   }
 
+  // A marketing business (has a direct-mail studio) leads with the simple "Make my marketing" flow.
+  const hasCampaign = web.clusters.some((c) => c.charter?.flavor === 'direct_mail');
+
   return (
     <AppShell>
       <div className="mx-auto max-w-6xl px-4 py-6">
@@ -304,6 +311,25 @@ export default function WorkWeb() {
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
         </div>
 
+        {/* THE SIMPLE FLOW: for a marketing business, "Make my marketing" is the whole front page —
+            one form → a postcard, social posts, and an email you can look at. The studio areas move
+            behind an "Advanced" toggle so the first thing you see is one action, not a map. */}
+        {hasCampaign && (
+          <div className="mb-5">
+            <PanelBoundary name="marketing maker">
+              <CampaignComposer worldId={worldId} onToast={(k, m) => toast(k, m)} />
+            </PanelBoundary>
+            <button
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="mt-3 flex items-center gap-1.5 text-xs text-forge-dim transition-colors hover:text-forge-ink"
+            >
+              <ChevronRight size={13} className={cn('transition-transform', showAdvanced && 'rotate-90')} />
+              {showAdvanced ? 'Hide' : 'Advanced'} — the studios & areas (social, video, farm lists, paperwork…)
+            </button>
+          </div>
+        )}
+
+        {(!hasCampaign || showAdvanced) && (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr]">
           {/* The web — production areas as a connected tree */}
           <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-2">
@@ -358,6 +384,7 @@ export default function WorkWeb() {
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Contacts — the real view behind the "View contacts" tool */}

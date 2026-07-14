@@ -13,6 +13,7 @@ import {
   type MailerMaterials, type MailBatchRow,
 } from '../../lib/garvis/mailerRun';
 import { uploadClusterFile } from '../../lib/garvis/artifacts';
+import { PostcardFront, PostcardBack } from './Postcard';
 import { cn } from '../../lib/utils';
 import { useUnsavedGuard } from '../../hooks/useUnsavedGuard';
 
@@ -254,43 +255,3 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
   );
 }
 
-/** 6×9 front. Aspect 9:6 landscape; the photo bleeds full, headline over a legibility scrim. */
-function PostcardFront({ spec, accent }: { spec: MailerSpec; accent: string }) {
-  return (
-    <div className="mailer-card relative w-full overflow-hidden rounded-lg bg-black shadow-soft" style={{ aspectRatio: '9 / 6' }}>
-      {spec.front.imageUrl
-        ? <img src={spec.front.imageUrl} alt={spec.front.imageAlt} className="absolute inset-0 h-full w-full object-cover" />
-        : <div className="absolute inset-0 flex items-center justify-center bg-forge-raised text-xs text-forge-dim">Pick a vault photo →</div>}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-[5%] pt-[15%]">
-        {spec.front.kicker && <div className="text-[2.6vw] uppercase tracking-widest text-white/80 lg:text-[13px]" style={{ color: accent }}>{spec.front.kicker}</div>}
-        <div className="text-[4.4vw] font-bold leading-tight text-white lg:text-[26px]">{spec.front.headline}</div>
-      </div>
-    </div>
-  );
-}
-
-/** 6×9 back. Copy left, QR + address zone right — bottom-right kept clear for postage per USPS. */
-function PostcardBack({ spec, accent, qr }: { spec: MailerSpec; accent: string; qr: string | null }) {
-  return (
-    <div className="mailer-card relative w-full overflow-hidden rounded-lg border border-forge-border bg-white text-neutral-900 shadow-soft" style={{ aspectRatio: '9 / 6' }}>
-      <div className="flex h-full">
-        <div className="flex w-1/2 flex-col p-[4%]">
-          <div className="text-[3.4vw] font-bold leading-tight lg:text-[19px]" style={{ color: accent }}>{spec.back.headline}</div>
-          <div className="mt-[3%] whitespace-pre-line text-[2vw] leading-snug text-neutral-700 lg:text-[12px]">{spec.back.body}</div>
-          <div className="mt-auto">
-            <div className="text-[2.2vw] font-semibold lg:text-[13px]">{spec.back.cta}</div>
-            <div className="mt-[2%] text-[1.7vw] text-neutral-500 lg:text-[10px]">{spec.back.contactLine}</div>
-            {spec.back.complianceLine && <div className="mt-[1%] text-[1.4vw] text-neutral-400 lg:text-[9px]">{spec.back.complianceLine}</div>}
-          </div>
-        </div>
-        <div className="flex w-1/2 flex-col items-end justify-between p-[4%]">
-          {qr ? <img src={qr} alt="QR to the tracking link" className="h-[26%] w-auto" /> : <div className="h-[26%] w-[26%] rounded bg-neutral-100" />}
-          {/* Address + postage zone — intentionally blank (the vendor/mail-merge fills it). */}
-          <div className="w-full rounded border border-dashed border-neutral-300 p-[4%] text-right text-[1.5vw] text-neutral-300 lg:text-[9px]" style={{ minHeight: '38%' }}>
-            address block · postage
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
