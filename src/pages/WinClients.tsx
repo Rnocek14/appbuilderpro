@@ -14,6 +14,7 @@ import { findBusinesses, auditBusiness, findContactEmail, type FoundBusiness } f
 import { auditIssues, type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
+import { ProspectCanvas } from '../components/garvis/canvas/ProspectCanvas';
 import { ingestBusinessProfile } from '../lib/preview/engine';
 import { queuePitch } from '../lib/garvis/outreach';
 import { cn } from '../lib/utils';
@@ -155,8 +156,7 @@ export default function WinClients() {
                 {view === 'web' ? (
                   <>
                     <ConstellationWeb nodes={webNodes} groups={WEB_GROUPS} height="440px"
-                      title="Bigger orb = weaker site = more opportunity" onOpen={(id) => setSelected(Number(id))} />
-                    {selected != null && rows[selected] && <FocusedProspect b={rows[selected]} building={!!rows[selected].building} onBuild={() => void build(selected)} onClose={() => setSelected(null)} />}
+                      title="Bigger orb = weaker site = more opportunity · tap one to open its web" onOpen={(id) => setSelected(Number(id))} />
                   </>
                 ) : (
                 <div className="space-y-2.5">
@@ -165,7 +165,7 @@ export default function WinClients() {
                       <div className="flex items-start gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-sm font-semibold text-forge-ink">{b.name}</span>
+                            <button onClick={() => setSelected(i)} className="truncate text-sm font-semibold text-forge-ink hover:text-forge-ember" title="Open this business's web">{b.name}</button>
                             {b.audit && <span className={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium', VERDICT_STYLE[b.audit.verdict].cls)}>{VERDICT_STYLE[b.audit.verdict].label}{b.audit.score != null ? ` · ${b.audit.score}` : ''}</span>}
                             {!b.audit && b.url && <span className="inline-flex items-center gap-1 text-[11px] text-forge-dim"><Loader2 size={11} className="animate-spin" /> checking site…</span>}
                           </div>
@@ -215,46 +215,17 @@ export default function WinClients() {
           </div>
         )}
       </div>
+
+      {/* tap a prospect → its own web (canvas): their site, the new site, the pitch, contact */}
+      {selected != null && rows[selected] && (
+        <ProspectCanvas
+          data={{ name: rows[selected].name, url: rows[selected].url, audit: rows[selected].audit, built: rows[selected].built ?? null }}
+          building={!!rows[selected].building}
+          onBuild={() => void build(selected)}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </AppShell>
   );
 }
 
-/** The focused card shown when you tap an orb in the web — the business, its real weaknesses, and
- *  the one action (build them a site). Mirrors a list row so the two views feel like one thing. */
-function FocusedProspect({ b, building, onBuild, onClose }: { b: Row; building: boolean; onBuild: () => void; onClose: () => void }) {
-  return (
-    <div className="mt-3 rounded-xl border border-forge-ember/40 bg-forge-panel/60 p-4">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold text-forge-ink">{b.name}</span>
-            {b.audit && <span className={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium', VERDICT_STYLE[b.audit.verdict].cls)}>{VERDICT_STYLE[b.audit.verdict].label}{b.audit.score != null ? ` · ${b.audit.score}` : ''}</span>}
-          </div>
-          {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-[11px] text-forge-dim hover:text-forge-ember">{b.url.replace(/^https?:\/\//, '')} <ExternalLink size={10} /></a>}
-          {b.audit && b.audit.signals.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {b.audit.signals.map((s) => (
-                <span key={s.id} className="inline-flex items-center gap-1 rounded-md bg-forge-raised px-1.5 py-0.5 text-[10.5px] text-forge-dim" title={s.detail}>
-                  <AlertTriangle size={9} className={s.severity === 'high' ? 'text-forge-ember' : 'text-forge-warn'} /> {s.label}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="shrink-0 text-right">
-          {b.built ? (
-            <>
-              <a href={b.built.previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">Open site <ExternalLink size={11} /></a>
-              <div className={cn('mt-1 text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · no email found'}</div>
-            </>
-          ) : (
-            <button onClick={onBuild} disabled={building || !b.url} className="inline-flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-2 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
-              {building ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Build their site
-            </button>
-          )}
-          <button onClick={onClose} className="mt-1 block text-[10.5px] text-forge-dim hover:text-forge-ink">close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
