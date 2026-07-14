@@ -23,12 +23,15 @@ export function ConstellationWeb({ nodes, groups, onOpen, title, height, emptyLa
   useEffect(() => {
     const cv = starRef.current; if (!cv) return;
     const ctx = cv.getContext('2d'); if (!ctx) return;
+    const root = getComputedStyle(document.documentElement);
+    const warm = root.getPropertyValue('--gv-star-warm').trim() || '#F5C9A6';
+    const cool = root.getPropertyValue('--gv-star-cool').trim() || '#C9B6D8';
     const draw = () => {
       const w = cv.clientWidth, h = cv.clientHeight;
       cv.width = w; cv.height = h; ctx.clearRect(0, 0, w, h);
       for (let i = 0; i < 90; i++) {
         ctx.globalAlpha = Math.random() * 0.5 + 0.06;
-        ctx.fillStyle = Math.random() > 0.5 ? '#F5C9A6' : '#C9B6D8';
+        ctx.fillStyle = Math.random() > 0.5 ? warm : cool;
         ctx.beginPath(); ctx.arc(Math.random() * w, Math.random() * h, Math.random() * 1.3 + 0.2, 0, 7); ctx.fill();
       }
     };
@@ -100,33 +103,33 @@ export function ConstellationWeb({ nodes, groups, onOpen, title, height, emptyLa
 const CW_CSS = `
 .cw-root{ position:relative; width:100%; height:min(72vh,620px); border-radius:22px; overflow:hidden;
   background:
-    radial-gradient(1000px 640px at 50% 46%, rgba(245,129,62,.10), transparent 60%),
-    radial-gradient(820px 520px at 82% 84%, rgba(199,123,224,.10), transparent 55%),
-    linear-gradient(160deg,#141019,#1A1421);
-  border:1px solid #2a2233; }
+    radial-gradient(1000px 640px at 50% 46%, rgba(var(--gv-ember-rgb),.10), transparent 60%),
+    radial-gradient(820px 520px at 82% 84%, rgba(var(--gv-violet-rgb),.10), transparent 55%),
+    linear-gradient(160deg,var(--gv-night-1),var(--gv-night-2));
+  border:1px solid var(--gv-night-line); }
 .cw-stars{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; opacity:.5; }
 .cw-links{ position:absolute; inset:0; width:100%; height:100%; }
 .cw-line{ stroke-width:1; opacity:.22; vector-effect:non-scaling-stroke; }
 
 .cw-legend{ position:absolute; top:12px; left:14px; z-index:4; display:flex; flex-wrap:wrap; gap:12px; }
-.cw-leg{ font:600 11.5px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:#C6BAD0; display:inline-flex; align-items:center; gap:6px; }
-.cw-leg b{ color:#F1E9DD; font-variant-numeric:tabular-nums; }
+.cw-leg{ font:600 11.5px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--gv-night-dim2); display:inline-flex; align-items:center; gap:6px; }
+.cw-leg b{ color:var(--gv-night-ink); font-variant-numeric:tabular-nums; }
 .cw-dot{ width:9px; height:9px; border-radius:50%; }
-.cw-title{ position:absolute; top:12px; right:16px; z-index:4; font:600 12px/1 -apple-system,sans-serif; color:#A99BB0; }
-.cw-empty{ position:absolute; inset:0; display:grid; place-items:center; color:#A99BB0; font:400 14px/1.5 -apple-system,sans-serif; text-align:center; padding:0 20px; }
+.cw-title{ position:absolute; top:12px; right:16px; z-index:4; font:600 12px/1 -apple-system,sans-serif; color:var(--gv-night-dim); }
+.cw-empty{ position:absolute; inset:0; display:grid; place-items:center; color:var(--gv-night-dim); font:400 14px/1.5 -apple-system,sans-serif; text-align:center; padding:0 20px; }
 
 .cw-hub{ position:absolute; transform:translate(-50%,-50%); z-index:1; }
 .cw-hubdot{ display:block; width:10px; height:10px; border-radius:50%; opacity:.7; }
 
 .cw-node{ position:absolute; transform:translate(-50%,-50%); z-index:2; cursor:pointer; background:none; border:none; padding:0;
-  display:flex; flex-direction:column; align-items:center; gap:5px; color:#F1E9DD; font:inherit;
+  display:flex; flex-direction:column; align-items:center; gap:5px; color:var(--gv-night-ink); font:inherit;
   transition:transform .2s cubic-bezier(.2,.7,.2,1); }
 .cw-node:hover{ transform:translate(-50%,-50%) scale(1.14); z-index:5; }
 .cw-node:focus-visible{ outline:none; }
 .cw-orb{ position:relative; border-radius:50%; border:1.5px solid; display:grid; place-items:center; transition:.2s ease; }
-.cw-node:focus-visible .cw-orb{ box-shadow:0 0 0 2px #F5813E !important; }
+.cw-node:focus-visible .cw-orb{ box-shadow:0 0 0 2px var(--gv-ember) !important; }
 .cw-badge{ position:absolute; top:-6px; right:-6px; min-width:17px; height:17px; padding:0 4px; border-radius:999px;
-  background:#221B2B; border:1px solid #3A2E47; color:#F1E9DD; font:700 10px/17px -apple-system,sans-serif; text-align:center; }
+  background:var(--gv-night-orb); border:1px solid var(--gv-night-line2); color:var(--gv-night-ink); font:700 10px/17px -apple-system,sans-serif; text-align:center; }
 .cw-lab{ font:600 11px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; max-width:120px; text-align:center;
   opacity:0; transition:opacity .15s ease; text-shadow:0 1px 6px rgba(0,0,0,.7); pointer-events:none;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

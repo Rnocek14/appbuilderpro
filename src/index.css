@@ -4,6 +4,62 @@
 
 :root {
   color-scheme: dark;
+
+  /* ─── Garvis design tokens ────────────────────────────────────────────────
+     ONE ember. The brand orange had drifted into three (forge #FF8A3D,
+     canvas #F5813E, sheet #E4631C) plus stray light/deep variants — so the
+     canvases, the sheets, and the shell each read like a slightly different
+     app. These reconcile them to a single ember scale, one violet, and the
+     two fixed materials the surfaces are built from: NIGHT (the dark canvas /
+     sky) and PAPER (the cream sheets that open over it). Canvas and sheet CSS
+     reference these tokens — no raw hex lives in the components anymore. */
+
+  /* Ember — the single brand heat, as a scale: heat → base → deep → ink */
+  --gv-ember-heat: #FFB573;    /* lightest — badge / spark highlights        */
+  --gv-ember:      #FF8A3D;    /* base — the brand orange                    */
+  --gv-ember-deep: #E5631F;    /* deep — borders, gradients, text-on-light   */
+  --gv-ember-ink:  #B44A12;    /* deepest — hover text on paper (contrast)   */
+  --gv-ember-rgb:  255,138,61; /* base as an rgb triplet, for glows          */
+  --gv-ember-grad: linear-gradient(150deg, var(--gv-ember-deep), var(--gv-ember));
+
+  /* Violet — the one secondary accent (connections, people, contacts) */
+  --gv-violet:      #C77BE0;
+  --gv-violet-line: #4A3A52;   /* dim violet orb border                      */
+  --gv-violet-rgb:  199,123,224;
+
+  /* NIGHT — the dark canvas / sky material */
+  --gv-night-1:     #141019;   /* gradient top                               */
+  --gv-night-2:     #1A1421;   /* gradient bottom / deep panel               */
+  --gv-night-orb:   #221B2B;   /* orb + video-card surface                   */
+  --gv-night-line:  #2A2233;   /* canvas border                              */
+  --gv-night-line2: #3A2E47;   /* orb border, badge border                   */
+  --gv-night-warm:  #4A3A2C;   /* warm (center) orb border                   */
+  --gv-night-ink:   #F1E9DD;   /* bright text on night                       */
+  --gv-night-dim:   #A99BB0;   /* muted text on night                        */
+  --gv-night-dim2:  #C6BAD0;   /* legend text                                */
+  --gv-star-warm:   #F5C9A6;   /* starfield warm dot                         */
+  --gv-star-cool:   #C9B6D8;   /* starfield cool dot                         */
+  --gv-scrim:       rgba(12,8,16,.66); /* overlay backdrop                   */
+
+  /* PAPER — the cream sheet material that opens over the night */
+  --gv-paper:        #FBF9F5;  /* sheet surface                              */
+  --gv-paper-raised: #FFFFFF;  /* inputs / cards / chips on the sheet        */
+  --gv-paper-ink:    #2A2320;  /* heading + body text                        */
+  --gv-paper-dim:    #8A8076;  /* secondary text                             */
+  --gv-paper-note:   #7A7066;  /* note body text                             */
+  --gv-paper-faint:  #A89F94;  /* faintest captions                          */
+  --gv-paper-line:   #E7E0D6;  /* default border                             */
+  --gv-paper-line2:  #EDE6DC;  /* divider / hover fill                       */
+  --gv-paper-tint:   #FBEDE2;  /* ember-tinted selection                     */
+  --gv-paper-warm:   #FBF3E9;  /* warm callout fill                          */
+  --gv-paper-warmln: #F0DFC8;  /* warm callout border                        */
+
+  /* Semantic — on paper */
+  --gv-ok:      #3C8A5B;
+  --gv-ok-fill: #E9F3EC;
+  --gv-ok-line: #BFE0CB;
+  --gv-warn:    #B8860B;
+  --gv-err:     #C0492B;
 }
 
 html.light { color-scheme: light; }
@@ -16,11 +72,11 @@ html.light body {
   @apply bg-[#F7F6F3] text-[#1B1D24];
 }
 
-::selection { background: rgba(255, 138, 61, 0.35); }
+::selection { background: rgba(var(--gv-ember-rgb), 0.35); }
 
 /* focus visibility — quality floor */
 :focus-visible {
-  outline: 2px solid #ff8a3d;
+  outline: 2px solid var(--gv-ember);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -46,7 +102,7 @@ html.light body {
   position: absolute;
   left: 0; right: 0; bottom: -1px;
   height: 2px;
-  background: linear-gradient(90deg, transparent, #ff8a3d 30%, #ffb573 50%, #ff8a3d 70%, transparent);
+  background: linear-gradient(90deg, transparent, var(--gv-ember) 30%, var(--gv-ember-heat) 50%, var(--gv-ember) 70%, transparent);
   border-radius: 2px;
 }
 
@@ -59,7 +115,7 @@ html.light body {
 .card-lift:hover {
   transform: translateY(-3px);
   box-shadow: 0 12px 32px -12px rgba(0,0,0,.6), 0 2px 8px -4px rgba(0,0,0,.4);
-  border-color: rgba(255,138,61,.35);
+  border-color: rgba(var(--gv-ember-rgb),.35);
 }
 
 /* skeleton shimmer loader — replaces bare spinners */
