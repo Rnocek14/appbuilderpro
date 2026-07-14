@@ -11,39 +11,42 @@ import { usePreviewClaims } from '../../hooks/usePreviewClaims';
 import { cn } from '../../lib/utils';
 import { CommandPalette } from '../CommandPalette';
 
-// Grouped nav — one labeled section per job so the sidebar reads at a glance instead of as one long
-// list. BUILD leads (it's the product a new user came for); Garvis (the portfolio OS) follows;
-// Labs is admin-only. Onboarding finding: the first screen must answer "where do I build?" instantly.
+// Grouped nav — one labeled section per job so the sidebar reads at a glance. This is a Garvis
+// deployment: the business OS LEADS (it's what the operator came for); the app builder is a real,
+// still-reachable capability ("edit apps") demoted below it under "Apps", not removed. Labs is
+// admin-only. The unified identity fixed the "split brand" confusion (FableForge vs Garvis).
 const navSections = [
   {
-    title: 'Build',
-    items: [
-      { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
-      { to: '/new', label: 'New project', icon: Plus },
-      { to: '/import', label: 'Import', icon: FolderDown },
-      { to: '/autopilot', label: 'Autopilot', icon: Bot },
-      { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
-    ],
-  },
-  {
-    // Command leads — the waking moment is the product's front door; the altitude stack
-    // UX REDESIGN (docs/garvis-ux-redesign): workflow pillars, not subsystems. The legacy
-    // portfolio pages (Overview/Mind/Mission Control/Missions/Opportunities/Marketing/Health)
-    // keep their ROUTES (nothing 404s; deep links + banners still work) but leave the nav —
-    // their jobs live in Command (the thread), Ventures, Inbox, and Settings. The skies
-    // (Universe/System) stay reachable from Ventures and the palette, not as destinations.
-    title: 'Garvis',
+    // Command is the front door; the altitude stack (Universe/System) stays reachable from
+    // Businesses and the palette. Legacy portfolio pages keep their ROUTES (nothing 404s) but
+    // live off-nav — their jobs are inside Command, Businesses, Queue, and Settings.
+    title: 'Operate',
     items: [
       { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
       // ONE QUEUE (design review P0): approvals + replies/leads + build questions, one room.
       // The old Inbox/Approvals/Build-questions routes redirect here; the badge sums all lanes.
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
-      { to: '/garvis/webs', label: 'Ventures', icon: Waypoints },
+      { to: '/garvis/webs', label: 'Businesses', icon: Waypoints },
       { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
       { to: '/garvis/contacts', label: 'Contacts', icon: Users },
       // ONE MEMORY (design review P2): Library + Mind, one door. Old routes stay reachable.
       { to: '/garvis/memory', label: 'Memory', icon: BrainCircuit },
+      // THE GALAXY — the 3D view of every business, first-class again (it was palette-only). The
+      // "3D, good-looking" surface a new operator expects to find, one click from anywhere.
+      { to: '/garvis/universe', label: 'Galaxy', icon: Telescope },
+    ],
+  },
+  {
+    // The app builder — a capability, not the headline. Kept fully reachable so apps can still be
+    // built and edited; just no longer the first thing an operator sees.
+    title: 'Apps',
+    items: [
+      { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
+      { to: '/new', label: 'New app', icon: Plus },
+      { to: '/import', label: 'Import', icon: FolderDown },
+      { to: '/autopilot', label: 'Autopilot', icon: Bot },
+      { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],
   },
   {
@@ -143,7 +146,7 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
     <aside className={cn('flex h-full flex-col border-r border-forge-border bg-forge-panel', collapsed ? 'w-16' : 'w-60')}>
       <div className={cn('flex items-center py-4', collapsed ? 'flex-col gap-2 px-2' : 'gap-2 px-4')}>
         <Flame size={20} className="shrink-0 text-forge-ember" />
-        {!collapsed && <span className="font-display text-lg font-semibold tracking-tight">FableForge</span>}
+        {!collapsed && <span className="font-display text-lg font-semibold tracking-tight">Garvis</span>}
         {collapsible && (
           <button
             onClick={() => setCollapsed((v) => !v)}
@@ -298,7 +301,7 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
             {mobileOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
           <Flame size={18} className="text-forge-ember" />
-          <span className="font-display font-semibold">FableForge</span>
+          <span className="font-display font-semibold">Garvis</span>
         </header>
         <main className={cn('flex-1 overflow-y-auto panel-scroll', !fullBleed && 'p-6')}>{children}</main>
       </div>

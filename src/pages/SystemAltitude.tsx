@@ -70,7 +70,7 @@ export default function SystemAltitude() {
       <AppShell>
         <div className="mx-auto max-w-2xl px-4 py-16 text-center">
           <p className="text-forge-dim">This system could not be loaded.</p>
-          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Ventures</Link>
+          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Businesses</Link>
         </div>
       </AppShell>
     );

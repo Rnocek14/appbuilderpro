@@ -40,7 +40,7 @@ export function QuickStartRealEstate({ onToast }: { onToast: (k: 'success' | 'er
       onToast('success', `Created “${web.title}” — every studio is set up. Open one and press Generate.`);
       navigate(`/garvis/webs/${web.worldId}`); // the world opens on its first studio
     } catch (e) {
-      onToast('error', e instanceof Error ? e.message : 'Could not set up the venture.');
+      onToast('error', e instanceof Error ? e.message : 'Could not set up the business.');
       setBusy(false);
     }
   };

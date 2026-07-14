@@ -1394,8 +1394,8 @@ export default function ProjectWorkspace() {
         <div className="mb-3 rounded-lg border border-forge-ember/40 bg-forge-ember/10 p-3">
           <p className="text-xs text-forge-ink">
             <b>One-click setup.</b> {isProviderConnected('supabase')
-              ? 'FableForge creates a dedicated database for this app in your connected Supabase org, wires it up, and applies the schema — automatically.'
-              : 'FableForge Cloud creates and manages a database for this app automatically — no Supabase account needed. (Or connect your own Supabase in Settings → Connections to own it.)'}
+              ? 'Garvis creates a dedicated database for this app in your connected Supabase org, wires it up, and applies the schema — automatically.'
+              : 'Garvis Cloud creates and manages a database for this app automatically — no Supabase account needed. (Or connect your own Supabase in Settings → Connections to own it.)'}
           </p>
           <Button size="sm" className="mt-2" loading={provisioning} onClick={provisionDatabase}>
             <Database size={13} /> Set up database
@@ -1415,7 +1415,7 @@ export default function ProjectWorkspace() {
             </p>
           ) : (
             <p className="text-xs text-forge-dim">
-              No backend yet. Generate one from this app's code — FableForge infers the data model and writes a
+              No backend yet. Generate one from this app's code — Garvis infers the data model and writes a
               Supabase migration (tables + RLS + auth) plus a typed client.
             </p>
           )}
@@ -1562,7 +1562,7 @@ export default function ProjectWorkspace() {
           </div>
           <p className="mt-1 text-[11px] text-forge-dim">
             {hasDb ? 'This app has a live database. View or query it any time.'
-              : 'Create a database for this app — one click. FableForge Cloud sets one up automatically (or uses your connected Supabase).'}
+              : 'Create a database for this app — one click. Garvis Cloud sets one up automatically (or uses your connected Supabase).'}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button size="sm" loading={provisioning} onClick={provisionDatabase}>

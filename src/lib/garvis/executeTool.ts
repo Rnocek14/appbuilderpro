@@ -393,7 +393,7 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
         ok: true, order_id: order.id, label: order.label, cadence: order.cadence,
         first_run_at: order.nextRunAt,
         world: matchedWorld,
-        note: `Standing order set${matchedWorld ? ` on the world "${matchedWorld}"` : ' (no world attached — it appears in the Ventures page\'s standing-orders panel)'}. It runs on the heartbeat; real findings land in the waking moment. It only reads and records — nothing is ever sent automatically.`,
+        note: `Standing order set${matchedWorld ? ` on the world "${matchedWorld}"` : ' (no world attached — it appears in the Businesses page\'s standing-orders panel)'}. It runs on the heartbeat; real findings land in the waking moment. It only reads and records — nothing is ever sent automatically.`,
       };
     }
 

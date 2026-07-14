@@ -394,7 +394,7 @@ export default function Garvis() {
           <Sparkles size={16} className="shrink-0 text-forge-ember" />
           <p className="text-sm text-forge-ink/90">
             Garvis has a new front door — <Link to="/garvis/command" className="text-forge-ember hover:underline">Command</Link> wakes with what matters,{' '}
-            <Link to="/garvis/webs" className="text-forge-ember hover:underline">Ventures</Link> is where missions live, and the{' '}
+            <Link to="/garvis/webs" className="text-forge-ember hover:underline">Businesses</Link> is where missions live, and the{' '}
             <Link to="/garvis/universe" className="text-forge-ember hover:underline">Universe</Link> shows everything in one sky.
           </p>
           {!armed && (

@@ -32,7 +32,7 @@ export default function Pricing() {
       <header className="mx-auto flex max-w-4xl items-center justify-between px-6 py-5">
         <Link to="/" className="flex items-center gap-2">
           <Flame size={20} className="text-forge-ember" />
-          <span className="font-display font-semibold">FableForge</span>
+          <span className="font-display font-semibold">Garvis</span>
         </Link>
         <Link to={session ? '/dashboard' : '/auth'} className="text-sm text-forge-dim hover:text-forge-ink">
           {session ? 'Dashboard' : 'Sign in'}

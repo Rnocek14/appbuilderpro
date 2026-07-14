@@ -75,7 +75,7 @@ export function WakingMoment({ name }: { name: string }) {
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <button onClick={() => navigate('/garvis/webs')}
             className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
-            <b className="font-medium text-forge-ink">Start a venture</b> — a business or product with studios
+            <b className="font-medium text-forge-ink">Start a business</b> — set up marketing, contacts, and studios
           </button>
           <button onClick={() => navigate('/garvis/explore')}
             className="rounded-lg border border-forge-border px-3 py-1.5 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ember">
@@ -114,7 +114,7 @@ export function WakingMoment({ name }: { name: string }) {
       {quiet && (
         <p className="mt-1 text-sm text-forge-dim">
           All quiet — no replies waiting, nothing blocked, nothing new since you last looked.{' '}
-          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your ventures</button>
+          <button onClick={() => navigate('/garvis/webs')} className="text-forge-ember hover:underline">Open your businesses</button>
           {' '}to push something forward.
         </p>
       )}

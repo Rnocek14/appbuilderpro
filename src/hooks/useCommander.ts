@@ -45,21 +45,21 @@ async function resolveStudio(surface: StudioSurface, worldName: string | null):
   Promise<{ canvas?: StudioCanvas; reason?: string }> {
   const { data: worlds } = await supabase.from('knowledge_worlds').select('id, title').limit(100);
   const all = ((worlds ?? []) as { id: string; title: string }[]);
-  if (!all.length) return { reason: 'You have no ventures yet — create one in Ventures and I can open its studios.' };
+  if (!all.length) return { reason: 'You have no businesses yet — create one in Businesses and I can open its studios.' };
   let world = worldName
     ? all.find((w) => w.title.toLowerCase() === worldName.toLowerCase())
       ?? all.find((w) => w.title.toLowerCase().includes(worldName.toLowerCase()))
     : (all.length === 1 ? all[0] : undefined);
   if (!world) {
     return { reason: worldName
-      ? `I don't see a venture named “${worldName}” — yours are: ${all.map((w) => w.title).join(', ')}.`
-      : `Which venture? You have: ${all.map((w) => w.title).join(', ')}.` };
+      ? `I don't see a business named “${worldName}” — yours are: ${all.map((w) => w.title).join(', ')}.`
+      : `Which business? You have: ${all.map((w) => w.title).join(', ')}.` };
   }
   const { data: clusters } = await supabase.from('knowledge_clusters')
     .select('id, slug, title, charter').eq('world_id', world.id).not('charter', 'is', null).limit(100);
   const hit = ((clusters ?? []) as { id: string; slug: string; charter: { flavor?: string } | null }[])
     .find((c) => c.charter?.flavor === FLAVOR_FOR[surface]);
-  if (!hit) return { reason: `${world.title} doesn't have a ${surface === 'mailer' ? 'postcard' : 'video'} studio area yet — open the venture and add one, or ask me to draft it.` };
+  if (!hit) return { reason: `${world.title} doesn't have a ${surface === 'mailer' ? 'postcard' : 'video'} studio area yet — open the business and add one, or ask me to draft it.` };
   return { canvas: { surface, worldId: world.id, clusterId: hit.id, clusterSlug: hit.slug, worldTitle: world.title } };
 }
 

@@ -209,7 +209,7 @@ export default function WorkWeb() {
       <AppShell>
         <div className="mx-auto max-w-2xl px-4 py-16 text-center">
           <p className="text-forge-dim">This web could not be loaded.</p>
-          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Ventures</Link>
+          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Businesses</Link>
         </div>
       </AppShell>
     );
@@ -259,7 +259,7 @@ export default function WorkWeb() {
             {templatePlay && (
               <button
                 onClick={() => void doRunPlay()} disabled={running}
-                title="Generates starter content across every studio in this venture at once"
+                title="Generates starter content across every studio in this business at once"
                 className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-60"
               >
                 {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
@@ -547,6 +547,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
   }, [artifacts]);
   const [loadingArts, setLoadingArts] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
+  // The world's brand accent tints the artifact previews (a postcard in her colors, not grey).
+  const [brandAccent, setBrandAccent] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    getBrandKit(worldId).then((k) => { if (live) setBrandAccent(k?.palette?.[0]); }).catch(() => {});
+    return () => { live = false; };
+  }, [worldId]);
 
   const reload = useCallback(async () => {
     try {
@@ -830,7 +837,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           </p>
         ) : (
           <div className="space-y-2">
-            {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} onChanged={bumpChanged} />)}
+            {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} onChanged={bumpChanged} accent={brandAccent} />)}
           </div>
         )}
       </div>

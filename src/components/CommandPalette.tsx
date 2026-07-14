@@ -66,7 +66,7 @@ export function CommandPalette({ open, onClose }: Props) {
     const commands: PaletteItem[] = [
       { id: 'new', label: 'New project', icon: Plus, run: () => navigate('/new') },
       { id: 'garvis-command', label: 'Garvis: Command (waking moment)', icon: Sparkles, run: () => navigate('/garvis/command') },
-      { id: 'garvis-webs', label: 'Garvis: Ventures (work webs)', icon: Waypoints, run: () => navigate('/garvis/webs') },
+      { id: 'garvis-webs', label: 'Garvis: Businesses', icon: Waypoints, run: () => navigate('/garvis/webs') },
       { id: 'garvis-universe', label: 'Garvis: Universe (all worlds, 3D)', icon: Telescope, run: () => navigate('/garvis/universe') },
       { id: 'garvis-universe-flat', label: 'Garvis: Universe (2D map)', icon: Telescope, run: () => navigate('/garvis/universe?mode=flat') },
       { id: 'garvis-explore', label: 'Garvis: Explore (rabbitholes)', icon: Search, run: () => navigate('/garvis/explore') },

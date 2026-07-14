@@ -43,7 +43,7 @@ export default function Auth() {
       <Card className="w-full max-w-sm p-6">
         <div className="mb-6 flex items-center gap-2">
           <Flame size={20} className="text-forge-ember" />
-          <span className="font-display text-lg font-semibold">FableForge</span>
+          <span className="font-display text-lg font-semibold">Garvis</span>
         </div>
 
         {!configured && (

@@ -76,8 +76,8 @@ export default function WorkWebs() {
             <Waypoints size={20} className="text-forge-ember" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-forge-ink">Ventures</h1>
-            <p className="text-sm text-forge-dim">A venture isn't a checklist — it's a living territory. Every area is a workspace with its own tools.</p>
+            <h1 className="text-xl font-semibold text-forge-ink">Businesses</h1>
+            <p className="text-sm text-forge-dim">A business here isn't a checklist — it's a living operation. Every area is a workspace with its own tools.</p>
           </div>
           <button
             onClick={() => navigate('/garvis/universe')}
@@ -164,7 +164,7 @@ export default function WorkWebs() {
         {loading ? (
           <Spinner label="Loading your webs…" />
         ) : webs.length === 0 ? (
-          <EmptyState icon={<Waypoints size={20} />} title="No ventures yet" body="Pick a template above to build the whole operation in one click — it works right now, no setup. Or describe your own in 'Start from intent' and Garvis designs it around your objective." />
+          <EmptyState icon={<Waypoints size={20} />} title="No businesses yet" body="Pick a template above to build the whole operation in one click — it works right now, no setup. Or describe your own in 'Start from intent' and Garvis designs it around your objective." />
         ) : (
           <div className="mb-10 grid gap-3 sm:grid-cols-2">
             {webs.map((w) => (
@@ -198,7 +198,7 @@ function TemplatesSection({ creating, onCreate }: { creating: string | null; onC
     <div className="mb-6">
       <div className="mb-2 flex items-center gap-2">
         <h2 className="text-sm font-semibold text-forge-ink">Build in one click</h2>
-        <span className="text-xs text-forge-dim">— a ready-made venture, fully set up. Works right now, no AI key needed.</span>
+        <span className="text-xs text-forge-dim">— a ready-made business, fully set up. Works right now, no AI key needed.</span>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {WEB_TEMPLATES.map((t) => {
@@ -216,7 +216,7 @@ function TemplatesSection({ creating, onCreate }: { creating: string | null; onC
                 className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-2 text-sm font-medium text-forge-ember transition-colors hover:bg-forge-ember/20 disabled:opacity-50"
               >
                 {creating === t.id ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                Create venture
+                Create business
               </button>
             </Card>
           );
