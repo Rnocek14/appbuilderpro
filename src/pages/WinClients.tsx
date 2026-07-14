@@ -15,6 +15,7 @@ import { auditIssues, type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
 import { ProspectCanvas } from '../components/garvis/canvas/ProspectCanvas';
+import { CanvasScene, type CanvasNode } from '../components/garvis/canvas/CanvasScene';
 import { ingestBusinessProfile } from '../lib/preview/engine';
 import { queuePitch } from '../lib/garvis/outreach';
 import { cn } from '../lib/utils';
@@ -44,6 +45,7 @@ export default function WinClients() {
   const [searched, setSearched] = useState(false);
   const [view, setView] = useState<'list' | 'web'>('list');
   const [selected, setSelected] = useState<number | null>(null);
+  const [stage, setStage] = useState<'hub' | 'find'>('hub'); // enter on the pipeline canvas
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
 
   const find = async () => {
@@ -109,9 +111,39 @@ export default function WinClients() {
     return { id: String(i), label: b.name, group: v, metric, badge: score ?? '?' };
   });
 
+  // Pipeline stage counts (this session) — honest zeros until you've done the work.
+  const builtCount = rows.filter((r) => r.built).length;
+  const queuedCount = rows.filter((r) => r.built?.queued).length;
+  const pipeCenter = {
+    kicker: 'Win clients',
+    title: searched && (niche.trim() || area.trim()) ? [niche.trim(), area.trim()].filter(Boolean).join(' · ') : 'Win new clients',
+    sub: searched ? `${rows.length} found` : 'find businesses to pitch',
+  };
+  const pipeNodes: CanvasNode[] = [
+    { key: 'find', emoji: '🔎', label: 'Find', sub: searched ? `${rows.length} found` : 'start here' },
+    { key: 'built', emoji: '✨', label: 'Sites built', sub: builtCount ? `${builtCount} ready` : 'none yet', count: builtCount, dim: builtCount === 0 },
+    { key: 'pitch', emoji: '✉️', label: 'Pitches', sub: queuedCount ? `${queuedCount} in Queue` : 'none yet', count: queuedCount, accent: 'violet', dim: queuedCount === 0 },
+    { key: 'clients', emoji: '🤝', label: 'Clients', sub: 'deploy · soon', dim: true },
+  ];
+  const onHub = (k: string) => {
+    if (k === 'clients') { toast('info', 'Deploy + the monthly retainer are next — that turns a “yes” into their real live site.'); return; }
+    setStage('find'); // find / sites built / pitches all open the results, where each row shows its state
+  };
+
   return (
     <AppShell>
+      {stage === 'hub' ? (
+        <div className="mx-auto max-w-4xl px-4 py-6">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Globe size={18} /></span>
+            <h1 className="text-xl font-semibold text-forge-ink">Win new clients</h1>
+          </div>
+          <p className="mb-4 text-sm text-forge-dim">Your pipeline — tap a stage to work it. Nothing sends without your approval.</p>
+          <CanvasScene center={pipeCenter} nodes={pipeNodes} onOpen={onHub} height="min(66vh,520px)" />
+        </div>
+      ) : (
       <div className="mx-auto max-w-4xl px-4 py-6">
+        <button onClick={() => setStage('hub')} className="mb-3 inline-flex items-center gap-1 text-xs text-forge-dim hover:text-forge-ember">← Pipeline</button>
         <div className="mb-1 flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Globe size={18} /></span>
           <h1 className="text-xl font-semibold text-forge-ink">Win new clients</h1>
@@ -215,6 +247,7 @@ export default function WinClients() {
           </div>
         )}
       </div>
+      )}
 
       {/* tap a prospect → its own web (canvas): their site, the new site, the pitch, contact */}
       {selected != null && rows[selected] && (
