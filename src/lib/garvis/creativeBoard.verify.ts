@@ -4,7 +4,7 @@
 // tiles + renditions land WITHOUT overlapping (the whole point of "spread out and compare").
 import {
   emptyBoard, addTile, patchTile, setTileContent, moveTile, toggleFavorite, removeTile,
-  getTile, childrenOf, lineageOf, favorites, nextRootPosition, childPosition, boardExtent,
+  getTile, childrenOf, lineageOf, favorites, nextRootPosition, childPosition, boardExtent, tidyByTime,
   type Board, type BoardTile, type BoardMetrics,
 } from './creativeBoard';
 
@@ -93,6 +93,20 @@ const tile = (id: string, parentId: string | null, x: number, y: number): BoardT
   check('empty extent is one padded tile', boardExtent(b, M).w === M.w + 80 && boardExtent(b, M).h === M.h + 80);
   b = addTile(b, tile('a', null, 500, 400));
   check('extent covers the far tile + pad', boardExtent(b, M).w === 500 + M.w + 40 && boardExtent(b, M).h === 400 + M.h + 40);
+}
+
+// --- tidy: re-lay tiles into a clean time-ordered grid, no overlaps ------------------------
+{
+  let b: Board<string> = emptyBoard();
+  b = addTile(b, { id: 'old', prompt: 'p', parentId: null, content: 'c-old', x: 500, y: 500, favorite: true, createdAt: 100 });
+  b = addTile(b, { id: 'mid', prompt: 'p', parentId: null, content: 'c-mid', x: 900, y: 20, favorite: false, createdAt: 200 });
+  b = addTile(b, { id: 'new', prompt: 'p', parentId: 'old', content: 'c-new', x: 40, y: 900, favorite: false, createdAt: 300 });
+  const t = tidyByTime(b, M, 'desc');
+  check('tidy orders newest-first at the origin', t.tiles[0].id === 'new' && t.tiles[0].x === M.pad && t.tiles[0].y === M.pad);
+  check('tidy keeps all tiles + content + favorites + lineage', t.tiles.length === 3 && !!getTile(t, 'old')?.favorite && getTile(t, 'new')?.parentId === 'old');
+  const clean = t.tiles.every((a, i) => t.tiles.every((c, j) => i === j || Math.abs(a.x - c.x) >= M.w - 1 || Math.abs(a.y - c.y) >= M.h - 1));
+  check('tidy grid never overlaps', clean);
+  check('tidy asc orders oldest-first', tidyByTime(b, M, 'asc').tiles[0].id === 'old');
 }
 
 console.log(`\ncreativeBoard.verify: ${passed} passed, ${failed} failed`);

@@ -37,7 +37,8 @@ import { parseFarmCsv, partitionMailable, farmMath, type FarmRecipient, type Far
 import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { supabase } from '../../../lib/supabase';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
-import { EmailStudio } from '../EmailStudio';
+import { EmailBoard } from './EmailBoard';
+import { BrandBoard } from './BrandBoard';
 import { PostcardBoard } from './PostcardBoard';
 import { SocialBoard } from './SocialBoard';
 import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
@@ -49,7 +50,7 @@ import type { MailerBrand } from '../../../lib/garvis/mailer';
 import { cn } from '../../../lib/utils';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
-type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis';
+type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding';
 
 // Rendition concepts to cycle when you "spin another" postcard — same real materials, a genuinely
 // different design mechanism each time.
@@ -117,6 +118,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
     { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers' },
+    { key: 'branding', emoji: '🎨', label: 'Branding', sub: 'logo concepts' },
   ];
 
   const addSat = (nodeKey: string) => setSats((s) => [...s, { nodeKey, id: `${nodeKey}-${s.length}-${(s.length * 7 + 3) % 97}` }]);
@@ -127,7 +129,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     // photos, the MLS, the brand), so they don't require the campaign details to be filled first.
     // The postcard board loads the world's own materials (brand, photos, context), so it — like the
     // other studios — opens straight to work without first filling the campaign details form.
-    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && key !== 'social' && key !== 'postcard' && !ready) { setOpen('center'); return; }
+    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && key !== 'social' && key !== 'postcard' && key !== 'branding' && !ready) { setOpen('center'); return; }
     setOpen(key);
   };
 
@@ -161,9 +163,9 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
         </BoardOverlay>
       )}
       {open === 'email' && (
-        <Sheet emoji="✉️" title="Email" lead="Ideas + worked examples — pick one, spin the angle, edit, and save." onClose={() => setOpen(null)}>
-          <EmailStudio worldId={worldId} clusterId={targetCluster} onToast={onToast} />
-        </Sheet>
+        <BoardOverlay title="Email board" onClose={() => setOpen(null)}>
+          <EmailBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
+        </BoardOverlay>
       )}
       {open === 'people' && (
         <PeopleSheet realEstate={realEstate} worldId={worldId} onToast={onToast} onClose={() => setOpen(null)} />
@@ -175,6 +177,11 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
       )}
       {open === 'analysis' && (
         <AnalysisSheet realEstate={realEstate} area={details?.area ?? ''} onClose={() => setOpen(null)} />
+      )}
+      {open === 'branding' && (
+        <BoardOverlay title="Branding board" onClose={() => setOpen(null)}>
+          <BrandBoard worldId={worldId} clusterId={targetCluster} onToast={onToast} />
+        </BoardOverlay>
       )}
     </div>
   );

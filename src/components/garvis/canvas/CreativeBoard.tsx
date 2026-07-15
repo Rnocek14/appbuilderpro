@@ -8,10 +8,10 @@
 // this shell unchanged.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Sparkles, Loader2, Star, Wand2, Maximize2, Trash2, Crosshair, Printer, X } from 'lucide-react';
+import { Sparkles, Loader2, Star, Wand2, Maximize2, Trash2, Crosshair, Printer, X, Search, LayoutGrid } from 'lucide-react';
 import {
   emptyBoard, addTile, moveTile, removeTile, toggleFavorite, setTileContent, getTile,
-  nextRootPosition, childPosition, favorites as favTiles,
+  nextRootPosition, childPosition, favorites as favTiles, tidyByTime,
   type Board, type BoardMetrics,
 } from '../../../lib/garvis/creativeBoard';
 import { loadBoard, saveBoard } from '../../../lib/garvis/clusterState';
@@ -53,6 +53,7 @@ export interface CreativeBoardAdapter<C> {
   renderFocus: (content: C, api: FocusApi<C>) => ReactNode;
   renderPrint?: (content: C) => ReactNode;   // full print-size render (for Export)
   printCss?: string;                          // @page + hide rules for Export
+  searchText?: (content: C) => string;        // extra searchable text (beyond the tile's prompt)
 }
 
 export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
@@ -69,6 +70,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   const [renditionFor, setRenditionFor] = useState<string | null>(null);
   const [renditionText, setRenditionText] = useState('');
   const [favOnly, setFavOnly] = useState(false);
+  const [search, setSearch] = useState('');
   const [printing, setPrinting] = useState<C[] | null>(null);
 
   // ---- load + persist (debounced) --------------------------------------------------------
@@ -168,7 +170,9 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     if (d && d.mode === 'tile' && !d.moved && clickId) setFocusId(clickId);
   };
 
-  const shown = favOnly ? board.tiles.filter((t) => t.favorite) : board.tiles;
+  const q = search.trim().toLowerCase();
+  const base = favOnly ? board.tiles.filter((t) => t.favorite) : board.tiles;
+  const shown = q ? base.filter((t) => `${t.prompt} ${adapter.searchText ? adapter.searchText(t.content) : ''}`.toLowerCase().includes(q)) : base;
   const scale = M.w / adapter.designWidth;
   const focusTile = focusId ? getTile(board, focusId) : null;
   const favs = useMemo(() => favTiles(board), [board]);
@@ -208,9 +212,11 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <p className="truncate text-[11.5px] text-forge-dim">{adapter.subtitle}</p>
           </div>
           <div className="flex items-center gap-1.5">
+            <span className="cb-searchwrap"><Search size={12} className="text-forge-dim" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search" className="cb-search" /></span>
             <button onClick={() => setFavOnly((v) => !v)} className={cn('cb-tool', favOnly && 'cb-tool-on')} title="Show only starred">
               <Star size={13} className={favOnly ? 'fill-current' : ''} /> {favs.length}
             </button>
+            <button onClick={() => { setBoard((b) => tidyByTime(b, M, 'desc')); setPan({ x: 0, y: 0 }); }} className="cb-tool" title="Tidy — arrange newest first"><LayoutGrid size={13} /> Tidy</button>
             <button onClick={() => setPan({ x: 0, y: 0 })} className="cb-tool" title="Recenter"><Crosshair size={13} /></button>
             {adapter.renderPrint && <button onClick={doExport} className="cb-tool" title="Print the starred cards"><Printer size={13} /> Print</button>}
           </div>
@@ -325,6 +331,9 @@ const CB_CSS = `
 .cb-tool{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:4px 8px;border-radius:8px;border:1px solid var(--forge-border,#3a2f25);color:var(--forge-dim,#a99b90);background:transparent}
 .cb-tool:hover{color:var(--forge-ink,#f0e6da);border-color:rgba(255,138,61,.5)}
 .cb-tool-on{color:#f4b942;border-color:rgba(244,185,66,.5);background:rgba(244,185,66,.08)}
+.cb-searchwrap{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;border:1px solid var(--forge-border,#3a2f25)}
+.cb-search{background:transparent;border:none;outline:none;color:var(--forge-ink,#f0e6da);font-size:11px;width:96px}
+.cb-search::placeholder{color:var(--forge-dim,#a99b90)}
 .cb-chip{font-size:11px;padding:4px 9px;border-radius:999px;border:1px solid var(--forge-border,#3a2f25);color:var(--forge-dim,#a99b90);background:transparent;white-space:nowrap}
 .cb-chip:hover{color:var(--forge-ink,#f0e6da)}
 .cb-chip-on{color:#1a0e04;background:linear-gradient(180deg,#ffb066,#ff8a3d);border-color:transparent;font-weight:600}

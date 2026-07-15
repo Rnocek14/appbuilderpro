@@ -133,6 +133,17 @@ export function childPosition<C>(board: Board<C>, parent: BoardTile<C>, m: Board
   return { x, y };
 }
 
+/** Re-lay every tile into a clean grid ordered by time (newest first by default) — the "tidy" action,
+ *  so a board that's grown to hundreds of generations snaps back to a scannable, time-sorted grid.
+ *  Flattens lineage layout by design (a tidy grid, not families); content + favorites are preserved. */
+export function tidyByTime<C>(board: Board<C>, m: BoardMetrics, order: 'desc' | 'asc' = 'desc'): Board<C> {
+  const cols = Math.max(1, m.cols);
+  const pad = PAD(m);
+  const sorted = [...board.tiles].sort((a, b) => (order === 'desc' ? b.createdAt - a.createdAt : a.createdAt - b.createdAt));
+  const tiles = sorted.map((t, i) => ({ ...t, x: pad + (i % cols) * (m.w + m.gap), y: pad + Math.floor(i / cols) * (m.h + m.gap) }));
+  return { tiles };
+}
+
 /** The board's content bounds (for centering / scroll extents), padded. */
 export function boardExtent<C>(board: Board<C>, m: BoardMetrics): { w: number; h: number } {
   if (board.tiles.length === 0) return { w: m.w + PAD(m) * 2, h: m.h + PAD(m) * 2 };
