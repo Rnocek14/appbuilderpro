@@ -42,6 +42,7 @@ export interface CreativeBoardAdapter<C> {
   promptPlaceholder: string;
   emptyHint: string;
   banner?: ReactNode;                 // honesty / availability line under the make bar
+  extraControls?: ReactNode;          // channel-specific make-bar controls (e.g. a platform selector)
   captionOf: (content: C) => string;
   generate: (args: { prompt: string; kindId: string | null }) => Promise<C>;
   rendition: (args: { parent: C; instruction: string }) => Promise<C>;
@@ -203,7 +204,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
               <Star size={13} className={favOnly ? 'fill-current' : ''} /> {favs.length}
             </button>
             <button onClick={() => setPan({ x: 0, y: 0 })} className="cb-tool" title="Recenter"><Crosshair size={13} /></button>
-            <button onClick={doExport} className="cb-tool" title="Print the starred cards"><Printer size={13} /> Print</button>
+            {adapter.renderPrint && <button onClick={doExport} className="cb-tool" title="Print the starred cards"><Printer size={13} /> Print</button>}
           </div>
         </div>
 
@@ -213,6 +214,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
               className={cn('cb-chip', kind === k.id && 'cb-chip-on')}>{k.emoji} {k.label}</button>
           ))}
         </div>
+        {adapter.extraControls && <div className="mt-2">{adapter.extraControls}</div>}
         <div className="mt-2 flex items-center gap-2">
           <input value={prompt} onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') void make(); }}

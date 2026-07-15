@@ -38,10 +38,9 @@ import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { supabase } from '../../../lib/supabase';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { EmailStudio } from '../EmailStudio';
-import { IdeaStudio } from '../IdeaStudio';
 import { PostcardBoard } from './PostcardBoard';
+import { SocialBoard } from './SocialBoard';
 import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
-import { SOCIAL_SPEC } from '../../../lib/garvis/socialStudio';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
@@ -157,9 +156,9 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
         </BoardOverlay>
       )}
       {open === 'social' && (
-        <Sheet emoji="📱" title="Social" lead="Post ideas + worked examples — pick one, spin the angle, edit, and save." onClose={() => setOpen(null)}>
-          <IdeaStudio spec={SOCIAL_SPEC} worldId={worldId} clusterId={targetCluster} onToast={onToast} />
-        </Sheet>
+        <BoardOverlay title="Social board" onClose={() => setOpen(null)}>
+          <SocialBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
+        </BoardOverlay>
       )}
       {open === 'email' && (
         <Sheet emoji="✉️" title="Email" lead="Ideas + worked examples — pick one, spin the angle, edit, and save." onClose={() => setOpen(null)}>
