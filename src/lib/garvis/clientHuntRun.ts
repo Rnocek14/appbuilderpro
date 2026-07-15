@@ -100,6 +100,16 @@ export async function findContactEmail(url: string): Promise<string | null> {
   } catch { return null; }
 }
 
+/** The tech a business runs, read from their own page markup by fetch-url (see _shared/techFingerprint). */
+export interface TechFingerprint {
+  builder: string | null;
+  diyBuilder: boolean;
+  booking: string | null;
+  analytics: string[];
+  chat: string | null;
+  ecommerce: string | null;
+}
+
 /** The raw page context behind an audit — fetched anyway, kept so we can persist + detect on it later. */
 export interface ScrapeContext {
   reachable: boolean;
@@ -107,6 +117,7 @@ export interface ScrapeContext {
   description: string | null;
   text: string;                 // readable page text (capped by fetch-url)
   checks: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
+  tech: TechFingerprint | null; // the tech fingerprint, when fetch-url returned one
 }
 
 /** Fetch a business's site ONCE and return both the honest audit and the raw scrape context (so the
@@ -114,15 +125,16 @@ export interface ScrapeContext {
  *  Unreachable → an honest 'unknown' audit + an empty context, never faked. */
 export async function scrapeAndAudit(url: string): Promise<{ audit: SiteAudit; scrape: ScrapeContext }> {
   const nowYear = new Date().getFullYear();
-  const empty: ScrapeContext = { reachable: false, title: null, description: null, text: '', checks: {} };
+  const empty: ScrapeContext = { reachable: false, title: null, description: null, text: '', checks: {}, tech: null };
   try {
     const { data, error } = await supabase.functions.invoke('fetch-url', { body: { url, mode: 'text' } });
     if (error) throw new Error(error.message);
-    const d = data as { url?: string; title?: string; description?: string; text?: string; error?: string; checks?: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean } };
+    const d = data as { url?: string; title?: string; description?: string; text?: string; error?: string; checks?: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean }; tech?: TechFingerprint };
     if (!d || d.error) return { audit: auditSite({ url, reachable: false }, nowYear), scrape: empty };
     const c = d.checks ?? {};
     const scrape: ScrapeContext = {
       reachable: true, title: d.title ?? null, description: d.description ?? null, text: d.text ?? '', checks: c,
+      tech: d.tech ?? null,
     };
     const audit = auditSite({
       url: d.url || url, reachable: true, title: d.title ?? null, description: d.description ?? null,
@@ -184,6 +196,7 @@ export async function recordProspectAudit(input: RecordAuditInput): Promise<void
       strengths: a.strengths,
       vertical,
       checks: sc?.checks ?? {},
+      tech: sc?.tech ?? {},
       meta_title: sc?.title ?? null,
       meta_description: sc?.description ?? null,
       text_snippet: sc?.text ? sc.text.slice(0, 8000) : null,
@@ -218,6 +231,7 @@ export interface ProspectAuditRow {
   strengths: string[];
   vertical: string | null;
   checks: Record<string, boolean>;
+  tech: Partial<TechFingerprint>;
   meta_title: string | null;
   meta_description: string | null;
   text_snippet: string | null;

@@ -111,7 +111,12 @@ export function SavedAudits() {
                       </td>
                       <td className={cn('py-1.5 pr-3 font-medium', V_CLS[r.verdict])}>{V_LABEL[r.verdict]}</td>
                       <td className="py-1.5 pr-3 tabular-nums text-forge-dim">{r.score ?? '—'}</td>
-                      <td className="py-1.5 pr-3 text-forge-dim">{r.vertical ?? '—'}</td>
+                      <td className="py-1.5 pr-3 text-forge-dim">
+                        {r.vertical ?? '—'}
+                        {r.tech?.builder && (
+                          <span className="ml-1 text-[10px] text-forge-dim/70" title={r.tech.diyBuilder ? 'DIY site builder' : 'site platform'}>· {r.tech.builder}</span>
+                        )}
+                      </td>
                       <td className="py-1.5 pr-3">
                         {proposals.length === 0 && gaps.length === 0 ? (
                           <span className="text-forge-dim">—</span>

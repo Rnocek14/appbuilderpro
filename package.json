@@ -54,6 +54,7 @@
     "verify:inquiry": "tsx src/lib/garvis/inquiry.verify.ts",
     "verify:gardener": "tsx src/lib/garvis/gardener.verify.ts",
     "verify:automation": "tsx src/lib/garvis/automation/detect.verify.ts",
+    "verify:techfingerprint": "tsx supabase/functions/_shared/techFingerprint.verify.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

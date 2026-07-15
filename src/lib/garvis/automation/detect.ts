@@ -9,7 +9,7 @@
 // roadmap GAP, not a promise. Pure + deterministic (verified by detect.verify.ts) — no model call.
 
 import type { Vertical } from '../verticals';
-import type { ProspectAuditRow } from '../clientHuntRun';
+import type { ProspectAuditRow, TechFingerprint } from '../clientHuntRun';
 import { CAPABILITIES, isDeliverable, type SignalKind } from './registry';
 
 export interface DetectedSignal {
@@ -46,8 +46,9 @@ export interface DetectionResult {
 export interface AuditView {
   vertical: Vertical | null;
   checks: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
-  siteSignalIds: string[]; // ids from siteAudit (e.g. 'no_contact')
-  text: string | null;     // scraped page text, if we kept it
+  siteSignalIds: string[];              // ids from siteAudit (e.g. 'no_contact')
+  text: string | null;                  // scraped page text, if we kept it
+  tech: Partial<TechFingerprint> | null; // tech fingerprint, when we have one (empty {} = not computed)
 }
 
 export function auditViewFromRow(r: ProspectAuditRow): AuditView {
@@ -56,8 +57,17 @@ export function auditViewFromRow(r: ProspectAuditRow): AuditView {
     checks: (r.checks ?? {}) as AuditView['checks'],
     siteSignalIds: (r.signals ?? []).map((s) => s.id),
     text: r.text_snippet ?? null,
+    tech: r.tech ?? null,
   };
 }
+
+/** True once fetch-url has actually run a fingerprint (old rows default to {} — unknown, not empty). */
+function techComputed(tech: Partial<TechFingerprint> | null): tech is TechFingerprint {
+  return !!tech && Object.keys(tech).length > 0;
+}
+
+// DIY site builders where the owner clearly built it themselves (a strong rebuild + automation lead).
+const DIY_BUILDERS = new Set(['wix', 'squarespace', 'godaddy', 'weebly']);
 
 // "You can book/reserve yourself online" — presence means booking is NOT a manual gap.
 const ONLINE_BOOKING = /(book (online|now|an?\s?appointment)|online booking|schedule (online|now|an?\s?appointment)|request (an?\s?)?appointment|book a (table|reservation)|reserve (online|a table)|book now)/i;
@@ -89,12 +99,39 @@ export function deriveSignals(v: AuditView): DetectedSignal[] {
     });
   }
 
-  // Booking-driven business with NO online-booking language anywhere in the page text we kept.
-  // Only assert the absence when we actually have text to look at (else it's unknown, not a gap).
-  if (text && v.vertical && BOOKING_VERTICALS.includes(v.vertical) && !ONLINE_BOOKING.test(text)) {
+  const tech = v.tech;
+  const hasTech = techComputed(tech);
+
+  // No online booking. Prefer the HARD signal (no scheduling widget in the markup); fall back to the
+  // text heuristic only when we don't have a tech fingerprint yet. Only assert an absence we can see.
+  const bookingVertical = v.vertical != null && BOOKING_VERTICALS.includes(v.vertical);
+  if (bookingVertical) {
+    if (hasTech && !tech.booking) {
+      out.push({
+        id: 'platform:no_online_booking', kind: 'platform', label: 'No online booking',
+        evidence: 'No booking or scheduling widget found in the page code — customers can’t self-schedule.',
+      });
+    } else if (!hasTech && text && !ONLINE_BOOKING.test(text)) {
+      out.push({
+        id: 'platform:no_online_booking', kind: 'platform', label: 'No online booking',
+        evidence: `No online-booking language found on a ${v.vertical!.replace('_', ' ')} site — customers can’t self-schedule.`,
+      });
+    }
+  }
+
+  // Flying blind — no analytics or ad pixel installed (only assertable once we've fingerprinted).
+  if (hasTech && tech.analytics.length === 0) {
     out.push({
-      id: 'platform:no_online_booking', kind: 'platform', label: 'No online booking',
-      evidence: `No online-booking language found on a ${v.vertical.replace('_', ' ')} site — customers can’t self-schedule.`,
+      id: 'platform:no_analytics', kind: 'platform', label: 'No analytics or ad pixel',
+      evidence: 'No analytics or ad pixel found in the page code — they can’t measure what their site does.',
+    });
+  }
+
+  // Owner-built DIY site (Wix/Squarespace/GoDaddy/Weebly) — a strong rebuild + automation lead.
+  if (hasTech && tech.builder && DIY_BUILDERS.has(tech.builder)) {
+    out.push({
+      id: 'stack:diy_builder', kind: 'stack', label: `DIY site (${tech.builder})`,
+      evidence: `Built on ${tech.builder} — a self-serve builder, so the owner likely runs the business by hand.`,
     });
   }
 
@@ -128,15 +165,24 @@ export function proposeFromSignals(signals: DetectedSignal[], vertical: Vertical
   const gaps: DetectionGap[] = [];
   for (const sig of signals) {
     if (covered.has(sig.id)) continue;
+    const hint = GAP_HINTS[sig.id];
     const notBuilt = CAPABILITIES.find((c) => c.matchesSignals.includes(sig.id) && !isDeliverable(c) &&
       (c.verticals.includes('any') || (vertical != null && c.verticals.includes(vertical))));
     gaps.push({
       signalId: sig.id,
-      reason: notBuilt ? `“${notBuilt.title}” would fit — not built yet.` : 'No capability maps to this yet — logged for the roadmap.',
+      reason: hint
+        ? hint
+        : notBuilt ? `“${notBuilt.title}” would fit — not built yet.` : 'No capability maps to this yet — logged for the roadmap.',
     });
   }
   return { proposals, gaps };
 }
+
+// Signals that carry a meaning but no automation capability — surfaced as informative gaps, not promises.
+const GAP_HINTS: Record<string, string> = {
+  'platform:no_analytics': 'Analytics / conversion-tracking setup — a one-time win, not built yet.',
+  'stack:diy_builder': 'Strong website-rebuild lead (owner-built DIY site).',
+};
 
 export function detect(view: AuditView): DetectionResult {
   const signals = deriveSignals(view);
