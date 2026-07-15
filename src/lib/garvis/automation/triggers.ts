@@ -102,3 +102,33 @@ export function renderTemplate(tpl: string, c: CustomerRec): string {
     .replace(/\{first_name\}/g, first)
     .replace(/\{name\}/g, (c.name ?? '').trim());
 }
+
+export interface ParsedCustomer {
+  email: string; name: string | null;
+  last_service_at: string | null; last_visit_at: string | null;
+  purchase_at: string | null; next_due_at: string | null;
+}
+
+/** Parse a pasted CSV (header: name,email,last_service_at,last_visit_at,purchase_at,next_due_at).
+ *  Tolerant — only the columns present are used; a row needs a valid email or it's skipped. Pure. */
+export function parseCustomerCsv(text: string): ParsedCustomer[] {
+  const lines = (text ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+  const head = lines[0].split(',').map((h) => h.trim().toLowerCase());
+  const idx = (k: string) => head.indexOf(k);
+  const iEmail = idx('email'), iName = idx('name');
+  const iLs = idx('last_service_at'), iLv = idx('last_visit_at'), iPu = idx('purchase_at'), iNd = idx('next_due_at');
+  const cell = (c: string[], i: number) => (i >= 0 ? (c[i] ?? '').trim() || null : null);
+  const out: ParsedCustomer[] = [];
+  for (const line of lines.slice(1)) {
+    const c = line.split(',').map((x) => x.trim());
+    const email = iEmail >= 0 ? (c[iEmail] ?? '') : '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) continue;
+    out.push({
+      email, name: cell(c, iName),
+      last_service_at: cell(c, iLs), last_visit_at: cell(c, iLv),
+      purchase_at: cell(c, iPu), next_due_at: cell(c, iNd),
+    });
+  }
+  return out;
+}

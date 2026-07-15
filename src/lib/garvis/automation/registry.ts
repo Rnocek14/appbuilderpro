@@ -33,6 +33,14 @@ export interface Capability {
   monthlyPrice: string;          // honest range
   complianceNote?: string;       // the guardrail that must ride with it
   status: CapabilityStatus;      // 'not_built' is documented but NEVER proposed
+  // For date/interval capabilities: defaults to spin up a per-customer trigger (app_0076) in one click.
+  triggerDefault?: {
+    anchorField: 'last_service_at' | 'last_visit_at' | 'purchase_at' | 'next_due_at';
+    offsetDays: number;
+    windowDays: number;
+    subject: string;
+    body: string;
+  };
 }
 
 export const CAPABILITIES: Capability[] = [
@@ -61,6 +69,11 @@ export const CAPABILITIES: Capability[] = [
     monthlyPrice: '$200–500/mo',
     complianceNote: 'Email-first (no SMS). Never gate or filter reviews (FTC).',
     status: 'ga',
+    triggerDefault: {
+      anchorField: 'last_service_at', offsetDays: 2, windowDays: 14,
+      subject: 'How did we do, {first_name}?',
+      body: 'Hi {first_name},\n\nThanks for choosing us. If you have a moment, we’d be grateful for a quick review — it really helps.\n\n[review link]\n\nThank you!',
+    },
   },
   {
     id: 'invoice_chase',
@@ -98,6 +111,11 @@ export const CAPABILITIES: Capability[] = [
     verticals: ['home_services'],
     monthlyPrice: '$300–500/mo',
     status: 'beta',
+    triggerDefault: {
+      anchorField: 'last_service_at', offsetDays: 180, windowDays: 21,
+      subject: 'Time for your seasonal service, {first_name}',
+      body: 'Hi {first_name},\n\nIt’s been about six months since your last service — a good time for a seasonal tune-up to keep everything running smoothly. Reply here and we’ll get you booked.\n\nThanks!',
+    },
   },
   {
     id: 'hygiene_recall',
@@ -111,6 +129,11 @@ export const CAPABILITIES: Capability[] = [
     monthlyPrice: '$400–800/mo',
     complianceNote: 'Health context — keep copy HIPAA-aware; human approval stays on.',
     status: 'beta',
+    triggerDefault: {
+      anchorField: 'last_visit_at', offsetDays: 180, windowDays: 21,
+      subject: 'You’re due for a visit, {first_name}',
+      body: 'Hi {first_name},\n\nOur records show it’s been about six months since your last visit — you’re due for your routine check-up. Reply here and we’ll find a time that works.\n\nThank you!',
+    },
   },
   // ---- Documented but NOT deliverable yet → surfaced as a roadmap GAP, never proposed. ----
   {

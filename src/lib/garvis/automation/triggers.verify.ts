@@ -3,7 +3,7 @@
 // never blasts everyone who became due long ago) and ONCE-ONLY (a due date fires at most once), plus the
 // honest guards (needs an active trigger, an email, and a real anchor) and determinism.
 
-import { dueFires, isCustomerDue, dueDateFor, fireKey, renderTemplate, type TriggerDef, type CustomerRec } from './triggers';
+import { dueFires, isCustomerDue, dueDateFor, fireKey, renderTemplate, parseCustomerCsv, type TriggerDef, type CustomerRec } from './triggers';
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean) => { if (cond) { pass++; } else { fail++; console.error(`✗ ${name}`); } };
@@ -52,6 +52,14 @@ ok('template: {first_name} substitutes', renderTemplate('Hi {first_name}, time f
 ok('template: {name} substitutes full name', renderTemplate('Dear {name}', dueToday) === 'Dear Ada Lovelace');
 const nameless: CustomerRec = { id: 'c_nameless', email: 'f@x.com', anchors: {} };
 ok('template: missing name renders empty, not a placeholder', renderTemplate('Hi {first_name}!', nameless) === 'Hi !');
+
+// ---- CSV import parsing: tolerant, email-required, only-present-columns ----
+const csv = parseCustomerCsv('name,email,last_visit_at\nAda Lovelace,ada@x.com,2026-01-16\nBad Row,not-an-email,2026-01-01\nBo,bo@x.com,');
+ok('csv: parses the valid rows, skips the bad email', csv.length === 2 && csv[0].email === 'ada@x.com');
+ok('csv: maps the present column', csv[0].last_visit_at === '2026-01-16');
+ok('csv: an empty cell becomes null, not ""', csv[1].last_visit_at === null);
+ok('csv: absent columns are null', csv[0].purchase_at === null);
+ok('csv: header-only or empty input yields nothing', parseCustomerCsv('name,email').length === 0 && parseCustomerCsv('').length === 0);
 
 // ---- determinism ----
 ok('deterministic: identical plan for identical inputs', JSON.stringify(dueFires(recall, all, [], NOW)) === JSON.stringify(dueFires(recall, all, [], NOW)));
