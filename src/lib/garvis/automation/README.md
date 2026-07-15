@@ -10,7 +10,10 @@ prospect's own page; nothing is fabricated, nothing we can't actually run is pro
 |---|---|
 | `registry.ts` | The **capability registry** — the typed catalog of what our rails can deliver. Each entry maps to a real rail (`send-email`, `invoice-chase`, `outreach-followups`, `outreach-reactivate`, `standing-worker`) and the signals that propose it. Capabilities we can see the need for but can't yet deliver are marked `status: 'not_built'` — documented, **never proposed**. |
 | `detect.ts` | Derives `manual_process:*` / `platform:*` / `stack:*` signals from observed facts (siteAudit signals, `checks{}`, scraped text, and the tech fingerprint), then resolves them against the registry: deliverable matches → **proposals**; matched needs with nothing deliverable → **gaps** (the roadmap / bespoke queue). |
-| `detect.verify.ts` | The honesty invariants (`npm run verify:automation`). |
+| `detect.verify.ts` | The detection honesty invariants (`npm run verify:automation`). |
+| `triggers.ts` | The **trigger engine** — pure per-customer scheduling core. "Fire once, N days after an event on this customer's record" (recall, seasonal, post-job). Owns the **window guard** (turning a trigger on never blasts everyone due long ago) and **once-only** (a (customer, due date) fires at most once). No clock/IO — caller supplies `now` + the fire ledger. |
+| `triggers.verify.ts` | The trigger invariants (`npm run verify:triggers`). |
+| `triggersRun.ts` | The trigger **runner** — loads active triggers + customers + the fire ledger, computes what's due, and enqueues one **approval-gated** send per due customer through the existing one send path (claim-first idempotency). Nothing sends; each lands in the approval queue. Single-tenant today; the autonomous/heartbeat + multi-tenant version reuses this exact logic. Data model: `app_0076_automation_triggers.sql`. |
 
 The tech fingerprint itself lives in `supabase/functions/_shared/techFingerprint.ts` (it runs
 server-side in `fetch-url`, where the raw HTML is available) and is verified by
