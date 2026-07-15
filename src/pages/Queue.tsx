@@ -8,10 +8,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
 import { useUndoBar } from '../components/garvis/UndoBar';
 import { AppShell } from '../components/layout/AppShell';
-import { Badge, Button, EmptyState, Input, Skeleton } from '../components/ui';
+import { Badge, Button, EmptyState, Input, Skeleton, LoadError } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { rawComplete } from '../lib/aiClient';
@@ -328,11 +328,7 @@ export default function Queue() {
           </div>
         ) : rows.length === 0 ? (
           loadFailed ? (
-            <div className="rounded-xl border border-forge-ember/40 bg-forge-ember/5 p-6 text-center">
-              <AlertTriangle size={20} className="mx-auto mb-2 text-forge-ember" />
-              <p className="mb-3 text-sm text-forge-ink">Couldn’t load the Queue — this isn’t “nothing to do,” it’s a load error.</p>
-              <Button variant="outline" size="sm" onClick={() => void refresh()}>Retry</Button>
-            </div>
+            <LoadError message="Couldn’t load the Queue — this isn’t “nothing to do,” it’s a load error." onRetry={() => void refresh()} />
           ) : (
             <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear"
               body="Approvals, blocked build questions, replies, and website leads all land here. Right now: nothing needs you." />

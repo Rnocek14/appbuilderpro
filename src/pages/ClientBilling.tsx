@@ -7,10 +7,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink, useSearchParams } from 'react-router-dom';
-import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, AlertTriangle, Rocket } from 'lucide-react';
+import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, Rocket } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
-import { Button, StatCard, EmptyState } from '../components/ui';
+import { Button, StatCard, EmptyState, LoadError } from '../components/ui';
 import { cn } from '../lib/utils';
 import { CLIENT_TIERS, tierById, formatUsd, monthlyRevenueCents, oneTimeRevenueCents, type TierId } from '../lib/garvis/billing/clientTiers';
 import {
@@ -115,11 +115,7 @@ export default function ClientBilling() {
         {loading ? (
           <div className="flex items-center gap-2 py-10 text-sm text-forge-dim"><Loader2 size={15} className="animate-spin" /> Loading…</div>
         ) : loadFailed ? (
-          <div className="rounded-xl border border-forge-ember/40 bg-forge-ember/5 p-6 text-center">
-            <AlertTriangle size={22} className="mx-auto mb-2 text-forge-ember" />
-            <p className="mb-3 text-sm text-forge-ink">Couldn’t load your billing book.</p>
-            <Button variant="outline" size="sm" onClick={() => void refresh()}>Retry</Button>
-          </div>
+          <LoadError message="Couldn’t load your billing book." onRetry={() => void refresh()} />
         ) : (
           <>
             {/* Revenue summary */}

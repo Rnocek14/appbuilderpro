@@ -7,10 +7,10 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Zap, Loader2, Plus, Play, Pause, Trash2, Upload, Users, CalendarClock, ArrowRight, Info, AlertTriangle } from 'lucide-react';
+import { Zap, Loader2, Plus, Play, Pause, Trash2, Upload, Users, CalendarClock, ArrowRight, Info } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
-import { Button, EmptyState } from '../components/ui';
+import { Button, EmptyState, LoadError } from '../components/ui';
 import { cn } from '../lib/utils';
 import {
   listCustomerLists, createCustomerList, listCustomers, addCustomers, parseCustomerCsv,
@@ -142,11 +142,7 @@ export default function Automations() {
         {loading ? (
           <div className="flex items-center gap-2 py-10 text-sm text-forge-dim"><Loader2 size={15} className="animate-spin" /> Loading…</div>
         ) : loadFailed ? (
-          <div className="rounded-xl border border-forge-ember/40 bg-forge-ember/5 p-6 text-center">
-            <AlertTriangle size={22} className="mx-auto mb-2 text-forge-ember" />
-            <p className="mb-3 text-sm text-forge-ink">Couldn’t load your automations.</p>
-            <Button variant="outline" size="sm" onClick={() => void refresh()}>Retry</Button>
-          </div>
+          <LoadError message="Couldn’t load your automations." onRetry={() => void refresh()} />
         ) : lists.length === 0 ? (
           <EmptyState icon={<Users size={22} />} title="No customer list yet"
             body="Automations run on a business’s own past customers. Create a list and import a few to begin."
