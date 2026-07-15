@@ -39,6 +39,7 @@ import { supabase } from '../../../lib/supabase';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { EmailStudio } from '../EmailStudio';
 import { IdeaStudio } from '../IdeaStudio';
+import { PostcardBoard } from './PostcardBoard';
 import { SOCIAL_SPEC } from '../../../lib/garvis/socialStudio';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
@@ -110,7 +111,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     : { kicker: bizName ? `Market ${bizName}` : 'Start here', title: 'Set up your first announcement', sub: 'tap to begin — takes a minute', filled: false };
 
   const nodes: CanvasNode[] = [
-    { key: 'postcard', emoji: '📮', label: 'Postcard', sub: 'front & back · print', dim: !ready },
+    { key: 'postcard', emoji: '📮', label: 'Postcards', sub: 'a board of ideas', dim: false },
     { key: 'social', emoji: '📱', label: 'Social posts', sub: 'post ideas', dim: false },
     { key: 'email', emoji: '✉️', label: 'Email', sub: 'ideas + examples', dim: false },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
@@ -124,7 +125,9 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     const key = k as NodeKey;
     // people + video + analysis + email work from the world's own data (a mail list, the world's
     // photos, the MLS, the brand), so they don't require the campaign details to be filled first.
-    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && key !== 'social' && !ready) { setOpen('center'); return; }
+    // The postcard board loads the world's own materials (brand, photos, context), so it — like the
+    // other studios — opens straight to work without first filling the campaign details form.
+    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && key !== 'social' && key !== 'postcard' && !ready) { setOpen('center'); return; }
     setOpen(key);
   };
 
@@ -146,9 +149,10 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
           }}
         />
       )}
-      {open === 'postcard' && set && (
-        <PostcardSheet set={set} details={details!} brand={brand} accent={accent}
-          targetCluster={targetCluster} onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('postcard')} />
+      {open === 'postcard' && (
+        <BoardOverlay title="Postcard board" onClose={() => setOpen(null)}>
+          <PostcardBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
+        </BoardOverlay>
       )}
       {open === 'social' && (
         <Sheet emoji="📱" title="Social" lead="Post ideas + worked examples — pick one, spin the angle, edit, and save." onClose={() => setOpen(null)}>
@@ -182,6 +186,30 @@ function centerSub(d: CampaignInput): string {
   const bits = [d.price, [d.beds && `${d.beds} bd`, d.baths && `${d.baths} ba`].filter(Boolean).join(' · '), d.area]
     .map((x) => (x || '').trim()).filter(Boolean);
   return bits.join(' · ') || (d.details || '').trim();
+}
+
+// ---------- Board shell ----------
+// A large, near-fullscreen dark surface that hosts a spatial creative board (the postcard board, and
+// later social/branding). Unlike the cream paper Sheet, a board needs room to spread out, so it opens
+// big and dark. Scrim + Escape + focus-trap all come from the shared Overlay primitive.
+function BoardOverlay({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <Overlay onClose={onClose} z={60}>
+      <style>{`
+        .mkc-board{width:min(96vw,1200px);height:88vh;display:flex;flex-direction:column;border-radius:16px;overflow:hidden;border:1px solid var(--forge-border,#3a2f25);background:var(--forge-bg,#14100c);box-shadow:0 30px 80px rgba(0,0,0,.6)}
+        .mkc-board-top{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710)}
+        .mkc-board-top h3{font-size:14px;font-weight:600;color:var(--forge-ink,#f0e6da)}
+        .mkc-board-body{flex:1;min-height:0}
+      `}</style>
+      <div className="mkc-board" role="dialog" aria-modal="true">
+        <div className="mkc-board-top">
+          <h3>{title}</h3>
+          <button className="mkc-x" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <div className="mkc-board-body">{children}</div>
+      </div>
+    </Overlay>
+  );
 }
 
 // ---------- Sheet shell ----------
