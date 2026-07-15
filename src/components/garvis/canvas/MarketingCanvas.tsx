@@ -38,6 +38,8 @@ import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { supabase } from '../../../lib/supabase';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { EmailStudio } from '../EmailStudio';
+import { IdeaStudio } from '../IdeaStudio';
+import { SOCIAL_SPEC } from '../../../lib/garvis/socialStudio';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
@@ -109,7 +111,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
 
   const nodes: CanvasNode[] = [
     { key: 'postcard', emoji: '📮', label: 'Postcard', sub: 'front & back · print', dim: !ready },
-    { key: 'social', emoji: '📱', label: 'Social posts', sub: 'FB & Instagram', dim: !ready },
+    { key: 'social', emoji: '📱', label: 'Social posts', sub: 'post ideas', dim: false },
     { key: 'email', emoji: '✉️', label: 'Email', sub: 'ideas + examples', dim: false },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
@@ -122,7 +124,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     const key = k as NodeKey;
     // people + video + analysis + email work from the world's own data (a mail list, the world's
     // photos, the MLS, the brand), so they don't require the campaign details to be filled first.
-    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && !ready) { setOpen('center'); return; }
+    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && key !== 'social' && !ready) { setOpen('center'); return; }
     setOpen(key);
   };
 
@@ -148,10 +150,10 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
         <PostcardSheet set={set} details={details!} brand={brand} accent={accent}
           targetCluster={targetCluster} onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('postcard')} />
       )}
-      {open === 'social' && set && (
-        <SocialSheet set={set} accent={accent} photoUrl={details!.photoUrl ?? null} worldId={worldId}
-          brandName={(details!.businessName || details!.agentName || agent || 'Your brand').trim()}
-          onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('social')} />
+      {open === 'social' && (
+        <Sheet emoji="📱" title="Social" lead="Post ideas + worked examples — pick one, spin the angle, edit, and save." onClose={() => setOpen(null)}>
+          <IdeaStudio spec={SOCIAL_SPEC} worldId={worldId} clusterId={targetCluster} onToast={onToast} />
+        </Sheet>
       )}
       {open === 'email' && (
         <Sheet emoji="✉️" title="Email" lead="Ideas + worked examples — pick one, spin the angle, edit, and save." onClose={() => setOpen(null)}>
