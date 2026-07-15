@@ -10,6 +10,7 @@ import { loadWeb } from './workwebRun';
 import { inferRealEstate } from './studioKit';
 import { generateImageAsset } from './imagegenRun';
 import { queueSocialPost } from './socialRun';
+import { aiProvenance, withDisclosure } from './mediaProvenance';
 import {
   socialImagePrompt, withGeneratedImage, sizeForPlatform, composeSocialText,
   type SocialContent, type SocialMaterials,
@@ -67,7 +68,11 @@ export async function queueSocialTile(args: {
   content: SocialContent; worldId: string | null; scheduleAt?: string | null;
 }): Promise<{ warnings: string[] }> {
   const { content } = args;
-  const text = composeSocialText(content.platform, content.caption, content.hashtags);
+  const base = composeSocialText(content.platform, content.caption, content.hashtags);
+  // An AI-generated image on the post must be disclosed to the viewer (platform policy + our honesty
+  // rules) — a real home photo or a brand card is not AI, so it carries no label.
+  const aiImage = content.imageMode === 'ai' && !!content.imageUrl;
+  const text = aiImage ? withDisclosure(base, aiProvenance('image', 'gpt-image-1', Date.now())) : base;
   const media = content.imageUrl ? [content.imageUrl] : [];
   const res = await queueSocialPost({
     text, platforms: [provider(content.platform)], mediaUrls: media,

@@ -5,8 +5,9 @@
 // angle, edit, save. Verified by adsStudio.verify.ts.
 //
 // HONESTY: examples are starting drafts from the facts we HAVE. Budget, landing URL, and any specific
-// claim are visible [EDIT: …] holes — never invented. These are DRAFTS: nothing spends. Launching an
-// ad is a spend action that goes through Approvals, not this studio.
+// claim are visible [EDIT: …] holes — never invented. These are DRAFTS to launch YOURSELF: Garvis does
+// not place paid ads for you (there is no ad-launch integration), so the finished ad is copied into
+// Meta/Google Ads Manager by hand. Nothing here spends, and no approval auto-launches an ad.
 
 import { type StudioCtx, type StudioIdea, type StudioSpec, type StudioExample, area, biz, pick, fillTokens } from './studioKit';
 
@@ -246,7 +247,7 @@ export function buildAdExample(id: string, ctx: StudioCtx, variant = 0): StudioE
 
 export const ADS_SPEC: StudioSpec = {
   kind: 'ads', emoji: '📣', title: 'Ads studio',
-  subtitle: 'Pick a campaign idea — each opens a ready ad you can spin, edit, and save. Launching spends, so ads go out through Approvals.',
+  subtitle: 'Pick a campaign idea — each opens a ready ad you can spin, edit, and save. These are drafts to launch yourself in Meta/Google Ads Manager — Garvis doesn’t place paid ads for you.',
   savePrefix: 'Ad',
   ideasFor: adIdeasFor,
   sampleFor: (k, ctx) => fillTokens(k.sample, ctx),
