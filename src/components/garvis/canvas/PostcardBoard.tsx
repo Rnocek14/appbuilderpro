@@ -6,7 +6,8 @@
 // shell. Honest throughout: listing cards use the real home photo (AI refused), lifestyle cards generate
 // imagery, unknown facts stay [EDIT] holes, and "send" logs what was actually mailed.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import QRCode from 'qrcode';
 import { Loader2, Sparkles, Image as ImageIcon, Wand2, Star, Trash2, Send } from 'lucide-react';
 import { PostcardFront, PostcardBack, PostcardViewer } from '../Postcard';
 import {
@@ -93,12 +94,7 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
         <PostcardFocus content={c} api={api} materials={materials} worldId={worldId} clusterId={clusterId} onToast={onToast} tryImage={tryImage} />
       ),
 
-      renderPrint: (c) => (
-        <>
-          <PostcardFront spec={c.spec} accent={c.spec.accent} variant={c.variant} />
-          <PostcardBack spec={c.spec} accent={c.spec.accent} qr={c.spec.back.qrUrl} />
-        </>
-      ),
+      renderPrint: (c) => <PostcardPrintPiece content={c} />,
       printCss: POSTCARD_PRINT_CSS,
     };
   }, [materials, realEstate, aiState, clusterId, worldId, onToast]);
@@ -123,6 +119,7 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
   const [mailCount, setMailCount] = useState('');
   const allowsAI = tileAllowsAI(content);
   const kind = kindById(content.kindId);
+  const qr = useQr(content.spec.back.qrUrl);   // a real scannable QR, not the raw destination URL
 
   const genImage = async () => {
     setGenBusy(true);
@@ -146,7 +143,7 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
         {content.imageMode === 'ai' && <span className="rounded-full bg-forge-ember/15 px-2 py-0.5 text-[10px] text-forge-ember">AI image</span>}
       </div>
 
-      <PostcardViewer spec={content.spec} accent={content.spec.accent} qr={content.spec.back.qrUrl} variant={content.variant} />
+      <PostcardViewer spec={content.spec} accent={content.spec.accent} qr={qr} variant={content.variant} />
       {content.aiNote && <p className="mt-1 text-[10px] text-forge-dim/80">{content.aiNote}</p>}
 
       {/* image actions */}
@@ -215,6 +212,30 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
         </div>
       </div>
     </div>
+  );
+}
+
+/** Render a destination URL into a real scannable QR data-URL (PostcardBack draws it as an <img>).
+ *  Returns null while pending / when there's no link, so the back shows its gray placeholder. */
+function useQr(url: string | null): string | null {
+  const [data, setData] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!url) { setData(null); return; }
+    QRCode.toDataURL(url, { margin: 1, width: 240 }).then((d) => { if (live) setData(d); }).catch(() => { if (live) setData(null); });
+    return () => { live = false; };
+  }, [url]);
+  return data;
+}
+
+/** A full print-size piece (front + back) with a real QR — used for Export/Print. */
+function PostcardPrintPiece({ content }: { content: PostcardContent }) {
+  const qr = useQr(content.spec.back.qrUrl);
+  return (
+    <>
+      <PostcardFront spec={content.spec} accent={content.spec.accent} variant={content.variant} />
+      <PostcardBack spec={content.spec} accent={content.spec.accent} qr={qr} />
+    </>
   );
 }
 

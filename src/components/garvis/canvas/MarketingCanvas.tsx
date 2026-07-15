@@ -40,6 +40,7 @@ import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { EmailStudio } from '../EmailStudio';
 import { IdeaStudio } from '../IdeaStudio';
 import { PostcardBoard } from './PostcardBoard';
+import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
 import { SOCIAL_SPEC } from '../../../lib/garvis/socialStudio';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
@@ -144,7 +145,8 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
           onSave={(d) => {
             setDetails(d); setAgent(d.agentName ?? agent); setPhone(d.agentPhone ?? phone); setOpen(null);
             // Persist so it comes back next visit (rehydrated on mount) instead of resetting to blank.
-            if (targetCluster) void supabase.from('knowledge_clusters').update({ working_state: { campaign: d } }).eq('id', targetCluster).then(() => {}, () => {});
+            // MERGE — a raw column replace here would wipe working_state.boards (the postcard board).
+            if (targetCluster) void patchClusterWorkingState(targetCluster, { campaign: d }).catch(() => {});
             onToast('success', 'Set — now open any node to make a piece.');
           }}
         />

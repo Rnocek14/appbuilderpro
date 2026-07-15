@@ -101,13 +101,18 @@ export function favorites<C>(board: Board<C>): BoardTile<C>[] {
 
 const PAD = (m: BoardMetrics) => m.pad ?? 40;
 
-/** Grid slot for the next ROOT tile (a fresh "make", not a rendition) — flows left→right, wrapping. */
+/** Grid slot for the next ROOT tile (a fresh "make", not a rendition) — flows left→right, wrapping.
+ *  Occupancy-aware: skips any slot already covered by a tile (e.g. after deletes or renditions), so a
+ *  fresh card never lands on top of an existing one. */
 export function nextRootPosition<C>(board: Board<C>, m: BoardMetrics): { x: number; y: number } {
-  const roots = board.tiles.filter((t) => t.parentId === null).length;
   const cols = Math.max(1, m.cols);
-  const col = roots % cols;
-  const row = Math.floor(roots / cols);
-  return { x: PAD(m) + col * (m.w + m.gap), y: PAD(m) + row * (m.h + m.gap) };
+  let idx = board.tiles.filter((t) => t.parentId === null).length;
+  for (let guard = 0; guard < 400; guard++, idx++) {
+    const x = PAD(m) + (idx % cols) * (m.w + m.gap);
+    const y = PAD(m) + Math.floor(idx / cols) * (m.h + m.gap);
+    if (!board.tiles.some((t) => overlaps(x, y, t.x, t.y, m))) return { x, y };
+  }
+  return { x: PAD(m), y: PAD(m) };
 }
 
 /** Overlap test: do two w×h boxes at these top-lefts intersect (with a little slack)? */

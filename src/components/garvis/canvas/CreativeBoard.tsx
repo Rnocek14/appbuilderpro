@@ -72,20 +72,37 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     let live = true;
     void (async () => {
       if (clusterId) {
-        try { const b = await loadBoard<C>(clusterId, adapter.storageKey); if (live && b) setBoard(b); } catch { /* start empty */ }
+        try {
+          const b = await loadBoard<C>(clusterId, adapter.storageKey);
+          // MERGE, don't clobber: keep any tiles the user made before this async load (or before the
+          // cluster id resolved) — appending them to the loaded board so nothing they created is lost.
+          if (live && b) setBoard((cur) => (cur.tiles.length ? { ...b, tiles: [...b.tiles, ...cur.tiles] } : b));
+        } catch { /* start empty */ }
       }
       if (live) setLoaded(true);
     })();
     return () => { live = false; };
   }, [clusterId, adapter.storageKey]);
 
+  // Keep the latest save target so the unmount flush can persist a still-pending change.
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestSave = useRef<{ clusterId: string | null; key: string; board: Board<C> }>({ clusterId, key: adapter.storageKey, board });
+  latestSave.current = { clusterId, key: adapter.storageKey, board };
   useEffect(() => {
     if (!loaded || !clusterId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { void saveBoard(clusterId, adapter.storageKey, board).catch(() => {}); }, 700);
+    saveTimer.current = setTimeout(() => { saveTimer.current = null; void saveBoard(clusterId, adapter.storageKey, board).catch(() => {}); }, 700);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
   }, [board, loaded, clusterId, adapter.storageKey]);
+  // Flush a still-pending debounced save when the board overlay closes/unmounts, so a last-second edit
+  // (a filled [EDIT] hole, a star, a drag) isn't silently dropped by the cleanup's clearTimeout.
+  useEffect(() => () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current); saveTimer.current = null;
+      const s = latestSave.current;
+      if (s.clusterId) void saveBoard(s.clusterId, s.key, s.board).catch(() => {});
+    }
+  }, []);
 
   const newId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `t${Date.now()}${Math.round(performance.now())}`);
 
@@ -98,6 +115,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
       const content = await adapter.generate({ prompt: prompt.trim(), kindId: kind });
       setBoard((b) => addTile(b, { id: newId(), prompt: prompt.trim() || (adapter.kinds.find((k) => k.id === kind)?.label ?? ''), parentId: null, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now() }));
       setPrompt('');
+      setFavOnly(false);   // the new (unstarred) card must be visible, not hidden by the ⭐ filter
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not make that.'); }
     finally { setBusyAt(null); }
   }, [board, M, adapter, prompt, kind, busyAt, onToast]);
@@ -111,6 +129,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     try {
       const content = await adapter.rendition({ parent: parent.content, instruction: instruction.trim() });
       setBoard((b) => addTile(b, { id: newId(), prompt: instruction.trim() || 'rendition', parentId, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now() }));
+      setFavOnly(false);   // reveal the rendition even if the ⭐ filter was on
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not spin a rendition.'); }
     finally { setBusyAt(null); }
   }, [board, M, adapter, busyAt, onToast]);
@@ -121,7 +140,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     if (e.button !== 0) return;
     // A press on a hover control (open / rendition / star / delete) must NOT start a tile drag, or the
     // drag would swallow the button's click.
-    if ((e.target as HTMLElement).closest('.cb-hover, button')) return;
+    if ((e.target as HTMLElement).closest('.cb-hover, button')) { e.stopPropagation(); return; }
     e.stopPropagation();
     const t = getTile(board, id); if (!t) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -155,7 +174,8 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     if (!pieces.length) { onToast('info', 'Make a piece first — then ⭐ the ones to print.'); return; }
     if (!adapter.renderPrint) { onToast('info', 'Nothing to export.'); return; }
     setPrinting(pieces);
-    setTimeout(() => { window.print(); setTimeout(() => setPrinting(null), 300); }, 60);
+    // give the print pieces (incl. their async-rendered QR data URLs) a beat to paint before printing.
+    setTimeout(() => { window.print(); setTimeout(() => setPrinting(null), 300); }, 350);
   };
 
   const focusApi = (id: string): FocusApi<C> => ({
