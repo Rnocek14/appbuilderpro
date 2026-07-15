@@ -62,7 +62,9 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
 }) {
   const M = adapter.metrics;
   const [board, setBoard] = useState<Board<C>>(() => emptyBoard<C>());
-  const [loaded, setLoaded] = useState(false);
+  // Persist ONLY after the DB load for the CURRENT clusterId has resolved — never before, or a debounced
+  // save can clobber (or duplicate) already-saved tiles when the cluster id resolves late (null → real).
+  const hydratedFor = useRef<string | null>(null);
   const [kind, setKind] = useState<string | null>(adapter.kinds[0]?.id ?? null);
   const [prompt, setPrompt] = useState('');
   const [busyAt, setBusyAt] = useState<{ x: number; y: number; label: string } | null>(null);
@@ -86,11 +88,18 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
         try {
           const b = await loadBoard<C>(clusterId, adapter.storageKey);
           // MERGE, don't clobber: keep any tiles the user made before this async load (or before the
-          // cluster id resolved) — appending them to the loaded board so nothing they created is lost.
-          if (live && b) setBoard((cur) => (cur.tiles.length ? { ...b, tiles: [...b.tiles, ...cur.tiles] } : b));
+          // cluster id resolved), but NEVER duplicate a tile the load already returned (id-deduped).
+          if (live && b) setBoard((cur) => {
+            if (!cur.tiles.length) return b;
+            const have = new Set(b.tiles.map((t) => t.id));
+            const extra = cur.tiles.filter((t) => !have.has(t.id));
+            return extra.length ? { ...b, tiles: [...b.tiles, ...extra] } : b;
+          });
         } catch { /* start empty */ }
+        // Only NOW is this cluster hydrated — this is the gate that lets saves begin. Setting it after
+        // the merge means a board change from the merge itself triggers the first (correct) save.
+        if (live) hydratedFor.current = clusterId;
       }
-      if (live) setLoaded(true);
     })();
     return () => { live = false; };
   }, [clusterId, adapter.storageKey]);
@@ -100,18 +109,19 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   const latestSave = useRef<{ clusterId: string | null; key: string; board: Board<C> }>({ clusterId, key: adapter.storageKey, board });
   latestSave.current = { clusterId, key: adapter.storageKey, board };
   useEffect(() => {
-    if (!loaded || !clusterId) return;
+    if (!clusterId || hydratedFor.current !== clusterId) return;   // never persist a not-yet-hydrated cluster
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => { saveTimer.current = null; void saveBoard(clusterId, adapter.storageKey, board).catch(() => {}); }, 700);
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [board, loaded, clusterId, adapter.storageKey]);
+  }, [board, clusterId, adapter.storageKey]);
   // Flush a still-pending debounced save when the board overlay closes/unmounts, so a last-second edit
-  // (a filled [EDIT] hole, a star, a drag) isn't silently dropped by the cleanup's clearTimeout.
+  // (a filled [EDIT] hole, a star, a drag) isn't silently dropped by the cleanup's clearTimeout — but
+  // only for a cluster that actually hydrated, so we never flush a pre-load board over saved work.
   useEffect(() => () => {
     if (saveTimer.current) {
       clearTimeout(saveTimer.current); saveTimer.current = null;
       const s = latestSave.current;
-      if (s.clusterId) void saveBoard(s.clusterId, s.key, s.board).catch(() => {});
+      if (s.clusterId && hydratedFor.current === s.clusterId) void saveBoard(s.clusterId, s.key, s.board).catch(() => {});
     }
   }, []);
 

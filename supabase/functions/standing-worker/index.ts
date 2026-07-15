@@ -24,7 +24,7 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
-import { pickNextPending, mergeTemplate, batchProgress, type BatchRecipient } from '../_shared/batchCore.ts';
+import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, type BatchRecipient } from '../_shared/batchCore.ts';
 // DAILY AUTOMATIC CLIENT HUNT (client_hunt kind) — the discovery brain + the pure builders are
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
@@ -140,9 +140,29 @@ Deno.serve(async (req) => {
         if (ap.status !== 'approved') continue; // still awaiting the human — not our call to make
 
         const recips: BatchRecipient[] = Array.isArray(b.recipients) ? b.recipients : [];
+        // Persist each recipient's outcome IMMEDIATELY, not after the whole slice.
+        // The write is guarded on status so a cancel that lands mid-tick can't be resurrected.
+        const persistRecips = () => admin.from('outreach_batches')
+          .update({ recipients: recips }).eq('id', b.id).in('status', ['queued', 'draining']);
+
+        // RECOVERY SWEEP: a recipient stuck 'sending' means a crash between its claim and its outcome.
+        // We never re-send it (that would risk a duplicate real email) — we skip it with an honest reason
+        // so the batch can still finish and the operator sees a true count.
+        const stale = staleSendingIndices(recips, Date.now(), 3 * 60_000);
+        if (stale.length) {
+          for (const ix of stale) {
+            recips[ix].state = 'skipped';
+            recips[ix].reason = 'send interrupted before confirmation — not retried to avoid a duplicate; resend manually if it did not arrive';
+          }
+          await persistRecips();
+        }
+
         const slice = pickNextPending(recips, PER_TICK);
         if (slice.length === 0) {
           const prog = batchProgress(recips);
+          // Nothing left to pick. If a fresh claim is still in flight, wait for it to resolve (or be
+          // swept) before finishing — never mark a batch done while a send is unconfirmed.
+          if (prog.sending > 0) continue;
           await admin.from('outreach_batches').update({ status: 'done', finished_at: nowIso }).eq('id', b.id);
           await admin.from('mind_events').insert({
             owner_id: b.owner_id, event_type: 'note', source: 'execution',
@@ -154,13 +174,11 @@ Deno.serve(async (req) => {
         if (b.status !== 'draining') await admin.from('outreach_batches').update({ status: 'draining' }).eq('id', b.id);
 
         let sentNow = 0; let skippedNow = 0;
-        // Persist each recipient's outcome IMMEDIATELY, not after the whole slice: a worker crash
-        // then re-sends at most the one in-flight recipient, never the batch already delivered.
-        // The write is guarded on status so a cancel that lands mid-tick can't be resurrected.
-        const persistRecips = () => admin.from('outreach_batches')
-          .update({ recipients: recips }).eq('id', b.id).in('status', ['queued', 'draining']);
         for (const ix of slice) {
           const r = recips[ix];
+          // CLAIM before any irreversible work: persist 'sending' so a crash can't re-pick (and re-send)
+          // this recipient. Every outcome below overwrites the claim; a crash leaves it for the sweep.
+          r.state = 'sending'; r.claimedAt = nowIso; await persistRecips();
           const { data: msg, error: msgErr } = await admin.from('outreach_messages').insert({
             owner_id: b.owner_id, contact_id: r.contactId, subject: mergeTemplate(b.subject, r.name),
             body_text: mergeTemplate(b.body_text, r.name), to_address: r.email, status: 'approved',
@@ -187,9 +205,10 @@ Deno.serve(async (req) => {
               const out = await res.json().catch(() => ({} as { error?: string }));
               const why = String((out as { error?: string })?.error ?? `HTTP ${res.status}`);
               if (why.includes('Daily send cap')) {
-                // Cap reached: this recipient stays pending for a later tick. send-email already
-                // marked its message 'blocked' and released the claim; reject the now-unused
-                // approval so no live garvis-auto send_email row is left dangling, then stop.
+                // Cap reached: send-email blocked (did NOT send). Release the claim back to 'pending' so
+                // a later tick retries this recipient; send-email already marked its message 'blocked'.
+                // Reject the now-unused approval so no live garvis-auto send_email row dangles, then stop.
+                r.state = 'pending'; r.claimedAt = undefined; await persistRecips();
                 await admin.from('approvals').update({ status: 'rejected', decided_via: 'batch-cap' }).eq('id', apRow.id);
                 break;
               }
@@ -200,12 +219,13 @@ Deno.serve(async (req) => {
           }
         }
         const prog = batchProgress(recips);
+        const finished = prog.pending === 0 && prog.sending === 0;
         await admin.from('outreach_batches').update({
           sent_count: b.sent_count + sentNow,
           skipped_count: b.skipped_count + skippedNow,
-          ...(prog.pending === 0 ? { status: 'done', finished_at: nowIso } : {}),
+          ...(finished ? { status: 'done', finished_at: nowIso } : {}),
         }).eq('id', b.id).in('status', ['queued', 'draining']);
-        if (prog.pending === 0) {
+        if (finished) {
           await admin.from('mind_events').insert({
             owner_id: b.owner_id, event_type: 'note', source: 'execution',
             subject: `Batch "${b.subject.slice(0, 100)}" done — ${prog.sent} sent${prog.skipped > 0 ? `, ${prog.skipped} skipped` : ''}`,

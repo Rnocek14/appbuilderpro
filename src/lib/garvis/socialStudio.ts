@@ -39,7 +39,7 @@ const RE: SocialIdea[] = [
       parts: [
         P('Post', pick([
           `SOLD in ${area(c)} 🎉\n\nAnother happy [EDIT: seller/buyer]! This one [EDIT: sold over asking / in X days / detail].\n\nThinking about making a move? The ${area(c)} market is [EDIT: honest one-liner]. DM me “value” for a free, no-pressure number on your home.`,
-          `Just closed 🔑 Congrats to [EDIT: first name / “my wonderful clients”]!\n\n${area(c)} homes are moving. If you’ve ever wondered what yours is worth today, I’ll tell you honestly — no obligation. Comment 🏡 below.`,
+          `Just closed 🔑 Congrats to [EDIT: first name / “my wonderful clients”]!\n\nThe ${area(c)} market is [EDIT: one honest one-liner]. If you’ve ever wondered what yours is worth today, I’ll tell you honestly — no obligation. Comment 🏡 below.`,
         ], v)),
         P('Hashtags', `#JustSold #${area(c).replace(/[^A-Za-z]/g, '')}RealEstate #HomeSold #RealEstate #ThankYou`, false),
         bestFor('Instagram + Facebook · the sold photo or a “SOLD” sign graphic. Great as a Story too.'),

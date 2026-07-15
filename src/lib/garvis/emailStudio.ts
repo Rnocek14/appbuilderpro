@@ -45,8 +45,8 @@ const RE: EmailConcept[] = [
     render: (c, v) => ({
       subject: pick([`Just sold in ${area(c)}`, `Another ${area(c)} home just sold — here's what it means`], v),
       body: `Hi {{first_name}},\n\nI just helped a ${area(c)} owner sell [EDIT: how fast / over asking / detail].\n\n${pick([
-        `Homes here are moving, and a lot of owners are surprised by what theirs would sell for today.`,
-        `The market in ${area(c)} has shifted, and your home's number has probably moved with it.`,
+        `[EDIT: one honest line about the ${area(c)} market] A lot of owners are surprised by what theirs would sell for today.`,
+        `The ${area(c)} market is [EDIT: one honest word — moving fast / holding steady], and your home's number may have moved with it.`,
       ], v)}\n\nIf you're curious — even just curious — I'll put together a free, no-pressure estimate for your place. Takes about five minutes, no obligation.\n\nJust reply "value" and I'll get started.\n\n${sign(c)}`,
     }),
   },
