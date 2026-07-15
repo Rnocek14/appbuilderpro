@@ -65,7 +65,7 @@ export function RememberModal({ projectId, seed, open, onClose }: {
     <Modal open={open} onClose={onClose} title="Remembered preferences">
       <div className="space-y-4">
         <p className="text-xs text-forge-dim">
-          Teach FableForge a lasting rule — it's applied to every change from now on. Use it when you
+          Teach Garvis a lasting rule — it's applied to every change from now on. Use it when you
           correct something ("make all dark surfaces pure black") so you don't have to repeat yourself.
         </p>
 

@@ -9,6 +9,7 @@ import { AlarmClock, Loader2, Play, Pause, Trash2, Plus, Eye, CalendarClock } fr
 import { listOrders, createOrder, setOrderStatus, deleteOrder, runOrderNow } from '../../lib/garvis/standingRun';
 import { orderStatusLine, type Cadence, type OrderKind, type StandingOrder } from '../../lib/garvis/standing';
 import { ClockStatus } from './ClockStatus';
+import { Button } from '../ui';
 
 export function StandingOrdersPanel({ worldId, onToast }: {
   worldId?: string; onToast: (kind: 'success' | 'error', msg: string) => void;
@@ -93,12 +94,13 @@ export function StandingOrdersPanel({ worldId, onToast }: {
               className="mt-2 w-full rounded-lg border border-forge-border bg-forge-raised/30 px-2.5 py-1.5 font-mono text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/50 focus:outline-none"
             />
           )}
-          <button
+          <Button
+            variant='primary' size='sm'
             onClick={() => void add()} disabled={busy === 'create'}
-            className="mt-2 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50"
+            className="mt-2"
           >
             {busy === 'create' ? <Loader2 size={13} className="animate-spin" /> : <AlarmClock size={13} />} Set the order
-          </button>
+          </Button>
         </div>
       )}
 

@@ -11,6 +11,7 @@ import {
   type TimelineRow,
 } from '../../lib/garvis/timelinesRun';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
@@ -90,10 +91,9 @@ export function TimelinePanel({ worldId, onToast }: { worldId: string; onToast: 
           <input type="checkbox" checked={withReminders} onChange={(e) => setWithReminders(e.target.checked)} className="accent-[#FF8A3D]" />
           arm a firing reminder per step
         </label>
-        <button onClick={() => void doCreate()} disabled={busy || !title.trim() || !anchor}
-          className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-50">
+        <Button variant='primary' size='sm' onClick={() => void doCreate()} disabled={busy || !title.trim() || !anchor}>
           <Plus size={13} /> Start timeline
-        </button>
+        </Button>
       </div>
 
       {rows.length > 0 && (

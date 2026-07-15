@@ -34,6 +34,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const ClusterSpike = lazy(() => import('./pages/spike/ClusterSpike'));
 const Brain = lazy(() => import('./pages/Brain'));
 const Contacts = lazy(() => import('./pages/Contacts'));
+const WinClients = lazy(() => import('./pages/WinClients'));
 const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
@@ -44,6 +45,12 @@ const Universe3D = lazy(() => import('./pages/Universe3D'));
 const PreviewEngine = lazy(() => import('./pages/PreviewEngine'));
 const PreviewSite = lazy(() => import('./pages/PreviewSite'));
 const PreviewReport = lazy(() => import('./pages/PreviewReport'));
+const ProfileHome = lazy(() => import('./pages/ProfileHome'));
+const CanvasPreview = lazy(() => import('./pages/dev/CanvasPreview'));
+const ProfileHomePreview = lazy(() => import('./pages/dev/ProfileHomePreview'));
+const WebPreview = lazy(() => import('./pages/dev/WebPreview'));
+const ProspectWebPreview = lazy(() => import('./pages/dev/ProspectWebPreview'));
+const WinHubPreview = lazy(() => import('./pages/dev/WinHubPreview'));
 
 function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: boolean }) {
   const { session, profile, loading } = useAuth();
@@ -70,6 +77,9 @@ function AppRoutes() {
           <Route path="/oauth/callback" element={<OAuthCallback />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/garvis" element={<Protected><Garvis /></Protected>} />
+          {/* The canvas spine: you → a business → an area → a made thing, all one route so the
+              stage never remounts as you branch; the params ARE the path (Back walks up, deep-links work). */}
+          <Route path="/garvis/home/:businessId?/:areaSlug?" element={<Protected><ProfileHome /></Protected>} />
           <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
           {/* ONE MEMORY (design review P2): the nav door; the old rooms stay routable below. */}
           <Route path="/garvis/memory" element={<Protected><Memory /></Protected>} />
@@ -83,6 +93,7 @@ function AppRoutes() {
               every deep link, toast, and waking move keeps working (merge and relocate). */}
           <Route path="/garvis/queue" element={<Protected><Queue /></Protected>} />
           <Route path="/garvis/inbox" element={<Navigate to="/garvis/queue" replace />} />
+          <Route path="/garvis/clients" element={<Protected><WinClients /></Protected>} />
           <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
           <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
           <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
@@ -106,6 +117,13 @@ function AppRoutes() {
           <Route path="/admin" element={<Protected adminOnly><AdminDashboard /></Protected>} />
           {/* /spike/clusters removed — same component as /garvis/explore (audit: one page, two doors). */}
           <Route path="/business-preview-engine" element={<Protected><PreviewEngine /></Protected>} />
+          {/* DEV-ONLY — unauthed preview of in-progress surfaces, for screenshot-driven building.
+              Gated to dev builds so it never ships to production. */}
+          {import.meta.env.DEV && <Route path="/dev/marketing-canvas" element={<CanvasPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/profile-home" element={<ProfileHomePreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/web" element={<WebPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/prospect-web" element={<ProspectWebPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/win-hub" element={<WinHubPreview />} />}
           {/* PUBLIC — the link business owners open from the outreach email (no login). */}
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />

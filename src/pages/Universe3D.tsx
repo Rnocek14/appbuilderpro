@@ -18,7 +18,7 @@ import { Html, Line, OrbitControls } from '@react-three/drei';
 import { EffectComposer, Bloom, Vignette, Noise } from '@react-three/postprocessing';
 import { ArrowLeft, Telescope, Waypoints, Orbit as OrbitIcon } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { Spinner } from '../components/ui';
+import { Spinner, Button } from '../components/ui';
 import { loadUniverseScene } from '../lib/garvis/universeViewRun';
 import { loadSystemScene } from '../lib/garvis/systemViewRun';
 import { listClusterArtifacts, type StudioArtifact } from '../lib/garvis/artifacts';
@@ -625,7 +625,7 @@ function Universe3D() {
       <AppShell>
         <div className="mx-auto max-w-2xl px-4 py-16 text-center">
           <p className="text-forge-dim">The universe could not be loaded.</p>
-          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Ventures</Link>
+          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Businesses</Link>
         </div>
       </AppShell>
     );
@@ -725,10 +725,10 @@ function Universe3D() {
               )}
             </div>
             <div className="border-t border-forge-border p-3">
-              <button
+              <Button
+                variant="primary" size="sm" className="w-full"
                 onClick={() => navigate(`/garvis/webs/${selected.id}?area=${encodeURIComponent(planet.slug)}`)}
-                className="w-full rounded-lg bg-ember-gradient px-3 py-2 text-xs font-medium text-[#1A0E04]"
-              >Open the full studio — tools, files, chat</button>
+              >Open the full studio — tools, files, chat</Button>
             </div>
           </div>
         )}

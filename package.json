@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "db:push": "supabase db push",
-    "functions:deploy": "supabase functions deploy generate-app chat-edit garvis-brain garvis-short-script explorer-turn discover-media fetch-url ingest-profile claim-submit shot-worker embed-worker ingest-document send-email cluster-chat ads-sync render-video deploy-site deploy-backend job-worker agent-turn draft-plan research connections create-checkout customer-portal oauth github-export provision-supabase db-console apply-migration project-logs docusign-send mls-sync social-publish",
+    "functions:deploy": "supabase functions deploy generate-app chat-edit garvis-brain garvis-short-script explorer-turn discover-media fetch-url ingest-profile claim-submit shot-worker embed-worker ingest-document send-email cluster-chat ads-sync render-video deploy-site deploy-backend job-worker agent-turn draft-plan research connections create-checkout customer-portal oauth github-export provision-supabase db-console apply-migration project-logs docusign-send mls-sync social-publish generate-image",
     "functions:deploy:webhooks": "supabase functions deploy resend-webhook resend-inbound outreach-followups site-events garvis-pulse garvis-worker ads-watch outreach-reactivate inbox-draft garvis-scorecard invoice-chase standing-worker stripe-webhook unsubscribe ai-gateway docusign-webhook --no-verify-jwt",
     "verify:knowledge": "tsx src/lib/garvis/knowledge.verify.ts",
     "verify:objective": "tsx src/lib/garvis/objective.verify.ts",

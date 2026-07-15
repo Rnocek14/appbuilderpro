@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles, Send, Loader2, ShieldCheck } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { Button } from '../ui';
 import { useToast } from '../../context/ToastContext';
 import { runStudioTurn, loadStudioContext } from '../../lib/garvis/studioChat';
 import { listStudioMessages, type StudioMessage } from '../../lib/garvis/artifacts';
@@ -95,10 +96,9 @@ export function StudioChat({ worldId, webTitle, objective, clusterId, cluster, t
           disabled={busy}
           className="flex-1 rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 disabled:opacity-50"
         />
-        <button onClick={() => void send()} disabled={busy || !input.trim()}
-          className="flex items-center justify-center rounded-lg bg-ember-gradient px-3 py-2 text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-50">
+        <Button variant='primary' size='md' onClick={() => void send()} disabled={busy || !input.trim()}>
           {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -393,10 +393,9 @@ export default function Queue() {
                         }}
                         className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
                       <div className="flex items-center gap-2">
-                        <button onClick={() => void send()} disabled={sending}
-                          className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04] disabled:opacity-60">
+                        <Button variant="primary" size="sm" onClick={() => void send()} disabled={sending}>
                           {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue reply
-                        </button>
+                        </Button>
                         <button onClick={() => void draftWithGarvis(m)} disabled={drafting || sending}
                           title="Garvis drafts from their message, your contact record, and the voice of emails you actually approved."
                           className="flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-[11px] text-forge-dim hover:border-forge-ember/60 hover:text-forge-ember disabled:opacity-50">

@@ -755,7 +755,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, lastGeneratio
             <button
               type="button"
               onClick={() => setRememberOpen(true)}
-              title="Remember — teach FableForge a lasting preference"
+              title="Remember — teach Garvis a lasting preference"
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-forge-border text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
             >
               <Brain size={13} />

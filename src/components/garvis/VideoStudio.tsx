@@ -13,6 +13,7 @@ import {
 } from '../../lib/garvis/videoRun';
 import { cn } from '../../lib/utils';
 import { useUnsavedGuard } from '../../hooks/useUnsavedGuard';
+import { Button } from '../ui';
 
 const ASPECTS: { id: Aspect; label: string; box: string }[] = [
   { id: '9:16', label: 'Reel / TikTok', box: 'aspect-[9/16] max-w-[240px]' },
@@ -165,9 +166,9 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
             </div>
           </div>
           <div className="flex items-center justify-center gap-2">
-            <button onClick={() => { setScene(0); setPlaying((p) => !p); }} className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-1.5 text-xs font-medium text-[#1A0E04]">
+            <Button variant='primary' size='sm' onClick={() => { setScene(0); setPlaying((p) => !p); }}>
               {playing ? <Pause size={13} /> : <Play size={13} />} {playing ? 'Pause' : 'Play'}
-            </button>
+            </Button>
             <span className="text-[11px] text-forge-dim">{sb.totalDurationS}s · {sb.scenes.length} scenes</span>
           </div>
         </div>
@@ -215,9 +216,9 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => void doRender()} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3 py-2 text-sm font-medium text-[#1A0E04] disabled:opacity-60">
+            <Button variant='primary' size='md' onClick={() => void doRender()} disabled={busy}>
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />} Render mp4
-            </button>
+            </Button>
             <button onClick={() => void doSave()} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-forge-border px-3 py-2 text-sm text-forge-ink hover:border-forge-ember/50 disabled:opacity-60">
               <Save size={14} /> Save storyboard
             </button>

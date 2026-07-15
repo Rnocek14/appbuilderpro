@@ -1,6 +1,9 @@
-import { useEffect, useRef, type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react';
+import { type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react';
 import { Flame, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { Overlay } from './Overlay';
+
+export { Overlay } from './Overlay';
 
 // ---------------- Button ----------------
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -133,33 +136,23 @@ export function Ember({ size = 15, className }: { size?: number; className?: str
 }
 
 // ---------------- Modal ----------------
-// Escape closes and focus RETURNS to whatever opened it — handled once here so every consumer
-// inherits it (the system scan found each modal reinventing or forgetting both).
-function ModalShell({ onClose, title, children, size }: { onClose: () => void; title: string; children: ReactNode; size: 'md' | 'lg' }) {
-  const trigger = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    trigger.current = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      trigger.current?.focus?.();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+// A forge-dark modal on the shared Overlay primitive — Escape, focus-trap, scroll-lock, and
+// focus-return all come from there, so this only owns its panel + heading.
+export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'lg' }) {
+  if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeInUp [animation-duration:0.18s]" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
-      <div className={cn('w-full rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen p-5 shadow-lift animate-scaleIn', size === 'lg' ? 'max-w-3xl' : 'max-w-md')} onClick={(e) => e.stopPropagation()}>
+    <Overlay onClose={onClose} z={50}>
+      <div
+        className={cn('w-full rounded-xl border border-forge-border bg-forge-panel bg-panel-sheen p-5 shadow-lift animate-scaleIn', size === 'lg' ? 'max-w-3xl' : 'max-w-md')}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <h2 className="mb-4 font-display text-lg font-semibold tracking-tight">{title}</h2>
         {children}
       </div>
-    </div>
+    </Overlay>
   );
-}
-
-export function Modal({ open, onClose, title, children, size = 'md' }: { open: boolean; onClose: () => void; title: string; children: ReactNode; size?: 'md' | 'lg' }) {
-  if (!open) return null;
-  return <ModalShell onClose={onClose} title={title} size={size}>{children}</ModalShell>;
 }
 
 // ---------------- StatCard ----------------

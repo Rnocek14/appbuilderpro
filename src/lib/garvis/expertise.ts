@@ -317,6 +317,42 @@ RULE: master ONE channel to a measured cost-per-lead before adding the next.${NO
   },
 ];
 
+// GROWING A FACELESS AI-VIDEO ACCOUNT is not marketing a real business: the reel factory's born-with
+// knowledge is a short-form-content discipline — hook in the first second, one idea per reel, a
+// repeatable format per account, and the honest line that AI content is fine BECAUSE the account is
+// faceless entertainment and every post carries the platform's made-with-AI label.
+const CONTENT_GROWTH_PACK: SeedArtifact[] = [
+  {
+    slug: 'reel-format-system', kind: 'doc', title: 'Reel format system',
+    detail: `${H('The repeatable format for this account — {{business_name}}')}
+ONE ACCOUNT, ONE PROMISE. Pick the niche and the promise a viewer gets every time (a laugh, a fact, a
+feeling, a "how"). Voice: {{tone}}. The account is a BRAND, not a random feed — sameness is the asset.
+THE ANATOMY OF A REEL (9-30s, vertical 9:16):
+1) HOOK (0-1s) — a visual or line that stops the scroll. First frame is the whole game; no slow intros.
+2) BODY (3-5 beats) — one idea, escalating. Each beat is ONE scene = one shot prompt + one on-screen
+   caption. Captions carry the story with the sound off (most watch muted).
+3) PAYOFF / LOOP — land the promise, then loop the last frame to the first so it replays.
+FORMATS THAT REPEAT (pick 2-3 and run them forever): listicle ("3 things…"), POV, "did you know",
+before/after, tier-list, oddly-satisfying, story-time. A format you can make 100 of beats a viral one-off.
+CADENCE: 1-2 reels/day per account, same posting slots. Volume + consistency is how faceless accounts grow.${NOTE}`,
+  },
+  {
+    slug: 'reel-honesty-and-labeling', kind: 'doc', title: 'The honest line for AI content',
+    detail: `${H('Why AI video is allowed here — and the rule that keeps it honest')}
+THE CARVE-OUT IS NARROW. Fully AI-generated footage is honest for THIS world only because the account is
+faceless ENTERTAINMENT — the AI content is the product and deceives no real buyer. That is the deliberate
+opposite of a real business's video, which never fabricates footage of a real place, person, or listing.
+THE HARD RULES (non-negotiable):
+- Every generated reel carries the platform's MADE-WITH-AI label. The label is what keeps the model honest.
+- Never impersonate a real person or brand, never fabricate a real event or news, never present AI as a real record.
+- Generation is credit-gated (nothing renders silently) and posting is approval-gated (nothing posts without your yes).
+- Growth comes from the CONTENT. No bought/bot followers, no engagement pods, no fake metrics — they breach
+  platform rules and destroy an account's real resale value.
+- A network of distinct real personas survives platform review; a cluster of identical clones posting the
+  same clip is the canonical spam signal — give each account its own niche, look, and cut.${NOTE}`,
+  },
+];
+
 const GENERIC_STUDIO: SeedArtifact[] = [
   {
     slug: 'studio-brief', kind: 'doc', title: 'Creative brief',
@@ -474,7 +510,7 @@ const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
   feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK, data: DATA_PACK,
-  tracker: TRACKER_PACK,
+  tracker: TRACKER_PACK, content_growth: CONTENT_GROWTH_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */

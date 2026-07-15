@@ -83,7 +83,7 @@ export default function ImportProject() {
       <div className="mx-auto max-w-2xl px-6 py-10">
         <h1 className="font-display text-2xl font-semibold text-forge-ink">Import a project</h1>
         <p className="mt-1 text-sm text-forge-dim">
-          Bring an existing app into FableForge — Lovable projects sync to GitHub, so a repo URL is the
+          Bring an existing app into Garvis — Lovable projects sync to GitHub, so a repo URL is the
           quickest route. A zip export of the code works too.
         </p>
 

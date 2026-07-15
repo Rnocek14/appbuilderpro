@@ -13,6 +13,7 @@ import { DOC_TYPES, toMarkdown, toPlainText, deliverableArtifact, type Deliverab
 import { createArtifact } from '../../lib/garvis/artifacts';
 import { AddKnowledge } from './AddKnowledge';
 import { VerdictPrompt } from './VerdictPrompt';
+import { Button } from '../ui';
 
 const DOC_ORDER: DocType[] = ['proposal', 'report', 'one_pager', 'brief', 'letter', 'summary'];
 
@@ -109,13 +110,13 @@ export function DeliverableStudio({ worldId, clusterId, onToast }: {
       />
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button
+        <Button
+          variant='primary' size='md'
           onClick={() => void run()} disabled={busy}
-          className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-50"
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
           {busy ? (batch ? 'Generating batch…' : 'Writing…') : batch ? 'Generate the batch' : `Generate the ${meta.label.toLowerCase()}`}
-        </button>
+        </Button>
         <button
           onClick={() => { setBatch((v) => !v); setDocs(null); setErr(null); }}
           className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs transition-colors ${batch ? 'border-forge-cyan/50 text-forge-cyan' : 'border-forge-border text-forge-dim hover:text-forge-ink'}`}

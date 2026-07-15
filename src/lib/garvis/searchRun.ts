@@ -51,6 +51,6 @@ export function routeForHit(h: SearchHit): string {
 }
 
 export const KIND_LABEL: Record<SearchKind, string> = {
-  artifact: 'artifact', area: 'area', world: 'venture', contact: 'contact',
+  artifact: 'artifact', area: 'area', world: 'business', contact: 'contact',
   invoice: 'invoice', document: 'document', belief: 'belief', mission: 'mission',
 };

@@ -16,7 +16,7 @@ export default function Landing() {
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2">
           <Flame size={22} className="text-forge-ember" />
-          <span className="font-display text-lg font-semibold tracking-tight">FableForge</span>
+          <span className="font-display text-lg font-semibold tracking-tight">Garvis</span>
         </div>
         <nav className="flex items-center gap-4 text-sm">
           <Link to="/pricing" className="text-forge-dim hover:text-forge-ink">Pricing</Link>
@@ -34,16 +34,16 @@ export default function Landing() {
             Your own AI app builder — on your own Supabase, with your own keys
           </p>
           <h1 className="mx-auto max-w-2xl font-display text-4xl font-bold leading-tight tracking-tight sm:text-5xl">
-            Apps are forged here, <span className="bg-ember-gradient bg-clip-text text-transparent">not prompted into the void</span>
+            Your business, run by <span className="bg-ember-gradient bg-clip-text text-transparent">an AI chief of staff</span>
           </h1>
           <p className="mx-auto mt-5 max-w-xl text-forge-dim">
-            FableForge turns a sentence into a working app: blueprint, database, files, live preview.
-            Inside lives Garvis — an AI chief of staff that runs ventures, documents, watches, and an
-            honest approval queue for everything outbound. Your Supabase, your keys.
+            Garvis runs the operation — marketing, paperwork, contacts, and an honest approval queue
+            for everything that goes out — and builds the apps and sites you need along the way.
+            Nothing sends without your say-so. Your Supabase, your keys.
           </p>
           <div className="mt-8 flex justify-center gap-3">
             <Link to={session ? '/new' : '/auth'} className="group inline-flex items-center gap-2 rounded-lg bg-ember-gradient px-6 py-3 font-medium text-[#1A0E04] shadow-soft transition-all duration-150 ease-forge hover:-translate-y-px hover:shadow-liftEmber active:scale-[0.98]">
-              Start forging <ArrowRight size={16} className="transition-transform duration-200 ease-forge group-hover:translate-x-0.5" />
+              Get started <ArrowRight size={16} className="transition-transform duration-200 ease-forge group-hover:translate-x-0.5" />
             </Link>
             <Link to="/pricing" className="inline-flex items-center gap-2 rounded-lg border border-forge-border px-6 py-3 text-forge-ink transition-all duration-150 ease-forge hover:-translate-y-px hover:border-forge-ember/50 hover:bg-forge-raised">
               See plans
@@ -70,7 +70,7 @@ export default function Landing() {
       </main>
 
       <footer className="border-t border-forge-border py-6 text-center text-xs text-forge-dim">
-        FableForge — self-hosted app forging. MIT-style freedom: it's your code.
+        Garvis — your self-hosted AI business OS. MIT-style freedom: it's your code.
       </footer>
     </div>
   );

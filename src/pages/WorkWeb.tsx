@@ -3,7 +3,7 @@
 // chartered WORKSPACE on the right when you dive into one. Each area is a thought + a workspace +
 // a ledger — its tools, artifacts, and results all in one place. Approval-gated by construction.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Waypoints, Loader2, ArrowLeft, Play, Sparkles, Upload, Send, Eye, FileText, FileImage,
@@ -29,21 +29,30 @@ import type { ResearchPlan } from '../lib/garvis/marketIntel';
 import type { WorldDNA, BusinessContext } from '../lib/garvis/genesis';
 import { ArtifactCard } from '../components/garvis/ArtifactCard';
 import { StudioChat } from '../components/garvis/StudioChat';
-import { MailerDesigner } from '../components/garvis/MailerDesigner';
-import { FarmPanel } from '../components/garvis/FarmPanel';
-import { PaperworkStudio } from '../components/garvis/PaperworkStudio';
-import { MarketDataPanel } from '../components/garvis/MarketDataPanel';
-import { TimelinePanel } from '../components/garvis/TimelinePanel';
-import { SocialPublisher } from '../components/garvis/SocialPublisher';
-import { VideoStudio } from '../components/garvis/VideoStudio';
-import { AnsweringDesk } from '../components/garvis/AnsweringDesk';
-import { DeliverableStudio } from '../components/garvis/DeliverableStudio';
-import { DataWorkspace } from '../components/garvis/DataWorkspace';
+import { PanelBoundary } from '../components/garvis/PanelBoundary';
+import { GenerationReadiness } from '../components/garvis/GenerationReadiness';
+import { StudioHero } from '../components/garvis/StudioHero';
+import { FirstRunGuide } from '../components/garvis/FirstRunGuide';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
-import { TrackerRegistry } from '../components/garvis/TrackerRegistry';
 import { VerdictReadout } from '../components/garvis/VerdictReadout';
 import { AskGarvis } from '../components/garvis/AskGarvis';
 import { WorldGoalPanel } from '../components/garvis/WorldGoalPanel';
+
+// HEAVY / PER-FLAVOR STUDIO PANELS — lazy so one leaf dependency (qrcode, pdf, docx) failing to
+// resolve can never blank the whole Ventures page again. Each renders only for its own flavor, so
+// splitting them out of the initial chunk is a straight win; PanelBoundary contains any failure.
+const MailerDesigner = lazy(() => import('../components/garvis/MailerDesigner').then((m) => ({ default: m.MailerDesigner })));
+const FarmPanel = lazy(() => import('../components/garvis/FarmPanel').then((m) => ({ default: m.FarmPanel })));
+const PaperworkStudio = lazy(() => import('../components/garvis/PaperworkStudio').then((m) => ({ default: m.PaperworkStudio })));
+const MarketDataPanel = lazy(() => import('../components/garvis/MarketDataPanel').then((m) => ({ default: m.MarketDataPanel })));
+const TimelinePanel = lazy(() => import('../components/garvis/TimelinePanel').then((m) => ({ default: m.TimelinePanel })));
+const SocialPublisher = lazy(() => import('../components/garvis/SocialPublisher').then((m) => ({ default: m.SocialPublisher })));
+const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
+const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').then((m) => ({ default: m.AnsweringDesk })));
+const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
+const DataWorkspace = lazy(() => import('../components/garvis/DataWorkspace').then((m) => ({ default: m.DataWorkspace })));
+const TrackerRegistry = lazy(() => import('../components/garvis/TrackerRegistry').then((m) => ({ default: m.TrackerRegistry })));
+const MarketingCanvas = lazy(() => import('../components/garvis/canvas/MarketingCanvas').then((m) => ({ default: m.MarketingCanvas })));
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -67,6 +76,9 @@ export default function WorkWeb() {
   const [intel, setIntel] = useState<WorldIntelligenceRow | null>(null);
   const [reflecting, setReflecting] = useState(false);
   const [showIntel, setShowIntel] = useState(false);
+  // Marketing-first businesses (they have a direct-mail studio) open on the simple "Make my
+  // marketing" flow; the studio tree + areas move behind an "Advanced" toggle.
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // The heartbeat updates when observed: refresh the deterministic Living State on open, then read.
   // Learning is no longer manual-only — if reflection is genuinely due (enough real activity, not
@@ -201,11 +213,17 @@ export default function WorkWeb() {
       <AppShell>
         <div className="mx-auto max-w-2xl px-4 py-16 text-center">
           <p className="text-forge-dim">This web could not be loaded.</p>
-          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Ventures</Link>
+          <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Businesses</Link>
         </div>
       </AppShell>
     );
   }
+
+  // Any marketing/outreach business leads with the simple "Make my marketing" flow (the single-
+  // purpose desks — answering / documents / data / tracker / product lab — keep the studio view).
+  // Real-estate businesses get listing-shaped announcements; everyone else gets generic ones.
+  const hasCampaign = !noOutreach;
+  const realEstate = /real.?estate|realtor|realty|listing|propert|broker|\bhomes?\b/i.test(web.title);
 
   return (
     <AppShell>
@@ -248,19 +266,27 @@ export default function WorkWeb() {
             {/* outreach chips only where outreach exists — a product lab's or answering desk's "sent 0" is not a stat, it's noise */}
             {!noOutreach && <StatChip label="sent" value={web.rollup.messagesSent} />}
             {!noOutreach && <StatChip label="replies" value={web.rollup.replies} tone="ok" />}
-            {templatePlay && (
-              <button
+            {/* First-run convenience only: fill EVERY studio at once, and only while the business is
+                still empty. Once any real work exists it disappears, so it never competes with each
+                studio's own Generate button. */}
+            {templatePlay && web.rollup.artifacts === 0 && (
+              <Button
+                variant="primary" size="md"
                 onClick={() => void doRunPlay()} disabled={running}
-                className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-60"
+                title="One-time head start: puts a starter into every studio in this business at once. After that, use each studio's own Generate."
               >
                 {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}
-                Run the play
-              </button>
+                Fill all studios to start
+              </Button>
             )}
           </div>
         </div>
 
         {showIntel && intel && <WorldIntelDashboard intel={intel} />}
+
+        {/* FIRST-RUN ORIENTATION — three concrete steps to the first real marketing. Only shows
+            when this world has produced no EARNED work yet; vanishes the moment it has. */}
+        <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} />
 
         {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
         <div className="mb-4">
@@ -288,6 +314,27 @@ export default function WorkWeb() {
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
         </div>
 
+        {/* THE HOME: for a marketing business, the marketing canvas IS the front page — what you're
+            marketing glows in the center and everything you can make branches around it. Tap a node
+            to open a focused sheet that makes that piece (postcard, social, email) from one set of
+            details. The studio areas move behind an "Advanced" toggle so the first thing you see is
+            an inviting canvas, not a map of buttons. */}
+        {hasCampaign && (
+          <div className="mb-5">
+            <PanelBoundary name="marketing canvas">
+              <MarketingCanvas worldId={worldId} realEstate={realEstate} onToast={(k, m) => toast(k, m)} />
+            </PanelBoundary>
+            <button
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="mt-3 flex items-center gap-1.5 text-xs text-forge-dim transition-colors hover:text-forge-ink"
+            >
+              <ChevronRight size={13} className={cn('transition-transform', showAdvanced && 'rotate-90')} />
+              {showAdvanced ? 'Hide' : 'Advanced'} — the studios & areas (social, video, farm lists, paperwork…)
+            </button>
+          </div>
+        )}
+
+        {(!hasCampaign || showAdvanced) && (
         <div className="grid gap-5 lg:grid-cols-[minmax(0,340px)_1fr]">
           {/* The web — production areas as a connected tree */}
           <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-2">
@@ -342,6 +389,7 @@ export default function WorkWeb() {
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* Contacts — the real view behind the "View contacts" tool */}
@@ -457,14 +505,13 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
     <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs text-forge-dim">
         <Sparkles size={13} className="text-forge-ember" />
-        <span className="font-medium text-forge-ink">Create more</span>
-        <span className="hidden sm:inline">— every take is added to the shelf, never overwritten; regenerations avoid repeating prior work</span>
+        <span className="font-medium text-forge-ink">Want a different version?</span>
+        <span className="hidden sm:inline">— each one is added to the shelf, never replaces what you have</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <input
           value={direction} onChange={(e) => setDirection(e.target.value)} maxLength={200}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void go(takeTool); }}
-          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”… (↵ runs a take)"
+          placeholder="Steer it (optional): “bolder”, “luxury buyers”, “lead with the $61k-over-ask story”…"
           className="min-w-[220px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none"
         />
         <button onClick={() => void go('gen-ideas')} disabled={!!busy} className={btn} title="10 distinct concepts for this studio — near-duplicates collapsed, each with its first step">
@@ -534,6 +581,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
   }, [artifacts]);
   const [loadingArts, setLoadingArts] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
+  // The world's brand accent tints the artifact previews (a postcard in her colors, not grey).
+  const [brandAccent, setBrandAccent] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    getBrandKit(worldId).then((k) => { if (live) setBrandAccent(k?.palette?.[0]); }).catch(() => {});
+    return () => { live = false; };
+  }, [worldId]);
 
   const reload = useCallback(async () => {
     try {
@@ -577,6 +631,21 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <Link to="/garvis/queue" className="mt-3 flex items-center gap-1.5 rounded-lg border border-forge-warn/40 bg-forge-warn/10 px-3 py-2 text-xs text-forge-warn">
           <ShieldCheck size={14} /> {cluster.pendingApprovals} action{cluster.pendingApprovals === 1 ? '' : 's'} waiting for approval <ChevronRight size={13} />
         </Link>
+      )}
+
+      {/* THE STUDIO HERO — names what this studio makes and gives ONE obvious Generate action.
+          The answer to "I don't even know how to generate it." Only for studio areas; other
+          archetypes (vault, audience, ledger…) have their own dedicated panels below. */}
+      {cluster.charter?.archetype === 'studio' && (
+        <div className="mt-3">
+          <StudioHero
+            cluster={cluster}
+            worldId={worldId}
+            hasEarnedWork={cluster.earnedArtifacts > 0}
+            onDone={bumpChanged}
+            onToast={(k, m) => toast(k, m)}
+          />
+        </div>
       )}
 
       {/* Brand kit — the vault's real workspace. This is where "Set up the brand" lands:
@@ -647,83 +716,83 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           brand kit + vault photos, with a QR from the tracking link, a print/PDF path, and a
           mail log so mailed batches count as real outreach. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'direct_mail' && (
-        <MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="postcard designer"><MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* THE FARM — neighborhood prospecting: territories, address-first household lists (columns
           kept), farm-viability math, do-not-mail suppression, and an addressed merged print run
           from this world's saved postcard design. Lives on both the lists desk and the mail studio. */}
       {cluster.charter?.archetype === 'studio' && (cluster.charter.flavor === 'lists' || cluster.charter.flavor === 'direct_mail') && (
-        <FarmPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="neighborhood farm"><FarmPanel worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* MARKET DATA from the owner's own RESO/MLS feed — computed stats, honest empty state,
           and the sold-by-zip number the Farm's turnover math needs. */}
       {cluster.charter?.flavor === 'market' && (
-        <MarketDataPanel onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="market data"><MarketDataPanel onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
           plays in the browser now, renders a real mp4 when a render key is set. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'video' && (
-        <VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="video studio"><VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* AUTO-POST to her real connected social accounts (Ayrshare), scheduled + approval-gated. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'social' && (
-        <SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="social publisher"><SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded
           only in this world's knowledge base, cited, with its gaps flagged. Refuses over an empty
           corpus. The human copies and sends; nothing is auto-sent. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'assist' && (
-        <AnsweringDesk worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="answering desk"><AnsweringDesk worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* DELIVERABLE GENERATOR — the document studio: produce a finished, exportable document
           (proposal / report / one-pager) grounded in this world's knowledge, one or a batch. You
           review and send; nothing is auto-delivered. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
-        <DeliverableStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="document studio"><DeliverableStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* AUTO-PAPERWORK: the operator's own templates merged from real records — unfilled fields
           refuse to send, and every envelope goes through Approvals to docusign-send. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
-        <PaperworkStudio worldId={worldId} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="paperwork studio"><PaperworkStudio worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* DATA & NUMBERS WORKSPACE — a CSV becomes a typed table, honest per-column stats, and a chart
           drawn only from a real aggregation. Every number is computed in pure code; the optional read
           narrates only those figures, never inventing one. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'data' && (
-        <DataWorkspace worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="data workspace"><DataWorkspace worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* PERSONAL/INTERNAL REGISTRY — log entries that become queryable memory. Records, not
           automations: nothing is computed or sent from them unless the owner asks. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
-        <TrackerRegistry worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onChanged={onChanged} />
+        <PanelBoundary name="registry"><TrackerRegistry worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onChanged={onChanged} /></PanelBoundary>
       )}
 
       {/* TRANSACTION TIMELINES: contract-to-close checklists whose dated steps can become firing
           reminders — deadlines that ring, not rows that wait. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
-        <TimelinePanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
+        <PanelBoundary name="transaction timelines"><TimelinePanel worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile
           into ONE brief and open the app builder. Real photos, never placeholders. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'landing' && (
         <div className="mt-4">
-          <button
+          <Button
+            variant="primary" size="md"
             onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
-            className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px"
             title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
           >
             <Sparkles size={15} /> Build the website — with this world's artwork
-          </button>
+          </Button>
           {/* SITE RENDITIONS — pick the design mechanism before the generator runs; same real
               materials, a genuinely different site. Rebuild under another direction any time. */}
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -739,32 +808,40 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         </div>
       )}
 
-      {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. Renditions add,
-          never overwrite; regenerations diverge from prior work by default. */}
-      {cluster.charter && <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} ideaTitles={ideaTitles} />}
+      {/* CREATIVE DEPTH — ideas, another take, the business plan, all steerable. HIDDEN until the
+          studio has real work: an empty studio shows exactly ONE way to make something (the hero /
+          its dedicated panel). Once there's a piece on the shelf, this appears as an opt-in
+          "want a different version?" — so the first-time view is never a wall of buttons. */}
+      {cluster.charter && cluster.earnedArtifacts > 0 && (
+        <CreateMoreBar worldId={worldId} cluster={cluster} onDone={bumpChanged} ideaTitles={ideaTitles} />
+      )}
 
-      {/* Tools */}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {cluster.tools.map((t) => {
-          const Icon = TOOL_ICON[t.kind] ?? Sparkles;
-          const busy = busyTool === `${cluster.slug}:${t.id}`;
-          return (
-            <button
-              key={t.id}
-              onClick={() => onTool(t)} disabled={busy}
-              title={t.hint}
-              className={cn(
-                'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50',
-                t.kind === 'queue' ? 'border-forge-ember/50 bg-forge-ember/10 text-forge-ember hover:bg-forge-ember/20'
-                  : 'border-forge-border text-forge-ink hover:border-forge-ember/50 hover:bg-forge-raised',
-              )}
-            >
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* Tools — only for NON-studio areas (audience lists, launch/queue, vault imports…). A studio's
+          one action is its hero Generate button or its dedicated panel above, so its tool row would
+          just be the same producer under a second label — hidden here to keep one obvious action. */}
+      {cluster.charter?.archetype !== 'studio' && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {cluster.tools.map((t) => {
+            const Icon = TOOL_ICON[t.kind] ?? Sparkles;
+            const busy = busyTool === `${cluster.slug}:${t.id}`;
+            return (
+              <button
+                key={t.id}
+                onClick={() => onTool(t)} disabled={busy}
+                title={t.hint}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50',
+                  t.kind === 'queue' ? 'border-forge-ember/50 bg-forge-ember/10 text-forge-ember hover:bg-forge-ember/20'
+                    : 'border-forge-border text-forge-ink hover:border-forge-ember/50 hover:bg-forge-raised',
+                )}
+              >
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Files */}
       <div className="mt-5">
@@ -795,10 +872,14 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         {loadingArts ? (
           <p className="text-sm text-forge-dim/70">Loading…</p>
         ) : artifacts.length === 0 ? (
-          <p className="text-sm text-forge-dim/70">Nothing here yet. Use a tool above, or just ask the studio below.</p>
+          <p className="text-sm text-forge-dim/70">
+            {cluster.charter?.archetype === 'studio'
+              ? 'Nothing here yet — use the studio above to make your first piece. It lands here.'
+              : 'Nothing here yet. Use a tool above to get started.'}
+          </p>
         ) : (
           <div className="space-y-2">
-            {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} onChanged={bumpChanged} />)}
+            {artifacts.map((a) => <ArtifactCard key={a.id} artifact={a} onChanged={bumpChanged} accent={brandAccent} />)}
           </div>
         )}
       </div>

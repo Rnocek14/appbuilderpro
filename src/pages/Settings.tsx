@@ -127,7 +127,7 @@ function AIProviderCard() {
             </p>
           )}
           <p className="mt-2 text-[11px] text-forge-dim">
-            Keys are stored only in this browser's local storage and sent directly to the provider — never to FableForge's servers.
+            Keys are stored only in this browser's local storage and sent directly to the provider — never to Garvis's servers.
           </p>
         </div>
       </div>

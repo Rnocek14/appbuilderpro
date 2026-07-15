@@ -602,7 +602,7 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   const { data, error } = await supabase.functions.invoke('agent-turn', {
     body: { system, messages: rest, tools: [], maxTokens, fast },
   });
-  if (error) throw new Error(`FableForge Cloud AI: ${error.message}`);
+  if (error) throw new Error(`Garvis Cloud AI: ${error.message}`);
   const d = data as {
     content?: { type: string; text?: string }[];
     usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
@@ -611,7 +611,7 @@ async function cloudComplete(messages: { role: string; content: string }[], maxT
   } | null;
   if (d?.error) throw new Error(d.error);
   const text = (d?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
-  if (!text) throw new Error('FableForge Cloud AI returned no text.');
+  if (!text) throw new Error('Garvis Cloud AI returned no text.');
   const inputTokens = d?.usage?.input_tokens ?? 0;
   const outputTokens = d?.usage?.output_tokens ?? 0;
   const cacheCreation = d?.usage?.cache_creation_input_tokens ?? 0;

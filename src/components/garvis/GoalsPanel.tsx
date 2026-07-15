@@ -89,7 +89,7 @@ export function GoalsPanel() {
 
       {/* add goal */}
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-forge-border pt-3">
-        <Input className="min-w-[12rem] flex-1" placeholder="New goal (e.g. Get FableForge to $5k MRR)" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <Input className="min-w-[12rem] flex-1" placeholder="New goal (e.g. Get to $5k MRR)" value={title} onChange={(e) => setTitle(e.target.value)} />
         <Input className="w-40" placeholder="success metric" value={metric} onChange={(e) => setMetric(e.target.value)} />
         <select className={selectCls} value={priority} onChange={(e) => setPriority(Number(e.target.value))} title="Priority">
           <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option><option value={4}>P4</option>

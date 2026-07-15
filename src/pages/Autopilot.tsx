@@ -185,7 +185,7 @@ export default function Autopilot() {
             <EmptyState
               icon={<Bot size={28} />}
               title="Nothing building yet"
-              body="Queue a product brief and FableForge will plan it into milestones, build each one, validate, self-fix, and leave you a report."
+              body="Queue a product brief and Garvis will plan it into milestones, build each one, validate, self-fix, and leave you a report."
               action={<Button onClick={() => setOpen(true)}><Plus size={15} /> Queue your first brief</Button>}
             />
           </div>

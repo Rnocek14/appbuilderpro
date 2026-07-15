@@ -11,8 +11,9 @@ import { Card, Badge, EmptyState, Spinner, Button } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../lib/utils';
 import { WEB_TEMPLATES, ARCHETYPES, flattenTemplate } from '../lib/garvis/workweb';
+import { growthPlan, planMoneyVerdict } from '../lib/garvis/genesis';
 import { listWebs, instantiateWeb, type WebSummary } from '../lib/garvis/workwebRun';
-import { generateDraft, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
+import { generateDraft, generateDraftFromRepo, generateDraftsFromRepos, parseRepoRef, listDrafts, approveDraft, discardDraft, removeDraftNode, type DraftRow } from '../lib/garvis/genesisRun';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 
 const TEMPLATE_ICON: Record<string, typeof Building2> = { 'mom-real-estate': Building2, 'app-launch': Rocket };
@@ -25,6 +26,8 @@ export default function WorkWebs() {
   const [creating, setCreating] = useState<string | null>(null);
   const [intent, setIntent] = useState('');
   const [drafting, setDrafting] = useState(false);
+  const [repoUrl, setRepoUrl] = useState('');
+  const [repoDrafting, setRepoDrafting] = useState(false);
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [genesisWarnings, setGenesisWarnings] = useState<string[]>([]);
 
@@ -56,6 +59,36 @@ export default function WorkWebs() {
     }
   };
 
+  const draftFromRepo = async () => {
+    const refs = repoUrl.split(/[\s,]+/).map((s) => s.trim()).filter((s) => parseRepoRef(s));
+    if (!refs.length) return;
+    setRepoDrafting(true);
+    setGenesisWarnings([]);
+    try {
+      if (refs.length === 1) {
+        const r = await generateDraftFromRepo(refs[0]);
+        if (!r.id) { toast('error', r.problems[0] ?? 'Couldn’t spin up a world from that repo.'); setGenesisWarnings(r.warnings); return; }
+        setRepoUrl('');
+        setGenesisWarnings(r.warnings);
+        toast('success', `Read the repo and drafted "${r.draft?.title}" — review it below. Nothing exists until you approve.`);
+      } else {
+        const results = await generateDraftsFromRepos(refs);
+        const ok = results.filter((x) => x.result.id);
+        const failed = results.filter((x) => !x.result.id);
+        setRepoUrl('');
+        toast(ok.length ? 'success' : 'error',
+          `Drafted ${ok.length} of ${refs.length} apps — review them below.${failed.length ? ` ${failed.length} couldn’t be read (likely private or too little product info).` : ''} Nothing exists until you approve each.`);
+      }
+      await refresh();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Reading the repo(s) failed.');
+    } finally {
+      setRepoDrafting(false);
+    }
+  };
+
+  const repoRefCount = repoUrl.split(/[\s,]+/).map((s) => s.trim()).filter((s) => parseRepoRef(s)).length;
+
   const create = async (templateId: string) => {
     setCreating(templateId);
     try {
@@ -76,8 +109,8 @@ export default function WorkWebs() {
             <Waypoints size={20} className="text-forge-ember" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-forge-ink">Ventures</h1>
-            <p className="text-sm text-forge-dim">A venture isn't a checklist — it's a living territory. Every area is a workspace with its own tools.</p>
+            <h1 className="text-xl font-semibold text-forge-ink">Businesses</h1>
+            <p className="text-sm text-forge-dim">A business here isn't a checklist — it's a living operation. Every area is a workspace with its own tools.</p>
           </div>
           <button
             onClick={() => navigate('/garvis/universe')}
@@ -86,13 +119,17 @@ export default function WorkWebs() {
           ><Telescope size={13} /> Universe</button>
         </div>
 
+        {/* THE ALWAYS-WORKS PATH FIRST: deterministic templates build a whole venture in one click,
+            no AI required. Kept ABOVE the AI genesis box so the primary door never dead-ends. */}
+        <TemplatesSection creating={creating} onCreate={(id) => void create(id)} />
+
         {/* Genesis — describe a mission; Garvis synthesizes the DNA, then designs the web.
-            Drafts are proposals: nothing becomes a world until approved. */}
+            Drafts are proposals: nothing becomes a world until approved. Needs an AI key. */}
         <Card className="mb-8 p-4">
           <div className="flex items-center gap-2">
             <Sparkles size={16} className="text-forge-ember" />
-            <h2 className="text-sm font-semibold text-forge-ink">Start from intent</h2>
-            <span className="text-xs text-forge-dim">— describe the business or mission; Garvis designs the work web and shows you why</span>
+            <h2 className="text-sm font-semibold text-forge-ink">Or start from intent</h2>
+            <span className="text-xs text-forge-dim">— describe the business or mission; Garvis designs the work web and shows you why (needs an AI key)</span>
           </div>
           {/* THE FRONT DOOR the reachability audit found missing: nothing advertised that a world can
               be a growth op, a product lab, an answering desk, a document studio, or a data workspace.
@@ -125,6 +162,31 @@ export default function WorkWebs() {
               {drafting ? 'Synthesizing…' : 'Draft the web'}
             </Button>
             <span className="text-[11px] text-forge-dim">Two passes: business DNA first, then the web — every area arrives with its reason.</span>
+          </div>
+
+          {/* Or point Garvis at a GitHub repo: it reads the repo's real signal (README, the site
+              title/description, package.json, docs) and distills the intent for you. Public repos for
+              now; a private repo needs a connected GitHub token. Still just a draft — you approve it. */}
+          <div className="mt-4 border-t border-forge-border/60 pt-3">
+            <div className="flex items-center gap-2">
+              <Building2 size={14} className="text-forge-ember" />
+              <span className="text-xs font-medium text-forge-ink">Or spin up from your GitHub repos</span>
+              <span className="text-[11px] text-forge-dim">— Garvis reads each repo and drafts its marketing world; paste several to bring your whole portfolio in at once</span>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && repoRefCount > 0) { e.preventDefault(); void draftFromRepo(); } }}
+                placeholder="github.com/owner/repo  (or several, separated by spaces or commas)"
+                className="flex-1 rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/50"
+                aria-label="GitHub repo URL(s)"
+              />
+              <Button variant="outline" onClick={() => void draftFromRepo()} loading={repoDrafting} disabled={repoRefCount === 0}>
+                {repoDrafting ? 'Reading…' : repoRefCount > 1 ? `Read ${repoRefCount} repos` : 'Read repo'}
+              </Button>
+            </div>
+            <span className="mt-1 block text-[11px] text-forge-dim">Public repos for now. Each comes in as its own draft — nothing is created until you approve it.</span>
           </div>
           {genesisWarnings.length > 0 && (
             <ul className="mt-2 space-y-0.5">
@@ -160,7 +222,7 @@ export default function WorkWebs() {
         {loading ? (
           <Spinner label="Loading your webs…" />
         ) : webs.length === 0 ? (
-          <EmptyState icon={<Waypoints size={20} />} title="No ventures yet" body="Describe yours in 'Start from intent' above — Garvis designs the whole territory and its tools around your objective. (Templates below work too.)" />
+          <EmptyState icon={<Waypoints size={20} />} title="No businesses yet" body="Pick a template above to build the whole operation in one click — it works right now, no setup. Or describe your own in 'Start from intent' and Garvis designs it around your objective." />
         ) : (
           <div className="mb-10 grid gap-3 sm:grid-cols-2">
             {webs.map((w) => (
@@ -182,32 +244,43 @@ export default function WorkWebs() {
           </div>
         )}
 
-        {/* Templates */}
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-forge-dim">Start a new venture</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {WEB_TEMPLATES.map((t) => {
-            const Icon = TEMPLATE_ICON[t.id] ?? Plus;
-            return (
-              <Card key={t.id} className="flex flex-col p-4">
-                <div className="mb-2 flex items-center gap-2">
-                  <Icon size={18} className="text-forge-ember" />
-                  <span className="font-medium text-forge-ink">{t.title}</span>
-                  {t.playIds.length > 0 && <Badge tone="ember">{t.playIds.length} play{t.playIds.length === 1 ? '' : 's'}</Badge>}
-                </div>
-                <p className="flex-1 text-sm text-forge-dim">{t.description}</p>
-                <button
-                  onClick={() => void create(t.id)} disabled={creating !== null}
-                  className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-2 text-sm font-medium text-forge-ember transition-colors hover:bg-forge-ember/20 disabled:opacity-50"
-                >
-                  {creating === t.id ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-                  Create venture
-                </button>
-              </Card>
-            );
-          })}
-        </div>
       </div>
     </AppShell>
+  );
+}
+
+/** The always-works path: instantiate a fully-built venture from a template with ZERO AI. Rendered
+ *  ABOVE the AI genesis box because it is deterministic — it never dead-ends, offline or not. */
+function TemplatesSection({ creating, onCreate }: { creating: string | null; onCreate: (id: string) => void }) {
+  return (
+    <div className="mb-6">
+      <div className="mb-2 flex items-center gap-2">
+        <h2 className="text-sm font-semibold text-forge-ink">Build in one click</h2>
+        <span className="text-xs text-forge-dim">— a ready-made business, fully set up. Works right now, no AI key needed.</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {WEB_TEMPLATES.map((t) => {
+          const Icon = TEMPLATE_ICON[t.id] ?? Plus;
+          return (
+            <Card key={t.id} className="flex flex-col p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <Icon size={18} className="text-forge-ember" />
+                <span className="font-medium text-forge-ink">{t.title}</span>
+                {t.playIds.length > 0 && <Badge tone="ember">{t.playIds.length} play{t.playIds.length === 1 ? '' : 's'}</Badge>}
+              </div>
+              <p className="flex-1 text-sm text-forge-dim">{t.description}</p>
+              <button
+                onClick={() => onCreate(t.id)} disabled={creating !== null}
+                className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-2 text-sm font-medium text-forge-ember transition-colors hover:bg-forge-ember/20 disabled:opacity-50"
+              >
+                {creating === t.id ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+                Create business
+              </button>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -247,6 +320,36 @@ function DraftReview({ draft, onApprove, onDiscard, onRemoveNode }: {
           ))}
         </div>
       )}
+
+      {/* THE MONEY QUESTION, ANSWERED BEFORE YOU APPROVE: turn the DNA into a real go-to-market plan
+          and an honest read on whether it can actually earn. Deterministic from the DNA — visible
+          [holes] where it's thin, never an invented number. */}
+      {dna && (() => {
+        const verdict = planMoneyVerdict(dna);
+        const plan = growthPlan(dna);
+        return (
+          <div className="mt-3 rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+            <div className="flex items-center gap-2">
+              <span className={cn('rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide',
+                verdict.canMakeMoney ? 'bg-forge-ok/15 text-forge-ok' : 'bg-forge-warn/15 text-forge-warn')}>
+                {verdict.canMakeMoney ? 'Can make money' : 'Money model incomplete'}
+              </span>
+              <span className="text-xs text-forge-dim">{verdict.line}</span>
+            </div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {plan.map((s) => (
+                <div key={s.heading} className="rounded-lg border border-forge-border/60 p-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-forge-ember/90">{s.heading}</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {s.lines.map((l, i) => <li key={i} className="text-xs leading-snug text-forge-ink/85">{l}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] text-forge-dim">This plan is read straight from the synthesized DNA above — a check on the money model and channels BEFORE you commit. If it looks wrong, edit the intent and re-draft. Nothing here is an invented figure; visible [holes] mark what the DNA still needs.</p>
+          </div>
+        );
+      })()}
 
       <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
         {/* Areas, each with its why */}

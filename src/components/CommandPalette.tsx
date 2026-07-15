@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, FolderOpen, Plus, CreditCard, Settings as SettingsIcon, Sparkles, Waypoints, Telescope, BrainCircuit, ShieldCheck, FileText, Users, CircleDollarSign, Lightbulb, Target } from 'lucide-react';
 import { useProjects } from '../hooks/useProjectData';
 import { cn } from '../lib/utils';
+import { Overlay } from './ui/Overlay';
 import { universalSearch, routeForHit, KIND_LABEL, type SearchHit, type SearchKind } from '../lib/garvis/searchRun';
 
 const HIT_ICON: Record<SearchKind, typeof FileText> = {
@@ -19,7 +20,7 @@ export function CommandPalette({ open, onClose }: Props) {
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // global ⌘K / Ctrl+K shortcut
+  // global ⌘K / Ctrl+K shortcut (Escape-to-close is handled by the Overlay primitive below)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -27,7 +28,6 @@ export function CommandPalette({ open, onClose }: Props) {
         if (open) onClose();
         else document.dispatchEvent(new CustomEvent('ff:open-palette'));
       }
-      if (e.key === 'Escape' && open) onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -66,7 +66,7 @@ export function CommandPalette({ open, onClose }: Props) {
     const commands: PaletteItem[] = [
       { id: 'new', label: 'New project', icon: Plus, run: () => navigate('/new') },
       { id: 'garvis-command', label: 'Garvis: Command (waking moment)', icon: Sparkles, run: () => navigate('/garvis/command') },
-      { id: 'garvis-webs', label: 'Garvis: Ventures (work webs)', icon: Waypoints, run: () => navigate('/garvis/webs') },
+      { id: 'garvis-webs', label: 'Garvis: Businesses', icon: Waypoints, run: () => navigate('/garvis/webs') },
       { id: 'garvis-universe', label: 'Garvis: Universe (all worlds, 3D)', icon: Telescope, run: () => navigate('/garvis/universe') },
       { id: 'garvis-universe-flat', label: 'Garvis: Universe (2D map)', icon: Telescope, run: () => navigate('/garvis/universe?mode=flat') },
       { id: 'garvis-explore', label: 'Garvis: Explore (rabbitholes)', icon: Search, run: () => navigate('/garvis/explore') },
@@ -119,10 +119,9 @@ export function CommandPalette({ open, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/60 pt-[15vh]" onClick={onClose}>
+    <Overlay onClose={onClose} placement="top" z={90}>
       <div
         className="w-full max-w-lg overflow-hidden rounded-xl border border-forge-border bg-forge-panel shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Command palette"
       >
@@ -167,6 +166,6 @@ export function CommandPalette({ open, onClose }: Props) {
           ))}
         </ul>
       </div>
-    </div>
+    </Overlay>
   );
 }

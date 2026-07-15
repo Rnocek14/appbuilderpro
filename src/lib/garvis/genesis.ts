@@ -9,7 +9,7 @@
 //      what the operational loop is. EVERYTHING downstream (web, website, marketing, lead finder,
 //      emails, pricing, CRM) derives from this one record, so it exists first and is stored.
 //   2. GENESIS (web synthesis) — the DNA becomes production areas, composed ONLY from the fixed
-//      vocabulary existing code already executes: the 7 archetypes, the 16 flavors, the tool
+//      vocabulary existing code already executes: the 7 archetypes, the 17 flavors, the tool
 //      registry. Genesis generates DATA that existing validators accept — never new vocabulary.
 //      That single constraint is what prevents chaos.
 //
@@ -146,11 +146,23 @@ this fixed vocabulary (existing machinery executes it; anything else will be rej
 
 ARCHETYPES (exactly 7): intel (knowing) · audience (who) · studio (making) · launch (acting,
 always approval-gated) · loop (following up) · ledger (learning) · vault (holding)
-FLAVORS (exactly 16): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data tracker
+FLAVORS (exactly 17): generic direct_mail email social video landing market brand crm lists ads feature_lab assist deliver data tracker content_growth
 
 THE SHAPE FOLLOWS THE OBJECTIVE — not every world is a marketing operation:
 - MARKETING/GROWTH intent (grow a business, get customers): the classic shape — intel, audience,
   studios for the growth channels, launch, loop, ledger, vault.
+- CONTENT-GROWTH / FACELESS-VIDEO-NETWORK intent (the user runs a PORTFOLIO of faceless niche
+  accounts and grows them with AI-generated short video — "brainrot accounts", "faceless AI reels",
+  "grow and sell Instagram/TikTok accounts", "a content farm", "post AI videos to a bunch of niche
+  pages"): design a CONTENT NETWORK. The content itself is the product (entertainment), so AI-
+  generated video is honest here — it is the deliberate inverse of a real-business marketing world.
+  Shape it as: intel (flavor generic OR market: niche + trend research and an idea backlog), audience
+  (flavor lists: the ACCOUNT ROSTER — each account a distinct niche persona), one or more studio areas
+  with flavor content_growth (the reel factory — an idea becomes a multi-scene vertical storyboard),
+  launch (flavor social: approval-gated posting to the accounts), loop (per-account posting cadence),
+  ledger (per-account growth + cost-vs-revenue), and vault (flavor brand: a brand kit per persona).
+  Every account is a GENUINE distinct brand, never a sockpuppet clone; keep audience+launch because
+  this world posts. Seed the vault/intel play with the FIRST personas + niches to define.
 - PRODUCT/PLATFORM intent (the user BUILDS or WORKS FOR a product — "I work at X", feature
   ideation, improving a platform, internal tooling): design a PRODUCT LAB instead — intel
   (flavor market: the platform, its users, competitors, complaints), one or more studio areas
@@ -464,6 +476,76 @@ export function mergeTokens(text: string, ctx: BusinessContext, extra: Record<st
  *  auto-repairs these on synthesis, but a user can prune a draft below them via removeDraftNode — so
  *  approveDraft re-checks here (deep scan): no zero/thin worlds, and every world can know, hold, and
  *  learn. Returns a list of human-readable violations ([] means the draft is sound). */
+// ---------------------------------------------------------------------------
+// Go-to-market plan — turn the synthesized DNA into an ACTIONABLE money + marketing plan the owner
+// can judge BEFORE approving a world. Pure and deterministic: it only organizes what the DNA already
+// says (revenue model, buyers, channels, metrics) into a plan, and shows a visible [bracketed hole]
+// wherever the DNA is thin — it never invents a price, a number, or a market.
+// ---------------------------------------------------------------------------
+
+export interface PlanSection { heading: string; lines: string[] }
+
+/** A structured GTM plan derived from the DNA: positioning, how it makes money, the marketing
+ *  channels (best first), the first 90 days, and what to measure. Honest holes where the DNA is thin. */
+export function growthPlan(dna: WorldDNA): PlanSection[] {
+  const has = (s: string | null | undefined): s is string => !!(s && s.trim());
+  const sections: PlanSection[] = [];
+
+  sections.push({ heading: 'Positioning', lines: [
+    has(dna.valueProposition) ? dna.valueProposition : '[define the one-sentence value proposition]',
+    has(dna.brandPersonality) ? `Voice: ${dna.brandPersonality}.` : '',
+  ].filter(Boolean) });
+
+  const money: string[] = [];
+  money.push(has(dna.revenueModel) ? `How it makes money: ${dna.revenueModel}.` : '[no revenue model set — how does this earn?]');
+  money.push(dna.idealCustomers.length ? `Who pays: ${dna.idealCustomers.slice(0, 4).join('; ')}.` : '[who is the paying customer?]');
+  if (has(dna.salesCycle)) money.push(`Sales cycle: ${dna.salesCycle}.`);
+  money.push('Pricing: set it from 3–5 real comparable prices before committing — never guess a number.');
+  sections.push({ heading: 'How it makes money', lines: money });
+
+  const ch = dna.growthChannels.slice(0, 4);
+  sections.push({ heading: 'Marketing — best channels first', lines: ch.length
+    ? ch.map((c, i) => `${i + 1}. ${c}`)
+    : ['[no channels identified — pick the 2–3 places the buyer already is, master one before adding the next]'] });
+
+  sections.push({ heading: 'First 90 days', lines: [
+    has(dna.operationalLoop)
+      ? `Run this loop weekly: ${dna.operationalLoop}.`
+      : 'Weeks 1–2: brand + landing page + one channel live. Weeks 3–8: publish on cadence, capture leads. Weeks 9–12: double down on the channel with the lowest cost per lead.',
+    'Ship one channel well before adding the next — focus beats spread.',
+  ] });
+
+  const kpis = dna.successMetrics.slice(0, 5);
+  sections.push({ heading: 'What to measure', lines: [
+    ...(kpis.length ? kpis.map((k) => `• ${k}`) : ['• leads captured', '• conversion to customer']),
+    '• cost per lead, per channel — the number that says what to scale and what to kill.',
+  ] });
+
+  if (dna.constraints.length) {
+    sections.push({ heading: 'Honest constraints', lines: dna.constraints.slice(0, 4).map((c) => `• ${c}`) });
+  }
+  return sections;
+}
+
+/** An honest one-line read of whether this world can actually earn — used so the draft never
+ *  over-promises. A world with no revenue model is called out as internal/non-commercial (which may
+ *  be correct); an incomplete money model names exactly what's missing. */
+export function planMoneyVerdict(dna: WorldDNA): { canMakeMoney: boolean; line: string } {
+  const rev = (dna.revenueModel ?? '').toLowerCase();
+  if (!rev || /\bnone\b|personal|internal|\bn\/a\b|no revenue|not a revenue/.test(rev)) {
+    return { canMakeMoney: false, line: 'No revenue model — this reads as an internal/non-commercial system, so there is nothing to monetize (that may be exactly right).' };
+  }
+  const hasBuyers = dna.idealCustomers.length > 0;
+  const hasChannels = dna.growthChannels.length > 0;
+  if (hasBuyers && hasChannels) {
+    return { canMakeMoney: true, line: `Can make money: ${dna.revenueModel} — sold to ${dna.idealCustomers[0]}, reached via ${dna.growthChannels.slice(0, 2).join(' + ')}.` };
+  }
+  const gaps: string[] = [];
+  if (!hasBuyers) gaps.push('no paying customer named');
+  if (!hasChannels) gaps.push('no growth channels');
+  return { canMakeMoney: false, line: `The money model is incomplete (${gaps.join(', ')}) — fill this in before it can earn.` };
+}
+
 export function structuralViolations(t: WebTemplate): string[] {
   const flat = (t.nodes ?? []).flatMap((n) => [n, ...(n.children ?? [])]);
   const has = (a: Archetype) => flat.some((n) => n.archetype === a);

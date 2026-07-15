@@ -3,14 +3,14 @@
 // version pills reveal a diff against the current version and let you restore an older one (which is
 // itself a new version, so nothing is ever lost).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FileText, History, RotateCcw, Loader2 } from 'lucide-react';
-import { Badge } from '../ui';
 import { cn } from '../../lib/utils';
 import { diffLines } from '../../lib/garvis/clusterChat';
 import { listVersions, restoreVersion, type StudioArtifact, type ArtifactVersion } from '../../lib/garvis/artifacts';
+import { StudioPreviewFrame, mediumOf, mediumLabel } from './StudioPreviewFrame';
 
-export function ArtifactCard({ artifact, onChanged }: { artifact: StudioArtifact; onChanged: () => void }) {
+export function ArtifactCard({ artifact, onChanged, accent }: { artifact: StudioArtifact; onChanged: () => void; accent?: string }) {
   const [open, setOpen] = useState(false);
   const [versions, setVersions] = useState<ArtifactVersion[] | null>(null);
   const [showVersions, setShowVersions] = useState(false);
@@ -38,13 +38,16 @@ export function ArtifactCard({ artifact, onChanged }: { artifact: StudioArtifact
   };
 
   const diff = diffAgainst ? diffLines(diffAgainst.detail ?? '', artifact.detail ?? '') : null;
+  // Classify the artifact's medium once so the row shows what it IS (a postcard, a social post…)
+  // and the expanded view frames it in that medium instead of a raw text dump.
+  const medium = useMemo(() => mediumOf(artifact), [artifact]);
 
   return (
     <div className="rounded-lg border border-forge-border bg-forge-panel/60">
       <div className="flex items-center gap-2 px-3 py-2">
         <FileText size={14} className="text-forge-ember" />
         <button onClick={() => setOpen((o) => !o)} className="flex-1 text-left text-sm text-forge-ink">{artifact.title}</button>
-        <Badge tone="dim">{artifact.kind}</Badge>
+        <span className="rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim" title="What this artifact is">{mediumLabel(medium)}</span>
         {artifact.revision > 1 && (
           <button onClick={() => void loadVersions()} title="Version history"
             className="flex items-center gap-1 rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim hover:text-forge-ink">
@@ -54,7 +57,9 @@ export function ArtifactCard({ artifact, onChanged }: { artifact: StudioArtifact
       </div>
 
       {open && !diff && (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-forge-border px-3 py-2 text-xs text-forge-dim">{artifact.detail || '—'}</pre>
+        <div className="border-t border-forge-border p-3">
+          <StudioPreviewFrame medium={medium} content={artifact.detail || '—'} accent={accent} />
+        </div>
       )}
 
       {showVersions && versions && versions.length > 0 && (

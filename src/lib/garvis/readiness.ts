@@ -65,9 +65,9 @@ export function computeReadiness(s: ReadinessState): Readiness {
     title: 'Her business exists as a world',
     status: s.worldCount > 0 ? 'done' : 'todo',
     detail: s.worldCount > 0
-      ? 'Her venture is set up, with its studios and expertise inside.'
+      ? 'Her business is set up, with its studios and expertise inside.'
       : 'Describe her business on Command in one sentence and approve the draft — it is born with the real-estate studios and packs.',
-    action: s.worldCount > 0 ? 'Open Ventures' : 'Create it on Command',
+    action: s.worldCount > 0 ? 'Open Businesses' : 'Create it on Command',
     href: s.worldCount > 0 ? '/garvis/webs' : '/garvis/command',
   });
 
@@ -80,7 +80,7 @@ export function computeReadiness(s: ReadinessState): Readiness {
       : !s.brandHasCompliance
         ? 'Brand is set, but there is no compliance line — add her brokerage/license identifier so every send carries it automatically.'
         : `Set${s.brandHasLook ? ', with her look' : ''} — outbound goes out as her, with her required disclosure.`,
-    action: 'Open Ventures', href: '/garvis/webs',
+    action: 'Open Businesses', href: '/garvis/webs',
   });
 
   steps.push({
@@ -132,7 +132,7 @@ export function computeReadiness(s: ReadinessState): Readiness {
     detail: s.mlsConnected
       ? 'A RESO feed is connected — market stats and the farm turnover math run on real listings.'
       : 'Optional: if her MLS offers a RESO Web API, connect it for real median-sold / DOM / months-of-supply. No feed = honestly empty, never fake.',
-    action: 'Open Ventures', href: '/garvis/webs',
+    action: 'Open Businesses', href: '/garvis/webs',
   });
 
   const core = steps.filter((x) => x.group === 'core');

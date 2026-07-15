@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NotebookPen, Loader2, Search } from 'lucide-react';
 import { listClusterArtifacts, createArtifact, type StudioArtifact } from '../../lib/garvis/artifacts';
 import { timeAgo } from '../../lib/utils';
+import { Button } from '../ui';
 
 export function TrackerRegistry({ clusterId, onToast, onChanged }: {
   worldId: string; clusterId: string; onToast: (kind: 'success' | 'error', msg: string) => void; onChanged?: () => void;
@@ -77,12 +78,13 @@ export function TrackerRegistry({ clusterId, onToast, onChanged }: {
         placeholder="The details worth recalling later — anything you type here is what future answers stand on."
         className="mt-2 w-full resize-y rounded-lg border border-forge-border bg-forge-raised/30 px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/50 focus:outline-none"
       />
-      <button
+      <Button
+        variant='primary' size='md'
         onClick={() => void add()} disabled={busy || title.trim().length < 2}
-        className="mt-2 flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-50"
+        className="mt-2"
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : <NotebookPen size={14} />} Log it
-      </button>
+      </Button>
 
       {/* The record */}
       <div className="mt-4">

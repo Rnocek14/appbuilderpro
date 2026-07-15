@@ -12,6 +12,7 @@ import { assistArtifact, type AssistDraft } from '../../lib/garvis/assist';
 import { createArtifact } from '../../lib/garvis/artifacts';
 import { AddKnowledge } from './AddKnowledge';
 import { VerdictPrompt } from './VerdictPrompt';
+import { Button } from '../ui';
 
 export function AnsweringDesk({ worldId, clusterId, onToast }: {
   worldId: string; clusterId: string; onToast: (kind: 'success' | 'error', msg: string) => void;
@@ -80,13 +81,13 @@ export function AnsweringDesk({ worldId, clusterId, onToast }: {
         className="mt-3 w-full resize-y rounded-lg border border-forge-border bg-forge-raised/30 px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/50 focus:outline-none"
       />
       <div className="mt-2 flex items-center gap-2">
-        <button
+        <Button
+          variant='primary' size='md'
           onClick={() => void run()} disabled={busy || incoming.trim().length < 3}
-          className="flex items-center gap-1.5 rounded-lg bg-ember-gradient px-3.5 py-2 text-sm font-medium text-[#1A0E04] shadow-soft transition-transform hover:-translate-y-px disabled:opacity-50"
         >
           {busy ? <Loader2 size={14} className="animate-spin" /> : <MailQuestion size={14} />}
           {busy ? 'Drafting…' : 'Draft the reply'}
-        </button>
+        </Button>
         <span className="text-[11px] text-forge-dim/60">⌘/Ctrl + Enter</span>
       </div>
 
