@@ -69,8 +69,6 @@ function techComputed(tech: Partial<TechFingerprint> | null): tech is TechFinger
 // DIY site builders where the owner clearly built it themselves (a strong rebuild + automation lead).
 const DIY_BUILDERS = new Set(['wix', 'squarespace', 'godaddy', 'weebly']);
 
-// "You can book/reserve yourself online" — presence means booking is NOT a manual gap.
-const ONLINE_BOOKING = /(book (online|now|an?\s?appointment)|online booking|schedule (online|now|an?\s?appointment)|request (an?\s?)?appointment|book a (table|reservation)|reserve (online|a table)|book now)/i;
 // "Call us to book / for a quote" — presence means the funnel runs through a phone by hand.
 const PHONE_FUNNEL = /(call (us )?(to|for|and)?\s?(book|schedule|make an appointment)|call (us )?(for|to get) (a )?(free )?(quote|estimate|pricing|appointment)|call today|give us a call)/i;
 // Verticals where booking/scheduling is core to how they make money.
@@ -102,25 +100,20 @@ export function deriveSignals(v: AuditView): DetectedSignal[] {
   const tech = v.tech;
   const hasTech = techComputed(tech);
 
-  // No online booking. Prefer the HARD signal (no scheduling widget in the markup); fall back to the
-  // text heuristic only when we don't have a tech fingerprint yet. Only assert an absence we can see.
+  // No online booking — asserted ONLY from the HARD tech signal (a fingerprinted page with no
+  // scheduling widget). We deliberately do NOT infer "no booking" from the absence of a keyword in body
+  // text: a missing phrase is not an observed absence, and the honesty rule forbids asserting from
+  // missing data (the keyword list would never be exhaustive, so it would fabricate false gaps).
   const bookingVertical = v.vertical != null && BOOKING_VERTICALS.includes(v.vertical);
-  if (bookingVertical) {
-    if (hasTech && !tech.booking) {
-      out.push({
-        id: 'platform:no_online_booking', kind: 'platform', label: 'No online booking',
-        evidence: 'No booking or scheduling widget found in the page code — customers can’t self-schedule.',
-      });
-    } else if (!hasTech && text && !ONLINE_BOOKING.test(text)) {
-      out.push({
-        id: 'platform:no_online_booking', kind: 'platform', label: 'No online booking',
-        evidence: `No online-booking language found on a ${v.vertical!.replace('_', ' ')} site — customers can’t self-schedule.`,
-      });
-    }
+  if (bookingVertical && hasTech && !tech.booking) {
+    out.push({
+      id: 'platform:no_online_booking', kind: 'platform', label: 'No online booking',
+      evidence: 'No booking or scheduling widget found in the page code — customers can’t self-schedule.',
+    });
   }
 
   // Flying blind — no analytics or ad pixel installed (only assertable once we've fingerprinted).
-  if (hasTech && tech.analytics.length === 0) {
+  if (hasTech && (tech.analytics ?? []).length === 0) {
     out.push({
       id: 'platform:no_analytics', kind: 'platform', label: 'No analytics or ad pixel',
       evidence: 'No analytics or ad pixel found in the page code — they can’t measure what their site does.',

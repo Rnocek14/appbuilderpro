@@ -94,7 +94,7 @@ export default function Automations() {
   };
 
   const remove = async (t: TriggerRow) => {
-    if (!window.confirm(`Delete the "${t.label}" automation? Its send history is kept.`)) return;
+    if (!window.confirm(`Delete the "${t.label}" automation? It stops firing and its send history is removed.`)) return;
     setTriggers((ts) => ts.filter((x) => x.id !== t.id));
     try { await deleteTrigger(t.id); } catch (e) { toast('error', emsg(e)); void refresh(); }
   };

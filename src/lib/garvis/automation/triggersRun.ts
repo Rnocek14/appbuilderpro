@@ -47,10 +47,35 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
   if (!uid) return summary;
   const now = nowIso ?? new Date().toISOString();
 
+  // Reconcile stranded claims: a prior run that died AFTER claiming a fire but BEFORE enqueuing leaves a
+  // trigger_fires row with approval_id = null that would block that (customer, due-date) forever. Release
+  // any older than 10 minutes so they retry, instead of being silently lost.
+  const staleCutoff = new Date(Date.parse(now) - 10 * 60 * 1000).toISOString();
+  await supabase.from('trigger_fires').delete()
+    .eq('owner_id', uid).is('approval_id', null).lt('created_at', staleCutoff);
+
   const { data: trigData } = await supabase.from('automation_triggers')
     .select('*').eq('owner_id', uid).eq('status', 'active');
   const triggers = (trigData ?? []) as TriggerRow[];
   summary.triggers = triggers.length;
+
+  // Customers are shared across triggers on the same list — fetch each list once, not per trigger.
+  const customersByList = new Map<string, CustomerRec[]>();
+  const customersFor = async (listId: string): Promise<CustomerRec[]> => {
+    const cached = customersByList.get(listId);
+    if (cached) return cached;
+    const { data: custData } = await supabase.from('customers')
+      .select('*').eq('owner_id', uid).eq('list_id', listId);
+    const mapped: CustomerRec[] = ((custData ?? []) as CustomerRow[]).map((c) => ({
+      id: c.id, email: c.email, name: c.name,
+      anchors: {
+        last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
+        purchase_at: c.purchase_at, next_due_at: c.next_due_at,
+      },
+    }));
+    customersByList.set(listId, mapped);
+    return mapped;
+  };
 
   for (const t of triggers) {
     const def: TriggerDef = {
@@ -58,16 +83,7 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
       windowDays: t.window_days, status: t.status,
     };
 
-    const { data: custData } = await supabase.from('customers')
-      .select('*').eq('owner_id', uid).eq('list_id', t.list_id);
-    const rows = (custData ?? []) as CustomerRow[];
-    const customers: CustomerRec[] = rows.map((c) => ({
-      id: c.id, email: c.email, name: c.name,
-      anchors: {
-        last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
-        purchase_at: c.purchase_at, next_due_at: c.next_due_at,
-      },
-    }));
+    const customers = await customersFor(t.list_id);
 
     const { data: fireData } = await supabase.from('trigger_fires')
       .select('customer_id, fired_for').eq('owner_id', uid).eq('trigger_id', t.id);
@@ -82,7 +98,10 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
       const { data: claim, error: claimErr } = await supabase.from('trigger_fires')
         .insert({ owner_id: uid, trigger_id: t.id, customer_id: fire.customerId, fired_for: fire.firedFor })
         .select('id').maybeSingle();
-      if (claimErr || !claim) { summary.skipped++; continue; }  // already fired — never double-send
+      // Only a unique-violation (23505) means "already fired" (idempotency working). Any other error is
+      // a real failure to retry next run — counting it as "skipped" would hide it.
+      if (claimErr) { if ((claimErr as { code?: string }).code === '23505') summary.skipped++; else summary.errors++; continue; }
+      if (!claim) { summary.skipped++; continue; }
       const fireId = (claim as { id: string }).id;
 
       try {
@@ -100,7 +119,14 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
           const { data: c } = await supabase.from('contacts')
             .insert({ owner_id: uid, email: fire.email, email_status: 'unknown', is_primary: true })
             .select('id').maybeSingle();
-          contactId = c ? (c as { id: string }).id : null;
+          if (c) {
+            contactId = (c as { id: string }).id;
+          } else {
+            // A concurrent insert won the race — re-select rather than orphan the message's contact link.
+            const { data: again } = await supabase.from('contacts')
+              .select('id').eq('owner_id', uid).eq('email', fire.email).maybeSingle();
+            contactId = again ? (again as { id: string }).id : null;
+          }
         }
 
         const { data: camp, error: campErr } = await supabase.from('outreach_campaigns')

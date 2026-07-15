@@ -34,12 +34,13 @@ export async function listCustomerLists(): Promise<CustomerListRow[]> {
     .eq('owner_id', u).order('created_at', { ascending: false });
   return (data ?? []) as CustomerListRow[];
 }
-export async function createCustomerList(name: string): Promise<CustomerListRow | null> {
-  const u = await uid(); if (!u) return null;
-  const { data } = await supabase.from('customer_lists')
+export async function createCustomerList(name: string): Promise<CustomerListRow> {
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { data, error } = await supabase.from('customer_lists')
     .insert({ owner_id: u, name: name.trim() || 'My customers', source: 'manual' })
     .select('id,name,source,created_at').single();
-  return (data as CustomerListRow) ?? null;
+  if (error) throw new Error(error.message);
+  return data as CustomerListRow;
 }
 
 // ---- customers ----
@@ -62,7 +63,8 @@ export async function addCustomers(listId: string, rows: NewCustomer[]): Promise
     purchase_at: r.purchase_at || null, next_due_at: r.next_due_at || null,
     consent_basis: 'warm_transactional', consent_at: new Date().toISOString(),
   }));
-  const { data } = await supabase.from('customers').insert(payload).select('id');
+  const { data, error } = await supabase.from('customers').insert(payload).select('id');
+  if (error) throw new Error(error.message);
   return (data ?? []).length;
 }
 
@@ -77,25 +79,32 @@ export async function listTriggers(): Promise<TriggerRow[]> {
 /** Spin up a trigger for a capability using its registry defaults. Only capabilities that carry a
  *  triggerDefault (the date/interval ones) can become a trigger — the rest aren't schedule-shaped. */
 export async function createTriggerFromCapability(listId: string, capabilityId: string): Promise<TriggerRow | null> {
-  const u = await uid(); if (!u) return null;
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
   const cap: Capability | undefined = capabilityById(capabilityId);
   const d = cap?.triggerDefault;
-  if (!cap || !d) return null;
-  const { data } = await supabase.from('automation_triggers').insert({
+  if (!cap || !d) return null; // capability isn't schedule-shaped — nothing to create
+  const { data, error } = await supabase.from('automation_triggers').insert({
     owner_id: u, list_id: listId, capability_id: cap.id, label: cap.title,
     anchor_field: d.anchorField, offset_days: d.offsetDays, window_days: d.windowDays,
     template_subject: d.subject, template_body: d.body, status: 'active',
   }).select('*').single();
-  return (data as TriggerRow) ?? null;
+  // One instance per (owner, list, capability) — a duplicate would fire the same customer twice.
+  if (error) {
+    if ((error as { code?: string }).code === '23505') throw new Error(`"${cap.title}" is already on this list.`);
+    throw new Error(error.message);
+  }
+  return data as TriggerRow;
 }
 export async function setTriggerStatus(id: string, status: 'active' | 'paused'): Promise<void> {
-  const u = await uid(); if (!u) return;
-  await supabase.from('automation_triggers').update({ status, updated_at: new Date().toISOString() })
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { error } = await supabase.from('automation_triggers').update({ status, updated_at: new Date().toISOString() })
     .eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
 }
 export async function deleteTrigger(id: string): Promise<void> {
-  const u = await uid(); if (!u) return;
-  await supabase.from('automation_triggers').delete().eq('owner_id', u).eq('id', id);
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { error } = await supabase.from('automation_triggers').delete().eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
 }
 
 /** Capabilities that can be turned into a per-customer trigger (have a triggerDefault + are deliverable). */

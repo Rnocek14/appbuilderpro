@@ -29,28 +29,33 @@ const notBuiltIds = new Set(CAPABILITIES.filter((c) => !isDeliverable(c)).map((c
 ok('never proposes a not_built capability (weak)', rWeak.proposals.every((p) => !notBuiltIds.has(p.capabilityId)));
 
 // phone-only booking → the online_booking / missed_call capabilities are not_built → GAPS, not proposals
-ok('weak: phone_only surfaces a gap for not-built booking', rWeak.gaps.length > 0);
+ok('weak (no fingerprint): no fabricated booking gap without tech', !rWeak.gaps.some((g) => g.signalId === 'platform:no_online_booking'));
 ok('weak: every proposal is GA or beta (never not_built)', rWeak.proposals.every((p) => p.status === 'ga' || p.status === 'beta'));
 
 // ---- a health site with no online-booking language → the platform gap, honestly ----
 const dental: AuditView = {
-  vertical: 'health', checks: { https: true, viewport: true, form: true, email: true },
-  siteSignalIds: [], text: 'Smile Dental. We offer cleanings and whitening. Our friendly team is here for you.',
-  tech: null,
+  vertical: 'health', checks: { https: true, viewport: true, form: true, email: true }, siteSignalIds: [],
+  text: 'Smile Dental. We offer cleanings and whitening.',
+  tech: { builder: 'wordpress', diyBuilder: false, booking: null, analytics: ['ga'], chat: null, ecommerce: null },
 };
 const rDental = detect(dental);
-ok('dental: emits no_online_booking (booking vertical, no booking words)', rDental.signals.some((s) => s.id === 'platform:no_online_booking'));
+ok('dental: emits no_online_booking (fingerprinted, no booking widget)', rDental.signals.some((s) => s.id === 'platform:no_online_booking'));
 ok('dental: does NOT emit manual_intake (has form + email)', !rDental.signals.some((s) => s.id === 'manual_process:manual_intake'));
 ok('dental: online_booking is a gap, not a proposal', rDental.proposals.every((p) => p.capabilityId !== 'online_booking'));
+ok('dental: the no_online_booking need surfaces as a gap (capability not built)', rDental.gaps.some((g) => g.signalId === 'platform:no_online_booking'));
 
-// ---- a site that DOES let you book online → no booking gap asserted ----
+// ---- HONESTY: with NO tech fingerprint we never assert "no booking" from missing keywords ----
+const noTech: AuditView = { vertical: 'health', checks: { form: true, email: true }, siteSignalIds: [], text: 'Smile Dental — no booking words at all here', tech: null };
+ok('no fingerprint → no fabricated booking gap (unknown, not asserted)', !deriveSignals(noTech).some((s) => s.id === 'platform:no_online_booking'));
+
+// ---- a fingerprinted site that DOES have a booking widget → no booking gap ----
 const booked: AuditView = {
-  vertical: 'health', checks: { https: true, viewport: true, form: true, email: true },
-  siteSignalIds: [], text: 'Book online now for your next visit — schedule an appointment in seconds.', tech: null,
+  vertical: 'health', checks: { https: true, viewport: true, form: true, email: true }, siteSignalIds: [], text: 'Welcome',
+  tech: { builder: 'wordpress', diyBuilder: false, booking: 'calendly', analytics: ['ga'], chat: null, ecommerce: null },
 };
-ok('booked: no false no_online_booking signal', !deriveSignals(booked).some((s) => s.id === 'platform:no_online_booking'));
+ok('booked: booking widget present → no no_online_booking signal', !deriveSignals(booked).some((s) => s.id === 'platform:no_online_booking'));
 
-// ---- unknown data → no fabricated signal: no text means we can't assert a booking gap ----
+// ---- unknown data → no fabricated signal ----
 const noText: AuditView = { vertical: 'health', checks: { form: true, email: true }, siteSignalIds: [], text: null, tech: null };
 ok('no text: no booking gap asserted (unknown, not a guess)', !deriveSignals(noText).some((s) => s.id === 'platform:no_online_booking'));
 
