@@ -8,11 +8,12 @@
 // this shell unchanged.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Sparkles, Loader2, Star, Wand2, Maximize2, Trash2, Crosshair, Printer, X, Search, LayoutGrid } from 'lucide-react';
+import { Sparkles, Loader2, Star, Wand2, Maximize2, Trash2, Crosshair, Printer, X, Search, LayoutGrid, Archive, Undo2, FolderPlus, Folder } from 'lucide-react';
 import {
   emptyBoard, addTile, moveTile, removeTile, toggleFavorite, setTileContent, getTile,
   nextRootPosition, childPosition, favorites as favTiles, tidyByTime,
-  type Board, type BoardMetrics,
+  addGroup, setTileGroup, viewTiles, groupsOf, ARCHIVE_GROUP,
+  type Board, type BoardMetrics, type BoardView,
 } from '../../../lib/garvis/creativeBoard';
 import { loadBoard, saveBoard } from '../../../lib/garvis/clusterState';
 import { Overlay } from '../../ui/Overlay';
@@ -71,6 +72,10 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   const [renditionText, setRenditionText] = useState('');
   const [favOnly, setFavOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [view, setView] = useState<BoardView>('all');
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
+  const [newGroupText, setNewGroupText] = useState('');
+  const [newGroupTileId, setNewGroupTileId] = useState<string | null>(null);
   const [printing, setPrinting] = useState<C[] | null>(null);
 
   // ---- load + persist (debounced) --------------------------------------------------------
@@ -119,12 +124,15 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     setBusyAt({ ...pos, label: 'Making…' });
     try {
       const content = await adapter.generate({ prompt: prompt.trim(), kindId: kind });
-      setBoard((b) => addTile(b, { id: newId(), prompt: prompt.trim() || (adapter.kinds.find((k) => k.id === kind)?.label ?? ''), parentId: null, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now() }));
+      // A new piece joins the group you're viewing (or the main space); never the archive.
+      const group = view !== 'all' && view !== ARCHIVE_GROUP ? view : undefined;
+      setBoard((b) => addTile(b, { id: newId(), prompt: prompt.trim() || (adapter.kinds.find((k) => k.id === kind)?.label ?? ''), parentId: null, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now(), group }));
       setPrompt('');
       setFavOnly(false);   // the new (unstarred) card must be visible, not hidden by the ⭐ filter
+      if (view === ARCHIVE_GROUP) setView('all');   // making from the archive drops you into the working space
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not make that.'); }
     finally { setBusyAt(null); }
-  }, [board, M, adapter, prompt, kind, busyAt, onToast]);
+  }, [board, M, adapter, prompt, kind, busyAt, view, onToast]);
 
   // ---- spin a rendition from a tile ------------------------------------------------------
   const spin = useCallback(async (parentId: string, instruction: string) => {
@@ -134,7 +142,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     setBusyAt({ ...pos, label: 'Spinning…' });
     try {
       const content = await adapter.rendition({ parent: parent.content, instruction: instruction.trim() });
-      setBoard((b) => addTile(b, { id: newId(), prompt: instruction.trim() || 'rendition', parentId, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now() }));
+      setBoard((b) => addTile(b, { id: newId(), prompt: instruction.trim() || 'rendition', parentId, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now(), group: parent.group }));
       setFavOnly(false);   // reveal the rendition even if the ⭐ filter was on
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not spin a rendition.'); }
     finally { setBusyAt(null); }
@@ -171,11 +179,22 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   };
 
   const q = search.trim().toLowerCase();
-  const base = favOnly ? board.tiles.filter((t) => t.favorite) : board.tiles;
+  const viewBase = viewTiles(board, view);
+  const base = favOnly ? viewBase.filter((t) => t.favorite) : viewBase;
   const shown = q ? base.filter((t) => `${t.prompt} ${adapter.searchText ? adapter.searchText(t.content) : ''}`.toLowerCase().includes(q)) : base;
   const scale = M.w / adapter.designWidth;
   const focusTile = focusId ? getTile(board, focusId) : null;
   const favs = useMemo(() => favTiles(board), [board]);
+  const groups = groupsOf(board);
+
+  const submitNewGroup = () => {
+    const name = newGroupText.trim();
+    if (!name) return;
+    const tileId = newGroupTileId;
+    setBoard((b) => { let nb = addGroup(b, name); if (tileId) nb = setTileGroup(nb, tileId, name); return nb; });
+    if (!tileId) setView(name);
+    setNewGroupOpen(false); setNewGroupTileId(null);
+  };
 
   const doExport = () => {
     const pieces = (favs.length ? favs : board.tiles).map((t) => t.content);
@@ -216,7 +235,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <button onClick={() => setFavOnly((v) => !v)} className={cn('cb-tool', favOnly && 'cb-tool-on')} title="Show only starred">
               <Star size={13} className={favOnly ? 'fill-current' : ''} /> {favs.length}
             </button>
-            <button onClick={() => { setBoard((b) => tidyByTime(b, M, 'desc')); setPan({ x: 0, y: 0 }); }} className="cb-tool" title="Tidy — arrange newest first"><LayoutGrid size={13} /> Tidy</button>
+            <button onClick={() => { setBoard((b) => tidyByTime(b, M, 'desc', new Set(viewTiles(b, view).map((t) => t.id)))); setPan({ x: 0, y: 0 }); }} className="cb-tool" title="Tidy — arrange this view newest first"><LayoutGrid size={13} /> Tidy</button>
             <button onClick={() => setPan({ x: 0, y: 0 })} className="cb-tool" title="Recenter"><Crosshair size={13} /></button>
             {adapter.renderPrint && <button onClick={doExport} className="cb-tool" title="Print the starred cards"><Printer size={13} /> Print</button>}
           </div>
@@ -241,9 +260,20 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
         {adapter.banner && <div className="mt-1.5 text-[11px] text-forge-dim">{adapter.banner}</div>}
       </div>
 
+      {/* groups — sub-collections + the archive, so the main board never drowns and nothing is lost */}
+      <div className="cb-groups">
+        <button onClick={() => setView('all')} className={cn('cb-gchip', view === 'all' && 'cb-gchip-on')}>All · {viewTiles(board, 'all').length}</button>
+        {groups.map((g) => (
+          <button key={g} onClick={() => setView(g)} className={cn('cb-gchip', view === g && 'cb-gchip-on')}><Folder size={11} /> {g} · {board.tiles.filter((t) => t.group === g).length}</button>
+        ))}
+        <button onClick={() => { setNewGroupTileId(null); setNewGroupText(''); setNewGroupOpen(true); }} className="cb-gchip" title="New group"><FolderPlus size={12} /> New group</button>
+        <span className="mx-1 h-3.5 w-px bg-forge-border" />
+        <button onClick={() => setView(ARCHIVE_GROUP)} className={cn('cb-gchip', view === ARCHIVE_GROUP && 'cb-gchip-on')} title="Archived — hidden from the working board, never deleted"><Archive size={11} /> Archived · {viewTiles(board, ARCHIVE_GROUP).length}</button>
+      </div>
+
       {/* the spread */}
       <div className="cb-stage" onPointerDown={onStagePointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
-        {board.tiles.length === 0 && !busyAt && (
+        {shown.length === 0 && !busyAt && (
           <div className="cb-empty">
             <Wand2 size={22} className="text-forge-ember/70" />
             <p className="mt-2 max-w-xs text-center text-[13px] text-forge-dim">{adapter.emptyHint}</p>
@@ -272,6 +302,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
                   <button className="cb-mini" title="Open & edit" onClick={(e) => { e.stopPropagation(); setFocusId(t.id); }}><Maximize2 size={13} /></button>
                   <button className="cb-mini" title="Make a rendition" onClick={(e) => { e.stopPropagation(); setRenditionFor(t.id); setRenditionText(''); }}><Wand2 size={13} /></button>
                   <button className={cn('cb-mini', t.favorite && 'text-amber-300')} title="Star" onClick={(e) => { e.stopPropagation(); setBoard((b) => toggleFavorite(b, t.id)); }}><Star size={13} className={t.favorite ? 'fill-current' : ''} /></button>
+                  <button className="cb-mini" title={t.group === ARCHIVE_GROUP ? 'Restore' : 'Archive'} onClick={(e) => { e.stopPropagation(); setBoard((b) => setTileGroup(b, t.id, t.group === ARCHIVE_GROUP ? null : ARCHIVE_GROUP)); }}>{t.group === ARCHIVE_GROUP ? <Undo2 size={13} /> : <Archive size={13} />}</button>
                   <button className="cb-mini" title="Delete" onClick={(e) => { e.stopPropagation(); setBoard((b) => removeTile(b, t.id)); }}><Trash2 size={13} /></button>
                 </div>
               </div>
@@ -314,6 +345,37 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
           <div className="cb-focus" onPointerDown={(e) => e.stopPropagation()}>
             <button className="cb-close" onClick={() => setFocusId(null)} title="Close"><X size={16} /></button>
             {adapter.renderFocus(focusTile.content, focusApi(focusTile.id))}
+            {/* shell-provided: file this piece into a group, or archive it */}
+            <div className="cb-organize">
+              <span className="cb-org-label">Group</span>
+              <button onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, null))} className={cn('cb-gchip', !focusTile.group && 'cb-gchip-on')}>Main</button>
+              {groups.map((g) => (
+                <button key={g} onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, g))} className={cn('cb-gchip', focusTile.group === g && 'cb-gchip-on')}><Folder size={11} /> {g}</button>
+              ))}
+              <button onClick={() => { setNewGroupTileId(focusTile.id); setNewGroupText(''); setNewGroupOpen(true); }} className="cb-gchip"><FolderPlus size={11} /> New</button>
+              <span className="mx-1 h-3.5 w-px bg-forge-border" />
+              <button onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, focusTile.group === ARCHIVE_GROUP ? null : ARCHIVE_GROUP))} className="cb-gchip">
+                {focusTile.group === ARCHIVE_GROUP ? <><Undo2 size={11} /> Restore</> : <><Archive size={11} /> Archive</>}
+              </button>
+            </div>
+          </div>
+        </Overlay>
+      )}
+
+      {/* new group */}
+      {newGroupOpen && (
+        <Overlay onClose={() => { setNewGroupOpen(false); setNewGroupTileId(null); }} z={82}>
+          <div className="cb-modal" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-forge-ink"><FolderPlus size={15} className="text-forge-ember" /> New group</div>
+            <p className="mb-2 text-[12px] text-forge-dim">Name a sub-collection (a listing, a campaign) so the board stays organized as it grows.</p>
+            <input autoFocus value={newGroupText} onChange={(e) => setNewGroupText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submitNewGroup(); }}
+              placeholder="e.g. 123 Maple St · Spring campaign"
+              className="w-full rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+            <div className="mt-3 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => { setNewGroupOpen(false); setNewGroupTileId(null); }}>Cancel</Button>
+              <Button variant="primary" size="sm" disabled={!newGroupText.trim()} onClick={submitNewGroup}><FolderPlus size={13} /> Create</Button>
+            </div>
           </div>
         </Overlay>
       )}
@@ -337,6 +399,12 @@ const CB_CSS = `
 .cb-chip{font-size:11px;padding:4px 9px;border-radius:999px;border:1px solid var(--forge-border,#3a2f25);color:var(--forge-dim,#a99b90);background:transparent;white-space:nowrap}
 .cb-chip:hover{color:var(--forge-ink,#f0e6da)}
 .cb-chip-on{color:#1a0e04;background:linear-gradient(180deg,#ffb066,#ff8a3d);border-color:transparent;font-weight:600}
+.cb-groups{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:7px 14px;border-bottom:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710)}
+.cb-gchip{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 9px;border-radius:8px;border:1px solid var(--forge-border,#3a2f25);color:var(--forge-dim,#a99b90);background:transparent;white-space:nowrap}
+.cb-gchip:hover{color:var(--forge-ink,#f0e6da);border-color:rgba(255,138,61,.5)}
+.cb-gchip-on{color:#1a0e04;background:linear-gradient(180deg,#ffb066,#ff8a3d);border-color:transparent;font-weight:600}
+.cb-organize{margin-top:14px;display:flex;flex-wrap:wrap;align-items:center;gap:6px;border-top:1px solid var(--forge-border,#3a2f25);padding-top:12px}
+.cb-org-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--forge-dim,#a99b90)}
 .cb-stage{position:relative;flex:1;overflow:hidden;background:
   radial-gradient(circle at 1px 1px, rgba(255,255,255,.05) 1px, transparent 0) 0 0/24px 24px,
   var(--forge-bg,#14100c);cursor:grab;touch-action:none}

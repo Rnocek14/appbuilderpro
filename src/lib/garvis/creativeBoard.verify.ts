@@ -5,6 +5,7 @@
 import {
   emptyBoard, addTile, patchTile, setTileContent, moveTile, toggleFavorite, removeTile,
   getTile, childrenOf, lineageOf, favorites, nextRootPosition, childPosition, boardExtent, tidyByTime,
+  addGroup, setTileGroup, viewTiles, groupsOf, ARCHIVE_GROUP,
   type Board, type BoardTile, type BoardMetrics,
 } from './creativeBoard';
 
@@ -102,11 +103,41 @@ const tile = (id: string, parentId: string | null, x: number, y: number): BoardT
   b = addTile(b, { id: 'mid', prompt: 'p', parentId: null, content: 'c-mid', x: 900, y: 20, favorite: false, createdAt: 200 });
   b = addTile(b, { id: 'new', prompt: 'p', parentId: 'old', content: 'c-new', x: 40, y: 900, favorite: false, createdAt: 300 });
   const t = tidyByTime(b, M, 'desc');
-  check('tidy orders newest-first at the origin', t.tiles[0].id === 'new' && t.tiles[0].x === M.pad && t.tiles[0].y === M.pad);
+  check('tidy puts the newest tile at the origin', getTile(t, 'new')?.x === M.pad && getTile(t, 'new')?.y === M.pad);
   check('tidy keeps all tiles + content + favorites + lineage', t.tiles.length === 3 && !!getTile(t, 'old')?.favorite && getTile(t, 'new')?.parentId === 'old');
   const clean = t.tiles.every((a, i) => t.tiles.every((c, j) => i === j || Math.abs(a.x - c.x) >= M.w - 1 || Math.abs(a.y - c.y) >= M.h - 1));
   check('tidy grid never overlaps', clean);
-  check('tidy asc orders oldest-first', tidyByTime(b, M, 'asc').tiles[0].id === 'old');
+  const asc = tidyByTime(b, M, 'asc');
+  check('tidy asc puts the oldest tile at the origin', getTile(asc, 'old')?.x === M.pad && getTile(asc, 'old')?.y === M.pad);
+}
+
+// --- groups + archive: sub-collections that keep the main board scannable, never lose work ---
+{
+  let b: Board<string> = emptyBoard();
+  b = addTile(b, { id: 'a', prompt: 'p', parentId: null, content: 'a', x: 0, y: 0, favorite: false, createdAt: 1 });
+  b = addTile(b, { id: 'g1', prompt: 'p', parentId: null, content: 'g', x: 0, y: 0, favorite: false, createdAt: 2 });
+  b = addGroup(b, 'Maple St');
+  b = addGroup(b, 'Maple St');           // idempotent
+  b = addGroup(b, ARCHIVE_GROUP);        // reserved — rejected
+  check('addGroup adds once, rejects duplicates + the reserved archive name', groupsOf(b).join() === 'Maple St');
+  b = setTileGroup(b, 'g1', 'Maple St');
+  check('setTileGroup moves a tile into a group', getTile(b, 'g1')?.group === 'Maple St');
+  check('view "all" shows everything; a group view shows only its tiles', viewTiles(b, 'all').length === 2 && viewTiles(b, 'Maple St').map((t) => t.id).join() === 'g1');
+  b = setTileGroup(b, 'a', ARCHIVE_GROUP);
+  check('archiving hides from "all" but keeps it in the Archive view (never deleted)', viewTiles(b, 'all').map((t) => t.id).join() === 'g1' && viewTiles(b, ARCHIVE_GROUP).map((t) => t.id).join() === 'a');
+  b = setTileGroup(b, 'a', null);
+  check('un-archiving returns it to the main space', viewTiles(b, 'all').map((t) => t.id).sort().join() === 'a,g1');
+  // mutators preserve the groups list
+  check('addTile / patchTile / removeTile preserve the groups list', groupsOf(addTile(b, { id: 'z', prompt: '', parentId: null, content: 'z', x: 0, y: 0, favorite: false, createdAt: 9 })).join() === 'Maple St' && groupsOf(removeTile(b, 'a')).join() === 'Maple St');
+}
+
+// --- tidy can re-lay just one view's tiles, leaving the rest put ----------------------------
+{
+  let b: Board<string> = emptyBoard();
+  b = addTile(b, { id: 'x', prompt: 'p', parentId: null, content: 'x', x: 999, y: 999, favorite: false, createdAt: 1, group: 'G' });
+  b = addTile(b, { id: 'y', prompt: 'p', parentId: null, content: 'y', x: 5, y: 5, favorite: false, createdAt: 2 });
+  const t = tidyByTime(b, M, 'desc', new Set(['x']));
+  check('filtered tidy re-lays only the named tiles', getTile(t, 'x')?.x === M.pad && getTile(t, 'x')?.y === M.pad && getTile(t, 'y')?.x === 5);
 }
 
 console.log(`\ncreativeBoard.verify: ${passed} passed, ${failed} failed`);
