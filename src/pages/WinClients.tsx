@@ -10,7 +10,7 @@ import { NavLink } from 'react-router-dom';
 import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info, Radar, Square } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
-import { findBusinesses, auditBusiness, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
+import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
 import { US_CITIES, US_STATES, citiesFor } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
 import { type Verdict } from '../lib/garvis/siteAudit';
@@ -69,8 +69,10 @@ export default function WinClients() {
           const idx = i++;
           const b = found[idx];
           if (!b.url) { continue; }
-          const audit = await auditBusiness(b.url);
+          const { audit, scrape } = await scrapeAndAudit(b.url);
           setRows((r) => r.map((x, j) => (j === idx ? { ...x, audit } : x)));
+          // Keep the audit we just paid for (Phase 0) — best-effort, never blocks the UI.
+          void recordProspectAudit({ url: b.url, audit, scrape, source: 'find', businessName: b.name, niche, area });
         }
       };
       await Promise.all([worker(), worker(), worker()]);
@@ -120,8 +122,9 @@ export default function WinClients() {
     catch { toast('error', 'That doesn’t look like a website URL.'); return; }
     setScanning(true); setSearched(true);
     try {
-      const audit = await auditBusiness(href);
+      const { audit, scrape } = await scrapeAndAudit(href);
       setRows((r) => [{ name: host, url: href, snippet: '', audit }, ...r]);
+      void recordProspectAudit({ url: href, audit, scrape, source: 'scan', businessName: host, niche, area });
       setScanUrl('');
       toast('success', `Scanned ${host} — ${audit.reachable ? 'audited. Press Build to make their demo.' : 'couldn’t load it; worth a manual look.'}`);
     } catch (e) { toast('error', emsg(e)); }
