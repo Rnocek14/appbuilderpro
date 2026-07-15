@@ -63,16 +63,32 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
   const [phone, setPhone] = useState('');
 
   const [details, setDetails] = useState<CampaignInput | null>(null);
+  const [bizName, setBizName] = useState('');
   const [open, setOpen] = useState<NodeKey | null>(null);
   const [sats, setSats] = useState<Satellite[]>([]);
 
   useEffect(() => {
     let live = true;
-    void loadWeb(worldId).then((w) => {
+    void loadWeb(worldId).then(async (w) => {
       if (!live || !w) return;
+      setBizName(w.title ?? '');
       const c = w.clusters.find((x) => x.charter?.flavor === 'direct_mail')
         ?? w.clusters.find((x) => x.charter?.archetype === 'studio') ?? w.clusters.find((x) => x.charter);
-      setTargetCluster(c?.id ?? null);
+      const cid = c?.id ?? null;
+      setTargetCluster(cid);
+      // REHYDRATE the campaign you were working on — so reopening this business shows your real work,
+      // not a blank "set up your announcement" every visit (the "it feels empty" complaint).
+      if (cid) {
+        try {
+          const { data } = await supabase.from('knowledge_clusters').select('working_state').eq('id', cid).maybeSingle();
+          const saved = (data?.working_state as { campaign?: CampaignInput } | null)?.campaign;
+          if (live && saved?.type) {
+            setDetails(saved);
+            if (saved.agentName) setAgent((a) => a || saved.agentName!);
+            if (saved.agentPhone) setPhone((p) => p || saved.agentPhone!);
+          }
+        } catch { /* first visit / no saved state — a blank canvas is correct then */ }
+      }
     }).catch(() => {});
     void getBrandKit(worldId).then((k) => {
       if (!live || !k) return;
@@ -88,7 +104,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
 
   const center = ready
     ? { kicker: metaFor(details!.type)?.label ?? 'Campaign', title: centerTitle(details!), sub: centerSub(details!), filled: true }
-    : { kicker: 'Start here', title: 'Set up your announcement', sub: 'tap to begin', filled: false };
+    : { kicker: bizName ? `Market ${bizName}` : 'Start here', title: 'Set up your first announcement', sub: 'tap to begin — takes a minute', filled: false };
 
   const nodes: CanvasNode[] = [
     { key: 'postcard', emoji: '📮', label: 'Postcard', sub: 'front & back · print', dim: !ready },
@@ -119,7 +135,12 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
           realEstate={realEstate} initial={details} agent={agent} phone={phone} brand={brand}
           targetCluster={targetCluster} onToast={onToast}
           onClose={() => setOpen(null)}
-          onSave={(d) => { setDetails(d); setAgent(d.agentName ?? agent); setPhone(d.agentPhone ?? phone); setOpen(null); onToast('success', 'Set — now open any node to make a piece.'); }}
+          onSave={(d) => {
+            setDetails(d); setAgent(d.agentName ?? agent); setPhone(d.agentPhone ?? phone); setOpen(null);
+            // Persist so it comes back next visit (rehydrated on mount) instead of resetting to blank.
+            if (targetCluster) void supabase.from('knowledge_clusters').update({ working_state: { campaign: d } }).eq('id', targetCluster).then(() => {}, () => {});
+            onToast('success', 'Set — now open any node to make a piece.');
+          }}
         />
       )}
       {open === 'postcard' && set && (

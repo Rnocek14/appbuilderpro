@@ -93,13 +93,16 @@ export default function ProfileHome() {
         const scene = await loadUniverseScene();
         const biz: BranchNode[] = scene.bodies.map((b) => {
           const count = madeCount(b.massEvidence);
-          return { key: b.id, emoji: '🏢', label: b.title, sub: b.momentum?.label ?? b.massEvidence, count: count && count > 0 ? count : undefined, dim: count === 0, accent: 'ember' };
+          // A business you created is ACTIVE — never grey it out for having no *earned* artifacts yet
+          // (it's already stocked with starter playbooks). Reserve dim for genuinely inactive things.
+          return { key: b.id, emoji: '🏢', label: b.title, sub: b.momentum?.label ?? b.massEvidence, count: count && count > 0 ? count : undefined, dim: false, accent: 'ember' };
         });
         const ambient: BranchNode[] = [
           { key: 'today', emoji: '🌅', label: 'Today', sub: 'what needs you', accent: 'violet', leaf: true },
           { key: 'queue', emoji: '✅', label: 'Queue', sub: 'approve & reply', accent: 'violet', leaf: true },
           { key: 'money', emoji: '💵', label: 'Money', sub: 'invoices', accent: 'violet', leaf: true },
-          { key: 'new', emoji: '＋', label: 'New business', sub: 'start one', dim: true, leaf: true },
+          // The one creative CTA on the front door — a bright, obvious action, not a dimmed placeholder.
+          { key: 'new', emoji: '＋', label: 'New business', sub: 'start one', accent: 'violet', leaf: true },
         ];
         return {
           key: '', crumb: 'You',
@@ -116,8 +119,10 @@ export default function ProfileHome() {
         if (!scene) {
           return { key: bId, crumb: 'Business', center: { kicker: 'Business', title: 'This business', sub: 'nothing set up yet' }, nodes: [], empty: { emoji: '🗂', title: 'Nothing set up yet', body: 'This business doesn’t have any production areas yet.', ctaLabel: 'Open the full studio', onCta: () => navigate(`/garvis/webs/${bId}`) } };
         }
+        // A production area is a real, active workspace (it ships with a starter playbook) — show it
+        // lit, with its count when it has earned work. No more field of grey orbs on a fresh business.
         const areas: BranchNode[] = scene.planets.map((pl) => ({
-          key: pl.slug, emoji: AREA_EMOJI[pl.archetype] ?? '📦', label: pl.title, sub: pl.evidence, count: pl.artifactsTotal > 0 ? pl.artifactsTotal : undefined, dim: pl.artifactsTotal === 0, accent: 'ember',
+          key: pl.slug, emoji: AREA_EMOJI[pl.archetype] ?? '📦', label: pl.title, sub: pl.evidence, count: pl.artifactsTotal > 0 ? pl.artifactsTotal : undefined, dim: false, accent: 'ember',
         }));
         return {
           key: bId, crumb: scene.star.title,
@@ -134,16 +139,21 @@ export default function ProfileHome() {
       if (!planet) {
         return { key: `${bId}/${slug}`, crumb: 'Area', center: { kicker: 'Area', title: 'This area', sub: '' }, nodes: [], empty: { emoji: '🗂', title: 'Area not found', body: 'This area isn’t part of this business.', ctaLabel: 'Back to the business', onCta: () => navigate(`/garvis/home/${encodeURIComponent(bId)}`, { replace: true }) } };
       }
-      const work = (await listClusterArtifacts(planet.id)).filter((a) => a.source !== SEED_SOURCE);
+      // Show EVERYTHING in the area, including the starter playbooks it shipped with — clearly labeled
+      // "starter" (not passed off as earned work). A newly-set-up area is never an empty room now; it
+      // opens with the expert playbook waiting, so there's real material to read + build from.
+      const work = await listClusterArtifacts(planet.id);
       work.forEach((a) => artifactsById.current.set(a.id, a));
       const nodes: BranchNode[] = work.map((a) => ({
-        key: a.id, emoji: WORK_EMOJI[a.kind] ?? '📄', label: a.title, sub: a.revision > 1 ? `v${a.revision} · ${a.kind}` : a.kind, accent: 'ember', leaf: true,
+        key: a.id, emoji: WORK_EMOJI[a.kind] ?? '📄', label: a.title,
+        sub: a.source === SEED_SOURCE ? 'starter playbook' : (a.revision > 1 ? `v${a.revision} · ${a.kind}` : a.kind),
+        accent: 'ember', leaf: true,
       }));
       return {
         key: `${bId}/${slug}`, crumb: planet.title,
         center: { kicker: planet.status, title: planet.title, sub: planet.evidence },
         nodes,
-        empty: nodes.length ? undefined : { emoji: AREA_EMOJI[planet.archetype] ?? '📦', title: 'Nothing made here yet', body: `No work in ${planet.title} yet. Open the studio to make the first piece.`, ctaLabel: 'Open the full studio', onCta: () => navigate(`/garvis/webs/${bId}`) },
+        empty: nodes.length ? undefined : { emoji: AREA_EMOJI[planet.archetype] ?? '📦', title: 'Ready to make your first piece', body: `Open the ${planet.title} studio and generate something — it’s set up and waiting.`, ctaLabel: 'Open the full studio', onCta: () => navigate(`/garvis/webs/${bId}`) },
       };
     } catch {
       return errorLevel(p.join('/'), p.length ? 'Business' : 'You');

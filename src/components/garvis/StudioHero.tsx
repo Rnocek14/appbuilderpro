@@ -40,8 +40,10 @@ interface HeroConfig {
 const HERO: Partial<Record<Flavor, HeroConfig>> = {
   generic:     { icon: PenLine,      makes: 'campaign copy, angles, and messaging for this part of the business.', primaryTool: 'gen-copy',          cta: 'Generate copy' },
   direct_mail: { icon: Mail,         makes: 'a real designed postcard — your photo on a print-ready card you can Print or save as PDF. Use the designer below.', primaryTool: null, cta: '' },
-  social:      { icon: Share2,       makes: 'platform-ready posts for Facebook, Instagram, and more — then posts them.', primaryTool: 'gen-social',        cta: 'Generate social posts' },
-  video:       { icon: Clapperboard, makes: 'a 30-second script + shot list — then a captioned storyboard you can play.', primaryTool: 'gen-video-script',  cta: 'Generate a video script' },
+  // social + video have a full working studio below (publisher / storyboard). The panel IS the action,
+  // so the hero only frames it — a second "Generate" button on top just re-teaches "make something".
+  social:      { icon: Share2,       makes: 'platform-ready posts for Facebook & Instagram — write, preview, and post them from the publisher below.', primaryTool: null, cta: '' },
+  video:       { icon: Clapperboard, makes: 'a 30-second reel — a captioned storyboard you can play, built from your own photos. Use the video studio below.', primaryTool: null, cta: '' },
   ads:         { icon: Megaphone,    makes: 'launch-ready ad copy, keywords, and tracking URLs for Meta and Google.', primaryTool: 'gen-ads',           cta: 'Generate an ad campaign' },
   email:       { icon: Mail,         makes: 'a multi-touch email sequence, saved as drafts for you to send.',      primaryTool: 'gen-email-seq',     cta: 'Generate an email sequence' },
   feature_lab: { icon: FlaskConical, makes: 'distinct, buildable product concepts — then a full spec for the one you pick.', primaryTool: 'gen-features',      cta: 'Generate feature concepts' },
@@ -91,7 +93,7 @@ export function StudioHero({ cluster, worldId, hasEarnedWork, onDone, onToast }:
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-medium uppercase tracking-wide text-forge-ember/80">
-            {hasEarnedWork ? 'Studio' : 'Studio — nothing generated here yet'}
+            {hasEarnedWork ? 'Studio' : 'Studio · ready to work'}
           </p>
           <p className="mt-0.5 text-sm font-medium text-forge-ink">Makes {cfg.makes}</p>
 
