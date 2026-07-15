@@ -38,13 +38,13 @@ interface HeroConfig {
 
 // One entry per studio flavor. Tool ids match the generators in workwebRun.runTool / workweb tools.
 const HERO: Partial<Record<Flavor, HeroConfig>> = {
-  generic:     { icon: PenLine,      makes: 'campaign copy, angles, and messaging for this part of the business.', primaryTool: 'gen-copy',          cta: 'Generate copy' },
+  generic:     { icon: PenLine,      makes: 'your core messaging — value prop, elevator pitch, story, taglines, objection answers — from a gallery of ideas. Use the copy studio below.', primaryTool: null, cta: '' },
   direct_mail: { icon: Mail,         makes: 'a real designed postcard — your photo on a print-ready card you can Print or save as PDF. Use the designer below.', primaryTool: null, cta: '' },
   // social + video have a full working studio below (publisher / storyboard). The panel IS the action,
   // so the hero only frames it — a second "Generate" button on top just re-teaches "make something".
   social:      { icon: Share2,       makes: 'platform-ready posts for Facebook & Instagram — write, preview, and post them from the publisher below.', primaryTool: null, cta: '' },
   video:       { icon: Clapperboard, makes: 'a 30-second reel — a captioned storyboard you can play, built from your own photos. Use the video studio below.', primaryTool: null, cta: '' },
-  ads:         { icon: Megaphone,    makes: 'launch-ready ad copy, keywords, and tracking URLs for Meta and Google.', primaryTool: 'gen-ads',           cta: 'Generate an ad campaign' },
+  ads:         { icon: Megaphone,    makes: 'ready ad campaigns for Meta & Google — primary text, headlines, audiences, keywords — from a gallery of ideas. Use the ads studio below.', primaryTool: null, cta: '' },
   email:       { icon: Mail,         makes: 'ready-to-send emails from a gallery of ideas — pick one, spin the angle, edit, and save. Use the email studio below.', primaryTool: null, cta: '' },
   feature_lab: { icon: FlaskConical, makes: 'distinct, buildable product concepts — then a full spec for the one you pick.', primaryTool: 'gen-features',      cta: 'Generate feature concepts' },
   content_growth: { icon: Clapperboard, makes: 'a multi-scene vertical reel storyboard for a faceless AI-video account — shot prompts, captions, and a voiceover script. The honest seed the clip engine fills.', primaryTool: 'gen-reel', cta: 'Generate a reel storyboard' },

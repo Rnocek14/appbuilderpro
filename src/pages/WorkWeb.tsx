@@ -32,6 +32,8 @@ import { StudioChat } from '../components/garvis/StudioChat';
 import { PanelBoundary } from '../components/garvis/PanelBoundary';
 import { GenerationReadiness } from '../components/garvis/GenerationReadiness';
 import { StudioHero } from '../components/garvis/StudioHero';
+import { ADS_SPEC } from '../lib/garvis/adsStudio';
+import { COPY_SPEC } from '../lib/garvis/copyStudio';
 import { FirstRunGuide } from '../components/garvis/FirstRunGuide';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 import { VerdictReadout } from '../components/garvis/VerdictReadout';
@@ -48,6 +50,7 @@ const MarketDataPanel = lazy(() => import('../components/garvis/MarketDataPanel'
 const TimelinePanel = lazy(() => import('../components/garvis/TimelinePanel').then((m) => ({ default: m.TimelinePanel })));
 const SocialPublisher = lazy(() => import('../components/garvis/SocialPublisher').then((m) => ({ default: m.SocialPublisher })));
 const EmailStudio = lazy(() => import('../components/garvis/EmailStudio').then((m) => ({ default: m.EmailStudio })));
+const IdeaStudio = lazy(() => import('../components/garvis/IdeaStudio').then((m) => ({ default: m.IdeaStudio })));
 const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
 const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').then((m) => ({ default: m.AnsweringDesk })));
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
@@ -747,6 +750,17 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* EMAIL STUDIO — a gallery of email ideas, each a ready example you spin/edit/save as a draft. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'email' && (
         <PanelBoundary name="email studio"><EmailStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+      )}
+
+      {/* ADS STUDIO — a gallery of Meta/Google campaign ideas, each a ready ad draft (nothing spends). */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'ads' && (
+        <PanelBoundary name="ads studio"><IdeaStudio spec={ADS_SPEC} worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+      )}
+
+      {/* COPY STUDIO — the core messaging every channel reuses (value prop, story, taglines, …). Also
+          the working surface for a plain (flavorless) studio cluster, so it's never a dead end. */}
+      {cluster.charter?.archetype === 'studio' && (cluster.charter.flavor === 'generic' || cluster.charter.flavor == null) && (
+        <PanelBoundary name="copy studio"><IdeaStudio spec={COPY_SPEC} worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded

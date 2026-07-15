@@ -8,41 +8,17 @@
 // who signs it, phone, area). Anything specific we can't know is a visible [EDIT: …] hole the owner
 // fills — never invented. {{first_name}} is a mail-merge field the send path fills per recipient.
 
-export interface EmailCtx {
-  businessName: string;        // the business / brand this studio belongs to
-  agentName: string;           // who signs the email (often the same as the business)
-  phone: string | null;        // real phone, if known
-  area: string | null;         // town / neighborhood, if known
-  realEstate: boolean;         // real-estate concepts vs. general-business concepts
-}
+import {
+  type StudioCtx, type StudioIdea, type StudioSpec,
+  area, biz, sign, pick, fillTokens,
+} from './studioKit';
 
+export type EmailCtx = StudioCtx;
 export interface EmailExample { subject: string; body: string }
 
-export interface EmailConcept {
-  id: string;
-  name: string;                // the idea, in plain words ("Just listed")
-  blurb: string;               // when you'd send it
-  emoji: string;
-  audience: 'realestate' | 'general' | 'both';
-  sample: string;              // a teaser subject for the gallery card (so ideas are visible up front)
-  variants: number;            // how many distinct angles this idea has
+export interface EmailConcept extends StudioIdea {
   render: (ctx: EmailCtx, variant: number) => EmailExample;
 }
-
-// ---- shared building blocks ----------------------------------------------------------------
-const clean = (s: string | null | undefined) => (s && s.trim() ? s.trim() : '');
-const area = (c: EmailCtx) => clean(c.area) || '[EDIT: your area]';
-const biz = (c: EmailCtx) => clean(c.businessName) || clean(c.agentName) || '[EDIT: your business]';
-
-/** The sign-off — real name + business + phone when we have them, a visible hole when we don't. */
-function sign(c: EmailCtx): string {
-  const name = clean(c.agentName) || clean(c.businessName) || '[EDIT: your name]';
-  const withBiz = clean(c.businessName) && clean(c.businessName) !== name ? `${name}, ${clean(c.businessName)}` : name;
-  return `— ${withBiz}${clean(c.phone) ? `\n${clean(c.phone)}` : ''}`;
-}
-
-/** Pick a hook by variant (wraps), so "another angle" always returns something. */
-const pick = <T,>(arr: T[], v: number): T => arr[((v % arr.length) + arr.length) % arr.length];
 
 // ---- real-estate concepts ------------------------------------------------------------------
 const RE: EmailConcept[] = [
@@ -220,13 +196,20 @@ export function buildEmailExample(conceptId: string, ctx: EmailCtx, variant = 0)
   return { subject: fillTokens(ex.subject, ctx), body: fillTokens(ex.body, ctx) };
 }
 
-/** Fill the tiny {biz}/{area} display tokens used in a couple of subjects. {{first_name}} is left
- *  intact on purpose — it's a mail-merge field the send path fills per recipient. */
-function fillTokens(s: string, ctx: EmailCtx): string {
-  return s.replace(/\{biz\}/g, biz(ctx)).replace(/\{area\}/g, area(ctx));
-}
-
 /** The teaser subject for a gallery card (tokens filled), so every idea shows an example up front. */
-export function conceptSample(k: EmailConcept, ctx: EmailCtx): string {
+export function conceptSample(k: StudioIdea, ctx: EmailCtx): string {
   return fillTokens(k.sample, ctx);
 }
+
+/** The Email studio as a plug-in for the shared IdeaStudio scaffold. */
+export const EMAIL_SPEC: StudioSpec = {
+  kind: 'email', emoji: '✉️', title: 'Email studio',
+  subtitle: 'Pick an idea — each opens a ready email you can spin, edit, and save.',
+  savePrefix: 'Email',
+  ideasFor: conceptsFor,
+  sampleFor: conceptSample,
+  build: (id, ctx, v) => {
+    const ex = buildEmailExample(id, ctx, v);
+    return ex ? { parts: [{ label: 'Subject', value: ex.subject }, { label: 'Body', value: ex.body, multiline: true }] } : null;
+  },
+};
