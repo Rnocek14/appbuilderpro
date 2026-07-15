@@ -1,5 +1,6 @@
 // src/pages/ProfileHome.tsx
-// THE FRONT DOOR + THE WHOLE SPINE. You start on your profile canvas and branch DOWN it — you →
+// THE CANVAS SPINE (nav label "Canvas"). Command is the front door where you land; Canvas is the spatial
+// workspace you branch into to DO the work. You start on your profile canvas and branch DOWN it — you →
 // a business → one of its areas → a made thing — the "move over and branch" gesture at every level,
 // with the URL as the source of truth so Back walks you up and any level deep-links. Every level's
 // nodes come from the real loaders (loadUniverseScene → businesses, loadSystemScene → a business's
