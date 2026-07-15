@@ -47,6 +47,7 @@ const PaperworkStudio = lazy(() => import('../components/garvis/PaperworkStudio'
 const MarketDataPanel = lazy(() => import('../components/garvis/MarketDataPanel').then((m) => ({ default: m.MarketDataPanel })));
 const TimelinePanel = lazy(() => import('../components/garvis/TimelinePanel').then((m) => ({ default: m.TimelinePanel })));
 const SocialPublisher = lazy(() => import('../components/garvis/SocialPublisher').then((m) => ({ default: m.SocialPublisher })));
+const EmailStudio = lazy(() => import('../components/garvis/EmailStudio').then((m) => ({ default: m.EmailStudio })));
 const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
 const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').then((m) => ({ default: m.AnsweringDesk })));
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
@@ -741,6 +742,11 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* AUTO-POST to her real connected social accounts (Ayrshare), scheduled + approval-gated. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'social' && (
         <PanelBoundary name="social publisher"><SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+      )}
+
+      {/* EMAIL STUDIO — a gallery of email ideas, each a ready example you spin/edit/save as a draft. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'email' && (
+        <PanelBoundary name="email studio"><EmailStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded

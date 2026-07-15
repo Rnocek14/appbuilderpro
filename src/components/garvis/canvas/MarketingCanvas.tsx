@@ -37,6 +37,7 @@ import { parseFarmCsv, partitionMailable, farmMath, type FarmRecipient, type Far
 import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { supabase } from '../../../lib/supabase';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
+import { EmailStudio } from '../EmailStudio';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
@@ -109,7 +110,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
   const nodes: CanvasNode[] = [
     { key: 'postcard', emoji: '📮', label: 'Postcard', sub: 'front & back · print', dim: !ready },
     { key: 'social', emoji: '📱', label: 'Social posts', sub: 'FB & Instagram', dim: !ready },
-    { key: 'email', emoji: '✉️', label: 'Email', sub: 'to your list', dim: !ready },
+    { key: 'email', emoji: '✉️', label: 'Email', sub: 'ideas + examples', dim: false },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
     { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers' },
@@ -119,9 +120,9 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
 
   const onOpen = (k: string) => {
     const key = k as NodeKey;
-    // people + video + analysis work from the world's own data (a mail list, the world's photos, the
-    // MLS), so they don't require the campaign details to be filled first.
-    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && !ready) { setOpen('center'); return; }
+    // people + video + analysis + email work from the world's own data (a mail list, the world's
+    // photos, the MLS, the brand), so they don't require the campaign details to be filled first.
+    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && !ready) { setOpen('center'); return; }
     setOpen(key);
   };
 
@@ -152,8 +153,10 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
           brandName={(details!.businessName || details!.agentName || agent || 'Your brand').trim()}
           onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('social')} />
       )}
-      {open === 'email' && set && (
-        <EmailSheet set={set} accent={accent} onToast={onToast} onClose={() => setOpen(null)} />
+      {open === 'email' && (
+        <Sheet emoji="✉️" title="Email" lead="Ideas + worked examples — pick one, spin the angle, edit, and save." onClose={() => setOpen(null)}>
+          <EmailStudio worldId={worldId} clusterId={targetCluster} onToast={onToast} />
+        </Sheet>
       )}
       {open === 'people' && (
         <PeopleSheet realEstate={realEstate} worldId={worldId} onToast={onToast} onClose={() => setOpen(null)} />
