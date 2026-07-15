@@ -50,7 +50,7 @@ export function tierById(id: string): ClientTier | undefined {
 }
 
 export function formatUsd(cents: number): string {
-  const dollars = Math.round((cents ?? 0)) / 100;
+  const dollars = Math.round(Number.isFinite(cents) ? cents : 0) / 100;
   return `$${dollars.toLocaleString('en-US', { minimumFractionDigits: dollars % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`;
 }
 

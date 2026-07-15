@@ -119,6 +119,13 @@ export function parseCustomerCsv(text: string): ParsedCustomer[] {
   const iEmail = idx('email'), iName = idx('name');
   const iLs = idx('last_service_at'), iLv = idx('last_visit_at'), iPu = idx('purchase_at'), iNd = idx('next_due_at');
   const cell = (c: string[], i: number) => (i >= 0 ? (c[i] ?? '').trim() || null : null);
+  // A date cell is kept only when it's a real YYYY-MM-DD; anything else (blank, "n/a", "last week",
+  // 2026/13/45) becomes null so one bad cell can't fail the whole batch insert into a date column.
+  const isoDate = (v: string | null): string | null => {
+    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+    const t = Date.parse(`${v}T00:00:00Z`);
+    return Number.isFinite(t) ? v : null;
+  };
   const out: ParsedCustomer[] = [];
   for (const line of lines.slice(1)) {
     const c = line.split(',').map((x) => x.trim());
@@ -126,8 +133,8 @@ export function parseCustomerCsv(text: string): ParsedCustomer[] {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) continue;
     out.push({
       email, name: cell(c, iName),
-      last_service_at: cell(c, iLs), last_visit_at: cell(c, iLv),
-      purchase_at: cell(c, iPu), next_due_at: cell(c, iNd),
+      last_service_at: isoDate(cell(c, iLs)), last_visit_at: isoDate(cell(c, iLv)),
+      purchase_at: isoDate(cell(c, iPu)), next_due_at: isoDate(cell(c, iNd)),
     });
   }
   return out;

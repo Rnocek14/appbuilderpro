@@ -24,6 +24,7 @@ ok('one-time does not leak into MRR', monthlyRevenueCents([{ cadence: 'one_time'
 ok('formatUsd whole dollars', formatUsd(50000) === '$500');
 ok('formatUsd thousands separator', formatUsd(140000) === '$1,400');
 ok('formatUsd cents when needed', formatUsd(49950) === '$499.50');
+ok('formatUsd NaN degrades to $0 (never "$NaN")', formatUsd(NaN) === '$0');
 
 ok('tierById resolves a known tier', tierById('website_automation')?.cadence === 'monthly');
 ok('tierById is undefined for junk', tierById('nope') === undefined);

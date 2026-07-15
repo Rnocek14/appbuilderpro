@@ -60,6 +60,8 @@ ok('csv: maps the present column', csv[0].last_visit_at === '2026-01-16');
 ok('csv: an empty cell becomes null, not ""', csv[1].last_visit_at === null);
 ok('csv: absent columns are null', csv[0].purchase_at === null);
 ok('csv: header-only or empty input yields nothing', parseCustomerCsv('name,email').length === 0 && parseCustomerCsv('').length === 0);
+const csvBadDate = parseCustomerCsv('email,last_visit_at\nx@y.com,not-a-date\nz@y.com,2026-13-45');
+ok('csv: invalid date cell → null, row still kept (no batch-killing bad date)', csvBadDate.length === 2 && csvBadDate[0].last_visit_at === null && csvBadDate[1].last_visit_at === null);
 
 // ---- determinism ----
 ok('deterministic: identical plan for identical inputs', JSON.stringify(dueFires(recall, all, [], NOW)) === JSON.stringify(dueFires(recall, all, [], NOW)));

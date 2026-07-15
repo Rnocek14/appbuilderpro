@@ -25,13 +25,15 @@ export async function getBillingSettings(): Promise<BillingSettings> {
 }
 
 export async function saveBillingSettings(s: BillingSettings): Promise<void> {
-  const u = await uid(); if (!u) return;
-  await supabase.from('agency_billing_settings').upsert({
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  // supabase-js RESOLVES with {error} rather than throwing — surface it, or a failed save reads as success.
+  const { error } = await supabase.from('agency_billing_settings').upsert({
     owner_id: u,
     website_payment_link: s.website_payment_link?.trim() || null,
     automation_payment_link: s.automation_payment_link?.trim() || null,
     updated_at: new Date().toISOString(),
   }, { onConflict: 'owner_id' });
+  if (error) throw new Error(error.message);
 }
 
 export async function listClientSubs(): Promise<ClientSubRow[]> {
@@ -44,24 +46,29 @@ export async function listClientSubs(): Promise<ClientSubRow[]> {
 export interface NewClientSub {
   business_name: string; email?: string | null; tier: TierId; cadence: Cadence; price_cents: number; notes?: string | null;
 }
-export async function createClientSub(input: NewClientSub): Promise<ClientSubRow | null> {
-  const u = await uid(); if (!u) return null;
-  const { data } = await supabase.from('client_subscriptions').insert({
+export async function createClientSub(input: NewClientSub): Promise<ClientSubRow> {
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const cents = Math.max(0, Math.round(Number.isFinite(input.price_cents) ? input.price_cents : 0));
+  const { data, error } = await supabase.from('client_subscriptions').insert({
     owner_id: u, business_name: input.business_name.trim(), email: input.email?.trim() || null,
-    tier: input.tier, cadence: input.cadence, price_cents: Math.max(0, Math.round(input.price_cents)),
+    tier: input.tier, cadence: input.cadence, price_cents: cents,
     status: 'pending', notes: input.notes?.trim() || null,
   }).select('*').single();
-  return (data as ClientSubRow) ?? null;
+  if (error) throw new Error(error.message);
+  return data as ClientSubRow;
 }
 
 export async function setClientStatus(id: string, status: 'pending' | 'active' | 'canceled'): Promise<void> {
-  const u = await uid(); if (!u) return;
-  await supabase.from('client_subscriptions')
-    .update({ status, activated_at: status === 'active' ? new Date().toISOString() : null })
-    .eq('owner_id', u).eq('id', id);
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  // Stamp activated_at only on activation; never null it on cancel/pause (keeps the churn/history date).
+  const patch: Record<string, unknown> = { status };
+  if (status === 'active') patch.activated_at = new Date().toISOString();
+  const { error } = await supabase.from('client_subscriptions').update(patch).eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
 }
 
 export async function deleteClientSub(id: string): Promise<void> {
-  const u = await uid(); if (!u) return;
-  await supabase.from('client_subscriptions').delete().eq('owner_id', u).eq('id', id);
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { error } = await supabase.from('client_subscriptions').delete().eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
 }
