@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Database, RefreshCw, Download, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { listProspectAudits, type ProspectAuditRow } from '../../lib/garvis/clientHuntRun';
 import { type Verdict } from '../../lib/garvis/siteAudit';
+import { detectFromRow } from '../../lib/garvis/automation/detect';
 import { cn } from '../../lib/utils';
 
 const VERDICTS: (Verdict | 'all')[] = ['all', 'weak', 'dated', 'solid', 'unknown'];
@@ -93,12 +94,14 @@ export function SavedAudits() {
                     <th className="py-1.5 pr-3 font-medium">Verdict</th>
                     <th className="py-1.5 pr-3 font-medium">Score</th>
                     <th className="py-1.5 pr-3 font-medium">Vertical</th>
-                    <th className="py-1.5 pr-3 font-medium">Issues</th>
+                    <th className="py-1.5 pr-3 font-medium">Could automate</th>
                     <th className="py-1.5 font-medium">Last checked</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map((r) => (
+                  {shown.map((r) => {
+                    const { proposals, gaps } = detectFromRow(r);
+                    return (
                     <tr key={r.id} className="border-t border-forge-border/60">
                       <td className="py-1.5 pr-3">
                         <div className="font-medium text-forge-ink">{r.business_name || r.host || r.url}</div>
@@ -109,10 +112,28 @@ export function SavedAudits() {
                       <td className={cn('py-1.5 pr-3 font-medium', V_CLS[r.verdict])}>{V_LABEL[r.verdict]}</td>
                       <td className="py-1.5 pr-3 tabular-nums text-forge-dim">{r.score ?? '—'}</td>
                       <td className="py-1.5 pr-3 text-forge-dim">{r.vertical ?? '—'}</td>
-                      <td className="py-1.5 pr-3 text-forge-dim">{(r.signals ?? []).length}</td>
+                      <td className="py-1.5 pr-3">
+                        {proposals.length === 0 && gaps.length === 0 ? (
+                          <span className="text-forge-dim">—</span>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {proposals.map((p) => (
+                              <span key={p.capabilityId} title={`${p.pitch} · ${p.monthlyPrice}`}
+                                className="rounded-md border border-forge-ok/40 bg-forge-ok/10 px-1.5 py-0.5 text-[10.5px] text-forge-ok">
+                                {p.title}
+                              </span>
+                            ))}
+                            {gaps.length > 0 && (
+                              <span title="Real needs we spotted with no deliverable automation yet — the roadmap queue"
+                                className="text-[10.5px] text-forge-dim">+{gaps.length} gap{gaps.length === 1 ? '' : 's'}</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-1.5 text-forge-dim">{new Date(r.last_audited_at).toLocaleDateString()}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

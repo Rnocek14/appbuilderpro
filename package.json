@@ -53,6 +53,7 @@
     "verify:lab": "tsx src/lib/garvis/lab.verify.ts",
     "verify:inquiry": "tsx src/lib/garvis/inquiry.verify.ts",
     "verify:gardener": "tsx src/lib/garvis/gardener.verify.ts",
+    "verify:automation": "tsx src/lib/garvis/automation/detect.verify.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

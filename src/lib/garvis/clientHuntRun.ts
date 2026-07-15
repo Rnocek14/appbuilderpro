@@ -220,6 +220,7 @@ export interface ProspectAuditRow {
   checks: Record<string, boolean>;
   meta_title: string | null;
   meta_description: string | null;
+  text_snippet: string | null;
   created_at: string;
   last_audited_at: string;
 }
