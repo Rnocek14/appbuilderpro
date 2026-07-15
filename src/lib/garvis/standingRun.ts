@@ -63,12 +63,14 @@ export async function createClientHuntOrder(config: HuntConfig): Promise<Standin
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
-  const niche = config.niche.trim();
-  if (!niche) throw new Error('Add a niche to hunt — e.g. roofers, dentists, plumbers.');
+  // A niche is OPTIONAL — no niche means hunt every kind of local business (fully hands-off).
+  const label = config.niches.length === 0 ? 'Daily hunt: all local businesses'
+    : config.niches.length === 1 ? `Daily hunt: ${config.niches[0]}`
+    : `Daily hunt: ${config.niches.length} business types`;
   const nowIso = new Date().toISOString();
   const { data, error } = await supabase.from('standing_orders').insert({
-    owner_id: uid, world_id: null, kind: CLIENT_HUNT_KIND, label: `Daily hunt: ${niche}`,
-    cadence: 'daily', config: { ...config, niche, cursor: 0 },
+    owner_id: uid, world_id: null, kind: CLIENT_HUNT_KIND, label,
+    cadence: 'daily', config: { ...config, cursor: 0 },
     status: 'active', anchor_at: nowIso,
     next_run_at: nextRunAfter('daily', nowIso, nowIso),
   }).select('id, world_id, kind, label, cadence, config, status, anchor_at, next_run_at, last_run_at, last_result').single();

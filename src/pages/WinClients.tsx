@@ -59,8 +59,9 @@ export default function WinClients() {
   const [selected, setSelected] = useState<number | null>(null);
   const [stage, setStage] = useState<'hub' | 'find'>('hub'); // enter on the pipeline canvas
   // Daily automatic hunt (a standing order) — set once, then Garvis sweeps fresh markets every day.
+  // Hands-off by default: no niche needed — it hunts every kind of local business.
   const [hunt, setHunt] = useState<StandingOrder | null>(null);
-  const [citiesPerDay, setCitiesPerDay] = useState(10);
+  const [searchesPerDay, setSearchesPerDay] = useState(20);
   const [demoQuota, setDemoQuota] = useState(5);
   const [savingHunt, setSavingHunt] = useState(false);
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
@@ -174,18 +175,21 @@ export default function WinClients() {
     scope === 'all' ? { mode: 'topN', n: US_CITIES.length }
       : scope.startsWith('top') ? { mode: 'topN', n: parseInt(scope.slice(3), 10) || 50 }
       : { mode: 'state', state: scope };
-  const huntCfgPreview: HuntConfig = { niche: niche.trim() || 'your niche', scope: scopeToSweep(), citiesPerDay, demoQuota };
+  // No niche typed → hunt EVERY kind of local business (hands-off). Typing one narrows it.
+  const huntNiches = (): string[] => (niche.trim() ? [niche.trim()] : []);
+  const huntCfgPreview: HuntConfig = { niches: huntNiches(), scope: scopeToSweep(), searchesPerDay, demoQuota };
 
-  // Turn the same niche + scope into a DAILY AUTOMATIC order. From then on Garvis sweeps fresh
-  // markets each day, builds demos, and queues pitches for your approval — no URLs to paste.
+  // Turn the scope (and any typed niche) into a DAILY AUTOMATIC order. From then on Garvis sweeps
+  // fresh markets each day, builds demos, and queues pitches for your approval — no URLs to paste,
+  // and no niche required (it hunts everything by default).
   const startHunt = async () => {
-    const n = niche.trim();
-    if (!n) { toast('error', 'Enter a niche first — the daily hunt needs to know what to look for.'); return; }
     setSavingHunt(true);
     try {
-      const order = await createClientHuntOrder({ niche: n, scope: scopeToSweep(), citiesPerDay, demoQuota });
+      const order = await createClientHuntOrder({ niches: huntNiches(), scope: scopeToSweep(), searchesPerDay, demoQuota });
       setHunt(order);
-      toast('success', `Daily hunt on for "${n}". Garvis will sweep fresh markets every day and queue pitches for your approval.`);
+      toast('success', niche.trim()
+        ? `Daily hunt on for "${niche.trim()}". Garvis will sweep fresh markets every day and queue pitches for your approval.`
+        : 'Daily hunt on for every kind of local business. Garvis will sweep fresh markets every day and queue pitches for your approval.');
     } catch (e) { toast('error', emsg(e)); }
     finally { setSavingHunt(false); }
   };
@@ -331,20 +335,23 @@ export default function WinClients() {
               <div>
                 <div className="flex items-center gap-1.5 text-sm font-medium text-forge-ink"><CalendarClock size={14} className="text-forge-ember" /> Put it on autopilot</div>
                 <p className="mt-0.5 text-[11.5px] text-forge-dim">{huntSummary(huntCfgPreview)}</p>
+                {!niche.trim() && (
+                  <p className="mt-0.5 text-[10.5px] text-forge-ok/90">✓ No niche needed — it hunts every kind of local business. Type a niche above to narrow it.</p>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <label className="flex items-center gap-1 text-[11px] text-forge-dim">Cities/day
-                    <input type="number" min={1} max={40} value={citiesPerDay} onChange={(e) => setCitiesPerDay(Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)))}
+                  <label className="flex items-center gap-1 text-[11px] text-forge-dim">Searches/day
+                    <input type="number" min={1} max={40} value={searchesPerDay} onChange={(e) => setSearchesPerDay(Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)))}
                       className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
                   </label>
                   <label className="flex items-center gap-1 text-[11px] text-forge-dim">Demos/day
                     <input type="number" min={1} max={25} value={demoQuota} onChange={(e) => setDemoQuota(Math.max(1, Math.min(25, parseInt(e.target.value, 10) || 1)))}
                       className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
                   </label>
-                  <Button variant="primary" size="sm" onClick={() => void startHunt()} disabled={savingHunt || !niche.trim()}>
+                  <Button variant="primary" size="sm" onClick={() => void startHunt()} disabled={savingHunt}>
                     {savingHunt ? <Loader2 size={13} className="animate-spin" /> : <CalendarClock size={13} />} Turn on daily hunt
                   </Button>
                 </div>
-                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-forge-dim/80"><Info size={11} /> Uses the niche + scope above. Runs on Garvis’s daily heartbeat; every demo + pitch lands in your Queue to approve — nothing sends on its own.</p>
+                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-forge-dim/80"><Info size={11} /> Runs on Garvis’s daily heartbeat across the scope above. Every demo + pitch lands in your Queue to approve — nothing sends on its own.</p>
               </div>
             )}
           </div>

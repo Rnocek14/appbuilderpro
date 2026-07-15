@@ -484,7 +484,7 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
       if (built >= cfg.demoQuota) break;
       if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;
       try {
-        const outcome = await buildOneDemo(admin, order, cfg.niche, t, env);
+        const outcome = await buildOneDemo(admin, order, qy.niche, t, env);  // per-query type (grid mixes types)
         if (outcome === 'queued') { built++; queued++; }
         else if (outcome === 'built') built++;
         // 'skipped' → unreachable/invalid; nothing recorded, nothing faked
