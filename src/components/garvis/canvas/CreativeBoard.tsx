@@ -24,7 +24,10 @@ type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 export interface BoardKind { id: string; label: string; emoji: string; hint: string }
 
 export interface FocusApi<C> {
-  update: (content: C) => void;
+  /** Replace the tile's content, or apply a functional updater against its LATEST content — the
+   *  functional form is what a slow async op (image gen) must use so it doesn't clobber edits made
+   *  while it was in flight. */
+  update: (content: C | ((prev: C) => C)) => void;
   rendition: (instruction: string) => Promise<void>;
   favorite: () => void;
   remove: () => void;
@@ -180,7 +183,12 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   };
 
   const focusApi = (id: string): FocusApi<C> => ({
-    update: (content) => setBoard((b) => setTileContent(b, id, content)),
+    update: (arg) => setBoard((b) => {
+      const t = getTile(b, id);
+      if (!t) return b;
+      const next = typeof arg === 'function' ? (arg as (p: C) => C)(t.content) : arg;
+      return setTileContent(b, id, next);
+    }),
     rendition: async (instruction) => { await spin(id, instruction); },
     favorite: () => setBoard((b) => toggleFavorite(b, id)),
     remove: () => { setBoard((b) => removeTile(b, id)); setFocusId(null); },

@@ -73,5 +73,11 @@ export async function queueSocialTile(args: {
     text, platforms: [provider(content.platform)], mediaUrls: media,
     scheduleAt: args.scheduleAt ?? null, worldId: args.worldId,
   });
-  return { warnings: res.warnings };
+  const warnings = [...res.warnings];
+  // The no-photo "brand card" is a preview graphic (CSS), not a real image — it can't be attached, so a
+  // brand-mode post goes out as TEXT ONLY. Say so, so nothing is silently dropped.
+  if (content.imageMode === 'brand' && !content.imageUrl) {
+    warnings.unshift('Posting as text only — the brand card is a preview and isn’t attached. Add a photo or connect an image key to include a graphic.');
+  }
+  return { warnings };
 }

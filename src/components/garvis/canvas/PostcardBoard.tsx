@@ -11,7 +11,7 @@ import QRCode from 'qrcode';
 import { Loader2, Sparkles, Image as ImageIcon, Wand2, Star, Trash2, Send } from 'lucide-react';
 import { PostcardFront, PostcardBack, PostcardViewer } from '../Postcard';
 import {
-  postcardKindsFor, kindById, defaultKind, buildPostcardContent, applyRendition, withPhoto, tileAllowsAI,
+  postcardKindsFor, kindById, defaultKind, buildPostcardContent, applyRendition, withPhoto, withGeneratedImage, tileAllowsAI,
   type PostcardContent, type PostcardMaterials,
 } from '../../../lib/garvis/postcardBoard';
 import { loadPostcardMaterials, generateTileImage, logPostcardMailed } from '../../../lib/garvis/postcardBoardRun';
@@ -123,8 +123,15 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
 
   const genImage = async () => {
     setGenBusy(true);
-    try { const next = await tryImage(content, genStyle.trim() || null); api.update(next); }
-    finally { setGenBusy(false); }
+    try {
+      const next = await tryImage(content, genStyle.trim() || null);
+      // Apply ONLY the new image onto the latest content, so a text edit made while it was generating
+      // isn't clobbered by this pre-generation snapshot.
+      if (next.imageMode === 'ai' && next.spec.front.imageUrl) {
+        const url = next.spec.front.imageUrl, note = next.aiNote;
+        api.update((prev) => withGeneratedImage(prev, url, note));
+      }
+    } finally { setGenBusy(false); }
   };
 
   const logMailed = async () => {

@@ -11,7 +11,7 @@ import { Loader2, Sparkles, Image as ImageIcon, Send, Copy } from 'lucide-react'
 import { SocialMock } from './SocialMock';
 import {
   socialKindsFor, socialKindById, defaultSocialKind, buildSocialContent, applySocialRendition,
-  withPhoto, tileAllowsAI, composeSocialText, PLATFORM_ORDER,
+  withPhoto, withGeneratedImage, tileAllowsAI, composeSocialText, PLATFORM_ORDER,
   type SocialContent, type SocialMaterials, type SocialPlatform,
 } from '../../../lib/garvis/socialBoard';
 import { loadSocialMaterials, generateSocialTileImage, queueSocialTile } from '../../../lib/garvis/socialBoardRun';
@@ -64,7 +64,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
       emptyHint: 'Pick a platform + a kind, type an idea, and hit Make. Your posts appear here — make as many as you like, compare, then queue the best.',
       kinds: socialKindsFor(realEstate).map((k) => ({ id: k.id, label: k.label, emoji: k.emoji, hint: k.hint })),
       banner: aiState === 'off'
-        ? '🎨 AI imagery is off — posts use your brand design and real photos. Connect an image key to generate imagery.'
+        ? '🎨 AI imagery is off — the brand card is a preview, so these posts go out as text. Attach a photo, or connect an image key to generate + attach imagery.'
         : 'Real facts fill in; unknowns show as [EDIT] holes. Nothing posts from here — Queue sends it through Approvals first.',
       extraControls: (
         <div className="flex flex-wrap items-center gap-1.5">
@@ -119,7 +119,15 @@ function SocialFocus({ content, api, materials, worldId, clusterId, onToast, try
 
   const genImage = async () => {
     setGenBusy(true);
-    try { api.update(await tryImage(content, genStyle.trim() || null)); } finally { setGenBusy(false); }
+    try {
+      const next = await tryImage(content, genStyle.trim() || null);
+      // Apply ONLY the new image onto the latest content, so a caption/platform edit made while the
+      // image was generating isn't clobbered by this (pre-generation) snapshot.
+      if (next.imageMode === 'ai' && next.imageUrl) {
+        const url = next.imageUrl, note = next.aiNote;
+        api.update((prev) => withGeneratedImage(prev, url, note));
+      }
+    } finally { setGenBusy(false); }
   };
 
   const queue = async () => {
