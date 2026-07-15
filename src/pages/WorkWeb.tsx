@@ -35,6 +35,7 @@ import { StudioHero } from '../components/garvis/StudioHero';
 import { ADS_SPEC } from '../lib/garvis/adsStudio';
 import { COPY_SPEC } from '../lib/garvis/copyStudio';
 import { SOCIAL_SPEC } from '../lib/garvis/socialStudio';
+import { REEL_SPEC } from '../lib/garvis/reelStudio';
 import { FirstRunGuide } from '../components/garvis/FirstRunGuide';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 import { VerdictReadout } from '../components/garvis/VerdictReadout';
@@ -768,6 +769,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           the working surface for a plain (flavorless) studio cluster, so it's never a dead end. */}
       {cluster.charter?.archetype === 'studio' && (cluster.charter.flavor === 'generic' || cluster.charter.flavor == null) && (
         <PanelBoundary name="copy studio"><IdeaStudio spec={COPY_SPEC} worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+      )}
+
+      {/* REEL STUDIO — short-video formats → an editable storyboard (hook, scenes, captions, VO) for a
+          faceless content account. Saved as a draft; rendering to video needs a connected video model. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
+        <PanelBoundary name="reel studio"><IdeaStudio spec={REEL_SPEC} worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded
