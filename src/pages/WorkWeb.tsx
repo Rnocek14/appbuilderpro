@@ -34,6 +34,7 @@ import { GenerationReadiness } from '../components/garvis/GenerationReadiness';
 import { StudioHero } from '../components/garvis/StudioHero';
 import { ADS_SPEC } from '../lib/garvis/adsStudio';
 import { COPY_SPEC } from '../lib/garvis/copyStudio';
+import { SOCIAL_SPEC } from '../lib/garvis/socialStudio';
 import { FirstRunGuide } from '../components/garvis/FirstRunGuide';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 import { VerdictReadout } from '../components/garvis/VerdictReadout';
@@ -742,9 +743,15 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <PanelBoundary name="video studio"><VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
+      {/* SOCIAL STUDIO — a gallery of post ideas → a ready caption. Sits above the publisher: pick an
+          idea + edit it here, then schedule/post it below. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'social' && (
+        <PanelBoundary name="social studio"><IdeaStudio spec={SOCIAL_SPEC} worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+      )}
+
       {/* AUTO-POST to her real connected social accounts (Ayrshare), scheduled + approval-gated. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'social' && (
-        <PanelBoundary name="social publisher"><SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+        <div className="mt-4"><PanelBoundary name="social publisher"><SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary></div>
       )}
 
       {/* EMAIL STUDIO — a gallery of email ideas, each a ready example you spin/edit/save as a draft. */}

@@ -6,6 +6,7 @@ import { sign, area, biz, exampleToText, inferRealEstate, fillTokens, type Studi
 import { EMAIL_SPEC } from './emailStudio';
 import { ADS_SPEC } from './adsStudio';
 import { COPY_SPEC } from './copyStudio';
+import { SOCIAL_SPEC } from './socialStudio';
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -25,7 +26,7 @@ const gen: StudioCtx = { businessName: "Rosa's Bakery", agentName: 'Rosa', phone
 }
 
 // --- every studio spec is a well-formed, cohesive plug-in --------------------------------
-const SPECS: StudioSpec[] = [EMAIL_SPEC, ADS_SPEC, COPY_SPEC];
+const SPECS: StudioSpec[] = [EMAIL_SPEC, ADS_SPEC, COPY_SPEC, SOCIAL_SPEC];
 for (const spec of SPECS) {
   const tag = spec.kind;
   check(`[${tag}] has title/subtitle/emoji/savePrefix`, !!spec.title && !!spec.subtitle && !!spec.emoji && !!spec.savePrefix);

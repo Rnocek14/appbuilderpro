@@ -42,7 +42,7 @@ const HERO: Partial<Record<Flavor, HeroConfig>> = {
   direct_mail: { icon: Mail,         makes: 'a real designed postcard — your photo on a print-ready card you can Print or save as PDF. Use the designer below.', primaryTool: null, cta: '' },
   // social + video have a full working studio below (publisher / storyboard). The panel IS the action,
   // so the hero only frames it — a second "Generate" button on top just re-teaches "make something".
-  social:      { icon: Share2,       makes: 'platform-ready posts for Facebook & Instagram — write, preview, and post them from the publisher below.', primaryTool: null, cta: '' },
+  social:      { icon: Share2,       makes: 'posts for Facebook & Instagram — pick a post idea from the gallery below, edit it, then schedule or post it from the publisher.', primaryTool: null, cta: '' },
   video:       { icon: Clapperboard, makes: 'a 30-second reel — a captioned storyboard you can play, built from your own photos. Use the video studio below.', primaryTool: null, cta: '' },
   ads:         { icon: Megaphone,    makes: 'ready ad campaigns for Meta & Google — primary text, headlines, audiences, keywords — from a gallery of ideas. Use the ads studio below.', primaryTool: null, cta: '' },
   email:       { icon: Mail,         makes: 'ready-to-send emails from a gallery of ideas — pick one, spin the angle, edit, and save. Use the email studio below.', primaryTool: null, cta: '' },
