@@ -82,6 +82,12 @@ export function CommandPalette({ open, onClose }: Props) {
       { id: 'a-health', label: 'Health (system status)', icon: ShieldCheck, run: () => navigate('/garvis/health') },
       { id: 'a-control', label: 'Mission Control — activity (legacy)', icon: ShieldCheck, run: () => navigate('/garvis/control') },
       { id: 'a-overview', label: 'Portfolio overview (legacy)', icon: Waypoints, run: () => navigate('/garvis') },
+      // Keep old search terms findable even though the nav labels changed (muscle memory: "universe", "brain").
+      { id: 'a-universe', label: 'Universe (3D worlds) → Galaxy', icon: Telescope, run: () => navigate('/garvis/universe') },
+      { id: 'a-brain', label: 'Brain → Memory (library)', icon: BrainCircuit, run: () => navigate('/garvis/memory?tab=library') },
+      { id: 'a-missions', label: 'Missions (legacy)', icon: Sparkles, run: () => navigate('/garvis/missions') },
+      { id: 'a-marketing', label: 'Marketing (legacy)', icon: Waypoints, run: () => navigate('/garvis/marketing') },
+      { id: 'a-opps', label: 'Opportunities (legacy)', icon: Search, run: () => navigate('/garvis/opportunities') },
     ];
     const commands: PaletteItem[] = [...navCommands, ...aliases];
     const projectItems: PaletteItem[] = projects.map((p) => ({
