@@ -38,14 +38,16 @@ interface HeroConfig {
 
 // One entry per studio flavor. Tool ids match the generators in workwebRun.runTool / workweb tools.
 const HERO: Partial<Record<Flavor, HeroConfig>> = {
-  generic:     { icon: PenLine,      makes: 'campaign copy, angles, and messaging for this part of the business.', primaryTool: 'gen-copy',          cta: 'Generate copy' },
+  generic:     { icon: PenLine,      makes: 'your core messaging — value prop, elevator pitch, story, taglines, objection answers — from a gallery of ideas. Use the copy studio below.', primaryTool: null, cta: '' },
   direct_mail: { icon: Mail,         makes: 'a real designed postcard — your photo on a print-ready card you can Print or save as PDF. Use the designer below.', primaryTool: null, cta: '' },
-  social:      { icon: Share2,       makes: 'platform-ready posts for Facebook, Instagram, and more — then posts them.', primaryTool: 'gen-social',        cta: 'Generate social posts' },
-  video:       { icon: Clapperboard, makes: 'a 30-second script + shot list — then a captioned storyboard you can play.', primaryTool: 'gen-video-script',  cta: 'Generate a video script' },
-  ads:         { icon: Megaphone,    makes: 'launch-ready ad copy, keywords, and tracking URLs for Meta and Google.', primaryTool: 'gen-ads',           cta: 'Generate an ad campaign' },
-  email:       { icon: Mail,         makes: 'a multi-touch email sequence, saved as drafts for you to send.',      primaryTool: 'gen-email-seq',     cta: 'Generate an email sequence' },
+  // social + video have a full working studio below (publisher / storyboard). The panel IS the action,
+  // so the hero only frames it — a second "Generate" button on top just re-teaches "make something".
+  social:      { icon: Share2,       makes: 'posts for Facebook & Instagram — pick a post idea from the gallery below, edit it, then schedule or post it from the publisher.', primaryTool: null, cta: '' },
+  video:       { icon: Clapperboard, makes: 'a 30-second reel — a captioned storyboard you can play, built from your own photos. Use the video studio below.', primaryTool: null, cta: '' },
+  ads:         { icon: Megaphone,    makes: 'ready ad campaigns for Meta & Google — primary text, headlines, audiences, keywords — from a gallery of ideas. Use the ads studio below.', primaryTool: null, cta: '' },
+  email:       { icon: Mail,         makes: 'ready-to-send emails from a gallery of ideas — pick one, spin the angle, edit, and save. Use the email studio below.', primaryTool: null, cta: '' },
   feature_lab: { icon: FlaskConical, makes: 'distinct, buildable product concepts — then a full spec for the one you pick.', primaryTool: 'gen-features',      cta: 'Generate feature concepts' },
-  content_growth: { icon: Clapperboard, makes: 'a multi-scene vertical reel storyboard for a faceless AI-video account — shot prompts, captions, and a voiceover script. The honest seed the clip engine fills.', primaryTool: 'gen-reel', cta: 'Generate a reel storyboard' },
+  content_growth: { icon: Clapperboard, makes: 'reels for a faceless AI-video account — pick a short-video format below, get a full storyboard (hook, scenes, captions, voiceover), edit it, and save. Use the reel studio below.', primaryTool: null, cta: '' },
   // Dedicated-surface flavors: the panel below is the action; the hero just frames it.
   landing:     { icon: Globe,        makes: 'a campaign landing page built from this world’s brand and artwork.',  primaryTool: null, cta: '' },
   market:      { icon: LayoutGrid,   makes: 'honest market stats computed from your own MLS/RESO feed.',           primaryTool: null, cta: '' },
@@ -91,7 +93,7 @@ export function StudioHero({ cluster, worldId, hasEarnedWork, onDone, onToast }:
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-medium uppercase tracking-wide text-forge-ember/80">
-            {hasEarnedWork ? 'Studio' : 'Studio — nothing generated here yet'}
+            {hasEarnedWork ? 'Studio' : 'Studio · ready to work'}
           </p>
           <p className="mt-0.5 text-sm font-medium text-forge-ink">Makes {cfg.makes}</p>
 

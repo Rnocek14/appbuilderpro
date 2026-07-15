@@ -3,6 +3,7 @@
 
 import {
   composeBatchRecipients, mergeTemplate, unknownTokens, batchProgress, pickNextPending,
+  staleSendingIndices,
   type BatchRecipient,
 } from '../../../supabase/functions/_shared/batchCore';
 
@@ -59,6 +60,19 @@ check('progress counts are exact', prog.sent === 1 && prog.skipped === 1 && prog
 check('drain picks the next pending in order, capped', JSON.stringify(pickNextPending(recips, 2)) === '[1,3]');
 check('drain of a finished batch picks nothing', pickNextPending(recips.map((r) => ({ ...r, state: 'sent' as const })), 5).length === 0);
 check('deterministic', JSON.stringify(composeBatchRecipients(contacts)) === JSON.stringify(composeBatchRecipients(contacts)));
+
+// --- idempotency: a claimed ('sending') recipient is never re-sent, stale claims are swept ----------
+const claimed: BatchRecipient[] = [
+  { contactId: '1', email: 'a@x.com', name: 'A', state: 'sent' },
+  { contactId: '2', email: 'b@x.com', name: 'B', state: 'sending', claimedAt: new Date(1000).toISOString() },
+  { contactId: '3', email: 'c@x.com', name: 'C', state: 'pending' },
+];
+check('a claimed (sending) recipient is NOT re-picked — never double-sent', JSON.stringify(pickNextPending(claimed, 5)) === '[2]');
+const cp = batchProgress(claimed);
+check('progress counts sending distinctly', cp.sending === 1 && cp.sent === 1 && cp.pending === 1 && cp.skipped === 0);
+check('a stale claim (crash) is swept, a fresh claim is left alone', JSON.stringify(staleSendingIndices(claimed, 200_000, 60_000)) === '[1]'
+  && staleSendingIndices([{ contactId: '9', email: 'z@x.com', name: 'Z', state: 'sending', claimedAt: new Date(190_000).toISOString() }], 200_000, 60_000).length === 0);
+check('a sending recipient with no claimedAt is treated as stale (recoverable)', JSON.stringify(staleSendingIndices([{ contactId: '9', email: 'z@x.com', name: 'Z', state: 'sending' }], 200_000, 60_000)) === '[0]');
 
 console.log(`\noutreachBatch.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) { throw new Error(`${failed} check(s) failed`); }

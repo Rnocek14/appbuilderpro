@@ -151,7 +151,7 @@ export async function auditBusiness(url: string): Promise<SiteAudit> {
   return (await scrapeAndAudit(url)).audit;
 }
 
-/** Persist an audit we just ran, so it stops being thrown away (Phase 0 — see app_0072_prospect_audits.sql).
+/** Persist an audit we just ran, so it stops being thrown away (Phase 0 — see app_0074_prospect_audits.sql).
  *  Best-effort by design: the honest audit UI must never break because a write failed. Records only what
  *  was really observed; `vertical` is a deterministic read of the scraped text, never invented. */
 export interface RecordAuditInput {

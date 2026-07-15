@@ -242,9 +242,9 @@ function socialFor(input: CampaignInput, b: Bits): SocialPost[] {
     return renderAll({
       emoji: '🏡',
       hook: `Thinking of selling in ${area}?`,
-      body: b.highlight || 'Homes here are moving, and a lot of owners are surprised by what theirs would sell for today.',
+      body: b.highlight || `${EDIT(`one honest line about the ${area} market`)} If you’ve ever wondered what your home would sell for today, I’m glad to run the numbers — no pressure.`,
       cta: `Curious what yours is worth? DM me “VALUE” — no pressure, no obligation.`,
-      authority: `${area} continues to see steady demand. ${b.highlight || 'If you’re weighing a move, the first question is always what your home would sell for today.'} I’m glad to run those numbers for anyone considering it.`,
+      authority: `${b.highlight || EDIT(`a true line about ${area} demand`)} If you’re weighing a move, the first question is always what your home would sell for today. I’m glad to run those numbers for anyone considering it.`,
       tags: reTags(['#HomeValue', '#ThinkingOfSelling', '#SellersMarket']),
     });
   }
@@ -254,7 +254,7 @@ function socialFor(input: CampaignInput, b: Bits): SocialPost[] {
       hook: `JUST SOLD${b.addr ? ` — ${b.addr}` : ''}`,
       body: `Another happy seller${b.area ? ` in ${b.area}` : ''}. ${highlight}`,
       cta: `Thinking of selling? Let’s find out what your home is worth.`,
-      authority: `Just closed${b.area ? ` in ${b.area}` : ''}. ${b.highlight || 'The right marketing brought the right buyer.'} Homes are moving — happy to share what I’m seeing for owners weighing a sale.`,
+      authority: `Just closed${b.area ? ` in ${b.area}` : ''}. ${b.highlight || 'The right marketing brought the right buyer.'} Happy to share what I’m seeing for owners weighing a sale.`,
       tags: reTags(['#JustSold', '#SoldHome', '#ThinkingOfSelling']),
     });
   }
@@ -287,13 +287,13 @@ function emailFor(input: CampaignInput, b: Bits & { agent: string; phone: string
     const area = b.area || EDIT('your neighborhood');
     return {
       subject: `Curious what your ${area} home is worth?`,
-      body: `Hi there,\n\nHomes in ${area} have been moving, and a lot of owners are surprised by what theirs would sell for today.\n\nIf you’ve ever wondered — even out of curiosity — I’m happy to put together a free, no-pressure estimate for your home. It takes about five minutes and there’s no obligation at all.\n\nJust reply to this email and I’ll get started.\n\n${sign}`,
+      body: `Hi there,\n\n${b.highlight || EDIT(`one honest line about the ${area} market`)}\n\nIf you’ve ever wondered — even out of curiosity — I’m happy to put together a free, no-pressure estimate for your home. It takes about five minutes and there’s no obligation at all.\n\nJust reply to this email and I’ll get started.\n\n${sign}`,
     };
   }
   if (input.type === 'just_sold') {
     return {
       subject: `Just sold${b.area ? ` in ${b.area}` : ''} — is your home next?`,
-      body: `Hi there,\n\nI just closed on ${b.addr || 'another home'}${b.area ? ` in ${b.area}` : ''}. ${b.highlight || 'The right marketing brought the right buyer.'}\n\nHomes are moving right now. If you’ve thought about selling, I’d be glad to tell you what yours could sell for — free, and with no pressure.\n\nReply anytime.\n\n${sign}`,
+      body: `Hi there,\n\nI just closed on ${b.addr || 'another home'}${b.area ? ` in ${b.area}` : ''}. ${b.highlight || 'The right marketing brought the right buyer.'}\n\nIf you’ve thought about selling, I’d be glad to tell you what yours could sell for — free, and with no pressure.\n\nReply anytime.\n\n${sign}`,
     };
   }
   if (input.type === 'open_house') {

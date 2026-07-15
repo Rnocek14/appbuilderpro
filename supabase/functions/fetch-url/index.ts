@@ -152,13 +152,22 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   try {
-    // Authenticated FableForge users only — this is an outbound fetch proxy.
-    const authClient = createClient(
-      Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
-    );
-    const { data: { user } } = await authClient.auth.getUser();
-    if (!user) return json({ error: 'Unauthorized' }, 401);
+    // Authenticated FableForge users only — this is an outbound fetch proxy. EXCEPTION: the standing
+    // worker (daily client_hunt) presents x-worker-secret and reuses the read-only scrape modes
+    // (text/images/contact) server-side; it never has a user session. 'save' still requires a real
+    // user (it writes to a user's project storage), so a worker call is rejected below for that mode.
+    const workerSecret = Deno.env.get('WORKER_SECRET');
+    const isWorker = !!workerSecret && req.headers.get('x-worker-secret') === workerSecret;
+    let user: { id: string } | null = null;
+    if (!isWorker) {
+      const authClient = createClient(
+        Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
+      );
+      const { data: { user: u } } = await authClient.auth.getUser();
+      if (!u) return json({ error: 'Unauthorized' }, 401);
+      user = { id: u.id };
+    }
 
     const { url: raw, mode, projectId } = (await req.json().catch(() => ({}))) as
       { url?: string; mode?: 'text' | 'images' | 'save' | 'contact'; projectId?: string };
@@ -169,6 +178,7 @@ Deno.serve(async (req) => {
 
     // ---- mode 'save': copy ONE image into the user's project-assets storage + manifest ----
     if (mode === 'save') {
+      if (!user) return json({ error: 'save requires a signed-in user.' }, 401); // worker calls read only
       if (!projectId) return json({ error: 'projectId is required' }, 400);
       const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
       const { data: proj } = await admin.from('projects').select('id, owner_id').eq('id', projectId).single();

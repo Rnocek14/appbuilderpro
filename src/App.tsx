@@ -51,6 +51,8 @@ const ProfileHomePreview = lazy(() => import('./pages/dev/ProfileHomePreview'));
 const WebPreview = lazy(() => import('./pages/dev/WebPreview'));
 const ProspectWebPreview = lazy(() => import('./pages/dev/ProspectWebPreview'));
 const WinHubPreview = lazy(() => import('./pages/dev/WinHubPreview'));
+const StudiosPreview = lazy(() => import('./pages/dev/StudiosPreview'));
+const BoardPreview = lazy(() => import('./pages/dev/BoardPreview'));
 
 function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: boolean }) {
   const { session, profile, loading } = useAuth();
@@ -124,6 +126,8 @@ function AppRoutes() {
           {import.meta.env.DEV && <Route path="/dev/web" element={<WebPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/prospect-web" element={<ProspectWebPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/win-hub" element={<WinHubPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/studios" element={<StudiosPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/board" element={<BoardPreview />} />}
           {/* PUBLIC — the link business owners open from the outreach email (no login). */}
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />

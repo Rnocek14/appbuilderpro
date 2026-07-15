@@ -14,8 +14,12 @@ export interface BatchRecipient {
   contactId: string | null;
   email: string;
   name: string;
-  state: 'pending' | 'sent' | 'skipped';
+  // 'sending' is a CLAIM written (and persisted) BEFORE the irreversible send call — so a worker crash
+  // mid-send leaves the recipient claimed, never re-picked, and therefore never double-sent. A stale
+  // 'sending' (crash) is swept to 'skipped' with an honest reason on a later tick.
+  state: 'pending' | 'sending' | 'sent' | 'skipped';
   reason?: string;
+  claimedAt?: string;   // when 'sending' was claimed (epoch iso), so a stuck claim can be detected
 }
 
 export interface ContactLike {
@@ -75,21 +79,37 @@ export function mergeTemplate(template: string, name: string): string {
     .replace(/\{\{\s*first_name\s*\}\}/g, () => first);
 }
 
-export function batchProgress(recipients: BatchRecipient[]): { pending: number; sent: number; skipped: number } {
-  let pending = 0, sent = 0, skipped = 0;
+export function batchProgress(recipients: BatchRecipient[]): { pending: number; sending: number; sent: number; skipped: number } {
+  let pending = 0, sending = 0, sent = 0, skipped = 0;
   for (const r of recipients) {
     if (r.state === 'pending') pending++;
+    else if (r.state === 'sending') sending++;
     else if (r.state === 'sent') sent++;
     else skipped++;
   }
-  return { pending, sent, skipped };
+  return { pending, sending, sent, skipped };
 }
 
-/** Indices of the next up-to-`max` pending recipients — the drain slice for one clock tick. */
+/** Indices of the next up-to-`max` pending recipients — the drain slice for one clock tick. A 'sending'
+ *  recipient is a live claim and is deliberately NOT re-picked, so it can never be sent twice. */
 export function pickNextPending(recipients: BatchRecipient[], max: number): number[] {
   const out: number[] = [];
   for (let i = 0; i < recipients.length && out.length < max; i++) {
     if (recipients[i].state === 'pending') out.push(i);
+  }
+  return out;
+}
+
+/** Indices of recipients stuck 'sending' longer than `staleMs` — a crash between claim and outcome.
+ *  These are swept to 'skipped' (never silently retried) so a batch can still complete and the operator
+ *  sees the honest count. `nowMs`/`staleMs` are passed in to keep this pure + deterministic. */
+export function staleSendingIndices(recipients: BatchRecipient[], nowMs: number, staleMs: number): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < recipients.length; i++) {
+    const r = recipients[i];
+    if (r.state !== 'sending') continue;
+    const claimed = r.claimedAt ? Date.parse(r.claimedAt) : NaN;
+    if (!Number.isFinite(claimed) || nowMs - claimed >= staleMs) out.push(i);
   }
   return out;
 }

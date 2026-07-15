@@ -1,4 +1,4 @@
--- app_0073_prospect_audit_tech.sql — keep the tech fingerprint alongside the honest audit.
+-- app_0075_prospect_audit_tech.sql — keep the tech fingerprint alongside the honest audit.
 --
 -- fetch-url now reads the tech a business runs from their own raw HTML (site builder, booking widget,
 -- analytics/ad pixels, live-chat, storefront) — the single best qualifier for both a rebuild and an

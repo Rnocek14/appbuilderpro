@@ -5,14 +5,17 @@
 // (review-each-batch; nothing emails a real business without your OK). Deploy + monthly SEO retainer
 // come after a "yes" — this is the top of the funnel, made into one legible screen.
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info, Radar, Square } from 'lucide-react';
+import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info, Radar, Square, CalendarClock, Pause, Play, Power } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
-import { US_CITIES, US_STATES, citiesFor } from '../lib/garvis/usCities';
+import { US_CITIES, US_STATES, citiesFor, type SweepScope } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
+import { huntSummary, type HuntConfig } from '../lib/garvis/clientHuntSchedule';
+import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder } from '../lib/garvis/standingRun';
+import { orderStatusLine, type StandingOrder } from '../lib/garvis/standing';
 import { type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
@@ -56,7 +59,18 @@ export default function WinClients() {
   const [view, setView] = useState<'list' | 'web'>('list');
   const [selected, setSelected] = useState<number | null>(null);
   const [stage, setStage] = useState<'hub' | 'find'>('hub'); // enter on the pipeline canvas
+  // Daily automatic hunt (a standing order) — set once, then Garvis sweeps fresh markets every day.
+  // Hands-off by default: no niche needed — it hunts every kind of local business.
+  const [hunt, setHunt] = useState<StandingOrder | null>(null);
+  const [searchesPerDay, setSearchesPerDay] = useState(20);
+  const [demoQuota, setDemoQuota] = useState(5);
+  const [savingHunt, setSavingHunt] = useState(false);
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
+
+  // Load any existing daily hunt so the panel shows its live state instead of the setup form.
+  useEffect(() => {
+    void listOrders().then((os) => setHunt(os.find((o) => o.kind === 'client_hunt') ?? null)).catch(() => {});
+  }, []);
 
   const find = async () => {
     setFinding(true); setSearched(true); setRows([]);
@@ -158,6 +172,41 @@ export default function WinClients() {
       toast('success', `Swept ${cities.length === US_CITIES.length ? 'the country' : scope.startsWith('top') ? `the top ${scope.slice(3)} markets` : scope} — found ${all.length} unique ${n}. Build the strong prospects; nothing is emailed until you approve it.`);
     } catch (e) { toast('error', emsg(e)); }
     finally { setSweeping(false); }
+  };
+
+  // The chosen scope as a SweepScope (for the daily hunt config + its summary preview).
+  const scopeToSweep = (): SweepScope =>
+    scope === 'all' ? { mode: 'topN', n: US_CITIES.length }
+      : scope.startsWith('top') ? { mode: 'topN', n: parseInt(scope.slice(3), 10) || 50 }
+      : { mode: 'state', state: scope };
+  // No niche typed → hunt EVERY kind of local business (hands-off). Typing one narrows it.
+  const huntNiches = (): string[] => (niche.trim() ? [niche.trim()] : []);
+  const huntCfgPreview: HuntConfig = { niches: huntNiches(), scope: scopeToSweep(), searchesPerDay, demoQuota };
+
+  // Turn the scope (and any typed niche) into a DAILY AUTOMATIC order. From then on Garvis sweeps
+  // fresh markets each day, builds demos, and queues pitches for your approval — no URLs to paste,
+  // and no niche required (it hunts everything by default).
+  const startHunt = async () => {
+    setSavingHunt(true);
+    try {
+      const order = await createClientHuntOrder({ niches: huntNiches(), scope: scopeToSweep(), searchesPerDay, demoQuota });
+      setHunt(order);
+      toast('success', niche.trim()
+        ? `Daily hunt on for "${niche.trim()}". Garvis will sweep fresh markets every day and queue pitches for your approval.`
+        : 'Daily hunt on for every kind of local business. Garvis will sweep fresh markets every day and queue pitches for your approval.');
+    } catch (e) { toast('error', emsg(e)); }
+    finally { setSavingHunt(false); }
+  };
+  const toggleHunt = async () => {
+    if (!hunt) return;
+    const next = hunt.status === 'active' ? 'paused' : 'active';
+    try { await setOrderStatus(hunt.id, next); setHunt({ ...hunt, status: next }); }
+    catch (e) { toast('error', emsg(e)); }
+  };
+  const stopHunt = async () => {
+    if (!hunt) return;
+    try { await deleteOrder(hunt.id); setHunt(null); toast('info', 'Daily hunt turned off.'); }
+    catch (e) { toast('error', emsg(e)); }
   };
 
   const weakCount = rows.filter((r) => r.audit?.verdict === 'weak').length;
@@ -264,6 +313,52 @@ export default function WinClients() {
             )}
           </div>
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores). A national sweep runs {sweepCostLine(citiesFor(scope === 'all' ? { mode: 'topN', n: US_CITIES.length } : scope.startsWith('top') ? { mode: 'topN', n: parseInt(scope.slice(3), 10) || 50 } : { mode: 'state', state: scope }).length)} Build reads their real content + photos; nothing emails until you approve it in the Queue.</p>
+
+          {/* AUTOPILOT — turn the same niche + scope into a DAILY AUTOMATIC hunt. No URLs to paste:
+              Garvis sweeps fresh markets every day, builds demos, and queues pitches for approval. */}
+          <div className="mt-3 rounded-xl border border-forge-border bg-forge-bg/40 p-3">
+            {hunt ? (
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-forge-ink">
+                    <CalendarClock size={14} className="text-forge-ember" /> {hunt.label}
+                    <span className={cn('rounded-full border px-1.5 py-0.5 text-[10px]', hunt.status === 'active' ? 'border-forge-ok/40 bg-forge-ok/15 text-forge-ok' : 'border-forge-border bg-forge-raised text-forge-dim')}>
+                      {hunt.status === 'active' ? 'running daily' : 'paused'}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 line-clamp-2 text-[11.5px] text-forge-dim">{orderStatusLine(hunt)}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => void toggleHunt()}>
+                    {hunt.status === 'active' ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => void stopHunt()}><Power size={13} /> Turn off</Button>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-center gap-1.5 text-sm font-medium text-forge-ink"><CalendarClock size={14} className="text-forge-ember" /> Put it on autopilot</div>
+                <p className="mt-0.5 text-[11.5px] text-forge-dim">{huntSummary(huntCfgPreview)}</p>
+                {!niche.trim() && (
+                  <p className="mt-0.5 text-[10.5px] text-forge-ok/90">✓ No niche needed — it hunts every kind of local business, including ones with <em>no website yet</em> (your best prospects). Type a niche above to narrow it.</p>
+                )}
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-1 text-[11px] text-forge-dim">Searches/day
+                    <input type="number" min={1} max={40} value={searchesPerDay} onChange={(e) => setSearchesPerDay(Math.max(1, Math.min(40, parseInt(e.target.value, 10) || 1)))}
+                      className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+                  </label>
+                  <label className="flex items-center gap-1 text-[11px] text-forge-dim">Demos/day
+                    <input type="number" min={1} max={25} value={demoQuota} onChange={(e) => setDemoQuota(Math.max(1, Math.min(25, parseInt(e.target.value, 10) || 1)))}
+                      className="w-16 rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+                  </label>
+                  <Button variant="primary" size="sm" onClick={() => void startHunt()} disabled={savingHunt}>
+                    {savingHunt ? <Loader2 size={13} className="animate-spin" /> : <CalendarClock size={13} />} Turn on daily hunt
+                  </Button>
+                </div>
+                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-forge-dim/80"><Info size={11} /> Runs daily via Google Places — real businesses with phone + address, deduped, and no market swept twice (it stops once one is tapped out). Every demo + pitch lands in your Queue to approve — nothing sends on its own.</p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Every audit we've run is kept here — the accumulating prospect intelligence (app_0072). */}
