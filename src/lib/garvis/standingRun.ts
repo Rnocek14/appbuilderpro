@@ -6,10 +6,11 @@
 
 import { supabase } from '../supabase';
 import { nextRunAfter, type Cadence, type OrderKind, type StandingOrder, type WatchResult } from './standing';
+import { CLIENT_HUNT_KIND, type HuntConfig } from './clientHuntSchedule';
 
 interface OrderRow {
   id: string; world_id: string | null; kind: OrderKind; label: string; cadence: Cadence;
-  config: { url?: string; note?: string } | null; status: 'active' | 'paused';
+  config: { url?: string; note?: string; [k: string]: unknown } | null; status: 'active' | 'paused';
   anchor_at: string; next_run_at: string; last_run_at: string | null; last_result: WatchResult | null;
 }
 
@@ -52,6 +53,28 @@ export async function createOrder(input: {
     next_run_at: nextRunAfter(input.cadence, nowIso, nowIso),
   }).select('id, world_id, kind, label, cadence, config, status, anchor_at, next_run_at, last_run_at, last_result').single();
   if (error || !data) throw new Error(error?.message ?? 'Could not create the order.');
+  return toOrder(data as OrderRow);
+}
+
+/** Create a DAILY AUTOMATIC client-hunt order (the standing-worker's client_hunt branch executes it).
+ *  Stores the HuntConfig + a cursor at 0; cadence is daily; it starts active. One implementation of
+ *  "when": the client computes the first next_run_at with the same core the worker steps forever. */
+export async function createClientHuntOrder(config: HuntConfig): Promise<StandingOrder> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  // A niche is OPTIONAL — no niche means hunt every kind of local business (fully hands-off).
+  const label = config.niches.length === 0 ? 'Daily hunt: all local businesses'
+    : config.niches.length === 1 ? `Daily hunt: ${config.niches[0]}`
+    : `Daily hunt: ${config.niches.length} business types`;
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase.from('standing_orders').insert({
+    owner_id: uid, world_id: null, kind: CLIENT_HUNT_KIND, label,
+    cadence: 'daily', config: { ...config, cursor: 0 },
+    status: 'active', anchor_at: nowIso,
+    next_run_at: nextRunAfter('daily', nowIso, nowIso),
+  }).select('id, world_id, kind, label, cadence, config, status, anchor_at, next_run_at, last_run_at, last_result').single();
+  if (error || !data) throw new Error(error?.message ?? 'Could not start the daily hunt.');
   return toOrder(data as OrderRow);
 }
 

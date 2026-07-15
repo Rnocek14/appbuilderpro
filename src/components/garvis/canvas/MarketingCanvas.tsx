@@ -37,6 +37,11 @@ import { parseFarmCsv, partitionMailable, farmMath, type FarmRecipient, type Far
 import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { supabase } from '../../../lib/supabase';
 import { StudioPreviewFrame } from '../StudioPreviewFrame';
+import { EmailBoard } from './EmailBoard';
+import { BrandBoard } from './BrandBoard';
+import { PostcardBoard } from './PostcardBoard';
+import { SocialBoard } from './SocialBoard';
+import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
@@ -45,7 +50,7 @@ import type { MailerBrand } from '../../../lib/garvis/mailer';
 import { cn } from '../../../lib/utils';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
-type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis';
+type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding';
 
 // Rendition concepts to cycle when you "spin another" postcard — same real materials, a genuinely
 // different design mechanism each time.
@@ -63,16 +68,32 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
   const [phone, setPhone] = useState('');
 
   const [details, setDetails] = useState<CampaignInput | null>(null);
+  const [bizName, setBizName] = useState('');
   const [open, setOpen] = useState<NodeKey | null>(null);
   const [sats, setSats] = useState<Satellite[]>([]);
 
   useEffect(() => {
     let live = true;
-    void loadWeb(worldId).then((w) => {
+    void loadWeb(worldId).then(async (w) => {
       if (!live || !w) return;
+      setBizName(w.title ?? '');
       const c = w.clusters.find((x) => x.charter?.flavor === 'direct_mail')
         ?? w.clusters.find((x) => x.charter?.archetype === 'studio') ?? w.clusters.find((x) => x.charter);
-      setTargetCluster(c?.id ?? null);
+      const cid = c?.id ?? null;
+      setTargetCluster(cid);
+      // REHYDRATE the campaign you were working on — so reopening this business shows your real work,
+      // not a blank "set up your announcement" every visit (the "it feels empty" complaint).
+      if (cid) {
+        try {
+          const { data } = await supabase.from('knowledge_clusters').select('working_state').eq('id', cid).maybeSingle();
+          const saved = (data?.working_state as { campaign?: CampaignInput } | null)?.campaign;
+          if (live && saved?.type) {
+            setDetails(saved);
+            if (saved.agentName) setAgent((a) => a || saved.agentName!);
+            if (saved.agentPhone) setPhone((p) => p || saved.agentPhone!);
+          }
+        } catch { /* first visit / no saved state — a blank canvas is correct then */ }
+      }
     }).catch(() => {});
     void getBrandKit(worldId).then((k) => {
       if (!live || !k) return;
@@ -88,24 +109,27 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
 
   const center = ready
     ? { kicker: metaFor(details!.type)?.label ?? 'Campaign', title: centerTitle(details!), sub: centerSub(details!), filled: true }
-    : { kicker: 'Start here', title: 'Set up your announcement', sub: 'tap to begin', filled: false };
+    : { kicker: bizName ? `Market ${bizName}` : 'Start here', title: 'Set up your first announcement', sub: 'tap to begin — takes a minute', filled: false };
 
   const nodes: CanvasNode[] = [
-    { key: 'postcard', emoji: '📮', label: 'Postcard', sub: 'front & back · print', dim: !ready },
-    { key: 'social', emoji: '📱', label: 'Social posts', sub: 'FB & Instagram', dim: !ready },
-    { key: 'email', emoji: '✉️', label: 'Email', sub: 'to your list', dim: !ready },
+    { key: 'postcard', emoji: '📮', label: 'Postcards', sub: 'a board of ideas', dim: false },
+    { key: 'social', emoji: '📱', label: 'Social posts', sub: 'post ideas', dim: false },
+    { key: 'email', emoji: '✉️', label: 'Email', sub: 'ideas + examples', dim: false },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
     { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers' },
+    { key: 'branding', emoji: '🎨', label: 'Branding', sub: 'logo concepts' },
   ];
 
   const addSat = (nodeKey: string) => setSats((s) => [...s, { nodeKey, id: `${nodeKey}-${s.length}-${(s.length * 7 + 3) % 97}` }]);
 
   const onOpen = (k: string) => {
     const key = k as NodeKey;
-    // people + video + analysis work from the world's own data (a mail list, the world's photos, the
-    // MLS), so they don't require the campaign details to be filled first.
-    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && !ready) { setOpen('center'); return; }
+    // people + video + analysis + email work from the world's own data (a mail list, the world's
+    // photos, the MLS, the brand), so they don't require the campaign details to be filled first.
+    // The postcard board loads the world's own materials (brand, photos, context), so it — like the
+    // other studios — opens straight to work without first filling the campaign details form.
+    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && key !== 'social' && key !== 'postcard' && key !== 'branding' && !ready) { setOpen('center'); return; }
     setOpen(key);
   };
 
@@ -119,20 +143,29 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
           realEstate={realEstate} initial={details} agent={agent} phone={phone} brand={brand}
           targetCluster={targetCluster} onToast={onToast}
           onClose={() => setOpen(null)}
-          onSave={(d) => { setDetails(d); setAgent(d.agentName ?? agent); setPhone(d.agentPhone ?? phone); setOpen(null); onToast('success', 'Set — now open any node to make a piece.'); }}
+          onSave={(d) => {
+            setDetails(d); setAgent(d.agentName ?? agent); setPhone(d.agentPhone ?? phone); setOpen(null);
+            // Persist so it comes back next visit (rehydrated on mount) instead of resetting to blank.
+            // MERGE — a raw column replace here would wipe working_state.boards (the postcard board).
+            if (targetCluster) void patchClusterWorkingState(targetCluster, { campaign: d }).catch(() => {});
+            onToast('success', 'Set — now open any node to make a piece.');
+          }}
         />
       )}
-      {open === 'postcard' && set && (
-        <PostcardSheet set={set} details={details!} brand={brand} accent={accent}
-          targetCluster={targetCluster} onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('postcard')} />
+      {open === 'postcard' && (
+        <BoardOverlay title="Postcard board" onClose={() => setOpen(null)}>
+          <PostcardBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
+        </BoardOverlay>
       )}
-      {open === 'social' && set && (
-        <SocialSheet set={set} accent={accent} photoUrl={details!.photoUrl ?? null} worldId={worldId}
-          brandName={(details!.businessName || details!.agentName || agent || 'Your brand').trim()}
-          onToast={onToast} onClose={() => setOpen(null)} onSpin={() => addSat('social')} />
+      {open === 'social' && (
+        <BoardOverlay title="Social board" onClose={() => setOpen(null)}>
+          <SocialBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
+        </BoardOverlay>
       )}
-      {open === 'email' && set && (
-        <EmailSheet set={set} accent={accent} onToast={onToast} onClose={() => setOpen(null)} />
+      {open === 'email' && (
+        <BoardOverlay title="Email board" onClose={() => setOpen(null)}>
+          <EmailBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
+        </BoardOverlay>
       )}
       {open === 'people' && (
         <PeopleSheet realEstate={realEstate} worldId={worldId} onToast={onToast} onClose={() => setOpen(null)} />
@@ -145,6 +178,11 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
       {open === 'analysis' && (
         <AnalysisSheet realEstate={realEstate} area={details?.area ?? ''} onClose={() => setOpen(null)} />
       )}
+      {open === 'branding' && (
+        <BoardOverlay title="Branding board" onClose={() => setOpen(null)}>
+          <BrandBoard worldId={worldId} clusterId={targetCluster} onToast={onToast} />
+        </BoardOverlay>
+      )}
     </div>
   );
 }
@@ -156,6 +194,30 @@ function centerSub(d: CampaignInput): string {
   const bits = [d.price, [d.beds && `${d.beds} bd`, d.baths && `${d.baths} ba`].filter(Boolean).join(' · '), d.area]
     .map((x) => (x || '').trim()).filter(Boolean);
   return bits.join(' · ') || (d.details || '').trim();
+}
+
+// ---------- Board shell ----------
+// A large, near-fullscreen dark surface that hosts a spatial creative board (the postcard board, and
+// later social/branding). Unlike the cream paper Sheet, a board needs room to spread out, so it opens
+// big and dark. Scrim + Escape + focus-trap all come from the shared Overlay primitive.
+function BoardOverlay({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <Overlay onClose={onClose} z={60}>
+      <style>{`
+        .mkc-board{width:min(96vw,1200px);height:88vh;display:flex;flex-direction:column;border-radius:16px;overflow:hidden;border:1px solid var(--forge-border,#3a2f25);background:var(--forge-bg,#14100c);box-shadow:0 30px 80px rgba(0,0,0,.6)}
+        .mkc-board-top{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710)}
+        .mkc-board-top h3{font-size:14px;font-weight:600;color:var(--forge-ink,#f0e6da)}
+        .mkc-board-body{flex:1;min-height:0}
+      `}</style>
+      <div className="mkc-board" role="dialog" aria-modal="true">
+        <div className="mkc-board-top">
+          <h3>{title}</h3>
+          <button className="mkc-x" onClick={onClose} aria-label="Close"><X size={18} /></button>
+        </div>
+        <div className="mkc-board-body">{children}</div>
+      </div>
+    </Overlay>
+  );
 }
 
 // ---------- Sheet shell ----------

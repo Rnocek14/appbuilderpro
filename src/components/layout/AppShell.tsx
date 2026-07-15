@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, Link, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
   LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign, KeyRound } from 'lucide-react';
@@ -17,15 +17,17 @@ import { CommandPalette } from '../CommandPalette';
 // admin-only. The unified identity fixed the "split brand" confusion (FableForge vs Garvis).
 const navSections = [
   {
-    // Command is the front door; the altitude stack (Universe/System) stays reachable from
-    // Businesses and the palette. Legacy portfolio pages keep their ROUTES (nothing 404s) but
-    // live off-nav — their jobs are inside Command, Businesses, Queue, and Settings.
+    // ONE front door: Command — where every sign-in lands, greeting you with what to do next. Canvas is
+    // the spatial workspace you branch into to actually do the work; it's not a rival "home". The altitude
+    // stack (Galaxy/System) stays reachable from Businesses and the palette. Legacy portfolio pages keep
+    // their ROUTES (nothing 404s) but live off-nav — their jobs are inside Command, Businesses, Queue.
     title: 'Operate',
     items: [
-      // The canvas spine's front door: you at the center, your businesses orbiting. Branch in from here.
-      { to: '/garvis/home', label: 'Home', icon: Compass },
-      { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
+      // The front door — the waking moment + what-to-do-next, where sign-in lands (Auth → /garvis/command).
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
+      // The spatial workspace: you at the center, businesses orbiting; branch in to work a channel.
+      { to: '/garvis/home', label: 'Canvas', icon: Compass },
+      { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
       // ONE QUEUE (design review P0): approvals + replies/leads + build questions, one room.
       // The old Inbox/Approvals/Build-questions routes redirect here; the badge sums all lanes.
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
@@ -149,8 +151,10 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
   const renderSidebar = (collapsed: boolean, collapsible = true) => (
     <aside className={cn('flex h-full flex-col border-r border-forge-border bg-forge-panel', collapsed ? 'w-16' : 'w-60')}>
       <div className={cn('flex items-center py-4', collapsed ? 'flex-col gap-2 px-2' : 'gap-2 px-4')}>
-        <Flame size={20} className="shrink-0 text-forge-ember" />
-        {!collapsed && <span className="font-display text-lg font-semibold tracking-tight">Garvis</span>}
+        <Link to="/garvis/command" className="flex items-center gap-2 rounded-lg" title="Garvis — home">
+          <Flame size={20} className="shrink-0 text-forge-ember" />
+          {!collapsed && <span className="font-display text-lg font-semibold tracking-tight">Garvis</span>}
+        </Link>
         {collapsible && (
           <button
             onClick={() => setCollapsed((v) => !v)}

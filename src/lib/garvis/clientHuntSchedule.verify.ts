@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/clientHuntSchedule.verify.ts
-import { parseHuntConfig, plannedHuntToday, huntSummary, CLIENT_HUNT_KIND, type HuntConfig } from './clientHuntSchedule';
+import { parseHuntConfig, plannedHuntToday, huntSummary, CLIENT_HUNT_KIND, LOCAL_NICHES, type HuntConfig } from './clientHuntSchedule';
 import { US_CITIES } from './usCities';
 
 let passed = 0; let failed = 0;
@@ -8,45 +8,75 @@ console.log('clientHuntSchedule.verify');
 
 check('the order kind is client_hunt', CLIENT_HUNT_KIND === 'client_hunt');
 
-// --- parse + bound the config ---------------------------------------------------------------
+// --- the catalog is a real, non-trivial set of local-business types -------------------------
 {
-  const ok = parseHuntConfig({ niche: 'roofers', scope: { mode: 'topN', n: 50 }, citiesPerDay: 10, demoQuota: 5 });
-  check('parses a valid config', !!ok && ok.niche === 'roofers' && ok.citiesPerDay === 10 && ok.demoQuota === 5);
-  check('no niche → null (an automatic order must know what to hunt)', parseHuntConfig({ scope: { mode: 'topN', n: 50 } }) === null);
-  const runaway = parseHuntConfig({ niche: 'x', citiesPerDay: 9999, demoQuota: 9999 });
-  check('caps searches/day and demos/day so an autonomous order can never run away', !!runaway && runaway.citiesPerDay === 40 && runaway.demoQuota === 25);
-  check('defaults are sane when fields are missing', parseHuntConfig({ niche: 'x' })!.demoQuota === 5);
+  check('LOCAL_NICHES is a substantial catalog', LOCAL_NICHES.length >= 25 && LOCAL_NICHES.every((n) => typeof n === 'string' && n.length > 1));
+  check('the catalog has the classic weak-site verticals', ['roofers', 'plumbers', 'dentists'].every((n) => LOCAL_NICHES.includes(n)));
 }
 
-// --- the daily plan rolls across the country ------------------------------------------------
+// --- parse + bound the config ---------------------------------------------------------------
 {
-  const cfg: HuntConfig = { niche: 'dentists', scope: { mode: 'topN', n: 20 }, citiesPerDay: 5, demoQuota: 3 };
+  const ok = parseHuntConfig({ niches: ['roofers'], scope: { mode: 'topN', n: 50 }, searchesPerDay: 10, demoQuota: 5 });
+  check('parses a valid config', !!ok && ok.niches[0] === 'roofers' && ok.searchesPerDay === 10 && ok.demoQuota === 5);
+
+  // The whole point: NO niche is valid and means "hunt everything" (fully hands-off).
+  const all = parseHuntConfig({ scope: { mode: 'topN', n: 50 } });
+  check('no niche → hunts the whole catalog (niches empty), not null', !!all && all.niches.length === 0);
+
+  check('a legacy single `niche` string still works', parseHuntConfig({ niche: 'dentists' })!.niches[0] === 'dentists');
+  check('the legacy `citiesPerDay` field maps to searchesPerDay', parseHuntConfig({ citiesPerDay: 15 })!.searchesPerDay === 15);
+
+  const runaway = parseHuntConfig({ searchesPerDay: 9999, demoQuota: 9999 });
+  check('caps searches/day and demos/day so an autonomous order can never run away', !!runaway && runaway.searchesPerDay === 40 && runaway.demoQuota === 25);
+  check('defaults are sane when fields are missing', parseHuntConfig({})!.searchesPerDay === 10 && parseHuntConfig({})!.demoQuota === 5);
+  check('only non-object junk is rejected', parseHuntConfig(null) === null && parseHuntConfig(42) === null);
+}
+
+// --- a NARROWED (single-niche) hunt rolls across the country --------------------------------
+{
+  const cfg: HuntConfig = { niches: ['dentists'], scope: { mode: 'topN', n: 20 }, searchesPerDay: 5, demoQuota: 3 };
 
   const day1 = plannedHuntToday(cfg, 0);
-  check('day 1 sweeps citiesPerDay cities', day1.queries.length === 5);
+  check('day 1 runs searchesPerDay searches', day1.queries.length === 5);
   check('day 1 starts at the top market', day1.queries[0].city === US_CITIES[0].city);
+  check('a single-niche hunt sweeps by city', day1.queries.every((q) => q.niche === 'dentists') && day1.queries[1].city !== day1.queries[0].city);
   check('cursor advances for tomorrow', day1.nextCursor === 5);
 
   const day2 = plannedHuntToday(cfg, day1.nextCursor);
-  check('day 2 hits DIFFERENT cities (fresh markets, not re-sweeping)', day2.queries[0].city !== day1.queries[0].city && day2.nextCursor === 10);
+  check('day 2 hits DIFFERENT cities (fresh markets)', day2.queries[0].city !== day1.queries[0].city && day2.nextCursor === 10);
 
-  // A cursor near the end wraps back to the start (the campaign keeps running forever).
   const near = plannedHuntToday(cfg, 18);
-  check('a slice past the end wraps around the scope', near.wrapped === true && near.queries.length === 5);
-
-  // citiesPerDay larger than the scope is clamped (a small state can't search 40 cities).
-  const tiny = plannedHuntToday({ niche: 'x', scope: { mode: 'state', state: 'DC' }, citiesPerDay: 40, demoQuota: 5 }, 0);
-  check('citiesPerDay clamps to the scope size', tiny.queries.length >= 1 && tiny.queries.every((q) => q.state === 'DC'));
-
-  // a negative/garbage cursor is normalized, never crashes
-  check('a negative cursor is normalized', plannedHuntToday(cfg, -3).queries.length === 5);
+  check('a slice past the end wraps around', near.wrapped === true && near.queries.length === 5);
 }
 
-// --- the human summary is honest about the send boundary ------------------------------------
+// --- the HANDS-OFF (all-niches) hunt sweeps the type × city grid -----------------------------
 {
-  const line = huntSummary({ niche: 'roofers', scope: { mode: 'topN', n: 50 }, citiesPerDay: 10, demoQuota: 5 });
-  check('summary names the niche + the daily demo cap', /roofers/.test(line) && /5 demos/.test(line));
-  check('summary states nothing sends on its own', /nothing sends on its own/i.test(line));
+  const cfg: HuntConfig = { niches: [], scope: { mode: 'topN', n: 3 }, searchesPerDay: 5, demoQuota: 3 };
+  const day1 = plannedHuntToday(cfg, 0);
+  check('day 1 runs searchesPerDay searches across the grid', day1.queries.length === 5);
+  check('city-major: day 1 stays in the top market, mixing business TYPES', day1.queries.every((q) => q.city === US_CITIES[0].city));
+  check('those are DIFFERENT business types (real diversity per day)', new Set(day1.queries.map((q) => q.niche)).size === 5);
+  check('every niche is drawn from the catalog', day1.queries.every((q) => LOCAL_NICHES.includes(q.niche)));
+
+  // The grid is cities × niches; the cursor rolls the whole thing and eventually wraps.
+  const gridLen = 3 * LOCAL_NICHES.length;
+  const near = plannedHuntToday(cfg, gridLen - 2);
+  check('a slice past the grid end wraps around', near.wrapped === true && near.queries.length === 5);
+
+  // searchesPerDay larger than the whole grid is clamped.
+  const tiny = plannedHuntToday({ niches: ['x'], scope: { mode: 'state', state: 'DC' }, searchesPerDay: 40, demoQuota: 5 }, 0);
+  check('searchesPerDay clamps to the grid size', tiny.queries.length >= 1 && tiny.queries.every((q) => q.state === 'DC'));
+
+  check('a negative cursor is normalized, never crashes', plannedHuntToday(cfg, -3).queries.length === 5);
+}
+
+// --- the human summary is honest about scope + the send boundary -----------------------------
+{
+  const all = huntSummary({ niches: [], scope: { mode: 'topN', n: 50 }, searchesPerDay: 20, demoQuota: 5 });
+  check('summary of a hands-off hunt says it hunts every local business', /every kind of local business/.test(all) && /5 demos/.test(all));
+  check('summary states nothing sends on its own', /nothing sends on its own/i.test(all));
+  const one = huntSummary({ niches: ['roofers'], scope: { mode: 'state', state: 'TX' }, searchesPerDay: 10, demoQuota: 5 });
+  check('summary of a narrowed hunt names the niche', /roofers/.test(one) && /TX/.test(one));
 }
 
 console.log(`\nclientHuntSchedule.verify: ${passed} passed, ${failed} failed`);
