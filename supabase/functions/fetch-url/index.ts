@@ -13,6 +13,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch, urlAllowed } from '../_shared/safeFetch.ts';
+import { fingerprintTech } from '../_shared/techFingerprint.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -265,7 +266,10 @@ Deno.serve(async (req) => {
       email: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i.test(bodyRaw),
       https: finalUrl.startsWith('https://'),
     };
-    return json({ url: finalUrl, title: title || url.hostname, description, text, contentType: type, checks });
+    // The tech a business runs, read from their own markup (builder, booking, pixels, chat, store) —
+    // computed here while we still have the raw HTML. The best qualifier for a rebuild + automation pitch.
+    const tech = fingerprintTech(bodyRaw);
+    return json({ url: finalUrl, title: title || url.hostname, description, text, contentType: type, checks, tech });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return json({ error: /abort/i.test(msg) ? 'The page took too long to load.' : msg }, 200);

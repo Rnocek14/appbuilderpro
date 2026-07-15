@@ -5,8 +5,9 @@
 
 import { supabase } from '../supabase';
 import { parseSerperOrganic } from './marketIntel';
-import { auditSite, type SiteAudit } from './siteAudit';
+import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit';
 import { sweepPlan, registerDomain } from './nationalSweepCore';
+import { detectVertical } from './verticals';
 import type { UsCity } from './usCities';
 
 export interface FoundBusiness {
@@ -99,20 +100,164 @@ export async function findContactEmail(url: string): Promise<string | null> {
   } catch { return null; }
 }
 
-/** Look at one business's site and audit it honestly. Unreachable → an honest 'unknown', never faked. */
-export async function auditBusiness(url: string): Promise<SiteAudit> {
+/** The tech a business runs, read from their own page markup by fetch-url (see _shared/techFingerprint). */
+export interface TechFingerprint {
+  builder: string | null;
+  diyBuilder: boolean;
+  booking: string | null;
+  analytics: string[];
+  chat: string | null;
+  ecommerce: string | null;
+}
+
+/** The raw page context behind an audit — fetched anyway, kept so we can persist + detect on it later. */
+export interface ScrapeContext {
+  reachable: boolean;
+  title: string | null;
+  description: string | null;
+  text: string;                 // readable page text (capped by fetch-url)
+  checks: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
+  tech: TechFingerprint | null; // the tech fingerprint, when fetch-url returned one
+}
+
+/** Fetch a business's site ONCE and return both the honest audit and the raw scrape context (so the
+ *  caller can persist it — the page text/checks are fetched regardless and were being discarded).
+ *  Unreachable → an honest 'unknown' audit + an empty context, never faked. */
+export async function scrapeAndAudit(url: string): Promise<{ audit: SiteAudit; scrape: ScrapeContext }> {
   const nowYear = new Date().getFullYear();
+  const empty: ScrapeContext = { reachable: false, title: null, description: null, text: '', checks: {}, tech: null };
   try {
     const { data, error } = await supabase.functions.invoke('fetch-url', { body: { url, mode: 'text' } });
     if (error) throw new Error(error.message);
-    const d = data as { url?: string; title?: string; description?: string; text?: string; error?: string; checks?: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean } };
-    if (!d || d.error) return auditSite({ url, reachable: false }, nowYear);
+    const d = data as { url?: string; title?: string; description?: string; text?: string; error?: string; checks?: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean }; tech?: TechFingerprint };
+    if (!d || d.error) return { audit: auditSite({ url, reachable: false }, nowYear), scrape: empty };
     const c = d.checks ?? {};
-    return auditSite({
+    const scrape: ScrapeContext = {
+      reachable: true, title: d.title ?? null, description: d.description ?? null, text: d.text ?? '', checks: c,
+      tech: d.tech ?? null,
+    };
+    const audit = auditSite({
       url: d.url || url, reachable: true, title: d.title ?? null, description: d.description ?? null,
       text: d.text ?? '', hasViewport: !!c.viewport, hasForm: !!c.form, emailFound: !!c.email,
     }, nowYear);
+    return { audit, scrape };
   } catch {
-    return auditSite({ url, reachable: false }, nowYear);
+    return { audit: auditSite({ url, reachable: false }, nowYear), scrape: empty };
+  }
+}
+
+/** Look at one business's site and audit it honestly. Unreachable → an honest 'unknown', never faked. */
+export async function auditBusiness(url: string): Promise<SiteAudit> {
+  return (await scrapeAndAudit(url)).audit;
+}
+
+/** Persist an audit we just ran, so it stops being thrown away (Phase 0 — see app_0074_prospect_audits.sql).
+ *  Best-effort by design: the honest audit UI must never break because a write failed. Records only what
+ *  was really observed; `vertical` is a deterministic read of the scraped text, never invented. */
+export interface RecordAuditInput {
+  url: string;
+  audit: SiteAudit;
+  scrape?: ScrapeContext | null;
+  source: 'find' | 'scan' | 'sweep' | 'manual';
+  businessName?: string | null;
+  niche?: string | null;
+  area?: string | null;
+}
+export async function recordProspectAudit(input: RecordAuditInput): Promise<void> {
+  try {
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) return;                                   // not signed in — nothing to scope the row to
+    const url = input.url.trim();
+    if (!url) return;
+    let host = url;
+    try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* keep raw url as host */ }
+
+    const a = input.audit;
+    const sc = input.scrape ?? null;
+    // Vertical = a deterministic classification of whatever text we actually have (null when none).
+    const verticalText = [input.businessName, input.niche, a.headline, sc?.title, sc?.description, sc?.text]
+      .filter(Boolean).join(' ').trim();
+    const vertical = verticalText ? detectVertical(verticalText) : null;
+
+    const row = {
+      owner_id: uid,
+      url,
+      host,
+      business_name: input.businessName ?? null,
+      niche: input.niche?.trim() || null,
+      area: input.area?.trim() || null,
+      source: input.source,
+      reachable: a.reachable,
+      score: a.score,
+      verdict: a.verdict,
+      headline: a.headline,
+      signals: a.signals,
+      strengths: a.strengths,
+      vertical,
+      checks: sc?.checks ?? {},
+      tech: sc?.tech ?? {},
+      meta_title: sc?.title ?? null,
+      meta_description: sc?.description ?? null,
+      text_snippet: sc?.text ? sc.text.slice(0, 8000) : null,
+      last_audited_at: new Date().toISOString(),
+    };
+
+    // SELECT-FIRST (house rule): refresh an existing prospect's audit rather than duplicate it.
+    const { data: existing } = await supabase.from('prospect_audits')
+      .select('id').eq('owner_id', uid).eq('url', url).maybeSingle();
+    if (existing) {
+      await supabase.from('prospect_audits').update(row).eq('id', (existing as { id: string }).id);
+    } else {
+      await supabase.from('prospect_audits').insert(row);
+    }
+  } catch { /* best-effort: persistence never breaks the audit UI */ }
+}
+
+/** A saved audit row, as read back from prospect_audits (the accumulating prospect intelligence). */
+export interface ProspectAuditRow {
+  id: string;
+  url: string;
+  host: string | null;
+  business_name: string | null;
+  niche: string | null;
+  area: string | null;
+  source: string;
+  reachable: boolean;
+  score: number | null;
+  verdict: Verdict;
+  headline: string | null;
+  signals: AuditSignal[];
+  strengths: string[];
+  vertical: string | null;
+  checks: Record<string, boolean>;
+  tech: Partial<TechFingerprint>;
+  meta_title: string | null;
+  meta_description: string | null;
+  text_snippet: string | null;
+  created_at: string;
+  last_audited_at: string;
+}
+
+/** Read back the audits we've kept, newest first. Best-effort: returns [] when signed out or when the
+ *  table hasn't been migrated yet, so the UI degrades to "nothing saved" instead of erroring. */
+export async function listProspectAudits(
+  opts: { verdict?: Verdict | 'all'; vertical?: string | 'all'; limit?: number } = {},
+): Promise<ProspectAuditRow[]> {
+  try {
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) return [];
+    let q = supabase.from('prospect_audits').select('*')
+      .eq('owner_id', uid)
+      .order('last_audited_at', { ascending: false })
+      .limit(opts.limit ?? 200);
+    if (opts.verdict && opts.verdict !== 'all') q = q.eq('verdict', opts.verdict);
+    if (opts.vertical && opts.vertical !== 'all') q = q.eq('vertical', opts.vertical);
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return data as ProspectAuditRow[];
+  } catch {
+    return [];
   }
 }
