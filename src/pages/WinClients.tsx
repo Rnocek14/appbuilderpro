@@ -18,6 +18,7 @@ import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
 import { ProspectCanvas } from '../components/garvis/canvas/ProspectCanvas';
+import { SavedAudits } from '../components/garvis/SavedAudits';
 import { CanvasScene, type CanvasNode } from '../components/garvis/canvas/CanvasScene';
 import { profileFromScrape } from '../lib/preview/scrapeProfile';
 import { queuePitch } from '../lib/garvis/outreach';
@@ -264,6 +265,9 @@ export default function WinClients() {
           </div>
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Real Google results only — Garvis never invents a business, and the site check reads their real page (no faked scores). A national sweep runs {sweepCostLine(citiesFor(scope === 'all' ? { mode: 'topN', n: US_CITIES.length } : scope.startsWith('top') ? { mode: 'topN', n: parseInt(scope.slice(3), 10) || 50 } : { mode: 'state', state: scope }).length)} Build reads their real content + photos; nothing emails until you approve it in the Queue.</p>
         </div>
+
+        {/* Every audit we've run is kept here — the accumulating prospect intelligence (app_0072). */}
+        <SavedAudits />
 
         {/* Results */}
         {searched && (

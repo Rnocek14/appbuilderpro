@@ -5,7 +5,7 @@
 
 import { supabase } from '../supabase';
 import { parseSerperOrganic } from './marketIntel';
-import { auditSite, type SiteAudit } from './siteAudit';
+import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit';
 import { sweepPlan, registerDomain } from './nationalSweepCore';
 import { detectVertical } from './verticals';
 import type { UsCity } from './usCities';
@@ -199,4 +199,50 @@ export async function recordProspectAudit(input: RecordAuditInput): Promise<void
       await supabase.from('prospect_audits').insert(row);
     }
   } catch { /* best-effort: persistence never breaks the audit UI */ }
+}
+
+/** A saved audit row, as read back from prospect_audits (the accumulating prospect intelligence). */
+export interface ProspectAuditRow {
+  id: string;
+  url: string;
+  host: string | null;
+  business_name: string | null;
+  niche: string | null;
+  area: string | null;
+  source: string;
+  reachable: boolean;
+  score: number | null;
+  verdict: Verdict;
+  headline: string | null;
+  signals: AuditSignal[];
+  strengths: string[];
+  vertical: string | null;
+  checks: Record<string, boolean>;
+  meta_title: string | null;
+  meta_description: string | null;
+  created_at: string;
+  last_audited_at: string;
+}
+
+/** Read back the audits we've kept, newest first. Best-effort: returns [] when signed out or when the
+ *  table hasn't been migrated yet, so the UI degrades to "nothing saved" instead of erroring. */
+export async function listProspectAudits(
+  opts: { verdict?: Verdict | 'all'; vertical?: string | 'all'; limit?: number } = {},
+): Promise<ProspectAuditRow[]> {
+  try {
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) return [];
+    let q = supabase.from('prospect_audits').select('*')
+      .eq('owner_id', uid)
+      .order('last_audited_at', { ascending: false })
+      .limit(opts.limit ?? 200);
+    if (opts.verdict && opts.verdict !== 'all') q = q.eq('verdict', opts.verdict);
+    if (opts.vertical && opts.vertical !== 'all') q = q.eq('vertical', opts.vertical);
+    const { data, error } = await q;
+    if (error || !data) return [];
+    return data as ProspectAuditRow[];
+  } catch {
+    return [];
+  }
 }
