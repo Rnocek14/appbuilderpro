@@ -36,6 +36,8 @@ export default function Automations() {
   const [triggers, setTriggers] = useState<TriggerRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [creatingList, setCreatingList] = useState(false);
+  const [newName, setNewName] = useState('');
   const [csvOpen, setCsvOpen] = useState(false);
   const [csv, setCsv] = useState('');
   const [running, setRunning] = useState(false);
@@ -59,13 +61,11 @@ export default function Automations() {
     void listCustomers(listId).then(setCustomers).catch(() => setCustomers([]));
   }, [listId]);
 
-  const newList = async () => {
-    const name = window.prompt('Name this customer list (e.g. "Past patients")', 'My customers');
-    if (name === null) return;
+  // Inline list creation (no jarring native window.prompt).
+  const createList = async () => {
     try {
-      const row = await createCustomerList(name);
-      if (row) { setLists((l) => [row, ...l]); setListId(row.id); toast('success', 'List created.'); }
-      else toast('error', 'Could not create the list — is the migration applied?');
+      const row = await createCustomerList(newName.trim() || 'My customers');
+      if (row) { setLists((l) => [row, ...l]); setListId(row.id); setNewName(''); setCreatingList(false); toast('success', 'List created.'); }
     } catch (e) { toast('error', emsg(e)); }
   };
 
@@ -128,6 +128,17 @@ export default function Automations() {
           Due ones land in your <NavLink to="/garvis/queue" className="text-forge-ember hover:underline">Queue</NavLink> to approve. Nothing sends without your OK.
         </p>
 
+        {creatingList && (
+          <div className="mb-4 flex items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+            {/* eslint-disable-next-line jsx-a11y/no-autofocus */}
+            <input autoFocus value={newName} onChange={(e) => setNewName(e.target.value)} placeholder='Name this list (e.g. "Past patients")'
+              onKeyDown={(e) => { if (e.key === 'Enter') void createList(); if (e.key === 'Escape') { setCreatingList(false); setNewName(''); } }}
+              className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />
+            <Button variant="primary" size="sm" onClick={() => void createList()}><Plus size={13} /> Create</Button>
+            <Button variant="outline" size="sm" onClick={() => { setCreatingList(false); setNewName(''); }}>Cancel</Button>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center gap-2 py-10 text-sm text-forge-dim"><Loader2 size={15} className="animate-spin" /> Loading…</div>
         ) : loadFailed ? (
@@ -139,7 +150,7 @@ export default function Automations() {
         ) : lists.length === 0 ? (
           <EmptyState icon={<Users size={22} />} title="No customer list yet"
             body="Automations run on a business’s own past customers. Create a list and import a few to begin."
-            action={<Button variant="primary" size="md" onClick={() => void newList()}><Plus size={15} /> New customer list</Button>} />
+            action={<Button variant="primary" size="md" onClick={() => setCreatingList(true)}><Plus size={15} /> New customer list</Button>} />
         ) : (
           <>
             {/* List picker + actions */}
@@ -151,7 +162,7 @@ export default function Automations() {
               <span className="text-xs text-forge-dim">{customers.length} customer{customers.length === 1 ? '' : 's'}</span>
               <div className="ml-auto flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => setCsvOpen((o) => !o)}><Upload size={13} /> Import CSV</Button>
-                <Button variant="outline" size="sm" onClick={() => void newList()}><Plus size={13} /> New list</Button>
+                <Button variant="outline" size="sm" onClick={() => setCreatingList(true)}><Plus size={13} /> New list</Button>
                 <Button variant="primary" size="sm" onClick={() => void runNow()} disabled={running || triggersForList.length === 0}>
                   {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Run due now
                 </Button>

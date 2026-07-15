@@ -68,6 +68,12 @@ function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: b
   return <>{children}</>;
 }
 
+// A dead/mistyped URL sends a signed-in operator to Command (their home), not the marketing landing.
+function NotFoundRedirect() {
+  const { session } = useAuth();
+  return <Navigate to={session ? '/garvis/command' : '/'} replace />;
+}
+
 function AppRoutes() {
   const location = useLocation();
   return (
@@ -136,7 +142,7 @@ function AppRoutes() {
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />
           <Route path="/preview-site/:slug/report" element={<PreviewReport />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

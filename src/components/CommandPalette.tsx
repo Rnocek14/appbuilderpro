@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, FolderOpen, Plus, CreditCard, Settings as SettingsIcon, Sparkles, Waypoints, Telescope, BrainCircuit, ShieldCheck, FileText, Users, CircleDollarSign, Lightbulb, Target } from 'lucide-react';
 import { useProjects } from '../hooks/useProjectData';
+import { NAV_SECTIONS } from '../lib/navConfig';
 import { cn } from '../lib/utils';
 import { Overlay } from './ui/Overlay';
 import { universalSearch, routeForHit, KIND_LABEL, type SearchHit, type SearchKind } from '../lib/garvis/searchRun';
@@ -63,33 +64,26 @@ export function CommandPalette({ open, onClose }: Props) {
 
   const items = useMemo(() => {
     interface PaletteItem { id: string; label: string; icon: typeof Search; run: () => void; tag?: string }
-    const commands: PaletteItem[] = [
-      { id: 'new', label: 'New project', icon: Plus, run: () => navigate('/new') },
-      { id: 'garvis-command', label: 'Garvis: Command (waking moment)', icon: Sparkles, run: () => navigate('/garvis/command') },
-      { id: 'garvis-webs', label: 'Garvis: Businesses', icon: Waypoints, run: () => navigate('/garvis/webs') },
-      { id: 'garvis-universe', label: 'Garvis: Universe (all worlds, 3D)', icon: Telescope, run: () => navigate('/garvis/universe') },
-      { id: 'garvis-universe-flat', label: 'Garvis: Universe (2D map)', icon: Telescope, run: () => navigate('/garvis/universe?mode=flat') },
-      { id: 'garvis-explore', label: 'Garvis: Explore (rabbitholes)', icon: Search, run: () => navigate('/garvis/explore') },
-      { id: 'garvis-memory', label: 'Garvis: Memory (library & the record)', icon: BrainCircuit, run: () => navigate('/garvis/memory') },
-      { id: 'garvis-brain', label: 'Garvis: Library (Brain)', icon: BrainCircuit, run: () => navigate('/garvis/brain') },
-      // ONE QUEUE — the old Approvals/Inbox labels stay searchable (muscle memory), same room.
-      { id: 'garvis-queue', label: 'Garvis: Queue (approvals · replies · questions)', icon: ShieldCheck, run: () => navigate('/garvis/queue') },
-      { id: 'garvis-approvals', label: 'Garvis: Approvals → Queue', icon: ShieldCheck, run: () => navigate('/garvis/queue') },
-      // NOTHING LOST: every page that left the sidebar in the nav collapse stays one keystroke
-      // away here — full functionality, without 16 permanent doors.
-      { id: 'garvis-inbox', label: 'Garvis: Inbox (leads & replies) → Queue', icon: Sparkles, run: () => navigate('/garvis/queue') },
-      { id: 'garvis-money', label: 'Garvis: Money (invoices)', icon: CreditCard, run: () => navigate('/garvis/money') },
-      { id: 'garvis-contacts', label: 'Garvis: Contacts', icon: FolderOpen, run: () => navigate('/garvis/contacts') },
-      { id: 'garvis-overview', label: 'Garvis: Overview (legacy portfolio)', icon: Waypoints, run: () => navigate('/garvis') },
-      { id: 'garvis-mind', label: 'Garvis: Mind (identity & beliefs)', icon: BrainCircuit, run: () => navigate('/garvis/mind') },
-      { id: 'garvis-control', label: 'Garvis: Mission Control (activity)', icon: ShieldCheck, run: () => navigate('/garvis/control') },
-      { id: 'garvis-missions', label: 'Garvis: Missions', icon: Sparkles, run: () => navigate('/garvis/missions') },
-      { id: 'garvis-opps', label: 'Garvis: Opportunities', icon: Search, run: () => navigate('/garvis/opportunities') },
-      { id: 'garvis-marketing', label: 'Garvis: Marketing (portfolio)', icon: Waypoints, run: () => navigate('/garvis/marketing') },
-      { id: 'garvis-health', label: 'Garvis: Health (system status)', icon: ShieldCheck, run: () => navigate('/garvis/health') },
-      { id: 'billing', label: 'Open billing', icon: CreditCard, run: () => navigate('/billing') },
-      { id: 'settings', label: 'Open settings', icon: SettingsIcon, run: () => navigate('/settings') },
+    // Primary commands are GENERATED from the shared nav (src/lib/navConfig.ts) so the palette always
+    // covers every sidebar destination and can never drift from it. Below that, a curated set of
+    // muscle-memory aliases + the off-sidebar legacy rooms — searchable, clearly labeled.
+    const navCommands: PaletteItem[] = NAV_SECTIONS.flatMap((s) => s.items).map((it) => ({
+      id: `nav-${it.to}`, label: it.label, icon: it.icon, run: () => navigate(it.to),
+    }));
+    const aliases: PaletteItem[] = [
+      { id: 'a-newproj', label: 'New project', icon: Plus, run: () => navigate('/new') },
+      { id: 'a-approvals', label: 'Approvals → Queue', icon: ShieldCheck, run: () => navigate('/garvis/queue') },
+      { id: 'a-inbox', label: 'Inbox (leads & replies) → Queue', icon: Sparkles, run: () => navigate('/garvis/queue') },
+      // Memory merged Library + Mind — point the old names at the tabbed room, not the pre-merge pages.
+      { id: 'a-library', label: 'Library → Memory', icon: BrainCircuit, run: () => navigate('/garvis/memory?tab=library') },
+      { id: 'a-mind', label: 'Mind → Memory', icon: BrainCircuit, run: () => navigate('/garvis/memory?tab=mind') },
+      { id: 'a-galaxy-flat', label: 'Galaxy (2D map)', icon: Telescope, run: () => navigate('/garvis/universe?mode=flat') },
+      { id: 'a-explore', label: 'Explore (rabbitholes)', icon: Search, run: () => navigate('/garvis/explore') },
+      { id: 'a-health', label: 'Health (system status)', icon: ShieldCheck, run: () => navigate('/garvis/health') },
+      { id: 'a-control', label: 'Mission Control — activity (legacy)', icon: ShieldCheck, run: () => navigate('/garvis/control') },
+      { id: 'a-overview', label: 'Portfolio overview (legacy)', icon: Waypoints, run: () => navigate('/garvis') },
     ];
+    const commands: PaletteItem[] = [...navCommands, ...aliases];
     const projectItems: PaletteItem[] = projects.map((p) => ({
       id: p.id,
       label: p.name,
@@ -105,8 +99,10 @@ export function CommandPalette({ open, onClose }: Props) {
       icon: HIT_ICON[h.kind],
       run: () => navigate(routeForHit(h)),
     }));
-    const all = [...projectItems, ...commands];
-    if (!query.trim()) return all.slice(0, 8);
+    const all = [...commands, ...projectItems];
+    // On open (no query), always show navigation commands first + a few recent projects — not a wall
+    // of project names with no commands visible.
+    if (!query.trim()) return [...commands.slice(0, 6), ...projectItems.slice(0, 3)];
     const q = query.toLowerCase();
     return [...all.filter((i) => i.label.toLowerCase().includes(q)).slice(0, 6), ...hitItems.slice(0, 8)];
   }, [projects, query, navigate, hits]);

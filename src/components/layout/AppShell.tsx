@@ -6,6 +6,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase } from '../../lib/supabase';
+import { NAV_SECTIONS } from '../../lib/navConfig';
 import { useInbox } from '../../hooks/useAutopilot';
 import { usePreviewClaims } from '../../hooks/usePreviewClaims';
 import { cn } from '../../lib/utils';
@@ -15,58 +16,9 @@ import { CommandPalette } from '../CommandPalette';
 // deployment: the business OS LEADS (it's what the operator came for); the app builder is a real,
 // still-reachable capability ("edit apps") demoted below it under "Apps", not removed. Labs is
 // admin-only. The unified identity fixed the "split brand" confusion (FableForge vs Garvis).
-const navSections = [
-  {
-    // ONE front door: Command — where every sign-in lands, greeting you with what to do next. Canvas is
-    // the spatial workspace you branch into to actually do the work; it's not a rival "home". The altitude
-    // stack (Galaxy/System) stays reachable from Businesses and the palette. Legacy portfolio pages keep
-    // their ROUTES (nothing 404s) but live off-nav — their jobs are inside Command, Businesses, Queue.
-    title: 'Operate',
-    items: [
-      // The front door — the waking moment + what-to-do-next, where sign-in lands (Auth → /garvis/command).
-      { to: '/garvis/command', label: 'Command', icon: Sparkles },
-      // The spatial workspace: you at the center, businesses orbiting; branch in to work a channel.
-      { to: '/garvis/home', label: 'Canvas', icon: Compass },
-      { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
-      // ONE QUEUE (design review P0): approvals + replies/leads + build questions, one room.
-      // The old Inbox/Approvals/Build-questions routes redirect here; the badge sums all lanes.
-      { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
-      { to: '/garvis/webs', label: 'Businesses', icon: Waypoints },
-      // The agency loop's front door: find businesses with weak sites → build + pitch (approval-gated).
-      { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
-      // Recurring per-customer automations (recall/seasonal/review) on a client's warm list.
-      { to: '/garvis/automations', label: 'Automations', icon: Zap },
-      // Sell the tiers (Website / Website + Automation) and track your MRR — your own book of business.
-      { to: '/garvis/client-billing', label: 'Client billing', icon: Receipt },
-      { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
-      { to: '/garvis/contacts', label: 'Contacts', icon: Users },
-      // ONE MEMORY (design review P2): Library + Mind, one door. Old routes stay reachable.
-      { to: '/garvis/memory', label: 'Memory', icon: BrainCircuit },
-      // THE GALAXY — the 3D view of every business, first-class again (it was palette-only). The
-      // "3D, good-looking" surface a new operator expects to find, one click from anywhere.
-      { to: '/garvis/universe', label: 'Galaxy', icon: Telescope },
-    ],
-  },
-  {
-    // The app builder — a capability, not the headline. Kept fully reachable so apps can still be
-    // built and edited; just no longer the first thing an operator sees.
-    title: 'Apps',
-    items: [
-      { to: '/dashboard', label: 'Projects', icon: LayoutGrid },
-      { to: '/new', label: 'New app', icon: Plus },
-      { to: '/import', label: 'Import', icon: FolderDown },
-      { to: '/autopilot', label: 'Autopilot', icon: Bot },
-      { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
-    ],
-  },
-  {
-    title: 'Account',
-    items: [
-      { to: '/billing', label: 'Billing', icon: CreditCard },
-      { to: '/settings', label: 'Settings', icon: Settings },
-    ],
-  },
-];
+// The sidebar renders the shared nav config (src/lib/navConfig.ts) — the SAME list the ⌘K palette
+// generates from, so the two never drift. Add/rename destinations there, not here.
+const navSections = NAV_SECTIONS;
 
 // Admin-only experiments — a 900-line spike should not be one click from Billing for everyone.
 const labsSection = {

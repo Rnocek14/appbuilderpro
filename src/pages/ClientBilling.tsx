@@ -106,7 +106,7 @@ export default function ClientBilling() {
       <div className="mx-auto max-w-4xl px-4 py-6">
         <div className="mb-1 flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Receipt size={18} /></span>
-          <h1 className="text-xl font-semibold text-forge-ink">Client billing</h1>
+          <h1 className="text-xl font-semibold text-forge-ink">Client revenue</h1>
         </div>
         <p className="mb-5 text-sm text-forge-dim">
           Sell the two offers and track your book. Send a client their payment link, mark them active when they pay, and watch your MRR add up.
