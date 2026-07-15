@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
+import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { useUndoBar } from '../components/garvis/UndoBar';
 import { AppShell } from '../components/layout/AppShell';
 import { Badge, Button, EmptyState, Input, Skeleton } from '../components/ui';
@@ -62,9 +62,14 @@ export default function Queue() {
   const [decided, setDecided] = useState<Approval[]>([]);
   const [runs, setRuns] = useState<ExecutionRun[]>([]);
 
+  // A failed load must NOT masquerade as "Queue is clear" — that's a dangerously reassuring lie on the
+  // most-used screen. Track it so the empty view can distinguish "nothing needs you" from "couldn't load".
+  const [loadFailed, setLoadFailed] = useState(false);
   const refresh = useCallback(async () => {
-    try { setApprovals(await listApprovals('pending')); } catch { setApprovals((prev) => prev ?? []); }
-    try { setItems(await loadInbox()); } catch { setItems((prev) => prev ?? []); }
+    let failed = false;
+    try { setApprovals(await listApprovals('pending')); } catch { failed = true; setApprovals((prev) => prev ?? []); }
+    try { setItems(await loadInbox()); } catch { failed = true; setItems((prev) => prev ?? []); }
+    setLoadFailed(failed);
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -322,8 +327,16 @@ export default function Queue() {
             ))}
           </div>
         ) : rows.length === 0 ? (
-          <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear"
-            body="Approvals, blocked build questions, replies, and website leads all land here. Right now: nothing needs you." />
+          loadFailed ? (
+            <div className="rounded-xl border border-forge-ember/40 bg-forge-ember/5 p-6 text-center">
+              <AlertTriangle size={20} className="mx-auto mb-2 text-forge-ember" />
+              <p className="mb-3 text-sm text-forge-ink">Couldn’t load the Queue — this isn’t “nothing to do,” it’s a load error.</p>
+              <Button variant="outline" size="sm" onClick={() => void refresh()}>Retry</Button>
+            </div>
+          ) : (
+            <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear"
+              body="Approvals, blocked build questions, replies, and website leads all land here. Right now: nothing needs you." />
+          )
         ) : (
           <>
             {(approvals ?? []).length > 0 && laneHead('Decisions — the only irreversible clicks')}

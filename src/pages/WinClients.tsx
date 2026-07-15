@@ -6,7 +6,7 @@
 // come after a "yes" — this is the top of the funnel, made into one legible screen.
 
 import { useState, useRef, useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info, Radar, Square, CalendarClock, Pause, Play, Power } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
@@ -45,6 +45,7 @@ const VERDICT_STYLE: Record<Verdict, { label: string; cls: string }> = {
 
 export default function WinClients() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [niche, setNiche] = useState('');
   const [area, setArea] = useState('');
   const [scanUrl, setScanUrl] = useState('');
@@ -230,10 +231,10 @@ export default function WinClients() {
     { key: 'find', emoji: '🔎', label: 'Find', sub: searched ? `${rows.length} found` : 'start here' },
     { key: 'built', emoji: '✨', label: 'Sites built', sub: builtCount ? `${builtCount} ready` : 'none yet', count: builtCount, dim: builtCount === 0 },
     { key: 'pitch', emoji: '✉️', label: 'Pitches', sub: queuedCount ? `${queuedCount} in Queue` : 'none yet', count: queuedCount, accent: 'violet', dim: queuedCount === 0 },
-    { key: 'clients', emoji: '🤝', label: 'Clients', sub: 'deploy · soon', dim: true },
+    { key: 'clients', emoji: '🤝', label: 'Clients', sub: 'billing · MRR' },
   ];
   const onHub = (k: string) => {
-    if (k === 'clients') { toast('info', 'Deploy + the monthly retainer are next — that turns a “yes” into their real live site.'); return; }
+    if (k === 'clients') { navigate('/garvis/client-billing'); return; } // the won-clients live in the billing book
     setStage('find'); // find / sites built / pitches all open the results, where each row shows its state
   };
 
@@ -410,9 +411,14 @@ export default function WinClients() {
                         </div>
                         <div className="shrink-0">
                           {b.built ? (
-                            <div className="text-right">
+                            <div className="flex flex-col items-end gap-1">
                               <a href={b.built.previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">Open site <ExternalLink size={11} /></a>
-                              <div className={cn('mt-1 text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · no email found'}</div>
+                              <div className={cn('text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · add their email in Contacts to pitch'}</div>
+                              {/* When they say yes → carry name + email straight into the billing book (no re-typing). */}
+                              <NavLink to={`/garvis/client-billing?business=${encodeURIComponent(b.name)}&email=${encodeURIComponent(b.built.email ?? '')}&tier=website_automation`}
+                                className="inline-flex items-center gap-1 text-[11px] text-forge-ember hover:underline">
+                                Record as client <ArrowRight size={11} />
+                              </NavLink>
                             </div>
                           ) : (
                             <Button variant="primary" size="sm" onClick={() => void build(i)} disabled={b.building || !b.url}>

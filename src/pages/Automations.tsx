@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Zap, Loader2, Plus, Play, Pause, Trash2, Upload, Users, CalendarClock, ArrowRight, Info } from 'lucide-react';
+import { Zap, Loader2, Plus, Play, Pause, Trash2, Upload, Users, CalendarClock, ArrowRight, Info, AlertTriangle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { Button, EmptyState } from '../components/ui';
@@ -35,19 +35,22 @@ export default function Automations() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [triggers, setTriggers] = useState<TriggerRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
   const [csv, setCsv] = useState('');
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<TriggerRunSummary | null>(null);
 
   const refresh = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setLoadFailed(false);
     try {
       const [ls, ts] = await Promise.all([listCustomerLists(), listTriggers()]);
       setLists(ls);
       setTriggers(ts);
       setListId((cur) => cur ?? ls[0]?.id ?? null);
-    } finally { setLoading(false); }
+    } catch (e) { setLoadFailed(true); toast('error', emsg(e)); }
+    finally { setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -127,6 +130,12 @@ export default function Automations() {
 
         {loading ? (
           <div className="flex items-center gap-2 py-10 text-sm text-forge-dim"><Loader2 size={15} className="animate-spin" /> Loading…</div>
+        ) : loadFailed ? (
+          <div className="rounded-xl border border-forge-ember/40 bg-forge-ember/5 p-6 text-center">
+            <AlertTriangle size={22} className="mx-auto mb-2 text-forge-ember" />
+            <p className="mb-3 text-sm text-forge-ink">Couldn’t load your automations.</p>
+            <Button variant="outline" size="sm" onClick={() => void refresh()}>Retry</Button>
+          </div>
         ) : lists.length === 0 ? (
           <EmptyState icon={<Users size={22} />} title="No customer list yet"
             body="Automations run on a business’s own past customers. Create a list and import a few to begin."
