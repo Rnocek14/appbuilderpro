@@ -140,5 +140,25 @@ const tile = (id: string, parentId: string | null, x: number, y: number): BoardT
   check('filtered tidy re-lays only the named tiles', getTile(t, 'x')?.x === M.pad && getTile(t, 'x')?.y === M.pad && getTile(t, 'y')?.x === 5);
 }
 
+// --- layout ignores archived tiles + avoids in-flight ghosts (fluid, no collisions) --------
+{
+  const PAD = M.pad ?? 40;
+  let b: Board<string> = emptyBoard();
+  // An archived tile sitting exactly on the first grid slot must NOT block a fresh root there.
+  b = addTile(b, { id: 'arch', prompt: 'p', parentId: null, content: 'a', x: PAD, y: PAD, favorite: false, createdAt: 1, group: ARCHIVE_GROUP });
+  const p0 = nextRootPosition(b, M);
+  check('archived tiles do not occupy the visible board', p0.x === PAD && p0.y === PAD);
+  // Two concurrent "makes": the second must dodge the first's in-flight ghost, not stack on it.
+  const g0 = nextRootPosition(b, M, []);
+  const g1 = nextRootPosition(b, M, [g0]);
+  check('a second concurrent make dodges the first in-flight ghost', !(g1.x === g0.x && g1.y === g0.y));
+  // A rendition avoids an in-flight sibling ghost too.
+  const parent: BoardTile<string> = { id: 'par', prompt: 'p', parentId: null, content: 'c', x: 40, y: 40, favorite: false, createdAt: 2 };
+  b = addTile(b, parent);
+  const c0 = childPosition(b, parent, M);
+  const c1 = childPosition(b, parent, M, [c0]);
+  check('a concurrent rendition dodges the in-flight sibling ghost', !(c1.x === c0.x && c1.y === c0.y));
+}
+
 console.log(`\ncreativeBoard.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} creativeBoard check(s) failed`);

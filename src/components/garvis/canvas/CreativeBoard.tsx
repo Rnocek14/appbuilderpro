@@ -8,10 +8,10 @@
 // this shell unchanged.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Sparkles, Loader2, Star, Wand2, Maximize2, Trash2, Crosshair, Printer, X, Search, LayoutGrid, Archive, Undo2, FolderPlus, Folder } from 'lucide-react';
+import { Sparkles, Loader2, Star, Wand2, Maximize2, Trash2, Crosshair, Printer, X, Search, LayoutGrid, Archive, Undo2, FolderPlus, Folder, ZoomIn, ZoomOut, Maximize, CheckSquare } from 'lucide-react';
 import {
   emptyBoard, addTile, moveTile, removeTile, toggleFavorite, setTileContent, getTile,
-  nextRootPosition, childPosition, favorites as favTiles, tidyByTime,
+  nextRootPosition, childPosition, favorites as favTiles, tidyByTime, boardExtent,
   addGroup, setTileGroup, viewTiles, groupsOf, ARCHIVE_GROUP,
   type Board, type BoardMetrics, type BoardView,
 } from '../../../lib/garvis/creativeBoard';
@@ -67,8 +67,15 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   const hydratedFor = useRef<string | null>(null);
   const [kind, setKind] = useState<string | null>(adapter.kinds[0]?.id ?? null);
   const [prompt, setPrompt] = useState('');
-  const [busyAt, setBusyAt] = useState<{ x: number; y: number; label: string } | null>(null);
+  // Several pieces can generate AT ONCE (make one, then another) — each is an in-flight ghost, and the
+  // ref mirrors the list so rapid-fire makes read the latest occupancy synchronously (no stacking).
+  const [busy, setBusy] = useState<{ id: string; x: number; y: number; label: string }[]>([]);
+  const busyRef = useRef<{ id: string; x: number; y: number; label: string }[]>([]);
+  const boardRef = useRef(board); boardRef.current = board;
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [renditionFor, setRenditionFor] = useState<string | null>(null);
   const [renditionText, setRenditionText] = useState('');
@@ -78,6 +85,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   const [newGroupText, setNewGroupText] = useState('');
   const [newGroupTileId, setNewGroupTileId] = useState<string | null>(null);
+  const [newGroupBulk, setNewGroupBulk] = useState(false);   // the new group is for the current multi-selection
   const [printing, setPrinting] = useState<C[] | null>(null);
 
   // ---- load + persist (debounced) --------------------------------------------------------
@@ -127,36 +135,75 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
 
   const newId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `t${Date.now()}${Math.round(performance.now())}`);
 
-  // ---- make a new piece ------------------------------------------------------------------
-  const make = useCallback(async () => {
-    if (busyAt) return;
-    const pos = nextRootPosition(board, M);
-    setBusyAt({ ...pos, label: 'Making…' });
-    try {
-      const content = await adapter.generate({ prompt: prompt.trim(), kindId: kind });
-      // A new piece joins the group you're viewing (or the main space); never the archive.
-      const group = view !== 'all' && view !== ARCHIVE_GROUP ? view : undefined;
-      setBoard((b) => addTile(b, { id: newId(), prompt: prompt.trim() || (adapter.kinds.find((k) => k.id === kind)?.label ?? ''), parentId: null, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now(), group }));
-      setPrompt('');
-      setFavOnly(false);   // the new (unstarred) card must be visible, not hidden by the ⭐ filter
-      if (view === ARCHIVE_GROUP) setView('all');   // making from the archive drops you into the working space
-    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not make that.'); }
-    finally { setBusyAt(null); }
-  }, [board, M, adapter, prompt, kind, busyAt, view, onToast]);
+  const MAX_CONCURRENT = 6;
+  const addGhost = (g: { id: string; x: number; y: number; label: string }) => { busyRef.current = [...busyRef.current, g]; setBusy(busyRef.current); };
+  const dropGhost = (id: string) => { busyRef.current = busyRef.current.filter((x) => x.id !== id); setBusy(busyRef.current); };
+  const ghostBoxes = () => busyRef.current.map((g) => ({ x: g.x, y: g.y }));
 
-  // ---- spin a rendition from a tile ------------------------------------------------------
+  // ---- make a new piece — non-blocking, several can run at once ---------------------------
+  const make = useCallback(async () => {
+    if (busyRef.current.length >= MAX_CONCURRENT) { onToast('info', 'A few are already generating — give them a second.'); return; }
+    const p = prompt.trim();
+    const gid = newId();
+    const pos = nextRootPosition(boardRef.current, M, ghostBoxes());   // dodge existing tiles AND in-flight ghosts
+    addGhost({ id: gid, x: pos.x, y: pos.y, label: 'Making…' });
+    setPrompt('');               // clear immediately so the next idea can be typed while this one renders
+    setFavOnly(false);           // the new (unstarred) card must be visible, not hidden by the ⭐ filter
+    try {
+      const content = await adapter.generate({ prompt: p, kindId: kind });
+      const group = view !== 'all' && view !== ARCHIVE_GROUP ? view : undefined;   // joins the group in view, never the archive
+      setBoard((b) => addTile(b, { id: newId(), prompt: p || (adapter.kinds.find((k) => k.id === kind)?.label ?? ''), parentId: null, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now(), group }));
+      if (view === ARCHIVE_GROUP) setView('all');
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not make that.'); }
+    finally { dropGhost(gid); }
+  }, [M, adapter, prompt, kind, view, onToast]);
+
+  // ---- spin a rendition from a tile — also non-blocking ----------------------------------
   const spin = useCallback(async (parentId: string, instruction: string) => {
-    const parent = getTile(board, parentId);
-    if (!parent || busyAt) return;
-    const pos = childPosition(board, parent, M);
-    setBusyAt({ ...pos, label: 'Spinning…' });
+    const parent = getTile(boardRef.current, parentId);
+    if (!parent) return;
+    if (busyRef.current.length >= MAX_CONCURRENT) { onToast('info', 'A few are already generating — give them a second.'); return; }
+    const gid = newId();
+    const pos = childPosition(boardRef.current, parent, M, ghostBoxes());
+    addGhost({ id: gid, x: pos.x, y: pos.y, label: 'Spinning…' });
+    setFavOnly(false);
     try {
       const content = await adapter.rendition({ parent: parent.content, instruction: instruction.trim() });
       setBoard((b) => addTile(b, { id: newId(), prompt: instruction.trim() || 'rendition', parentId, content, x: pos.x, y: pos.y, favorite: false, createdAt: Date.now(), group: parent.group }));
-      setFavOnly(false);   // reveal the rendition even if the ⭐ filter was on
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not spin a rendition.'); }
-    finally { setBusyAt(null); }
-  }, [board, M, adapter, busyAt, onToast]);
+    finally { dropGhost(gid); }
+  }, [M, adapter, onToast]);
+
+  // ---- zoom + fit-to-view ----------------------------------------------------------------
+  const clampZoom = (z: number) => Math.min(1.6, Math.max(0.35, z));
+  const zoomBy = (factor: number) => setZoom((z) => clampZoom(z * factor));
+  const fit = useCallback(() => {
+    const el = stageRef.current; if (!el) return;
+    const ext = boardExtent(board, M);
+    const z = clampZoom(Math.min(el.clientWidth / ext.w, el.clientHeight / ext.h, 1));
+    setZoom(z); setPan({ x: 0, y: 0 });
+  }, [board, M]);
+  const recenter = () => { setPan({ x: 0, y: 0 }); setZoom(1); };
+  // Wheel zooms toward the cursor (non-passive so we can preventDefault the page from scrolling).
+  useEffect(() => {
+    const el = stageRef.current; if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+      setZoom((z) => {
+        const nz = clampZoom(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+        setPan((p) => ({ x: cx - (cx - p.x) * (nz / z), y: cy - (cy - p.y) * (nz / z) }));
+        return nz;
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  // ---- multi-select for bulk organize (shift/⌘-click a tile) -----------------------------
+  const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const bulkGroup = (g: string | null) => { setBoard((b) => { let nb = b; selected.forEach((id) => { nb = setTileGroup(nb, id, g); }); return nb; }); setSelected(new Set()); };
 
   // ---- pointer: drag a tile, or pan the board -------------------------------------------
   const drag = useRef<{ mode: 'tile' | 'pan'; id?: string; sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
@@ -179,13 +226,18 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     const d = drag.current; if (!d) return;
     const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
     if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
-    if (d.mode === 'tile' && d.id) setBoard((b) => moveTile(b, d.id!, d.ox + dx, d.oy + dy));
+    // A tile's coords are in board space; a screen drag of dx maps to dx/zoom on the board.
+    if (d.mode === 'tile' && d.id) setBoard((b) => moveTile(b, d.id!, d.ox + dx / zoom, d.oy + dy / zoom));
     else if (d.mode === 'pan') setPan({ x: d.ox + dx, y: d.oy + dy });
   };
   const onPointerUp = (e: React.PointerEvent, clickId?: string) => {
     const d = drag.current; drag.current = null;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (d && d.mode === 'tile' && !d.moved && clickId) setFocusId(clickId);
+    if (d && d.mode === 'tile' && !d.moved && clickId) {
+      // shift / ⌘ / ctrl-click toggles selection for bulk organize; a plain click opens the focus view.
+      if (e.shiftKey || e.metaKey || e.ctrlKey) toggleSelect(clickId);
+      else setFocusId(clickId);
+    }
   };
 
   const q = search.trim().toLowerCase();
@@ -201,9 +253,16 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     const name = newGroupText.trim();
     if (!name) return;
     const tileId = newGroupTileId;
-    setBoard((b) => { let nb = addGroup(b, name); if (tileId) nb = setTileGroup(nb, tileId, name); return nb; });
-    if (!tileId) setView(name);
-    setNewGroupOpen(false); setNewGroupTileId(null);
+    const bulkIds = newGroupBulk ? [...selected] : [];
+    setBoard((b) => {
+      let nb = addGroup(b, name);
+      if (tileId) nb = setTileGroup(nb, tileId, name);
+      bulkIds.forEach((id) => { nb = setTileGroup(nb, id, name); });
+      return nb;
+    });
+    if (newGroupBulk) setSelected(new Set());
+    if (!tileId && !newGroupBulk) setView(name);   // a fresh empty group jumps you into it
+    setNewGroupOpen(false); setNewGroupTileId(null); setNewGroupBulk(false);
   };
 
   const doExport = () => {
@@ -245,8 +304,11 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <button onClick={() => setFavOnly((v) => !v)} className={cn('cb-tool', favOnly && 'cb-tool-on')} title="Show only starred">
               <Star size={13} className={favOnly ? 'fill-current' : ''} /> {favs.length}
             </button>
-            <button onClick={() => { setBoard((b) => tidyByTime(b, M, 'desc', new Set(viewTiles(b, view).map((t) => t.id)))); setPan({ x: 0, y: 0 }); }} className="cb-tool" title="Tidy — arrange this view newest first"><LayoutGrid size={13} /> Tidy</button>
-            <button onClick={() => setPan({ x: 0, y: 0 })} className="cb-tool" title="Recenter"><Crosshair size={13} /></button>
+            <button onClick={() => { setBoard((b) => tidyByTime(b, M, 'desc', new Set(viewTiles(b, view).map((t) => t.id)))); setPan({ x: 0, y: 0 }); setZoom(1); }} className="cb-tool" title="Tidy — arrange this view newest first"><LayoutGrid size={13} /> Tidy</button>
+            <button onClick={() => zoomBy(1 / 1.15)} className="cb-tool" title="Zoom out"><ZoomOut size={13} /></button>
+            <button onClick={fit} className="cb-tool" title="Fit everything in view"><Maximize size={13} /></button>
+            <button onClick={() => zoomBy(1.15)} className="cb-tool" title="Zoom in"><ZoomIn size={13} /></button>
+            <button onClick={recenter} className="cb-tool" title="Recenter · 100%"><Crosshair size={13} /></button>
             {adapter.renderPrint && <button onClick={doExport} className="cb-tool" title="Print the starred cards"><Printer size={13} /> Print</button>}
           </div>
         </div>
@@ -263,8 +325,8 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             onKeyDown={(e) => { if (e.key === 'Enter') void make(); }}
             placeholder={adapter.promptPlaceholder}
             className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />
-          <Button variant="primary" size="md" onClick={() => void make()} disabled={!!busyAt}>
-            {busyAt ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} Make
+          <Button variant="primary" size="md" onClick={() => void make()}>
+            {busy.length ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} Make
           </Button>
         </div>
         {adapter.banner && <div className="mt-1.5 text-[11px] text-forge-dim">{adapter.banner}</div>}
@@ -282,14 +344,14 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
       </div>
 
       {/* the spread */}
-      <div className="cb-stage" onPointerDown={onStagePointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
-        {shown.length === 0 && !busyAt && (
+      <div ref={stageRef} className="cb-stage" onPointerDown={onStagePointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+        {shown.length === 0 && busy.length === 0 && (
           <div className="cb-empty">
             <Wand2 size={22} className="text-forge-ember/70" />
             <p className="mt-2 max-w-xs text-center text-[13px] text-forge-dim">{adapter.emptyHint}</p>
           </div>
         )}
-        <div className="cb-plane" style={{ transform: `translate(${pan.x}px, ${pan.y}px)` }}>
+        <div className="cb-plane" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'top left' }}>
           {/* lineage connectors */}
           <svg className="cb-links" width="100%" height="100%">
             {shown.map((t) => {
@@ -300,7 +362,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
           </svg>
 
           {shown.map((t) => (
-            <div key={t.id} className="cb-tile" style={{ left: t.x, top: t.y, width: M.w }}
+            <div key={t.id} className={cn('cb-tile', selected.has(t.id) && 'cb-tile-sel')} style={{ left: t.x, top: t.y, width: M.w }}
               onPointerDown={(e) => onTilePointerDown(e, t.id)} onPointerMove={onPointerMove} onPointerUp={(e) => onPointerUp(e, t.id)}>
               <div className="cb-card" style={{ width: M.w, height: M.h }}>
                 <div style={{ position: 'absolute', left: 0, top: 0, width: adapter.designWidth, transformOrigin: 'top left', transform: `scale(${scale})`, pointerEvents: 'none' }}>
@@ -320,15 +382,29 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             </div>
           ))}
 
-          {busyAt && (
-            <div className="cb-tile" style={{ left: busyAt.x, top: busyAt.y, width: M.w }}>
+          {busy.map((g) => (
+            <div key={g.id} className="cb-tile" style={{ left: g.x, top: g.y, width: M.w }}>
               <div className="cb-card cb-ghost" style={{ width: M.w, height: M.h }}>
                 <Loader2 size={18} className="animate-spin text-forge-ember" />
-                <span className="mt-1.5 text-[11px] text-forge-dim">{busyAt.label}</span>
+                <span className="mt-1.5 text-[11px] text-forge-dim">{g.label}</span>
               </div>
             </div>
-          )}
+          ))}
         </div>
+
+        {/* bulk organize — appears when you shift/⌘-click tiles; acts on the whole selection at once */}
+        {selected.size > 0 && (
+          <div className="cb-bulk" onPointerDown={(e) => e.stopPropagation()}>
+            <span className="cb-bulk-n"><CheckSquare size={13} /> {selected.size} selected</span>
+            <span className="cb-bulk-lbl">Move to</span>
+            <button className="cb-gchip" onClick={() => bulkGroup(null)}>Main</button>
+            {groups.map((g) => <button key={g} className="cb-gchip" onClick={() => bulkGroup(g)}><Folder size={11} /> {g}</button>)}
+            <button className="cb-gchip" onClick={() => { setNewGroupTileId(null); setNewGroupText(''); setNewGroupBulk(true); setNewGroupOpen(true); }}><FolderPlus size={11} /> New</button>
+            <span className="mx-1 h-3.5 w-px bg-forge-border" />
+            <button className="cb-gchip" onClick={() => bulkGroup(ARCHIVE_GROUP)}><Archive size={11} /> Archive</button>
+            <button className="cb-gchip" onClick={() => setSelected(new Set())}>Clear</button>
+          </div>
+        )}
       </div>
 
       {/* rendition prompt (from a tile's ⟳) */}
@@ -374,16 +450,16 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
 
       {/* new group */}
       {newGroupOpen && (
-        <Overlay onClose={() => { setNewGroupOpen(false); setNewGroupTileId(null); }} z={82}>
+        <Overlay onClose={() => { setNewGroupOpen(false); setNewGroupTileId(null); setNewGroupBulk(false); }} z={82}>
           <div className="cb-modal" onPointerDown={(e) => e.stopPropagation()}>
-            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-forge-ink"><FolderPlus size={15} className="text-forge-ember" /> New group</div>
+            <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-forge-ink"><FolderPlus size={15} className="text-forge-ember" /> New group{newGroupBulk && selected.size > 0 ? ` · ${selected.size} selected` : ''}</div>
             <p className="mb-2 text-[12px] text-forge-dim">Name a sub-collection (a listing, a campaign) so the board stays organized as it grows.</p>
             <input autoFocus value={newGroupText} onChange={(e) => setNewGroupText(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') submitNewGroup(); }}
               placeholder="e.g. 123 Maple St · Spring campaign"
               className="w-full rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
             <div className="mt-3 flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => { setNewGroupOpen(false); setNewGroupTileId(null); }}>Cancel</Button>
+              <Button variant="ghost" size="sm" onClick={() => { setNewGroupOpen(false); setNewGroupTileId(null); setNewGroupBulk(false); }}>Cancel</Button>
               <Button variant="primary" size="sm" disabled={!newGroupText.trim()} onClick={submitNewGroup}><FolderPlus size={13} /> Create</Button>
             </div>
           </div>
@@ -426,6 +502,10 @@ const CB_CSS = `
 .cb-tile:active{cursor:grabbing}
 .cb-card{position:relative;overflow:hidden;border-radius:12px;border:1px solid var(--forge-border,#3a2f25);box-shadow:0 6px 18px rgba(0,0,0,.35);background:#0f0b07;display:flex;align-items:center;justify-content:center;flex-direction:column;transition:box-shadow .15s,transform .15s}
 .cb-tile:hover .cb-card{box-shadow:0 10px 28px rgba(0,0,0,.5);border-color:rgba(255,138,61,.45)}
+.cb-tile-sel .cb-card{outline:2px solid var(--forge-ember,#ff8a3d);outline-offset:2px;border-color:transparent}
+.cb-bulk{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:flex;flex-wrap:wrap;align-items:center;gap:6px;max-width:calc(100% - 24px);padding:7px 10px;border-radius:12px;border:1px solid var(--forge-border,#3a2f25);background:rgba(28,23,16,.96);box-shadow:0 14px 40px rgba(0,0,0,.5);z-index:5}
+.cb-bulk-n{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--forge-ink,#f0e6da)}
+.cb-bulk-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--forge-dim,#a99b90);margin-left:4px}
 .cb-ghost{gap:2px}
 .cb-badge{position:absolute;top:6px;left:6px;font-size:9px;padding:1px 6px;border-radius:999px;background:rgba(255,138,61,.9);color:#1a0e04;font-weight:600}
 .cb-fav{position:absolute;top:6px;right:6px;color:#f4b942}

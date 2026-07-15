@@ -137,14 +137,18 @@ const PAD = (m: BoardMetrics) => m.pad ?? 40;
 
 /** Grid slot for the next ROOT tile (a fresh "make", not a rendition) — flows left→right, wrapping.
  *  Occupancy-aware: skips any slot already covered by a tile (e.g. after deletes or renditions), so a
- *  fresh card never lands on top of an existing one. */
-export function nextRootPosition<C>(board: Board<C>, m: BoardMetrics): { x: number; y: number } {
+ *  fresh card never lands on top of an existing one. Archived tiles don't count (they're out of the
+ *  visible board), and `extra` boxes (in-flight "making…" ghosts) DO — so firing several at once spreads
+ *  them out instead of stacking. */
+export function nextRootPosition<C>(board: Board<C>, m: BoardMetrics, extra: { x: number; y: number }[] = []): { x: number; y: number } {
   const cols = Math.max(1, m.cols);
-  let idx = board.tiles.filter((t) => t.parentId === null).length;
+  const active = board.tiles.filter((t) => t.group !== ARCHIVE_GROUP);
+  const occ = [...active.map((t) => ({ x: t.x, y: t.y })), ...extra];
+  let idx = active.filter((t) => t.parentId === null).length;
   for (let guard = 0; guard < 400; guard++, idx++) {
     const x = PAD(m) + (idx % cols) * (m.w + m.gap);
     const y = PAD(m) + Math.floor(idx / cols) * (m.h + m.gap);
-    if (!board.tiles.some((t) => overlaps(x, y, t.x, t.y, m))) return { x, y };
+    if (!occ.some((o) => overlaps(x, y, o.x, o.y, m))) return { x, y };
   }
   return { x: PAD(m), y: PAD(m) };
 }
@@ -155,12 +159,15 @@ function overlaps(ax: number, ay: number, bx: number, by: number, m: BoardMetric
 }
 
 /** Where a rendition of `parent` lands: just to its right (the family reads left→right); if that spot
- *  is taken, step down until it's clear, so a lineage stacks neatly beside its parent. */
-export function childPosition<C>(board: Board<C>, parent: BoardTile<C>, m: BoardMetrics): { x: number; y: number } {
+ *  is taken, step down until it's clear, so a lineage stacks neatly beside its parent. Archived tiles are
+ *  ignored; `extra` boxes (in-flight ghosts) are avoided so concurrent renditions don't collide. */
+export function childPosition<C>(board: Board<C>, parent: BoardTile<C>, m: BoardMetrics, extra: { x: number; y: number }[] = []): { x: number; y: number } {
+  const active = board.tiles.filter((t) => t.group !== ARCHIVE_GROUP);
+  const occ = [...active.map((t) => ({ x: t.x, y: t.y })), ...extra];
   const x = parent.x + m.w + m.gap;
   let y = parent.y;
   let guard = 0;
-  while (board.tiles.some((t) => overlaps(x, y, t.x, t.y, m)) && guard < 200) {
+  while (occ.some((o) => overlaps(x, y, o.x, o.y, m)) && guard < 200) {
     y += m.h + m.gap;
     guard++;
   }
