@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign, KeyRound } from 'lucide-react';
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign, KeyRound, Zap } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase } from '../../lib/supabase';
@@ -34,6 +34,8 @@ const navSections = [
       { to: '/garvis/webs', label: 'Businesses', icon: Waypoints },
       // The agency loop's front door: find businesses with weak sites → build + pitch (approval-gated).
       { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
+      // Recurring per-customer automations (recall/seasonal/review) on a client's warm list.
+      { to: '/garvis/automations', label: 'Automations', icon: Zap },
       { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
       { to: '/garvis/contacts', label: 'Contacts', icon: Users },
       // ONE MEMORY (design review P2): Library + Mind, one door. Old routes stay reachable.

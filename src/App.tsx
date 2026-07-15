@@ -35,6 +35,7 @@ const ClusterSpike = lazy(() => import('./pages/spike/ClusterSpike'));
 const Brain = lazy(() => import('./pages/Brain'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const WinClients = lazy(() => import('./pages/WinClients'));
+const Automations = lazy(() => import('./pages/Automations'));
 const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
@@ -96,6 +97,7 @@ function AppRoutes() {
           <Route path="/garvis/queue" element={<Protected><Queue /></Protected>} />
           <Route path="/garvis/inbox" element={<Navigate to="/garvis/queue" replace />} />
           <Route path="/garvis/clients" element={<Protected><WinClients /></Protected>} />
+          <Route path="/garvis/automations" element={<Protected><Automations /></Protected>} />
           <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
           <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
           <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
