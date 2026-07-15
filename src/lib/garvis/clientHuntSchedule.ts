@@ -5,8 +5,10 @@
 // (cities searched + demos built) so an autonomous machine can never run away. The impure daily worker
 // executes the plan; sending still waits for the owner's approval (the clock owns work, not the trigger out).
 
-import { citiesFor, type SweepScope, type UsCity } from './usCities';
-import { sweepPlan, type SweepQuery } from './nationalSweepCore';
+// .ts extensions: this module is also imported by the standing-worker EDGE function (Deno), whose
+// strict resolver requires explicit extensions. The leaf modules import only types, so Deno is happy.
+import { citiesFor, type SweepScope, type UsCity } from './usCities.ts';
+import { sweepPlan, type SweepQuery } from './nationalSweepCore.ts';
 
 /** The standing-order kind for a daily automatic hunt (added to the clock's OrderKind vocabulary). */
 export const CLIENT_HUNT_KIND = 'client_hunt' as const;

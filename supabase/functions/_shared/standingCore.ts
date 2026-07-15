@@ -16,7 +16,12 @@
 //   - Anything a standing order PRODUCES lands as a draft/record for the human — orders never send,
 //     post, or spend on their own. The clock schedules work; the human still owns the trigger out.
 
-export type OrderKind = 'watch_url' | 'cadence_digest';
+// 'client_hunt' is a DAILY AUTOMATIC prospecting order (see src/lib/garvis/clientHuntSchedule.ts):
+// every day it sweeps a fresh slice of the country for a niche, builds demos, and queues pitches for
+// the owner's approval. Its config is the HuntConfig (niche/scope/citiesPerDay/demoQuota) + a rolling
+// cursor; the worker's client_hunt branch owns it. Like every order, it only READS + queues — the
+// clock schedules the work; the human still owns the trigger out.
+export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt';
 export type Cadence = 'hourly' | 'daily' | 'weekly';
 export type WatchStatus = 'changed' | 'unchanged' | 'unreachable';
 
@@ -25,7 +30,8 @@ export interface StandingOrder {
   kind: OrderKind;
   label: string;                 // the promise in the owner's words ("watch Acme's pricing page")
   cadence: Cadence;
-  config: { url?: string; note?: string };
+  // watch_url uses {url}; cadence_digest uses {note}; client_hunt stores its HuntConfig + cursor here.
+  config: { url?: string; note?: string; [k: string]: unknown };
   status: 'active' | 'paused';
   nextRunAt: string;             // ISO
   lastRunAt: string | null;      // ISO

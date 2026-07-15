@@ -25,6 +25,13 @@ import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { pickNextPending, mergeTemplate, batchProgress, type BatchRecipient } from '../_shared/batchCore.ts';
+// DAILY AUTOMATIC CLIENT HUNT (client_hunt kind) — the scheduling brain + the pure builders are
+// verified in src; this worker is only the I/O around them (Serper search, fetch-url scrape, DB writes).
+import { parseHuntConfig, plannedHuntToday, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
+import { pickHuntTargets, buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
+import { parseBusinessProfile, assembleFallbackSpec, previewSlug } from '../_shared/previewSpec.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
@@ -33,7 +40,8 @@ const STORED_TEXT_CAP = 20_000;    // enough context for change excerpts without
 
 interface OrderRow {
   id: string; owner_id: string; world_id: string | null; kind: string; label: string;
-  cadence: 'hourly' | 'daily' | 'weekly'; config: { url?: string; note?: string } | null;
+  cadence: 'hourly' | 'daily' | 'weekly';
+  config: { url?: string; note?: string; cursor?: number; [k: string]: unknown } | null;
   status: string; anchor_at: string; next_run_at: string; last_run_at: string | null;
   last_hash: string | null; last_text: string | null;
 }
@@ -215,6 +223,53 @@ Deno.serve(async (req) => {
   for (const order of (rows ?? []) as OrderRow[]) {
     // A forced run may target a paused/not-yet-due order (the owner asked); the scan only sees due ones.
     if (!body.order_id && !isDue({ status: order.status as 'active' | 'paused', nextRunAt: order.next_run_at }, nowIso)) continue;
+
+    // ---- client_hunt: a self-contained daily prospecting run ---------------------------------
+    // It owns its own persistence (a rolling cursor in config, not a content hash), so it never
+    // flows into the watch/digest persist block below. Honesty is the same everywhere: it READS +
+    // queues pitches as PENDING approvals; nothing sends.
+    if (order.kind === 'client_hunt') {
+      try {
+        const r = await runClientHunt(admin, order, nowIso);
+        ran++;
+        if (r.built > 0) changed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: r.built > 0 ? 'changed' : 'unchanged', line: r.line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          config: { ...(order.config ?? {}), cursor: r.nextCursor },  // advance the sweep for tomorrow
+          updated_at: nowIso,
+        }).eq('id', order.id);
+        // Surface a productive day once (deduped by order+date) — the waking moment reads these.
+        if (r.built > 0) {
+          const key = `client-hunt:${order.id}:${nowIso.slice(0, 10)}`;
+          const dayAgo = new Date(Date.parse(nowIso) - 26 * 60 * 60 * 1000).toISOString();
+          const { data: recent } = await admin.from('mind_events')
+            .select('payload').eq('owner_id', order.owner_id).eq('source', 'standing-order')
+            .gte('occurred_at', dayAgo).limit(200);
+          const seen = new Set((recent ?? []).map((x) => String((x as { payload?: { key?: string } }).payload?.key ?? '')));
+          if (!seen.has(key)) {
+            await admin.from('mind_events').insert({
+              owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+              subject: r.line.slice(0, 300),
+              payload: { key, order_id: order.id, kind: order.kind, built: r.built, queued: r.queued },
+            });
+            const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
+            await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, r.line).catch(() => {});
+          }
+        }
+      } catch (e) {
+        failed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Run failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
+
     try {
       const result = order.kind === 'watch_url'
         ? await runWatch(order, nowIso)
@@ -375,4 +430,202 @@ async function runDigest(admin: any, order: OrderRow, nowIso: string): Promise<W
 
   // A digest with real news counts as "changed" so it surfaces; a quiet period stays quiet.
   return { status: madeCount > 0 ? 'changed' : 'unchanged', line, hash: `digest-${bucket}`, excerpt: null, checkedAt: nowIso };
+}
+
+// --- client_hunt: the daily automatic prospecting run --------------------------------------------
+// Executes ONE day's slice of a standing hunt: sweep today's fresh cities (rolling cursor), find real
+// businesses, and for up to demoQuota of them build a demo + queue a pitch. All the decisions —
+// which cities, which businesses, what the profile/pitch say — come from the VERIFIED pure modules;
+// this function is only Serper + fetch-url + DB. A soft time budget keeps a hand-edited large config
+// from overrunning the edge invocation (the cursor still advances, so tomorrow picks up fresh).
+const HUNT_TIME_BUDGET_MS = 90_000;
+
+interface HuntEnv { supabaseUrl: string; workerSecret: string; appOrigin: string; nowYear: number }
+
+// deno-lint-ignore no-explicit-any
+async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
+  Promise<{ built: number; queued: number; line: string; nextCursor: number }> {
+  const cfg: HuntConfig | null = parseHuntConfig(order.config);
+  const cursorRaw = order.config?.cursor;
+  const cursor = typeof cursorRaw === 'number' && isFinite(cursorRaw) ? cursorRaw : 0;
+  if (!cfg) return { built: 0, queued: 0, line: `${order.label}: no niche is configured — nothing to hunt. Set it up on Win Clients.`, nextCursor: cursor };
+
+  const plan = plannedHuntToday(cfg, cursor);
+  const serperKey = Deno.env.get('SERPER_API_KEY');
+  if (!serperKey) return { built: 0, queued: 0, line: `${order.label}: search isn’t configured on the server (SERPER_API_KEY missing) — nothing was hunted.`, nextCursor: plan.nextCursor };
+
+  const env: HuntEnv = {
+    supabaseUrl: Deno.env.get('SUPABASE_URL')!,
+    workerSecret: Deno.env.get('WORKER_SECRET') ?? '',
+    appOrigin: Deno.env.get('APP_ORIGIN') ?? '',
+    nowYear: new Date(nowIso).getUTCFullYear(),
+  };
+  const startedMs = Date.now();
+  const seenDomains = new Set<string>();   // a business found in two cities is built once (per run)
+  let built = 0; let queued = 0;
+
+  for (const qy of plan.queries) {
+    if (built >= cfg.demoQuota) break;
+    if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;   // soft budget — cursor already advances
+    // Real businesses for this city — Google organic via Serper, never invented.
+    let serperData: unknown;
+    try {
+      const r = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: { 'X-API-KEY': serperKey, 'content-type': 'application/json' },
+        body: JSON.stringify({ q: `${qy.niche} ${qy.area}` }),
+      });
+      if (!r.ok) continue;
+      serperData = await r.json();
+    } catch { continue; }   // one city's search failing never sinks the day
+
+    const targets = pickHuntTargets(serperData, cfg.demoQuota - built, seenDomains);
+    for (const t of targets) {
+      if (built >= cfg.demoQuota) break;
+      if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;
+      try {
+        const outcome = await buildOneDemo(admin, order, cfg.niche, t, env);
+        if (outcome === 'queued') { built++; queued++; }
+        else if (outcome === 'built') built++;
+        // 'skipped' → unreachable/invalid; nothing recorded, nothing faked
+      } catch { /* one prospect failing never sinks the day */ }
+    }
+  }
+  return { built, queued, line: huntRunLine(order.label, built, queued), nextCursor: plan.nextCursor };
+}
+
+/** Read one page through the SAME hardened scrape path the app uses (fetch-url), authenticated with
+ *  the worker secret. Returns the parsed JSON, or null on any failure. */
+async function scrapePage(url: string, mode: 'text' | 'images' | 'contact', env: HuntEnv): Promise<Record<string, unknown> | null> {
+  try {
+    const r = await fetch(`${env.supabaseUrl}/functions/v1/fetch-url`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-worker-secret': env.workerSecret },
+      body: JSON.stringify({ url, mode }),
+    });
+    if (!r.ok) return null;
+    return await r.json().catch(() => null);
+  } catch { return null; }
+}
+
+/** Build ONE demo from a target: scrape → honest audit → deterministic profile → recipe demo →
+ *  pitch → (if a public email exists) a PENDING approval. Returns what actually happened. Mirrors
+ *  ingest-profile's save path (one build path) and queuePitch's queue path (approval-gated). */
+// deno-lint-ignore no-explicit-any
+async function buildOneDemo(admin: any, order: OrderRow, niche: string, target: { name: string; url: string }, env: HuntEnv):
+  Promise<'queued' | 'built' | 'skipped'> {
+  const text = await scrapePage(target.url, 'text', env);
+  // fetch-url returns { error } (HTTP 200) for an unreachable/non-HTML page — we do NOT fabricate a
+  // demo of a site we couldn't read.
+  if (!text || text.error || !text.checks) return 'skipped';
+  const checks = text.checks as { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
+  const finalUrl = (typeof text.url === 'string' && text.url) || target.url;
+
+  const imgResp = await scrapePage(target.url, 'images', env);
+  const images: string[] = Array.isArray(imgResp?.images)
+    ? (imgResp!.images as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u).slice(0, 12)
+    : [];
+  const contactResp = await scrapePage(target.url, 'contact', env);
+  const email: string | null = Array.isArray(contactResp?.emails) ? ((contactResp!.emails as string[])[0] ?? null) : null;
+
+  const audit = auditSite({
+    url: finalUrl, reachable: true,
+    title: (text.title as string) ?? null, description: (text.description as string) ?? null,
+    text: (text.text as string) ?? '', hasViewport: !!checks.viewport, hasForm: !!checks.form, emailFound: !!checks.email,
+  }, env.nowYear);
+
+  const raw = buildHuntProfileRaw({
+    url: finalUrl, niche, fallbackName: target.name,
+    page: { title: (text.title as string) ?? null, description: (text.description as string) ?? null },
+    images, email, audit,
+  });
+  const { profile } = parseBusinessProfile(raw);
+  if (!profile) return 'skipped';
+
+  // Save the profile + the deterministic recipe demo (identical to ingest-profile — one build path).
+  const { data: profileRow, error: pErr } = await admin.from('business_profiles').insert({
+    user_id: order.owner_id, business_name: profile.business_name, industry: profile.industry,
+    website_score: profile.current_website_score ?? null, profile,
+  }).select('id').single();
+  if (pErr || !profileRow) return 'skipped';
+
+  const spec = assembleFallbackSpec(profile);
+  const nonce = Math.random().toString(36).slice(2, 8);   // slug isn't enumerable by guessing names
+  const slug = `${previewSlug(profile.business_name)}-${nonce}`;
+  const previewUrl = env.appOrigin ? `${env.appOrigin}/preview-site/${slug}` : `/preview-site/${slug}`;
+  const pitch = buildHuntPitch(profile, previewUrl);
+
+  const { data: site, error: sErr } = await admin.from('preview_sites').insert({
+    user_id: order.owner_id, profile_id: profileRow.id, slug,
+    business_name: profile.business_name, industry: profile.industry,
+    spec, pitch, spec_source: 'fallback', status: 'preview',
+  }).select('id').single();
+  if (sErr || !site) return 'skipped';
+
+  // No public email → the demo is a warm asset the owner can send by hand, but there is nothing to
+  // queue. Honest: a built demo, not a queued pitch.
+  if (!email) return 'built';
+
+  const ok = await queueHuntPitch(admin, order.owner_id, {
+    previewSiteId: (site as { id: string }).id, businessProfileId: (profileRow as { id: string }).id,
+    businessName: profile.business_name, pitch, previewUrl, toEmail: email,
+  });
+  return ok ? 'queued' : 'built';
+}
+
+/** Server-side twin of queuePitch: contact → campaign → message(draft) → PENDING approval. Nothing
+ *  sends — the approval lands in the owner's queue. Suppression is sacred: a known unsubscribed/
+ *  bounced/complained contact is never re-queued, and an existing contact's status is never reset. */
+// deno-lint-ignore no-explicit-any
+async function queueHuntPitch(admin: any, uid: string, input: {
+  previewSiteId: string; businessProfileId: string; businessName: string; pitch: string; previewUrl: string; toEmail: string;
+}): Promise<boolean> {
+  const to = input.toEmail.toLowerCase().trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return false;
+
+  let contactId: string;
+  const { data: existing } = await admin.from('contacts')
+    .select('id, email_status').eq('owner_id', uid).eq('email', to).maybeSingle();
+  if (existing) {
+    const st = (existing as { email_status?: string }).email_status;
+    if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') return false;  // never re-contact
+    contactId = (existing as { id: string }).id;
+  } else {
+    const { data: c } = await admin.from('contacts').insert({
+      owner_id: uid, business_profile_id: input.businessProfileId, email: to, email_status: 'unknown', is_primary: true,
+    }).select('id').maybeSingle();
+    if (c) contactId = (c as { id: string }).id;
+    else {
+      const { data: again } = await admin.from('contacts').select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
+      if (!again) return false;
+      contactId = (again as { id: string }).id;
+    }
+  }
+
+  const { data: camp } = await admin.from('outreach_campaigns').insert({
+    owner_id: uid, business_profile_id: input.businessProfileId, contact_id: contactId,
+    preview_site_id: input.previewSiteId, kind: 'cold_site_pitch', state: 'pending_approval',
+  }).select('id').single();
+  if (!camp) return false;
+
+  const subject = `A new website for ${input.businessName}`;
+  const body = `${input.pitch.trim()}\n\nTake a look: ${input.previewUrl}`;
+  const { data: msg } = await admin.from('outreach_messages').insert({
+    owner_id: uid, campaign_id: (camp as { id: string }).id, contact_id: contactId, preview_site_id: input.previewSiteId,
+    sequence_step: 0, subject, body_text: body, to_address: to, status: 'draft',
+  }).select('id').single();
+  if (!msg) return false;
+
+  // The approval is payload-hash bound exactly like enqueueApproval — the send executor refuses if
+  // the payload changes after this decision. requested_by 'garvis-auto' marks a machine-queued
+  // request; status defaults to 'pending', so the OWNER still approves each send.
+  const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id };
+  const payload_hash = await hashPayload(payload);
+  const { error: apErr } = await admin.from('approvals').insert({
+    owner_id: uid, kind: 'send_email',
+    title: `Pitch "${input.businessName}" → ${to}`,
+    preview: `${subject}\n\n${body}`,
+    payload, payload_hash, requested_by: 'garvis-auto',
+  });
+  return !apErr;
 }
