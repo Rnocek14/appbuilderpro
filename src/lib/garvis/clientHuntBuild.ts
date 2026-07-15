@@ -62,6 +62,7 @@ export function fieldsFromPage(
   page: { title?: string | null; description?: string | null },
   niche: string,
   fallbackName: string,
+  location?: string | null,   // a REAL location (e.g. from Google Places city/state) — honest, not guessed
 ): ExtractedFields {
   const name = cleanBusinessName(page.title) ?? cleanBusinessName(fallbackName) ?? fallbackName.trim();
   const trade = titleCase(niche.trim());
@@ -70,7 +71,7 @@ export function fieldsFromPage(
     industry: trade || 'Local business',
     // One honest, generic service = the trade itself. We never invent a named service list.
     services: [trade || 'Services'],
-    location: null,
+    location: (location && location.trim()) ? location.trim().slice(0, 120) : null,
     hours: null,
     reviews_summary: null,
     google_rating: null,
@@ -81,18 +82,21 @@ export function fieldsFromPage(
 export interface HuntProfileInput {
   url: string;
   niche: string;
-  fallbackName: string;                                   // the Serper result name (always present)
+  fallbackName: string;                                   // the discovered business name (always present)
   page: { title?: string | null; description?: string | null };
   images: string[];                                       // photo URLs from their own site (mode 'images')
   email: string | null;                                   // their published contact email (mode 'contact')
   audit: SiteAudit;                                       // the honest siteAudit of their current site
+  location?: string | null;                               // real city/state (e.g. from Places) — optional
+  phone?: string | null;                                  // real phone (e.g. from Places) — optional
 }
 
 /** Merge the deterministic fields + scraped assets + audit into a raw BusinessProfile object for
  *  parseBusinessProfile to validate. Reuses the exact same buildProfile the interactive scraper uses
- *  (one implementation), so photo provenance + honesty are identical. */
+ *  (one implementation), so photo provenance + honesty are identical. A real location/phone (from
+ *  Google Places) rides through when provided — never invented. */
 export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unknown> {
-  const fields = fieldsFromPage(input.page, input.niche, input.fallbackName);
+  const fields = fieldsFromPage(input.page, input.niche, input.fallbackName, input.location);
   const ctx: ScrapeContext = {
     url: input.url,
     images: input.images,
@@ -100,7 +104,9 @@ export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unk
     auditScore: input.audit.reachable ? input.audit.score : null,
     auditIssues: auditIssues(input.audit),
   };
-  return buildProfile(fields, ctx);
+  const raw = buildProfile(fields, ctx);
+  if (input.phone && input.phone.trim()) raw.phone = input.phone.trim().slice(0, 40);  // real Places phone
+  return raw;
 }
 
 /** The deterministic outreach pitch — a byte-for-byte match of engine.ts's generatePitch FALLBACK
@@ -118,11 +124,19 @@ ${previewUrl}
 If you like it, publishing it takes a day. No obligation either way.`;
 }
 
-/** The honest one-line record of a day's run for the order's history + the owner's digest. */
-export function huntRunLine(label: string, built: number, queued: number): string {
-  if (built === 0) return `${label}: no beatable prospects turned up today — nothing built. Will sweep fresh markets tomorrow.`;
-  const pitched = queued === 0
-    ? 'none had a public email, so nothing was queued to send'
-    : `${queued} had a public email and ${queued === 1 ? 'was' : 'were'} queued for your approval`;
-  return `${label}: built ${built} demo${built === 1 ? '' : 's'} today — ${pitched}. Nothing sent on its own.`;
+/** The honest one-line record of a day's run for the order's history + the owner's digest.
+ *  Reports what was DISCOVERED (real Places businesses added to the lead pool) and what was BUILT
+ *  (demos + queued pitches) — the two phases of a daily run. */
+export function huntRunLine(label: string, discovered: number, built: number, queued: number): string {
+  if (discovered === 0 && built === 0) {
+    return `${label}: no new businesses turned up today — those markets look tapped. Will try fresh ones next run.`;
+  }
+  const parts = [`found ${discovered} new business${discovered === 1 ? '' : 'es'}`];
+  if (built > 0) {
+    const pitched = queued === 0
+      ? 'none had a public email, so nothing was queued to send'
+      : `${queued} had a public email and ${queued === 1 ? 'was' : 'were'} queued for your approval`;
+    parts.push(`built ${built} demo${built === 1 ? '' : 's'} — ${pitched}`);
+  }
+  return `${label}: ${parts.join('; ')}. Nothing sent on its own.`;
 }

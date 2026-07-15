@@ -336,7 +336,7 @@ export default function WinClients() {
                 <div className="flex items-center gap-1.5 text-sm font-medium text-forge-ink"><CalendarClock size={14} className="text-forge-ember" /> Put it on autopilot</div>
                 <p className="mt-0.5 text-[11.5px] text-forge-dim">{huntSummary(huntCfgPreview)}</p>
                 {!niche.trim() && (
-                  <p className="mt-0.5 text-[10.5px] text-forge-ok/90">✓ No niche needed — it hunts every kind of local business. Type a niche above to narrow it.</p>
+                  <p className="mt-0.5 text-[10.5px] text-forge-ok/90">✓ No niche needed — it hunts every kind of local business, including ones with <em>no website yet</em> (your best prospects). Type a niche above to narrow it.</p>
                 )}
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <label className="flex items-center gap-1 text-[11px] text-forge-dim">Searches/day
@@ -351,7 +351,7 @@ export default function WinClients() {
                     {savingHunt ? <Loader2 size={13} className="animate-spin" /> : <CalendarClock size={13} />} Turn on daily hunt
                   </Button>
                 </div>
-                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-forge-dim/80"><Info size={11} /> Runs on Garvis’s daily heartbeat across the scope above. Every demo + pitch lands in your Queue to approve — nothing sends on its own.</p>
+                <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-forge-dim/80"><Info size={11} /> Runs daily via Google Places — real businesses with phone + address, deduped, and no market swept twice (it stops once one is tapped out). Every demo + pitch lands in your Queue to approve — nothing sends on its own.</p>
               </div>
             )}
           </div>

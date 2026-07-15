@@ -109,11 +109,14 @@ const serper = {
   check('no [Name]-style placeholders leak', !/\[[A-Za-z]/.test(pitch));
 }
 
-// --- huntRunLine: the honest daily record ------------------------------------------------------
+// --- huntRunLine: the honest daily record (discovered + built + queued) ------------------------
 {
-  check('a day that built nothing says so', /nothing was built|nothing built/i.test(huntRunLine('Roofers hunt', 0, 0)));
-  check('a productive day reports built + queued + the send boundary', /built 3 demos/.test(huntRunLine('Roofers hunt', 3, 2)) && /approval/.test(huntRunLine('Roofers hunt', 3, 2)) && /Nothing sent on its own/.test(huntRunLine('Roofers hunt', 3, 2)));
-  check('built-but-no-email is honest that nothing queued', /nothing was queued/.test(huntRunLine('Roofers hunt', 2, 0)));
+  check('a dry day says the markets look tapped', /tapped|no new businesses/i.test(huntRunLine('Roofers hunt', 0, 0, 0)));
+  const productive = huntRunLine('Roofers hunt', 12, 3, 2);
+  check('a productive day reports discovered + built + queued + the send boundary',
+    /found 12 new businesses/.test(productive) && /built 3 demos/.test(productive) && /approval/.test(productive) && /Nothing sent on its own/.test(productive));
+  check('built-but-no-email is honest that nothing queued', /nothing was queued/.test(huntRunLine('Roofers hunt', 5, 2, 0)));
+  check('discovered-but-not-yet-built is still reported', /found 8 new businesses/.test(huntRunLine('Roofers hunt', 8, 0, 0)) && !/built/.test(huntRunLine('Roofers hunt', 8, 0, 0)));
 }
 
 console.log(`\nclientHuntBuild.verify: ${passed} passed, ${failed} failed`);

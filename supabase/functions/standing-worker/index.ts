@@ -25,11 +25,17 @@ import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { pickNextPending, mergeTemplate, batchProgress, type BatchRecipient } from '../_shared/batchCore.ts';
-// DAILY AUTOMATIC CLIENT HUNT (client_hunt kind) — the scheduling brain + the pure builders are
-// verified in src; this worker is only the I/O around them (Serper search, fetch-url scrape, DB writes).
-import { parseHuntConfig, plannedHuntToday, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
-import { pickHuntTargets, buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
+// DAILY AUTOMATIC CLIENT HUNT (client_hunt kind) — the discovery brain + the pure builders are
+// verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
+// writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
+import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
+import { buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
 import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
+import { citiesFor } from '../../../src/lib/garvis/usCities.ts';
+import {
+  PLACES_FIELD_MASK, parsePlace, buildDiscoveryQueries, exhaustionUpdate,
+  type PlaceRaw, type DiscoveredBiz,
+} from '../../../src/lib/garvis/placesDiscovery.ts';
 import { parseBusinessProfile, assembleFallbackSpec, previewSlug } from '../_shared/previewSpec.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
 
@@ -237,7 +243,6 @@ Deno.serve(async (req) => {
           last_run_at: nowIso,
           last_result: { status: r.built > 0 ? 'changed' : 'unchanged', line: r.line, hash: null, excerpt: null, checkedAt: nowIso },
           next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
-          config: { ...(order.config ?? {}), cursor: r.nextCursor },  // advance the sweep for tomorrow
           updated_at: nowIso,
         }).eq('id', order.id);
         // Surface a productive day once (deduped by order+date) — the waking moment reads these.
@@ -252,7 +257,7 @@ Deno.serve(async (req) => {
             await admin.from('mind_events').insert({
               owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
               subject: r.line.slice(0, 300),
-              payload: { key, order_id: order.id, kind: order.kind, built: r.built, queued: r.queued },
+              payload: { key, order_id: order.id, kind: order.kind, discovered: r.discovered, built: r.built, queued: r.queued },
             });
             const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
             await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, r.line).catch(() => {});
@@ -432,66 +437,149 @@ async function runDigest(admin: any, order: OrderRow, nowIso: string): Promise<W
   return { status: madeCount > 0 ? 'changed' : 'unchanged', line, hash: `digest-${bucket}`, excerpt: null, checkedAt: nowIso };
 }
 
-// --- client_hunt: the daily automatic prospecting run --------------------------------------------
-// Executes ONE day's slice of a standing hunt: sweep today's fresh cities (rolling cursor), find real
-// businesses, and for up to demoQuota of them build a demo + queue a pitch. All the decisions —
-// which cities, which businesses, what the profile/pitch say — come from the VERIFIED pure modules;
-// this function is only Serper + fetch-url + DB. A soft time budget keeps a hand-edited large config
-// from overrunning the edge invocation (the cursor still advances, so tomorrow picks up fresh).
+// --- client_hunt: the daily automatic prospecting run (Google Places) ----------------------------
+// Two phases per run, the swift-prep-pros model. DISCOVER: run the next-best non-exhausted Places
+// queries, persisting every REAL business into the lead pool (deduped) and marking a market drained
+// after two zero-insert runs. BUILD: turn up to demoQuota fresh leads into demos + queued pitches,
+// NO-WEBSITE prospects first (they need a site the most). All decisions come from the VERIFIED pure
+// modules; this is only Places + fetch-url + DB. A soft time budget bounds the invocation.
 const HUNT_TIME_BUDGET_MS = 90_000;
+const DISCOVER_BUDGET_MS = 55_000;   // cap discovery so building always gets a share of the window
+const PLACES_PAGES = 2;   // pages per query (≤20 results each) — bounds Places cost per search
 
-interface HuntEnv { supabaseUrl: string; workerSecret: string; appOrigin: string; nowYear: number }
+interface HuntEnv { supabaseUrl: string; workerSecret: string; appOrigin: string; placesKey: string; nowYear: number }
+interface QueryRowDB { id: string; query_text: string; keyword: string; last_run_at: string | null; exhausted: boolean; total_inserted: number; run_count: number; consecutive_zero_runs: number }
+interface LeadRow { id: string; place_id: string | null; company_name: string; keyword: string; website: string | null; phone: string | null; city: string | null; state: string | null }
 
 // deno-lint-ignore no-explicit-any
 async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
-  Promise<{ built: number; queued: number; line: string; nextCursor: number }> {
-  const cfg: HuntConfig | null = parseHuntConfig(order.config);
-  const cursorRaw = order.config?.cursor;
-  const cursor = typeof cursorRaw === 'number' && isFinite(cursorRaw) ? cursorRaw : 0;
-  if (!cfg) return { built: 0, queued: 0, line: `${order.label}: no niche is configured — nothing to hunt. Set it up on Win Clients.`, nextCursor: cursor };
-
-  const plan = plannedHuntToday(cfg, cursor);
-  const serperKey = Deno.env.get('SERPER_API_KEY');
-  if (!serperKey) return { built: 0, queued: 0, line: `${order.label}: search isn’t configured on the server (SERPER_API_KEY missing) — nothing was hunted.`, nextCursor: plan.nextCursor };
+  Promise<{ discovered: number; built: number; queued: number; line: string }> {
+  const cfg = parseHuntConfig(order.config);
+  if (!cfg) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: no config — nothing to hunt. Set it up on Win Clients.` };
+  const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+  if (!placesKey) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: Google Places isn’t configured on the server (GOOGLE_PLACES_API_KEY missing) — nothing was hunted.` };
 
   const env: HuntEnv = {
     supabaseUrl: Deno.env.get('SUPABASE_URL')!,
     workerSecret: Deno.env.get('WORKER_SECRET') ?? '',
     appOrigin: Deno.env.get('APP_ORIGIN') ?? '',
+    placesKey,
     nowYear: new Date(nowIso).getUTCFullYear(),
   };
   const startedMs = Date.now();
-  const seenDomains = new Set<string>();   // a business found in two cities is built once (per run)
-  let built = 0; let queued = 0;
 
-  for (const qy of plan.queries) {
-    if (built >= cfg.demoQuota) break;
-    if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;   // soft budget — cursor already advances
-    // Real businesses for this city — Google organic via Serper, never invented.
-    let serperData: unknown;
-    try {
-      const r = await fetch('https://google.serper.dev/search', {
-        method: 'POST',
-        headers: { 'X-API-KEY': serperKey, 'content-type': 'application/json' },
-        body: JSON.stringify({ q: `${qy.niche} ${qy.area}` }),
-      });
-      if (!r.ok) continue;
-      serperData = await r.json();
-    } catch { continue; }   // one city's search failing never sinks the day
+  // Seed the discovery queue once per owner (idempotent: unique(owner, query_text) makes a re-seed a
+  // no-op). buildDiscoveryQueries expands the niches (or the whole catalog) × the scope's cities.
+  await ensureDiscoveryQueue(admin, order.owner_id, cfg);
 
-    const targets = pickHuntTargets(serperData, cfg.demoQuota - built, seenDomains);
-    for (const t of targets) {
-      if (built >= cfg.demoQuota) break;
-      if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;
-      try {
-        const outcome = await buildOneDemo(admin, order, qy.niche, t, env);  // per-query type (grid mixes types)
-        if (outcome === 'queued') { built++; queued++; }
-        else if (outcome === 'built') built++;
-        // 'skipped' → unreachable/invalid; nothing recorded, nothing faked
-      } catch { /* one prospect failing never sinks the day */ }
-    }
+  // --- DISCOVER: run up to searchesPerDay next-best queries, persist the real businesses ----------
+  let discovered = 0;
+  const { data: queries } = await admin.from('discovery_queries')
+    .select('id, query_text, keyword, last_run_at, exhausted, total_inserted, run_count, consecutive_zero_runs')
+    .eq('owner_id', order.owner_id).eq('exhausted', false)
+    .order('last_run_at', { ascending: true, nullsFirst: true })   // never-run first, then least-recent
+    .limit(cfg.searchesPerDay);
+  for (const q of (queries ?? []) as QueryRowDB[]) {
+    if (Date.now() - startedMs > DISCOVER_BUDGET_MS) break;   // leave time for the build phase
+    discovered += await runDiscoveryQuery(admin, order.owner_id, q, env);
   }
-  return { built, queued, line: huntRunLine(order.label, built, queued), nextCursor: plan.nextCursor };
+
+  // --- BUILD: up to demoQuota fresh leads → demo + pitch, NO-WEBSITE prospects first --------------
+  let built = 0; let queued = 0;
+  const { data: leads } = await admin.from('discovered_businesses')
+    .select('id, place_id, company_name, keyword, website, phone, city, state')
+    .eq('owner_id', order.owner_id).eq('status', 'new')
+    .order('has_website', { ascending: true }).order('created_at', { ascending: true })
+    .limit(cfg.demoQuota);
+  for (const lead of (leads ?? []) as LeadRow[]) {
+    if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;
+    try {
+      const outcome = await buildDemoForLead(admin, order, lead, env);
+      if (outcome === 'queued') { built++; queued++; }
+      else if (outcome === 'built') built++;
+      else await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: nowIso }).eq('id', lead.id);
+    } catch { /* one lead failing never sinks the day */ }
+  }
+
+  return { discovered, built, queued, line: huntRunLine(order.label, discovered, built, queued) };
+}
+
+/** Seed the discovery queue on the owner's first run (skipped once any rows exist). Chunked upsert,
+ *  ignoreDuplicates — the unique(owner, query_text) index makes it safe + idempotent. */
+// deno-lint-ignore no-explicit-any
+async function ensureDiscoveryQueue(admin: any, ownerId: string, cfg: HuntConfig): Promise<void> {
+  const { count } = await admin.from('discovery_queries')
+    .select('id', { count: 'exact', head: true }).eq('owner_id', ownerId);
+  if ((count ?? 0) > 0) return;
+  const niches = cfg.niches.length ? cfg.niches : [...LOCAL_NICHES];
+  const cities = citiesFor(cfg.scope).map((c) => ({ city: c.city, state: c.state }));
+  const rows = buildDiscoveryQueries(niches, cities).map((r) => ({ owner_id: ownerId, ...r }));
+  for (let i = 0; i < rows.length; i += 500) {
+    await admin.from('discovery_queries').upsert(rows.slice(i, i + 500), { onConflict: 'owner_id,query_text', ignoreDuplicates: true });
+  }
+}
+
+/** Run ONE discovery query: Places search (paginated) → parse → dedupe-insert into the lead pool.
+ *  Always records the attempt (counters + exhaustion) even if it threw, so the queue keeps rolling. */
+// deno-lint-ignore no-explicit-any
+async function runDiscoveryQuery(admin: any, ownerId: string, q: QueryRowDB, env: HuntEnv): Promise<number> {
+  let inserted = 0;
+  try {
+    for (const raw of await fetchPlaces(env.placesKey, q.query_text, PLACES_PAGES)) {
+      const biz = parsePlace(raw, q.keyword);
+      if (biz && await insertLead(admin, ownerId, biz, q.id)) inserted++;
+    }
+  } catch { /* one query failing never sinks the run — still record the attempt below */ }
+  const upd = exhaustionUpdate(q, inserted);
+  await admin.from('discovery_queries').update({
+    last_run_at: new Date().toISOString(),
+    last_inserted: upd.last_inserted, total_inserted: upd.total_inserted,
+    run_count: upd.run_count, consecutive_zero_runs: upd.consecutive_zero_runs, exhausted: upd.exhausted,
+  }).eq('id', q.id);
+  return inserted;
+}
+
+/** Google Places textSearch, paginated. Returns structured business records — never invented. */
+async function fetchPlaces(apiKey: string, textQuery: string, pages: number): Promise<PlaceRaw[]> {
+  const all: PlaceRaw[] = [];
+  let pageToken: string | undefined;
+  for (let i = 0; i < pages; i++) {
+    const body: Record<string, unknown> = { textQuery, maxResultCount: 20, regionCode: 'US' };
+    if (pageToken) body.pageToken = pageToken;
+    const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': PLACES_FIELD_MASK },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) break;
+    const json = (await res.json()) as { places?: PlaceRaw[]; nextPageToken?: string };
+    if (json.places?.length) all.push(...json.places);
+    if (!json.nextPageToken) break;
+    pageToken = json.nextPageToken;
+    await new Promise((r) => setTimeout(r, 2000));  // Places needs a short delay before a pageToken is valid
+  }
+  return all;
+}
+
+/** Insert a discovered business, deduped per owner by place_id then normalized website. Returns true
+ *  only when a genuinely NEW lead was stored (so the discovery count is honest). */
+// deno-lint-ignore no-explicit-any
+async function insertLead(admin: any, ownerId: string, biz: DiscoveredBiz, queryId: string): Promise<boolean> {
+  if (biz.place_id) {
+    const { data } = await admin.from('discovered_businesses').select('id').eq('owner_id', ownerId).eq('place_id', biz.place_id).maybeSingle();
+    if (data) return false;
+  }
+  if (biz.website_normalized) {
+    const { data } = await admin.from('discovered_businesses').select('id').eq('owner_id', ownerId).eq('website_normalized', biz.website_normalized).maybeSingle();
+    if (data) return false;
+  }
+  const { error } = await admin.from('discovered_businesses').insert({
+    owner_id: ownerId, place_id: biz.place_id, company_name: biz.company_name, keyword: biz.keyword,
+    website: biz.website, website_normalized: biz.website_normalized, phone: biz.phone, address: biz.address,
+    city: biz.city, state: biz.state, category: biz.category, lat: biz.lat, lng: biz.lng,
+    has_website: biz.has_website, status: 'new', source_query_id: queryId,
+  });
+  return !error;   // a unique-violation race → not counted as new (correct)
 }
 
 /** Read one page through the SAME hardened scrape path the app uses (fetch-url), authenticated with
@@ -508,36 +596,44 @@ async function scrapePage(url: string, mode: 'text' | 'images' | 'contact', env:
   } catch { return null; }
 }
 
-/** Build ONE demo from a target: scrape → honest audit → deterministic profile → recipe demo →
- *  pitch → (if a public email exists) a PENDING approval. Returns what actually happened. Mirrors
- *  ingest-profile's save path (one build path) and queuePitch's queue path (approval-gated). */
+/** Build ONE demo from a discovered lead. A lead WITH a website is scraped for real content/photos/
+ *  email + honestly audited; a lead with NO website (the strongest "build you a site" prospect) is
+ *  built from the Places facts alone (real name/type/city/phone — never invented). Then: recipe demo
+ *  → pitch → (if a public email exists) a PENDING approval. Mirrors ingest-profile's save path and
+ *  queuePitch's queue path. Also marks the lead built + links the demo. */
 // deno-lint-ignore no-explicit-any
-async function buildOneDemo(admin: any, order: OrderRow, niche: string, target: { name: string; url: string }, env: HuntEnv):
+async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env: HuntEnv):
   Promise<'queued' | 'built' | 'skipped'> {
-  const text = await scrapePage(target.url, 'text', env);
-  // fetch-url returns { error } (HTTP 200) for an unreachable/non-HTML page — we do NOT fabricate a
-  // demo of a site we couldn't read.
-  if (!text || text.error || !text.checks) return 'skipped';
-  const checks = text.checks as { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
-  const finalUrl = (typeof text.url === 'string' && text.url) || target.url;
+  const location = [lead.city, lead.state].filter(Boolean).join(', ') || null;
+  let images: string[] = [];
+  let email: string | null = null;
+  let page: { title: string | null; description: string | null } = { title: null, description: null };
+  let finalUrl = lead.website ?? '';
+  // Default (no site, or an unreachable one): an honest "no website" audit — no invented score.
+  let audit = auditSite({ url: finalUrl, reachable: false }, env.nowYear);
 
-  const imgResp = await scrapePage(target.url, 'images', env);
-  const images: string[] = Array.isArray(imgResp?.images)
-    ? (imgResp!.images as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u).slice(0, 12)
-    : [];
-  const contactResp = await scrapePage(target.url, 'contact', env);
-  const email: string | null = Array.isArray(contactResp?.emails) ? ((contactResp!.emails as string[])[0] ?? null) : null;
-
-  const audit = auditSite({
-    url: finalUrl, reachable: true,
-    title: (text.title as string) ?? null, description: (text.description as string) ?? null,
-    text: (text.text as string) ?? '', hasViewport: !!checks.viewport, hasForm: !!checks.form, emailFound: !!checks.email,
-  }, env.nowYear);
+  if (lead.website) {
+    const text = await scrapePage(lead.website, 'text', env);
+    if (text && !text.error && text.checks) {   // reachable HTML — read their real site
+      const checks = text.checks as { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
+      finalUrl = (typeof text.url === 'string' && text.url) || lead.website;
+      page = { title: (text.title as string) ?? null, description: (text.description as string) ?? null };
+      const imgResp = await scrapePage(lead.website, 'images', env);
+      images = Array.isArray(imgResp?.images)
+        ? (imgResp!.images as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u).slice(0, 12)
+        : [];
+      const contactResp = await scrapePage(lead.website, 'contact', env);
+      email = Array.isArray(contactResp?.emails) ? ((contactResp!.emails as string[])[0] ?? null) : null;
+      audit = auditSite({
+        url: finalUrl, reachable: true, title: page.title, description: page.description,
+        text: (text.text as string) ?? '', hasViewport: !!checks.viewport, hasForm: !!checks.form, emailFound: !!checks.email,
+      }, env.nowYear);
+    }
+  }
 
   const raw = buildHuntProfileRaw({
-    url: finalUrl, niche, fallbackName: target.name,
-    page: { title: (text.title as string) ?? null, description: (text.description as string) ?? null },
-    images, email, audit,
+    url: finalUrl, niche: lead.keyword, fallbackName: lead.company_name,
+    page, images, email, audit, location, phone: lead.phone,
   });
   const { profile } = parseBusinessProfile(raw);
   if (!profile) return 'skipped';
@@ -562,8 +658,13 @@ async function buildOneDemo(admin: any, order: OrderRow, niche: string, target: 
   }).select('id').single();
   if (sErr || !site) return 'skipped';
 
-  // No public email → the demo is a warm asset the owner can send by hand, but there is nothing to
-  // queue. Honest: a built demo, not a queued pitch.
+  // The lead now has a demo — mark it built + link the preview so it never gets re-built.
+  await admin.from('discovered_businesses')
+    .update({ status: 'built', preview_site_id: (site as { id: string }).id, updated_at: new Date().toISOString() })
+    .eq('id', lead.id);
+
+  // No public email → the demo is a warm asset (plus a real phone lead from Places), but there is
+  // nothing to email. Honest: a built demo, not a queued pitch.
   if (!email) return 'built';
 
   const ok = await queueHuntPitch(admin, order.owner_id, {
