@@ -7,7 +7,8 @@ import { EMAIL_SPEC } from './emailStudio';
 import { ADS_SPEC } from './adsStudio';
 import { COPY_SPEC } from './copyStudio';
 import { SOCIAL_SPEC } from './socialStudio';
-import { REEL_SPEC } from './reelStudio';
+// NOTE: the reel studio is NOT here — it graduated to its own three-stage pipeline (Ideation → Script →
+// Scene), not a flat IdeaStudio spec, so it has its own suite: reelStudio.verify.ts.
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -27,7 +28,7 @@ const gen: StudioCtx = { businessName: "Rosa's Bakery", agentName: 'Rosa', phone
 }
 
 // --- every studio spec is a well-formed, cohesive plug-in --------------------------------
-const SPECS: StudioSpec[] = [EMAIL_SPEC, ADS_SPEC, COPY_SPEC, SOCIAL_SPEC, REEL_SPEC];
+const SPECS: StudioSpec[] = [EMAIL_SPEC, ADS_SPEC, COPY_SPEC, SOCIAL_SPEC];
 for (const spec of SPECS) {
   const tag = spec.kind;
   check(`[${tag}] has title/subtitle/emoji/savePrefix`, !!spec.title && !!spec.subtitle && !!spec.emoji && !!spec.savePrefix);
@@ -54,12 +55,11 @@ for (const spec of SPECS) {
 // --- honesty across the board: unknowns are EDIT holes, never invented ----------------------
 {
   // With a bare context, every studio should surface visible EDIT holes and never fabricate a number/URL.
-  const BIZ_USING = new Set(['email', 'ads', 'copy', 'social']);  // reels are faceless — no business name
   for (const spec of SPECS) {
     const ideas = spec.ideasFor(false);
     const blob = ideas.map((i) => exampleToText(spec.build(i.id, bare, 0)!)).join('\n');
     const holes = /\[EDIT:/.test(blob);
-    const bizHole = !BIZ_USING.has(spec.kind) || /\[EDIT: your business\]/.test(blob);
+    const bizHole = /\[EDIT: your business\]/.test(blob);
     check(`[${spec.kind}] bare context → visible [EDIT] holes, never a fabricated fact`, holes && bizHole);
   }
 }

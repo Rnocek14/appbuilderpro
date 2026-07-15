@@ -8,7 +8,7 @@ import { EMAIL_SPEC } from '../../lib/garvis/emailStudio';
 import { ADS_SPEC } from '../../lib/garvis/adsStudio';
 import { COPY_SPEC } from '../../lib/garvis/copyStudio';
 import { SOCIAL_SPEC } from '../../lib/garvis/socialStudio';
-import { REEL_SPEC } from '../../lib/garvis/reelStudio';
+import { ReelStudio } from '../../components/garvis/ReelStudio';
 import type { StudioCtx } from '../../lib/garvis/studioKit';
 
 const CTX: StudioCtx = { businessName: 'Lakeside Realty', agentName: 'Jane Doe', phone: '(262) 555-0148', area: 'Lake Geneva', realEstate: true };
@@ -23,7 +23,7 @@ export default function StudiosPreview() {
         <section data-studio="ads"><IdeaStudio spec={ADS_SPEC} worldId="dev" clusterId={null} onToast={noop} ctxOverride={CTX} /></section>
         <section data-studio="copy"><IdeaStudio spec={COPY_SPEC} worldId="dev" clusterId={null} onToast={noop} ctxOverride={CTX} /></section>
         <section data-studio="social"><IdeaStudio spec={SOCIAL_SPEC} worldId="dev" clusterId={null} onToast={noop} ctxOverride={CTX} /></section>
-        <section data-studio="reel"><IdeaStudio spec={REEL_SPEC} worldId="dev" clusterId={null} onToast={noop} ctxOverride={CTX} /></section>
+        <section data-studio="reel"><ReelStudio worldId="dev" clusterId={null} onToast={noop} ctxOverride={CTX} /></section>
       </div>
     </div>
   );
