@@ -20,6 +20,8 @@ export interface PostcardContent {
   campaignType: CampaignType;
   imageMode: 'photo' | 'brand' | 'ai';   // real photo · designed brand card · AI illustration
   aiNote: string | null;                 // the honesty label shown when imageMode === 'ai'
+  /** The board-copy editor's verdict when AI wrote these words (1-10 + its notes). Persisted with the tile. */
+  quality?: { score: number; notes: string } | null;
 }
 
 /** One "kind" of postcard — the chips on the make bar. Maps to a persuasion concept + a campaign type

@@ -82,6 +82,7 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
         ? '🎨 AI imagery is off — cards use your brand design and real photos. Connect an image key to generate imagery.'
         : 'Real facts fill in; anything unknown shows as an [EDIT] you complete. Nothing mails from here — print, then log what you sent.',
       captionOf: (c) => `${kindById(c.kindId)?.label ?? 'Postcard'}${c.imageMode === 'ai' ? ' · AI image' : c.imageMode === 'photo' ? ' · photo' : ' · brand'}`,
+      qualityOf: (c) => c.quality ?? null,
       references: [
         ...(materials.brand?.palette?.length ? [{ label: 'Brand palette', swatches: materials.brand.palette }] : []),
         ...materials.images.slice(0, 8).map((i) => ({ label: i.caption || i.label || 'your photo', url: i.url })),
@@ -99,7 +100,7 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
             materials: copyFacts(materials),
           });
           if (!ai.ok) explainCopyMiss(ai, onToast);
-          if (ai.ok) content = applyCopyFields(content, ai.fields as PostcardCopyFields);
+          if (ai.ok) content = { ...applyCopyFields(content, ai.fields as PostcardCopyFields), quality: ai.quality };
         }
         if (!kind.needsRealPhoto && tileAllowsAI(content) && aiState !== 'off') {
           content = await tryImage(content, prompt || null);
@@ -118,7 +119,7 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
             current: { headline: parent.spec.front.headline, sub: parent.spec.front.kicker, body: parent.spec.back.body, cta: parent.spec.back.cta },
           });
           if (!ai.ok) explainCopyMiss(ai, onToast);
-          if (ai.ok) content = applyCopyFields(content, ai.fields as PostcardCopyFields);
+          if (ai.ok) content = { ...applyCopyFields(content, ai.fields as PostcardCopyFields), quality: ai.quality };
         }
         if (r.wantsImage && aiState !== 'off') return tryImage(content, r.imageStyle);
         return content;

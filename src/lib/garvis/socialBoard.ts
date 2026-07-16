@@ -28,6 +28,8 @@ export interface SocialContent {
   imageUrl: string | null;
   imageMode: 'photo' | 'brand' | 'ai';
   aiNote: string | null;
+  /** The board-copy editor's verdict when AI wrote these words (1-10 + its notes). Persisted with the tile. */
+  quality?: { score: number; notes: string } | null;
 }
 
 /** The real materials the content builder needs (socialBoardRun supplies these from the world + brand). */
@@ -40,6 +42,8 @@ export interface SocialMaterials {
   images: { url: string; caption: string | null; label: string | null }[];
   // Voice for the copy seam — the difference between on-brand words and generic AI copy.
   tone?: string | null;
+  /** A REAL post the owner already approved and published — the voice the AI matches, never invents. */
+  voiceExample?: string | null;
   audience?: string | null;
   offerings?: string[];
 }

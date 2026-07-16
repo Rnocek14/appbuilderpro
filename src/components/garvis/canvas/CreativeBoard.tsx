@@ -50,6 +50,8 @@ export interface CreativeBoardAdapter<C> {
   banner?: ReactNode;                 // honesty / availability line under the make bar
   extraControls?: ReactNode;          // channel-specific make-bar controls (e.g. a platform selector)
   captionOf: (content: C) => string;
+  /** The editor's verdict for AI-written tiles — rendered as a score badge (hover = the notes). */
+  qualityOf?: (content: C) => { score: number; notes: string } | null;
   generate: (args: { prompt: string; kindId: string | null }) => Promise<C>;
   rendition: (args: { parent: C; instruction: string }) => Promise<C>;
   renderThumb: (content: C) => ReactNode;
@@ -404,6 +406,9 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
                   {adapter.renderThumb(t.content)}
                 </div>
                 {t.parentId && <span className="cb-badge">rendition</span>}
+                {(() => { const q = adapter.qualityOf?.(t.content); return q
+                  ? <span className={cn('cb-q', q.score >= 8 && 'cb-q-good')} title={`Editor: ${q.notes}`}>✓ {q.score}</span>
+                  : null; })()}
                 {t.favorite && <span className="cb-fav"><Star size={12} className="fill-current" /></span>}
                 <div className="cb-hover">
                   <button className="cb-mini" title="Open & edit" onClick={(e) => { e.stopPropagation(); setFocusId(t.id); }}><Maximize2 size={13} /></button>
@@ -575,6 +580,8 @@ const CB_CSS = `
 .cb-mini{display:grid;place-items:center;height:26px;width:26px;border-radius:7px;color:#f0e6da;background:rgba(255,255,255,.1)}
 .cb-mini:hover{background:rgba(255,138,61,.35)}
 .cb-cap{margin-top:5px;font-size:10.5px;color:rgb(var(--forge-dim,139 144 160));max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+.cb-q{position:absolute;right:6px;bottom:6px;z-index:3;font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:rgba(0,0,0,.55);color:rgb(var(--forge-dim,139 144 160));border:1px solid rgb(var(--forge-border,38 43 58));cursor:help}
+.cb-q-good{color:#4ade80;border-color:rgba(74,222,128,.4)}
 .cb-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
 .cb-modal{width:min(92vw,440px);border-radius:14px;border:1px solid rgb(var(--forge-border,38 43 58));background:rgb(var(--forge-panel,18 21 29));padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
 .cb-refs{position:absolute;left:0;top:0;bottom:0;z-index:5;display:flex;align-items:flex-start;pointer-events:none}

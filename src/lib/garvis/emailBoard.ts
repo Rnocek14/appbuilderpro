@@ -15,6 +15,8 @@ export interface EmailContent {
   subject: string;
   subjectOptions: string[];     // the kind's subject angles (so renditions can cycle them, pure)
   body: string;
+  /** The board-copy editor's verdict when AI wrote these words (1-10 + its notes). Persisted with the tile. */
+  quality?: { score: number; notes: string } | null;
 }
 
 export interface EmailMaterials {

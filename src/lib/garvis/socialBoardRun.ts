@@ -4,6 +4,7 @@
 // photo), and QUEUE a post to the approval-gated publisher — the loop actually closes (unlike print).
 // Nothing posts here; queueSocialPost snapshots the post and enqueues one publish_post approval.
 
+import { supabase } from '../supabase';
 import { loadMailerMaterials } from './mailerRun';
 import { getBrandKit } from './artifacts';
 import { loadWeb } from './workwebRun';
@@ -20,10 +21,15 @@ const provider = (p: SocialContent['platform']): string => (p === 'x' ? 'twitter
 
 /** Load everything the social board needs, in the pure adapter's shape. */
 export async function loadSocialMaterials(worldId: string): Promise<SocialMaterials> {
-  const [m, brand, web] = await Promise.all([
+  const [m, brand, web, voiceRow] = await Promise.all([
     loadMailerMaterials(worldId),
     getBrandKit(worldId).catch(() => null),
     loadWeb(worldId).catch(() => null),
+    // VOICE MEMORY: the most recent post the owner actually approved and published is the best
+    // example of how they sound — board-copy's VOICE section matches its register, never copies it.
+    supabase.from('social_posts').select('body').eq('status', 'posted')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then((r) => r.data, () => null),
   ]);
   const businessName = m.ctx?.business_name || web?.title || '';
   const bk = brand as ({ palette?: string[]; avatarUrl?: string | null; name?: string | null; logo_url?: string | null; headshots?: string[] } | null);
@@ -39,6 +45,7 @@ export async function loadSocialMaterials(worldId: string): Promise<SocialMateri
     tone: m.ctx?.tone ?? null,
     audience: m.ctx?.audience ?? null,
     offerings: m.ctx?.offerings ?? [],
+    voiceExample: (voiceRow as { body?: string } | null)?.body?.slice(0, 800) ?? null,
   };
 }
 
