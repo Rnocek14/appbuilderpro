@@ -68,8 +68,7 @@ jobs:
           fi
           echo "Mode: $MODE   Project: $PROJECT_REF"
           if [ "$MODE" = "full" ] && [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::error::mode=full needs SUPABASE_DB_PASSWORD (for migrations). Use mode=functions, or add the secret."
-            exit 1
+            echo "::notice::No SUPABASE_DB_PASSWORD — migrations will apply through the management API (access token only)."
           fi
 
       - uses: actions/checkout@v4
@@ -110,14 +109,33 @@ jobs:
           echo "Project is awake and healthy. Giving the API a moment to settle…"
           sleep 20
 
-      # ── mode=full only: apply migrations. --include-all because this project's schema came from
-      # manual SQL pastes, so the migration history table is behind. Every migration is additive +
-      # idempotent, so re-applying from the top is safe; history is tracked from then on.
+      # ── mode=full only: apply migrations. Preferred path (SUPABASE_DB_PASSWORD set): supabase
+      # db push --include-all, which also records migration history. Fallback (no password): run
+      # each migration file through the management API's SQL endpoint — same SQL, access token
+      # only. Safe either way: every migration is additive + idempotent, so re-applying from the
+      # top is a no-op where the schema already exists.
       - name: Apply migrations
         if: ${{ env.MODE == 'full' }}
         run: |
-          supabase link --project-ref "$PROJECT_REF"
-          supabase db push --include-all
+          set -e
+          if [ -n "$SUPABASE_DB_PASSWORD" ]; then
+            supabase link --project-ref "$PROJECT_REF"
+            supabase db push --include-all
+          else
+            echo "Applying $(ls supabase/migrations/2026*.sql supabase/migrations/app_00*.sql | wc -l) migrations via the management API…"
+            for f in supabase/migrations/2026*.sql supabase/migrations/app_00*.sql; do
+              body=$(jq -n --arg q "$(cat "$f")" '{query:$q}')
+              resp=$(curl -s -w '\n%{http_code}' -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+                -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" -d "$body")
+              code=$(echo "$resp" | tail -n1)
+              if [ "$code" -ge 400 ] 2>/dev/null; then
+                echo "::error::$f failed (HTTP $code): $(echo "$resp" | head -n -1 | head -c 600)"
+                exit 1
+              fi
+              echo "applied: $f"
+            done
+            echo "All migrations applied."
+          fi
 
       # ── The hot path, always deployed: the win-clients loop (discover-media/fetch-url/
       # ingest-profile) + the boards' words seam (board-copy/generate-image). All self-auth.
