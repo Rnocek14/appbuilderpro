@@ -12,7 +12,7 @@ import {
   type EmailContent, type EmailMaterials, type EmailCopyFields,
 } from '../../../lib/garvis/emailBoard';
 import { loadEmailMaterials, queueEmailToSegment, emailSegmentCounts, saveEmailTemplate, type BatchSegment } from '../../../lib/garvis/emailBoardRun';
-import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
+import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -60,6 +60,7 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
       kinds: emailKindsFor(realEstate).map((k) => ({ id: k.id, label: k.label, emoji: k.emoji, hint: k.hint })),
       banner: 'Real facts fill in; unknowns are [EDIT] holes; {{first_name}} fills per recipient. Nothing sends — a segment send goes through Approvals and drains under your daily cap.',
       captionOf: (c) => emailKindById(c.kindId)?.label ?? 'Email',
+      qualityOf: (c) => c.quality ?? null,
       searchText: (c) => `${c.subject} ${c.body}`,
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && emailKindById(kindId)) || defaultEmailKind(realEstate);
@@ -70,7 +71,8 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
         // materials only, {{first_name}} + [EDIT] holes preserved). Honest fallback to the template.
         if (prompt.trim()) {
           const ai = await generateBoardCopy({ channel: 'email', mode: 'make', instruction: prompt, kindLabel: kind.label, materials: facts() });
-          if (ai.ok) content = applyEmailCopy(content, ai.fields as EmailCopyFields);
+          if (!ai.ok) explainCopyMiss(ai, onToast);
+          if (ai.ok) content = { ...applyEmailCopy(content, ai.fields as EmailCopyFields), quality: ai.quality };
         }
         return content;
       },
@@ -81,7 +83,8 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
             channel: 'email', mode: 'rendition', instruction, kindLabel: emailKindById(parent.kindId)?.label ?? null,
             materials: facts(), current: { subject: parent.subject, body: parent.body },
           });
-          if (ai.ok) return applyEmailCopy({ ...parent }, ai.fields as EmailCopyFields);
+          if (!ai.ok) explainCopyMiss(ai, onToast);
+          if (ai.ok) return { ...applyEmailCopy({ ...parent }, ai.fields as EmailCopyFields), quality: ai.quality };
         }
         return applyEmailRendition(parent, instruction);
       },

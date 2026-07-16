@@ -11,11 +11,11 @@ import { Loader2, Sparkles, Image as ImageIcon, Send, Copy } from 'lucide-react'
 import { SocialMock } from './SocialMock';
 import {
   socialKindsFor, socialKindById, defaultSocialKind, buildSocialContent, applySocialRendition,
-  withPhoto, withGeneratedImage, tileAllowsAI, composeSocialText, PLATFORM_ORDER, applySocialCopy,
+  withPhoto, withGeneratedImage, tileAllowsAI, composeSocialText, PLATFORM_ORDER, applySocialCopy, platformizeCta,
   type SocialContent, type SocialMaterials, type SocialPlatform, type SocialCopyFields,
 } from '../../../lib/garvis/socialBoard';
 import { loadSocialMaterials, generateSocialTileImage, queueSocialTile } from '../../../lib/garvis/socialBoardRun';
-import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
+import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { PLATFORM_LABEL } from '../../../lib/garvis/campaignCore';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
@@ -76,6 +76,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
         </div>
       ),
       captionOf: (c) => `${PLATFORM_LABEL[c.platform]} · ${socialKindById(c.kindId)?.label ?? 'Post'}${c.imageMode === 'ai' ? ' · AI' : c.imageMode === 'photo' ? ' · photo' : ''}`,
+      qualityOf: (c) => c.quality ?? null,
       references: [
         ...(materials.avatarUrl ? [{ label: 'Logo / avatar', url: materials.avatarUrl }] : []),
         { label: 'Brand color', swatches: [materials.accent] },
@@ -91,9 +92,10 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
         if (prompt.trim()) {
           const ai = await generateBoardCopy({
             channel: 'social', mode: 'make', instruction: prompt, kindLabel: kind.label, platform,
-            materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [] },
+            materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [], voiceExample: materials.voiceExample ?? null },
           });
-          if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
+          if (!ai.ok) explainCopyMiss(ai, onToast);
+          if (ai.ok) content = { ...applySocialCopy(content, ai.fields as SocialCopyFields), quality: ai.quality };
         }
         if (!kind.needsRealPhoto && tileAllowsAI(content) && aiState !== 'off') content = await tryImage(content, prompt || null);
         return content;
@@ -105,10 +107,11 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
           const ai = await generateBoardCopy({
             channel: 'social', mode: 'rendition', instruction, kindLabel: socialKindById(parent.kindId)?.label ?? null,
             platform: content.platform,
-            materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [] },
+            materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [], voiceExample: materials.voiceExample ?? null },
             current: { caption: parent.caption, hashtags: parent.hashtags },
           });
-          if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
+          if (!ai.ok) explainCopyMiss(ai, onToast);
+          if (ai.ok) content = { ...applySocialCopy(content, ai.fields as SocialCopyFields), quality: ai.quality };
         }
         if (r.wantsImage && aiState !== 'off') return tryImage(content, r.imageStyle);
         // HONESTY: never silently spawn an identical twin. If the instruction changed nothing (words
@@ -145,6 +148,9 @@ function SocialFocus({ content, api, materials, worldId, clusterId, onToast, try
   const [genStyle, setGenStyle] = useState('');
   const [pickPhoto, setPickPhoto] = useState(false);
   const [queueBusy, setQueueBusy] = useState(false);
+  // Optional schedule: queueSocialTile already accepts scheduleAt (delegated to the publisher);
+  // this picker is the UI the parameter never had. Empty = post when approved.
+  const [scheduleAt, setScheduleAt] = useState('');
   const allowsAI = tileAllowsAI(content);
   const kind = socialKindById(content.kindId);
 
@@ -164,8 +170,11 @@ function SocialFocus({ content, api, materials, worldId, clusterId, onToast, try
   const queue = async () => {
     setQueueBusy(true);
     try {
-      const { warnings } = await queueSocialTile({ content, worldId });
-      onToast('success', `Queued to ${PLATFORM_LABEL[content.platform]} — approve it in your Queue.${warnings.length ? ' (' + warnings[0] + ')' : ''}`);
+      const iso = scheduleAt ? new Date(scheduleAt).toISOString() : null;
+      if (iso && new Date(iso).getTime() <= Date.now()) { onToast('error', 'That schedule time is in the past — pick a future time or clear it.'); return; }
+      const { warnings } = await queueSocialTile({ content, worldId, scheduleAt: iso, materials, clusterId });
+      const when = iso ? ` for ${new Date(iso).toLocaleString()}` : '';
+      onToast('success', `Queued to ${PLATFORM_LABEL[content.platform]}${when} — approve it in your Queue.${warnings.length ? ' (' + warnings[0] + ')' : ''}`);
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not queue the post.'); }
     finally { setQueueBusy(false); }
   };
@@ -182,10 +191,11 @@ function SocialFocus({ content, api, materials, worldId, clusterId, onToast, try
         {content.imageMode === 'ai' && <span className="rounded-full bg-forge-ember/15 px-2 py-0.5 text-[10px] text-forge-ember">AI image</span>}
       </div>
 
-      {/* platform switch */}
+      {/* platform switch — platformizeCta here too: the rendition path rewrites CTAs per platform,
+          so switching in the dock must not leak "DM me" onto LinkedIn */}
       <div className="mb-2 flex flex-wrap gap-1.5">
         {PLATFORM_ORDER.map((p) => (
-          <button key={p} onClick={() => api.update({ ...content, platform: p })} className={cn('cb-chip', content.platform === p && 'cb-chip-on')}>{PLATFORM_EMOJI[p]} {PLATFORM_LABEL[p]}</button>
+          <button key={p} onClick={() => api.update({ ...content, platform: p, caption: platformizeCta(content.caption, p) })} className={cn('cb-chip', content.platform === p && 'cb-chip-on')}>{PLATFORM_EMOJI[p]} {PLATFORM_LABEL[p]}</button>
         ))}
       </div>
 
@@ -243,7 +253,13 @@ function SocialFocus({ content, api, materials, worldId, clusterId, onToast, try
 
       {/* actions — Queue closes the loop through Approvals */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Button variant="primary" size="sm" onClick={() => void queue()} disabled={queueBusy}>{queueBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue to publisher</Button>
+        <label className="inline-flex items-center gap-1.5 text-[10.5px] text-forge-dim">
+          Schedule
+          <input type="datetime-local" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)}
+            className="rounded-md border border-forge-border bg-forge-bg px-2 py-1 text-[11.5px] text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+          {scheduleAt && <button className="cb-chip" onClick={() => setScheduleAt('')}>clear</button>}
+        </label>
+        <Button variant="primary" size="sm" onClick={() => void queue()} disabled={queueBusy}>{queueBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} {scheduleAt ? 'Schedule' : 'Queue to publisher'}</Button>
         <Button variant="outline" size="sm" onClick={() => void copy()}><Copy size={13} /> Copy</Button>
         <Button variant={api.isFavorite ? 'primary' : 'ghost'} size="sm" onClick={api.favorite}>{api.isFavorite ? '★ Starred' : '☆ Star'}</Button>
         <span className="text-[10.5px] text-forge-dim">Instagram needs an image — generate or attach one, or the queue will say so.</span>

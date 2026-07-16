@@ -105,14 +105,14 @@ const SD_CSS = `
 .sd-chip:hover{ border-color:var(--gv-ember); box-shadow:0 0 0 1px var(--gv-ember), 0 0 18px -6px rgba(var(--gv-ember-rgb),.5); }
 .sd-em{ font-size:14px; line-height:1; }
 
-.sd-panel{ width:min(920px,100%); max-height:90vh; display:flex; flex-direction:column; background:var(--forge-bg); color:var(--forge-ink);
-  border:1px solid var(--forge-border); border-radius:18px; box-shadow:0 30px 80px -20px rgba(0,0,0,.7); overflow:hidden;
+.sd-panel{ width:min(920px,100%); max-height:90vh; display:flex; flex-direction:column; background:rgb(var(--forge-bg,12 14 19)); color:rgb(var(--forge-ink,232 230 225));
+  border:1px solid rgb(var(--forge-border,38 43 58)); border-radius:18px; box-shadow:0 30px 80px -20px rgba(0,0,0,.7); overflow:hidden;
   animation:sd-rise .2s cubic-bezier(.2,.7,.2,1); }
 @keyframes sd-rise{ from{ transform:translateY(12px) scale(.98); opacity:0 } to{ transform:none; opacity:1 } }
-.sd-top{ display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--forge-border); background:var(--forge-panel); }
+.sd-top{ display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid rgb(var(--forge-border,38 43 58)); background:rgb(var(--forge-panel,18 21 29)); }
 .sd-toptitle{ font:600 15px/1 -apple-system,sans-serif; }
-.sd-x{ margin-left:auto; border:none; background:none; cursor:pointer; color:var(--forge-dim); width:32px; height:32px; border-radius:9px; display:grid; place-items:center; }
-.sd-x:hover{ background:var(--forge-raised); color:var(--forge-ink); }
+.sd-x{ margin-left:auto; border:none; background:none; cursor:pointer; color:rgb(var(--forge-dim,139 144 160)); width:32px; height:32px; border-radius:9px; display:grid; place-items:center; }
+.sd-x:hover{ background:rgb(var(--forge-raised,26 30 41)); color:rgb(var(--forge-ink,232 230 225)); }
 .sd-body{ overflow-y:auto; padding:18px; }
 .sd-loading{ display:grid; place-items:center; padding:60px; }
 `;

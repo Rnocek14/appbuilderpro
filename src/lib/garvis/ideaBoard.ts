@@ -19,6 +19,8 @@ export interface IdeaContent {
   title: string;   // the idea in one line
   pitch: string;   // what it is + why it matters for THIS project
   notes: string;   // first steps / risks / open questions — [EDIT] holes for unknowns
+  /** The board-copy editor's verdict when AI wrote this idea (1-10 + its notes). Persisted with the tile. */
+  quality?: { score: number; notes: string } | null;
 }
 
 /** The real facts the seeds + AI may use — the project itself, nothing invented. */

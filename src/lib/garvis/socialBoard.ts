@@ -28,6 +28,8 @@ export interface SocialContent {
   imageUrl: string | null;
   imageMode: 'photo' | 'brand' | 'ai';
   aiNote: string | null;
+  /** The board-copy editor's verdict when AI wrote these words (1-10 + its notes). Persisted with the tile. */
+  quality?: { score: number; notes: string } | null;
 }
 
 /** The real materials the content builder needs (socialBoardRun supplies these from the world + brand). */
@@ -40,6 +42,8 @@ export interface SocialMaterials {
   images: { url: string; caption: string | null; label: string | null }[];
   // Voice for the copy seam — the difference between on-brand words and generic AI copy.
   tone?: string | null;
+  /** A REAL post the owner already approved and published — the voice the AI matches, never invents. */
+  voiceExample?: string | null;
   audience?: string | null;
   offerings?: string[];
 }
@@ -59,7 +63,8 @@ export interface SocialKind {
 const bizOf = (m: SocialMaterials) => (m.businessName.trim() || '[EDIT: your business]');
 const areaOf = (m: SocialMaterials) => ((m.area && m.area.trim()) || '[EDIT: your area]');
 const slug = (s: string) => { const t = (s || '').trim(); return (!t || /\[EDIT/.test(t)) ? '[EDIT: area]' : t.replace(/[^a-zA-Z0-9]+/g, ''); };
-const reTags = (m: SocialMaterials, lead: string) => [lead, `#${slug(areaOf(m))}RealEstate`, '#RealEstate', '#Realtor'];
+// Set-dedup: a kind whose lead tag is also a stock tag (e.g. ask_question → #RealEstate) must not post it twice.
+const reTags = (m: SocialMaterials, lead: string) => [...new Set([lead, `#${slug(areaOf(m))}RealEstate`, '#RealEstate', '#Realtor'])];
 const genTags = (m: SocialMaterials, lead: string) => [lead, `#${slug(areaOf(m))}`, '#SmallBusiness'];
 
 // Real-estate kinds. Listing kinds require the REAL home photo (AI refused) — same honesty gate as postcards.
@@ -190,7 +195,8 @@ export function sizeForPlatform(p: SocialPlatform): '1024x1024' | '1536x1024' {
 /** The exact text that would post (caption + hashtags), joined the way each network expects. Inlined
  *  here (not imported from the mock component) so this core stays pure + testable. */
 /** Platform tag budgets — IG rewards a fuller tag set; LinkedIn/Facebook read spammy past ~3; X past 2. */
-const TAG_CAP: Record<SocialPlatform, number> = { instagram: 8, facebook: 3, linkedin: 3, x: 2 };
+/** Exported so previews can show EXACTLY the tags that will post — never more. */
+export const TAG_CAP: Record<SocialPlatform, number> = { instagram: 8, facebook: 3, linkedin: 3, x: 2 };
 
 export function composeSocialText(platform: SocialPlatform, caption: string, hashtags: string[]): string {
   const tags = hashtags.slice(0, TAG_CAP[platform]);

@@ -10,6 +10,7 @@
 
 import { Heart, MessageCircle, Send, Bookmark, Repeat2, MoreHorizontal, Globe, ThumbsUp, Share2, Bird } from 'lucide-react';
 import type { SocialPlatform } from '../../../lib/garvis/campaignCore';
+import { TAG_CAP } from '../../../lib/garvis/socialBoard';
 
 export interface MockInput {
   platform: SocialPlatform;
@@ -62,8 +63,11 @@ const IconRow = ({ children }: { children: React.ReactNode }) => (
   <div style={{ display: 'flex', alignItems: 'center', gap: 18, color: '#536471' }}>{children}</div>
 );
 
-export function SocialMock({ platform, brandName, caption, hashtags, accent, imageUrl, headline, avatarUrl }: MockInput) {
+export function SocialMock({ platform, brandName, caption, hashtags: allTags, accent, imageUrl, headline, avatarUrl }: MockInput) {
   const m = META[platform];
+  // The preview's contract is "what you're about to post looks like what people will see" —
+  // composeSocialText caps tags per platform at post time, so the mock must show the same cap.
+  const hashtags = allTags.slice(0, TAG_CAP[platform]);
   const name = brandName.trim() || 'Your brand';
   const card: React.CSSProperties = { background: '#fff', borderRadius: 14, border: '1px solid #E7E0D6', overflow: 'hidden', color: '#0F1419', fontSize: 14, boxShadow: '0 6px 20px -12px rgba(0,0,0,.3)' };
 
