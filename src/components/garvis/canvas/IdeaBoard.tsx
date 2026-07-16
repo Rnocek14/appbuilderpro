@@ -13,7 +13,7 @@ import {
   applyIdeaRendition, composeIdeaText,
   type IdeaContent, type IdeaMaterials, type IdeaCopyFields, type IdeaTag,
 } from '../../../lib/garvis/ideaBoard';
-import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
+import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { supabase } from '../../../lib/supabase';
 import { listOrders, createOrder, setOrderStatus } from '../../../lib/garvis/standingRun';
@@ -70,6 +70,7 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
           instruction: prompt.trim() || `One fresh, specific ${kind.label.toLowerCase()} idea for this project — not generic advice.`,
           materials: facts(),
         });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
         if (ai.ok) content = applyIdeaCopy(content, ai.fields as IdeaCopyFields);
         return content;
       },
@@ -78,6 +79,7 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
           channel: 'idea', mode: 'rendition', instruction, kindLabel: ideaKindById(parent.kindId)?.label ?? null,
           materials: facts(), current: { title: parent.title, pitch: parent.pitch, notes: parent.notes, tag: parent.tag },
         });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
         if (ai.ok) return applyIdeaCopy({ ...parent }, ai.fields as IdeaCopyFields);
         const det = applyIdeaRendition(parent, instruction);
         if (det) return det;
@@ -121,7 +123,9 @@ function IdeaFocus({ content, api, materials, worldId, clusterId, onToast }: {
     const brief = composeIdeaText(content, materials.projectName);
     try { localStorage.setItem('ff:build-brief', JSON.stringify({ prompt: content.title, brief })); } catch { /* prompt-only seed */ }
     onToast('success', 'Idea handed to the app builder — it seeds the first generation.');
-    navigate('/new');
+    // ?from=constellation is the flag NewProject checks before consuming ff:build-brief —
+    // a bare /new would leave the brief unread in localStorage (the loop-closer would be a dead end).
+    navigate('/new?from=constellation');
   };
   return (
     <div>

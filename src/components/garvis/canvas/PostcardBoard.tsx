@@ -16,7 +16,7 @@ import {
   type PostcardContent, type PostcardMaterials, type PostcardCopyFields,
 } from '../../../lib/garvis/postcardBoard';
 import { loadPostcardMaterials, generateTileImage, logPostcardMailed } from '../../../lib/garvis/postcardBoardRun';
-import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
+import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
 import { inferRealEstate } from '../../../lib/garvis/studioKit';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
@@ -98,6 +98,7 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
             channel: 'postcard', mode: 'make', instruction: prompt, kindLabel: kind.label,
             materials: copyFacts(materials),
           });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
           if (ai.ok) content = applyCopyFields(content, ai.fields as PostcardCopyFields);
         }
         if (!kind.needsRealPhoto && tileAllowsAI(content) && aiState !== 'off') {
@@ -116,6 +117,7 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
             materials: copyFacts(materials),
             current: { headline: parent.spec.front.headline, sub: parent.spec.front.kicker, body: parent.spec.back.body, cta: parent.spec.back.cta },
           });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
           if (ai.ok) content = applyCopyFields(content, ai.fields as PostcardCopyFields);
         }
         if (r.wantsImage && aiState !== 'off') return tryImage(content, r.imageStyle);

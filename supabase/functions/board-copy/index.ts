@@ -105,6 +105,7 @@ Deno.serve(async (req) => {
       '- Preserve any {{merge_field}} tokens (e.g. {{first_name}}) exactly as-is; never replace them with a guessed value.',
       '- Keep any [EDIT: ...] holes from the current piece that the instruction does not resolve.',
       '- No hype you cannot back ("guaranteed", "#1", invented urgency).',
+      '- No market-frequency or scarcity claims ("rare find", "won\'t last", "doesn\'t come up often", "going fast") unless the materials contain inventory, turnover, or days-on-market data that backs them — an urgency instruction is NOT license to invent scarcity.',
       '',
       'VOICE: if MATERIALS.tone is set, it describes this business\'s voice — write EVERY word in that voice. If MATERIALS.audience is set, that is exactly who you are writing to. If MATERIALS.voiceExample is set, it is a real piece the owner approved — match its register without copying it.',
       '',

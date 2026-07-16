@@ -674,14 +674,14 @@ const SHEET_CSS = `
 /* THE ROOM — a node expanded into the canvas as a full workspace (never a floating popup). It grows
    out of the canvas region to viewport height; "‹ Canvas" walks back out. */
 .mkc-room{ display:flex; flex-direction:column; height:max(560px, calc(100vh - 150px)); border-radius:16px; overflow:hidden;
-  border:1px solid var(--forge-border,#3a2f25); background:var(--forge-bg,#14100c);
+  border:1px solid rgb(var(--forge-border,38 43 58)); background:rgb(var(--forge-bg,12 14 19));
   animation:mkcRoomIn .22s ease-out; transform-origin:50% 30%; }
 @keyframes mkcRoomIn{ from{ transform:scale(.94); opacity:.35 } to{ transform:scale(1); opacity:1 } }
 @media (prefers-reduced-motion:reduce){ .mkc-room{ animation:none } }
-.mkc-room-top{ display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--forge-border,#3a2f25); background:var(--forge-panel,#1c1710); }
-.mkc-back{ font-size:12.5px; font-weight:600; color:var(--forge-ember,#ff8a3d); padding:4px 10px; border-radius:8px; border:1px solid rgba(255,138,61,.35); background:transparent; white-space:nowrap; }
+.mkc-room-top{ display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid rgb(var(--forge-border,38 43 58)); background:rgb(var(--forge-panel,18 21 29)); }
+.mkc-back{ font-size:12.5px; font-weight:600; color:rgb(var(--forge-ember,255 138 61)); padding:4px 10px; border-radius:8px; border:1px solid rgba(255,138,61,.35); background:transparent; white-space:nowrap; }
 .mkc-back:hover{ background:rgba(255,138,61,.12); }
-.mkc-room-crumb{ font-size:12px; color:var(--forge-dim,#a99b90); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mkc-room-crumb{ font-size:12px; color:rgb(var(--forge-dim,139 144 160)); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .mkc-room-body{ flex:1; min-height:0; }
 
 .mkc-chips{ display:flex; flex-wrap:wrap; gap:9px; margin-bottom:16px; }

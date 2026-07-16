@@ -12,7 +12,7 @@ import {
   type EmailContent, type EmailMaterials, type EmailCopyFields,
 } from '../../../lib/garvis/emailBoard';
 import { loadEmailMaterials, queueEmailToSegment, emailSegmentCounts, saveEmailTemplate, type BatchSegment } from '../../../lib/garvis/emailBoardRun';
-import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
+import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -70,6 +70,7 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
         // materials only, {{first_name}} + [EDIT] holes preserved). Honest fallback to the template.
         if (prompt.trim()) {
           const ai = await generateBoardCopy({ channel: 'email', mode: 'make', instruction: prompt, kindLabel: kind.label, materials: facts() });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
           if (ai.ok) content = applyEmailCopy(content, ai.fields as EmailCopyFields);
         }
         return content;
@@ -81,6 +82,7 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
             channel: 'email', mode: 'rendition', instruction, kindLabel: emailKindById(parent.kindId)?.label ?? null,
             materials: facts(), current: { subject: parent.subject, body: parent.body },
           });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
           if (ai.ok) return applyEmailCopy({ ...parent }, ai.fields as EmailCopyFields);
         }
         return applyEmailRendition(parent, instruction);

@@ -11,11 +11,11 @@ import { Loader2, Sparkles, Image as ImageIcon, Send, Copy } from 'lucide-react'
 import { SocialMock } from './SocialMock';
 import {
   socialKindsFor, socialKindById, defaultSocialKind, buildSocialContent, applySocialRendition,
-  withPhoto, withGeneratedImage, tileAllowsAI, composeSocialText, PLATFORM_ORDER, applySocialCopy,
+  withPhoto, withGeneratedImage, tileAllowsAI, composeSocialText, PLATFORM_ORDER, applySocialCopy, platformizeCta,
   type SocialContent, type SocialMaterials, type SocialPlatform, type SocialCopyFields,
 } from '../../../lib/garvis/socialBoard';
 import { loadSocialMaterials, generateSocialTileImage, queueSocialTile } from '../../../lib/garvis/socialBoardRun';
-import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
+import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { PLATFORM_LABEL } from '../../../lib/garvis/campaignCore';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
@@ -93,6 +93,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
             channel: 'social', mode: 'make', instruction: prompt, kindLabel: kind.label, platform,
             materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [] },
           });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
           if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
         }
         if (!kind.needsRealPhoto && tileAllowsAI(content) && aiState !== 'off') content = await tryImage(content, prompt || null);
@@ -108,6 +109,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
             materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [] },
             current: { caption: parent.caption, hashtags: parent.hashtags },
           });
+          if (!ai.ok) explainCopyMiss(ai, onToast);
           if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
         }
         if (r.wantsImage && aiState !== 'off') return tryImage(content, r.imageStyle);
@@ -182,10 +184,11 @@ function SocialFocus({ content, api, materials, worldId, clusterId, onToast, try
         {content.imageMode === 'ai' && <span className="rounded-full bg-forge-ember/15 px-2 py-0.5 text-[10px] text-forge-ember">AI image</span>}
       </div>
 
-      {/* platform switch */}
+      {/* platform switch — platformizeCta here too: the rendition path rewrites CTAs per platform,
+          so switching in the dock must not leak "DM me" onto LinkedIn */}
       <div className="mb-2 flex flex-wrap gap-1.5">
         {PLATFORM_ORDER.map((p) => (
-          <button key={p} onClick={() => api.update({ ...content, platform: p })} className={cn('cb-chip', content.platform === p && 'cb-chip-on')}>{PLATFORM_EMOJI[p]} {PLATFORM_LABEL[p]}</button>
+          <button key={p} onClick={() => api.update({ ...content, platform: p, caption: platformizeCta(content.caption, p) })} className={cn('cb-chip', content.platform === p && 'cb-chip-on')}>{PLATFORM_EMOJI[p]} {PLATFORM_LABEL[p]}</button>
         ))}
       </div>
 

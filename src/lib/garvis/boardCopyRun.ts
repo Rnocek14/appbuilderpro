@@ -49,3 +49,13 @@ export async function generateBoardCopy(args: BoardCopyArgs): Promise<BoardCopyR
 
 /** Test/dev hook: forget a cached "unavailable" verdict (e.g. after the operator adds a key). */
 export function resetBoardCopyAvailability(): void { copyUnavailable = false; }
+
+// A typed idea must never vanish silently: when the seam ERRORS (network, server) the boards fall
+// back to templates — this tells the user their words went nowhere, once per session, not per Make.
+// ("available: false" stays silent by design: the banner already explains that AI is off.)
+let missExplained = false;
+export function explainCopyMiss(r: BoardCopyResult, toast: (k: 'info' | 'error', m: string) => void): void {
+  if (r.ok || r.available === false || missExplained) return;
+  missExplained = true;
+  toast('info', 'The AI writer couldn’t be reached, so this used the starter template instead of your words. It will retry on your next Make.');
+}
