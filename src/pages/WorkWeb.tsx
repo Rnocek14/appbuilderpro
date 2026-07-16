@@ -34,7 +34,6 @@ import { GenerationReadiness } from '../components/garvis/GenerationReadiness';
 import { StudioHero } from '../components/garvis/StudioHero';
 import { ADS_SPEC } from '../lib/garvis/adsStudio';
 import { COPY_SPEC } from '../lib/garvis/copyStudio';
-import { SOCIAL_SPEC } from '../lib/garvis/socialStudio';
 import { FirstRunGuide } from '../components/garvis/FirstRunGuide';
 import { StandingOrdersPanel } from '../components/garvis/StandingOrdersPanel';
 import { VerdictReadout } from '../components/garvis/VerdictReadout';
@@ -50,7 +49,8 @@ const PaperworkStudio = lazy(() => import('../components/garvis/PaperworkStudio'
 const MarketDataPanel = lazy(() => import('../components/garvis/MarketDataPanel').then((m) => ({ default: m.MarketDataPanel })));
 const TimelinePanel = lazy(() => import('../components/garvis/TimelinePanel').then((m) => ({ default: m.TimelinePanel })));
 const SocialPublisher = lazy(() => import('../components/garvis/SocialPublisher').then((m) => ({ default: m.SocialPublisher })));
-const EmailStudio = lazy(() => import('../components/garvis/EmailStudio').then((m) => ({ default: m.EmailStudio })));
+const EmailBoard = lazy(() => import('../components/garvis/canvas/EmailBoard').then((m) => ({ default: m.EmailBoard })));
+const SocialBoard = lazy(() => import('../components/garvis/canvas/SocialBoard').then((m) => ({ default: m.SocialBoard })));
 const IdeaStudio = lazy(() => import('../components/garvis/IdeaStudio').then((m) => ({ default: m.IdeaStudio })));
 const ReelStudio = lazy(() => import('../components/garvis/ReelStudio').then((m) => ({ default: m.ReelStudio })));
 const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
@@ -744,10 +744,11 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <PanelBoundary name="video studio"><VideoStudio worldId={worldId} clusterId={cluster.id} title={cluster.title} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
-      {/* SOCIAL STUDIO — a gallery of post ideas → a ready caption. Sits above the publisher: pick an
-          idea + edit it here, then schedule/post it below. */}
+      {/* SOCIAL — the ONE social system: the same spatial board the canvas node opens, scoped to this
+          area. (The old idea-gallery twin is retired — one catalog, one surface.) The publisher below
+          handles scheduling + connected accounts. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'social' && (
-        <PanelBoundary name="social studio"><IdeaStudio spec={SOCIAL_SPEC} worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+        <PanelBoundary name="social board"><div style={{ height: 640 }}><SocialBoard worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></div></PanelBoundary>
       )}
 
       {/* AUTO-POST to her real connected social accounts (Ayrshare), scheduled + approval-gated. */}
@@ -755,9 +756,10 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <div className="mt-4"><PanelBoundary name="social publisher"><SocialPublisher worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary></div>
       )}
 
-      {/* EMAIL STUDIO — a gallery of email ideas, each a ready example you spin/edit/save as a draft. */}
+      {/* EMAIL — the ONE email system: the same board the canvas node opens, scoped to this area.
+          (The old gallery twin is retired; its unique concepts were folded into the board's kinds.) */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'email' && (
-        <PanelBoundary name="email studio"><EmailStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+        <PanelBoundary name="email board"><div style={{ height: 640 }}><EmailBoard worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></div></PanelBoundary>
       )}
 
       {/* ADS STUDIO — a gallery of Meta/Google campaign ideas, each a ready ad draft (nothing spends). */}

@@ -384,7 +384,9 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <p className="mt-2 max-w-xs text-center text-[13px] text-forge-dim">{adapter.emptyHint}</p>
           </div>
         )}
-        <div className="cb-plane" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'top left' }}>
+        {/* When the references rail is open, the whole plane shifts right by its width — the rail must
+            never sit ON TOP of cards (the first column would become unclickable). */}
+        <div className="cb-plane" style={{ transform: `translate(${pan.x + (refsOpen && (adapter.references?.length ?? 0) > 0 ? 158 : 0)}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'top left' }}>
           {/* lineage connectors */}
           <svg className="cb-links" width="100%" height="100%">
             {shown.map((t) => {

@@ -14,18 +14,20 @@ import { ErrorBoundary } from '../../ErrorBoundary';
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 
 // The summonable studios, lazy so the canvas stays light until a tool is actually opened.
-const MailerDesigner = lazy(() => import('../MailerDesigner').then((m) => ({ default: m.MailerDesigner })));
+const PostcardBoard = lazy(() => import('./PostcardBoard').then((m) => ({ default: m.PostcardBoard })));
+const SocialBoard = lazy(() => import('./SocialBoard').then((m) => ({ default: m.SocialBoard })));
+const EmailBoard = lazy(() => import('./EmailBoard').then((m) => ({ default: m.EmailBoard })));
 const VideoStudio = lazy(() => import('../VideoStudio').then((m) => ({ default: m.VideoStudio })));
-const SocialPublisher = lazy(() => import('../SocialPublisher').then((m) => ({ default: m.SocialPublisher })));
 const DeliverableStudio = lazy(() => import('../DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
 const DataWorkspace = lazy(() => import('../DataWorkspace').then((m) => ({ default: m.DataWorkspace })));
 const MarketDataPanel = lazy(() => import('../MarketDataPanel').then((m) => ({ default: m.MarketDataPanel })));
 
 interface ToolDef { key: string; emoji: string; label: string }
 const TOOLS: ToolDef[] = [
-  { key: 'mailer', emoji: '✉️', label: 'Postcard' },
+  { key: 'mailer', emoji: '✉️', label: 'Postcards' },
   { key: 'video', emoji: '🎬', label: 'Video' },
   { key: 'social', emoji: '📣', label: 'Social' },
+  { key: 'email', emoji: '📧', label: 'Email' },
   { key: 'document', emoji: '📄', label: 'Document' },
   { key: 'data', emoji: '📊', label: 'Data' },
   { key: 'market', emoji: '🏷️', label: 'Market data' },
@@ -44,9 +46,11 @@ export function StudioDock({ worldId, clusterId, title, onToast, onClosed }: {
 
   const studio = () => {
     switch (open) {
-      case 'mailer': return <MailerDesigner worldId={worldId} clusterId={clusterId} onToast={onToast} />;
+      // The spine summons the SAME creative boards the marketing canvas opens — one system everywhere.
+      case 'mailer': return <div style={{ height: '72vh', width: 'min(94vw, 1100px)' }}><PostcardBoard worldId={worldId} clusterId={clusterId} onToast={onToast} /></div>;
       case 'video': return <VideoStudio worldId={worldId} clusterId={clusterId} title={title} onToast={onToast} />;
-      case 'social': return <SocialPublisher worldId={worldId} onToast={onToast} />;
+      case 'social': return <div style={{ height: '72vh', width: 'min(94vw, 1100px)' }}><SocialBoard worldId={worldId} clusterId={clusterId} onToast={onToast} /></div>;
+      case 'email': return <div style={{ height: '72vh', width: 'min(94vw, 1100px)' }}><EmailBoard worldId={worldId} clusterId={clusterId} onToast={onToast} /></div>;
       case 'document': return <DeliverableStudio worldId={worldId} clusterId={clusterId} onToast={onToast} />;
       case 'data': return <DataWorkspace worldId={worldId} clusterId={clusterId} onToast={onToast} />;
       case 'market': return <MarketDataPanel onToast={onToast} />;
