@@ -42,6 +42,10 @@ on:
         description: 'Arm the pg_cron heartbeat (needs WORKER_SECRET secret)'
         type: boolean
         default: false
+      single_migration:
+        description: 'Apply exactly ONE migration file by name (e.g. app_0080_standing_orders_idea_stream.sql) — works in any mode'
+        type: string
+        default: ''
   push:
     branches: [main]
     paths: ['supabase/**']
@@ -109,6 +113,26 @@ jobs:
           echo "Project is awake and healthy. Giving the API a moment to settle…"
           sleep 20
 
+      # ── Surgical migration: apply exactly ONE named file via the management API, in any mode.
+      # The bulk replay below assumes the whole history applies cleanly; on a project whose schema
+      # came from manual pastes, the oldest app-builder migrations reference tables that never
+      # existed here. This path ships one known-good migration without touching the rest.
+      - name: Apply one migration
+        if: ${{ inputs.single_migration != '' }}
+        run: |
+          set -e
+          f="supabase/migrations/${{ inputs.single_migration }}"
+          if [ ! -f "$f" ]; then echo "::error::$f not found"; exit 1; fi
+          body=$(jq -n --arg q "$(cat "$f")" '{query:$q}')
+          resp=$(curl -s -w '\n%{http_code}' -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" -d "$body")
+          code=$(echo "$resp" | tail -n1)
+          if [ "$code" -ge 400 ] 2>/dev/null; then
+            echo "::error::$f failed (HTTP $code): $(echo "$resp" | head -n -1 | head -c 600)"
+            exit 1
+          fi
+          echo "applied: $f"
+
       # ── mode=full only: apply migrations. Preferred path (SUPABASE_DB_PASSWORD set): supabase
       # db push --include-all, which also records migration history. Fallback (no password): run
       # each migration file through the management API's SQL endpoint — same SQL, access token
@@ -118,23 +142,61 @@ jobs:
         if: ${{ env.MODE == 'full' }}
         run: |
           set -e
+          apply_sql () {  # apply_sql <file> — run one SQL file through the management API
+            body=$(jq -n --arg q "$(cat "$1")" '{query:$q}')
+            resp=$(curl -s -w '\n%{http_code}' -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" -d "$body")
+            code=$(echo "$resp" | tail -n1)
+            if [ "$code" -ge 400 ] 2>/dev/null; then
+              echo "::error::$1 failed (HTTP $code): $(echo "$resp" | head -n -1 | head -c 600)"
+              exit 1
+            fi
+            echo "applied: $1"
+          }
+          # BASE FIRST: live DBs got schema.sql by hand-paste at different vintages (one was missing
+          # ai_messages, which crashed the very first migration). schema_repair.sql is the generated
+          # idempotent rewrite of both base schemas — brings ANY vintage up to the current base.
+          apply_sql supabase/schema_repair.sql
           if [ -n "$SUPABASE_DB_PASSWORD" ]; then
             supabase link --project-ref "$PROJECT_REF"
             supabase db push --include-all
           else
-            echo "Applying $(ls supabase/migrations/2026*.sql supabase/migrations/app_00*.sql | wc -l) migrations via the management API…"
-            for f in supabase/migrations/2026*.sql supabase/migrations/app_00*.sql; do
-              body=$(jq -n --arg q "$(cat "$f")" '{query:$q}')
+            # Dependencies cross directories both ways (app_0041 needs the timestamped preview
+            # tables; timestamped garvis_worker needs app_0003's agent_runs), so no single listing
+            # order works. Multi-pass retry: failures wait for the next pass; every migration is
+            # idempotent so re-tries are safe. Only a pass with ZERO progress is a real failure.
+            try_sql () {
+              body=$(jq -n --arg q "$(cat "$1")" '{query:$q}')
               resp=$(curl -s -w '\n%{http_code}' -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
                 -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" -d "$body")
               code=$(echo "$resp" | tail -n1)
               if [ "$code" -ge 400 ] 2>/dev/null; then
-                echo "::error::$f failed (HTTP $code): $(echo "$resp" | head -n -1 | head -c 600)"
+                echo "  deferred: $1 (HTTP $code): $(echo "$resp" | head -n -1 | head -c 300)"
+                return 1
+              fi
+              echo "  applied: $1"
+            }
+            pending=$(ls supabase/migrations/2026*.sql supabase/migrations/app_00*.sql)
+            total=$(echo "$pending" | wc -l)
+            echo "Applying $total migrations via the management API (multi-pass)…"
+            for pass in 1 2 3; do
+              echo "— pass $pass —"
+              next=""
+              for f in $pending; do
+                try_sql "$f" || next="$next $f"
+              done
+              next=$(echo $next | tr ' ' '\n' | sed '/^$/d')
+              [ -z "$next" ] && { echo "All $total migrations applied."; break; }
+              if [ "$(echo "$next" | wc -l)" = "$(echo "$pending" | wc -l)" ]; then
+                echo "::error::No progress in pass $pass — these migrations fail on their own: $next"
                 exit 1
               fi
-              echo "applied: $f"
+              pending="$next"
             done
-            echo "All migrations applied."
+            if [ -n "$next" ]; then
+              echo "::error::Migrations still failing after 3 passes: $next"
+              exit 1
+            fi
           fi
 
       # ── The hot path, always deployed: the win-clients loop (discover-media/fetch-url/
@@ -157,8 +219,10 @@ jobs:
       - name: Deploy the full function fleet
         if: ${{ env.MODE == 'full' }}
         run: |
-          npm run functions:deploy
-          npm run functions:deploy:webhooks
+          # `npm run x -- <args>` appends to the underlying supabase command — the curated lists
+          # don't carry --project-ref themselves, and there is no linked project on the runner.
+          npm run functions:deploy -- --project-ref "$PROJECT_REF"
+          npm run functions:deploy:webhooks -- --project-ref "$PROJECT_REF"
 
       # Push each function secret that exists as a repo secret; skip the rest silently.
       # Values never echo — GitHub masks them and the loop only prints names.
