@@ -19,8 +19,11 @@ export interface BoardCopyArgs {
   current?: Record<string, unknown> | null;  // rendition: the piece being revised
 }
 
+/** The editor-in-the-loop verdict that rides along with every AI draft (see board-copy's judge). */
+export interface CopyQuality { score: number; notes: string }
+
 export type BoardCopyResult =
-  | { ok: true; fields: Record<string, unknown> }
+  | { ok: true; fields: Record<string, unknown>; quality: CopyQuality | null }
   | { ok: false; available: false }          // no key — caller uses its deterministic path silently
   | { ok: false; available: true; error: string };
 
@@ -38,9 +41,12 @@ export async function generateBoardCopy(args: BoardCopyArgs): Promise<BoardCopyR
       },
     });
     if (error) return { ok: false, available: true, error: error.message };
-    const d = data as { available?: boolean; ok?: boolean; fields?: Record<string, unknown>; error?: string };
+    const d = data as { available?: boolean; ok?: boolean; fields?: Record<string, unknown>; error?: string; quality?: CopyQuality | null };
     if (d?.available === false) { copyUnavailable = true; return { ok: false, available: false }; }
-    if (d?.ok && d.fields && typeof d.fields === 'object') return { ok: true, fields: d.fields };
+    if (d?.ok && d.fields && typeof d.fields === 'object') {
+      const q = d.quality && typeof d.quality.score === 'number' ? d.quality : null;
+      return { ok: true, fields: d.fields, quality: q };
+    }
     return { ok: false, available: true, error: d?.error || 'The copy seam returned nothing.' };
   } catch (e) {
     return { ok: false, available: true, error: e instanceof Error ? e.message : 'board-copy failed' };
