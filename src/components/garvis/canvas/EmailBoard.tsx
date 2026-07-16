@@ -47,7 +47,7 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
     if (!materials) return null;
     const facts = (): Record<string, unknown> => ({
       business: materials.businessName || null, agent: materials.agentName || null,
-      phone: materials.phone, area: materials.area,
+      phone: materials.phone, area: materials.area, tone: materials.tone ?? null,
     });
     return {
       storageKey: 'email',

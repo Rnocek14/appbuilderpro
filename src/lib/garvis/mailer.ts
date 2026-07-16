@@ -80,7 +80,9 @@ export function compileMailer(input: MailerInput): MailerSpec {
       kicker = locale ? clip(`${name} · ${locale}`, 44) : name;
       backHeadline = craft ? clip(`This is what ${name} makes.`, 60) : `From ${name}.`;
       bodyLines = [
-        craft ? `The front of this card is our real work — ${craft}.` : 'The front of this card is our real work.',
+        input.imageUrl
+          ? (craft ? `The front of this card is our real work — ${craft}.` : 'The front of this card is our real work.')
+          : (craft ? `Real ${craft}, made locally — no stock photos, no call center.` : EDIT('one honest trust line — what makes you real')),
         ctx.audience ? `We make it for ${ctx.audience}.` : EDIT('one line: who this is for'),
         offer,
       ];
@@ -115,7 +117,7 @@ export function compileMailer(input: MailerInput): MailerSpec {
       backHeadline = clip(`A fair question — and our answer.`, 60);
       bodyLines = [
         ctx.audience ? `If you're ${clip(ctx.audience, 70)}, you've probably wondered about this.` : EDIT('one line: the question your audience is already asking'),
-        craft ? `${name} does ${craft} — the front of this card is our real work.` : EDIT('one line: what you do, plainly'),
+        craft ? (input.imageUrl ? `${name} does ${craft} — the front of this card is our real work.` : `${name} does ${craft}, right here.`) : EDIT('one line: what you do, plainly'),
         offer,
       ];
       break;
@@ -136,7 +138,9 @@ export function compileMailer(input: MailerInput): MailerSpec {
       bodyLines = [
         EDIT('one line: what the offer includes and how long it stands'),
         ctx.audience ? `For ${clip(ctx.audience, 70)}.` : EDIT('who it’s for'),
-        craft ? `The photo on the front is our real ${craft}.` : 'The photo on the front is our real work.',
+        input.imageUrl
+          ? (craft ? `The photo on the front is our real ${craft}.` : 'The photo on the front is our real work.')
+          : (craft ? `Real ${craft}, made locally.` : EDIT('one honest trust line')),
       ];
       break;
     case 'story':

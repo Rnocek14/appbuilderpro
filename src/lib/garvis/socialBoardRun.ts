@@ -36,6 +36,9 @@ export async function loadSocialMaterials(worldId: string): Promise<SocialMateri
     // logo, else a headshot — the wire the audit found dead (logo saved but never shown anywhere).
     avatarUrl: bk?.avatarUrl ?? bk?.logo_url ?? bk?.headshots?.[0] ?? null,
     images: m.images.map((i) => ({ url: i.url, caption: i.caption, label: i.label })),
+    tone: m.ctx?.tone ?? null,
+    audience: m.ctx?.audience ?? null,
+    offerings: m.ctx?.offerings ?? [],
   };
 }
 

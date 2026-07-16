@@ -15,6 +15,7 @@ import {
 } from '../../../lib/garvis/ideaBoard';
 import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
+import { supabase } from '../../../lib/supabase';
 import { listOrders, createOrder, setOrderStatus } from '../../../lib/garvis/standingRun';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
@@ -33,15 +34,18 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
   useEffect(() => {
     if (materialsOverride) { setMaterials(materialsOverride); return; }
     let live = true;
-    void loadWeb(worldId)
-      .then((w) => { if (live) setMaterials({ projectName: w?.title ?? '', mission: null }); })
-      .catch(() => { if (live) setMaterials({ projectName: '', mission: null }); });
+    void Promise.all([
+      loadWeb(worldId).catch(() => null),
+      supabase.from('knowledge_worlds').select('business_context').eq('id', worldId).maybeSingle().then((r) => r.data, () => null),
+    ]).then(([w, bc]) => {
+      if (live) setMaterials({ projectName: w?.title ?? '', mission: null, context: (bc?.business_context as Record<string, unknown> | null) ?? null });
+    });
     return () => { live = false; };
   }, [worldId, materialsOverride]);
 
   const adapter = useMemo<CreativeBoardAdapter<IdeaContent> | null>(() => {
     if (!materials) return null;
-    const facts = (): Record<string, unknown> => ({ project: materials.projectName || null, mission: materials.mission });
+    const facts = (): Record<string, unknown> => ({ project: materials.projectName || null, mission: materials.mission, ...(materials.context ?? {}) });
     return {
       storageKey: 'idea',
       title: 'Idea board',

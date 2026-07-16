@@ -91,7 +91,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
         if (prompt.trim()) {
           const ai = await generateBoardCopy({
             channel: 'social', mode: 'make', instruction: prompt, kindLabel: kind.label, platform,
-            materials: { business: materials.businessName || null, area: materials.area },
+            materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [] },
           });
           if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
         }
@@ -105,7 +105,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
           const ai = await generateBoardCopy({
             channel: 'social', mode: 'rendition', instruction, kindLabel: socialKindById(parent.kindId)?.label ?? null,
             platform: content.platform,
-            materials: { business: materials.businessName || null, area: materials.area },
+            materials: { business: materials.businessName || null, area: materials.area, tone: materials.tone ?? null, audience: materials.audience ?? null, offerings: materials.offerings ?? [] },
             current: { caption: parent.caption, hashtags: parent.hashtags },
           });
           if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
