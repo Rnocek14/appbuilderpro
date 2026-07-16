@@ -182,7 +182,7 @@ Deno.serve(async (req) => {
           // this recipient. Every outcome below overwrites the claim; a crash leaves it for the sweep.
           r.state = 'sending'; r.claimedAt = nowIso; await persistRecips();
           const { data: msg, error: msgErr } = await admin.from('outreach_messages').insert({
-            owner_id: b.owner_id, contact_id: r.contactId, subject: mergeTemplate(b.subject, r.name),
+            owner_id: b.owner_id, contact_id: r.contactId, batch_id: b.id, subject: mergeTemplate(b.subject, r.name),
             body_text: mergeTemplate(b.body_text, r.name), to_address: r.email, status: 'approved',
           }).select('id').single();
           if (msgErr || !msg) { r.state = 'skipped'; r.reason = `message row failed: ${msgErr?.message ?? 'unknown'}`.slice(0, 200); skippedNow++; await persistRecips(); continue; }

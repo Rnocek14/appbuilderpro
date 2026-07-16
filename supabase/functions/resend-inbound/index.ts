@@ -87,17 +87,17 @@ Deno.serve(async (req) => {
 
   // Correlate to the original message: by provider id (in-reply-to/references) first, else by recipient.
   const inReplyTo = payload.provider_message_id ?? payload.in_reply_to ?? payload.references ?? '';
-  let msg: { id: string; owner_id: string; campaign_id: string | null } | null = null;
+  let msg: { id: string; owner_id: string; campaign_id: string | null; contact_id?: string | null } | null = null;
   if (inReplyTo) {
     const { data } = await admin.from('outreach_messages')
-      .select('id, owner_id, campaign_id').eq('provider_message_id', inReplyTo.replace(/[<>]/g, '')).maybeSingle();
+      .select('id, owner_id, campaign_id, contact_id').eq('provider_message_id', inReplyTo.replace(/[<>]/g, '')).maybeSingle();
     msg = data ?? null;
   }
   if (!msg && from) {
     // Fallback correlation must only match messages that actually WENT OUT — a reply can't
     // belong to a never-sent draft.
     const { data } = await admin.from('outreach_messages')
-      .select('id, owner_id, campaign_id').eq('to_address', from).not('sent_at', 'is', null)
+      .select('id, owner_id, campaign_id, contact_id').eq('to_address', from).not('sent_at', 'is', null)
       .order('sent_at', { ascending: false }).limit(1).maybeSingle();
     msg = data ?? null;
   }
@@ -151,6 +151,12 @@ Deno.serve(async (req) => {
     from_address: from, subject, body_text: text.slice(0, 8000), classification,
   });
   await admin.from('outreach_messages').update({ status: 'replied' }).eq('id', msg.id);
+  // Feedback substrate (app_0081): a reply is the strongest engagement signal — record it where
+  // the analytics lenses can rank it alongside opens/clicks.
+  await admin.from('outreach_events').insert({
+    owner_id: msg.owner_id, message_id: msg.id, campaign_id: msg.campaign_id,
+    contact_id: msg.contact_id ?? null, kind: 'replied', meta: { classification },
+  });
 
   // Explicit unsubscribe intent → suppression + contact status, so this address can NEVER be
   // emailed again. This was the missing ingestion path: the 'unsubscribe' suppression reason

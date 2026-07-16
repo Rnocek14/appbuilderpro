@@ -77,12 +77,30 @@ Deno.serve(async (req) => {
   let ownerId: string | null = null;
   let campaignId: string | null = null;
   let messageId: string | null = null;
+  let contactId: string | null = null;
+  let batchId: string | null = null;
   if (resendId) {
     const { data: m } = await admin.from('outreach_messages')
-      .select('id, owner_id, campaign_id').eq('provider_message_id', resendId).maybeSingle();
+      .select('id, owner_id, campaign_id, contact_id, batch_id').eq('provider_message_id', resendId).maybeSingle();
     ownerId = m?.owner_id ?? null;
     campaignId = m?.campaign_id ?? null;
     messageId = m?.id ?? null;
+    contactId = (m as { contact_id?: string } | null)?.contact_id ?? null;
+    batchId = (m as { batch_id?: string } | null)?.batch_id ?? null;
+  }
+
+  // PERSIST THE FEEDBACK (needle audit P0): opened/clicked used to be mapped and then discarded —
+  // the send machine could never learn which subject, segment, or send time worked. One row per
+  // engagement event; the insert is fail-soft (a metrics hiccup must never bounce the webhook,
+  // which would make Resend retry and double-count suppressions).
+  const EVENT_KINDS = new Set(['delivered', 'opened', 'clicked', 'bounced', 'complained']);
+  if (type && EVENT_KINDS.has(type) && ownerId && messageId) {
+    const link = (event.data as { click?: { link?: string } } | undefined)?.click?.link ?? null;
+    await admin.from('outreach_events').insert({
+      owner_id: ownerId, message_id: messageId, campaign_id: campaignId,
+      contact_id: contactId, batch_id: batchId, kind: type,
+      meta: link ? { url: link } : {},
+    });
   }
 
   // Advance message/campaign status on terminal events.
