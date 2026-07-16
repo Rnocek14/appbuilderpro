@@ -312,17 +312,26 @@ Deno.serve(async (req) => {
         const count = Math.min(5, Math.max(1, cfg.count ?? 3));
         await checkCredits(admin, order.owner_id, 'board_copy');
         const { data: world } = await admin.from('knowledge_worlds')
-          .select('title, business_context').eq('id', order.world_id ?? '').maybeSingle();
+          .select('title, business_context, dna').eq('id', order.world_id ?? '').maybeSingle();
         const title = (world?.title as string | undefined) ?? 'the project';
+        // Read the board FIRST: existing titles become a hard do-not-repeat list — without it a
+        // daily stream regenerates week 1's ideas by week 3.
+        const { data: row } = await admin.from('knowledge_clusters').select('working_state').eq('id', clusterId).maybeSingle();
+        const ws = ((row?.working_state as Record<string, unknown> | null) ?? {});
+        const boards = ((ws.boards as Record<string, unknown> | undefined) ?? {});
+        const board = (boards.idea as { tiles?: unknown[]; groups?: string[] } | undefined) ?? { tiles: [] };
+        const tiles = Array.isArray(board.tiles) ? (board.tiles as { x?: number; y?: number; content?: { title?: string } }[]) : [];
+        const existingTitles = tiles.map((t) => t.content?.title).filter((x): x is string => !!x).slice(-60);
         const m = modelForPlan(await getUserPlan(admin, order.owner_id));
         const result = await complete([
           { role: 'system', content: [
             'You generate product/business ideas for one specific real project. HONESTY IS ABSOLUTE:',
             "- Ground every idea ONLY on the facts given. NEVER invent user counts, revenue, competitors' specifics, or claims about the project.",
             '- Anything an idea needs but you cannot know goes in as a visible hole formatted exactly: [EDIT: what goes here].',
+            '- SPECIFIC beats clever: every idea must name a concrete mechanism, user moment, or number from the context (or an [EDIT] hole asking for exactly the missing number). Banned: generic advice ("leverage", "engage", "optimize your presence"). If the idea would fit any business, it is wrong.',
             `Return ONLY a strict JSON array of exactly ${count} objects: {"title": string (<=60 chars), "pitch": string (2-3 sentences), "notes": string (3-5 short lines: first steps, risks, open questions), "tag": one of "feature"|"automation"|"content"|"growth"|"revenue"|"wild"}. No markdown fences.`,
           ].join('\n') },
-          { role: 'user', content: `PROJECT: ${title}\nCONTEXT (the only facts you may use): ${JSON.stringify(world?.business_context ?? {})}\nGenerate ${count} fresh, specific, non-overlapping ideas across different tags.` },
+          { role: 'user', content: `PROJECT: ${title}\nCONTEXT (the only facts you may use): ${JSON.stringify(world?.business_context ?? {})}\nGenerate ${count} fresh, specific, non-overlapping ideas across different tags.${world?.dna ? `\nPRODUCT DNA: ${JSON.stringify(world.dna).slice(0, 1500)}` : ''}${existingTitles.length ? `\nALREADY ON THE BOARD — do NOT repeat or rephrase any of these:\n${existingTitles.map((t) => `- ${t}`).join('\n')}` : ''}` },
         ], { provider: m.provider, model: m.model, maxTokens: 1400 });
         let ideas: { title?: string; pitch?: string; notes?: string; tag?: string }[] = [];
         try { ideas = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* refusal below */ }
@@ -331,17 +340,12 @@ Deno.serve(async (req) => {
 
         // Append as ordinary board tiles under working_state.boards.idea — merge, never clobber.
         const TAGS = new Set(['feature', 'automation', 'content', 'growth', 'revenue', 'wild']);
-        const { data: row } = await admin.from('knowledge_clusters').select('working_state').eq('id', clusterId).maybeSingle();
-        const ws = ((row?.working_state as Record<string, unknown> | null) ?? {});
-        const boards = ((ws.boards as Record<string, unknown> | undefined) ?? {});
-        const board = (boards.idea as { tiles?: unknown[]; groups?: string[] } | undefined) ?? { tiles: [] };
-        const tiles = Array.isArray(board.tiles) ? (board.tiles as { x?: number; y?: number }[]) : [];
         const group = `Auto · ${nowIso.slice(0, 10)}`;
         const startY = tiles.length ? Math.max(...tiles.map((t) => (typeof t.y === 'number' ? t.y : 0))) + 206 : 40;
         const added = ideas.slice(0, count).map((i, ix) => ({
           id: crypto.randomUUID(), prompt: 'auto-idea', parentId: null,
           content: {
-            kindId: 'idea_feature', tag: TAGS.has(i.tag ?? '') ? i.tag : 'feature',
+            kindId: `idea_${TAGS.has(i.tag ?? '') ? i.tag : 'feature'}`, tag: TAGS.has(i.tag ?? '') ? i.tag : 'feature',
             title: String(i.title ?? 'Untitled idea').slice(0, 60),
             pitch: String(i.pitch ?? ''), notes: String(i.notes ?? ''),
           },

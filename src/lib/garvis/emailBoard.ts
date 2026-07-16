@@ -18,6 +18,7 @@ export interface EmailContent {
 }
 
 export interface EmailMaterials {
+  tone?: string | null;   // brand voice for the copy seam
   businessName: string;
   agentName: string;            // who signs
   phone: string | null;

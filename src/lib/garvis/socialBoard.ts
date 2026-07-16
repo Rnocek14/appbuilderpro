@@ -38,6 +38,10 @@ export interface SocialMaterials {
   accent: string;
   avatarUrl: string | null;
   images: { url: string; caption: string | null; label: string | null }[];
+  // Voice for the copy seam — the difference between on-brand words and generic AI copy.
+  tone?: string | null;
+  audience?: string | null;
+  offerings?: string[];
 }
 
 export interface SocialKind {
@@ -55,8 +59,8 @@ export interface SocialKind {
 const bizOf = (m: SocialMaterials) => (m.businessName.trim() || '[EDIT: your business]');
 const areaOf = (m: SocialMaterials) => ((m.area && m.area.trim()) || '[EDIT: your area]');
 const slug = (s: string) => { const t = (s || '').trim(); return (!t || /\[EDIT/.test(t)) ? '[EDIT: area]' : t.replace(/[^a-zA-Z0-9]+/g, ''); };
-const reTags = (m: SocialMaterials, lead: string) => [lead, `#${slug(areaOf(m))}RealEstate`, '#RealEstate', '#Realtor', '#[EDIT: neighborhood]'];
-const genTags = (m: SocialMaterials, lead: string) => [lead, `#${slug(areaOf(m))}`, '#[EDIT: niche]', '#SmallBusiness'];
+const reTags = (m: SocialMaterials, lead: string) => [lead, `#${slug(areaOf(m))}RealEstate`, '#RealEstate', '#Realtor'];
+const genTags = (m: SocialMaterials, lead: string) => [lead, `#${slug(areaOf(m))}`, '#SmallBusiness'];
 
 // Real-estate kinds. Listing kinds require the REAL home photo (AI refused) — same honesty gate as postcards.
 export const SOCIAL_KINDS_RE: SocialKind[] = [
@@ -123,7 +127,7 @@ export function buildSocialContent(args: {
 
   return {
     platform, kindId: kind.id, campaignType: kind.campaignType,
-    caption: kind.caption(materials), hashtags: kind.hashtags(materials), headline: kind.headline,
+    caption: platformizeCta(kind.caption(materials), platform), hashtags: kind.hashtags(materials), headline: kind.headline,
     imageUrl, imageMode, aiNote,
   };
 }
@@ -147,7 +151,7 @@ export function applySocialCopy(content: SocialContent, f: SocialCopyFields): So
 export function applySocialRendition(parent: SocialContent, instruction: string): SocialRenditionResult {
   const instr = (instruction ?? '').trim();
   const named = PLATFORM_ORDER.find((p) => new RegExp(p === 'x' ? '\\b(x|twitter)\\b' : `\\b${p}\\b`, 'i').test(instr));
-  if (named && named !== parent.platform) return { content: { ...parent, platform: named }, wantsImage: false, imageStyle: null };
+  if (named && named !== parent.platform) return { content: { ...parent, platform: named, caption: platformizeCta(parent.caption, named) }, wantsImage: false, imageStyle: null };
 
   if (instr && canGenerateImage(parent.campaignType) && parent.imageMode !== 'photo') {
     return { content: parent, wantsImage: true, imageStyle: instr };
@@ -185,8 +189,20 @@ export function sizeForPlatform(p: SocialPlatform): '1024x1024' | '1536x1024' {
 
 /** The exact text that would post (caption + hashtags), joined the way each network expects. Inlined
  *  here (not imported from the mock component) so this core stays pure + testable. */
+/** Platform tag budgets — IG rewards a fuller tag set; LinkedIn/Facebook read spammy past ~3; X past 2. */
+const TAG_CAP: Record<SocialPlatform, number> = { instagram: 8, facebook: 3, linkedin: 3, x: 2 };
+
 export function composeSocialText(platform: SocialPlatform, caption: string, hashtags: string[]): string {
-  if (!hashtags.length) return caption;
-  if (platform === 'x') return `${caption} ${hashtags.join(' ')}`.trim();
-  return `${caption}\n\n${hashtags.join(' ')}`;
+  const tags = hashtags.slice(0, TAG_CAP[platform]);
+  if (!tags.length) return caption;
+  if (platform === 'x') return `${caption} ${tags.join(' ')}`.trim();
+  return `${caption}\n\n${tags.join(' ')}`;
+}
+
+/** "DM me" is Instagram-native; every other platform gets its own action verb — a LinkedIn post
+ *  saying "DM me" reads wrong to the exact audience it courts. Pure text swap, applied at build. */
+export function platformizeCta(caption: string, platform: SocialPlatform): string {
+  if (platform === 'instagram') return caption;
+  const sub = platform === 'linkedin' ? 'Message me' : platform === 'x' ? 'Reply or DM' : 'Send me a message';
+  return caption.replace(/\bDM me\b/g, sub);
 }

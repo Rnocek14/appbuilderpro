@@ -17,38 +17,39 @@
 // Deploy: supabase functions deploy inbox-draft --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { complete, modelForPlan, getProviderConfig, type AIProvider } from '../_shared/ai.ts';
+import { getUserPlan } from '../_shared/credits.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret' };
 
 async function draftReply(input: {
   firstName: string; fromName: string; business: string;
   originalSubject: string; originalBody: string; theirReply: string;
+  voiceExample: string | null;
+  model: { provider: AIProvider; model: string };
 }): Promise<{ subject: string; body: string } | null> {
-  const openai = Deno.env.get('OPENAI_API_KEY');
-  const lovable = Deno.env.get('LOVABLE_API_KEY');
-  if (!openai && !lovable) return null;
-  const url = openai ? 'https://api.openai.com/v1/chat/completions' : 'https://ai.gateway.lovable.dev/v1/chat/completions';
-  const model = openai ? 'gpt-4o-mini' : 'google/gemini-2.5-flash';
   const system =
     'You draft a reply to a warm prospect who wrote back. Warm, direct, under 120 words, plain text. ' +
     'Answer ONLY what the thread itself supports. For anything you cannot know (prices, dates, availability, specifics), ' +
     'insert a visible placeholder like [YOU FILL: your price] instead of inventing. One clear next step (a question or a proposed time). ' +
-    'No hype, no apologies, no "hope this finds you well".';
+    'No hype, no apologies, no "hope this finds you well".' +
+    (input.voiceExample
+      ? `\n\nVOICE: match the owner's actual register — here is a real email they approved and sent (sound like this, never copy it):\n"""${input.voiceExample.slice(0, 900)}"""`
+      : '');
   const user =
     `The prospect replied to our email — draft the response.\n\n` +
     `Their first name: ${input.firstName || '(unknown)'}\nOur sender: ${input.fromName}${input.business ? ` (${input.business})` : ''}\n\n` +
     `Our original email — subject: ${input.originalSubject}\n"""${input.originalBody.slice(0, 1500)}"""\n\n` +
     `THEIR REPLY:\n"""${input.theirReply.slice(0, 1500)}"""\n\n` +
-    `Return strict JSON {"subject": string, "body": string}. Subject: "Re: " + the original subject unless theirs implies better.`;
+    `Return strict JSON {"subject": string, "body": string} — no markdown fences. Subject: "Re: " + the original subject unless theirs implies better.`;
   try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${openai ?? lovable}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], response_format: { type: 'json_object' }, temperature: 0.4 }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
+    // THE one provider seam (was a hard-coded gpt-4o-mini fetch): a paid user's configured model now
+    // drafts their most revenue-critical copy, same as every other seam.
+    const result = await complete(
+      [{ role: 'system', content: system }, { role: 'user', content: user }],
+      { provider: input.model.provider, model: input.model.model, maxTokens: 700 },
+    );
+    const parsed = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''));
     if (!parsed.subject || !parsed.body) return null;
     return { subject: String(parsed.subject).slice(0, 200), body: String(parsed.body).replace(/\\n/g, '\n').slice(0, 4000) };
   } catch {
@@ -64,8 +65,10 @@ Deno.serve(async (req) => {
 
   const secret = Deno.env.get('CRON_SECRET');
   if (!secret || req.headers.get('x-cron-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
-  if (!Deno.env.get('OPENAI_API_KEY') && !Deno.env.get('LOVABLE_API_KEY')) {
-    return json({ available: false, reason: 'No drafting model configured (OPENAI_API_KEY or LOVABLE_API_KEY).' });
+  const KEY_FOR: Record<string, string | null> = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', local: null };
+  const envKey = KEY_FOR[getProviderConfig().provider];
+  if (envKey && !Deno.env.get(envKey)) {
+    return json({ available: false, reason: `No drafting model configured (${envKey}).` });
   }
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -78,6 +81,22 @@ Deno.serve(async (req) => {
     .gte('received_at', windowStart).order('received_at', { ascending: true }).limit(25);
 
   let drafted = 0, skipped = 0;
+  // Per-owner caches: the configured model (plan-driven) + one real approved email as the voice rail.
+  const modelCache = new Map<string, { provider: AIProvider; model: string }>();
+  const voiceCache = new Map<string, string | null>();
+  const ownerModel = async (ownerId: string) => {
+    if (!modelCache.has(ownerId)) modelCache.set(ownerId, modelForPlan(await getUserPlan(admin, ownerId)));
+    return modelCache.get(ownerId)!;
+  };
+  const ownerVoice = async (ownerId: string) => {
+    if (!voiceCache.has(ownerId)) {
+      const { data: v } = await admin.from('outreach_messages')
+        .select('body_text').eq('owner_id', ownerId).eq('status', 'sent')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      voiceCache.set(ownerId, (v?.body_text as string | undefined) ?? null);
+    }
+    return voiceCache.get(ownerId)!;
+  };
   for (const r of (replies ?? []) as { id: string; owner_id: string; campaign_id: string; from_address: string | null; subject: string | null; body_text: string | null; received_at: string }[]) {
     try {
       // Already answered? Any message on the campaign created AFTER their reply (draft or sent —
@@ -110,6 +129,8 @@ Deno.serve(async (req) => {
         originalSubject: prior.subject ?? '',
         originalBody: prior.body_text ?? '',
         theirReply: r.body_text ?? '',
+        voiceExample: await ownerVoice(r.owner_id),
+        model: await ownerModel(r.owner_id),
       });
       if (!draft) { skipped++; continue; }
 

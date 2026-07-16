@@ -73,6 +73,10 @@ export function PostcardBack({ spec, accent, qr }: { spec: MailerSpec; accent: s
         <div className="flex w-1/2 flex-col p-[4%]">
           <div className="text-[3.4vw] font-bold leading-tight lg:text-[19px]" style={{ color: accent }}>{spec.back.headline}</div>
           <div className="mt-[3%] whitespace-pre-line text-[2vw] leading-snug text-neutral-700 lg:text-[12px]">{spec.back.body}</div>
+          {/* The Offer field prints: shown as its own emphasized line when it isn't already baked into the body (the dock's Offer edit was silently invisible before). */}
+          {spec.back.offer.trim() && !spec.back.body.includes(spec.back.offer.trim()) && (
+            <div className="mt-[2%] whitespace-pre-line text-[2vw] font-semibold leading-snug text-neutral-800 lg:text-[12px]">{spec.back.offer}</div>
+          )}
           <div className="mt-auto">
             <div className="text-[2.2vw] font-semibold lg:text-[13px]">{spec.back.cta}</div>
             <div className="mt-[2%] text-[1.7vw] text-neutral-500 lg:text-[10px]">{spec.back.contactLine}</div>

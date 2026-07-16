@@ -6,7 +6,7 @@
 import {
   SOCIAL_KINDS_RE, SOCIAL_KINDS_GENERIC, socialKindsFor, socialKindById, defaultSocialKind,
   buildSocialContent, applySocialRendition, withGeneratedImage, withPhoto, socialImagePrompt,
-  tileAllowsAI, sizeForPlatform, composeSocialText, PLATFORM_ORDER, applySocialCopy,
+  tileAllowsAI, sizeForPlatform, composeSocialText, PLATFORM_ORDER, applySocialCopy, platformizeCta,
   type SocialMaterials, type SocialKind,
 } from './socialBoard';
 import { canGenerateImage } from './imagegen';
@@ -91,6 +91,24 @@ check('socialKindsFor / kindById / defaultKind resolve, and the default allows A
   check('image fields are untouchable from the copy applier', out.imageMode === base.imageMode && out.imageUrl === base.imageUrl);
   const kept = applySocialCopy(base, { caption: '   ', hashtags: [] });
   check('empty fields keep the current words', kept.caption === base.caption && kept.hashtags === base.hashtags);
+}
+
+// --- platform-native output: tag budgets + CTA verbs + no broken default tags -----------------
+{
+  const m: SocialMaterials = { businessName: 'Lakeside Realty', area: 'Lake Geneva', realEstate: true, accent: '#2e6f95', avatarUrl: null, images: [] };
+  const kinds = socialKindsFor(true);
+  check('no kind ships a broken [EDIT] hashtag by default', kinds.every((k) => k.hashtags(m).every((t) => !t.includes('[EDIT'))));
+  const tags = ['#a', '#b', '#c', '#d', '#e'];
+  check('tag budgets: X gets 2, LinkedIn/FB get 3, IG keeps more', composeSocialText('x', 'c', tags).split('#').length - 1 === 2
+    && composeSocialText('linkedin', 'c', tags).split('#').length - 1 === 3
+    && composeSocialText('instagram', 'c', tags).split('#').length - 1 === 5);
+  check('"DM me" stays on Instagram but converts per platform', platformizeCta('DM me for a look', 'instagram') === 'DM me for a look'
+    && platformizeCta('DM me for a look', 'linkedin') === 'Message me for a look'
+    && platformizeCta('DM me for a look', 'facebook') === 'Send me a message for a look');
+  const li = buildSocialContent({ materials: m, kind: kinds[0], platform: 'linkedin' });
+  check('a LinkedIn build never says "DM me"', !li.caption.includes('DM me'));
+  const sw = applySocialRendition({ ...li, platform: 'linkedin' }, 'make it for instagram');
+  check('platform-switch renditions re-platformize the CTA', sw.content.platform === 'instagram');
 }
 
 console.log(`\nsocialBoard.verify: ${passed} passed, ${failed} failed`);

@@ -22,7 +22,12 @@ export interface IdeaContent {
 }
 
 /** The real facts the seeds + AI may use — the project itself, nothing invented. */
-export interface IdeaMaterials { projectName: string; mission: string | null }
+export interface IdeaMaterials {
+  projectName: string;
+  mission: string | null;
+  /** The world's real business_context (customers, model, constraints) — grounding for the AI seam. */
+  context?: Record<string, unknown> | null;
+}
 
 export interface IdeaKind {
   id: string; label: string; emoji: string; hint: string; tag: IdeaTag;

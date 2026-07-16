@@ -29,6 +29,7 @@ export async function loadEmailMaterials(worldId: string, clusterId: string | nu
     phone: camp?.agentPhone ?? null,
     area: camp?.area ?? null,
     realEstate: inferRealEstate(businessName || brand?.name || null),
+    tone: (brand as { tone?: string | null } | null)?.tone ?? null,
   };
 }
 
