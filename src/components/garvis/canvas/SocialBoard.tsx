@@ -76,6 +76,11 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
         </div>
       ),
       captionOf: (c) => `${PLATFORM_LABEL[c.platform]} · ${socialKindById(c.kindId)?.label ?? 'Post'}${c.imageMode === 'ai' ? ' · AI' : c.imageMode === 'photo' ? ' · photo' : ''}`,
+      references: [
+        ...(materials.avatarUrl ? [{ label: 'Logo / avatar', url: materials.avatarUrl }] : []),
+        { label: 'Brand color', swatches: [materials.accent] },
+        ...materials.images.slice(0, 8).map((i) => ({ label: i.caption || i.label || 'your photo', url: i.url })),
+      ],
 
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && socialKindById(kindId)) || defaultSocialKind(realEstate);

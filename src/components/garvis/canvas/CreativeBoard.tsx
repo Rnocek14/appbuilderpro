@@ -55,6 +55,9 @@ export interface CreativeBoardAdapter<C> {
   renderPrint?: (content: C) => ReactNode;   // full print-size render (for Export)
   printCss?: string;                          // @page + hide rules for Export
   searchText?: (content: C) => string;        // extra searchable text (beyond the tile's prompt)
+  /** REFERENCES — the operator's real photos, logo, palette. Shown in a rail beside the work so
+   *  creating never means leaving to go find what the business actually looks like. */
+  references?: { label: string; url?: string | null; swatches?: string[] }[];
 }
 
 export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
@@ -86,6 +89,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   const [newGroupText, setNewGroupText] = useState('');
   const [newGroupTileId, setNewGroupTileId] = useState<string | null>(null);
   const [newGroupBulk, setNewGroupBulk] = useState(false);   // the new group is for the current multi-selection
+  const [refsOpen, setRefsOpen] = useState(true);            // the references rail (real photos + brand)
   const [printing, setPrinting] = useState<C[] | null>(null);
 
   // ---- load + persist (debounced) --------------------------------------------------------
@@ -432,6 +436,31 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
           </div>
         )}
 
+        {/* THE REFERENCES RAIL — your real photos, logo, and palette live BESIDE the work, so creating
+            never means leaving the board to remember what the business actually looks like. */}
+        {(adapter.references?.length ?? 0) > 0 && (
+          <div className="cb-refs" onPointerDown={(e) => e.stopPropagation()}>
+            <button className="cb-refs-tab" onClick={() => setRefsOpen((v) => !v)} title={refsOpen ? 'Hide references' : 'References — your real photos & brand'}>
+              {refsOpen ? '‹' : '🖼'}
+            </button>
+            {refsOpen && (
+              <div className="cb-refs-body">
+                <span className="cb-org-label">References</span>
+                {adapter.references!.map((r, i) => (
+                  <div key={i} className="cb-ref">
+                    {r.url && <img src={r.url} alt={r.label} loading="lazy" />}
+                    {r.swatches && r.swatches.length > 0 && (
+                      <div className="cb-ref-sw">{r.swatches.map((c, j) => <span key={j} style={{ background: c }} title={c} />)}</div>
+                    )}
+                    <span className="cb-ref-lbl" title={r.label}>{r.label}</span>
+                  </div>
+                ))}
+                <p className="cb-refs-note">Your real materials — what the cards are made from.</p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* THE INSPECTOR DOCK — the editor lives IN the board, not in a modal over it. The spread stays
             visible and pannable beside it, so editing one card never hides the others you're comparing
             against (the whole point of a spatial lab). Esc or ✕ closes; the focused card auto-pans into
@@ -543,6 +572,15 @@ const CB_CSS = `
 .cb-cap{margin-top:5px;font-size:10.5px;color:var(--forge-dim,#a99b90);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
 .cb-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
 .cb-modal{width:min(92vw,440px);border-radius:14px;border:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710);padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.cb-refs{position:absolute;left:0;top:0;bottom:0;z-index:5;display:flex;align-items:flex-start;pointer-events:none}
+.cb-refs-tab{pointer-events:auto;margin:8px 0 0 8px;height:30px;width:30px;border-radius:8px;display:grid;place-items:center;font-size:13px;color:var(--forge-ink,#f0e6da);background:rgba(255,255,255,.08);border:1px solid var(--forge-border,#3a2f25);order:2}
+.cb-refs-tab:hover{border-color:rgba(255,138,61,.5)}
+.cb-refs-body{pointer-events:auto;width:150px;max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:9px;padding:10px;background:rgba(28,23,16,.94);border-right:1px solid var(--forge-border,#3a2f25);order:1}
+.cb-ref img{width:100%;border-radius:8px;display:block;border:1px solid rgba(255,255,255,.08)}
+.cb-ref-lbl{display:block;margin-top:3px;font-size:10px;color:var(--forge-dim,#a99b90);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cb-ref-sw{display:flex;gap:4px;flex-wrap:wrap}
+.cb-ref-sw span{width:20px;height:20px;border-radius:6px;border:1px solid rgba(255,255,255,.15)}
+.cb-refs-note{font-size:10px;line-height:1.4;color:var(--forge-dim,#a99b90)}
 .cb-dock{position:absolute;top:0;right:0;bottom:0;width:min(480px,50%);overflow:auto;border-left:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710);padding:18px;box-shadow:-18px 0 44px rgba(0,0,0,.4);z-index:6;cursor:default;animation:cbDockIn .18s ease-out}
 @keyframes cbDockIn{from{transform:translateX(24px);opacity:.4}to{transform:translateX(0);opacity:1}}
 @media (prefers-reduced-motion: reduce){.cb-dock{animation:none}}

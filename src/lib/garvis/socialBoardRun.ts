@@ -26,13 +26,15 @@ export async function loadSocialMaterials(worldId: string): Promise<SocialMateri
     loadWeb(worldId).catch(() => null),
   ]);
   const businessName = m.ctx?.business_name || web?.title || '';
-  const bk = brand as ({ palette?: string[]; avatarUrl?: string | null; name?: string | null } | null);
+  const bk = brand as ({ palette?: string[]; avatarUrl?: string | null; name?: string | null; logo_url?: string | null; headshots?: string[] } | null);
   return {
     businessName: businessName || bk?.name || '',
     area: m.ctx?.locale ?? null,
     realEstate: inferRealEstate(businessName || bk?.name || null),
     accent: m.brand?.palette?.[0] || bk?.palette?.[0] || '#FF8A3D',
-    avatarUrl: bk?.avatarUrl ?? null,
+    // The brand kit's real identity flows into the previews: explicit avatar, else the official
+    // logo, else a headshot — the wire the audit found dead (logo saved but never shown anywhere).
+    avatarUrl: bk?.avatarUrl ?? bk?.logo_url ?? bk?.headshots?.[0] ?? null,
     images: m.images.map((i) => ({ url: i.url, caption: i.caption, label: i.label })),
   };
 }

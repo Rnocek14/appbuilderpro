@@ -81,6 +81,10 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
         ? '🎨 AI imagery is off — cards use your brand design and real photos. Connect an image key to generate imagery.'
         : 'Real facts fill in; anything unknown shows as an [EDIT] you complete. Nothing mails from here — print, then log what you sent.',
       captionOf: (c) => `${kindById(c.kindId)?.label ?? 'Postcard'}${c.imageMode === 'ai' ? ' · AI image' : c.imageMode === 'photo' ? ' · photo' : ' · brand'}`,
+      references: [
+        ...(materials.brand?.palette?.length ? [{ label: 'Brand palette', swatches: materials.brand.palette }] : []),
+        ...materials.images.slice(0, 8).map((i) => ({ label: i.caption || i.label || 'your photo', url: i.url })),
+      ],
 
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && kindById(kindId)) || defaultKind(realEstate);
