@@ -15,3 +15,6 @@ playwright-report/
 e2e/.auth/
 /blob-report/
 .playwright/
+
+# transient Playwright drive scripts written by test agents at repo root
+/*.mjs
