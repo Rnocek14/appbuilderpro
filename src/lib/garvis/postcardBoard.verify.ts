@@ -6,7 +6,7 @@
 // look-instruction flags an image regen but never replaces a real photo).
 import {
   POSTCARD_KINDS_RE, POSTCARD_KINDS_GENERIC, postcardKindsFor, kindById, defaultKind,
-  buildPostcardContent, applyRendition, withGeneratedImage, withPhoto, postcardImagePrompt, tileAllowsAI,
+  buildPostcardContent, applyRendition, withGeneratedImage, withPhoto, postcardImagePrompt, tileAllowsAI, applyCopyFields,
   type PostcardMaterials, type PostcardKind,
 } from './postcardBoard';
 import { canGenerateImage } from './imagegen';
@@ -93,6 +93,18 @@ check('postcardKindsFor / kindById / defaultKind resolve', postcardKindsFor(true
   check('withGeneratedImage → ai mode + note + url', g.imageMode === 'ai' && g.aiNote === 'AI note' && g.spec.front.imageUrl === 'https://img/x.png');
   const p = withPhoto(base, 'https://img/up.jpg', 'my photo');
   check('withPhoto → photo mode + url + alt', p.imageMode === 'photo' && p.spec.front.imageUrl === 'https://img/up.jpg' && p.spec.front.imageAlt === 'my photo');
+}
+
+// --- the copy seam's pure applier: words only, photo/AI rules untouchable --------------------
+{
+  const m: PostcardMaterials = { ctx: { business_name: 'Lakeside Realty', principal: 'Jane Doe', craft: null, offerings: [], audience: null, locale: 'Lake Geneva', links: {}, tone: null }, brand: null, images: [] };
+  const base = buildPostcardContent({ materials: m, kind: postcardKindsFor(true).find((k) => !k.needsRealPhoto)!, idea: '' });
+  const out = applyCopyFields(base, { headline: 'Sunset season on the lake', sub: 'thinking of selling?', body: 'Line one.\nLine two [EDIT: offer].', cta: 'Text LAKE to get your number' });
+  check('applyCopyFields writes headline/sub/body/cta', out.spec.front.headline.startsWith('Sunset season') && out.spec.front.kicker === 'thinking of selling?' && out.spec.back.cta.startsWith('Text LAKE') && out.spec.back.body.includes('[EDIT: offer]'));
+  check('a too-long headline is clipped to postcard scale', applyCopyFields(base, { headline: 'x'.repeat(90) }).spec.front.headline.length <= 48);
+  check('image mode + photo rules are untouchable from the copy applier', out.imageMode === base.imageMode && out.spec.front.imageUrl === base.spec.front.imageUrl);
+  const kept = applyCopyFields(base, {});
+  check('no fields → the words stay put', kept.spec.front.headline === base.spec.front.headline && kept.spec.back.body === base.spec.back.body);
 }
 
 console.log(`\npostcardBoard.verify: ${passed} passed, ${failed} failed`);

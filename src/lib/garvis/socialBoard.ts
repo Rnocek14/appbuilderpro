@@ -133,6 +133,17 @@ export interface SocialRenditionResult { content: SocialContent; wantsImage: boo
 /** Spin a rendition: naming a platform switches to it; otherwise restyle the image (when AI is allowed
  *  and it's not a real photo we must keep); if neither applies, cycle to the next platform so the child
  *  is always visibly different. Pure — the impure image regen happens in the run. */
+/** Fields the board-copy AI seam may write — WORDS only. Hashtags are normalized (no #, ≤6);
+ *  imageMode / imageUrl / the listing-photo gate are untouchable from here. */
+export interface SocialCopyFields { caption?: string; hashtags?: string[] }
+export function applySocialCopy(content: SocialContent, f: SocialCopyFields): SocialContent {
+  const caption = typeof f.caption === 'string' && f.caption.trim() ? f.caption.trim() : content.caption;
+  const hashtags = Array.isArray(f.hashtags)
+    ? f.hashtags.map((t) => String(t).replace(/^#/, '').trim()).filter(Boolean).slice(0, 6)
+    : content.hashtags;
+  return { ...content, caption, hashtags: hashtags.length ? hashtags : content.hashtags };
+}
+
 export function applySocialRendition(parent: SocialContent, instruction: string): SocialRenditionResult {
   const instr = (instruction ?? '').trim();
   const named = PLATFORM_ORDER.find((p) => new RegExp(p === 'x' ? '\\b(x|twitter)\\b' : `\\b${p}\\b`, 'i').test(instr));

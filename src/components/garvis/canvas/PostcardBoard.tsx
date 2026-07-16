@@ -12,14 +12,23 @@ import { Loader2, Sparkles, Image as ImageIcon, Wand2, Star, Trash2, Send } from
 import { PostcardFront, PostcardBack, PostcardViewer } from '../Postcard';
 import {
   postcardKindsFor, kindById, defaultKind, buildPostcardContent, applyRendition, withPhoto, withGeneratedImage, tileAllowsAI,
-  type PostcardContent, type PostcardMaterials,
+  applyCopyFields,
+  type PostcardContent, type PostcardMaterials, type PostcardCopyFields,
 } from '../../../lib/garvis/postcardBoard';
 import { loadPostcardMaterials, generateTileImage, logPostcardMailed } from '../../../lib/garvis/postcardBoardRun';
+import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
 import { inferRealEstate } from '../../../lib/garvis/studioKit';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
+
+// The ONLY facts the copy seam may write from — real materials, nothing else.
+const copyFacts = (m: PostcardMaterials): Record<string, unknown> => ({
+  business: m.ctx?.business_name ?? null, agent: m.ctx?.principal ?? null, area: m.ctx?.locale ?? null,
+  offerings: m.ctx?.offerings ?? [], audience: m.ctx?.audience ?? null, site: m.ctx?.links?.site ?? null,
+  tone: m.ctx?.tone ?? null,
+});
 
 const patchFront = (c: PostcardContent, p: Partial<PostcardContent['spec']['front']>): PostcardContent =>
   ({ ...c, spec: { ...c.spec, front: { ...c.spec.front, ...p } } });
@@ -76,6 +85,16 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && kindById(kindId)) || defaultKind(realEstate);
         let content = buildPostcardContent({ materials, kind, idea: prompt });
+        // The typed idea reaches the WORDS: the board-copy seam writes real headline/body/cta from the
+        // idea + the real materials ([EDIT] holes for unknowns). Falls back to the honest template
+        // when the seam is off or errors — the card is still made, never blocked on AI.
+        if (prompt.trim()) {
+          const ai = await generateBoardCopy({
+            channel: 'postcard', mode: 'make', instruction: prompt, kindLabel: kind.label,
+            materials: copyFacts(materials),
+          });
+          if (ai.ok) content = applyCopyFields(content, ai.fields as PostcardCopyFields);
+        }
         if (!kind.needsRealPhoto && tileAllowsAI(content) && aiState !== 'off') {
           content = await tryImage(content, prompt || null);
         }
@@ -84,8 +103,18 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
 
       rendition: async ({ parent, instruction }) => {
         const r = applyRendition(parent, instruction);
-        if (r.wantsImage && aiState !== 'off') return tryImage(r.content, r.imageStyle);
-        return r.content;
+        let content = r.content;
+        // The instruction reaches the words too — revise the current piece, keep what it got right.
+        if (instruction.trim()) {
+          const ai = await generateBoardCopy({
+            channel: 'postcard', mode: 'rendition', instruction, kindLabel: kindById(parent.kindId)?.label ?? null,
+            materials: copyFacts(materials),
+            current: { headline: parent.spec.front.headline, sub: parent.spec.front.kicker, body: parent.spec.back.body, cta: parent.spec.back.cta },
+          });
+          if (ai.ok) content = applyCopyFields(content, ai.fields as PostcardCopyFields);
+        }
+        if (r.wantsImage && aiState !== 'off') return tryImage(content, r.imageStyle);
+        return content;
       },
 
       renderThumb: (c) => <PostcardFront spec={c.spec} accent={c.spec.accent} variant={c.variant} />,
