@@ -415,7 +415,7 @@ create policy "msg insert" on public.ai_messages for insert with check (user_id 
 drop policy if exists "usage select own" on public.usage_events;
 create policy "usage select own" on public.usage_events for select using (user_id = auth.uid() or public.is_admin());
 
-writes via service role (Stripe webhook)
+-- subscriptions: users read own; writes via service role (Stripe webhook)
 create policy "subs select own" on public.subscriptions for select using (user_id = auth.uid() or public.is_admin());
 
 -- deployments
