@@ -34,6 +34,7 @@ export async function listOrders(worldId?: string): Promise<StandingOrder[]> {
 
 export async function createOrder(input: {
   worldId?: string | null; kind: OrderKind; label: string; cadence: Cadence; url?: string;
+  config?: Record<string, unknown>;
 }): Promise<StandingOrder> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
@@ -47,7 +48,7 @@ export async function createOrder(input: {
   const nowIso = new Date().toISOString();
   const { data, error } = await supabase.from('standing_orders').insert({
     owner_id: uid, world_id: input.worldId ?? null, kind: input.kind, label,
-    cadence: input.cadence, config: input.kind === 'watch_url' ? { url: input.url!.trim() } : {},
+    cadence: input.cadence, config: input.kind === 'watch_url' ? { url: input.url!.trim() } : (input.config ?? {}),
     status: 'active', anchor_at: nowIso,
     // First run = the next grid slot from now; the worker steps the same grid forever after.
     next_run_at: nextRunAfter(input.cadence, nowIso, nowIso),
