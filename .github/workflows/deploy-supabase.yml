@@ -142,21 +142,28 @@ jobs:
         if: ${{ env.MODE == 'full' }}
         run: |
           set -e
+          apply_sql () {  # apply_sql <file> — run one SQL file through the management API
+            body=$(jq -n --arg q "$(cat "$1")" '{query:$q}')
+            resp=$(curl -s -w '\n%{http_code}' -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" -d "$body")
+            code=$(echo "$resp" | tail -n1)
+            if [ "$code" -ge 400 ] 2>/dev/null; then
+              echo "::error::$1 failed (HTTP $code): $(echo "$resp" | head -n -1 | head -c 600)"
+              exit 1
+            fi
+            echo "applied: $1"
+          }
+          # BASE FIRST: live DBs got schema.sql by hand-paste at different vintages (one was missing
+          # ai_messages, which crashed the very first migration). schema_repair.sql is the generated
+          # idempotent rewrite of both base schemas — brings ANY vintage up to the current base.
+          apply_sql supabase/schema_repair.sql
           if [ -n "$SUPABASE_DB_PASSWORD" ]; then
             supabase link --project-ref "$PROJECT_REF"
             supabase db push --include-all
           else
             echo "Applying $(ls supabase/migrations/2026*.sql supabase/migrations/app_00*.sql | wc -l) migrations via the management API…"
             for f in supabase/migrations/2026*.sql supabase/migrations/app_00*.sql; do
-              body=$(jq -n --arg q "$(cat "$f")" '{query:$q}')
-              resp=$(curl -s -w '\n%{http_code}' -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
-                -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" -d "$body")
-              code=$(echo "$resp" | tail -n1)
-              if [ "$code" -ge 400 ] 2>/dev/null; then
-                echo "::error::$f failed (HTTP $code): $(echo "$resp" | head -n -1 | head -c 600)"
-                exit 1
-              fi
-              echo "applied: $f"
+              apply_sql "$f"
             done
             echo "All migrations applied."
           fi
