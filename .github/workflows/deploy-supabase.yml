@@ -219,8 +219,11 @@ jobs:
       - name: Deploy the full function fleet
         if: ${{ env.MODE == 'full' }}
         run: |
+<<<<<<< Updated upstream
           # `npm run x -- <args>` appends to the underlying supabase command — the curated lists
           # don't carry --project-ref themselves, and there is no linked project on the runner.
+=======
+>>>>>>> Stashed changes
           npm run functions:deploy -- --project-ref "$PROJECT_REF"
           npm run functions:deploy:webhooks -- --project-ref "$PROJECT_REF"
 
