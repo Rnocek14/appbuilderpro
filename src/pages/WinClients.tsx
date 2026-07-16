@@ -6,21 +6,22 @@
 // come after a "yes" — this is the top of the funnel, made into one legible screen.
 
 import { useState, useRef, useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info, Radar, Square, CalendarClock, Pause, Play, Power } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
-import { findBusinesses, auditBusiness, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
+import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
 import { US_CITIES, US_STATES, citiesFor, type SweepScope } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
 import { huntSummary, type HuntConfig } from '../lib/garvis/clientHuntSchedule';
-import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder } from '../lib/garvis/standingRun';
+import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder, runOrderNow } from '../lib/garvis/standingRun';
 import { orderStatusLine, type StandingOrder } from '../lib/garvis/standing';
 import { type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
 import { ProspectCanvas } from '../components/garvis/canvas/ProspectCanvas';
+import { SavedAudits } from '../components/garvis/SavedAudits';
 import { CanvasScene, type CanvasNode } from '../components/garvis/canvas/CanvasScene';
 import { profileFromScrape } from '../lib/preview/scrapeProfile';
 import { queuePitch } from '../lib/garvis/outreach';
@@ -44,13 +45,14 @@ const VERDICT_STYLE: Record<Verdict, { label: string; cls: string }> = {
 
 export default function WinClients() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [niche, setNiche] = useState('');
   const [area, setArea] = useState('');
   const [scanUrl, setScanUrl] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scope, setScope] = useState('top50');
   const [sweeping, setSweeping] = useState(false);
-  const [sweepProg, setSweepProg] = useState<{ done: number; total: number; found: number; city: string } | null>(null);
+  const [sweepProg, setSweepProg] = useState<{ done: number; total: number; found: number; failed: number; city: string } | null>(null);
   const stopSweep = useRef(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [finding, setFinding] = useState(false);
@@ -64,6 +66,7 @@ export default function WinClients() {
   const [searchesPerDay, setSearchesPerDay] = useState(20);
   const [demoQuota, setDemoQuota] = useState(5);
   const [savingHunt, setSavingHunt] = useState(false);
+  const [runningHunt, setRunningHunt] = useState(false);
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
 
   // Load any existing daily hunt so the panel shows its live state instead of the setup form.
@@ -83,8 +86,10 @@ export default function WinClients() {
           const idx = i++;
           const b = found[idx];
           if (!b.url) { continue; }
-          const audit = await auditBusiness(b.url);
+          const { audit, scrape } = await scrapeAndAudit(b.url);
           setRows((r) => r.map((x, j) => (j === idx ? { ...x, audit } : x)));
+          // Keep the audit we just paid for (Phase 0) — best-effort, never blocks the UI.
+          void recordProspectAudit({ url: b.url, audit, scrape, source: 'find', businessName: b.name, niche, area });
         }
       };
       await Promise.all([worker(), worker(), worker()]);
@@ -134,8 +139,9 @@ export default function WinClients() {
     catch { toast('error', 'That doesn’t look like a website URL.'); return; }
     setScanning(true); setSearched(true);
     try {
-      const audit = await auditBusiness(href);
+      const { audit, scrape } = await scrapeAndAudit(href);
       setRows((r) => [{ name: host, url: href, snippet: '', audit }, ...r]);
+      void recordProspectAudit({ url: href, audit, scrape, source: 'scan', businessName: host, niche, area });
       setScanUrl('');
       toast('success', `Scanned ${host} — ${audit.reachable ? 'audited. Press Build to make their demo.' : 'couldn’t load it; worth a manual look.'}`);
     } catch (e) { toast('error', emsg(e)); }
@@ -156,16 +162,24 @@ export default function WinClients() {
     if (!n) { toast('error', 'Enter a niche first — e.g. roofers, dentists, plumbers.'); return; }
     const cities = scopeCities();
     stopSweep.current = false;
-    setSweeping(true); setSearched(true); setRows([]); setSweepProg({ done: 0, total: cities.length, found: 0, city: '' });
+    setSweeping(true); setSearched(true); setRows([]); setSweepProg({ done: 0, total: cities.length, found: 0, failed: 0, city: '' });
     const MAX_ROWS = 400;
     try {
-      const all = await sweepNation(n, cities, {
+      const res = await sweepNation(n, cities, {
         concurrency: 3,
         onFound: (b) => setRows((r) => (r.length >= MAX_ROWS ? r : [...r, { name: b.name, url: b.url, snippet: b.snippet, audit: null }])),
         onProgress: (p) => setSweepProg(p),
         shouldStop: () => stopSweep.current,
       });
-      toast('success', `Swept ${cities.length === US_CITIES.length ? 'the country' : scope.startsWith('top') ? `the top ${scope.slice(3)} markets` : scope} — found ${all.length} unique ${n}. Build the strong prospects; nothing is emailed until you approve it.`);
+      const where = cities.length === US_CITIES.length ? 'the country' : scope.startsWith('top') ? `the top ${scope.slice(3)} markets` : scope;
+      // Honest reporting: a sweep where searches FAILED never poses as "found 0" — say why.
+      if (res.failed > 0 && res.found.length === 0) {
+        toast('error', `The sweep couldn’t search (${res.failed}/${cities.length} cities failed): ${res.lastError ?? 'unknown error'}`);
+      } else if (res.failed > 0) {
+        toast('info', `Swept ${where} — found ${res.found.length} unique ${n}, but ${res.failed} cit${res.failed === 1 ? 'y' : 'ies'} failed (${res.lastError ?? 'unknown error'}).`);
+      } else {
+        toast('success', `Swept ${where} — found ${res.found.length} unique ${n}. Build the strong prospects; nothing is emailed until you approve it.`);
+      }
     } catch (e) { toast('error', emsg(e)); }
     finally { setSweeping(false); }
   };
@@ -204,6 +218,19 @@ export default function WinClients() {
     try { await deleteOrder(hunt.id); setHunt(null); toast('info', 'Daily hunt turned off.'); }
     catch (e) { toast('error', emsg(e)); }
   };
+  // Run the hunt RIGHT NOW (owner-scoped forced run in the worker) — same-day proof it works,
+  // and the panel's honest result line refreshes from the run it just did.
+  const runHuntNow = async () => {
+    if (!hunt) return;
+    setRunningHunt(true);
+    try {
+      await runOrderNow(hunt.id);
+      const os = await listOrders();
+      setHunt(os.find((o) => o.id === hunt.id) ?? hunt);
+      toast('success', 'Hunt ran — the result line below is from this run. Demos + pitches land in your Queue.');
+    } catch (e) { toast('error', emsg(e)); }
+    finally { setRunningHunt(false); }
+  };
 
   const weakCount = rows.filter((r) => r.audit?.verdict === 'weak').length;
   // The same rows as a web: clustered by verdict, orb size = opportunity (weaker site → bigger orb).
@@ -226,10 +253,10 @@ export default function WinClients() {
     { key: 'find', emoji: '🔎', label: 'Find', sub: searched ? `${rows.length} found` : 'start here' },
     { key: 'built', emoji: '✨', label: 'Sites built', sub: builtCount ? `${builtCount} ready` : 'none yet', count: builtCount, dim: builtCount === 0 },
     { key: 'pitch', emoji: '✉️', label: 'Pitches', sub: queuedCount ? `${queuedCount} in Queue` : 'none yet', count: queuedCount, accent: 'violet', dim: queuedCount === 0 },
-    { key: 'clients', emoji: '🤝', label: 'Clients', sub: 'deploy · soon', dim: true },
+    { key: 'clients', emoji: '🤝', label: 'Clients', sub: 'billing · MRR' },
   ];
   const onHub = (k: string) => {
-    if (k === 'clients') { toast('info', 'Deploy + the monthly retainer are next — that turns a “yes” into their real live site.'); return; }
+    if (k === 'clients') { navigate('/garvis/client-billing'); return; } // the won-clients live in the billing book
     setStage('find'); // find / sites built / pitches all open the results, where each row shows its state
   };
 
@@ -304,7 +331,9 @@ export default function WinClients() {
             {sweepProg && (
               <span className="text-[11px] text-forge-dim">
                 {sweeping && <Loader2 size={11} className="mr-1 inline animate-spin" />}
-                {sweepProg.done}/{sweepProg.total} cities · {sweepProg.found} found{sweepProg.city ? ` · ${sweepProg.city}` : ''}
+                {sweepProg.done}/{sweepProg.total} cities · {sweepProg.found} found
+                {sweepProg.failed > 0 && <span className="text-forge-err"> · {sweepProg.failed} failed</span>}
+                {sweepProg.city ? ` · ${sweepProg.city}` : ''}
               </span>
             )}
           </div>
@@ -325,6 +354,9 @@ export default function WinClients() {
                   <p className="mt-0.5 line-clamp-2 text-[11.5px] text-forge-dim">{orderStatusLine(hunt)}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  <Button variant="primary" size="sm" onClick={() => void runHuntNow()} disabled={runningHunt || hunt.status !== 'active'}>
+                    {runningHunt ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Run now
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => void toggleHunt()}>
                     {hunt.status === 'active' ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
                   </Button>
@@ -356,6 +388,9 @@ export default function WinClients() {
             )}
           </div>
         </div>
+
+        {/* Every audit we've run is kept here — the accumulating prospect intelligence (app_0072). */}
+        <SavedAudits />
 
         {/* Results */}
         {searched && (
@@ -403,9 +438,14 @@ export default function WinClients() {
                         </div>
                         <div className="shrink-0">
                           {b.built ? (
-                            <div className="text-right">
+                            <div className="flex flex-col items-end gap-1">
                               <a href={b.built.previewUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">Open site <ExternalLink size={11} /></a>
-                              <div className={cn('mt-1 text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · no email found'}</div>
+                              <div className={cn('text-[10.5px]', b.built.queued ? 'text-forge-ok' : 'text-forge-warn')}>{b.built.queued ? <span className="inline-flex items-center gap-1"><CheckCircle2 size={11} /> pitch in Queue</span> : 'built · add their email in Contacts to pitch'}</div>
+                              {/* When they say yes → carry name + email straight into the billing book (no re-typing). */}
+                              <NavLink to={`/garvis/client-billing?business=${encodeURIComponent(b.name)}&email=${encodeURIComponent(b.built.email ?? '')}&tier=website_automation`}
+                                className="inline-flex items-center gap-1 text-[11px] text-forge-ember hover:underline">
+                                Record as client <ArrowRight size={11} />
+                              </NavLink>
                             </div>
                           ) : (
                             <Button variant="primary" size="sm" onClick={() => void build(i)} disabled={b.building || !b.url}>

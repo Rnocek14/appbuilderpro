@@ -53,7 +53,11 @@
     "verify:lab": "tsx src/lib/garvis/lab.verify.ts",
     "verify:inquiry": "tsx src/lib/garvis/inquiry.verify.ts",
     "verify:gardener": "tsx src/lib/garvis/gardener.verify.ts",
-    "test:e2e": "playwright test"
+    "verify:automation": "tsx src/lib/garvis/automation/detect.verify.ts",
+    "verify:techfingerprint": "tsx supabase/functions/_shared/techFingerprint.verify.ts",
+    "verify:triggers": "tsx src/lib/garvis/automation/triggers.verify.ts",
+    "test:e2e": "playwright test",
+    "verify:clienttiers": "tsx src/lib/garvis/billing/clientTiers.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

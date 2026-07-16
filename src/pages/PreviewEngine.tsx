@@ -78,7 +78,7 @@ export default function PreviewEngine() {
     } finally { setRegenId(null); }
   };
 
-  const remove = async (id: string) => { await deletePreviewSite(id); await refresh(); };
+  const remove = async (id: string) => { if (!window.confirm('Delete this preview site? This can’t be undone.')) return; await deletePreviewSite(id); await refresh(); };
   const copyLink = (slug: string) => { void navigator.clipboard.writeText(previewUrlFor(slug)); toast('success', 'Preview link copied.'); };
   const copyPitch = (pitch: string) => { void navigator.clipboard.writeText(pitch); toast('success', 'Pitch email copied.'); };
 

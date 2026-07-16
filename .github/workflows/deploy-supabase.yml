@@ -1,14 +1,16 @@
 # Deploy Supabase — the operator hour as one button.
 #
 # The deep scan found NOTHING in this repo runs by existing: migrations, edge functions,
-# secrets, and the pg_cron heartbeat were all manual dashboard acts. This workflow makes the
-# whole thing one run. It has two modes, chosen by the `mode` input when you dispatch it:
+# secrets, and the pg_cron heartbeat were all manual dashboard acts (and the documented install
+# script had drifted 8 migrations stale). This workflow makes the whole thing one run. Two modes,
+# chosen by the `mode` input when you dispatch it:
 #
-#   mode = functions   (DEFAULT) — deploy edge functions + sync function secrets. No database
-#                       password required, no migrations run, nothing touches existing data.
-#                       This is all that's needed to "light up" the boards' AI.
-#   mode = full        — everything: migrations (needs SUPABASE_DB_PASSWORD) + all functions +
-#                       secrets + optional heartbeat arm. Use for a from-scratch project bring-up.
+#   mode = functions   (DEFAULT) — wake the project if paused, deploy the hot edge functions +
+#                       sync function secrets. No database password required, no migrations run,
+#                       nothing touches existing data.
+#   mode = full        — everything: migrations (needs SUPABASE_DB_PASSWORD) + the entire
+#                       function fleet (both JWT lists) + secrets + optional heartbeat arm +
+#                       table-drift verification. Use for project bring-up.
 #
 # One-time setup (repo Settings → Secrets and variables → Actions):
 #   REQUIRED (both modes)
@@ -19,9 +21,12 @@
 #   REQUIRED for mode=full only
 #     SUPABASE_DB_PASSWORD    — the project's database password (Settings → Database)
 #   OPTIONAL (each is pushed to Edge Function secrets only when set here)
-#     ANTHROPIC_API_KEY · OPENAI_API_KEY · WORKER_SECRET · CRON_SECRET ·
-#     GOOGLE_PLACES_API_KEY · APP_ORIGIN · RESEND_API_KEY · RESEND_WEBHOOK_SECRET ·
-#     INBOUND_SECRET · AI_PROVIDER · AI_MODEL · EMBEDDINGS_API_KEY
+#     WORKER_SECRET + CRON_SECRET (same value) · GOOGLE_PLACES_API_KEY · APP_ORIGIN ·
+#     RESEND_API_KEY · RESEND_WEBHOOK_SECRET · INBOUND_SECRET · AI_PROVIDER · AI_MODEL ·
+#     ANTHROPIC_API_KEY · OPENAI_API_KEY · EMBEDDINGS_API_KEY
+#
+# Runs on every merge to main that touches supabase/** (functions mode), and on demand
+# (Actions → Deploy Supabase → Run workflow; tick "arm heartbeat" to schedule the 9 pg_cron jobs).
 
 name: Deploy Supabase
 
@@ -34,7 +39,7 @@ on:
         options: [functions, full]
         default: functions
       arm_heartbeat:
-        description: 'Arm the pg_cron heartbeat (mode=full; needs WORKER_SECRET)'
+        description: 'Arm the pg_cron heartbeat (needs WORKER_SECRET secret)'
         type: boolean
         default: false
   push:
@@ -114,11 +119,11 @@ jobs:
           supabase link --project-ref "$PROJECT_REF"
           supabase db push --include-all
 
-      # ── The AI-facing functions this session added or rebuilt. board-copy is the words seam
-      # behind every creative board; it self-authenticates (getUser → 401) so JWT-verified is fine.
-      - name: Deploy board functions (JWT-verified)
+      # ── The hot path, always deployed: the win-clients loop (discover-media/fetch-url/
+      # ingest-profile) + the boards' words seam (board-copy/generate-image). All self-auth.
+      - name: Deploy hot functions (JWT-verified)
         run: |
-          for fn in board-copy generate-image; do
+          for fn in board-copy generate-image discover-media fetch-url ingest-profile; do
             echo "── deploying $fn ──"
             supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
           done
@@ -167,9 +172,10 @@ jobs:
           done
           echo "Synced:${synced:- (none provided as repo secrets)}"
 
-      # ── mode=full only: schedule the pg_cron jobs via the management API (no DB connection needed).
+      # The step everything "while you sleep" depends on: schedules the 9 pg_cron jobs that POST
+      # the workers. Uses the management API so no direct DB connection is needed from the runner.
       - name: Arm heartbeat
-        if: ${{ env.MODE == 'full' && inputs.arm_heartbeat }}
+        if: ${{ inputs.arm_heartbeat }}
         env:
           WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
         run: |
@@ -184,17 +190,33 @@ jobs:
             -H "Content-Type: application/json" -d "$body" >/dev/null
           echo "Heartbeat: armed."
 
-      # Honest verification: probe the functions we just deployed. Any HTTP answer that isn't 404
-      # means the function is live (401/405 are expected for an unauthenticated OPTIONS/GET probe).
-      - name: Verify functions are live
+      # Honest verification, not vibes: probe the functions we deployed, and (mode=full) check the
+      # loop's key tables actually exist. Any HTTP answer that isn't 404 means the function is live
+      # (401/405 are expected for an unauthenticated probe).
+      - name: Verify deployment
         run: |
           set -e
           fail=0
-          for fn in board-copy generate-image inbox-draft standing-worker; do
+          echo "— function probes —"
+          for fn in board-copy generate-image discover-media fetch-url ingest-profile inbox-draft standing-worker; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS "https://${PROJECT_REF}.supabase.co/functions/v1/${fn}")
             if [ "$code" = "404" ]; then echo "::error::$fn NOT deployed (404)"; fail=1; else echo "$fn: $code (live)"; fi
           done
+          echo "— table probes (migration drift) —"
+          q="select to_regclass('public.standing_orders') is not null as standing_orders, to_regclass('public.discovered_businesses') is not null as lead_pool, to_regclass('public.prospect_audits') is not null as audits, to_regclass('public.automation_triggers') is not null as automations, to_regclass('public.client_subscriptions') is not null as billing, to_regclass('public.preview_sites') is not null as demos;"
+          body=$(jq -n --arg q "$q" '{query:$q}')
+          curl -s -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" -d "$body" | tee /tmp/tables.json || true
+          if grep -q "false" /tmp/tables.json; then
+            if [ "$MODE" = "full" ]; then
+              echo "::error::A key table is missing — check the Apply migrations step."
+              fail=1
+            else
+              echo "::warning::A key table is missing — run this workflow with mode=full to apply migrations."
+            fi
+          fi
           echo
-          echo "Done. Open a board, type an idea, hit Make — real copy should appear."
-          echo "Then revoke the sbp_ token and rotate any key ever pasted in chat."
+          echo "Done. Open a board and hit Make — real copy should appear. Win Clients → Find should return businesses."
+          echo "Reminder: rotate any key ever pasted in chat, and revoke the sbp_ token when finished."
           exit $fail

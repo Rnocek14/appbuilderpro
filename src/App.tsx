@@ -35,6 +35,8 @@ const ClusterSpike = lazy(() => import('./pages/spike/ClusterSpike'));
 const Brain = lazy(() => import('./pages/Brain'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const WinClients = lazy(() => import('./pages/WinClients'));
+const Automations = lazy(() => import('./pages/Automations'));
+const ClientBilling = lazy(() => import('./pages/ClientBilling'));
 const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
@@ -64,6 +66,15 @@ function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: b
   if (!session) return <Navigate to="/auth" state={{ from: location }} replace />;
   if (adminOnly && profile?.role !== 'admin') return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
+}
+
+// A dead/mistyped URL sends a signed-in operator to Command (their home), not the marketing landing.
+// Wait for auth to resolve first — otherwise the loading race (session momentarily null) would bounce a
+// logged-in operator to the public landing, the exact thing this guards against.
+function NotFoundRedirect() {
+  const { session, loading } = useAuth();
+  if (loading) return <div className="flex min-h-screen items-center justify-center"><Spinner label="One sec…" /></div>;
+  return <Navigate to={session ? '/garvis/command' : '/'} replace />;
 }
 
 function AppRoutes() {
@@ -96,6 +107,8 @@ function AppRoutes() {
           <Route path="/garvis/queue" element={<Protected><Queue /></Protected>} />
           <Route path="/garvis/inbox" element={<Navigate to="/garvis/queue" replace />} />
           <Route path="/garvis/clients" element={<Protected><WinClients /></Protected>} />
+          <Route path="/garvis/automations" element={<Protected><Automations /></Protected>} />
+          <Route path="/garvis/client-billing" element={<Protected><ClientBilling /></Protected>} />
           <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
           <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
           <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
@@ -132,7 +145,7 @@ function AppRoutes() {
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />
           <Route path="/preview-site/:slug/report" element={<PreviewReport />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

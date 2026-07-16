@@ -7,10 +7,12 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { PLACES_FIELD_MASK } from '../../../src/lib/garvis/placesDiscovery.ts';
 
 // Flat cost estimates per call (these providers don't return token cost); keeps metering honest-ish.
 const PERPLEXITY_COST = 0.006;
 const SERPER_COST = 0.002;
+const PLACES_COST = 0.003; // Places Text Search (New) ~ $0.032/1k; a call returns up to 20 places
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -69,6 +71,27 @@ Deno.serve(async (req) => {
       if (!res.ok) return json({ error: `Serper ${res.status}` }, 502);
       const data = await res.json();
       await spendCredits(admin, user.id, { costUsd: SERPER_COST, kind: 'discover', provider: 'serper', model: safePath });
+      return json({ available: true, data });
+    }
+
+    if (provider === 'places') {
+      // Google Places Text Search (New) — the SAME backend the daily standing-worker hunt uses, so
+      // manual "find clients" and the automated hunt now discover businesses identically (structured
+      // leads with real websites, not organic-result snippets).
+      const key = Deno.env.get('GOOGLE_PLACES_API_KEY');
+      if (!key) return json({ available: false });
+      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'X-Goog-Api-Key': key,
+          'X-Goog-FieldMask': PLACES_FIELD_MASK,
+        },
+        body: JSON.stringify({ textQuery: String(q ?? ''), maxResultCount: 20, regionCode: 'US' }),
+      });
+      if (!res.ok) return json({ error: `Places ${res.status}` }, 502);
+      const data = await res.json();
+      await spendCredits(admin, user.id, { costUsd: PLACES_COST, kind: 'discover', provider: 'places', model: 'searchText' });
       return json({ available: true, data });
     }
 

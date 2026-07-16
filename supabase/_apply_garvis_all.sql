@@ -1,9 +1,274 @@
--- supabase/_apply_garvis_all.sql — GENERATED: every app_00xx migration, concatenated in order.
--- Regenerate after adding a migration:
---   bash -c '{ head -6 supabase/_apply_garvis_all.sql; for f in supabase/migrations/app_00*.sql; do echo; echo "-- ======== $f ========"; cat "$f"; done; } > /tmp/agg.sql && mv /tmp/agg.sql supabase/_apply_garvis_all.sql'
+-- supabase/_apply_garvis_all.sql — GENERATED: EVERY migration (timestamped 2026* + app_00xx), in
+-- the same lexicographic order `supabase db push` applies them. Regenerate after adding one:
+--   bash -c '{ head -6 supabase/_apply_garvis_all.sql; for f in supabase/migrations/2026*.sql supabase/migrations/app_00*.sql; do echo; echo "-- ======== $f ========"; cat "$f"; done; } > /tmp/agg.sql && mv /tmp/agg.sql supabase/_apply_garvis_all.sql'
 -- Apply AFTER schema.sql and schema_v2_autopilot.sql (see docs/RUNBOOK.md).
 -- All migrations are additive + idempotent; re-running is safe.
 --
+
+-- ======== supabase/migrations/20260702120000_message_changes.sql ========
+-- Per-message file changes: [{path, before, after, additions, deletions}] captured at the agent's
+-- write layer for each chat turn. Powers the chat's per-message diff cards (the "show me exactly
+-- what changed" trust feature) and message-level restore. Full contents, not patches — files are
+-- small and it makes revert/re-render trivial.
+alter table public.ai_messages add column if not exists changes jsonb;
+
+-- ======== supabase/migrations/20260702120001_stripe.sql ========
+-- Stripe billing foundation: platform subscriptions (free/pro tiers) + webhook idempotency.
+-- Webhooks are TRIGGERS only — canonical state is always re-fetched from Stripe (syncSubscription)
+-- because event delivery has no ordering guarantee.
+
+alter table public.profiles add column if not exists stripe_customer_id text unique;
+
+create table if not exists public.stripe_subscriptions (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  stripe_subscription_id text,
+  status text,                          -- active | trialing | past_due | canceled | ...
+  price_id text,
+  tier text not null default 'free',    -- free | pro
+  cancel_at_period_end boolean not null default false,
+  current_period_end timestamptz,
+  updated_at timestamptz not null default now()
+);
+alter table public.stripe_subscriptions enable row level security;
+drop policy if exists "own subscription" on public.stripe_subscriptions;
+create policy "own subscription" on public.stripe_subscriptions
+  for select using (auth.uid() = user_id);
+-- writes: service role only (webhook/sync) — no client policies.
+
+-- Processed Stripe event ids: a redelivered webhook is a no-op.
+create table if not exists public.stripe_events (
+  id text primary key,
+  received_at timestamptz not null default now()
+);
+alter table public.stripe_events enable row level security;
+-- service-role only; no client policies.
+
+-- ======== supabase/migrations/20260702120002_ai_gateway.sql ========
+-- FableForge AI gateway: generated apps get server-side AI with NO app-owner API keys.
+-- Each project gets a random gateway key (issued at backend deploy, pushed to the app's Function
+-- Secrets as FABLEFORGE_AI_KEY); the ai-gateway function maps key -> project -> owner and meters
+-- every call against the owner's credit balance. This is the Lovable AI model: their apps run on
+-- OUR key, charged through OUR credits.
+alter table public.projects add column if not exists ai_gateway_key text unique;
+create index if not exists projects_ai_gateway_key_idx on public.projects (ai_gateway_key) where ai_gateway_key is not null;
+
+-- ======== supabase/migrations/20260707120000_usage_client_insert.sql ========
+-- Direct-mode usage recording: in DIRECT mode the BROWSER makes the model calls, so the client is
+-- the only place that can log the generation/edit usage_events the monthly counter
+-- (generations_this_month) and the Billing history read from. Until now only edge functions
+-- (service role) could insert — so direct-mode users saw a "0/10 generations" counter that never
+-- moved. Allow users to insert their OWN usage rows; select stays owner-or-admin as before.
+drop policy if exists "usage insert own" on public.usage_events;
+create policy "usage insert own" on public.usage_events
+  for insert with check (user_id = auth.uid());
+
+-- ======== supabase/migrations/20260707140000_preview_engine.sql ========
+-- Business Website Preview Engine: the receiving side of the future scraper → builder pipeline.
+-- business_profiles stores the scraper handoff payload (with content-usage flags inside the JSON);
+-- preview_sites stores the generated SiteSpec + outreach pitch behind a public slug.
+
+create table if not exists public.business_profiles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  business_name text not null,
+  industry text not null,
+  website_score int,
+  profile jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_bizprofiles_user on public.business_profiles(user_id, created_at desc);
+
+create table if not exists public.preview_sites (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  profile_id uuid references public.business_profiles(id) on delete set null,
+  slug text not null unique,
+  business_name text not null,
+  industry text not null,
+  spec jsonb not null,
+  pitch text not null default '',
+  spec_source text not null default 'ai',        -- ai | fallback
+  status text not null default 'preview',        -- preview | emailed | purchased | published
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_preview_sites_user on public.preview_sites(user_id, created_at desc);
+
+alter table public.business_profiles enable row level security;
+alter table public.preview_sites enable row level security;
+
+drop policy if exists "bizprofiles own" on public.business_profiles;
+create policy "bizprofiles own" on public.business_profiles
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- The whole point of a preview is a no-login link in an email — anyone may READ a preview site.
+-- Writes stay owner-only.
+drop policy if exists "preview sites public read" on public.preview_sites;
+create policy "preview sites public read" on public.preview_sites for select using (true);
+drop policy if exists "preview sites insert own" on public.preview_sites;
+create policy "preview sites insert own" on public.preview_sites for insert with check (user_id = auth.uid());
+drop policy if exists "preview sites update own" on public.preview_sites;
+create policy "preview sites update own" on public.preview_sites for update using (user_id = auth.uid());
+drop policy if exists "preview sites delete own" on public.preview_sites;
+create policy "preview sites delete own" on public.preview_sites for delete using (user_id = auth.uid());
+
+-- ======== supabase/migrations/20260707150000_preview_intelligence.sql ========
+-- Preview Engine intelligence layer: persist the marketing strategy, owner-simulation critique,
+-- and audit report alongside each preview site — plus publish_requests, the purchase-intent
+-- inbox filled by the PUBLIC preview's "Claim this website" form (owners aren't logged in, so
+-- inserts run as anon; reading stays owner-only).
+
+alter table public.preview_sites add column if not exists strategy jsonb;
+alter table public.preview_sites add column if not exists critique jsonb;
+alter table public.preview_sites add column if not exists audit jsonb;
+
+create table if not exists public.publish_requests (
+  id uuid primary key default gen_random_uuid(),
+  preview_site_id uuid not null references public.preview_sites(id) on delete cascade,
+  name text not null,
+  contact text not null,
+  message text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_publish_requests_site on public.publish_requests(preview_site_id, created_at desc);
+
+alter table public.publish_requests enable row level security;
+
+drop policy if exists "publish requests anon insert" on public.publish_requests;
+create policy "publish requests anon insert" on public.publish_requests
+  for insert with check (true);
+
+-- Only the agency (the preview's owner) can read/manage requests.
+drop policy if exists "publish requests owner read" on public.publish_requests;
+create policy "publish requests owner read" on public.publish_requests
+  for select using (exists (
+    select 1 from public.preview_sites ps where ps.id = preview_site_id and ps.user_id = auth.uid()
+  ));
+drop policy if exists "publish requests owner delete" on public.publish_requests;
+create policy "publish requests owner delete" on public.publish_requests
+  for delete using (exists (
+    select 1 from public.preview_sites ps where ps.id = preview_site_id and ps.user_id = auth.uid()
+  ));
+
+-- ======== supabase/migrations/20260707160000_preview_events.sql ========
+-- Preview engagement tracking — the validation instrument. Logged from the PUBLIC preview pages
+-- (owners aren't logged in → anon insert), read only by the agency. This must exist BEFORE the
+-- first outreach email: view/engage/return signal can't be retrofitted after sending.
+
+create table if not exists public.preview_events (
+  id uuid primary key default gen_random_uuid(),
+  preview_site_id uuid not null references public.preview_sites(id) on delete cascade,
+  event text not null,          -- view | engaged | report_view | claim_open
+  visitor text not null default '', -- per-browser random id (dedupe + return-visit detection)
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_preview_events_site on public.preview_events(preview_site_id, created_at desc);
+
+alter table public.preview_events enable row level security;
+
+drop policy if exists "preview events anon insert" on public.preview_events;
+create policy "preview events anon insert" on public.preview_events
+  for insert with check (true);
+
+drop policy if exists "preview events owner read" on public.preview_events;
+create policy "preview events owner read" on public.preview_events
+  for select using (exists (
+    select 1 from public.preview_sites ps where ps.id = preview_site_id and ps.user_id = auth.uid()
+  ));
+
+-- ======== supabase/migrations/20260708100000_pipeline_spine.sql ========
+-- PIPELINE SPINE — turns the Preview Engine from an admin tool into a real funnel:
+--   * ingest_tokens: per-user API tokens so the EXTERNAL scraper/lead engine can POST
+--     BusinessProfile JSON to the ingest-profile edge function without a browser session.
+--   * publish_requests.status: the CRM seed — a claim is a lead with a lifecycle
+--     (new → contacted → won/lost), not a row that scrolls away.
+--   * Owners may UPDATE their requests' status (read/delete policies already exist).
+
+-- ---------- ingest tokens ----------
+create table if not exists public.ingest_tokens (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  token        text not null unique,             -- random 40+ chars; treat like a password
+  label        text not null default 'scraper',
+  created_at   timestamptz not null default now(),
+  last_used_at timestamptz,
+  revoked_at   timestamptz
+);
+create index if not exists idx_ingest_tokens_user on public.ingest_tokens(user_id);
+
+alter table public.ingest_tokens enable row level security;
+
+drop policy if exists "ingest tokens owner all" on public.ingest_tokens;
+create policy "ingest tokens owner all" on public.ingest_tokens
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- ---------- claim lifecycle ----------
+alter table public.publish_requests add column if not exists status text not null default 'new'
+  check (status in ('new', 'contacted', 'won', 'lost'));
+create index if not exists idx_publish_requests_status on public.publish_requests(status, created_at desc);
+
+drop policy if exists "publish requests owner update" on public.publish_requests;
+create policy "publish requests owner update" on public.publish_requests
+  for update using (exists (
+    select 1 from public.preview_sites ps where ps.id = preview_site_id and ps.user_id = auth.uid()
+  ));
+
+-- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
+-- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
+-- is closed" upgrade the client runtime documented as its follow-up).
+--
+--   * claim_next_agent_run_service(): like claim_next_agent_run() but for the PLATFORM worker —
+--     claims the next runnable run across ALL owners (each run still executes scoped to its
+--     owner_id; credits are checked/charged per owner per step). Service-role only.
+--   * Schedule: pg_cron + pg_net tick every 2 minutes (setup block at the bottom — requires the
+--     extensions to be enabled on the project and the two secrets filled in).
+
+create or replace function public.claim_next_agent_run_service() returns setof public.agent_runs
+language plpgsql security definer set search_path = public as $$
+declare r public.agent_runs;
+begin
+  select * into r from agent_runs
+  where status in ('queued', 'running')
+    and (lease_until is null or lease_until < now())
+  order by priority desc, created_at
+  limit 1
+  for update skip locked;
+  if not found then return; end if;
+  update agent_runs set
+    status = 'running',
+    lease_until = now() + interval '10 minutes',
+    started_at = coalesce(started_at, now())
+  where id = r.id
+  returning * into r;
+  return next r;
+end $$;
+
+-- The whole point is that ONLY the platform worker (service role) may claim across owners.
+revoke execute on function public.claim_next_agent_run_service() from public;
+revoke execute on function public.claim_next_agent_run_service() from anon;
+revoke execute on function public.claim_next_agent_run_service() from authenticated;
+grant execute on function public.claim_next_agent_run_service() to service_role;
+
+-- ============================================================
+-- OPTIONAL: true laptop-closed autonomy — a cron tick that pokes the worker.
+-- Requires: Dashboard → Database → Extensions → enable pg_cron AND pg_net.
+-- Then run (SQL editor), filling in your project ref + the WORKER_SECRET you set
+-- with `supabase secrets set WORKER_SECRET=...`:
+--
+--   select cron.schedule(
+--     'garvis-worker-tick',
+--     '*/2 * * * *',
+--     $cron$
+--     select net.http_post(
+--       url := 'https://YOUR_PROJECT_REF.supabase.co/functions/v1/garvis-worker',
+--       headers := jsonb_build_object('x-worker-secret', 'YOUR_WORKER_SECRET', 'content-type', 'application/json'),
+--       body := '{}'::jsonb
+--     );
+--     $cron$
+--   );
+--
+-- To stop: select cron.unschedule('garvis-worker-tick');
+-- ============================================================
 
 -- ======== supabase/migrations/app_0002_chat_threads.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -3852,3 +4117,437 @@ create policy "social_posts owner all" on public.social_posts
     and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
   );
 create index if not exists idx_social_posts_owner on public.social_posts(owner_id, created_at desc);
+
+-- ======== supabase/migrations/app_0071_reel_jobs.sql ========
+-- app_0071_reel_jobs.sql — THE REEL FACTORY data model. A content_growth studio turns a niche idea
+-- into a multi-scene vertical reel: one reel_job holds the storyboard; one reel_clip per scene is the
+-- async generation job the clip engine (Sora/Runway/Luma) fills. Nothing here posts — a finished reel
+-- rides the existing social_posts + approval spine, and every post carries the platform made-with-AI
+-- label. Owner RLS on both tables; world/cluster pinned when set. Additive + idempotent.
+--
+-- HONESTY: reel_jobs.ai_generated is set true at creation and is the IMMUTABLE provenance the label
+-- derives from — the whole content_growth carve-out (AI footage is honest here) rests on it being
+-- true and on the label being applied, so it is not a settable publish-time flag.
+
+create table if not exists public.reel_jobs (
+  id             uuid primary key default gen_random_uuid(),
+  owner_id       uuid not null references public.profiles(id) on delete cascade,
+  world_id       uuid references public.knowledge_worlds(id) on delete set null,
+  cluster_id     uuid references public.knowledge_clusters(id) on delete set null,  -- the content_growth studio area
+  account_id     uuid,                            -- which faceless account this reel is for (roster lands in a later slice)
+  title          text not null default '',
+  hook           text not null default '',
+  storyboard     jsonb not null default '{}'::jsonb,   -- the full ReelStoryboard {hook, scenes:[{prompt,caption,vo}]}
+  ai_generated   boolean not null default true,        -- immutable provenance — the made-with-AI label derives from this
+  status         text not null default 'draft'
+                   check (status in ('draft', 'generating', 'assembling', 'ready', 'failed')),
+  assembled_url  text,                            -- the final vertical mp4 once assembled (render seam)
+  error          text,
+  created_at     timestamptz not null default now()
+);
+alter table public.reel_jobs enable row level security;
+drop policy if exists "reel_jobs owner all" on public.reel_jobs;
+create policy "reel_jobs owner all" on public.reel_jobs
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_reel_jobs_owner on public.reel_jobs(owner_id, created_at desc);
+create index if not exists idx_reel_jobs_world on public.reel_jobs(world_id, created_at desc);
+
+-- One generation job per scene. owner_id is denormalized so RLS never needs a join to reel_jobs.
+create table if not exists public.reel_clips (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles(id) on delete cascade,
+  reel_id      uuid not null references public.reel_jobs(id) on delete cascade,
+  scene_index  int not null default 0,
+  prompt       text not null default '',        -- the text-to-video generation prompt for this scene
+  caption      text not null default '',        -- on-screen caption for this scene
+  vo           text not null default '',        -- voiceover line for this scene ('' = none)
+  provider     text not null default 'sora'
+                 check (provider in ('sora', 'runway', 'luma')),
+  status       text not null default 'queued'
+                 check (status in ('queued', 'running', 'done', 'failed')),
+  output_url   text,                            -- the generated clip once downloaded to storage
+  seed         bigint,
+  error        text,
+  created_at   timestamptz not null default now()
+);
+alter table public.reel_clips enable row level security;
+drop policy if exists "reel_clips owner all" on public.reel_clips;
+create policy "reel_clips owner all" on public.reel_clips
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.reel_jobs r where r.id = reel_id and r.owner_id = auth.uid())
+  );
+create unique index if not exists idx_reel_clips_scene on public.reel_clips(reel_id, scene_index);
+create index if not exists idx_reel_clips_status on public.reel_clips(status) where status in ('queued', 'running');
+
+-- ======== supabase/migrations/app_0072_client_discovery.sql ========
+-- app_0072_client_discovery.sql — THE HANDS-OFF PROSPECTING LAYER for Win Clients. Replaces the
+-- daily hunt's Serper-organic sweep with the swift-prep-pros model: discover REAL businesses through
+-- Google Places (structured records — name, phone, address, website, category, geo), persist them as
+-- a lead pool, and drive discovery from a SELF-EXHAUSTING work queue so the machine stops wasting
+-- searches on markets it has already drained.
+--
+--   discovery_queries      one row per (business-type × city) combo the owner is hunting. The daily
+--                          worker picks the next-best non-exhausted query, runs it, and marks it
+--                          exhausted after two consecutive zero-insert runs (that market is tapped).
+--   discovered_businesses  every real business Places returned, deduped per owner by place_id then by
+--                          normalized website. This is the lead pool the demo/pitch step draws from —
+--                          businesses with NO website are the strongest "I'll build you one" prospects.
+--
+-- HONESTY: these tables hold only what Google Places actually returned — never an invented business,
+-- phone, or address. status moves new → built (a demo was made) or skipped; nothing here sends.
+-- Owner RLS on both. Additive + idempotent.
+
+-- ---------------------------------------------------------------------------------------------
+-- The self-exhausting discovery work queue
+-- ---------------------------------------------------------------------------------------------
+create table if not exists public.discovery_queries (
+  id                    uuid primary key default gen_random_uuid(),
+  owner_id              uuid not null references public.profiles(id) on delete cascade,
+  keyword               text not null,                 -- the business type, e.g. "roofers"
+  city                  text not null,
+  state                 text not null,                 -- 2-letter
+  query_text            text not null,                 -- "roofers in Austin, TX" (the Places textQuery)
+  last_run_at           timestamptz,
+  last_inserted         integer not null default 0,
+  total_inserted        integer not null default 0,
+  run_count             integer not null default 0,
+  consecutive_zero_runs integer not null default 0,
+  exhausted             boolean not null default false, -- true once the market is drained (2 zero runs)
+  created_at            timestamptz not null default now()
+);
+alter table public.discovery_queries enable row level security;
+drop policy if exists "discovery_queries owner all" on public.discovery_queries;
+create policy "discovery_queries owner all" on public.discovery_queries
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+-- One row per owner per exact query — re-seeding is a no-op (on conflict do nothing).
+create unique index if not exists uq_discovery_queries_owner_query
+  on public.discovery_queries(owner_id, query_text);
+-- The worker's "next-best" scan: non-exhausted, least-recently-run first.
+create index if not exists idx_discovery_queries_pick
+  on public.discovery_queries(owner_id, exhausted, last_run_at nulls first);
+
+-- ---------------------------------------------------------------------------------------------
+-- The persistent lead pool (Places records)
+-- ---------------------------------------------------------------------------------------------
+create table if not exists public.discovered_businesses (
+  id                 uuid primary key default gen_random_uuid(),
+  owner_id           uuid not null references public.profiles(id) on delete cascade,
+  place_id           text,                              -- Google Places id (primary dedupe key)
+  company_name       text not null,
+  keyword            text,                              -- the business type it was found under
+  website            text,
+  website_normalized text,                              -- host, lowercased, no scheme/www (dedupe key)
+  phone              text,
+  address            text,
+  city               text,
+  state              text,
+  category           text,                              -- Places primaryType
+  lat                double precision,
+  lng                double precision,
+  has_website        boolean not null default false,    -- false ⇒ strongest "build you a site" prospect
+  status             text not null default 'new'
+                       check (status in ('new', 'built', 'skipped')),
+  preview_site_id    uuid references public.preview_sites(id) on delete set null,
+  source_query_id    uuid references public.discovery_queries(id) on delete set null,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now()
+);
+alter table public.discovered_businesses enable row level security;
+drop policy if exists "discovered_businesses owner all" on public.discovered_businesses;
+create policy "discovered_businesses owner all" on public.discovered_businesses
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+-- Dedupe: never store the same place twice, nor the same website twice, for one owner. Partial
+-- uniques so many rows may have NULL place_id / website_normalized without colliding.
+create unique index if not exists uq_discovered_owner_place
+  on public.discovered_businesses(owner_id, place_id) where place_id is not null;
+create unique index if not exists uq_discovered_owner_site
+  on public.discovered_businesses(owner_id, website_normalized) where website_normalized is not null;
+-- The build step's queue: this owner's un-built leads, no-website first (best prospects).
+create index if not exists idx_discovered_build_queue
+  on public.discovered_businesses(owner_id, status, has_website, created_at);
+
+-- ======== supabase/migrations/app_0073_cluster_working_state.sql ========
+-- app_0073_cluster_working_state.sql — a small per-cluster scratch store so a studio/canvas REMEMBERS
+-- what you were working on across reloads, instead of resetting to a blank "set it up" prompt every
+-- visit. The marketing canvas uses it to persist the current campaign details, so reopening a
+-- business shows your real work — the #1 "it feels empty" complaint. jsonb, and the existing
+-- knowledge_clusters RLS (owner-scoped) already governs reads/writes. Additive + idempotent.
+--
+-- HONESTY: this holds WORKING state only (what you're in the middle of). Finished, made artifacts
+-- stay in knowledge_artifacts — this column is never a source of truth for "work that happened".
+alter table public.knowledge_clusters add column if not exists working_state jsonb;
+
+-- ======== supabase/migrations/app_0074_prospect_audits.sql ========
+-- app_0074_prospect_audits.sql — PHASE 0: stop discarding the honest audit.
+--
+-- Today the "Win clients" hunt (WinClients.tsx) fetches each prospect's site, audits it honestly
+-- (siteAudit.ts — signals traced to observed facts, no faked Lighthouse), shows the verdict, and then
+-- THROWS THE WHOLE RESULT AWAY when the React state unmounts. Every audit is paid for (Serper +
+-- fetch-url) and then lost. This table keeps it.
+--
+-- WHY IT MATTERS: this is the foundation stone. Nothing downstream — opportunity detection
+-- (manual_process:* signals), the sector-pack proposal layer, or the cross-business intelligence DB
+-- (the moat) — can exist until audits persist. It is cheap and additive; it changes no existing
+-- behaviour, it only records what was already computed.
+--
+-- HONESTY RULES (same ethos as siteAudit.ts / marketIntel.ts):
+--   * Every column is something REALLY OBSERVED on the fetched page. An unreachable site is an honest
+--     'unknown' verdict with a null score — never a guess. Missing data stays null.
+--   * `vertical` is a DETERMINISTIC read (detectVertical) of the text actually scraped — no model call,
+--     no invented classification.
+--   * Read/record only. Nothing here contacts anyone; outreach still goes through the approval spine.
+--
+-- Additive + idempotent.
+
+create table if not exists public.prospect_audits (
+  id                uuid primary key default gen_random_uuid(),
+  owner_id          uuid not null references public.profiles(id) on delete cascade,
+
+  -- Identity (what we looked at)
+  url               text not null,                 -- the exact URL audited
+  host              text,                          -- registrable-ish host, for grouping
+  business_name     text,                          -- name from discovery, when known
+  niche             text,                          -- the niche searched (e.g. "roofers"), when known
+  area              text,                          -- the town/area searched, when known
+  source            text not null default 'scan'   -- how it entered the funnel
+                      check (source in ('find', 'scan', 'sweep', 'manual')),
+
+  -- The honest audit (mirrors the SiteAudit shape; every field traces to observed facts)
+  reachable         boolean not null default false,
+  score             integer,                       -- 10-100, DERIVED; null when unreachable ('unknown')
+  verdict           text not null default 'unknown'
+                      check (verdict in ('weak', 'dated', 'solid', 'unknown')),
+  headline          text,                          -- the owner-facing one-liner
+  signals           jsonb not null default '[]'::jsonb,   -- AuditSignal[] worst-first (what's wrong)
+  strengths         jsonb not null default '[]'::jsonb,   -- honest positives already present
+
+  -- The scrape substrate future detection layers need (fetched today, discarded today)
+  vertical          text,                          -- detectVertical() over the scraped text; null when no text
+  checks            jsonb not null default '{}'::jsonb,   -- raw { viewport, form, email, https }
+  meta_title        text,
+  meta_description  text,
+  text_snippet      text,                          -- capped readable page text (for manual_process:* detection)
+
+  created_at        timestamptz not null default now(),
+  last_audited_at   timestamptz not null default now()
+);
+
+alter table public.prospect_audits enable row level security;
+drop policy if exists "prospect_audits owner all" on public.prospect_audits;
+create policy "prospect_audits owner all" on public.prospect_audits
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- One row per (owner, url): re-auditing refreshes the same prospect instead of duplicating it
+-- (the client does SELECT-first, but the constraint makes the invariant real).
+create unique index if not exists uq_prospect_audits_owner_url on public.prospect_audits(owner_id, url);
+create index if not exists idx_prospect_audits_owner_verdict on public.prospect_audits(owner_id, verdict);
+create index if not exists idx_prospect_audits_owner_vertical on public.prospect_audits(owner_id, vertical);
+create index if not exists idx_prospect_audits_owner_recent on public.prospect_audits(owner_id, last_audited_at desc);
+
+-- ======== supabase/migrations/app_0075_prospect_audit_tech.sql ========
+-- app_0075_prospect_audit_tech.sql — keep the tech fingerprint alongside the honest audit.
+--
+-- fetch-url now reads the tech a business runs from their own raw HTML (site builder, booking widget,
+-- analytics/ad pixels, live-chat, storefront) — the single best qualifier for both a rebuild and an
+-- automation pitch. This adds one column to hold it, so detection can ground platform:* / stack:*
+-- signals in a real observed tag instead of a text guess.
+--
+-- Same honesty rule as the rest of the table: the fingerprint claims only signatures really present in
+-- the markup; an absent one is null/empty, never a guess. Old rows default to '{}' (unknown, not
+-- computed) and detection treats an empty object as "no tech signal", never as "nothing installed".
+--
+-- Additive + idempotent.
+
+alter table public.prospect_audits
+  add column if not exists tech jsonb not null default '{}'::jsonb;
+
+-- ======== supabase/migrations/app_0076_automation_triggers.sql ========
+-- app_0076_automation_triggers.sql — THE TRIGGER ENGINE (tentpole #1): per-customer event/date/interval
+-- automations, the mechanic every sector pack needs and the one Garvis's clock did not yet have.
+--
+-- standing_orders (app_0059) schedules ORDERS (watch a page, weekly digest). This adds the other axis:
+-- fire ONCE per customer, a set number of days after an event on THAT customer's own record (6 months
+-- after a patient's last visit; every spring for a maintenance customer; N days after a job closes).
+-- The scheduling + once-only math is pure and verified (automation/triggers.ts + triggers.verify.ts);
+-- this migration is the data it runs on. Wiring the runner (enqueue an approval-gated send per due
+-- customer, on the heartbeat) is the next step — nothing here sends; the human still owns the trigger out.
+--
+-- HONESTY / SAFETY:
+--   * A trigger fires only for customers whose due date was reached RECENTLY (window_days) — turning a
+--     trigger on never retroactively blasts years of backlog.
+--   * trigger_fires is the idempotency ledger: one row per (trigger, customer, due date) — fire once.
+--   * consent_basis on customers records that this is the client's OWN warm list (processor model);
+--     the actual send still re-checks suppression + goes through the approval spine.
+--
+-- Additive + idempotent. Owner-scoped RLS on every table (single-tenant today; the operator-membership
+-- overlay from tentpole #2 extends these policies later — it does not replace them).
+
+-- 1) A client's warm customer list ----------------------------------------------------------------
+create table if not exists public.customer_lists (
+  id                  uuid primary key default gen_random_uuid(),
+  owner_id            uuid not null references public.profiles(id) on delete cascade,
+  business_profile_id uuid,
+  name                text not null,
+  source              text not null default 'manual' check (source in ('manual', 'import', 'crm')),
+  created_at          timestamptz not null default now()
+);
+alter table public.customer_lists enable row level security;
+drop policy if exists "customer_lists owner all" on public.customer_lists;
+create policy "customer_lists owner all" on public.customer_lists
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create index if not exists idx_customer_lists_owner on public.customer_lists(owner_id, created_at desc);
+
+-- 2) Individual customers with the event dates triggers anchor on ---------------------------------
+create table if not exists public.customers (
+  id              uuid primary key default gen_random_uuid(),
+  owner_id        uuid not null references public.profiles(id) on delete cascade,
+  list_id         uuid not null references public.customer_lists(id) on delete cascade,
+  email           text,
+  name            text,
+  -- the anchor dates a trigger can key on (all optional — a null anchor simply never fires)
+  last_service_at date,
+  last_visit_at   date,
+  purchase_at     date,
+  next_due_at     date,
+  meta            jsonb not null default '{}'::jsonb,
+  consent_basis   text not null default 'warm_transactional' check (consent_basis in ('warm_transactional', 'cold_prospecting')),
+  consent_at      timestamptz,
+  created_at      timestamptz not null default now()
+);
+alter table public.customers enable row level security;
+drop policy if exists "customers owner all" on public.customers;
+create policy "customers owner all" on public.customers
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create index if not exists idx_customers_list on public.customers(list_id);
+create index if not exists idx_customers_owner on public.customers(owner_id);
+
+-- 3) A trigger: an instance of a sector-pack automation the owner turned on -----------------------
+create table if not exists public.automation_triggers (
+  id               uuid primary key default gen_random_uuid(),
+  owner_id         uuid not null references public.profiles(id) on delete cascade,
+  list_id          uuid not null references public.customer_lists(id) on delete cascade,
+  capability_id    text not null,                 -- the registry capability (e.g. 'hygiene_recall')
+  label            text not null,
+  anchor_field     text not null check (anchor_field in ('last_service_at', 'last_visit_at', 'purchase_at', 'next_due_at')),
+  offset_days      integer not null,              -- fire this many days after the anchor date
+  window_days      integer not null default 7 check (window_days >= 1),  -- only fire if it became due within this window
+  template_subject text not null,
+  template_body    text not null,
+  status           text not null default 'active' check (status in ('active', 'paused')),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+alter table public.automation_triggers enable row level security;
+drop policy if exists "automation_triggers owner all" on public.automation_triggers;
+create policy "automation_triggers owner all" on public.automation_triggers
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create index if not exists idx_automation_triggers_active on public.automation_triggers(status, list_id);
+create index if not exists idx_automation_triggers_owner on public.automation_triggers(owner_id);
+
+-- 4) The idempotency ledger: one row per (trigger, customer, due date) that fired -----------------
+create table if not exists public.trigger_fires (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles(id) on delete cascade,
+  trigger_id   uuid not null references public.automation_triggers(id) on delete cascade,
+  customer_id  uuid not null references public.customers(id) on delete cascade,
+  fired_for    date not null,                     -- the anchor-derived due date this fire satisfied
+  approval_id  uuid,                              -- the approval enqueued for this fire (null until wired)
+  created_at   timestamptz not null default now()
+);
+alter table public.trigger_fires enable row level security;
+drop policy if exists "trigger_fires owner all" on public.trigger_fires;
+create policy "trigger_fires owner all" on public.trigger_fires
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+-- Fire once per (trigger, customer, due date): the DB makes the once-only invariant real.
+create unique index if not exists uq_trigger_fires_once on public.trigger_fires(trigger_id, customer_id, fired_for);
+create index if not exists idx_trigger_fires_trigger on public.trigger_fires(trigger_id);
+
+-- ======== supabase/migrations/app_0077_client_billing.sql ========
+-- app_0077_client_billing.sql — SELL THE TIERS. The agency's own client-billing ledger: who bought
+-- which offer (Website, or Website + Automation), what they pay, and whether they're live.
+--
+-- This is DISTINCT from the FableForge SaaS billing (stripe_subscriptions / profiles.plan), which bills
+-- the operator for using the app builder. THIS bills the operator's LOCAL-BUSINESS CLIENTS — a plumber
+-- paying the operator for a rebuilt site + automations. The buyer is not a FableForge auth user, so it
+-- can't ride the existing user-scoped billing; it's the operator's own book of business.
+--
+-- v1 fulfils via Stripe Payment Links (created by the operator in Stripe — zero code): the app records
+-- the sale, shows the right link to send, and the operator marks a client active once paid. The fully
+-- automated Checkout + webhook path layers on later (it needs Stripe keys to build + test safely).
+--
+-- Owner-scoped RLS throughout. Additive + idempotent.
+
+-- 1) The operator's two Payment Links (set once, reused for every client) -------------------------
+create table if not exists public.agency_billing_settings (
+  owner_id                 uuid primary key references public.profiles(id) on delete cascade,
+  website_payment_link     text,   -- Stripe Payment Link URL for the "New Website" offer
+  automation_payment_link  text,   -- Stripe Payment Link URL for the "Website + Automation" offer
+  updated_at               timestamptz not null default now()
+);
+alter table public.agency_billing_settings enable row level security;
+drop policy if exists "agency_billing_settings owner all" on public.agency_billing_settings;
+create policy "agency_billing_settings owner all" on public.agency_billing_settings
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- 2) The client ledger: one row per business the operator has sold (or is selling) a tier ---------
+create table if not exists public.client_subscriptions (
+  id                  uuid primary key default gen_random_uuid(),
+  owner_id            uuid not null references public.profiles(id) on delete cascade,
+  business_name       text not null,
+  email               text,
+  business_profile_id uuid,                       -- link back to the prospect, when known
+  preview_site_id     uuid,                       -- the rebuilt site we pitched, when known
+  tier                text not null check (tier in ('website', 'website_automation')),
+  cadence             text not null check (cadence in ('one_time', 'monthly')),
+  price_cents         integer not null default 0, -- the agreed price (monthly for retainers)
+  status              text not null default 'pending' check (status in ('pending', 'active', 'canceled')),
+  notes               text,
+  created_at          timestamptz not null default now(),
+  activated_at        timestamptz
+);
+alter table public.client_subscriptions enable row level security;
+drop policy if exists "client_subscriptions owner all" on public.client_subscriptions;
+create policy "client_subscriptions owner all" on public.client_subscriptions
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+create index if not exists idx_client_subs_owner_status on public.client_subscriptions(owner_id, status, created_at desc);
+
+-- ======== supabase/migrations/app_0078_trigger_dedupe_indexes.sql ========
+-- app_0078_trigger_dedupe_indexes.sql — QA hardening for the trigger engine.
+--
+-- (1) ONCE-ONLY across duplicate triggers. The fire ledger's unique index is per-trigger
+--     (trigger_id, customer_id, fired_for), so two triggers of the SAME capability on the SAME list
+--     would each fire the same customer for the same due date — a double-send. Enforce one instance of
+--     a capability per list so that can't happen; createTriggerFromCapability surfaces the 23505 nicely.
+-- (2) Indexes that actually serve the runner's hot queries (owner_id + status; owner_id + list_id).
+--
+-- Additive + idempotent.
+
+create unique index if not exists uq_automation_triggers_owner_list_cap
+  on public.automation_triggers(owner_id, list_id, capability_id);
+
+create index if not exists idx_automation_triggers_owner_status
+  on public.automation_triggers(owner_id, status);
+
+create index if not exists idx_customers_owner_list
+  on public.customers(owner_id, list_id);
+
+-- ======== supabase/migrations/app_0079_standing_orders_client_hunt.sql ========
+-- app_0079_standing_orders_client_hunt.sql — let the daily client hunt EXIST.
+--
+-- app_0072 built the hunt's lead pool and standing-worker carries a complete client_hunt branch,
+-- but standing_orders' kind check (app_0059) was never widened past ('watch_url','cadence_digest')
+-- — so createClientHuntOrder's insert (standingRun.ts) was rejected by Postgres 100% of the time
+-- and "Turn on daily hunt" could never work. This is the one-line unlock.
+--
+-- Additive + idempotent: drop-if-exists then re-add with the full kind list.
+
+alter table public.standing_orders drop constraint if exists standing_orders_kind_check;
+alter table public.standing_orders
+  add constraint standing_orders_kind_check
+  check (kind in ('watch_url', 'cadence_digest', 'client_hunt'));
