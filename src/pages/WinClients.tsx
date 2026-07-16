@@ -14,7 +14,7 @@ import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, 
 import { US_CITIES, US_STATES, citiesFor, type SweepScope } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
 import { huntSummary, type HuntConfig } from '../lib/garvis/clientHuntSchedule';
-import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder } from '../lib/garvis/standingRun';
+import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder, runOrderNow } from '../lib/garvis/standingRun';
 import { orderStatusLine, type StandingOrder } from '../lib/garvis/standing';
 import { type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
@@ -52,7 +52,7 @@ export default function WinClients() {
   const [scanning, setScanning] = useState(false);
   const [scope, setScope] = useState('top50');
   const [sweeping, setSweeping] = useState(false);
-  const [sweepProg, setSweepProg] = useState<{ done: number; total: number; found: number; city: string } | null>(null);
+  const [sweepProg, setSweepProg] = useState<{ done: number; total: number; found: number; failed: number; city: string } | null>(null);
   const stopSweep = useRef(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [finding, setFinding] = useState(false);
@@ -66,6 +66,7 @@ export default function WinClients() {
   const [searchesPerDay, setSearchesPerDay] = useState(20);
   const [demoQuota, setDemoQuota] = useState(5);
   const [savingHunt, setSavingHunt] = useState(false);
+  const [runningHunt, setRunningHunt] = useState(false);
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
 
   // Load any existing daily hunt so the panel shows its live state instead of the setup form.
@@ -161,16 +162,24 @@ export default function WinClients() {
     if (!n) { toast('error', 'Enter a niche first — e.g. roofers, dentists, plumbers.'); return; }
     const cities = scopeCities();
     stopSweep.current = false;
-    setSweeping(true); setSearched(true); setRows([]); setSweepProg({ done: 0, total: cities.length, found: 0, city: '' });
+    setSweeping(true); setSearched(true); setRows([]); setSweepProg({ done: 0, total: cities.length, found: 0, failed: 0, city: '' });
     const MAX_ROWS = 400;
     try {
-      const all = await sweepNation(n, cities, {
+      const res = await sweepNation(n, cities, {
         concurrency: 3,
         onFound: (b) => setRows((r) => (r.length >= MAX_ROWS ? r : [...r, { name: b.name, url: b.url, snippet: b.snippet, audit: null }])),
         onProgress: (p) => setSweepProg(p),
         shouldStop: () => stopSweep.current,
       });
-      toast('success', `Swept ${cities.length === US_CITIES.length ? 'the country' : scope.startsWith('top') ? `the top ${scope.slice(3)} markets` : scope} — found ${all.length} unique ${n}. Build the strong prospects; nothing is emailed until you approve it.`);
+      const where = cities.length === US_CITIES.length ? 'the country' : scope.startsWith('top') ? `the top ${scope.slice(3)} markets` : scope;
+      // Honest reporting: a sweep where searches FAILED never poses as "found 0" — say why.
+      if (res.failed > 0 && res.found.length === 0) {
+        toast('error', `The sweep couldn’t search (${res.failed}/${cities.length} cities failed): ${res.lastError ?? 'unknown error'}`);
+      } else if (res.failed > 0) {
+        toast('info', `Swept ${where} — found ${res.found.length} unique ${n}, but ${res.failed} cit${res.failed === 1 ? 'y' : 'ies'} failed (${res.lastError ?? 'unknown error'}).`);
+      } else {
+        toast('success', `Swept ${where} — found ${res.found.length} unique ${n}. Build the strong prospects; nothing is emailed until you approve it.`);
+      }
     } catch (e) { toast('error', emsg(e)); }
     finally { setSweeping(false); }
   };
@@ -208,6 +217,19 @@ export default function WinClients() {
     if (!hunt) return;
     try { await deleteOrder(hunt.id); setHunt(null); toast('info', 'Daily hunt turned off.'); }
     catch (e) { toast('error', emsg(e)); }
+  };
+  // Run the hunt RIGHT NOW (owner-scoped forced run in the worker) — same-day proof it works,
+  // and the panel's honest result line refreshes from the run it just did.
+  const runHuntNow = async () => {
+    if (!hunt) return;
+    setRunningHunt(true);
+    try {
+      await runOrderNow(hunt.id);
+      const os = await listOrders();
+      setHunt(os.find((o) => o.id === hunt.id) ?? hunt);
+      toast('success', 'Hunt ran — the result line below is from this run. Demos + pitches land in your Queue.');
+    } catch (e) { toast('error', emsg(e)); }
+    finally { setRunningHunt(false); }
   };
 
   const weakCount = rows.filter((r) => r.audit?.verdict === 'weak').length;
@@ -309,7 +331,9 @@ export default function WinClients() {
             {sweepProg && (
               <span className="text-[11px] text-forge-dim">
                 {sweeping && <Loader2 size={11} className="mr-1 inline animate-spin" />}
-                {sweepProg.done}/{sweepProg.total} cities · {sweepProg.found} found{sweepProg.city ? ` · ${sweepProg.city}` : ''}
+                {sweepProg.done}/{sweepProg.total} cities · {sweepProg.found} found
+                {sweepProg.failed > 0 && <span className="text-forge-err"> · {sweepProg.failed} failed</span>}
+                {sweepProg.city ? ` · ${sweepProg.city}` : ''}
               </span>
             )}
           </div>
@@ -330,6 +354,9 @@ export default function WinClients() {
                   <p className="mt-0.5 line-clamp-2 text-[11.5px] text-forge-dim">{orderStatusLine(hunt)}</p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  <Button variant="primary" size="sm" onClick={() => void runHuntNow()} disabled={runningHunt || hunt.status !== 'active'}>
+                    {runningHunt ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Run now
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => void toggleHunt()}>
                     {hunt.status === 'active' ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
                   </Button>

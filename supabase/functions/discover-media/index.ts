@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
           'X-Goog-Api-Key': key,
           'X-Goog-FieldMask': PLACES_FIELD_MASK,
         },
-        body: JSON.stringify({ textQuery: String(q ?? ''), maxResultCount: 20 }),
+        body: JSON.stringify({ textQuery: String(q ?? ''), maxResultCount: 20, regionCode: 'US' }),
       });
       if (!res.ok) return json({ error: `Places ${res.status}` }, 502);
       const data = await res.json();

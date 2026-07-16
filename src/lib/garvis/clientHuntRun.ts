@@ -18,6 +18,21 @@ export interface FoundBusiness {
   auditing?: boolean;
 }
 
+/** The REAL error behind a failed functions.invoke. supabase-js flattens every non-2xx to a generic
+ *  "Edge Function returned a non-2xx status code" — but the function's JSON body carries the honest
+ *  message (402 out of credits, "Places 403", …). Read it so the user sees why, not just that. */
+async function realInvokeError(error: unknown, fallback: string): Promise<string> {
+  const ctx = (error as { context?: unknown })?.context;
+  if (ctx instanceof Response) {
+    try {
+      const body = await ctx.clone().json() as { error?: string };
+      if (body?.error) return body.error;
+    } catch { /* non-JSON body — fall through */ }
+  }
+  const msg = (error as { message?: string })?.message;
+  return msg && !/non-2xx status code/i.test(msg) ? msg : fallback;
+}
+
 /** Real businesses for "niche + area", from Google Places (the SAME backend as the daily hunt).
  *  Places returns structured leads — real name, website, address, category — so there are no
  *  directory snippets to filter out. Deduped by normalized website (falling back to name). */
@@ -27,7 +42,7 @@ export async function findBusinesses(niche: string, area: string): Promise<Found
   const { data, error } = await supabase.functions.invoke('discover-media', {
     body: { provider: 'places', q },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(await realInvokeError(error, 'The search call failed — check /garvis/health and that discover-media is deployed.'));
   const payload = data as { available?: boolean; data?: { places?: PlaceRaw[] }; error?: string };
   if (payload?.error) throw new Error(payload.error);
   if (!payload?.available) throw new Error('Search isn’t set up on the server yet (GOOGLE_PLACES_API_KEY missing).');
@@ -48,28 +63,33 @@ export async function findBusinesses(niche: string, area: string): Promise<Found
   return out;
 }
 
-export interface SweepProgress { done: number; total: number; found: number; city: string }
+export interface SweepProgress { done: number; total: number; found: number; failed: number; city: string }
+export interface SweepResult { found: FoundBusiness[]; failed: number; lastError: string | null }
 
-/** NATIONAL SWEEP — fan the same honest "niche + city" Google search across many US cities, dedupe
+/** NATIONAL SWEEP — fan the same honest "niche + city" Places search across many US cities, dedupe
  *  the businesses nationwide (a shop found in two cities is one prospect), and stream them back as
  *  they arrive. One search per city; a small concurrency pool + the cap keep it gentle + bounded.
- *  Discovery only — nothing is built or emailed here. Returns every unique business found. */
+ *  Discovery only — nothing is built or emailed here.
+ *  Honesty rules: a business with NO website is KEPT (it's the strongest "build you a site"
+ *  prospect — deduped by name instead of domain), and failed city searches are COUNTED and the
+ *  last real error reported — a sweep that failed everywhere never poses as "found 0". */
 export async function sweepNation(
   niche: string,
   cities: UsCity[],
   opts: {
-    cap?: number;                              // max cities to search (= max Google searches)
+    cap?: number;                              // max cities to search (= max Places searches)
     concurrency?: number;                      // parallel searches (1-5; default 3, gentle on the API)
     onFound?: (b: FoundBusiness) => void;      // stream each NEW business as it's discovered
     onProgress?: (p: SweepProgress) => void;   // per-city progress
     shouldStop?: () => boolean;                // cooperative cancel (checked before each city)
   } = {},
-): Promise<FoundBusiness[]> {
+): Promise<SweepResult> {
   const plan = sweepPlan(niche, cities, opts.cap ?? cities.length);
   const seen = new Set<string>();              // registrable domains found so far (national dedupe)
+  const seenNames = new Set<string>();         // no-website businesses dedupe by normalized name
   const found: FoundBusiness[] = [];
   const conc = Math.max(1, Math.min(opts.concurrency ?? 3, 5));
-  let i = 0; let done = 0;
+  let i = 0; let done = 0; let failed = 0; let lastError: string | null = null;
   const worker = async () => {
     while (i < plan.length) {
       if (opts.shouldStop?.()) return;
@@ -77,17 +97,27 @@ export async function sweepNation(
       try {
         const biz = await findBusinesses(qy.niche, qy.area);
         for (const b of biz) {
-          if (!registerDomain(seen, b.url)) continue;   // already found nationwide → skip
+          if (b.url) {
+            if (!registerDomain(seen, b.url)) continue;          // already found nationwide → skip
+          } else {
+            const key = b.name.toLowerCase().replace(/\s+/g, ' ').trim();
+            if (!key || seenNames.has(key)) continue;
+            seenNames.add(key);
+          }
           found.push(b);
           opts.onFound?.(b);
         }
-      } catch { /* one city's search failing never sinks the national sweep */ }
+      } catch (e) {
+        // One city failing never sinks the sweep — but it is never silent either.
+        failed++;
+        lastError = e instanceof Error ? e.message : String(e);
+      }
       done++;
-      opts.onProgress?.({ done, total: plan.length, found: found.length, city: `${qy.city}, ${qy.state}` });
+      opts.onProgress?.({ done, total: plan.length, found: found.length, failed, city: `${qy.city}, ${qy.state}` });
     }
   };
   await Promise.all(Array.from({ length: conc }, () => worker()));
-  return found;
+  return { found, failed, lastError };
 }
 
 /** The first publicly-listed email on a business's site (or its contact page), or null. Never
