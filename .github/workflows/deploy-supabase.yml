@@ -1,0 +1,151 @@
+# Deploy Supabase — the operator hour as one button.
+#
+# The deep scan found NOTHING in this repo runs by existing: migrations, 51 edge functions,
+# ~15 secrets, and the pg_cron heartbeat were all manual dashboard acts (and the documented
+# install script had drifted 8 migrations stale). This workflow makes the whole thing one run:
+#   migrations → functions (both JWT lists) → function secrets → optional heartbeat arm → verify.
+#
+# One-time setup (repo Settings → Secrets and variables → Actions):
+#   REQUIRED
+#     SUPABASE_ACCESS_TOKEN   — dashboard → Account → Access Tokens (revocable any time)
+#     SUPABASE_PROJECT_REF    — the ref in https://<ref>.supabase.co
+#     SUPABASE_DB_PASSWORD    — the project's database password (Settings → Database)
+#   OPTIONAL (each is pushed to Edge Function secrets only when set here)
+#     WORKER_SECRET + CRON_SECRET (same value) · GOOGLE_PLACES_API_KEY · APP_ORIGIN ·
+#     RESEND_API_KEY · RESEND_WEBHOOK_SECRET · INBOUND_SECRET · AI_PROVIDER · AI_MODEL ·
+#     ANTHROPIC_API_KEY · OPENAI_API_KEY · EMBEDDINGS_API_KEY
+#
+# Runs on every merge to main that touches supabase/**, and on demand (Actions → Deploy
+# Supabase → Run workflow, where "arm heartbeat" schedules the 9 pg_cron jobs).
+
+name: Deploy Supabase
+
+on:
+  workflow_dispatch:
+    inputs:
+      arm_heartbeat:
+        description: 'Arm the pg_cron heartbeat (needs WORKER_SECRET secret)'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ['supabase/**']
+
+concurrency:
+  group: deploy-supabase
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required secrets
+        run: |
+          missing=""
+          [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing="$missing SUPABASE_ACCESS_TOKEN"
+          [ -z "$PROJECT_REF" ] && missing="$missing SUPABASE_PROJECT_REF"
+          [ -z "$SUPABASE_DB_PASSWORD" ] && missing="$missing SUPABASE_DB_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repo secrets:$missing — add them in Settings → Secrets and variables → Actions (see this workflow's header comment)."
+            exit 1
+          fi
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$PROJECT_REF"
+
+      # --include-all: this project's DB got its schema from manual SQL pastes, so the migration
+      # history table is empty/behind. Every migration in the repo is additive + idempotent, so
+      # re-applying from the top is safe — and from then on, history is tracked and pushes are
+      # incremental.
+      - name: Apply migrations
+        run: supabase db push --include-all
+
+      - name: Deploy functions (user-JWT list)
+        run: npm run functions:deploy
+
+      - name: Deploy functions (webhook/cron list, --no-verify-jwt)
+        run: npm run functions:deploy:webhooks
+
+      # Push each function secret that exists as a repo secret; skip the rest silently.
+      # (Values never echo — GitHub masks them, and the loop only prints names.)
+      - name: Sync function secrets
+        env:
+          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          APP_ORIGIN: ${{ secrets.APP_ORIGIN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
+          INBOUND_SECRET: ${{ secrets.INBOUND_SECRET }}
+          AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
+          AI_MODEL: ${{ secrets.AI_MODEL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EMBEDDINGS_API_KEY: ${{ secrets.EMBEDDINGS_API_KEY }}
+        run: |
+          set -e
+          synced=""
+          for name in WORKER_SECRET CRON_SECRET GOOGLE_PLACES_API_KEY APP_ORIGIN RESEND_API_KEY \
+                      RESEND_WEBHOOK_SECRET INBOUND_SECRET AI_PROVIDER AI_MODEL \
+                      ANTHROPIC_API_KEY OPENAI_API_KEY EMBEDDINGS_API_KEY; do
+            val="${!name}"
+            if [ -n "$val" ]; then
+              supabase secrets set "$name=$val" --project-ref "$PROJECT_REF" >/dev/null
+              synced="$synced $name"
+            fi
+          done
+          echo "Synced:${synced:- (none provided)}"
+
+      # The step everything "while you sleep" depends on: schedules the 9 pg_cron jobs that POST
+      # the workers. Uses the management API so no direct DB connection is needed from the runner.
+      - name: Arm heartbeat
+        if: ${{ inputs.arm_heartbeat }}
+        env:
+          WORKER_SECRET: ${{ secrets.WORKER_SECRET }}
+        run: |
+          set -e
+          if [ -z "$WORKER_SECRET" ]; then
+            echo "::error::arm_heartbeat needs the WORKER_SECRET repo secret."
+            exit 1
+          fi
+          body=$(jq -n --arg q "select public.garvis_arm_heartbeat('https://${PROJECT_REF}.supabase.co/functions/v1', '${WORKER_SECRET}');" '{query:$q}')
+          out=$(curl -sf -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$body")
+          echo "Heartbeat: armed (arm call returned OK)"
+
+      # Honest verification, not vibes: probe the loop's executor functions and the key tables.
+      - name: Verify deployment
+        run: |
+          set -e
+          echo "— function probes (OPTIONS; any HTTP answer that isn't 404 = deployed) —"
+          fail=0
+          for fn in discover-media fetch-url standing-worker send-email ingest-profile; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS "https://${PROJECT_REF}.supabase.co/functions/v1/${fn}")
+            if [ "$code" = "404" ]; then echo "::error::$fn NOT deployed (404)"; fail=1; else echo "$fn: $code ok"; fi
+          done
+          echo "— table probes (migration drift) —"
+          q="select to_regclass('public.standing_orders') is not null as standing_orders, to_regclass('public.discovered_businesses') is not null as lead_pool, to_regclass('public.prospect_audits') is not null as audits, to_regclass('public.automation_triggers') is not null as automations, to_regclass('public.client_subscriptions') is not null as billing, to_regclass('public.preview_sites') is not null as demos;"
+          body=$(jq -n --arg q "$q" '{query:$q}')
+          curl -sf -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" -d "$body" | tee /tmp/tables.json
+          if grep -q "false" /tmp/tables.json; then echo "::error::A key table is missing — check the Apply migrations step."; fail=1; fi
+          echo "— heartbeat check —"
+          q2="select count(*) as cron_jobs from cron.job;"
+          body2=$(jq -n --arg q "$q2" '{query:$q}')
+          curl -s -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" -d "$body2" || echo "(cron check skipped — pg_cron may not be armed yet)"
+          exit $fail

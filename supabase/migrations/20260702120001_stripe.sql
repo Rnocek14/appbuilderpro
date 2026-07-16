@@ -15,6 +15,7 @@ create table if not exists public.stripe_subscriptions (
   updated_at timestamptz not null default now()
 );
 alter table public.stripe_subscriptions enable row level security;
+drop policy if exists "own subscription" on public.stripe_subscriptions;
 create policy "own subscription" on public.stripe_subscriptions
   for select using (auth.uid() = user_id);
 -- writes: service role only (webhook/sync) — no client policies.
