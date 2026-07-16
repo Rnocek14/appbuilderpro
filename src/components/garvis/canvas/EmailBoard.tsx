@@ -127,7 +127,7 @@ function EmailFocus({ content, api, clusterId, worldId, onToast }: {
   const [sending, setSending] = useState(false);
   const kind = emailKindById(content.kindId);
 
-  useEffect(() => { let live = true; void emailSegmentCounts().then((c) => { if (live) setCounts(c); }).catch(() => {}); return () => { live = false; }; }, []);
+  useEffect(() => { let live = true; void emailSegmentCounts(worldId).then((c) => { if (live) setCounts(c); }).catch(() => {}); return () => { live = false; }; }, []);
 
   const send = async () => {
     setSending(true);

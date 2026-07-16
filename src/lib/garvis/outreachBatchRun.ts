@@ -17,9 +17,11 @@ export interface BatchRow {
   created_at: string; finished_at: string | null;
 }
 
-export async function segmentCount(segment: BatchSegment): Promise<number> {
+export async function segmentCount(segment: BatchSegment, worldId?: string | null): Promise<number> {
   let q = supabase.from('contacts').select('id', { count: 'exact', head: true });
   if (segment !== 'all') q = q.eq('stage', segment);
+  // Business isolation (multi-business P0): counts from inside a business see ONLY its contacts.
+  if (worldId) q = q.eq('world_id', worldId);
   const { count, error } = await q;
   if (error) throw new Error(error.message);
   return count ?? 0;
@@ -45,9 +47,13 @@ export async function createBatch(input: {
   }
 
   // True segment size first, so the caller can be told honestly when the snapshot is truncated.
-  const total = await segmentCount(input.segment);
+  const total = await segmentCount(input.segment, input.worldId);
   let q = supabase.from('contacts').select('id, email, full_name, email_status').limit(SNAPSHOT_CAP);
   if (input.segment !== 'all') q = q.eq('stage', input.segment);
+  // BUSINESS ISOLATION (multi-business audit P0): a batch launched from one business's board
+  // must never snapshot another business's people. Strict equality — legacy contacts were
+  // backfilled to the owner's first world in app_0082, so nothing leaks through null.
+  if (input.worldId) q = q.eq('world_id', input.worldId);
   const { data: contacts, error } = await q;
   if (error) throw new Error(error.message);
   const truncatedFrom = total > SNAPSHOT_CAP ? total : null;
