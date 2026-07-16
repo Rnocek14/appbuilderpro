@@ -33,6 +33,8 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
 import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
+import { deriveSignals, proposeFromSignals } from '../../../src/lib/garvis/automation/detect.ts';
+import { detectVertical } from '../../../src/lib/garvis/verticals.ts';
 import { citiesFor } from '../../../src/lib/garvis/usCities.ts';
 import {
   PLACES_FIELD_MASK, parsePlace, buildDiscoveryQueries, exhaustionUpdate,
@@ -726,11 +728,18 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   let finalUrl = lead.website ?? '';
   // Default (no site, or an unreachable one): an honest "no website" audit — no invented score.
   let audit = auditSite({ url: finalUrl, reachable: false }, env.nowYear);
+  // Kept for automation detection below — the pitch upsell is grounded ONLY in what was observed.
+  let pageChecks: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean } = {};
+  let pageText = '';
+  let pageTech: Record<string, unknown> | null = null;
 
   if (lead.website) {
     const text = await scrapePage(lead.website, 'text', env);
     if (text && !text.error && text.checks) {   // reachable HTML — read their real site
       const checks = text.checks as { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
+      pageChecks = checks;
+      pageText = (text.text as string) ?? '';
+      pageTech = (text.tech as Record<string, unknown> | undefined) ?? null;
       finalUrl = (typeof text.url === 'string' && text.url) || lead.website;
       page = { title: (text.title as string) ?? null, description: (text.description as string) ?? null };
       const imgResp = await scrapePage(lead.website, 'images', env);
@@ -764,7 +773,23 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   const nonce = Math.random().toString(36).slice(2, 8);   // slug isn't enumerable by guessing names
   const slug = `${previewSlug(profile.business_name)}-${nonce}`;
   const previewUrl = env.appOrigin ? `${env.appOrigin}/preview-site/${slug}` : `/preview-site/${slug}`;
-  const pitch = buildHuntPitch(profile, previewUrl);
+
+  // AUTOMATION SEARCH → PITCH: run the grounded detector on what we actually observed and put the
+  // "website + automation $/mo" offer in the email. Zero observed signals → zero upsell lines.
+  const view = {
+    vertical: detectVertical([lead.keyword, page.title ?? '', pageText].filter(Boolean).join(' ')),
+    checks: pageChecks,
+    siteSignalIds: audit.signals.map((s) => s.id),
+    text: pageText || null,
+    tech: pageTech,
+  };
+  const sigs = deriveSignals(view);
+  const { proposals } = proposeFromSignals(sigs, view.vertical);
+  const upsells = proposals.map((p) => ({
+    title: p.title, pitch: p.pitch, monthlyPrice: p.monthlyPrice,
+    evidence: sigs.find((s) => s.id === p.matchedSignal)?.evidence ?? '',
+  }));
+  const pitch = buildHuntPitch(profile, previewUrl, upsells);
 
   const { data: site, error: sErr } = await admin.from('preview_sites').insert({
     user_id: order.owner_id, profile_id: profileRow.id, slug,

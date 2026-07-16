@@ -53,6 +53,10 @@ Deno.serve(async (req) => {
   const { data: due } = await admin.from('outreach_campaigns')
     .select('id, owner_id, contact_id, preview_site_id, follow_up_count')
     .eq('state', 'sent').eq('sequence_stopped', false)
+    // WARM/COLD WALL: automation campaigns are messages to a client's own customers (recall,
+    // review requests). Drafting a "following up on my earlier email about your website" cold
+    // pitch at THOSE people would be nonsense and reputational damage. Cold outreach only.
+    .neq('kind', 'automation')
     .lt('follow_up_count', MAX_FOLLOWUPS)
     .not('next_followup_at', 'is', null).lte('next_followup_at', nowIso)
     .order('next_followup_at', { ascending: true }).limit(limit);
