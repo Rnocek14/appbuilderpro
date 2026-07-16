@@ -17,6 +17,7 @@ type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 const PostcardBoard = lazy(() => import('./PostcardBoard').then((m) => ({ default: m.PostcardBoard })));
 const SocialBoard = lazy(() => import('./SocialBoard').then((m) => ({ default: m.SocialBoard })));
 const EmailBoard = lazy(() => import('./EmailBoard').then((m) => ({ default: m.EmailBoard })));
+const IdeaBoard = lazy(() => import('./IdeaBoard').then((m) => ({ default: m.IdeaBoard })));
 const VideoStudio = lazy(() => import('../VideoStudio').then((m) => ({ default: m.VideoStudio })));
 const DeliverableStudio = lazy(() => import('../DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
 const DataWorkspace = lazy(() => import('../DataWorkspace').then((m) => ({ default: m.DataWorkspace })));
@@ -24,6 +25,7 @@ const MarketDataPanel = lazy(() => import('../MarketDataPanel').then((m) => ({ d
 
 interface ToolDef { key: string; emoji: string; label: string }
 const TOOLS: ToolDef[] = [
+  { key: 'ideas', emoji: '💡', label: 'Ideas' },
   { key: 'mailer', emoji: '✉️', label: 'Postcards' },
   { key: 'video', emoji: '🎬', label: 'Video' },
   { key: 'social', emoji: '📣', label: 'Social' },
@@ -51,6 +53,7 @@ export function StudioDock({ worldId, clusterId, title, onToast, onClosed }: {
       case 'video': return <VideoStudio worldId={worldId} clusterId={clusterId} title={title} onToast={onToast} />;
       case 'social': return <div style={{ height: '72vh', width: 'min(94vw, 1100px)' }}><SocialBoard worldId={worldId} clusterId={clusterId} onToast={onToast} /></div>;
       case 'email': return <div style={{ height: '72vh', width: 'min(94vw, 1100px)' }}><EmailBoard worldId={worldId} clusterId={clusterId} onToast={onToast} /></div>;
+      case 'ideas': return <div style={{ height: '72vh', width: 'min(94vw, 1100px)' }}><IdeaBoard worldId={worldId} clusterId={clusterId} onToast={onToast} /></div>;
       case 'document': return <DeliverableStudio worldId={worldId} clusterId={clusterId} onToast={onToast} />;
       case 'data': return <DataWorkspace worldId={worldId} clusterId={clusterId} onToast={onToast} />;
       case 'market': return <MarketDataPanel onToast={onToast} />;

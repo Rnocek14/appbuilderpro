@@ -29,6 +29,7 @@ const FIELDS: Record<string, string> = {
   postcard: '{"headline": string (<=48 chars, the front of a printed postcard), "sub": string (<=90 chars supporting line), "body": string (2-4 short sentences for the back), "cta": string (<=60 chars call to action)}',
   social: '{"caption": string (platform-appropriate post text, line breaks allowed), "hashtags": string[] (3-6, no # prefix)}',
   email: '{"subject": string (<=70 chars), "body": string (the full email body, greeting through sign-off, plain text)}',
+  idea: '{"title": string (<=60 chars, the idea in one line), "pitch": string (2-3 sentences: what it is and why it matters for THIS project), "notes": string (3-5 short lines: first concrete steps, risks, open questions), "tag": string (exactly one of: feature, automation, content, growth, revenue, wild)}',
 };
 
 Deno.serve(async (req) => {

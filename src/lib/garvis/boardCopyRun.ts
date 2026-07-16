@@ -7,7 +7,7 @@
 
 import { supabase } from '../supabase';
 
-export type CopyChannel = 'postcard' | 'social' | 'email';
+export type CopyChannel = 'postcard' | 'social' | 'email' | 'idea';
 
 export interface BoardCopyArgs {
   channel: CopyChannel;

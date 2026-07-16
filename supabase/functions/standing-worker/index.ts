@@ -24,6 +24,8 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { complete, modelForPlan } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, getUserPlan } from '../_shared/credits.ts';
 import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, type BatchRecipient } from '../_shared/batchCore.ts';
 // DAILY AUTOMATIC CLIENT HUNT (client_hunt kind) — the discovery brain + the pure builders are
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
@@ -288,6 +290,87 @@ Deno.serve(async (req) => {
         await admin.from('standing_orders').update({
           last_run_at: nowIso,
           last_result: { status: 'unreachable', line: `Run failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
+
+    // ---- idea_stream: continuous ideation onto a project's Idea Board -------------------------
+    // Garvis ideating on a clock: N fresh, grounded ideas appended to the world's idea board as
+    // ordinary tiles, grouped by date ("Auto · 2026-07-16") so the board never drowns. HONESTY:
+    // grounded ONLY on the world's own title + business context; unknowns stay [EDIT: ...] holes;
+    // no AI key or no credits -> an honest last_result line, never template tiles pretending to be
+    // ideation. (working_state write is read-merge-write; the worker typically runs while the owner
+    // is away, which is the point of the stream.)
+    if (order.kind === 'idea_stream') {
+      try {
+        const cfg = order.config as { cluster_id?: string; count?: number };
+        const clusterId = cfg.cluster_id ?? '';
+        if (!clusterId) throw new Error('no idea board bound (config.cluster_id missing)');
+        const count = Math.min(5, Math.max(1, cfg.count ?? 3));
+        await checkCredits(admin, order.owner_id, 'board_copy');
+        const { data: world } = await admin.from('knowledge_worlds')
+          .select('title, business_context').eq('id', order.world_id ?? '').maybeSingle();
+        const title = (world?.title as string | undefined) ?? 'the project';
+        const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+        const result = await complete([
+          { role: 'system', content: [
+            'You generate product/business ideas for one specific real project. HONESTY IS ABSOLUTE:',
+            "- Ground every idea ONLY on the facts given. NEVER invent user counts, revenue, competitors' specifics, or claims about the project.",
+            '- Anything an idea needs but you cannot know goes in as a visible hole formatted exactly: [EDIT: what goes here].',
+            `Return ONLY a strict JSON array of exactly ${count} objects: {"title": string (<=60 chars), "pitch": string (2-3 sentences), "notes": string (3-5 short lines: first steps, risks, open questions), "tag": one of "feature"|"automation"|"content"|"growth"|"revenue"|"wild"}. No markdown fences.`,
+          ].join('\n') },
+          { role: 'user', content: `PROJECT: ${title}\nCONTEXT (the only facts you may use): ${JSON.stringify(world?.business_context ?? {})}\nGenerate ${count} fresh, specific, non-overlapping ideas across different tags.` },
+        ], { provider: m.provider, model: m.model, maxTokens: 1400 });
+        let ideas: { title?: string; pitch?: string; notes?: string; tag?: string }[] = [];
+        try { ideas = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* refusal below */ }
+        if (!Array.isArray(ideas) || ideas.length === 0) throw new Error('the model returned nothing usable');
+        await spendCredits(admin, order.owner_id, { costUsd: result.costUsd, kind: 'board_copy', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+
+        // Append as ordinary board tiles under working_state.boards.idea — merge, never clobber.
+        const TAGS = new Set(['feature', 'automation', 'content', 'growth', 'revenue', 'wild']);
+        const { data: row } = await admin.from('knowledge_clusters').select('working_state').eq('id', clusterId).maybeSingle();
+        const ws = ((row?.working_state as Record<string, unknown> | null) ?? {});
+        const boards = ((ws.boards as Record<string, unknown> | undefined) ?? {});
+        const board = (boards.idea as { tiles?: unknown[]; groups?: string[] } | undefined) ?? { tiles: [] };
+        const tiles = Array.isArray(board.tiles) ? (board.tiles as { x?: number; y?: number }[]) : [];
+        const group = `Auto · ${nowIso.slice(0, 10)}`;
+        const startY = tiles.length ? Math.max(...tiles.map((t) => (typeof t.y === 'number' ? t.y : 0))) + 206 : 40;
+        const added = ideas.slice(0, count).map((i, ix) => ({
+          id: crypto.randomUUID(), prompt: 'auto-idea', parentId: null,
+          content: {
+            kindId: 'idea_feature', tag: TAGS.has(i.tag ?? '') ? i.tag : 'feature',
+            title: String(i.title ?? 'Untitled idea').slice(0, 60),
+            pitch: String(i.pitch ?? ''), notes: String(i.notes ?? ''),
+          },
+          x: 40 + (ix % 3) * 276, y: startY + Math.floor(ix / 3) * 206,
+          favorite: false, createdAt: Date.parse(nowIso), group,
+        }));
+        const groups = Array.isArray(board.groups) ? board.groups : [];
+        boards.idea = { ...board, tiles: [...tiles, ...added], groups: groups.includes(group) ? groups : [...groups, group] };
+        await admin.from('knowledge_clusters').update({ working_state: { ...ws, boards } }).eq('id', clusterId);
+
+        ran++; changed++;
+        const line = `${added.length} fresh idea${added.length === 1 ? '' : 's'} added to ${title}'s idea board (${group}).`;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'changed', line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id);
+        await admin.from('mind_events').insert({
+          owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+          subject: line.slice(0, 300),
+          payload: { key: `idea-stream:${order.id}:${nowIso.slice(0, 10)}`, order_id: order.id, kind: order.kind, added: added.length },
+        }).then(() => {}, () => {});
+      } catch (e) {
+        failed++;
+        const msg = e instanceof Error ? e.message.slice(0, 160) : 'unknown error';
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Idea run skipped: ${msg}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
           next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
           updated_at: nowIso,
         }).eq('id', order.id).then(() => {}, () => {});
