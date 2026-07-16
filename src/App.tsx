@@ -68,6 +68,15 @@ function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: b
   return <>{children}</>;
 }
 
+// A dead/mistyped URL sends a signed-in operator to Command (their home), not the marketing landing.
+// Wait for auth to resolve first — otherwise the loading race (session momentarily null) would bounce a
+// logged-in operator to the public landing, the exact thing this guards against.
+function NotFoundRedirect() {
+  const { session, loading } = useAuth();
+  if (loading) return <div className="flex min-h-screen items-center justify-center"><Spinner label="One sec…" /></div>;
+  return <Navigate to={session ? '/garvis/command' : '/'} replace />;
+}
+
 function AppRoutes() {
   const location = useLocation();
   return (
@@ -136,7 +145,7 @@ function AppRoutes() {
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />
           <Route path="/preview-site/:slug/report" element={<PreviewReport />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFoundRedirect />} />
         </Routes>
       </Suspense>
     </ErrorBoundary>

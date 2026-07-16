@@ -115,7 +115,7 @@ export default function Dashboard() {
                     <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs hover:bg-forge-panel" onClick={async () => { setMenuFor(null); try { await archiveProject(p.id, !p.archived); toast('success', p.archived ? 'Project restored.' : 'Project archived.'); } catch (e) { toast('error', e instanceof Error ? e.message : 'That failed — nothing was changed.'); } }}>
                       <Archive size={12} /> {p.archived ? 'Restore' : 'Archive'}
                     </button>
-                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-forge-err hover:bg-forge-panel" onClick={async () => { setMenuFor(null); try { await deleteProject(p.id); toast('success', 'Project deleted.'); } catch (e) { toast('error', e instanceof Error ? e.message : 'Delete failed — the project is untouched.'); } }}>
+                    <button className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-forge-err hover:bg-forge-panel" onClick={async () => { setMenuFor(null); if (!window.confirm(`Delete “${p.name}”? This can’t be undone — use Archive if you might want it back.`)) return; try { await deleteProject(p.id); toast('success', 'Project deleted.'); } catch (e) { toast('error', e instanceof Error ? e.message : 'Delete failed — the project is untouched.'); } }}>
                       <Trash2 size={12} /> Delete
                     </button>
                   </div>

@@ -1,5 +1,5 @@
 import { type ButtonHTMLAttributes, type CSSProperties, type InputHTMLAttributes, type ReactNode } from 'react';
-import { Flame, Loader2 } from 'lucide-react';
+import { Flame, Loader2, AlertTriangle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Overlay } from './Overlay';
 
@@ -106,6 +106,17 @@ export function EmptyState({ icon, title, body, action }: { icon: ReactNode; tit
       <h3 className="font-display text-lg font-semibold">{title}</h3>
       <p className="max-w-sm text-sm text-forge-dim">{body}</p>
       {action}
+    </div>
+  );
+}
+
+// A load FAILURE — distinct from EmptyState so "couldn't load" never reads as "nothing here".
+export function LoadError({ message = 'Couldn’t load this — a load error, not empty.', onRetry }: { message?: string; onRetry?: () => void }) {
+  return (
+    <div className="rounded-xl border border-forge-ember/40 bg-forge-ember/5 p-6 text-center">
+      <AlertTriangle size={22} className="mx-auto mb-2 text-forge-ember" />
+      <p className="mb-3 text-sm text-forge-ink">{message}</p>
+      {onRetry && <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>}
     </div>
   );
 }

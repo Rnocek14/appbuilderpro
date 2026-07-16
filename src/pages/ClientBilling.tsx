@@ -6,10 +6,11 @@
 // layers on later. This is DISTINCT from FableForge's own /billing (which bills the operator for Pro).
 
 import { useState, useEffect, useCallback } from 'react';
-import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info } from 'lucide-react';
+import { NavLink, useSearchParams } from 'react-router-dom';
+import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, Rocket } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
-import { Button, StatCard, EmptyState } from '../components/ui';
+import { Button, StatCard, EmptyState, LoadError } from '../components/ui';
 import { cn } from '../lib/utils';
 import { CLIENT_TIERS, tierById, formatUsd, monthlyRevenueCents, oneTimeRevenueCents, type TierId } from '../lib/garvis/billing/clientTiers';
 import {
@@ -26,6 +27,7 @@ export default function ClientBilling() {
   const emsg = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong.');
 
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [settings, setSettings] = useState<BillingSettings>({ website_payment_link: null, automation_payment_link: null });
   const [subs, setSubs] = useState<ClientSubRow[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
@@ -37,12 +39,26 @@ export default function ClientBilling() {
   const [price, setPrice] = useState('500');
   const [saving, setSaving] = useState(false);
 
+  // Carry a won deal forward: Win clients deep-links here with the prospect already filled in, so the
+  // operator never re-types the business + email they already scraped. Read once, then clear the params.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const b = params.get('business'); const e = params.get('email'); const t = params.get('tier');
+    if (b) setBizName(b);
+    if (e) setEmail(e);
+    if (t === 'website' || t === 'website_automation') { setTier(t); setPrice(t === 'website' ? '1500' : '500'); }
+    if (b || e || t) setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const refresh = useCallback(async () => {
-    setLoading(true);
+    setLoading(true); setLoadFailed(false);
     try {
       const [s, list] = await Promise.all([getBillingSettings(), listClientSubs()]);
       setSettings(s); setSubs(list);
-    } finally { setLoading(false); }
+    } catch (e) { setLoadFailed(true); toast('error', emsg(e)); }
+    finally { setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -62,8 +78,8 @@ export default function ClientBilling() {
     setSaving(true);
     try {
       const row = await createClientSub({ business_name: bizName, email, tier, cadence, price_cents: cents });
-      if (row) { setSubs((s) => [row, ...s]); setBizName(''); setEmail(''); toast('success', 'Client recorded — send them the payment link, then mark them active once paid.'); }
-      else toast('error', 'Could not record — is the migration applied?');
+      setSubs((s) => [row, ...s]); setBizName(''); setEmail('');
+      toast('success', 'Client recorded — send them the payment link, then mark them active once paid.');
     } catch (e) { toast('error', emsg(e)); }
     finally { setSaving(false); }
   };
@@ -90,7 +106,7 @@ export default function ClientBilling() {
       <div className="mx-auto max-w-4xl px-4 py-6">
         <div className="mb-1 flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Receipt size={18} /></span>
-          <h1 className="text-xl font-semibold text-forge-ink">Client billing</h1>
+          <h1 className="text-xl font-semibold text-forge-ink">Client revenue</h1>
         </div>
         <p className="mb-5 text-sm text-forge-dim">
           Sell the two offers and track your book. Send a client their payment link, mark them active when they pay, and watch your MRR add up.
@@ -98,6 +114,8 @@ export default function ClientBilling() {
 
         {loading ? (
           <div className="flex items-center gap-2 py-10 text-sm text-forge-dim"><Loader2 size={15} className="animate-spin" /> Loading…</div>
+        ) : loadFailed ? (
+          <LoadError message="Couldn’t load your billing book." onRetry={() => void refresh()} />
         ) : (
           <>
             {/* Revenue summary */}
@@ -153,7 +171,8 @@ export default function ClientBilling() {
             {/* The book */}
             {subs.length === 0 ? (
               <EmptyState icon={<Receipt size={22} />} title="No clients yet"
-                body="Close a deal from Win clients, then record it here to start tracking your MRR." />
+                body="Win a client, then record the sale here to start tracking your MRR."
+                action={<NavLink to="/garvis/clients" className="inline-flex items-center gap-1.5 rounded-lg bg-forge-ember px-3 py-2 text-sm font-medium text-white hover:bg-forge-ember/90"><Rocket size={15} /> Go find clients</NavLink>} />
             ) : (
               <div className="overflow-x-auto rounded-xl border border-forge-border">
                 <table className="w-full min-w-[620px] text-left text-[13px]">
