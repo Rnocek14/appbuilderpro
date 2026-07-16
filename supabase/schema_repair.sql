@@ -59,6 +59,17 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now(),
   deleted_at timestamptz
 );
+-- shape upgrade: an existing public.profiles may predate columns above (create-if-not-exists skips them)
+alter table public.profiles add column if not exists id uuid references auth.users(id) on delete cascade;
+alter table public.profiles add column if not exists email text;
+alter table public.profiles add column if not exists full_name text;
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles add column if not exists role user_role default 'user';
+alter table public.profiles add column if not exists plan plan_tier default 'free';
+alter table public.profiles add column if not exists monthly_generation_limit int default 10;
+alter table public.profiles add column if not exists created_at timestamptz default now();
+alter table public.profiles add column if not exists updated_at timestamptz default now();
+alter table public.profiles add column if not exists deleted_at timestamptz;
 
 -- auto-create profile on signup
 create or replace function public.handle_new_user()
@@ -93,6 +104,17 @@ create table if not exists public.projects (
   updated_at timestamptz not null default now(),
   deleted_at timestamptz
 );
+-- shape upgrade: an existing public.projects may predate columns above (create-if-not-exists skips them)
+alter table public.projects add column if not exists id uuid default gen_random_uuid();
+alter table public.projects add column if not exists owner_id uuid references public.profiles(id) on delete cascade;
+alter table public.projects add column if not exists name text;
+alter table public.projects add column if not exists description text;
+alter table public.projects add column if not exists template_slug text;
+alter table public.projects add column if not exists status text default 'draft';
+alter table public.projects add column if not exists archived boolean default false;
+alter table public.projects add column if not exists created_at timestamptz default now();
+alter table public.projects add column if not exists updated_at timestamptz default now();
+alter table public.projects add column if not exists deleted_at timestamptz;
 
 create index if not exists idx_projects_owner on public.projects(owner_id) where deleted_at is null;
 
@@ -116,6 +138,21 @@ create table if not exists public.app_blueprints (
   created_at timestamptz not null default now(),
   unique (project_id, version)
 );
+-- shape upgrade: an existing public.app_blueprints may predate columns above (create-if-not-exists skips them)
+alter table public.app_blueprints add column if not exists id uuid default gen_random_uuid();
+alter table public.app_blueprints add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.app_blueprints add column if not exists version int default 1;
+alter table public.app_blueprints add column if not exists app_name text;
+alter table public.app_blueprints add column if not exists description text;
+alter table public.app_blueprints add column if not exists user_roles jsonb default '[]';
+alter table public.app_blueprints add column if not exists database_schema jsonb default '{}';
+alter table public.app_blueprints add column if not exists pages jsonb default '[]';
+alter table public.app_blueprints add column if not exists components jsonb default '[]';
+alter table public.app_blueprints add column if not exists auth_rules jsonb default '{}';
+alter table public.app_blueprints add column if not exists workflows jsonb default '[]';
+alter table public.app_blueprints add column if not exists integrations jsonb default '[]';
+alter table public.app_blueprints add column if not exists deployment_notes text;
+alter table public.app_blueprints add column if not exists created_at timestamptz default now();
 
 create index if not exists idx_blueprints_project on public.app_blueprints(project_id);
 
@@ -132,6 +169,16 @@ create table if not exists public.project_files (
   deleted_at timestamptz,
   unique (project_id, path)
 );
+-- shape upgrade: an existing public.project_files may predate columns above (create-if-not-exists skips them)
+alter table public.project_files add column if not exists id uuid default gen_random_uuid();
+alter table public.project_files add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.project_files add column if not exists path text;
+alter table public.project_files add column if not exists content text default '';
+alter table public.project_files add column if not exists version int default 1;
+alter table public.project_files add column if not exists updated_by_ai boolean default false;
+alter table public.project_files add column if not exists created_at timestamptz default now();
+alter table public.project_files add column if not exists updated_at timestamptz default now();
+alter table public.project_files add column if not exists deleted_at timestamptz;
 
 create index if not exists idx_files_project on public.project_files(project_id) where deleted_at is null;
 
@@ -146,6 +193,15 @@ create table if not exists public.project_file_versions (
   generation_id uuid,
   created_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.project_file_versions may predate columns above (create-if-not-exists skips them)
+alter table public.project_file_versions add column if not exists id uuid default gen_random_uuid();
+alter table public.project_file_versions add column if not exists file_id uuid references public.project_files(id) on delete cascade;
+alter table public.project_file_versions add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.project_file_versions add column if not exists path text;
+alter table public.project_file_versions add column if not exists content text;
+alter table public.project_file_versions add column if not exists version int;
+alter table public.project_file_versions add column if not exists generation_id uuid;
+alter table public.project_file_versions add column if not exists created_at timestamptz default now();
 
 create index if not exists idx_file_versions_file on public.project_file_versions(file_id);
 
@@ -184,6 +240,22 @@ create table if not exists public.project_generations (
   created_at timestamptz not null default now(),
   finished_at timestamptz
 );
+-- shape upgrade: an existing public.project_generations may predate columns above (create-if-not-exists skips them)
+alter table public.project_generations add column if not exists id uuid default gen_random_uuid();
+alter table public.project_generations add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.project_generations add column if not exists user_id uuid references public.profiles(id) on delete cascade;
+alter table public.project_generations add column if not exists prompt text;
+alter table public.project_generations add column if not exists kind text default 'create';
+alter table public.project_generations add column if not exists status generation_status default 'queued';
+alter table public.project_generations add column if not exists current_stage generation_stage;
+alter table public.project_generations add column if not exists stages jsonb default '[]';
+alter table public.project_generations add column if not exists summary text;
+alter table public.project_generations add column if not exists error text;
+alter table public.project_generations add column if not exists input_tokens int default 0;
+alter table public.project_generations add column if not exists output_tokens int default 0;
+alter table public.project_generations add column if not exists cost_usd numeric(10,5) default 0;
+alter table public.project_generations add column if not exists created_at timestamptz default now();
+alter table public.project_generations add column if not exists finished_at timestamptz;
 
 create index if not exists idx_generations_project on public.project_generations(project_id);
 
@@ -202,6 +274,15 @@ create table if not exists public.ai_messages (
   files_changed jsonb not null default '[]',
   created_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.ai_messages may predate columns above (create-if-not-exists skips them)
+alter table public.ai_messages add column if not exists id uuid default gen_random_uuid();
+alter table public.ai_messages add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.ai_messages add column if not exists user_id uuid references public.profiles(id) on delete cascade;
+alter table public.ai_messages add column if not exists generation_id uuid references public.project_generations(id) on delete set null;
+alter table public.ai_messages add column if not exists role text check (role in ('user', 'assistant', 'system'));
+alter table public.ai_messages add column if not exists content text;
+alter table public.ai_messages add column if not exists files_changed jsonb default '[]';
+alter table public.ai_messages add column if not exists created_at timestamptz default now();
 
 create index if not exists idx_messages_project on public.ai_messages(project_id, created_at);
 
@@ -218,6 +299,17 @@ create table if not exists public.usage_events (
   cost_usd numeric(10,5) not null default 0,
   created_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.usage_events may predate columns above (create-if-not-exists skips them)
+alter table public.usage_events add column if not exists id uuid default gen_random_uuid();
+alter table public.usage_events add column if not exists user_id uuid references public.profiles(id) on delete cascade;
+alter table public.usage_events add column if not exists project_id uuid references public.projects(id) on delete set null;
+alter table public.usage_events add column if not exists event_type text;
+alter table public.usage_events add column if not exists provider text;
+alter table public.usage_events add column if not exists model text;
+alter table public.usage_events add column if not exists input_tokens int default 0;
+alter table public.usage_events add column if not exists output_tokens int default 0;
+alter table public.usage_events add column if not exists cost_usd numeric(10,5) default 0;
+alter table public.usage_events add column if not exists created_at timestamptz default now();
 
 create index if not exists idx_usage_user_time on public.usage_events(user_id, created_at);
 
@@ -246,6 +338,19 @@ create table if not exists public.subscriptions (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.subscriptions may predate columns above (create-if-not-exists skips them)
+alter table public.subscriptions add column if not exists id uuid default gen_random_uuid();
+alter table public.subscriptions add column if not exists user_id uuid references public.profiles(id) on delete cascade;
+alter table public.subscriptions add column if not exists stripe_customer_id text;
+alter table public.subscriptions add column if not exists stripe_subscription_id text;
+alter table public.subscriptions add column if not exists plan plan_tier default 'free';
+alter table public.subscriptions add column if not exists status subscription_status default 'active';
+alter table public.subscriptions add column if not exists interval text check (interval in ('month', 'year'));
+alter table public.subscriptions add column if not exists trial_ends_at timestamptz;
+alter table public.subscriptions add column if not exists current_period_end timestamptz;
+alter table public.subscriptions add column if not exists cancel_at_period_end boolean default false;
+alter table public.subscriptions add column if not exists created_at timestamptz default now();
+alter table public.subscriptions add column if not exists updated_at timestamptz default now();
 
 create index if not exists idx_subs_user on public.subscriptions(user_id);
 
@@ -261,6 +366,16 @@ create table if not exists public.deployments (
   created_at timestamptz not null default now(),
   finished_at timestamptz
 );
+-- shape upgrade: an existing public.deployments may predate columns above (create-if-not-exists skips them)
+alter table public.deployments add column if not exists id uuid default gen_random_uuid();
+alter table public.deployments add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.deployments add column if not exists user_id uuid references public.profiles(id) on delete cascade;
+alter table public.deployments add column if not exists target text check (target in ('vercel', 'netlify', 'supabase'));
+alter table public.deployments add column if not exists status deployment_status default 'pending';
+alter table public.deployments add column if not exists url text;
+alter table public.deployments add column if not exists logs text;
+alter table public.deployments add column if not exists created_at timestamptz default now();
+alter table public.deployments add column if not exists finished_at timestamptz;
 
 create index if not exists idx_deployments_project on public.deployments(project_id);
 
@@ -275,6 +390,15 @@ create table if not exists public.error_logs (
   stack text,
   created_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.error_logs may predate columns above (create-if-not-exists skips them)
+alter table public.error_logs add column if not exists id uuid default gen_random_uuid();
+alter table public.error_logs add column if not exists user_id uuid references public.profiles(id) on delete set null;
+alter table public.error_logs add column if not exists project_id uuid references public.projects(id) on delete set null;
+alter table public.error_logs add column if not exists generation_id uuid references public.project_generations(id) on delete set null;
+alter table public.error_logs add column if not exists source text;
+alter table public.error_logs add column if not exists message text;
+alter table public.error_logs add column if not exists stack text;
+alter table public.error_logs add column if not exists created_at timestamptz default now();
 
 create index if not exists idx_errors_time on public.error_logs(created_at);
 
@@ -287,6 +411,14 @@ create table if not exists public.audit_logs (
   metadata jsonb not null default '{}',
   created_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.audit_logs may predate columns above (create-if-not-exists skips them)
+alter table public.audit_logs add column if not exists id uuid default gen_random_uuid();
+alter table public.audit_logs add column if not exists actor_id uuid references public.profiles(id) on delete set null;
+alter table public.audit_logs add column if not exists action text;
+alter table public.audit_logs add column if not exists entity_type text;
+alter table public.audit_logs add column if not exists entity_id uuid;
+alter table public.audit_logs add column if not exists metadata jsonb default '{}';
+alter table public.audit_logs add column if not exists created_at timestamptz default now();
 
 create index if not exists idx_audit_time on public.audit_logs(created_at);
 
@@ -299,6 +431,11 @@ create table if not exists public.platform_settings (
   updated_by uuid references public.profiles(id),
   updated_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.platform_settings may predate columns above (create-if-not-exists skips them)
+alter table public.platform_settings add column if not exists key text;
+alter table public.platform_settings add column if not exists value jsonb;
+alter table public.platform_settings add column if not exists updated_by uuid references public.profiles(id);
+alter table public.platform_settings add column if not exists updated_at timestamptz default now();
 
 insert into public.platform_settings (key, value) values
   ('default_model', '{"provider": "anthropic", "model": "claude-sonnet-4-6"}'),
@@ -536,6 +673,26 @@ create table if not exists public.jobs (
   updated_at timestamptz not null default now(),
   completed_at timestamptz
 );
+-- shape upgrade: an existing public.jobs may predate columns above (create-if-not-exists skips them)
+alter table public.jobs add column if not exists id uuid default gen_random_uuid();
+alter table public.jobs add column if not exists owner_id uuid references public.profiles(id) on delete cascade;
+alter table public.jobs add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.jobs add column if not exists title text;
+alter table public.jobs add column if not exists brief text;
+alter table public.jobs add column if not exists status text default 'queued';
+alter table public.jobs add column if not exists priority int default 0;
+alter table public.jobs add column if not exists phase text default 'decompose';
+alter table public.jobs add column if not exists milestone_index int default 0;
+alter table public.jobs add column if not exists fix_attempts int default 0;
+alter table public.jobs add column if not exists budget_usd numeric default 2.00;
+alter table public.jobs add column if not exists spent_usd numeric default 0;
+alter table public.jobs add column if not exists max_fix_attempts int default 2;
+alter table public.jobs add column if not exists pause_reason text;
+alter table public.jobs add column if not exists report jsonb;
+alter table public.jobs add column if not exists lease_until timestamptz;
+alter table public.jobs add column if not exists created_at timestamptz default now();
+alter table public.jobs add column if not exists updated_at timestamptz default now();
+alter table public.jobs add column if not exists completed_at timestamptz;
 
 create index if not exists idx_jobs_owner on public.jobs(owner_id);
 
@@ -554,6 +711,17 @@ create table if not exists public.job_milestones (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.job_milestones may predate columns above (create-if-not-exists skips them)
+alter table public.job_milestones add column if not exists id uuid default gen_random_uuid();
+alter table public.job_milestones add column if not exists job_id uuid references public.jobs(id) on delete cascade;
+alter table public.job_milestones add column if not exists position int;
+alter table public.job_milestones add column if not exists title text;
+alter table public.job_milestones add column if not exists description text default '';
+alter table public.job_milestones add column if not exists status text default 'pending';
+alter table public.job_milestones add column if not exists summary text;
+alter table public.job_milestones add column if not exists warning text;
+alter table public.job_milestones add column if not exists created_at timestamptz default now();
+alter table public.job_milestones add column if not exists updated_at timestamptz default now();
 
 create index if not exists idx_milestones_job on public.job_milestones(job_id, position);
 
@@ -572,6 +740,19 @@ create table if not exists public.agent_questions (
   created_at timestamptz not null default now(),
   answered_at timestamptz
 );
+-- shape upgrade: an existing public.agent_questions may predate columns above (create-if-not-exists skips them)
+alter table public.agent_questions add column if not exists id uuid default gen_random_uuid();
+alter table public.agent_questions add column if not exists job_id uuid references public.jobs(id) on delete cascade;
+alter table public.agent_questions add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.agent_questions add column if not exists owner_id uuid references public.profiles(id) on delete cascade;
+alter table public.agent_questions add column if not exists question text;
+alter table public.agent_questions add column if not exists context text;
+alter table public.agent_questions add column if not exists options jsonb default '[]';
+alter table public.agent_questions add column if not exists blocking boolean default true;
+alter table public.agent_questions add column if not exists answer text;
+alter table public.agent_questions add column if not exists status text default 'pending';
+alter table public.agent_questions add column if not exists created_at timestamptz default now();
+alter table public.agent_questions add column if not exists answered_at timestamptz;
 
 create index if not exists idx_questions_owner_pending on public.agent_questions(owner_id) where status = 'pending';
 
@@ -605,6 +786,11 @@ create table if not exists public.project_memory (
   decisions jsonb not null default '[]', -- [{decision, reason, at}]
   updated_at timestamptz not null default now()
 );
+-- shape upgrade: an existing public.project_memory may predate columns above (create-if-not-exists skips them)
+alter table public.project_memory add column if not exists project_id uuid references public.projects(id) on delete cascade;
+alter table public.project_memory add column if not exists conventions text default '';
+alter table public.project_memory add column if not exists decisions jsonb default '[]';
+alter table public.project_memory add column if not exists updated_at timestamptz default now();
 
 -- ---------- webhook notifications ----------
 alter table public.profiles add column if not exists webhook_url text;
