@@ -125,24 +125,66 @@ Deno.serve(async (req) => {
     ].filter(Boolean).join('\n\n');
 
     const m = modelForPlan(await getUserPlan(admin, user.id));
-    const result = await complete(
+    const stripFences = (t: string) => t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+    let costUsd = 0, inTok = 0, outTok = 0;
+    const track = (r: { costUsd: number; inputTokens: number; outputTokens: number }) => {
+      costUsd += r.costUsd; inTok += r.inputTokens; outTok += r.outputTokens;
+    };
+
+    const draft = await complete(
       [{ role: 'system', content: system }, { role: 'user', content: userMsg }],
       { provider: m.provider, model: m.model, maxTokens: 900 },
     );
-
+    track(draft);
     let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''));
-    } catch {
-      return json({ error: 'The model returned something unparseable — try rewording the idea.' }, 502);
+    try { parsed = JSON.parse(stripFences(draft.text)); }
+    catch { return json({ error: 'The model returned something unparseable — try rewording the idea.' }, 502); }
+
+    // THE QUALITY GATE — an editor in the loop. Every draft is judged against the same craft +
+    // honesty rubric a demanding professional would apply; a weak draft gets ONE revision built
+    // from the judge's specific notes, and the better of the two ships. The score rides along in
+    // the response so automation can hold a bar ("only post >= 8") instead of hoping.
+    // Fail-open on judge trouble: a broken judge must never block a good draft.
+    const judge = async (piece: Record<string, unknown>): Promise<{ score: number; notes: string } | null> => {
+      try {
+        const jr = await complete([
+          { role: 'system', content: [
+            'You are a ruthless marketing editor. Judge the piece against this rubric and return ONLY strict JSON {"score": number 1-10, "notes": string (the 1-3 most important specific fixes, or "ship it")}.',
+            'Rubric:',
+            '1. HONESTY (hard fail → score <= 3): any fact, stat, market/scarcity claim, or testimonial NOT present in MATERIALS; a filled-in merge field; a removed [EDIT: …] hole that was not resolved by real facts.',
+            '2. CRAFT (per the channel rules below): hook strength, specificity, platform-native form, length limits, one clear CTA.',
+            '3. VOICE: matches MATERIALS.tone/audience if set; sounds like a person, not a brochure.',
+            'Score 9-10 = a working professional would post this as-is. 7-8 = minor polish. <= 6 = needs the fixes in notes.',
+            '', CRAFT[channel] ?? '',
+          ].join('\n') },
+          { role: 'user', content: `MATERIALS: ${JSON.stringify(body.materials ?? {})}\n\nTHE BRIEF: ${instruction}\n\nTHE PIECE: ${JSON.stringify(piece)}` },
+        ], { provider: m.provider, model: m.model, maxTokens: 300 });
+        track(jr);
+        const v = JSON.parse(stripFences(jr.text)) as { score?: number; notes?: string };
+        return typeof v.score === 'number' ? { score: Math.max(1, Math.min(10, v.score)), notes: String(v.notes ?? '') } : null;
+      } catch { return null; }
+    };
+
+    let quality = await judge(parsed);
+    if (quality && quality.score < 8) {
+      try {
+        const rev = await complete([
+          { role: 'system', content: system },
+          { role: 'user', content: `${userMsg}\n\nYOUR FIRST DRAFT: ${JSON.stringify(parsed)}\n\nA professional editor's notes on it: ${quality.notes}\n\nRewrite the piece fixing exactly those notes. Keep every honesty rule: facts from MATERIALS only, [EDIT: …] holes for unknowns, merge fields untouched. Return ONLY the strict JSON.` },
+        ], { provider: m.provider, model: m.model, maxTokens: 900 });
+        track(rev);
+        const revised = JSON.parse(stripFences(rev.text)) as Record<string, unknown>;
+        const q2 = await judge(revised);
+        if (q2 && q2.score > quality.score) { parsed = revised; quality = q2; }
+      } catch { /* keep the first draft — a failed revision never blocks */ }
     }
 
     await spendCredits(admin, user.id, {
-      costUsd: result.costUsd, kind: 'board_copy', provider: m.provider, model: m.model,
-      inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+      costUsd, kind: 'board_copy', provider: m.provider, model: m.model,
+      inputTokens: inTok, outputTokens: outTok,
     });
 
-    return json({ ok: true, fields: parsed });
+    return json({ ok: true, fields: parsed, quality });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : 'board-copy failed' }, 500);
   }
