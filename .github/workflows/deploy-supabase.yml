@@ -161,11 +161,42 @@ jobs:
             supabase link --project-ref "$PROJECT_REF"
             supabase db push --include-all
           else
-            echo "Applying $(ls supabase/migrations/2026*.sql supabase/migrations/app_00*.sql | wc -l) migrations via the management API…"
-            for f in supabase/migrations/2026*.sql supabase/migrations/app_00*.sql; do
-              apply_sql "$f"
+            # Dependencies cross directories both ways (app_0041 needs the timestamped preview
+            # tables; timestamped garvis_worker needs app_0003's agent_runs), so no single listing
+            # order works. Multi-pass retry: failures wait for the next pass; every migration is
+            # idempotent so re-tries are safe. Only a pass with ZERO progress is a real failure.
+            try_sql () {
+              body=$(jq -n --arg q "$(cat "$1")" '{query:$q}')
+              resp=$(curl -s -w '\n%{http_code}' -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+                -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" -H "Content-Type: application/json" -d "$body")
+              code=$(echo "$resp" | tail -n1)
+              if [ "$code" -ge 400 ] 2>/dev/null; then
+                echo "  deferred: $1 (HTTP $code): $(echo "$resp" | head -n -1 | head -c 300)"
+                return 1
+              fi
+              echo "  applied: $1"
+            }
+            pending=$(ls supabase/migrations/2026*.sql supabase/migrations/app_00*.sql)
+            total=$(echo "$pending" | wc -l)
+            echo "Applying $total migrations via the management API (multi-pass)…"
+            for pass in 1 2 3; do
+              echo "— pass $pass —"
+              next=""
+              for f in $pending; do
+                try_sql "$f" || next="$next $f"
+              done
+              next=$(echo $next | tr ' ' '\n' | sed '/^$/d')
+              [ -z "$next" ] && { echo "All $total migrations applied."; break; }
+              if [ "$(echo "$next" | wc -l)" = "$(echo "$pending" | wc -l)" ]; then
+                echo "::error::No progress in pass $pass — these migrations fail on their own: $next"
+                exit 1
+              fi
+              pending="$next"
             done
-            echo "All migrations applied."
+            if [ -n "$next" ]; then
+              echo "::error::Migrations still failing after 3 passes: $next"
+              exit 1
+            fi
           fi
 
       # ── The hot path, always deployed: the win-clients loop (discover-media/fetch-url/
