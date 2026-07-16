@@ -4,7 +4,7 @@
 // Nothing here fabricates a business, a URL, or a verdict; an unreachable site is an honest unknown.
 
 import { supabase } from '../supabase';
-import { parseSerperOrganic } from './marketIntel';
+import { parsePlace, type PlaceRaw } from './placesDiscovery';
 import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit';
 import { sweepPlan, registerDomain } from './nationalSweepCore';
 import { detectVertical } from './verticals';
@@ -18,30 +18,31 @@ export interface FoundBusiness {
   auditing?: boolean;
 }
 
-// Big aggregators/directories aren't prospects — we want a business's OWN site (a weak one we can beat).
-const DIRECTORY = /(yelp\.|facebook\.|instagram\.|linkedin\.|yellowpages\.|bbb\.org|mapquest\.|tripadvisor\.|angi\.com|thumbtack\.|google\.[a-z.]+\/maps|houzz\.|nextdoor\.|wikipedia\.|amazon\.|reddit\.)/i;
-
-/** Real businesses for "niche + area", from Google organic results. Skips directories; deduped. */
+/** Real businesses for "niche + area", from Google Places (the SAME backend as the daily hunt).
+ *  Places returns structured leads — real name, website, address, category — so there are no
+ *  directory snippets to filter out. Deduped by normalized website (falling back to name). */
 export async function findBusinesses(niche: string, area: string): Promise<FoundBusiness[]> {
-  const q = [niche.trim(), area.trim()].filter(Boolean).join(' ');
+  const q = [niche.trim(), area.trim()].filter(Boolean).join(' in ');
   if (!q) throw new Error('Add a niche and an area first.');
   const { data, error } = await supabase.functions.invoke('discover-media', {
-    body: { provider: 'serper', path: 'search', q },
+    body: { provider: 'places', q },
   });
   if (error) throw new Error(error.message);
-  const payload = data as { available?: boolean; data?: unknown; error?: string };
+  const payload = data as { available?: boolean; data?: { places?: PlaceRaw[] }; error?: string };
   if (payload?.error) throw new Error(payload.error);
-  if (!payload?.available) throw new Error('Search isn’t set up on the server yet (SERPER_API_KEY missing).');
+  if (!payload?.available) throw new Error('Search isn’t set up on the server yet (GOOGLE_PLACES_API_KEY missing).');
 
   const seen = new Set<string>();
   const out: FoundBusiness[] = [];
-  for (const c of parseSerperOrganic(payload.data, 20)) {
-    const url = c.url;
-    if (url && DIRECTORY.test(url)) continue;
-    const key = (url ?? c.name).toLowerCase();
+  for (const raw of payload.data?.places ?? []) {
+    const biz = parsePlace(raw, niche);
+    if (!biz) continue;
+    const key = (biz.website_normalized ?? biz.company_name).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ name: c.name, url, snippet: c.snippet, audit: null });
+    // The snippet carries what Places knows: address + category (never invented).
+    const snippet = [biz.address, biz.category?.replace(/_/g, ' ')].filter(Boolean).join(' · ');
+    out.push({ name: biz.company_name, url: biz.website, snippet, audit: null });
     if (out.length >= 12) break;
   }
   return out;
