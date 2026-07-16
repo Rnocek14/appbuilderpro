@@ -80,7 +80,12 @@ function Stars({ rating = 5 }: { rating?: number }) {
 // Sections
 // ---------------------------------------------------------------------------
 
-export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?: string; secondaryCta?: string; image?: string; rating?: number; reviewCount?: number; variant?: string }) {
+export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?: string; secondaryCta?: string; phone?: string; image?: string; rating?: number; reviewCount?: number; variant?: string }) {
+  // Call button dials the REAL phone (injected by normalizeSpec); digits parsed from the label are
+  // only a fallback, and a label with no digits ("Call us today") routes to the quote form instead
+  // of rendering a dead tel: link.
+  const telDigits = (p.phone ?? p.secondaryCta ?? '').replace(/[^\d+]/g, '');
+  const telHref = telDigits.length >= 7 ? `tel:${telDigits}` : '#quote';
   const hasImage = !!p.image;
 
   // SPLIT variant — content on the page paper, photo in a framed panel on the right. Reads
@@ -96,7 +101,7 @@ export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?
             <div className="mt-8 flex flex-wrap items-center gap-3">
               {p.cta && <Cta label={p.cta} />}
               {p.secondaryCta && (
-                <a href={`tel:${p.secondaryCta.replace(/[^\d+]/g, '')}`}
+                <a href={telHref}
                   className="inline-flex items-center gap-2 rounded-[var(--r)] border border-[hsl(var(--bor))] px-6 py-3 text-sm font-semibold text-[hsl(var(--ink))] transition-colors hover:bg-[hsl(var(--card))]">
                   <Phone size={15} /> {p.secondaryCta}
                 </a>
@@ -138,7 +143,7 @@ export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?
           <div className="mt-8 flex flex-wrap items-center gap-3">
             {p.cta && <Cta label={p.cta} />}
             {p.secondaryCta && (
-              <a href={`tel:${p.secondaryCta.replace(/[^\d+]/g, '')}`}
+              <a href={telHref}
                 className="inline-flex items-center gap-2 rounded-[var(--r)] border border-white/40 px-6 py-3 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/10">
                 <Phone size={15} /> {p.secondaryCta}
               </a>
@@ -387,7 +392,7 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
           <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--mut))]">Prefer to talk?</p>
           {p.phone && <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2.5 text-base font-semibold text-[hsl(var(--ink))]"><Phone size={17} className="text-[hsl(var(--p))]" /> {p.phone}</a>}
           {p.email && <a href={`mailto:${p.email}`} className="flex items-center gap-2.5 text-sm text-[hsl(var(--ink))]"><Mail size={16} className="text-[hsl(var(--p))]" /> {p.email}</a>}
-          <p className="text-xs leading-relaxed text-[hsl(var(--mut))]">Free estimates. No obligation. Same-day response on most requests.</p>
+          <p className="text-xs leading-relaxed text-[hsl(var(--mut))]">Free, no-obligation quotes. Your request goes straight to the owner.</p>
         </div>
       </div>
     </SectionShell>

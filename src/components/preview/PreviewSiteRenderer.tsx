@@ -4,10 +4,22 @@
 // Google Fonts loaded on demand, sticky nav with anchor links, sections dispatched through the
 // registry, footer. `shot` mode renders a stripped, animation-free version for email screenshots.
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SiteSpec } from '../../lib/preview/spec';
 import { SECTION_COMPONENTS } from './sections';
-import { Phone } from 'lucide-react';
+import { Phone, Menu, X } from 'lucide-react';
+
+/** Create-or-update one <meta> in <head> — the SPA route must unfurl/read as the BUSINESS. */
+function upsertMeta(attr: 'name' | 'property', key: string, content: string) {
+  if (!content) return;
+  let el = document.head.querySelector(`meta[${attr}="${key}"]`) as HTMLMetaElement | null;
+  if (!el) {
+    el = document.createElement('meta');
+    el.setAttribute(attr, key);
+    document.head.appendChild(el);
+  }
+  el.content = content;
+}
 
 function useGoogleFonts(display: string, body: string) {
   useEffect(() => {
@@ -24,7 +36,18 @@ function useGoogleFonts(display: string, body: string) {
 
 export function PreviewSiteRenderer({ spec, shot = false }: { spec: SiteSpec; shot?: boolean }) {
   useGoogleFonts(spec.theme.displayFont, spec.theme.bodyFont);
-  useEffect(() => { document.title = spec.seo.title; }, [spec.seo.title]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // The generated SEO was being produced then thrown away — title only. Write description + OG
+  // so a shared preview link unfurls as the business, not as the platform.
+  useEffect(() => {
+    document.title = spec.seo.title;
+    upsertMeta('name', 'description', spec.seo.description ?? '');
+    upsertMeta('property', 'og:title', spec.seo.title);
+    upsertMeta('property', 'og:description', spec.seo.description ?? '');
+    upsertMeta('property', 'og:type', 'website');
+    const heroImg = spec.sections.find((s) => s.type === 'hero')?.props.image as string | undefined;
+    if (heroImg) upsertMeta('property', 'og:image', heroImg);
+  }, [spec]);
 
   const vars = useMemo(() => ({
     '--p': spec.theme.primary,
@@ -73,10 +96,27 @@ export function PreviewSiteRenderer({ spec, shot = false }: { spec: SiteSpec; sh
                 <a key={n.anchor} href={`#${n.anchor}`} className="text-sm font-medium text-[hsl(var(--mut))] transition-colors hover:text-[hsl(var(--ink))]">{n.label}</a>
               ))}
             </nav>
-            {phone
-              ? <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] px-4 py-2 text-sm font-semibold text-[hsl(var(--pi))]"><Phone size={14} /> <span className="hidden sm:inline">{phone}</span><span className="sm:hidden">Call</span></a>
-              : <a href="#quote" className="rounded-[var(--r)] bg-[hsl(var(--p))] px-4 py-2 text-sm font-semibold text-[hsl(var(--pi))]">{spec.nav.find((n) => n.anchor === 'quote')?.label ?? 'Contact'}</a>}
+            <div className="flex items-center gap-2">
+              {phone
+                ? <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] px-4 py-2 text-sm font-semibold text-[hsl(var(--pi))]"><Phone size={14} /> <span className="hidden sm:inline">{phone}</span><span className="sm:hidden">Call</span></a>
+                : <a href="#quote" className="rounded-[var(--r)] bg-[hsl(var(--p))] px-4 py-2 text-sm font-semibold text-[hsl(var(--pi))]">{spec.nav.find((n) => n.anchor === 'quote')?.label ?? 'Contact'}</a>}
+              {/* Mobile: the nav used to vanish entirely below md — on the device every owner
+                  opens the email with. A plain disclosure menu, no dependencies. */}
+              <button type="button" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((o) => !o)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--r)] border border-[hsl(var(--bor))] text-[hsl(var(--ink))] md:hidden">
+                {menuOpen ? <X size={17} /> : <Menu size={17} />}
+              </button>
+            </div>
           </div>
+          {menuOpen && (
+            <nav className="border-t border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-5 py-3 md:hidden">
+              {spec.nav.map((n) => (
+                <a key={n.anchor} href={`#${n.anchor}`} onClick={() => setMenuOpen(false)}
+                  className="block py-2.5 text-sm font-medium text-[hsl(var(--ink))]">{n.label}</a>
+              ))}
+            </nav>
+          )}
         </header>
       )}
 
