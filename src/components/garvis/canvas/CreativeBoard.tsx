@@ -25,6 +25,8 @@ type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 export interface BoardKind { id: string; label: string; emoji: string; hint: string }
 
 export interface FocusApi<C> {
+  /** The focused tile's stable id — for per-tile artifacts (e.g. a mail-run design slug). */
+  id: string;
   /** Replace the tile's content, or apply a functional updater against its LATEST content — the
    *  functional form is what a slow async op (image gen) must use so it doesn't clobber edits made
    *  while it was in flight. */
@@ -305,6 +307,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
   };
 
   const focusApi = (id: string): FocusApi<C> => ({
+    id,
     update: (arg) => setBoard((b) => {
       const t = getTile(b, id);
       if (!t) return b;
@@ -381,7 +384,9 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <p className="mt-2 max-w-xs text-center text-[13px] text-forge-dim">{adapter.emptyHint}</p>
           </div>
         )}
-        <div className="cb-plane" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'top left' }}>
+        {/* When the references rail is open, the whole plane shifts right by its width — the rail must
+            never sit ON TOP of cards (the first column would become unclickable). */}
+        <div className="cb-plane" style={{ transform: `translate(${pan.x + (refsOpen && (adapter.references?.length ?? 0) > 0 ? 158 : 0)}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'top left' }}>
           {/* lineage connectors */}
           <svg className="cb-links" width="100%" height="100%">
             {shown.map((t) => {
@@ -494,7 +499,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <p className="mb-2 text-[12px] text-forge-dim">Tell it what to change — a new card appears next to this one, and the original stays.</p>
             <input autoFocus value={renditionText} onChange={(e) => setRenditionText(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && renditionText.trim()) { const id = renditionFor; setRenditionFor(null); void spin(id, renditionText); } }}
-              placeholder="e.g. warmer sunset · call it “Just Sold” · minimal, more white space"
+              placeholder="e.g. warmer sunset · punchier headline · minimal, more white space"
               className="w-full rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setRenditionFor(null)}>Cancel</Button>

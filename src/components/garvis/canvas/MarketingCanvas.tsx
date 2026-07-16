@@ -30,7 +30,7 @@ import {
 import {
   listTerritories, createTerritory, importRecipients, listRecipients, loadDoNotMailKeys, type TerritoryRow,
 } from '../../../lib/garvis/farmRun';
-import { parseFarmCsv, partitionMailable, farmMath, type FarmRecipient, type FarmParseResult } from '../../../lib/garvis/farm';
+import { parseFarmCsv, partitionMailable, farmMath, farmCsv, type FarmRecipient, type FarmParseResult } from '../../../lib/garvis/farm';
 import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { supabase } from '../../../lib/supabase';
 import { EmailBoard } from './EmailBoard';
@@ -397,6 +397,17 @@ function PeopleSheet({ realEstate, worldId, onToast, onClose }: { realEstate: bo
           <div className="mkc-reach">
             <div className="mkc-reachbig"><b>{reach ? reach.mailable.length.toLocaleString() : '—'}</b> will get mail</div>
             <div className="mkc-reachsub">{homes.toLocaleString()} household{homes === 1 ? '' : 's'} · {absentee.toLocaleString()} absentee{reach && reach.suppressed.length ? ` · ${reach.suppressed.length} held back (do-not-mail / incomplete address)` : ''}</div>
+            {reach && reach.mailable.length > 0 && (
+              <button className="mkc-spin" style={{ marginTop: 8 }} title="The addressed list a print vendor needs — do-not-mail and incomplete addresses already excluded"
+                onClick={() => {
+                  const blob = new Blob([farmCsv(reach.mailable)], { type: 'text/csv' });
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(blob);
+                  a.download = `${(sel?.name ?? 'mail-list').replace(/[^\w-]+/g, '-').toLowerCase()}-mailable.csv`;
+                  a.click(); URL.revokeObjectURL(a.href);
+                  onToast('success', `Downloaded ${reach.mailable.length.toLocaleString()} addresses — send this with your printed design to the mail house.`);
+                }}>⬇ Mail-house list ({reach.mailable.length.toLocaleString()} addresses, CSV)</button>
+            )}
           </div>
 
           <input ref={fileRef} type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void onCsv(f); e.target.value = ''; }} />

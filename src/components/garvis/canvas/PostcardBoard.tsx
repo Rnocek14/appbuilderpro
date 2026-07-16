@@ -12,11 +12,12 @@ import { Loader2, Sparkles, Image as ImageIcon, Wand2, Star, Trash2, Send } from
 import { PostcardFront, PostcardBack, PostcardViewer } from '../Postcard';
 import {
   postcardKindsFor, kindById, defaultKind, buildPostcardContent, applyRendition, withPhoto, withGeneratedImage, tileAllowsAI,
-  applyCopyFields,
+  applyCopyFields, enforceListingHonesty,
   type PostcardContent, type PostcardMaterials, type PostcardCopyFields,
 } from '../../../lib/garvis/postcardBoard';
 import { loadPostcardMaterials, generateTileImage, logPostcardMailed } from '../../../lib/garvis/postcardBoardRun';
 import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
+import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
 import { inferRealEstate } from '../../../lib/garvis/studioKit';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
@@ -176,6 +177,19 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not log the batch.'); }
   };
 
+  // BOARD → MAIL RUN: a starred lab card becomes THE design the farm merge uses — no recreating it in
+  // the designer. Per-tile slug so runs never overwrite each other.
+  const [runBusy, setRunBusy] = useState(false);
+  const useForMailRun = async () => {
+    if (!clusterId) { onToast('info', 'This board isn’t linked to a workspace yet — open it from your business canvas.'); return; }
+    setRunBusy(true);
+    try {
+      await saveMailerDesign(clusterId, content.spec, `${content.spec.front.headline || 'Postcard'} — mail run`, `postcard-run-${api.id.slice(0, 8)}`);
+      onToast('success', 'Saved as a mail-run design. Open “People nearby” on the canvas to pick the area, download the mail-house list, and print.');
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not save the design.'); }
+    finally { setRunBusy(false); }
+  };
+
   return (
     <div>
       <div className="mb-2 flex items-center gap-2">
@@ -219,7 +233,13 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
 
       {/* words */}
       <div className="mt-2 space-y-2">
-        <Field label="Front headline" value={content.spec.front.headline} onChange={(v) => api.update(patchFront(content, { headline: v }))} />
+        <Field label="Front headline" value={content.spec.front.headline} onChange={(v) => {
+          // The listing-honesty backstop: typing a listing claim ("Just Sold…") reclassifies the card
+          // to the listing type — which requires the real home photo, so any AI image comes off.
+          const r = enforceListingHonesty(patchFront(content, { headline: v }));
+          if (r.reclassified) onToast('info', `That’s a listing claim — this card now needs the real home photo${r.strippedAI ? ', so the AI image was removed' : ''}.`);
+          api.update(r.content);
+        }} />
         <Field label="Back headline" value={content.spec.back.headline} onChange={(v) => api.update(patchBack(content, { headline: v }))} />
         <Field label="Body" value={content.spec.back.body} onChange={(v) => api.update(patchBack(content, { body: v }))} multiline />
         <Field label="Offer" value={content.spec.back.offer} onChange={(v) => api.update(patchBack(content, { offer: v }))} />
@@ -233,7 +253,7 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
         <div className="flex items-center gap-2">
           <input value={spinText} onChange={(e) => setSpinText(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && spinText.trim()) { void api.rendition(spinText); setSpinText(''); } }}
-            placeholder="warmer · call it “Just Sold” · more white space"
+            placeholder="warmer · punchier headline · more white space"
             className="flex-1 rounded-md border border-forge-border bg-forge-bg px-2.5 py-1.5 text-[12px] text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
           <Button variant="outline" size="sm" disabled={!spinText.trim()} onClick={() => { void api.rendition(spinText); setSpinText(''); }}><Wand2 size={13} /> Spin</Button>
         </div>
@@ -245,6 +265,9 @@ function PostcardFocus({ content, api, materials, worldId, clusterId, onToast, t
           <Star size={13} className={api.isFavorite ? 'fill-current' : ''} /> {api.isFavorite ? 'Starred' : 'Star'}
         </Button>
         <Button variant="ghost" size="sm" onClick={api.remove}><Trash2 size={13} /> Delete</Button>
+        <Button variant="outline" size="sm" disabled={runBusy} onClick={() => void useForMailRun()} title="Make this the design your farm mail run uses">
+          {runBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Use for mail run
+        </Button>
         <div className="ml-auto flex items-center gap-1.5">
           <input value={mailCount} onChange={(e) => setMailCount(e.target.value.replace(/[^0-9]/g, ''))} placeholder="#" style={{ width: 52 }}
             className="rounded-md border border-forge-border bg-forge-bg px-2 py-1.5 text-[12px] text-forge-ink focus:border-forge-ember/60 focus:outline-none" />

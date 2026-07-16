@@ -50,11 +50,13 @@ function rank(label: string | null): number {
 
 /** Save the postcard design as a studio artifact in this area (upsert by a stable slug so
  *  re-saves version rather than duplicate). Returns the artifact slug. */
-export async function saveMailerDesign(clusterId: string, spec: MailerSpec, title: string): Promise<string> {
+export async function saveMailerDesign(clusterId: string, spec: MailerSpec, title: string, slugOverride?: string): Promise<string> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
-  const slug = `postcard-${spec.concept.replace('_', '-')}`;
+  // Per-tile slugs (a board card sent to the mail run) never overwrite each other; the default
+  // concept slug keeps the designer's one-design-per-concept behavior.
+  const slug = slugOverride ?? `postcard-${spec.concept.replace('_', '-')}`;
   const { error } = await supabase.from('knowledge_artifacts').upsert({
     owner_id: uid, cluster_id: clusterId, slug, kind: 'post',
     title, detail: mailerToDetail(spec), source: 'garvis-chat',

@@ -4,6 +4,7 @@
 import {
   normalizeAddressLine, zip5, householdKey, parseCsvRows, parseFarmCsv,
   addressBlockLines, partitionMailable, farmMath, type FarmRecipient,
+  farmCsv,
 } from './farm';
 
 let passed = 0; let failed = 0;
@@ -112,6 +113,22 @@ check('small farm flagged against the EDDM/viability floors',
 
 // --- determinism ------------------------------------------------------------------
 check('deterministic: same file → identical result', JSON.stringify(parseFarmCsv(pr)) === JSON.stringify(parseFarmCsv(pr)));
+
+// --- the mail-house CSV: what a print vendor actually receives -------------------------------
+{
+  const r = (name: string, addr: string, mail: boolean): FarmRecipient => ({
+    fullName: name, situs: { address1: addr, city: 'Lake Geneva', state: 'WI', zip5: '53147' },
+    mail: mail ? { address1: '9 Elm "Cottage", Unit B', city: 'Chicago', state: 'IL', zip5: '60601' } : null,
+    isAbsentee: mail, householdKey: addr.toLowerCase(), attrs: {},
+  });
+  const csv = farmCsv([r('Ann Ames', '12 Maple St', false), r('', '77 Oak Ave', true)]);
+  const rows = csv.split('\n');
+  check('csv has the header + one row per mailable recipient', rows.length === 3 && rows[0] === 'full_name,address1,city,state,zip,absentee_owner');
+  check('a known owner mails to the SITUS when no mailing address', rows[1] === 'Ann Ames,12 Maple St,Lake Geneva,WI,53147,no');
+  check('unknown name becomes Current Resident; absentee uses the OWNER mailing address', rows[2].startsWith('Current Resident,') && rows[2].includes('60601') && rows[2].endsWith('yes'));
+  check('commas + quotes are RFC-4180 escaped', rows[2].includes('"9 Elm ""Cottage"", Unit B"'));
+  check('deterministic', farmCsv([r('A', '1 St', false)]) === farmCsv([r('A', '1 St', false)]));
+}
 
 console.log(`\nfarm.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) { throw new Error(`${failed} check(s) failed`); }

@@ -64,6 +64,13 @@ export const EMAIL_KINDS_RE: EmailKind[] = [
   { id: 're_referral', label: 'Referral ask', emoji: '🙏', hint: 'The best-value email you can send.',
     subjects: (m) => ['A quick favor?', 'Know anyone thinking of moving?', 'The best compliment you can give'],
     body: (m) => email(m, [`Most of my business comes from people like you.`, `If you know anyone in ${areaOf(m)} thinking of buying or selling, I’d be grateful for the introduction — I’ll take great care of them.`]) },
+  // Folded in from the retired email gallery (one catalog per channel — no more drifted twins):
+  { id: 're_open_house', label: 'Open house', emoji: '📅', hint: 'Invite your list (and their friends).',
+    subjects: (m) => [`Open house this [EDIT: day] in ${areaOf(m)}`, 'You’re invited: [EDIT: address], [EDIT: day/time]', 'Come see it in person'],
+    body: (m) => email(m, ['Come by — I’m hosting an open house I think you’ll want to see.', '• Where: [EDIT: address]', '• When: [EDIT: day, time]', '• The short version: [EDIT: one line on the home]', 'Bring a friend who’s house-hunting. Reply if you’d like the details or a private time instead.']) },
+  { id: 're_price_improvement', label: 'Price improved', emoji: '🔻', hint: 'A real price change re-opens the conversation.',
+    subjects: (m) => ['Price improved: [EDIT: address]', 'A second look is worth it now', `${areaOf(m)}: new price on [EDIT: address]`],
+    body: (m) => email(m, ['The home at [EDIT: address] just had a price improvement: [EDIT: new price].', 'If it was close before, it deserves a second look now — [EDIT: the one standout feature].', 'Want a showing this week? Just reply.']) },
 ];
 
 export const EMAIL_KINDS_GENERIC: EmailKind[] = [
@@ -79,6 +86,13 @@ export const EMAIL_KINDS_GENERIC: EmailKind[] = [
   { id: 'gen_newsletter', label: 'Newsletter', emoji: '📰', hint: 'A monthly touch that stays useful.',
     subjects: (m) => [`This month at ${bizOf(m)}`, 'Worth a read', 'Your monthly update'],
     body: (m) => email(m, ['Here’s what’s new: [EDIT: 2–3 short updates].', '[EDIT: one genuinely useful tip or link].']) },
+  // Folded in from the retired email gallery (one catalog per channel — no more drifted twins):
+  { id: 'gen_winback', label: 'We miss you', emoji: '🔁', hint: 'Re-open the door for quiet customers.',
+    subjects: (m) => ['It’s been a while', `Still here when you need us — ${bizOf(m)}`, 'We miss you'],
+    body: (m) => email(m, ['It’s been a while since we’ve seen you, and I just wanted to say hi.', '[EDIT: one genuine update or small welcome-back offer — only if real].', 'If there’s anything we could’ve done better, reply and tell me — I read every one of these.']) },
+  { id: 'gen_review', label: 'Review ask', emoji: '⭐', hint: 'A kind ask, only after a good experience.',
+    subjects: (m) => ['A quick favor?', `How did we do?`, 'Two minutes that mean a lot'],
+    body: (m) => email(m, ['Thanks again for choosing us — I hope it was great.', 'If you have two minutes, a short review helps more than you’d think: [EDIT: review link].', 'And if anything wasn’t right, reply here first so I can fix it.']) },
 ];
 
 export function emailKindsFor(realEstate: boolean): EmailKind[] { return realEstate ? EMAIL_KINDS_RE : EMAIL_KINDS_GENERIC; }
