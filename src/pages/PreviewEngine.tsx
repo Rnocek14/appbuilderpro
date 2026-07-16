@@ -81,6 +81,15 @@ export default function PreviewEngine() {
   const remove = async (id: string) => { if (!window.confirm('Delete this preview site? This can’t be undone.')) return; await deletePreviewSite(id); await refresh(); };
   const copyLink = (slug: string) => { void navigator.clipboard.writeText(previewUrlFor(slug)); toast('success', 'Preview link copied.'); };
   const copyPitch = (pitch: string) => { void navigator.clipboard.writeText(pitch); toast('success', 'Pitch email copied.'); };
+  // THE DELIVERABLE: one self-contained .html of the exact preview (same components, CSS inlined,
+  // SEO/OG/schema.org in the head) — what a paying client actually receives for their domain.
+  const exportHtml = async (r: PreviewSiteRow) => {
+    try {
+      const { downloadStaticSite } = await import('../lib/preview/exportStatic');
+      await downloadStaticSite(r.spec, r.slug, { canonicalUrl: previewUrlFor(r.slug) });
+      toast('success', `Exported ${r.business_name} as ${r.slug}.html — self-contained, ready for their domain.`);
+    } catch (e) { toast('error', e instanceof Error ? e.message : 'Export failed.'); }
+  };
 
   // Turn a generated pitch into a real, approval-gated outreach message (replaces copy-to-clipboard).
   const queueSend = async (r: PreviewSiteRow) => {
@@ -261,6 +270,10 @@ export default function PreviewEngine() {
                   <button onClick={() => copyLink(r.slug)} title="Copy preview link"
                     className="rounded-lg border border-forge-border p-2 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
                     <Copy size={14} />
+                  </button>
+                  <button onClick={() => void exportHtml(r)} title="Export as a self-contained .html — the deliverable a client puts on their domain (real SEO baked in)"
+                    className="rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
+                    Export
                   </button>
                   <button onClick={() => copyPitch(r.pitch)} title="Copy pitch email"
                     className="rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
