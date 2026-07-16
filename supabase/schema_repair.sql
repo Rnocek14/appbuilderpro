@@ -415,7 +415,8 @@ create policy "msg insert" on public.ai_messages for insert with check (user_id 
 drop policy if exists "usage select own" on public.usage_events;
 create policy "usage select own" on public.usage_events for select using (user_id = auth.uid() or public.is_admin());
 
--- subscriptions: users read own; writes via service role (Stripe webhook)
+-- subscriptions: read own; writes via service role (Stripe webhook)
+drop policy if exists "subs select own" on public.subscriptions;
 create policy "subs select own" on public.subscriptions for select using (user_id = auth.uid() or public.is_admin());
 
 -- deployments
@@ -428,7 +429,8 @@ create policy "deploy insert" on public.deployments for insert with check (user_
 drop policy if exists "deploy update" on public.deployments;
 create policy "deploy update" on public.deployments for update using (user_id = auth.uid() or public.is_admin());
 
-error inserts allowed from authed clients for their own context
+-- logs: admin read; error inserts allowed from authed clients for their own context
+drop policy if exists "errors insert own" on public.error_logs;
 create policy "errors insert own" on public.error_logs for insert with check (user_id = auth.uid() or user_id is null);
 
 drop policy if exists "errors admin read" on public.error_logs;

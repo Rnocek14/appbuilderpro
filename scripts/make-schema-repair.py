@@ -18,12 +18,32 @@ OUT = Path('supabase/schema_repair.sql')
 
 
 def split_statements(sql: str) -> list[str]:
-    """Split on top-level semicolons, respecting $tag$ ... $tag$ dollar-quoted bodies."""
+    """Split on top-level semicolons, respecting $tag$ bodies, '…' strings, and -- comments."""
     stmts, buf, i, n = [], [], 0, len(sql)
     dollar = None  # the active dollar-quote tag, e.g. "$$" or "$fn$"
     while i < n:
         ch = sql[i]
         if dollar is None:
+            # -- line comment: swallow to end of line (a ';' inside a comment is NOT a split)
+            if ch == '-' and sql.startswith('--', i):
+                j = sql.find('\n', i)
+                j = n if j == -1 else j
+                buf.append(sql[i:j])
+                i = j
+                continue
+            # '…' string literal ('' is an escaped quote): a ';' inside is not a split either
+            if ch == "'":
+                j = i + 1
+                while j < n:
+                    if sql[j] == "'":
+                        if j + 1 < n and sql[j + 1] == "'":
+                            j += 2
+                            continue
+                        break
+                    j += 1
+                buf.append(sql[i:j + 1])
+                i = j + 1
+                continue
             m = re.match(r'\$[A-Za-z_]*\$', sql[i:])
             if m:
                 dollar = m.group(0)
