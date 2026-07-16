@@ -1,0 +1,75 @@
+# Garvis go-live — deploys the AI-facing edge functions to Supabase from a GitHub runner.
+# Exists because local sandboxes can't always reach Supabase; GitHub's runners can.
+# Trigger it from the Actions tab (or API) with a Supabase access token. The token and
+# keys arrive as run inputs — they are masked in logs, but still visible on the run's
+# summary page to repo collaborators, so revoke/rotate them after a successful run and
+# delete the run itself for good measure.
+name: Garvis go-live
+on:
+  workflow_dispatch:
+    inputs:
+      project_ref:
+        description: Supabase project ref (the subdomain of https://<ref>.supabase.co)
+        required: true
+      access_token:
+        description: Supabase personal access token (sbp_...) — revoke after the run
+        required: true
+      anthropic_key:
+        description: ANTHROPIC_API_KEY value (optional — leave blank to keep what the dashboard has)
+        required: false
+        default: ''
+      openai_key:
+        description: OPENAI_API_KEY value (optional — leave blank to keep what the dashboard has)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  go-live:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ inputs.access_token }}
+      PROJECT_REF: ${{ inputs.project_ref }}
+      ANTHROPIC_KEY: ${{ inputs.anthropic_key }}
+      OPENAI_KEY: ${{ inputs.openai_key }}
+    steps:
+      - name: Mask credentials in logs
+        run: |
+          echo "::add-mask::$SUPABASE_ACCESS_TOKEN"
+          if [ -n "$ANTHROPIC_KEY" ]; then echo "::add-mask::$ANTHROPIC_KEY"; fi
+          if [ -n "$OPENAI_KEY" ]; then echo "::add-mask::$OPENAI_KEY"; fi
+
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # The CLI insists on a config.toml; this repo manages functions without one.
+      - name: Ensure minimal supabase config
+        run: |
+          if [ ! -f supabase/config.toml ]; then
+            printf 'project_id = "%s"\n' "$PROJECT_REF" > supabase/config.toml
+          fi
+
+      - name: Set AI secrets
+        if: ${{ inputs.anthropic_key != '' || inputs.openai_key != '' }}
+        run: |
+          args=()
+          if [ -n "$ANTHROPIC_KEY" ]; then args+=("ANTHROPIC_API_KEY=$ANTHROPIC_KEY"); fi
+          if [ -n "$OPENAI_KEY" ]; then args+=("OPENAI_API_KEY=$OPENAI_KEY"); fi
+          supabase secrets set --project-ref "$PROJECT_REF" "${args[@]}"
+
+      - name: Deploy AI edge functions
+        run: |
+          for fn in board-copy generate-image inbox-draft standing-worker; do
+            echo "── deploying $fn ──"
+            supabase functions deploy "$fn" --project-ref "$PROJECT_REF" --no-verify-jwt
+          done
+
+      - name: Done
+        run: |
+          echo "Secrets + functions live on $PROJECT_REF."
+          echo "Now: revoke the sbp_ token, rotate any key pasted in chat, and delete this run."
