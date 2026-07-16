@@ -76,25 +76,52 @@ export async function generateSocialTileImage(args: {
 /** Queue this tile to the approval-gated publisher — the loop closes here. Re-uses queueSocialPost, so
  *  it passes the exact same gate the network would (e.g. Instagram needs an image; the reason surfaces
  *  honestly if it can't). Returns any non-blocking warnings (char limits, etc.). */
+/** Render the brand card as a REAL PNG via the render-design edge function. Returns null on any
+ *  failure — callers degrade honestly instead of blocking the post. Not AI imagery: no disclosure. */
+export async function renderBrandCardImage(content: SocialContent, materials: SocialMaterials, clusterId?: string | null): Promise<string | null> {
+  try {
+    const size = content.platform === 'instagram' ? '1080x1080' : '1200x628';
+    const { data, error } = await supabase.functions.invoke('render-design', {
+      body: {
+        kind: 'brand_card', size, clusterId: clusterId ?? null,
+        spec: {
+          headline: content.headline ?? content.caption.slice(0, 80),
+          business: materials.businessName || 'Your brand',
+          area: materials.area, accent: materials.accent,
+        },
+      },
+    });
+    if (error) return null;
+    const d = data as { ok?: boolean; url?: string };
+    return d?.ok && d.url ? d.url : null;
+  } catch { return null; }
+}
+
 export async function queueSocialTile(args: {
   content: SocialContent; worldId: string | null; scheduleAt?: string | null;
+  /** When given, a brand-mode post gets its card RENDERED and attached instead of going out as text. */
+  materials?: SocialMaterials | null; clusterId?: string | null;
 }): Promise<{ warnings: string[] }> {
   const { content } = args;
   const base = composeSocialText(content.platform, content.caption, content.hashtags);
   // An AI-generated image on the post must be disclosed to the viewer (platform policy + our honesty
-  // rules) — a real home photo or a brand card is not AI, so it carries no label.
+  // rules) — a real home photo or a rendered brand design is not AI, so it carries no label.
   const aiImage = content.imageMode === 'ai' && !!content.imageUrl;
   const text = aiImage ? withDisclosure(base, aiProvenance('image', 'gpt-image-1', Date.now())) : base;
-  const media = content.imageUrl ? [content.imageUrl] : [];
+  let media = content.imageUrl ? [content.imageUrl] : [];
+  // THE TEXT-ONLY DEAD END, CLOSED: a brand-mode post now renders its card server-side and attaches
+  // the PNG. If the render fails, the old honest warning still fires — nothing is silently dropped.
+  if (!media.length && content.imageMode === 'brand' && args.materials) {
+    const url = await renderBrandCardImage(content, args.materials, args.clusterId ?? null);
+    if (url) media = [url];
+  }
   const res = await queueSocialPost({
     text, platforms: [provider(content.platform)], mediaUrls: media,
     scheduleAt: args.scheduleAt ?? null, worldId: args.worldId,
   });
   const warnings = [...res.warnings];
-  // The no-photo "brand card" is a preview graphic (CSS), not a real image — it can't be attached, so a
-  // brand-mode post goes out as TEXT ONLY. Say so, so nothing is silently dropped.
-  if (content.imageMode === 'brand' && !content.imageUrl) {
-    warnings.unshift('Posting as text only — the brand card is a preview and isn’t attached. Add a photo or connect an image key to include a graphic.');
+  if (content.imageMode === 'brand' && !media.length) {
+    warnings.unshift('Posting as text only — the brand card couldn’t be rendered this time. Add a photo, or try Queue again.');
   }
   return { warnings };
 }

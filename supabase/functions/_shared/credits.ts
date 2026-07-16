@@ -24,7 +24,8 @@ export type CreditKind =
   | 'image'    // one AI image generation (OpenAI gpt-image-1)
   | 'video_clip'  // one AI video clip (Sora/Runway/Luma) — the reel factory's per-scene generation
   | 'voiceover'   // one ElevenLabs narration for a reel scene/reel
-  | 'board_copy'; // one creative-board copy generation (a caption/subject/headline riff — small, frequent)
+  | 'board_copy'  // one creative-board copy generation (a caption/subject/headline riff — small, frequent)
+  | 'design_render'; // one server-rendered brand design PNG (satori/resvg — pure compute, cheapest seam)
 
 // Conservative pre-call estimate (in credits; 1 credit ≈ $0.01 of cost). Used ONLY to reject a start
 // when the balance clearly can't cover it — the real charge uses actual cost after the call.
@@ -46,6 +47,7 @@ const KIND_ESTIMATE: Record<CreditKind, number> = {
   video_clip: 200,  // one AI video clip — AI video is dollars/clip; conservative reject floor (~$2)
   voiceover: 5,     // one ElevenLabs narration — small, but metered like every paid call
   board_copy: 2,    // one board copy riff — a few hundred tokens on a small model
+  design_render: 1, // one brand-design PNG — pure compute, no provider fee
 };
 
 export class InsufficientCreditsError extends Error {

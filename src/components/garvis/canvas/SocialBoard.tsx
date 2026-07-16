@@ -172,7 +172,7 @@ function SocialFocus({ content, api, materials, worldId, clusterId, onToast, try
     try {
       const iso = scheduleAt ? new Date(scheduleAt).toISOString() : null;
       if (iso && new Date(iso).getTime() <= Date.now()) { onToast('error', 'That schedule time is in the past — pick a future time or clear it.'); return; }
-      const { warnings } = await queueSocialTile({ content, worldId, scheduleAt: iso });
+      const { warnings } = await queueSocialTile({ content, worldId, scheduleAt: iso, materials, clusterId });
       const when = iso ? ` for ${new Date(iso).toLocaleString()}` : '';
       onToast('success', `Queued to ${PLATFORM_LABEL[content.platform]}${when} — approve it in your Queue.${warnings.length ? ' (' + warnings[0] + ')' : ''}`);
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not queue the post.'); }

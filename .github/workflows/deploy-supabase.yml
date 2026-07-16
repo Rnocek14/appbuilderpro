@@ -141,7 +141,7 @@ jobs:
       # ingest-profile) + the boards' words seam (board-copy/generate-image). All self-auth.
       - name: Deploy hot functions (JWT-verified)
         run: |
-          for fn in board-copy generate-image discover-media fetch-url ingest-profile; do
+          for fn in board-copy generate-image render-design discover-media fetch-url ingest-profile; do
             echo "── deploying $fn ──"
             supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
           done
