@@ -201,6 +201,32 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
     return () => el.removeEventListener('wheel', onWheel);
   }, []);
 
+  // ---- the inspector dock is non-modal, so it provides its own Esc-to-close. Capture-phase +
+  // stopPropagation so Esc closes the DOCK first, never the whole board workspace behind it. ----
+  useEffect(() => {
+    if (!focusId) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setFocusId(null); } };
+    window.addEventListener('keydown', h, true);
+    return () => window.removeEventListener('keydown', h, true);
+  }, [focusId]);
+  // When the dock opens, make sure the focused card sits in the still-visible half of the stage —
+  // the inspector must never cover the very card being edited.
+  useEffect(() => {
+    if (!focusId || !stageRef.current) return;
+    const t = getTile(boardRef.current, focusId); if (!t) return;
+    const W = stageRef.current.clientWidth;
+    const dockW = Math.min(480, W * 0.5);
+    setZoom((z) => {
+      setPan((p) => {
+        const sx = t.x * z + p.x;                                  // tile's on-screen x
+        const visible = W - dockW;
+        if (sx > visible - M.w * z - 24 || sx < 0) return { ...p, x: Math.max(0, (visible - M.w * z) / 2) - t.x * z };
+        return p;
+      });
+      return z;
+    });
+  }, [focusId, M.w]);
+
   // ---- multi-select for bulk organize (shift/⌘-click a tile) -----------------------------
   const toggleSelect = (id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const bulkGroup = (g: string | null) => { setBoard((b) => { let nb = b; selected.forEach((id) => { nb = setTileGroup(nb, id, g); }); return nb; }); setSelected(new Set()); };
@@ -405,6 +431,30 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <button className="cb-gchip" onClick={() => setSelected(new Set())}>Clear</button>
           </div>
         )}
+
+        {/* THE INSPECTOR DOCK — the editor lives IN the board, not in a modal over it. The spread stays
+            visible and pannable beside it, so editing one card never hides the others you're comparing
+            against (the whole point of a spatial lab). Esc or ✕ closes; the focused card auto-pans into
+            the visible half so the dock never covers the very thing being edited. */}
+        {focusTile && (
+          <div className="cb-dock" onPointerDown={(e) => e.stopPropagation()}>
+            <button className="cb-close" onClick={() => setFocusId(null)} title="Close (Esc)"><X size={16} /></button>
+            {adapter.renderFocus(focusTile.content, focusApi(focusTile.id))}
+            {/* shell-provided: file this piece into a group, or archive it */}
+            <div className="cb-organize">
+              <span className="cb-org-label">Group</span>
+              <button onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, null))} className={cn('cb-gchip', !focusTile.group && 'cb-gchip-on')}>Main</button>
+              {groups.map((g) => (
+                <button key={g} onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, g))} className={cn('cb-gchip', focusTile.group === g && 'cb-gchip-on')}><Folder size={11} /> {g}</button>
+              ))}
+              <button onClick={() => { setNewGroupTileId(focusTile.id); setNewGroupText(''); setNewGroupOpen(true); }} className="cb-gchip"><FolderPlus size={11} /> New</button>
+              <span className="mx-1 h-3.5 w-px bg-forge-border" />
+              <button onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, focusTile.group === ARCHIVE_GROUP ? null : ARCHIVE_GROUP))} className="cb-gchip">
+                {focusTile.group === ARCHIVE_GROUP ? <><Undo2 size={11} /> Restore</> : <><Archive size={11} /> Archive</>}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* rendition prompt (from a tile's ⟳) */}
@@ -420,29 +470,6 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
             <div className="mt-3 flex justify-end gap-2">
               <Button variant="ghost" size="sm" onClick={() => setRenditionFor(null)}>Cancel</Button>
               <Button variant="primary" size="sm" disabled={!renditionText.trim()} onClick={() => { const id = renditionFor; setRenditionFor(null); void spin(id, renditionText); }}><Wand2 size={13} /> Spin it</Button>
-            </div>
-          </div>
-        </Overlay>
-      )}
-
-      {/* focus one — the adapter renders the big editable view */}
-      {focusTile && (
-        <Overlay onClose={() => setFocusId(null)} z={78}>
-          <div className="cb-focus" onPointerDown={(e) => e.stopPropagation()}>
-            <button className="cb-close" onClick={() => setFocusId(null)} title="Close"><X size={16} /></button>
-            {adapter.renderFocus(focusTile.content, focusApi(focusTile.id))}
-            {/* shell-provided: file this piece into a group, or archive it */}
-            <div className="cb-organize">
-              <span className="cb-org-label">Group</span>
-              <button onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, null))} className={cn('cb-gchip', !focusTile.group && 'cb-gchip-on')}>Main</button>
-              {groups.map((g) => (
-                <button key={g} onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, g))} className={cn('cb-gchip', focusTile.group === g && 'cb-gchip-on')}><Folder size={11} /> {g}</button>
-              ))}
-              <button onClick={() => { setNewGroupTileId(focusTile.id); setNewGroupText(''); setNewGroupOpen(true); }} className="cb-gchip"><FolderPlus size={11} /> New</button>
-              <span className="mx-1 h-3.5 w-px bg-forge-border" />
-              <button onClick={() => setBoard((b) => setTileGroup(b, focusTile.id, focusTile.group === ARCHIVE_GROUP ? null : ARCHIVE_GROUP))} className="cb-gchip">
-                {focusTile.group === ARCHIVE_GROUP ? <><Undo2 size={11} /> Restore</> : <><Archive size={11} /> Archive</>}
-              </button>
             </div>
           </div>
         </Overlay>
@@ -516,7 +543,9 @@ const CB_CSS = `
 .cb-cap{margin-top:5px;font-size:10.5px;color:var(--forge-dim,#a99b90);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
 .cb-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
 .cb-modal{width:min(92vw,440px);border-radius:14px;border:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710);padding:16px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-.cb-focus{position:relative;width:min(94vw,560px);max-height:90vh;overflow:auto;border-radius:16px;border:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710);padding:18px;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+.cb-dock{position:absolute;top:0;right:0;bottom:0;width:min(480px,50%);overflow:auto;border-left:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710);padding:18px;box-shadow:-18px 0 44px rgba(0,0,0,.4);z-index:6;cursor:default;animation:cbDockIn .18s ease-out}
+@keyframes cbDockIn{from{transform:translateX(24px);opacity:.4}to{transform:translateX(0);opacity:1}}
+@media (prefers-reduced-motion: reduce){.cb-dock{animation:none}}
 .cb-close{position:absolute;top:10px;right:10px;display:grid;place-items:center;height:30px;width:30px;border-radius:8px;color:var(--forge-dim,#a99b90);background:rgba(255,255,255,.06)}
 .cb-close:hover{color:var(--forge-ink,#f0e6da);background:rgba(255,255,255,.12)}
 .cb-print{position:fixed;left:-99999px;top:0}
