@@ -155,15 +155,40 @@ export function applyRendition(parent: PostcardContent, instruction: string): Re
   const hm = HEADLINE_RE.exec(instr);
 
   if (hm) {
-    // A words change — keep the image, restyle the layout, set the new headline.
+    // A words change — keep the image, restyle the layout, set the new headline. The listing-honesty
+    // backstop runs here: renaming a card to a listing claim reclassifies it (and strips AI imagery).
     const spec: MailerSpec = { ...parent.spec, front: { ...parent.spec.front, headline: clip(hm[1]) } };
-    return { content: { ...parent, spec, variant }, wantsImage: false, imageStyle: null };
+    return { content: enforceListingHonesty({ ...parent, spec, variant }).content, wantsImage: false, imageStyle: null };
   }
 
   // A look/feel change — advance the variant now; regenerate the image (unless it's a real photo we must
   // not replace, or an empty instruction). A listing kind (needsRealPhoto) keeps its real photo.
   const canImage = !!instr && canGenerateImage(parent.campaignType) && parent.imageMode !== 'photo';
   return { content: { ...parent, variant }, wantsImage: canImage, imageStyle: instr || null };
+}
+
+/** THE LISTING-HONESTY BACKSTOP. Renaming a lifestyle card's headline to "Just Sold!" must not smuggle
+ *  an AI image past the real-photo rule — a listing claim requires the real home photo. If a headline
+ *  (from an edit, a rendition, or the copy seam) makes a listing claim, the card is RECLASSIFIED to the
+ *  matching listing type and any AI imagery is stripped back to the brand design. Pure; callers toast. */
+const LISTING_CLAIM: [RegExp, CampaignType][] = [
+  [/\bjust\s+listed\b/i, 'just_listed'],
+  [/\bjust\s+sold\b/i, 'just_sold'],
+  [/\bopen\s+house\b/i, 'open_house'],
+];
+export function enforceListingHonesty(content: PostcardContent): { content: PostcardContent; reclassified: CampaignType | null; strippedAI: boolean } {
+  const claim = LISTING_CLAIM.find(([re]) => re.test(content.spec.front.headline))?.[1] ?? null;
+  if (!claim || claim === content.campaignType) return { content, reclassified: null, strippedAI: false };
+  const strippedAI = content.imageMode === 'ai';
+  return {
+    content: {
+      ...content,
+      campaignType: claim,
+      ...(strippedAI ? { imageMode: 'brand' as const, aiNote: null, spec: { ...content.spec, front: { ...content.spec.front, imageUrl: null } } } : {}),
+    },
+    reclassified: claim,
+    strippedAI,
+  };
 }
 
 /** Fields the board-copy AI seam may write — WORDS only. Pure applier: patches exactly the named
@@ -186,7 +211,8 @@ export function applyCopyFields(content: PostcardContent, f: PostcardCopyFields)
       ...(typeof f.cta === 'string' && f.cta.trim() ? { cta: f.cta.trim() } : {}),
     },
   };
-  return { ...content, spec };
+  // The seam writes words, but words can make listing claims — the honesty backstop still applies.
+  return enforceListingHonesty({ ...content, spec }).content;
 }
 
 /** Apply a generated image to a tile (the run calls this after the model returns). */

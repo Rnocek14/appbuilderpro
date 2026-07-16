@@ -6,7 +6,7 @@
 // look-instruction flags an image regen but never replaces a real photo).
 import {
   POSTCARD_KINDS_RE, POSTCARD_KINDS_GENERIC, postcardKindsFor, kindById, defaultKind,
-  buildPostcardContent, applyRendition, withGeneratedImage, withPhoto, postcardImagePrompt, tileAllowsAI, applyCopyFields,
+  buildPostcardContent, applyRendition, withGeneratedImage, withPhoto, postcardImagePrompt, tileAllowsAI, applyCopyFields, enforceListingHonesty,
   type PostcardMaterials, type PostcardKind,
 } from './postcardBoard';
 import { canGenerateImage } from './imagegen';
@@ -105,6 +105,22 @@ check('postcardKindsFor / kindById / defaultKind resolve', postcardKindsFor(true
   check('image mode + photo rules are untouchable from the copy applier', out.imageMode === base.imageMode && out.spec.front.imageUrl === base.spec.front.imageUrl);
   const kept = applyCopyFields(base, {});
   check('no fields → the words stay put', kept.spec.front.headline === base.spec.front.headline && kept.spec.back.body === base.spec.back.body);
+}
+
+// --- the listing-honesty backstop: a listing CLAIM forces listing RULES ----------------------
+{
+  const m: PostcardMaterials = { ctx: { business_name: 'Lakeside Realty', principal: 'Jane Doe', craft: null, offerings: [], audience: null, locale: 'Lake Geneva', links: {}, tone: null }, brand: null, images: [] };
+  const lifestyle = buildPostcardContent({ materials: m, kind: postcardKindsFor(true).find((k) => !k.needsRealPhoto)!, idea: '' });
+  const withAI = withGeneratedImage(lifestyle, 'https://x/ai.png', 'AI illustration');
+  const renamed = { ...withAI, spec: { ...withAI.spec, front: { ...withAI.spec.front, headline: 'JUST SOLD on the lake!' } } };
+  const h = enforceListingHonesty(renamed);
+  check('renaming to a listing claim reclassifies the campaign type', h.reclassified === 'just_sold' && h.content.campaignType === 'just_sold');
+  check('...and strips the AI image back to the brand design', h.strippedAI && h.content.imageMode === 'brand' && h.content.spec.front.imageUrl === null && h.content.aiNote === null);
+  check('a reclassified card refuses future AI imagery', canGenerateImage(h.content.campaignType) === false);
+  const clean = enforceListingHonesty(lifestyle);
+  check('a non-listing headline is untouched', clean.reclassified === null && clean.content === lifestyle);
+  check('applyCopyFields runs the backstop too (the AI seam cannot smuggle a claim)', applyCopyFields(withAI, { headline: 'Open house this weekend' }).campaignType === 'open_house');
+  check('a rendition headline instruction runs the backstop', applyRendition(withAI, 'call it "Just Listed"').content.campaignType === 'just_listed');
 }
 
 console.log(`\npostcardBoard.verify: ${passed} passed, ${failed} failed`);

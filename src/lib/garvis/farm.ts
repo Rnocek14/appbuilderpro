@@ -213,6 +213,21 @@ export interface MergePartition {
   suppressed: { recipient: FarmRecipient; reason: string }[];
 }
 
+/** The MAIL-HOUSE CSV — the addressed list a print vendor needs to run a real drop, so a 1,500-piece
+ *  mailing doesn't have to squeeze through a browser print dialog. Callers pass the MAILABLE partition
+ *  only (do-not-mail + incomplete addresses already excluded — the suppression never leaks into the
+ *  export). Uses the owner's mailing address when present (that's where mail actually goes), the
+ *  "Current Resident" convention for unknown names, and RFC-4180 quoting. Pure + deterministic. */
+export function farmCsv(mailable: FarmRecipient[]): string {
+  const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const rows = mailable.map((r) => {
+    const a = r.mail ?? r.situs;
+    return [r.fullName || 'Current Resident', a.address1, a.city, a.state, a.zip5, r.isAbsentee ? 'yes' : 'no']
+      .map(esc).join(',');
+  });
+  return ['full_name,address1,city,state,zip,absentee_owner', ...rows].join('\n');
+}
+
 /** Fail-closed merge gate: on the do-not-mail list → suppressed; can't compose a complete
  *  USPS address block → suppressed with the reason. Nothing prints on a guess. */
 export function partitionMailable(recipients: FarmRecipient[], doNotMailKeys: ReadonlySet<string>): MergePartition {
