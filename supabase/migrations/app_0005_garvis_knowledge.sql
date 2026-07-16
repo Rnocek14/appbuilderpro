@@ -62,4 +62,7 @@ create policy "garvis_knowledge admin read" on public.garvis_knowledge
   for select using (public.is_admin());
 
 -- ---------- realtime (stream proposed/approved knowledge to the Garvis dashboard) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_knowledge;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;

@@ -6,14 +6,12 @@
 -- All migrations are additive + idempotent; re-running is safe.
 --
 
-
 -- ======== supabase/migrations/20260702120000_message_changes.sql ========
 -- Per-message file changes: [{path, before, after, additions, deletions}] captured at the agent's
 -- write layer for each chat turn. Powers the chat's per-message diff cards (the "show me exactly
 -- what changed" trust feature) and message-level restore. Full contents, not patches — files are
 -- small and it makes revert/re-render trivial.
 alter table public.ai_messages add column if not exists changes jsonb;
-
 
 -- ======== supabase/migrations/20260702120001_stripe.sql ========
 -- Stripe billing foundation: platform subscriptions (free/pro tiers) + webhook idempotency.
@@ -46,7 +44,6 @@ create table if not exists public.stripe_events (
 alter table public.stripe_events enable row level security;
 -- service-role only; no client policies.
 
-
 -- ======== supabase/migrations/20260702120002_ai_gateway.sql ========
 -- FableForge AI gateway: generated apps get server-side AI with NO app-owner API keys.
 -- Each project gets a random gateway key (issued at backend deploy, pushed to the app's Function
@@ -55,7 +52,6 @@ alter table public.stripe_events enable row level security;
 -- OUR key, charged through OUR credits.
 alter table public.projects add column if not exists ai_gateway_key text unique;
 create index if not exists projects_ai_gateway_key_idx on public.projects (ai_gateway_key) where ai_gateway_key is not null;
-
 
 -- ======== supabase/migrations/20260707120000_usage_client_insert.sql ========
 -- Direct-mode usage recording: in DIRECT mode the BROWSER makes the model calls, so the client is
@@ -66,7 +62,6 @@ create index if not exists projects_ai_gateway_key_idx on public.projects (ai_ga
 drop policy if exists "usage insert own" on public.usage_events;
 create policy "usage insert own" on public.usage_events
   for insert with check (user_id = auth.uid());
-
 
 -- ======== supabase/migrations/20260707140000_preview_engine.sql ========
 -- Business Website Preview Engine: the receiving side of the future scraper → builder pipeline.
@@ -118,7 +113,6 @@ create policy "preview sites update own" on public.preview_sites for update usin
 drop policy if exists "preview sites delete own" on public.preview_sites;
 create policy "preview sites delete own" on public.preview_sites for delete using (user_id = auth.uid());
 
-
 -- ======== supabase/migrations/20260707150000_preview_intelligence.sql ========
 -- Preview Engine intelligence layer: persist the marketing strategy, owner-simulation critique,
 -- and audit report alongside each preview site — plus publish_requests, the purchase-intent
@@ -157,7 +151,6 @@ create policy "publish requests owner delete" on public.publish_requests
     select 1 from public.preview_sites ps where ps.id = preview_site_id and ps.user_id = auth.uid()
   ));
 
-
 -- ======== supabase/migrations/20260707160000_preview_events.sql ========
 -- Preview engagement tracking — the validation instrument. Logged from the PUBLIC preview pages
 -- (owners aren't logged in → anon insert), read only by the agency. This must exist BEFORE the
@@ -183,7 +176,6 @@ create policy "preview events owner read" on public.preview_events
   for select using (exists (
     select 1 from public.preview_sites ps where ps.id = preview_site_id and ps.user_id = auth.uid()
   ));
-
 
 -- ======== supabase/migrations/20260708100000_pipeline_spine.sql ========
 -- PIPELINE SPINE — turns the Preview Engine from an admin tool into a real funnel:
@@ -222,7 +214,6 @@ create policy "publish requests owner update" on public.publish_requests
     select 1 from public.preview_sites ps where ps.id = preview_site_id and ps.user_id = auth.uid()
   ));
 
-
 -- ======== supabase/migrations/app_0002_chat_threads.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- Adds conversation threads: each chat message can belong to a named thread so users can keep
@@ -243,7 +234,6 @@ alter table public.ai_messages add column if not exists thread_id text;
 -- Speeds up per-thread history lookups.
 create index if not exists ai_messages_project_thread_idx
   on public.ai_messages (project_id, thread_id, created_at);
-
 
 -- ======== supabase/migrations/app_0003_garvis_portfolio.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -351,9 +341,14 @@ create policy "agent_runs owner all" on public.agent_runs
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- ---------- realtime (stream portfolio + agent activity to the Garvis dashboard) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.apps;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.agent_runs;
-
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0004_garvis_runtime.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -409,7 +404,6 @@ end $$;
 -- Owner-scoped + auth.uid() guard inside makes this safe for authenticated callers.
 revoke execute on function public.claim_next_agent_run() from anon;
 grant execute on function public.claim_next_agent_run() to authenticated;
-
 
 -- ======== supabase/migrations/app_0005_garvis_knowledge.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -476,8 +470,10 @@ create policy "garvis_knowledge admin read" on public.garvis_knowledge
   for select using (public.is_admin());
 
 -- ---------- realtime (stream proposed/approved knowledge to the Garvis dashboard) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_knowledge;
-
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0006_garvis_objective.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -590,10 +586,18 @@ drop policy if exists "garvis_capabilities admin read" on public.garvis_capabili
 create policy "garvis_capabilities admin read" on public.garvis_capabilities for select using (public.is_admin());
 
 -- ---------- realtime ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_goals;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_constraints;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_capabilities;
-
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0007_garvis_app_profiles.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -654,7 +658,6 @@ do $$ begin
   alter publication supabase_realtime add table public.garvis_app_profiles;
 exception when duplicate_object then null; end $$;
 
-
 -- ======== supabase/migrations/app_0008_garvis_liveness.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- Garvis SENSES layer — app_liveness: the first automatic OUTCOME signal Garvis gets.
@@ -700,7 +703,6 @@ do $$ begin
   alter publication supabase_realtime add table public.app_liveness;
 exception when duplicate_object then null; end $$;
 
-
 -- ======== supabase/migrations/app_0009_garvis_strategic.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- Garvis STRATEGIC layer — the second triage lens: the founder's JUDGMENT of what matters.
@@ -721,7 +723,6 @@ exception when duplicate_object then null; end $$;
 
 alter table public.apps add column if not exists strategic_importance strategic_importance;
 alter table public.apps add column if not exists strategic_role text;
-
 
 -- ======== supabase/migrations/app_0010_garvis_marketing.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -807,7 +808,6 @@ create policy "marketing_assets admin read" on public.marketing_assets for selec
 do $$ begin alter publication supabase_realtime add table public.marketing_campaigns; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table public.marketing_assets; exception when duplicate_object then null; end $$;
 
-
 -- ======== supabase/migrations/app_0011_garvis_missions.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- Garvis MISSION ORCHESTRATOR — the Jarvis front door + the worker dispatch model.
@@ -875,7 +875,6 @@ create policy "garvis_tasks admin read" on public.garvis_tasks for select using 
 do $$ begin alter publication supabase_realtime add table public.garvis_missions; exception when duplicate_object then null; end $$;
 do $$ begin alter publication supabase_realtime add table public.garvis_tasks; exception when duplicate_object then null; end $$;
 
-
 -- ======== supabase/migrations/app_0012_garvis_opportunities.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- Garvis OPPORTUNITY DETECTION — the proactive layer: Garvis reasons over the portfolio as a SYSTEM
@@ -920,7 +919,6 @@ drop policy if exists "garvis_opportunities admin read" on public.garvis_opportu
 create policy "garvis_opportunities admin read" on public.garvis_opportunities for select using (public.is_admin());
 
 do $$ begin alter publication supabase_realtime add table public.garvis_opportunities; exception when duplicate_object then null; end $$;
-
 
 -- ======== supabase/migrations/app_0013_knowledge_universe.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -1026,7 +1024,6 @@ begin
   end loop;
 end $$;
 
-
 -- ======== supabase/migrations/app_0014_connections.sql ========
 -- app_0014_connections.sql
 -- Server-side store for a user's external provider connections (Supabase / GitHub / Netlify / …).
@@ -1072,7 +1069,6 @@ create trigger trg_touch_provider_connections before update on public.provider_c
 -- Each app maps to a provisioned Supabase project (C2) — remember its ref on the FableForge project.
 alter table public.projects add column if not exists supabase_project_ref text;
 
-
 -- ======== supabase/migrations/app_0015_oauth_states.sql ========
 -- app_0015_oauth_states.sql
 -- Short-lived store for in-flight OAuth authorization requests (PKCE verifier + CSRF state), so the
@@ -1093,14 +1089,12 @@ create index if not exists oauth_states_user_idx on public.oauth_states (user_id
 alter table public.oauth_states enable row level security;
 -- No client policies: only the service role (oauth edge fn) reads/writes. Browser has zero access.
 
-
 -- ======== supabase/migrations/app_0016_managed_cloud.sql ========
 -- app_0016_managed_cloud.sql
 -- Tiered provisioning: an app's database is either in the USER's own Supabase org (they connected via
 -- OAuth) or managed under FABLEFORGE's org ("FableForge Cloud" — no user Supabase account). This flag
 -- records which, so the deploy/console functions pick the right Management token (user OAuth vs platform).
 alter table public.projects add column if not exists supabase_managed boolean not null default false;
-
 
 -- ======== supabase/migrations/app_0017_credits.sql ========
 -- app_0017_credits.sql
@@ -1192,7 +1186,6 @@ create policy "update own profile" on public.profiles for update using (id = aut
     and credits_period_start = (select credits_period_start from public.profiles where id = auth.uid())
   );
 
-
 -- ======== supabase/migrations/app_0018_knowledge_universe_sync.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- KNOWLEDGE UNIVERSE SYNC — the columns the client sync layer (src/lib/garvis/universe.ts) needs to
@@ -1216,7 +1209,6 @@ alter table public.knowledge_artifacts add column if not exists slug text;
 -- Upsert key for artifacts (nulls stay distinct, so pre-existing rows without a slug are untouched).
 create unique index if not exists uq_ku_artifacts_cluster_slug
   on public.knowledge_artifacts(cluster_id, slug);
-
 
 -- ======== supabase/migrations/app_0019_intelligence_core.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -1353,8 +1345,10 @@ create policy "mind_identity owner all" on public.mind_identity
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- ---------- realtime (stream the growing record to the Mind page) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.mind_events;
-
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0020_project_assets.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -1394,7 +1388,6 @@ create policy "project_assets owner all" on public.project_assets
 drop policy if exists "project_assets admin read" on public.project_assets;
 create policy "project_assets admin read" on public.project_assets
   for select using (public.is_admin());
-
 
 -- ======== supabase/migrations/app_0021_brain_vector.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -1574,7 +1567,6 @@ drop policy if exists "documents bucket owner delete" on storage.objects;
 create policy "documents bucket owner delete" on storage.objects
   for delete using (bucket_id = 'documents' and (storage.foldername(name))[1] = auth.uid()::text);
 
-
 -- ======== supabase/migrations/app_0022_execution.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- EXECUTION SPINE v0 — the single place consequences happen (see docs/garvis-system-architecture.md §4/§6).
@@ -1672,7 +1664,6 @@ create policy "execution_runs owner read" on public.execution_runs
 drop policy if exists "execution_runs admin read" on public.execution_runs;
 create policy "execution_runs admin read" on public.execution_runs
   for select using (public.is_admin());
-
 
 -- ======== supabase/migrations/app_0023_outreach.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -1875,7 +1866,6 @@ drop policy if exists "suppression owner all" on public.suppression;
 create policy "suppression owner all" on public.suppression
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
-
 -- ======== supabase/migrations/app_0024_work_web.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- WORK WEB v0 — missions stop being checklists and become living work webs.
@@ -1925,7 +1915,6 @@ alter table public.outreach_campaigns add column if not exists world_id uuid
   references public.knowledge_worlds(id) on delete set null;
 create index if not exists idx_ocampaigns_world on public.outreach_campaigns(world_id);
 
-
 -- ======== supabase/migrations/app_0025_contacts_dedupe.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- CONTACTS DEDUPE — one contact per (owner, email). Closes the duplicate-contact → duplicate-send
@@ -1943,7 +1932,6 @@ create index if not exists idx_ocampaigns_world on public.outreach_campaigns(wor
 
 create unique index if not exists uq_contacts_owner_email
   on public.contacts(owner_id, email);
-
 
 -- ======== supabase/migrations/app_0026_cluster_studio.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -2073,7 +2061,6 @@ drop policy if exists "studio_messages owner all" on public.studio_messages;
 create policy "studio_messages owner all" on public.studio_messages
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
-
 -- ======== supabase/migrations/app_0027_world_intelligence.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
 -- WORLD INTELLIGENCE v0 — the synthesized understanding of each world (Sprint M, round 6).
@@ -2123,7 +2110,6 @@ create policy "world_intelligence owner all" on public.world_intelligence
 drop policy if exists "world_intelligence admin read" on public.world_intelligence;
 create policy "world_intelligence admin read" on public.world_intelligence
   for select using (public.is_admin());
-
 
 -- ======== supabase/migrations/app_0028_genesis.sql ========
 -- app_0028_genesis.sql — PROJECT GENESIS: worlds born from intent, not hand-coded templates.
@@ -2186,7 +2172,6 @@ create trigger trg_web_templates_touch before update on public.web_templates
 alter table public.knowledge_worlds add column if not exists dna jsonb;
 alter table public.knowledge_worlds add column if not exists business_context jsonb;
 
-
 -- ======== supabase/migrations/app_0029_photo_intake.sql ========
 -- app_0029_photo_intake.sql — G2: photos enter the living brain as understanding, not blobs.
 --
@@ -2205,7 +2190,6 @@ create index if not exists idx_documents_cluster on public.documents(cluster_id)
 alter table public.cluster_files add column if not exists caption text;
 alter table public.cluster_files add column if not exists label text;
 
-
 -- ======== supabase/migrations/app_0030_website_bridge.sql ========
 -- app_0030_website_bridge.sql — G3: a world builds its own website.
 --
@@ -2223,7 +2207,6 @@ alter table public.project_assets drop constraint if exists project_assets_sourc
 alter table public.project_assets add constraint project_assets_source_check
   check (source in ('upload', 'harvest', 'world'));
 
-
 -- ======== supabase/migrations/app_0031_ledger_policy.sql ========
 -- app_0031_ledger_policy.sql — the honest ledger must actually land.
 -- The audit found the client-side "decision recorded" execution_runs insert (execution.ts,
@@ -2235,7 +2218,6 @@ alter table public.project_assets add constraint project_assets_source_check
 drop policy if exists "execution_runs owner decision insert" on public.execution_runs;
 create policy "execution_runs owner decision insert" on public.execution_runs
   for insert with check (owner_id = auth.uid() and connector = 'garvis' and status = 'skipped');
-
 
 -- ======== supabase/migrations/app_0032_prospects.sql ========
 -- app_0032_prospects.sql — G4 Market Intelligence: prospects a world FOUND, with evidence-labeled
@@ -2263,7 +2245,6 @@ create policy "prospects owner all" on public.prospects
 create unique index if not exists uq_prospects_world_url on public.prospects(world_id, url) where url is not null;
 create index if not exists idx_prospects_world on public.prospects(world_id, status);
 
-
 -- ======== supabase/migrations/app_0033_prospect_audience.sql ========
 -- app_0033_prospect_audience.sql — close the prospect → audience dead-end the bones audit found:
 -- a QUALIFIED prospect had no path into contacts ('contacted' existed in the schema but nothing
@@ -2277,7 +2258,6 @@ alter table public.prospects add constraint prospects_status_check
 
 alter table public.prospects add column if not exists contact_id uuid references public.contacts(id) on delete set null;
 
-
 -- ======== supabase/migrations/app_0034_prospect_contact_scan.sql ========
 -- app_0034_prospect_contact_scan.sql — prospects can carry the contact emails their OWN site
 -- publicly lists (found by fetch-url mode 'contact'; Garvis never guesses an address). scanned_at
@@ -2286,7 +2266,6 @@ alter table public.prospects add column if not exists contact_id uuid references
 
 alter table public.prospects add column if not exists contact_emails jsonb not null default '[]'::jsonb;
 alter table public.prospects add column if not exists scanned_at timestamptz;
-
 
 -- ======== supabase/migrations/app_0035_mail_log.sql ========
 -- app_0035_mail_log.sql — direct mail becomes a real, tracked action. A postcard design is a
@@ -2317,7 +2296,6 @@ drop policy if exists "mail_batches owner all" on public.mail_batches;
 create policy "mail_batches owner all" on public.mail_batches
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_mail_batches_world on public.mail_batches(world_id, created_at desc);
-
 
 -- ======== supabase/migrations/app_0036_site_events.sql ========
 -- app_0036_site_events.sql — G5 INSTRUMENTATION: the sensory organ. Generated websites finally
@@ -2390,7 +2368,6 @@ create policy "leads owner all" on public.leads
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_leads_world on public.leads(world_id, status, created_at desc);
 
-
 -- ======== supabase/migrations/app_0037_ad_spends.sql ========
 -- app_0037_ad_spends.sql — real spend, logged. Until platform APIs are connected (Meta/Google
 -- OAuth apps the owner must register — see docs/garvis-advertising-plan.md), spend is the
@@ -2413,7 +2390,6 @@ drop policy if exists "ad_spends owner all" on public.ad_spends;
 create policy "ad_spends owner all" on public.ad_spends
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_ad_spends_world on public.ad_spends(world_id, channel, created_at desc);
-
 
 -- ======== supabase/migrations/app_0038_connections.sql ========
 -- app_0038_connections.sql — the ad-platform CONNECTIONS layer. Secrets live server-side only
@@ -2459,7 +2435,6 @@ create policy "ad_metrics owner read" on public.ad_metrics
 -- Writes arrive only via the ads-sync edge function (service role).
 create index if not exists idx_ad_metrics_world on public.ad_metrics(world_id, provider, date desc);
 
-
 -- ======== supabase/migrations/app_0039_daily_driver.sql ========
 -- app_0039_daily_driver.sql — Tier 1 "daily driver" surface: user reminders (the one operator
 -- affordance with no home), a CRM stage + notes on contacts. All owner-scoped RLS. Additive +
@@ -2499,7 +2474,6 @@ create policy "contact_notes owner all" on public.contact_notes
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_contact_notes_contact on public.contact_notes(contact_id, created_at desc);
 
-
 -- ======== supabase/migrations/app_0040_deploy_bundles.sql ========
 -- app_0040_deploy_bundles.sql — makes the approval spine a REAL deploy path. The site build runs
 -- client-side (WebContainer), so the built files only exist in the browser at build time. To route
@@ -2522,7 +2496,6 @@ drop policy if exists "deploy_bundles owner all" on public.deploy_bundles;
 create policy "deploy_bundles owner all" on public.deploy_bundles
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_deploy_bundles_project on public.deploy_bundles(project_id, created_at desc);
-
 
 -- ======== supabase/migrations/app_0041_wave_a_security.sql ========
 -- app_0041_wave_a_security.sql — Wave A: the trust floor. Fixes found by the full-system audit.
@@ -2567,7 +2540,6 @@ grant execute on function public.get_preview_by_slug(text) to anon, authenticate
 -- ── 2) projects: authoritative hosting binding ────────────────────────────────────────────────
 alter table public.projects add column if not exists netlify_site_id text;
 
-
 -- ======== supabase/migrations/app_0042_world_goals.sql ========
 -- app_0042_world_goals.sql — THE GOALS SPINE: Garvis adapts every function toward what each
 -- project is FOR. A goal is the owner's own statement of what a world is trying to achieve —
@@ -2601,7 +2573,6 @@ create policy "world_goals owner all" on public.world_goals
 
 create index if not exists idx_world_goals_world on public.world_goals(world_id, status, created_at desc);
 create index if not exists idx_world_goals_owner on public.world_goals(owner_id, status);
-
 
 -- ======== supabase/migrations/app_0043_heartbeat.sql ========
 -- app_0043_heartbeat.sql — THE HEARTBEAT: Garvis works while you sleep.
@@ -2720,7 +2691,6 @@ revoke all on function public.garvis_disarm_heartbeat() from public;
 revoke all on function public.garvis_disarm_heartbeat() from anon;
 revoke all on function public.garvis_disarm_heartbeat() from authenticated;
 
-
 -- ======== supabase/migrations/app_0044_speed_to_lead.sql ========
 -- app_0044_speed_to_lead.sql — SPEED-TO-LEAD: the instant first touch.
 --
@@ -2747,7 +2717,6 @@ alter table public.outreach_settings add column if not exists first_touch_subjec
 alter table public.outreach_settings add column if not exists first_touch_body text;
 
 alter table public.leads add column if not exists first_touch_at timestamptz;
-
 
 -- ======== supabase/migrations/app_0045_watchdog_heartbeat.sql ========
 -- app_0045_watchdog_heartbeat.sql — the heartbeat grows two organs and fixes one defect.
@@ -2864,7 +2833,6 @@ $$;
 revoke all on function public.garvis_disarm_heartbeat() from public;
 revoke all on function public.garvis_disarm_heartbeat() from anon;
 revoke all on function public.garvis_disarm_heartbeat() from authenticated;
-
 
 -- ======== supabase/migrations/app_0046_full_heartbeat.sql ========
 -- app_0046_full_heartbeat.sql — the complete heartbeat: SEVEN jobs. Recreates
@@ -2994,7 +2962,6 @@ revoke all on function public.garvis_disarm_heartbeat() from public;
 revoke all on function public.garvis_disarm_heartbeat() from anon;
 revoke all on function public.garvis_disarm_heartbeat() from authenticated;
 
-
 -- ======== supabase/migrations/app_0047_money_loop.sql ========
 -- app_0047_money_loop.sql — F1: THE MONEY LOOP. Invoices as first-class records, sent through
 -- the one gated send path, chased overnight by the heartbeat (politely, escalating, always as
@@ -3076,7 +3043,6 @@ revoke all on function public.garvis_disarm_heartbeat() from public;
 revoke all on function public.garvis_disarm_heartbeat() from anon;
 revoke all on function public.garvis_disarm_heartbeat() from authenticated;
 
-
 -- ======== supabase/migrations/app_0048_command_thread.sql ========
 -- app_0048_command_thread.sql — ONE BRAIN, part 1: the front door remembers.
 -- The UX audit's finding: "Refresh and Garvis has amnesia" — the Command transcript lived in
@@ -3096,7 +3062,6 @@ drop policy if exists "command_messages owner all" on public.command_messages;
 create policy "command_messages owner all" on public.command_messages
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_command_messages_owner on public.command_messages(owner_id, created_at desc);
-
 
 -- ======== supabase/migrations/app_0049_exploration_lab.sql ========
 -- app_0049_exploration_lab.sql — THE EXPLORATION LAB (additive, idempotent).
@@ -3128,7 +3093,6 @@ alter table public.knowledge_clusters add column if not exists epistemic text
 comment on column public.knowledge_clusters.epistemic is
   'Exploration Lab honesty layer: how solid this node is. Null = not applicable (most topics).';
 
-
 -- ======== supabase/migrations/app_0050_reply_handled.sql ========
 -- app_0050_reply_handled.sql — replies get a HANDLED state (additive, idempotent).
 --
@@ -3144,7 +3108,6 @@ comment on column public.replies.handled_at is
 
 create index if not exists replies_unhandled_idx on public.replies (owner_id) where handled_at is null;
 
-
 -- ======== supabase/migrations/app_0051_invoice_number_unique.sql ========
 -- app_0051_invoice_number_unique.sql — invoice numbers get REAL uniqueness (additive).
 --
@@ -3156,7 +3119,6 @@ create index if not exists replies_unhandled_idx on public.replies (owner_id) wh
 
 create unique index if not exists invoices_owner_number_key
   on public.invoices (owner_id, number);
-
 
 -- ======== supabase/migrations/app_0052_working_state.sql ========
 -- app_0052_working_state.sql — THE WORKING SET (design review P1): the durable "what I'm holding
@@ -3190,7 +3152,6 @@ do $$ begin
   create policy "working_state owner all" on public.working_state
     for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 exception when duplicate_object then null; end $$;
-
 
 -- ======== supabase/migrations/app_0053_universal_search.sql ========
 -- app_0053_universal_search.sql — UNIVERSAL SEARCH (design review P1): one query over everything
@@ -3297,7 +3258,6 @@ comment on function public.garvis_search(text, int) is
 revoke execute on function public.garvis_search(text, int) from anon;
 grant execute on function public.garvis_search(text, int) to authenticated;
 
-
 -- ======== supabase/migrations/app_0054_record_integrity.sql ========
 -- app_0054_record_integrity.sql — REAL EDGES + LEDGERED GRANTS (design review P2; additive, idempotent).
 --
@@ -3384,7 +3344,6 @@ begin
   return v_balance;
 end;
 $$;
-
 
 -- ======== supabase/migrations/app_0055_search_active_beliefs.sql ========
 -- app_0055_search_active_beliefs.sql — deep scan fix: retired beliefs leaked into ⌘K.
@@ -3482,7 +3441,6 @@ $$;
 revoke execute on function public.garvis_search(text, int) from anon;
 grant execute on function public.garvis_search(text, int) to authenticated;
 
-
 -- ======== supabase/migrations/app_0056_credit_integrity.sql ========
 -- app_0056_credit_integrity.sql — deep scan hardening (additive, idempotent).
 -- (1) Reassert the fully-pinned profile-update policy as the LAST word in the numbered sequence, so
@@ -3523,7 +3481,6 @@ grant execute on function public.grant_credits(uuid, int) to service_role;
 
 comment on function public.grant_credits(uuid, int) is
   'Atomically add credits to a user (Stripe top-up). service_role only; never client-callable.';
-
 
 -- ======== supabase/migrations/app_0057_projects_ref_pin.sql ========
 -- app_0057_projects_ref_pin.sql — deep scan VERIFICATION fix: the cross-tenant P0 was only relocated.
@@ -3578,7 +3535,6 @@ create trigger guard_project_privileged_cols
 comment on function public.guard_project_privileged_cols() is
   'Pins projects.supabase_project_ref / supabase_managed / ai_gateway_key to server-role writes only — closes the relocated cross-tenant ref vector (deep scan).';
 
-
 -- ======== supabase/migrations/app_0058_job_retry.sql ========
 -- app_0058_job_retry.sql — deep scan (deferred item, now done): the job-worker marked a job 'failed'
 -- on ANY thrown error, so a transient AI/network 5xx killed the whole build. This adds a bounded
@@ -3586,7 +3542,6 @@ comment on function public.guard_project_privileged_cols() is
 -- lease_until) instead of failing, and resets the counter on real progress. Additive + idempotent.
 
 alter table public.jobs add column if not exists retry_count int not null default 0;
-
 
 -- ======== supabase/migrations/app_0059_standing_orders.sql ========
 -- app_0059_standing_orders.sql — THE CLOCK: standing orders (watchers & schedules).
@@ -3692,7 +3647,6 @@ revoke all on function public.garvis_disarm_heartbeat() from public;
 revoke all on function public.garvis_disarm_heartbeat() from anon;
 revoke all on function public.garvis_disarm_heartbeat() from authenticated;
 
-
 -- ======== supabase/migrations/app_0060_liveness_verdicts.sql ========
 -- app_0060_liveness_verdicts.sql — Tier 1 trust plumbing: the clock's pulse + real draft verdicts.
 --
@@ -3742,7 +3696,6 @@ create policy "draft_verdicts owner all" on public.draft_verdicts
     ))
   );
 create index if not exists idx_draft_verdicts_world on public.draft_verdicts(owner_id, world_id, kind, created_at desc);
-
 
 -- ======== supabase/migrations/app_0061_forward_in_mailbox.sql ========
 -- app_0061_forward_in_mailbox.sql — TIER 2 ①: the mailbox connection (v0: forward-in).
@@ -3805,7 +3758,6 @@ create policy "inbound_mail owner all" on public.inbound_mail
   );
 create index if not exists idx_inbound_mail_lane on public.inbound_mail(owner_id, status, received_at desc);
 
-
 -- ======== supabase/migrations/app_0062_reminder_firing.sql ========
 -- app_0062_reminder_firing.sql — TIER 2 ②: reminders that FIRE.
 -- Reminders previously woke only when the app was next opened. The standing-worker's 15-minute
@@ -3814,7 +3766,6 @@ create index if not exists idx_inbound_mail_lane on public.inbound_mail(owner_id
 alter table public.reminders add column if not exists notified_at timestamptz;
 create index if not exists idx_reminders_due_fire
   on public.reminders(due_at) where done = false and notified_at is null;
-
 
 -- ======== supabase/migrations/app_0063_farm.sql ========
 -- app_0063_farm.sql — THE FARM: geographic prospecting becomes real. The readiness audit found the
@@ -3897,7 +3848,6 @@ create unique index if not exists uq_do_not_mail_household on public.do_not_mail
 alter table public.mail_batches add column if not exists territory_id uuid references public.farm_territories(id) on delete set null;
 alter table public.mail_batches add column if not exists batch_token text;
 
-
 -- ======== supabase/migrations/app_0064_send_batch.sql ========
 -- app_0064_send_batch.sql — BULK SEND-TO-SEGMENT. The audit's "impractical newsletter" fix:
 -- one approval approves a BATCH (a snapshotted segment of contacts); the standing worker drains it
@@ -3933,7 +3883,6 @@ create policy "outreach_batches owner all" on public.outreach_batches
   );
 create index if not exists idx_outreach_batches_active on public.outreach_batches(status, created_at) where status in ('queued', 'draining');
 create index if not exists idx_outreach_batches_owner on public.outreach_batches(owner_id, created_at desc);
-
 
 -- ======== supabase/migrations/app_0065_esign.sql ========
 -- app_0065_esign.sql — AUTO-PAPERWORK + E-SIGNATURE. Rebuilt on Garvis's spines from the lakegen
@@ -3992,7 +3941,6 @@ create policy "esign_envelopes owner all" on public.esign_envelopes
 create index if not exists idx_esign_envelopes_owner on public.esign_envelopes(owner_id, created_at desc);
 create index if not exists idx_esign_envelopes_envelope on public.esign_envelopes(envelope_id) where envelope_id is not null;
 
-
 -- ======== supabase/migrations/app_0066_mls.sql ========
 -- app_0066_mls.sql — MLS DATA RAIL. The audit's "every number-shaped artifact says 'fill from your
 -- MLS'" gap: a RESO Web API feed (credentials sealed server-side in provider_connections) syncs
@@ -4032,7 +3980,6 @@ create policy "mls_listings owner all" on public.mls_listings
 create unique index if not exists uq_mls_listings_key on public.mls_listings(owner_id, listing_key);
 create index if not exists idx_mls_listings_status on public.mls_listings(owner_id, status);
 create index if not exists idx_mls_listings_close on public.mls_listings(owner_id, close_date desc) where close_date is not null;
-
 
 -- ======== supabase/migrations/app_0067_timelines.sql ========
 -- app_0067_timelines.sql — TRANSACTION TIMELINES. The lakegen harvest's most authentically
@@ -4078,7 +4025,6 @@ create policy "timeline_steps owner all" on public.timeline_steps
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_timeline_steps_timeline on public.timeline_steps(timeline_id, position);
 
-
 -- ======== supabase/migrations/app_0068_mail_recipients_territory_pin.sql ========
 -- app_0068_mail_recipients_territory_pin.sql — close the double-check finding: mail_recipients'
 -- with-check pinned world ownership but NOT territory ownership. Because FKs bypass RLS, a user
@@ -4096,7 +4042,6 @@ create policy "mail_recipients owner all" on public.mail_recipients
     and exists (select 1 from public.farm_territories t where t.id = territory_id and t.owner_id = auth.uid())
   );
 
-
 -- ======== supabase/migrations/app_0069_approval_payload_hash.sql ========
 -- app_0069_approval_payload_hash.sql — tamper-evidence binding for approvals. An approval records a
 -- human decision about a SPECIFIC payload; this stores a deterministic SHA-256 of that payload at
@@ -4104,7 +4049,6 @@ create policy "mail_recipients owner all" on public.mail_recipients
 -- (older + worker-minted rows have no hash and skip the check). Additive + idempotent.
 
 alter table public.approvals add column if not exists payload_hash text;
-
 
 -- ======== supabase/migrations/app_0070_social_posts.sql ========
 -- app_0070_social_posts.sql — SOCIAL AUTO-POSTING. Her real accounts, connected once through a
@@ -4138,7 +4082,6 @@ create policy "social_posts owner all" on public.social_posts
     and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
   );
 create index if not exists idx_social_posts_owner on public.social_posts(owner_id, created_at desc);
-
 
 -- ======== supabase/migrations/app_0071_reel_jobs.sql ========
 -- app_0071_reel_jobs.sql — THE REEL FACTORY data model. A content_growth studio turns a niche idea
@@ -4206,7 +4149,6 @@ create policy "reel_clips owner all" on public.reel_clips
   );
 create unique index if not exists idx_reel_clips_scene on public.reel_clips(reel_id, scene_index);
 create index if not exists idx_reel_clips_status on public.reel_clips(status) where status in ('queued', 'running');
-
 
 -- ======== supabase/migrations/app_0072_client_discovery.sql ========
 -- app_0072_client_discovery.sql — THE HANDS-OFF PROSPECTING LAYER for Win Clients. Replaces the
@@ -4295,7 +4237,6 @@ create unique index if not exists uq_discovered_owner_site
 create index if not exists idx_discovered_build_queue
   on public.discovered_businesses(owner_id, status, has_website, created_at);
 
-
 -- ======== supabase/migrations/app_0073_cluster_working_state.sql ========
 -- app_0073_cluster_working_state.sql — a small per-cluster scratch store so a studio/canvas REMEMBERS
 -- what you were working on across reloads, instead of resetting to a blank "set it up" prompt every
@@ -4306,7 +4247,6 @@ create index if not exists idx_discovered_build_queue
 -- HONESTY: this holds WORKING state only (what you're in the middle of). Finished, made artifacts
 -- stay in knowledge_artifacts — this column is never a source of truth for "work that happened".
 alter table public.knowledge_clusters add column if not exists working_state jsonb;
-
 
 -- ======== supabase/migrations/app_0074_prospect_audits.sql ========
 -- app_0074_prospect_audits.sql — PHASE 0: stop discarding the honest audit.
@@ -4375,7 +4315,6 @@ create index if not exists idx_prospect_audits_owner_verdict on public.prospect_
 create index if not exists idx_prospect_audits_owner_vertical on public.prospect_audits(owner_id, vertical);
 create index if not exists idx_prospect_audits_owner_recent on public.prospect_audits(owner_id, last_audited_at desc);
 
-
 -- ======== supabase/migrations/app_0075_prospect_audit_tech.sql ========
 -- app_0075_prospect_audit_tech.sql — keep the tech fingerprint alongside the honest audit.
 --
@@ -4392,7 +4331,6 @@ create index if not exists idx_prospect_audits_owner_recent on public.prospect_a
 
 alter table public.prospect_audits
   add column if not exists tech jsonb not null default '{}'::jsonb;
-
 
 -- ======== supabase/migrations/app_0076_automation_triggers.sql ========
 -- app_0076_automation_triggers.sql — THE TRIGGER ENGINE (tentpole #1): per-customer event/date/interval
@@ -4495,7 +4433,6 @@ create policy "trigger_fires owner all" on public.trigger_fires
 create unique index if not exists uq_trigger_fires_once on public.trigger_fires(trigger_id, customer_id, fired_for);
 create index if not exists idx_trigger_fires_trigger on public.trigger_fires(trigger_id);
 
-
 -- ======== supabase/migrations/app_0077_client_billing.sql ========
 -- app_0077_client_billing.sql — SELL THE TIERS. The agency's own client-billing ledger: who bought
 -- which offer (Website, or Website + Automation), what they pay, and whether they're live.
@@ -4545,7 +4482,6 @@ create policy "client_subscriptions owner all" on public.client_subscriptions
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create index if not exists idx_client_subs_owner_status on public.client_subscriptions(owner_id, status, created_at desc);
 
-
 -- ======== supabase/migrations/app_0078_trigger_dedupe_indexes.sql ========
 -- app_0078_trigger_dedupe_indexes.sql — QA hardening for the trigger engine.
 --
@@ -4566,7 +4502,6 @@ create index if not exists idx_automation_triggers_owner_status
 create index if not exists idx_customers_owner_list
   on public.customers(owner_id, list_id);
 
-
 -- ======== supabase/migrations/app_0079_standing_orders_client_hunt.sql ========
 -- app_0079_standing_orders_client_hunt.sql — let the daily client hunt EXIST.
 --
@@ -4582,7 +4517,6 @@ alter table public.standing_orders
   add constraint standing_orders_kind_check
   check (kind in ('watch_url', 'cadence_digest', 'client_hunt'));
 
-
 -- ======== supabase/migrations/app_0080_standing_orders_idea_stream.sql ========
 -- app_0080_standing_orders_idea_stream.sql — allow the idea_stream standing-order kind.
 --
@@ -4594,7 +4528,6 @@ alter table public.standing_orders drop constraint if exists standing_orders_kin
 alter table public.standing_orders
   add constraint standing_orders_kind_check
   check (kind in ('watch_url', 'cadence_digest', 'client_hunt', 'idea_stream'));
-
 
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
