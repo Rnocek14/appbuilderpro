@@ -17,11 +17,16 @@ In the Supabase SQL editor, run each file's full contents:
 
 1. `schema.sql` — the app-builder base.
 2. `schema_v2_autopilot.sql` — jobs/autopilot tables.
-3. `supabase/_apply_garvis_all.sql` — **every Garvis migration (app_0003 → app_0070), concatenated
-   in order.** All migrations are additive + idempotent; re-running is safe. (Regenerate this file
+3. `supabase/_apply_garvis_all.sql` — **EVERY migration (the timestamped 2026\* set + app_0002 →
+   app_0079), concatenated in `db push` order.** This includes the preview engine
+   (business_profiles/preview_sites), the daily-hunt lead pool (app_0072), prospect audits
+   (app_0074/0075), automations (app_0076/0078), client billing (app_0077), and the hunt unlock
+   (app_0079). All migrations are additive + idempotent; re-running is safe. (Regenerate this file
    after adding a migration — the command is in its header.)
 
-**Verify:** `select count(*) from public.knowledge_worlds;` runs without error.
+**Verify:** `select count(*) from public.knowledge_worlds; select count(*) from public.preview_sites;
+select count(*) from public.discovered_businesses;` all run without error — or just open
+**/garvis/health**, whose Database card probes the loop's key tables.
 
 ## 2. Edge functions — two commands
 
@@ -42,6 +47,8 @@ Set in Supabase → Edge Functions → Secrets. Required for core:
 |---|---|
 | `AI_PROVIDER` + `AI_MODEL` + the matching `*_API_KEY` | every generative feature |
 | `WORKER_SECRET` and `CRON_SECRET` (use the SAME value) | the heartbeat's shared gate |
+| `GOOGLE_PLACES_API_KEY` | business discovery — Win Clients Find/sweep AND the daily hunt |
+| `APP_ORIGIN` | the exact https origin the frontend is hosted on — pitch emails embed `$APP_ORIGIN/preview-site/<slug>`; without it the hunt builds demos but queues no pitches |
 | `EMBEDDINGS_API_KEY` (or reuse `OPENAI_API_KEY`) | semantic retrieval (optional — lexical works without) |
 
 Per-feature (add when you use the feature; every one degrades with a named message in the UI):

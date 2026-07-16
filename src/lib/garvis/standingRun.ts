@@ -72,7 +72,9 @@ export async function createClientHuntOrder(config: HuntConfig): Promise<Standin
     owner_id: uid, world_id: null, kind: CLIENT_HUNT_KIND, label,
     cadence: 'daily', config: { ...config, cursor: 0 },
     status: 'active', anchor_at: nowIso,
-    next_run_at: nextRunAfter('daily', nowIso, nowIso),
+    // First run NOW (the next heartbeat tick, ≤15 min) — turning on the hunt produces same-day
+    // evidence it works instead of a silent 24-hour wait. The worker steps the daily grid after.
+    next_run_at: nowIso,
   }).select('id, world_id, kind, label, cadence, config, status, anchor_at, next_run_at, last_run_at, last_result').single();
   if (error || !data) throw new Error(error?.message ?? 'Could not start the daily hunt.');
   return toOrder(data as OrderRow);

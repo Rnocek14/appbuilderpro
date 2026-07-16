@@ -84,6 +84,25 @@ export default function Health() {
               </div>
             ))}
 
+            {/* Migration drift: the app being up says nothing about the DB being current — a
+                missing table here names the exact migration to apply. */}
+            <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-forge-dim">Database (win-clients loop tables)</h3>
+              <ul className="mt-2 space-y-1">
+                {report.tables.map((t) => (
+                  <li key={t.name} className="flex items-center gap-2 text-sm">
+                    {t.present === true ? <Check size={13} className="text-forge-ok" />
+                      : t.present === false ? <X size={13} className="text-forge-warn" />
+                      : <HelpCircle size={13} className="text-forge-dim" />}
+                    <span className="flex-1 font-mono text-xs text-forge-ink/80">{t.name}</span>
+                    <span className={cn('text-[10px]', t.present === false ? 'text-forge-warn' : 'text-forge-dim')}>
+                      {t.present === false ? `missing — apply ${t.feature}` : t.feature}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
             <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-forge-dim">Providers</h3>
               <ul className="mt-2 space-y-1.5">

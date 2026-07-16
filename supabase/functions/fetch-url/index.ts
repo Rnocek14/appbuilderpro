@@ -12,7 +12,7 @@
 // Deploy: npx supabase functions deploy fetch-url
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { safeFetch, urlAllowed } from '../_shared/safeFetch.ts';
+import { safeFetch, urlAllowed, urlStaticOk } from '../_shared/safeFetch.ts';
 import { fingerprintTech } from '../_shared/techFingerprint.ts';
 
 const cors = {
@@ -76,7 +76,7 @@ function extractImages(html: string, base: string): { url: string; alt: string }
     if (!candidate || candidate.startsWith('data:')) return;
     try {
       const abs = new URL(candidate, base);
-      if (!isAllowed(abs) || IMG_SKIP.test(abs.href)) return;
+      if (!urlStaticOk(abs) || IMG_SKIP.test(abs.href)) return;
       if (!found.has(abs.href)) found.set(abs.href, alt);
     } catch { /* unparseable src — skip */ }
   };
@@ -139,7 +139,7 @@ function findContactLink(html: string, base: string): string | null {
     if (!/contact|get in touch|reach (us|out)/i.test(href) && !/contact|get in touch/i.test(label)) continue;
     try {
       const abs = new URL(href, base);
-      if (abs.hostname === baseHost && isAllowed(abs)) return abs.href;
+      if (abs.hostname === baseHost && urlStaticOk(abs)) return abs.href;
     } catch { /* unparseable href — skip */ }
   }
   return null;

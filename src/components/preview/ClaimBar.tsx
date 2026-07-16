@@ -7,8 +7,13 @@
 import { useState } from 'react';
 import { X, ArrowRight, Check, FileText } from 'lucide-react';
 import { submitPublishRequest, recordPreviewEvent } from '../../lib/preview/engine';
+import { tierById } from '../../lib/garvis/billing/clientTiers';
 
-export function ClaimBar({ previewSiteId, businessName, slug, price = '$299' }: {
+// The public ask matches the tier the operator actually sells (clientTiers is the single source of
+// truth) — a hardcoded number here once publicly undercut the real offer by 5x.
+const WEBSITE_PRICE = (tierById('website')?.priceHint ?? 'from $1,500').replace(/\s+one-time$/, '');
+
+export function ClaimBar({ previewSiteId, businessName, slug, price = WEBSITE_PRICE }: {
   previewSiteId: string; businessName: string; slug: string; price?: string;
 }) {
   const [open, setOpen] = useState(false);

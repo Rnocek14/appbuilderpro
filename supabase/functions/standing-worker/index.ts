@@ -467,7 +467,7 @@ const HUNT_TIME_BUDGET_MS = 90_000;
 const DISCOVER_BUDGET_MS = 55_000;   // cap discovery so building always gets a share of the window
 const PLACES_PAGES = 2;   // pages per query (≤20 results each) — bounds Places cost per search
 
-interface HuntEnv { supabaseUrl: string; workerSecret: string; appOrigin: string; placesKey: string; nowYear: number }
+interface HuntEnv { supabaseUrl: string; workerSecret: string; serviceKey: string; appOrigin: string; placesKey: string; nowYear: number }
 interface QueryRowDB { id: string; query_text: string; keyword: string; last_run_at: string | null; exhausted: boolean; total_inserted: number; run_count: number; consecutive_zero_runs: number }
 interface LeadRow { id: string; place_id: string | null; company_name: string; keyword: string; website: string | null; phone: string | null; city: string | null; state: string | null }
 
@@ -482,6 +482,7 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
   const env: HuntEnv = {
     supabaseUrl: Deno.env.get('SUPABASE_URL')!,
     workerSecret: Deno.env.get('WORKER_SECRET') ?? '',
+    serviceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     appOrigin: Deno.env.get('APP_ORIGIN') ?? '',
     placesKey,
     nowYear: new Date(nowIso).getUTCFullYear(),
@@ -603,12 +604,19 @@ async function insertLead(admin: any, ownerId: string, biz: DiscoveredBiz, query
 }
 
 /** Read one page through the SAME hardened scrape path the app uses (fetch-url), authenticated with
- *  the worker secret. Returns the parsed JSON, or null on any failure. */
+ *  the worker secret. The Bearer header exists ONLY to pass the platform's verify-jwt gateway
+ *  (fetch-url deploys JWT-verified) — fetch-url's own worker check still runs on x-worker-secret.
+ *  Returns the parsed JSON, or null on any failure. */
 async function scrapePage(url: string, mode: 'text' | 'images' | 'contact', env: HuntEnv): Promise<Record<string, unknown> | null> {
   try {
     const r = await fetch(`${env.supabaseUrl}/functions/v1/fetch-url`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-worker-secret': env.workerSecret },
+      headers: {
+        'content-type': 'application/json',
+        'x-worker-secret': env.workerSecret,
+        authorization: `Bearer ${env.serviceKey}`,
+        apikey: env.serviceKey,
+      },
       body: JSON.stringify({ url, mode }),
     });
     if (!r.ok) return null;
@@ -686,6 +694,10 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   // No public email → the demo is a warm asset (plus a real phone lead from Places), but there is
   // nothing to email. Honest: a built demo, not a queued pitch.
   if (!email) return 'built';
+
+  // Never queue a pitch whose link can't be opened: with APP_ORIGIN unset the URL is a relative
+  // path that would email as a broken link. The demo stays built; the pitch waits for real config.
+  if (!/^https?:\/\//.test(previewUrl)) return 'built';
 
   const ok = await queueHuntPitch(admin, order.owner_id, {
     previewSiteId: (site as { id: string }).id, businessProfileId: (profileRow as { id: string }).id,
