@@ -6,7 +6,7 @@
 import {
   SOCIAL_KINDS_RE, SOCIAL_KINDS_GENERIC, socialKindsFor, socialKindById, defaultSocialKind,
   buildSocialContent, applySocialRendition, withGeneratedImage, withPhoto, socialImagePrompt,
-  tileAllowsAI, sizeForPlatform, composeSocialText, PLATFORM_ORDER,
+  tileAllowsAI, sizeForPlatform, composeSocialText, PLATFORM_ORDER, applySocialCopy,
   type SocialMaterials, type SocialKind,
 } from './socialBoard';
 import { canGenerateImage } from './imagegen';
@@ -79,6 +79,18 @@ check('socialKindsFor / kindById / defaultKind resolve, and the default allows A
   check('Instagram → square, others → landscape', sizeForPlatform('instagram') === '1024x1024' && sizeForPlatform('facebook') === '1536x1024' && sizeForPlatform('x') === '1536x1024');
   check('composeSocialText: X inlines tags, others block them', composeSocialText('x', 'hi', ['#a']) === 'hi #a' && composeSocialText('instagram', 'hi', ['#a']) === 'hi\n\n#a');
   check('PLATFORM_ORDER covers the four surfaces', PLATFORM_ORDER.join() === 'instagram,facebook,linkedin,x');
+}
+
+// --- the copy seam's pure applier: words only, image gate untouchable ------------------------
+{
+  const m: SocialMaterials = { businessName: 'Lakeside Realty', area: 'Lake Geneva', realEstate: true, accent: '#2e6f95', avatarUrl: null, images: [] };
+  const base = buildSocialContent({ materials: m, kind: socialKindsFor(true)[0], platform: 'instagram' });
+  const out = applySocialCopy(base, { caption: 'Kayak season on the lake 🛶 [EDIT: date]', hashtags: ['#LakeLife', ' kayak ', '', 'a', 'b', 'c', 'd', 'e'] });
+  check('applySocialCopy sets the caption (holes preserved)', out.caption.startsWith('Kayak season') && out.caption.includes('[EDIT: date]'));
+  check('hashtags are normalized: # stripped, blanks dropped, capped at 6', out.hashtags.length === 6 && out.hashtags[0] === 'LakeLife' && out.hashtags[1] === 'kayak');
+  check('image fields are untouchable from the copy applier', out.imageMode === base.imageMode && out.imageUrl === base.imageUrl);
+  const kept = applySocialCopy(base, { caption: '   ', hashtags: [] });
+  check('empty fields keep the current words', kept.caption === base.caption && kept.hashtags === base.hashtags);
 }
 
 console.log(`\nsocialBoard.verify: ${passed} passed, ${failed} failed`);

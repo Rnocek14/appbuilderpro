@@ -11,10 +11,11 @@ import { Loader2, Sparkles, Image as ImageIcon, Send, Copy } from 'lucide-react'
 import { SocialMock } from './SocialMock';
 import {
   socialKindsFor, socialKindById, defaultSocialKind, buildSocialContent, applySocialRendition,
-  withPhoto, withGeneratedImage, tileAllowsAI, composeSocialText, PLATFORM_ORDER,
-  type SocialContent, type SocialMaterials, type SocialPlatform,
+  withPhoto, withGeneratedImage, tileAllowsAI, composeSocialText, PLATFORM_ORDER, applySocialCopy,
+  type SocialContent, type SocialMaterials, type SocialPlatform, type SocialCopyFields,
 } from '../../../lib/garvis/socialBoard';
 import { loadSocialMaterials, generateSocialTileImage, queueSocialTile } from '../../../lib/garvis/socialBoardRun';
+import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
 import { PLATFORM_LABEL } from '../../../lib/garvis/campaignCore';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
@@ -75,17 +76,47 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
         </div>
       ),
       captionOf: (c) => `${PLATFORM_LABEL[c.platform]} · ${socialKindById(c.kindId)?.label ?? 'Post'}${c.imageMode === 'ai' ? ' · AI' : c.imageMode === 'photo' ? ' · photo' : ''}`,
+      references: [
+        ...(materials.avatarUrl ? [{ label: 'Logo / avatar', url: materials.avatarUrl }] : []),
+        { label: 'Brand color', swatches: [materials.accent] },
+        ...materials.images.slice(0, 8).map((i) => ({ label: i.caption || i.label || 'your photo', url: i.url })),
+      ],
 
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && socialKindById(kindId)) || defaultSocialKind(realEstate);
         let content = buildSocialContent({ materials, kind, platform });
+        // The typed idea reaches the CAPTION, not just the image style: the board-copy seam writes a
+        // real post from it (facts from materials only, [EDIT] holes preserved). Honest fallback to
+        // the template when the seam is off — the post is still made, never blocked on AI.
+        if (prompt.trim()) {
+          const ai = await generateBoardCopy({
+            channel: 'social', mode: 'make', instruction: prompt, kindLabel: kind.label, platform,
+            materials: { business: materials.businessName || null, area: materials.area },
+          });
+          if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
+        }
         if (!kind.needsRealPhoto && tileAllowsAI(content) && aiState !== 'off') content = await tryImage(content, prompt || null);
         return content;
       },
       rendition: async ({ parent, instruction }) => {
         const r = applySocialRendition(parent, instruction);
-        if (r.wantsImage && aiState !== 'off') return tryImage(r.content, r.imageStyle);
-        return r.content;
+        let content = r.content;
+        if (instruction.trim()) {
+          const ai = await generateBoardCopy({
+            channel: 'social', mode: 'rendition', instruction, kindLabel: socialKindById(parent.kindId)?.label ?? null,
+            platform: content.platform,
+            materials: { business: materials.businessName || null, area: materials.area },
+            current: { caption: parent.caption, hashtags: parent.hashtags },
+          });
+          if (ai.ok) content = applySocialCopy(content, ai.fields as SocialCopyFields);
+        }
+        if (r.wantsImage && aiState !== 'off') return tryImage(content, r.imageStyle);
+        // HONESTY: never silently spawn an identical twin. If the instruction changed nothing (words
+        // seam off AND the image restyle can't run), say so instead of duplicating the tile.
+        if (JSON.stringify(content) === JSON.stringify(parent)) {
+          throw new Error('That instruction needs AI (words or imagery) which isn’t connected yet — edit the caption directly in the card, or connect a key.');
+        }
+        return content;
       },
 
       renderThumb: (c) => (

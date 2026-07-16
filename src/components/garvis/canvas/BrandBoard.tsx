@@ -59,6 +59,11 @@ export function BrandBoard({ worldId, clusterId, onToast, materialsOverride }: {
         : 'Logo concepts are a starting point (not final/trademarked). Built from your palette; you add the wordmark.',
       captionOf: (c) => logoStyleById(c.styleId)?.label ?? 'Logo',
       searchText: (c) => `${c.styleId} ${c.prompt}`,
+      // The official branding sits BESIDE the concepts — the reference Riley asked for.
+      references: [
+        ...(materials.logoUrl ? [{ label: 'Your official logo', url: materials.logoUrl }] : []),
+        ...(materials.palette.length ? [{ label: 'Brand palette', swatches: materials.palette }] : []),
+      ],
       generate: async ({ prompt, kindId }) => {
         const style = (kindId && logoStyleById(kindId)) || defaultLogoStyle(materials.realEstate);
         const content = buildBrandContent({ materials, style, extra: prompt || null });
@@ -112,7 +117,7 @@ function BrandFocus({ content, api, materials, worldId, clusterId, onToast, tryL
   };
   const setAsLogo = async () => {
     if (!content.imageUrl) return;
-    try { await setBrandLogo(worldId, content.imageUrl); onToast('success', 'Set as your brand logo. It’ll flow into your postcards, social, and site.'); }
+    try { await setBrandLogo(worldId, content.imageUrl); onToast('success', 'Saved to your brand kit. Social previews use it as your avatar; your palette flows everywhere. (Postcards don’t print a logo yet.)'); }
     catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not set the logo.'); }
   };
 

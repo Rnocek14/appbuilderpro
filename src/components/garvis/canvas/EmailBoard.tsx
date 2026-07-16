@@ -4,13 +4,15 @@
 // a contact SEGMENT — which enqueues ONE approval the clock drains under your daily cap (loop closes).
 // Plugs the email pipeline (emailBoard + createBatch) into the generic CreativeBoard shell.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Send, Copy, Save, Users } from 'lucide-react';
 import {
   emailKindsFor, emailKindById, defaultEmailKind, buildEmailContent, applyEmailRendition, composeEmailText,
-  type EmailContent, type EmailMaterials,
+  applyEmailCopy,
+  type EmailContent, type EmailMaterials, type EmailCopyFields,
 } from '../../../lib/garvis/emailBoard';
 import { loadEmailMaterials, queueEmailToSegment, emailSegmentCounts, saveEmailTemplate, type BatchSegment } from '../../../lib/garvis/emailBoardRun';
+import { generateBoardCopy } from '../../../lib/garvis/boardCopyRun';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -38,23 +40,51 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
   }, [worldId, clusterId, materialsOverride, reProp]);
 
   const realEstate = reProp ?? materials?.realEstate ?? false;
+  // Repeated Makes cycle subject angles so two presses never produce identical twins (pure fallback path).
+  const makeSeq = useRef<Record<string, number>>({});
 
   const adapter = useMemo<CreativeBoardAdapter<EmailContent> | null>(() => {
     if (!materials) return null;
+    const facts = (): Record<string, unknown> => ({
+      business: materials.businessName || null, agent: materials.agentName || null,
+      phone: materials.phone, area: materials.area,
+    });
     return {
       storageKey: 'email',
       title: 'Email board',
       subtitle: 'Make drafts, compare subject-line angles, spin renditions, then send to a segment.',
       metrics: { w: 270, h: 300, gap: 26, cols: 3, pad: 40 },
       designWidth: 300,
-      promptPlaceholder: 'pick a kind and hit Make (the idea box isn’t needed for email)',
-      emptyHint: 'Pick a kind and hit Make. Drafts appear here — spin subject angles, compare, then send the best to a segment.',
+      promptPlaceholder: 'an idea… e.g. “open house with free kayak rides, casual and fun”',
+      emptyHint: 'Pick a kind (or type an idea) and hit Make. Drafts appear here — spin subject angles, compare, then send the best to a segment.',
       kinds: emailKindsFor(realEstate).map((k) => ({ id: k.id, label: k.label, emoji: k.emoji, hint: k.hint })),
       banner: 'Real facts fill in; unknowns are [EDIT] holes; {{first_name}} fills per recipient. Nothing sends — a segment send goes through Approvals and drains under your daily cap.',
       captionOf: (c) => emailKindById(c.kindId)?.label ?? 'Email',
       searchText: (c) => `${c.subject} ${c.body}`,
-      generate: async ({ kindId }) => buildEmailContent({ materials, kind: (kindId && emailKindById(kindId)) || defaultEmailKind(realEstate) }),
-      rendition: async ({ parent, instruction }) => applyEmailRendition(parent, instruction),
+      generate: async ({ prompt, kindId }) => {
+        const kind = (kindId && emailKindById(kindId)) || defaultEmailKind(realEstate);
+        const seq = makeSeq.current[kind.id] ?? 0;
+        makeSeq.current[kind.id] = seq + 1;
+        let content = buildEmailContent({ materials, kind, variant: seq });
+        // The idea box is REAL now: a typed idea becomes the draft via the board-copy seam (facts from
+        // materials only, {{first_name}} + [EDIT] holes preserved). Honest fallback to the template.
+        if (prompt.trim()) {
+          const ai = await generateBoardCopy({ channel: 'email', mode: 'make', instruction: prompt, kindLabel: kind.label, materials: facts() });
+          if (ai.ok) content = applyEmailCopy(content, ai.fields as EmailCopyFields);
+        }
+        return content;
+      },
+      rendition: async ({ parent, instruction }) => {
+        // The instruction reaches the words: "make it funnier and mention the kayaks" actually does.
+        if (instruction.trim()) {
+          const ai = await generateBoardCopy({
+            channel: 'email', mode: 'rendition', instruction, kindLabel: emailKindById(parent.kindId)?.label ?? null,
+            materials: facts(), current: { subject: parent.subject, body: parent.body },
+          });
+          if (ai.ok) return applyEmailCopy({ ...parent }, ai.fields as EmailCopyFields);
+        }
+        return applyEmailRendition(parent, instruction);
+      },
       renderThumb: (c) => <EmailCard content={c} materials={materials} />,
       renderFocus: (c, api) => <EmailFocus content={c} api={api} clusterId={clusterId} worldId={worldId} onToast={onToast} />,
     };

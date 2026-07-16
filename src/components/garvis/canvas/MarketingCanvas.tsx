@@ -11,18 +11,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
-  Loader2, X, Printer, Save, Upload, Sparkles, Copy, Send, CheckCircle2, Info,
+  Loader2, X, Save, Upload, Sparkles, CheckCircle2, Info,
   Play, Pause, Film, Clapperboard,
 } from 'lucide-react';
 import { CanvasScene, type CanvasNode, type Satellite } from './CanvasScene';
 import { Overlay } from '../../ui/Overlay';
 import {
-  composeCampaign, campaignsFor, metaFor, PLATFORM_LABEL,
-  type CampaignType, type CampaignInput, type CampaignSet, type SocialPost,
+  campaignsFor, metaFor,
+  type CampaignType, type CampaignInput,
 } from '../../../lib/garvis/campaignCore';
-import { compileMailer, type MailerConcept, type MailerSpec } from '../../../lib/garvis/mailer';
-import { PostcardViewer, PostcardFront, PostcardBack } from '../Postcard';
-import { SocialMock, composePostText, providerPlatform } from './SocialMock';
 import { buildImagePrompt, canGenerateImage } from '../../../lib/garvis/imagegen';
 import { generateImageAsset } from '../../../lib/garvis/imagegenRun';
 import { VIDEO_CONCEPTS, type Aspect, type Storyboard, type VideoConcept } from '../../../lib/garvis/storyboard';
@@ -36,7 +33,6 @@ import {
 import { parseFarmCsv, partitionMailable, farmMath, type FarmRecipient, type FarmParseResult } from '../../../lib/garvis/farm';
 import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { supabase } from '../../../lib/supabase';
-import { StudioPreviewFrame } from '../StudioPreviewFrame';
 import { EmailBoard } from './EmailBoard';
 import { BrandBoard } from './BrandBoard';
 import { PostcardBoard } from './PostcardBoard';
@@ -44,17 +40,11 @@ import { SocialBoard } from './SocialBoard';
 import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
-import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
-import { queueSocialPost } from '../../../lib/garvis/socialRun';
 import type { MailerBrand } from '../../../lib/garvis/mailer';
 import { cn } from '../../../lib/utils';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
 type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding';
-
-// Rendition concepts to cycle when you "spin another" postcard — same real materials, a genuinely
-// different design mechanism each time.
-const CONCEPT_CYCLE: MailerConcept[] = ['proof', 'offer_first', 'local_authority', 'story', 'question', 'urgency'];
 
 // The brand ember, as a concrete value for the JS-side rendering paths (postcard designer, video
 // storyboard, image prompts) that can't read the --gv-ember CSS token. Kept in lockstep with it.
@@ -104,7 +94,6 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     return () => { live = false; };
   }, [worldId]);
 
-  const set = useMemo<CampaignSet | null>(() => (details ? composeCampaign(details) : null), [details]);
   const ready = !!details;
 
   const center = ready
@@ -123,20 +112,45 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
 
   const addSat = (nodeKey: string) => setSats((s) => [...s, { nodeKey, id: `${nodeKey}-${s.length}-${(s.length * 7 + 3) % 97}` }]);
 
-  const onOpen = (k: string) => {
-    const key = k as NodeKey;
-    // people + video + analysis + email work from the world's own data (a mail list, the world's
-    // photos, the MLS, the brand), so they don't require the campaign details to be filled first.
-    // The postcard board loads the world's own materials (brand, photos, context), so it — like the
-    // other studios — opens straight to work without first filling the campaign details form.
-    if (key !== 'center' && key !== 'people' && key !== 'video' && key !== 'analysis' && key !== 'email' && key !== 'social' && key !== 'postcard' && key !== 'branding' && !ready) { setOpen('center'); return; }
-    setOpen(key);
-  };
+  // Every node opens straight to work — the boards load the world's own materials (brand, photos,
+  // context), so no details-form gate stands between a click and creating.
+  const onOpen = (k: string) => setOpen(k as NodeKey);
+
+  // THE ROOM — a board node doesn't open a popup; you go INTO the node and it expands on the canvas
+  // as the workspace. The orbit view swaps out, the board takes the whole canvas region at viewport
+  // height, and "‹ Canvas" (or Esc) walks you back out. No scrim, no shrunken floating window.
+  const boardKey = open === 'postcard' || open === 'social' || open === 'email' || open === 'branding' ? open : null;
+  const roomRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!boardKey) return;
+    roomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const h = (e: KeyboardEvent) => {
+      // A dialog above the room (rendition prompt, new-group, a sheet) owns Esc — the board's own
+      // inspector dock already stops propagation in capture phase.
+      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]')) setOpen(null);
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [boardKey]);
 
   return (
     <div>
       <style>{SHEET_CSS}</style>
-      <CanvasScene center={center} nodes={nodes} sats={sats} onOpen={onOpen} />
+      {!boardKey && <CanvasScene center={center} nodes={nodes} sats={sats} onOpen={onOpen} />}
+      {boardKey && (
+        <div ref={roomRef} className="mkc-room" role="region" aria-label={`${nodes.find((n) => n.key === boardKey)?.label ?? boardKey} workspace`}>
+          <div className="mkc-room-top">
+            <button className="mkc-back" onClick={() => setOpen(null)} title="Back to the canvas (Esc)">‹ Canvas</button>
+            <span className="mkc-room-crumb">{bizName || 'Your business'} · {nodes.find((n) => n.key === boardKey)?.label}</span>
+          </div>
+          <div className="mkc-room-body">
+            {boardKey === 'postcard' && <PostcardBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />}
+            {boardKey === 'social' && <SocialBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />}
+            {boardKey === 'email' && <EmailBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />}
+            {boardKey === 'branding' && <BrandBoard worldId={worldId} clusterId={targetCluster} onToast={onToast} />}
+          </div>
+        </div>
+      )}
 
       {open === 'center' && (
         <DetailsSheet
@@ -152,21 +166,6 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
           }}
         />
       )}
-      {open === 'postcard' && (
-        <BoardOverlay title="Postcard board" onClose={() => setOpen(null)}>
-          <PostcardBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
-        </BoardOverlay>
-      )}
-      {open === 'social' && (
-        <BoardOverlay title="Social board" onClose={() => setOpen(null)}>
-          <SocialBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
-        </BoardOverlay>
-      )}
-      {open === 'email' && (
-        <BoardOverlay title="Email board" onClose={() => setOpen(null)}>
-          <EmailBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />
-        </BoardOverlay>
-      )}
       {open === 'people' && (
         <PeopleSheet realEstate={realEstate} worldId={worldId} onToast={onToast} onClose={() => setOpen(null)} />
       )}
@@ -177,11 +176,6 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
       )}
       {open === 'analysis' && (
         <AnalysisSheet realEstate={realEstate} area={details?.area ?? ''} onClose={() => setOpen(null)} />
-      )}
-      {open === 'branding' && (
-        <BoardOverlay title="Branding board" onClose={() => setOpen(null)}>
-          <BrandBoard worldId={worldId} clusterId={targetCluster} onToast={onToast} />
-        </BoardOverlay>
       )}
     </div>
   );
@@ -194,30 +188,6 @@ function centerSub(d: CampaignInput): string {
   const bits = [d.price, [d.beds && `${d.beds} bd`, d.baths && `${d.baths} ba`].filter(Boolean).join(' · '), d.area]
     .map((x) => (x || '').trim()).filter(Boolean);
   return bits.join(' · ') || (d.details || '').trim();
-}
-
-// ---------- Board shell ----------
-// A large, near-fullscreen dark surface that hosts a spatial creative board (the postcard board, and
-// later social/branding). Unlike the cream paper Sheet, a board needs room to spread out, so it opens
-// big and dark. Scrim + Escape + focus-trap all come from the shared Overlay primitive.
-function BoardOverlay({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <Overlay onClose={onClose} z={60}>
-      <style>{`
-        .mkc-board{width:min(96vw,1200px);height:88vh;display:flex;flex-direction:column;border-radius:16px;overflow:hidden;border:1px solid var(--forge-border,#3a2f25);background:var(--forge-bg,#14100c);box-shadow:0 30px 80px rgba(0,0,0,.6)}
-        .mkc-board-top{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--forge-border,#3a2f25);background:var(--forge-panel,#1c1710)}
-        .mkc-board-top h3{font-size:14px;font-weight:600;color:var(--forge-ink,#f0e6da)}
-        .mkc-board-body{flex:1;min-height:0}
-      `}</style>
-      <div className="mkc-board" role="dialog" aria-modal="true">
-        <div className="mkc-board-top">
-          <h3>{title}</h3>
-          <button className="mkc-x" onClick={onClose} aria-label="Close"><X size={18} /></button>
-        </div>
-        <div className="mkc-board-body">{children}</div>
-      </div>
-    </Overlay>
-  );
 }
 
 // ---------- Sheet shell ----------
@@ -354,128 +324,6 @@ function DetailsSheet({ realEstate, initial, agent, phone, brand, targetCluster,
       <div className="mkc-acts">
         <button className="mkc-a pri" onClick={save} disabled={!canSave}><Sparkles size={15} /> Save &amp; explore</button>
       </div>
-    </Sheet>
-  );
-}
-
-// ---------- Postcard ----------
-function PostcardSheet({ set, details, brand, accent, targetCluster, onToast, onClose, onSpin }: {
-  set: CampaignSet; details: CampaignInput; brand: MailerBrand | null; accent: string;
-  targetCluster: string | null; onToast: Toast; onClose: () => void; onSpin: () => void;
-}) {
-  // Renditions: the base postcard + concept-varied re-compiles from the SAME real materials, each
-  // paired with a LOOK variant so spinning gives a visibly different design.
-  const base = set.postcard;
-  const [rends, setRends] = useState<{ spec: MailerSpec; variant: number }[]>([{ spec: base, variant: 0 }]);
-  const [sel, setSel] = useState(0);
-  const [qr, setQr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const conceptRef = useRef(0);
-  const spec = rends[sel]?.spec ?? base;
-  const variant = rends[sel]?.variant ?? 0;
-
-  useEffect(() => {
-    const url = spec.back.qrUrl ?? spec.back.linkUrl;
-    if (!url) { setQr(null); return; }
-    let live = true;
-    void QRCode.toDataURL(url, { margin: 1, width: 240 }).then((d) => { if (live) setQr(d); }).catch(() => { if (live) setQr(null); });
-    return () => { live = false; };
-  }, [spec.back.linkUrl, spec.back.qrUrl]);
-
-  const spin = () => {
-    conceptRef.current = (conceptRef.current + 1) % CONCEPT_CYCLE.length;
-    const concept = CONCEPT_CYCLE[conceptRef.current];
-    const next = compileMailer({
-      ctx: { business_name: details.businessName || details.agentName || '', principal: details.agentName || null, craft: null,
-        offerings: (details.subject || '').trim() ? [details.subject as string] : [], audience: details.area ? `${details.area} homeowners` : null,
-        locale: details.area || null, links: {}, tone: null },
-      brand, concept, imageUrl: details.photoUrl ?? null, imageAlt: base.front.imageAlt,
-      offer: base.back.offer, headline: base.front.headline, phone: details.agentPhone ?? null,
-    });
-    setRends((r) => [...r, { spec: next, variant: r.length }]); setSel(rends.length); onSpin();
-  };
-
-  const savePc = async () => {
-    if (!targetCluster) { onToast('info', 'Save works once this business has a studio to store it.'); return; }
-    setBusy(true);
-    try { await saveMailerDesign(targetCluster, spec, `${metaFor(set.type)?.label ?? 'Campaign'} postcard`); onToast('success', 'Postcard saved. Print it, or send to a mail vendor.'); }
-    catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not save.'); }
-    finally { setBusy(false); }
-  };
-
-  return (
-    <Sheet emoji="📮" title="Postcard" lead="A real 6×9 card — flip it, print it, or spin a different look." onClose={onClose}>
-      <style>{PRINT_CSS}</style>
-      <div className="mkc-pcwrap">
-        <div><PostcardViewer spec={spec} accent={accent} qr={qr} variant={variant} />
-          <div className="mkc-print"><PostcardFront spec={spec} accent={accent} variant={variant} /><PostcardBack spec={spec} accent={accent} qr={qr} /></div>
-        </div>
-        <div className="mkc-side">
-          <button className="mkc-a pri" onClick={() => window.print()}><Printer size={15} /> Print / Save PDF</button>
-          <button className="mkc-a" onClick={() => void savePc()} disabled={busy}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />} Save</button>
-        </div>
-      </div>
-      <div className="mkc-rends">
-        <div className="mkc-rlab">Renditions — same details, a different design</div>
-        <div className="mkc-rrow">
-          {rends.map((r, i) => (
-            <button key={i} className={cn('mkc-rthumb', i === sel && 'sel')} onClick={() => setSel(i)} aria-label={`Rendition ${i + 1}`}>
-              <div className="mkc-rthumb-in"><PostcardFront spec={r.spec} accent={accent} variant={r.variant} /></div>
-            </button>
-          ))}
-          <button className="mkc-spin" onClick={spin}><Sparkles size={14} /> Spin another</button>
-        </div>
-      </div>
-    </Sheet>
-  );
-}
-
-// ---------- Social ----------
-function SocialSheet({ set, accent, photoUrl, brandName, worldId, onToast, onClose, onSpin }: {
-  set: CampaignSet; accent: string; photoUrl: string | null; brandName: string; worldId: string; onToast: Toast; onClose: () => void; onSpin: () => void;
-}) {
-  const [posted, setPosted] = useState<Record<number, boolean>>({});
-  const post = async (i: number, p: SocialPost) => {
-    if (p.platform === 'instagram' && !photoUrl) { onToast('info', 'Instagram needs an image — add a photo in the details (or generate one) first.'); return; }
-    try {
-      const text = composePostText(p.platform, p.caption, p.hashtags);
-      await queueSocialPost({ text, platforms: [providerPlatform(p.platform)], mediaUrls: photoUrl ? [photoUrl] : [], worldId });
-      setPosted((s) => ({ ...s, [i]: true })); onSpin();
-      onToast('success', `Queued for ${PLATFORM_LABEL[p.platform]} — approve it in the Queue and it posts.`);
-    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not queue the post.'); }
-  };
-  const copy = async (p: SocialPost) => {
-    try { await navigator.clipboard.writeText(composePostText(p.platform, p.caption, p.hashtags)); onToast('success', 'Copied — ready to paste.'); }
-    catch { onToast('info', 'Select and copy the text.'); }
-  };
-  return (
-    <Sheet emoji="📱" title="Social posts" lead="One post tailored to each network — see it exactly as it'll look, then post (queues for your approval) or copy it." onClose={onClose}>
-      <div className="mkc-socgrid">
-        {set.socialPosts.map((p, i) => (
-          <div key={i} className="mkc-soccard">
-            <div className="mkc-socplat">{PLATFORM_LABEL[p.platform]}</div>
-            <SocialMock platform={p.platform} brandName={brandName} caption={p.caption} hashtags={p.hashtags} accent={accent} imageUrl={photoUrl} headline={set.headline} />
-            <div className="mkc-igbtns">
-              <button className={cn('mkc-sbtn p', posted[i] && 'done')} onClick={() => void post(i, p)} disabled={posted[i]}>
-                {posted[i] ? <><CheckCircle2 size={14} /> Queued</> : <><Send size={14} /> Post</>}
-              </button>
-              <button className="mkc-sbtn" onClick={() => void copy(p)}><Copy size={14} /> Copy</button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Sheet>
-  );
-}
-
-// ---------- Email ----------
-function EmailSheet({ set, accent, onToast, onClose }: { set: CampaignSet; accent: string; onToast: Toast; onClose: () => void }) {
-  const copy = async () => { try { await navigator.clipboard.writeText(`Subject: ${set.email.subject}\n\n${set.email.body}`); onToast('success', 'Email copied.'); } catch { onToast('info', 'Select and copy the text.'); } };
-  return (
-    <Sheet emoji="✉️" title="Email" lead="Written from the same details — copy it into your email or a bulk send." onClose={onClose}>
-      <p className="mkc-emsubj"><span>Subject</span> {set.email.subject}</p>
-      <StudioPreviewFrame medium="email" content={set.email.body} accent={accent} />
-      <div className="mkc-acts"><button className="mkc-a pri" onClick={() => void copy()}><Copy size={15} /> Copy email</button></div>
     </Sheet>
   );
 }
@@ -811,6 +659,19 @@ const SHEET_CSS = `
 .mkc-x:hover{ background:var(--gv-paper-line2); color:var(--gv-paper-ink); }
 .mkc-body{ padding:18px; }
 .mkc-lead{ margin:0 0 16px; color:var(--gv-paper-dim); font-size:14px; }
+
+/* THE ROOM — a node expanded into the canvas as a full workspace (never a floating popup). It grows
+   out of the canvas region to viewport height; "‹ Canvas" walks back out. */
+.mkc-room{ display:flex; flex-direction:column; height:max(560px, calc(100vh - 150px)); border-radius:16px; overflow:hidden;
+  border:1px solid var(--forge-border,#3a2f25); background:var(--forge-bg,#14100c);
+  animation:mkcRoomIn .22s ease-out; transform-origin:50% 30%; }
+@keyframes mkcRoomIn{ from{ transform:scale(.94); opacity:.35 } to{ transform:scale(1); opacity:1 } }
+@media (prefers-reduced-motion:reduce){ .mkc-room{ animation:none } }
+.mkc-room-top{ display:flex; align-items:center; gap:10px; padding:8px 12px; border-bottom:1px solid var(--forge-border,#3a2f25); background:var(--forge-panel,#1c1710); }
+.mkc-back{ font-size:12.5px; font-weight:600; color:var(--forge-ember,#ff8a3d); padding:4px 10px; border-radius:8px; border:1px solid rgba(255,138,61,.35); background:transparent; white-space:nowrap; }
+.mkc-back:hover{ background:rgba(255,138,61,.12); }
+.mkc-room-crumb{ font-size:12px; color:var(--forge-dim,#a99b90); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mkc-room-body{ flex:1; min-height:0; }
 
 .mkc-chips{ display:flex; flex-wrap:wrap; gap:9px; margin-bottom:16px; }
 .mkc-chip{ cursor:pointer; text-align:left; border:1px solid var(--gv-paper-line); background:var(--gv-paper-raised); border-radius:12px; padding:10px 13px; min-width:150px; }

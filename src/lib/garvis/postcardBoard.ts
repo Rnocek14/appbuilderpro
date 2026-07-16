@@ -166,6 +166,29 @@ export function applyRendition(parent: PostcardContent, instruction: string): Re
   return { content: { ...parent, variant }, wantsImage: canImage, imageStyle: instr || null };
 }
 
+/** Fields the board-copy AI seam may write — WORDS only. Pure applier: patches exactly the named
+ *  fields and never touches imageMode / the photo rules, so the listing-photo honesty gate is
+ *  untouchable from here. Unknown/empty fields leave the current words in place. */
+export interface PostcardCopyFields { headline?: string; sub?: string; body?: string; cta?: string }
+export function applyCopyFields(content: PostcardContent, f: PostcardCopyFields): PostcardContent {
+  const headline = typeof f.headline === 'string' && f.headline.trim() ? clip(f.headline.trim()) : null;
+  const spec: MailerSpec = {
+    ...content.spec,
+    front: {
+      ...content.spec.front,
+      ...(headline ? { headline } : {}),
+      ...(typeof f.sub === 'string' && f.sub.trim() ? { kicker: f.sub.trim() } : {}),
+    },
+    back: {
+      ...content.spec.back,
+      ...(headline ? { headline } : {}),
+      ...(typeof f.body === 'string' && f.body.trim() ? { body: f.body.trim() } : {}),
+      ...(typeof f.cta === 'string' && f.cta.trim() ? { cta: f.cta.trim() } : {}),
+    },
+  };
+  return { ...content, spec };
+}
+
 /** Apply a generated image to a tile (the run calls this after the model returns). */
 export function withGeneratedImage(content: PostcardContent, url: string, note: string | null): PostcardContent {
   return {

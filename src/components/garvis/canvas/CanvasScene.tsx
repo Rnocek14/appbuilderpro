@@ -170,7 +170,10 @@ export const MC_CSS = `
 .mc-cs{ font-size:11px; color:var(--gv-night-dim); font-variant-numeric:tabular-nums; }
 
 .mc-float{ animation:mc-bob 7.5s ease-in-out infinite; }
-@keyframes mc-bob{ 0%,100%{ translate:0 0 } 50%{ translate:0 -6px } }
+/* The drift is atmosphere, not a moving target: it pauses the moment you aim at a node, so the
+   primary click targets are always stable under the pointer. */
+.mc-float:hover{ animation-play-state:paused; }
+@keyframes mc-bob{ 0%,100%{ translate:0 0 } 50%{ translate:0 -3px } }
 
 .mc-sat{ position:absolute; width:13px; height:13px; border-radius:50%; transform:translate(-50%,-50%); z-index:1;
   background:radial-gradient(circle at 40% 35%, var(--gv-ember-heat), var(--gv-ember)); box-shadow:0 0 12px -1px rgba(var(--gv-ember-rgb),.6); animation:mc-pop .4s ease; }

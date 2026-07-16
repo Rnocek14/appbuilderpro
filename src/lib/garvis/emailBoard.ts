@@ -85,9 +85,24 @@ export function emailKindsFor(realEstate: boolean): EmailKind[] { return realEst
 export function emailKindById(id: string): EmailKind | null { return [...EMAIL_KINDS_RE, ...EMAIL_KINDS_GENERIC].find((k) => k.id === id) ?? null; }
 export function defaultEmailKind(realEstate: boolean): EmailKind { return realEstate ? EMAIL_KINDS_RE[2] /* free valuation */ : EMAIL_KINDS_GENERIC[0]; }
 
-export function buildEmailContent(args: { materials: EmailMaterials; kind: EmailKind }): EmailContent {
+export function buildEmailContent(args: { materials: EmailMaterials; kind: EmailKind; variant?: number }): EmailContent {
   const subjectOptions = args.kind.subjects(args.materials);
-  return { kindId: args.kind.id, variant: 0, subject: subjectOptions[0], subjectOptions, body: args.kind.body(args.materials) };
+  // Repeated Makes of the same kind cycle the subject angle, so twice-pressed Make is never a
+  // byte-identical twin — the board always gives you something new to compare.
+  const n = Math.max(1, subjectOptions.length);
+  const variant = ((args.variant ?? 0) % n + n) % n;
+  return { kindId: args.kind.id, variant, subject: subjectOptions[variant], subjectOptions, body: args.kind.body(args.materials) };
+}
+
+/** Fields the board-copy AI seam may write — subject + body. Empty/missing fields keep the current
+ *  words; merge fields like {{first_name}} pass through exactly as the seam returned them. */
+export interface EmailCopyFields { subject?: string; body?: string }
+export function applyEmailCopy(content: EmailContent, f: EmailCopyFields): EmailContent {
+  return {
+    ...content,
+    subject: typeof f.subject === 'string' && f.subject.trim() ? f.subject.trim() : content.subject,
+    body: typeof f.body === 'string' && f.body.trim() ? f.body : content.body,
+  };
 }
 
 const SUBJECT_RE = /^\s*(?:subject|call it|title)\s*[:\-]?\s*["“']?(.+?)["”']?\s*$/i;
