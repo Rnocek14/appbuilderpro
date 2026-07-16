@@ -73,6 +73,38 @@ jobs:
         with:
           version: latest
 
+      # ── Wake the project if Supabase auto-paused it (free-tier projects sleep after ~1 week
+      # idle). A paused project rejects every deploy with "status 'INACTIVE'". We restore via the
+      # management API (the runner can reach it), then poll until it reports ACTIVE_HEALTHY.
+      - name: Wake the project if paused
+        run: |
+          set -e
+          api="https://api.supabase.com/v1"
+          auth="Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
+          status=$(curl -s -H "$auth" "$api/projects" | jq -r --arg ref "$PROJECT_REF" '.[] | select(.id==$ref) | .status')
+          echo "Current status: ${status:-<project not visible to this token>}"
+          if [ -z "$status" ]; then
+            echo "::error::Token can't see project $PROJECT_REF. Wrong project ref, or the token lacks access."
+            exit 1
+          fi
+          if [ "$status" != "ACTIVE_HEALTHY" ]; then
+            echo "Project is '$status' — asking Supabase to restore it…"
+            curl -s -X POST -H "$auth" -H "Content-Type: application/json" \
+              "$api/projects/$PROJECT_REF/restore" -d '{}' || true
+            for i in $(seq 1 40); do
+              sleep 15
+              status=$(curl -s -H "$auth" "$api/projects" | jq -r --arg ref "$PROJECT_REF" '.[] | select(.id==$ref) | .status')
+              echo "  [$i/40] status: $status"
+              [ "$status" = "ACTIVE_HEALTHY" ] && break
+            done
+          fi
+          if [ "$status" != "ACTIVE_HEALTHY" ]; then
+            echo "::error::Project did not reach ACTIVE_HEALTHY in time (last: $status). Open the Supabase dashboard, click Restore, and re-run."
+            exit 1
+          fi
+          echo "Project is awake and healthy. Giving the API a moment to settle…"
+          sleep 20
+
       # ── mode=full only: apply migrations. --include-all because this project's schema came from
       # manual SQL pastes, so the migration history table is behind. Every migration is additive +
       # idempotent, so re-applying from the top is safe; history is tracked from then on.
