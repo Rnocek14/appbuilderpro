@@ -4,6 +4,17 @@ The end-to-end setup the readiness audit found missing. Follow in order; each st
 verification. A technical owner should land in **~1 hour** with this page (it was 4–8 undocumented
 hours before).
 
+## Zero-click path (recommended): the Deploy Supabase action
+
+Steps 1–4 below are now ONE GitHub Action. Add three repo secrets (Settings → Secrets and
+variables → Actions): `SUPABASE_ACCESS_TOKEN` (dashboard → Account → Access Tokens),
+`SUPABASE_PROJECT_REF`, `SUPABASE_DB_PASSWORD` — plus any function secrets you want synced
+(`WORKER_SECRET`+`CRON_SECRET`, `GOOGLE_PLACES_API_KEY`, `APP_ORIGIN`, `RESEND_API_KEY`, AI keys).
+Then Actions → **Deploy Supabase** → Run workflow (tick *arm heartbeat* on the first run). It
+applies every migration, deploys both function lists with the right JWT flags, syncs the secrets,
+arms the clock, and verifies functions + tables before going green. It also re-runs automatically
+on every merge to main that touches `supabase/**`. The manual steps below remain as the fallback.
+
 ## 0. Prerequisites
 
 - A Supabase project (URL + anon key + service-role key), the Supabase CLI logged in.
