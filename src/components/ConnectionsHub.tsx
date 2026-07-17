@@ -7,6 +7,7 @@ import { Check, Github, Globe, Database, Loader2, ExternalLink, X, FileSignature
 import { useConnections } from '../hooks/useConnections';
 import { useToast } from '../context/ToastContext';
 import { Button, Input } from './ui';
+import { AyrshareDestinations } from './garvis/AyrshareDestinations';
 
 const PROVIDERS = [
   { id: 'supabase', label: 'Supabase', icon: Database, oauth: true, hint: 'One-click OAuth — provisions a database per app in your org', url: '' },
@@ -73,6 +74,8 @@ export function ConnectionsHub() {
               </>
             )}
             {!connected && p.oauth && <p className="mt-1 text-[11px] text-forge-dim">{p.hint}</p>}
+            {/* Multi-business destinations (app_0084): each brand posts to ITS OWN accounts. */}
+            {connected && p.id === 'ayrshare' && <AyrshareDestinations />}
           </div>
         );
       })}
