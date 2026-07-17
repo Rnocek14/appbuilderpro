@@ -1,7 +1,7 @@
--- supabase/_apply_garvis_all.sql — GENERATED: EVERY migration (timestamped 2026* + app_00xx), in
--- the same lexicographic order `supabase db push` applies them. Regenerate after adding one:
---   bash -c '{ head -6 supabase/_apply_garvis_all.sql; for f in supabase/migrations/2026*.sql supabase/migrations/app_00*.sql; do echo; echo "-- ======== $f ========"; cat "$f"; done; } > /tmp/agg.sql && mv /tmp/agg.sql supabase/_apply_garvis_all.sql'
--- Apply AFTER schema.sql and schema_v2_autopilot.sql (see docs/RUNBOOK.md).
+-- supabase/_apply_garvis_all.sql — GENERATED: EVERY migration, in dependency order:
+-- timestamped 2026* (except garvis_worker) → app_00xx → garvis_worker (needs app_0003's
+-- agent_runs). Regenerate after adding a migration (keep garvis_worker last).
+-- Apply AFTER schema.sql and schema_v2_autopilot.sql (or supabase/schema_repair.sql).
 -- All migrations are additive + idempotent; re-running is safe.
 --
 
