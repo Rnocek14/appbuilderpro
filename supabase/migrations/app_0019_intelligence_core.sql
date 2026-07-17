@@ -132,4 +132,7 @@ create policy "mind_identity owner all" on public.mind_identity
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- ---------- realtime (stream the growing record to the Mind page) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.mind_events;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;

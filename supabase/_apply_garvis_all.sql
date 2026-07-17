@@ -340,8 +340,14 @@ create policy "agent_runs owner all" on public.agent_runs
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- ---------- realtime (stream portfolio + agent activity to the Garvis dashboard) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.apps;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.agent_runs;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0004_garvis_runtime.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -463,7 +469,10 @@ create policy "garvis_knowledge admin read" on public.garvis_knowledge
   for select using (public.is_admin());
 
 -- ---------- realtime (stream proposed/approved knowledge to the Garvis dashboard) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_knowledge;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0006_garvis_objective.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -576,9 +585,18 @@ drop policy if exists "garvis_capabilities admin read" on public.garvis_capabili
 create policy "garvis_capabilities admin read" on public.garvis_capabilities for select using (public.is_admin());
 
 -- ---------- realtime ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_goals;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_constraints;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_capabilities;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0007_garvis_app_profiles.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -1326,7 +1344,10 @@ create policy "mind_identity owner all" on public.mind_identity
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- ---------- realtime (stream the growing record to the Mind page) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.mind_events;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
 
 -- ======== supabase/migrations/app_0020_project_assets.sql ========
 -- FableForge PLATFORM migration (not a generated-app migration).
@@ -4519,6 +4540,16 @@ alter table public.outreach_messages add column if not exists delivered_at times
 alter table public.outreach_messages add column if not exists opened_at timestamptz;      -- first open
 alter table public.outreach_messages add column if not exists clicked_at timestamptz;     -- first click
 alter table public.outreach_messages add column if not exists open_count integer not null default 0;
+
+-- ======== supabase/migrations/app_0082_audit_proposals.sql ========
+-- app_0082_audit_proposals.sql — make "automation search" a QUERYABLE asset.
+--
+-- Detection results were recomputed client-side per render and thrown away — you could never ask
+-- "which saved prospects need missed-call text-back?" across the audit pool. Store the proposed
+-- capability ids on the audit row at write time. Additive + idempotent.
+
+alter table public.prospect_audits add column if not exists proposals text[] not null default '{}';
+create index if not exists idx_prospect_audits_proposals on public.prospect_audits using gin (proposals);
 
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop

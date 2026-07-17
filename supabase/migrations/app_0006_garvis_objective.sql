@@ -108,6 +108,15 @@ drop policy if exists "garvis_capabilities admin read" on public.garvis_capabili
 create policy "garvis_capabilities admin read" on public.garvis_capabilities for select using (public.is_admin());
 
 -- ---------- realtime ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_goals;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_constraints;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.garvis_capabilities;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
