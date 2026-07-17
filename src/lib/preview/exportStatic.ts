@@ -45,7 +45,11 @@ function jsonLd(spec: SiteSpec, opts: ExportOpts): string {
   return JSON.stringify(data).replace(/</g, '\\u003c');
 }
 
-export interface ExportOpts { canonicalUrl?: string | null; phone?: string | null; address?: string | null }
+export interface ExportOpts {
+  canonicalUrl?: string | null; phone?: string | null; address?: string | null;
+  /** When set, the exported quote form POSTs real leads to claim-submit (rate-limited, notified). */
+  previewSiteId?: string | null; leadSubmitUrl?: string | null;
+}
 
 /** Build the complete, self-contained HTML document for a SiteSpec. */
 export async function buildStaticSiteHtml(spec: SiteSpec, opts: ExportOpts = {}): Promise<string> {
@@ -83,13 +87,41 @@ html { scroll-behavior: smooth; }
 <body class="pv-export">
 ${body}
 <script>
-/* Minimal interactivity for the static build: every section CTA scrolls to the quote form. */
+/* Minimal interactivity for the static build: section CTAs scroll to the quote form
+   (form buttons excluded — those submit). */
 document.querySelectorAll('button').forEach(function (b) {
+  if (b.closest('form')) return;
   b.addEventListener('click', function () {
     var el = document.getElementById('quote') || document.getElementById('ctaBanner');
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   });
 });
+${opts.previewSiteId && opts.leadSubmitUrl ? `
+/* REAL lead capture on the exported site: the quote form posts through the same rate-limited,
+   owner-notified endpoint the live preview uses. */
+(function () {
+  var form = document.querySelector('#quote form');
+  if (!form) return;
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var f = form.querySelectorAll('input, textarea');
+    fetch(${JSON.stringify(opts.leadSubmitUrl)}, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        previewSiteId: ${JSON.stringify(opts.previewSiteId)},
+        name: (f[0] && f[0].value) || '',
+        contact: (f[1] && f[1].value) || '',
+        message: 'Quote request (exported site): ' + ((f[2] && f[2].value) || ''),
+      }),
+    }).catch(function () {});
+    var note = document.createElement('p');
+    note.textContent = 'Sent — you\\u2019ll hear back shortly.';
+    note.style.cssText = 'font-weight:600;margin-top:8px';
+    form.appendChild(note);
+    form.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+  });
+})();` : ''}
 </script>
 </body>
 </html>`;

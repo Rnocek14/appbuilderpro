@@ -34,7 +34,11 @@ function useGoogleFonts(display: string, body: string) {
   }, [display, body]);
 }
 
-export function PreviewSiteRenderer({ spec, shot = false }: { spec: SiteSpec; shot?: boolean }) {
+export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSubmitUrl }: {
+  spec: SiteSpec; shot?: boolean;
+  /** When set, the quote form posts REAL leads through claim-submit instead of the placeholder. */
+  previewSiteId?: string; leadSubmitUrl?: string;
+}) {
   useGoogleFonts(spec.theme.displayFont, spec.theme.bodyFont);
   const [menuOpen, setMenuOpen] = useState(false);
   // The generated SEO was being produced then thrown away — title only. Write description + OG
@@ -124,7 +128,9 @@ export function PreviewSiteRenderer({ spec, shot = false }: { spec: SiteSpec; sh
         {sections.map((s, i) => {
           // normalizeSpec guarantees the type is registered and props fit the section's shape.
           const C = SECTION_COMPONENTS[s.type] as React.ComponentType<Record<string, unknown>>;
-          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} /> : null;
+          const extra = s.type === 'quote' && previewSiteId && leadSubmitUrl
+            ? { previewSiteId, submitUrl: leadSubmitUrl } : {};
+          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} /> : null;
         })}
       </main>
 

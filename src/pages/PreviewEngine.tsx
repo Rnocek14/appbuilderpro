@@ -86,7 +86,11 @@ export default function PreviewEngine() {
   const exportHtml = async (r: PreviewSiteRow) => {
     try {
       const { downloadStaticSite } = await import('../lib/preview/exportStatic');
-      await downloadStaticSite(r.spec, r.slug, { canonicalUrl: previewUrlFor(r.slug) });
+      await downloadStaticSite(r.spec, r.slug, {
+        canonicalUrl: previewUrlFor(r.slug),
+        previewSiteId: r.id,
+        leadSubmitUrl: `${supabaseUrl}/functions/v1/claim-submit`,
+      });
       toast('success', `Exported ${r.business_name} as ${r.slug}.html — self-contained, ready for their domain.`);
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Export failed.'); }
   };
