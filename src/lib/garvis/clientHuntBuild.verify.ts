@@ -43,8 +43,8 @@ const serper = {
 {
   const f = fieldsFromPage({ title: 'Bright Dental | Smiles', description: 'x' }, 'dentists', 'Bright Dental Search');
   check('business_name from the page title', f.business_name === 'Bright Dental');
-  check('industry is the trade, title-cased', f.industry === 'Dentists');
-  check('services is exactly one honest generic (never an invented list)', f.services.length === 1 && f.services[0] === 'Dentists');
+  check('industry is the human trade noun, not the raw keyword', f.industry === 'Dental Care');
+  check('services is exactly one honest generic (never an invented list)', f.services.length === 1 && f.services[0] === 'Dental Care');
   check('location/rating/reviews are UNKNOWN, not guessed', f.location === null && f.google_rating === null && f.review_count === null && f.reviews_summary === null);
   const f2 = fieldsFromPage({ title: '' }, 'plumbers', 'Bob the Plumber');
   check('junk title falls back to the search-result name', f2.business_name === 'Bob the Plumber');
