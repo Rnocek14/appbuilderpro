@@ -7,7 +7,7 @@
 
 import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
-import { composeBatchRecipients, unknownTokens, batchProgress, type BatchRecipient } from './outreachBatch';
+import { composeBatchRecipients, unknownTokens, batchProgress, type BatchRecipient, computeBatchStats, type BatchEventCounts } from './outreachBatch';
 
 export type BatchSegment = 'all' | 'new' | 'contacted' | 'qualified' | 'customer';
 
@@ -25,6 +25,23 @@ export async function segmentCount(segment: BatchSegment, worldId?: string | nul
   const { count, error } = await q;
   if (error) throw new Error(error.message);
   return count ?? 0;
+}
+
+/** Engagement counts for a set of batches, from the app_0081 events substrate — one query. */
+export async function batchStatsFor(batchIds: string[]): Promise<Map<string, BatchEventCounts>> {
+  const out = new Map<string, BatchEventCounts>();
+  if (!batchIds.length) return out;
+  const { data } = await supabase.from('outreach_events')
+    .select('batch_id, kind').in('batch_id', batchIds).limit(5000);
+  const byBatch = new Map<string, string[]>();
+  for (const r of (data ?? []) as { batch_id: string | null; kind: string }[]) {
+    if (!r.batch_id) continue;
+    const arr = byBatch.get(r.batch_id) ?? [];
+    arr.push(r.kind);
+    byBatch.set(r.batch_id, arr);
+  }
+  for (const [id, kinds] of byBatch) out.set(id, computeBatchStats(kinds));
+  return out;
 }
 
 /** Create the batch + its ONE approval. Returns honest compose results. */

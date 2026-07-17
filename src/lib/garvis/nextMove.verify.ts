@@ -161,13 +161,19 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
 // 6. Sprint M: world intelligence feeds the morning (Rule 6 made literal).
 {
   const rows = collectWorldIntel([
-    { worldId: 'w1', worldTitle: 'Mom Real Estate', reflectionDueNow: true, events7d: 9, intelAgeDays: 21, topOpenQuestion: 'Lakefront or move-up sellers?', asOf: hoursAgo(0) },
-    { worldId: 'w2', worldTitle: 'Quiet World', reflectionDueNow: false, events7d: 1, intelAgeDays: 3, topOpenQuestion: null, asOf: hoursAgo(0) },
+    { worldId: 'w1', worldTitle: 'Mom Real Estate', reflectionDueNow: true, events7d: 9, intelAgeDays: 21, topOpenQuestion: 'Lakefront or move-up sellers?', recommendation: 'From your numbers: postcards are producing — send the next drop (3 leads / $120 this month)', asOf: hoursAgo(0) },
+    { worldId: 'w2', worldTitle: 'Quiet World', reflectionDueNow: false, events7d: 1, intelAgeDays: 3, topOpenQuestion: null, recommendation: null, asOf: hoursAgo(0) },
   ]);
   check('reflection-due surfaces with the counted event evidence + open question', (() => {
     const r = rows.find((m) => m.key === 'reflect:w1');
     return !!r && r.why.includes('9 recorded events') && r.why.includes('Lakefront or move-up');
   })());
+  check('a measured recommendation becomes a move — basis measured, the verdict IS the why', (() => {
+    const r = rows.find((m) => m.key === 'measured:w1');
+    return !!r && r.kind === 'measured_recommendation' && r.why.startsWith('From your numbers:')
+      && r.expected?.basis === 'measured';
+  })());
+  check('no recommendation → no measured move (Quiet World stays quiet)', !rows.some((m) => m.key === 'measured:w2'));
   check('stale intel surfaces with its age as evidence', (() => {
     const r = rows.find((m) => m.key === 'intel:w1');
     return !!r && r.title.includes('21 days old');

@@ -113,3 +113,30 @@ export function staleSendingIndices(recipients: BatchRecipient[], nowMs: number,
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// ENGAGEMENT STATS (app_0081): pure aggregation over outreach_events kinds for one batch.
+// Counts only — rates are left to the reader because sends and events arrive on different
+// clocks and a computed % mid-drain would lie.
+
+export interface BatchEventCounts {
+  delivered: number; opened: number; clicked: number; replied: number; bounced: number;
+}
+
+export function computeBatchStats(kinds: string[]): BatchEventCounts {
+  const c: BatchEventCounts = { delivered: 0, opened: 0, clicked: 0, replied: 0, bounced: 0 };
+  for (const k of kinds) if (k in c) c[k as keyof BatchEventCounts]++;
+  return c;
+}
+
+/** One honest line for the batch card. Empty string when nothing has arrived yet —
+ *  the caller renders its own "no engagement events yet" copy, never a fake zero-rate. */
+export function batchStatsLine(c: BatchEventCounts): string {
+  const parts: string[] = [];
+  if (c.delivered) parts.push(`${c.delivered} delivered`);
+  if (c.opened) parts.push(`${c.opened} opened`);
+  if (c.clicked) parts.push(`${c.clicked} clicked`);
+  if (c.replied) parts.push(`${c.replied} repl${c.replied === 1 ? 'y' : 'ies'}`);
+  if (c.bounced) parts.push(`${c.bounced} bounced`);
+  return parts.join(' · ');
+}

@@ -28,6 +28,7 @@ export type MoveKind =
   | 'blocking_empty'     // structural floor: an empty area blocks a live one (needs no history)
   | 'insight_connection' // "Garvis noticed" — the brain found a link
   | 'reflection_due'     // enough happened in a world that a reflection would teach something
+  | 'measured_recommendation' // the adaptive engine's measured verdict — YOUR numbers picked this move
   | 'intel_stale'        // the world's research is old enough to mislead
   | 'draft_waiting'      // genesis designed a world; it exists only if the user approves it
   | 'trail_open';        // a rabbit-hole exploration left warm — momentum worth resuming
@@ -206,6 +207,8 @@ export interface WorldIntelIn {
   reflectionDueNow: boolean; events7d: number;
   intelAgeDays: number | null;
   topOpenQuestion: string | null;
+  /** adaptiveRun's standing "From your numbers: …" line — measured, never heuristic. */
+  recommendation: string | null;
   asOf: string;
 }
 
@@ -261,6 +264,20 @@ export function collectTrails(rows: TrailRowIn[], now: Date): NextMove[] {
 export function collectWorldIntel(rows: WorldIntelIn[]): NextMove[] {
   const out: NextMove[] = [];
   for (const w of rows) {
+    // THE OUTCOME→ACTION WIRE (needle audit P0): adaptive.ts computes measured verdicts and
+    // adaptiveRun stores them — but no action surface ever read the field. A measured verdict
+    // outranks every heuristic nudge because it comes from THIS account's own rows.
+    if (w.recommendation?.trim()) {
+      out.push({
+        key: `measured:${w.worldId}`,
+        kind: 'measured_recommendation',
+        title: `${w.worldTitle}: your numbers picked the next move`,
+        why: w.recommendation.trim(),
+        action: { label: 'Act on it', route: `/garvis/webs/${w.worldId}` },
+        score: 0, bornAt: w.asOf,
+        expected: { text: w.recommendation.trim(), basis: 'measured' },
+      });
+    }
     if (w.reflectionDueNow) {
       out.push({
         key: `reflect:${w.worldId}`,
@@ -309,6 +326,7 @@ const BASE_VALUE: Record<MoveKind, number> = {
   lead_waiting: 100,       // someone ASKED — inbound demand ranks with a warm reply
   reply_unanswered: 100,   // a warm human is worth more than anything else in the system
   approval_waiting: 90,    // the user is the bottleneck
+  measured_recommendation: 85, // a MEASURED verdict from your own rows — above every heuristic nudge
   draft_waiting: 75,       // a designed world waiting on judgment — decide it before it goes stale
   natural_next: 60,
   followup_staged: 55,

@@ -2,6 +2,7 @@
 // Run: npx tsx src/lib/garvis/outreachBatch.verify.ts
 
 import {
+  computeBatchStats, batchStatsLine,
   composeBatchRecipients, mergeTemplate, unknownTokens, batchProgress, pickNextPending,
   staleSendingIndices,
   type BatchRecipient,
@@ -73,6 +74,11 @@ check('progress counts sending distinctly', cp.sending === 1 && cp.sent === 1 &&
 check('a stale claim (crash) is swept, a fresh claim is left alone', JSON.stringify(staleSendingIndices(claimed, 200_000, 60_000)) === '[1]'
   && staleSendingIndices([{ contactId: '9', email: 'z@x.com', name: 'Z', state: 'sending', claimedAt: new Date(190_000).toISOString() }], 200_000, 60_000).length === 0);
 check('a sending recipient with no claimedAt is treated as stale (recoverable)', JSON.stringify(staleSendingIndices([{ contactId: '9', email: 'z@x.com', name: 'Z', state: 'sending' }], 200_000, 60_000)) === '[0]');
+
+const st = computeBatchStats(['delivered', 'delivered', 'opened', 'clicked', 'replied', 'bounced', 'unknown_kind']);
+check('stats count by kind and ignore unknown kinds', st.delivered === 2 && st.opened === 1 && st.clicked === 1 && st.replied === 1 && st.bounced === 1);
+check('stats line reads naturally and singularizes reply', batchStatsLine(st) === '2 delivered · 1 opened · 1 clicked · 1 reply · 1 bounced');
+check('no events → empty line (caller says "nothing yet", never a fake rate)', batchStatsLine(computeBatchStats([])) === '');
 
 console.log(`\noutreachBatch.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) { throw new Error(`${failed} check(s) failed`); }

@@ -7,9 +7,10 @@
 import { useEffect, useState } from 'react';
 import { Send, Loader2, XCircle } from 'lucide-react';
 import {
-  createBatch, listBatches, cancelBatch, segmentCount, batchLine,
+  createBatch, listBatches, cancelBatch, segmentCount, batchLine, batchStatsFor,
   type BatchSegment, type BatchRow,
 } from '../../lib/garvis/outreachBatchRun';
+import { batchStatsLine, type BatchEventCounts } from '../../lib/garvis/outreachBatch';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 
@@ -28,6 +29,7 @@ export function BatchSendCard({ onToast }: { onToast: (k: 'success' | 'error' | 
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [batches, setBatches] = useState<BatchRow[]>([]);
+  const [stats, setStats] = useState<Map<string, BatchEventCounts>>(new Map());
 
   useEffect(() => {
     let live = true;
@@ -37,7 +39,13 @@ export function BatchSendCard({ onToast }: { onToast: (k: 'success' | 'error' | 
 
   useEffect(() => {
     let live = true;
-    void listBatches().then((b) => { if (live) setBatches(b); }).catch(() => {});
+    void listBatches().then(async (b) => {
+      if (!live) return;
+      setBatches(b);
+      // Engagement from the app_0081 events substrate — honest counts, arriving as Resend reports.
+      const st = await batchStatsFor(b.map((x) => x.id)).catch(() => new Map<string, BatchEventCounts>());
+      if (live) setStats(st);
+    }).catch(() => {});
     return () => { live = false; };
   }, []);
 
@@ -93,7 +101,11 @@ export function BatchSendCard({ onToast }: { onToast: (k: 'success' | 'error' | 
           {batches.slice(0, 5).map((b) => (
             <li key={b.id} className="flex items-center justify-between gap-2 text-[11px]">
               <span className="min-w-0 truncate text-forge-ink/80">{b.subject}</span>
-              <span className="shrink-0 text-forge-dim">{batchLine(b)}</span>
+              <span className="shrink-0 text-forge-dim">{batchLine(b)}{(() => {
+                const c = stats.get(b.id);
+                const line = c ? batchStatsLine(c) : '';
+                return line ? <span className="text-forge-heat"> · {line}</span> : null;
+              })()}</span>
               {(b.status === 'queued' || b.status === 'draining') && (
                 <button onClick={() => void doCancel(b)} title="Cancel batch" className="shrink-0 text-forge-dim hover:text-forge-warn"><XCircle size={12} /></button>
               )}
