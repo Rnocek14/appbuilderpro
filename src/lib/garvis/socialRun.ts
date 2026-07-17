@@ -39,6 +39,7 @@ export async function queueSocialPost(input: {
   const names = (draft.platforms as Platform[]).map((p) => PLATFORM_LABEL[p] ?? p).join(', ');
   const when = draft.scheduleAt ? ` — scheduled for ${draft.scheduleAt.slice(0, 16)}` : '';
   const approvalId = await enqueueApproval({
+    worldId: input.worldId ?? null,
     kind: 'publish_post',
     title: `Post to ${names}${when}`,
     preview: `${draft.text.slice(0, 400)}${draft.text.length > 400 ? '…' : ''}`,

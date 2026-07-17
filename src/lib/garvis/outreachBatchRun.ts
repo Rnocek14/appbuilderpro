@@ -89,6 +89,7 @@ export async function createBatch(input: {
   if (insErr || !batch) throw new Error(`Could not create the batch: ${insErr?.message ?? 'unknown error'}`);
 
   const approvalId = await enqueueApproval({
+    worldId: input.worldId ?? null,
     kind: 'send_batch',
     title: `Send "${subject}" to ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
     preview: `${body.slice(0, 280)}${body.length > 280 ? '…' : ''}\n\nThe clock drains this under your daily cap; every recipient re-checks suppression at send time.`,

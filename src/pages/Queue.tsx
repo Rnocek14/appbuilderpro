@@ -19,7 +19,7 @@ import { useInbox } from '../hooks/useAutopilot';
 import type { AgentQuestion } from '../types';
 import { KIND_META } from '../components/garvis/approvalMeta';
 import {
-  listApprovals, approveAndExecute, rejectApproval, reopenApproval, listExecutionRuns,
+  listApprovals, approveAndExecute, rejectApproval, reopenApproval, listExecutionRuns, worldTitlesFor,
   type Approval, type ExecutionRun,
 } from '../lib/garvis/execution';
 import {
@@ -61,6 +61,21 @@ export default function Queue() {
   // after a failed execution pointed at a stale list that didn't contain the failure).
   const [decided, setDecided] = useState<Approval[]>([]);
   const [runs, setRuns] = useState<ExecutionRun[]>([]);
+
+  // Brand badges (multi-business audit): with several businesses, "Post to Instagram" with no
+  // attribution means approving blind. Cache world id → title; unknown ids resolve to '' once so
+  // a deleted world can't retrigger the fetch forever. Old approvals (null world_id) get no badge.
+  const [worldTitles, setWorldTitles] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const ids = [...(approvals ?? []), ...decided].map((a) => a.world_id).filter((x): x is string => !!x);
+    const missing = [...new Set(ids)].filter((id) => !(id in worldTitles));
+    if (missing.length === 0) return;
+    void worldTitlesFor(missing).then((got) => setWorldTitles((prev) => {
+      const next = { ...prev };
+      for (const id of missing) next[id] = got[id] ?? '';
+      return next;
+    }));
+  }, [approvals, decided, worldTitles]);
 
   // A failed load must NOT masquerade as "Queue is clear" — that's a dangerously reassuring lie on the
   // most-used screen. Track it so the empty view can distinguish "nothing needs you" from "couldn't load".
@@ -274,6 +289,11 @@ export default function Queue() {
                 {decided.map((a) => (
                   <li key={a.id} className="flex items-center gap-3 rounded-lg border border-forge-border px-3 py-2 text-xs">
                     <Badge tone={a.status === 'approved' ? 'ok' : 'err'}>{a.status}</Badge>
+                    {a.world_id && worldTitles[a.world_id] && (
+                      <span className="max-w-[8rem] truncate rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim" title={worldTitles[a.world_id]}>
+                        {worldTitles[a.world_id]}
+                      </span>
+                    )}
                     <span className="min-w-0 flex-1 truncate text-forge-ink">{a.title}</span>
                     <span className="text-forge-dim">{a.decided_at ? timeAgo(a.decided_at) : timeAgo(a.created_at)}</span>
                   </li>
@@ -344,6 +364,11 @@ export default function Queue() {
                     <span className="rounded border border-forge-warn/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-forge-warn">
                       {KIND_META[a.kind]?.label ?? String(a.kind).replace(/_/g, ' ')}
                     </span>
+                    {a.world_id && worldTitles[a.world_id] && (
+                      <span className="max-w-[10rem] truncate rounded border border-forge-border bg-forge-raised px-1.5 py-0.5 text-[10px] text-forge-dim" title={worldTitles[a.world_id]}>
+                        {worldTitles[a.world_id]}
+                      </span>
+                    )}
                     <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{a.title}</span>
                     <span className="text-[10px] text-forge-dim">{timeAgo(a.created_at)}</span>
                     <button onClick={() => void decide(a, true)} disabled={actingId === a.id}

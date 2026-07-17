@@ -22,6 +22,7 @@ export interface Approval {
   requested_by: string;
   status: ApprovalStatus;
   result: Record<string, unknown> | null;
+  world_id?: string | null;
   created_at: string;
   decided_at: string | null;
 }
@@ -44,6 +45,8 @@ export async function enqueueApproval(input: {
   preview?: string;
   payload?: Record<string, unknown>;
   requestedBy?: string;
+  /** Which business this decision belongs to — the Queue renders it as a brand badge. */
+  worldId?: string | null;
 }): Promise<string> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
@@ -60,6 +63,7 @@ export async function enqueueApproval(input: {
     payload,
     payload_hash,
     requested_by: input.requestedBy ?? 'user',
+    world_id: input.worldId ?? null,
   }).select('id').single();
   if (error) throw new Error(error.message);
   return (data as { id: string }).id;
@@ -68,13 +72,24 @@ export async function enqueueApproval(input: {
 export async function listApprovals(status: ApprovalStatus | 'all' = 'pending', limit = 50): Promise<Approval[]> {
   let q = supabase
     .from('approvals')
-    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at')
+    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at, world_id')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (status !== 'all') q = q.eq('status', status);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data ?? []) as Approval[];
+}
+
+/** Brand attribution for the Queue: world id → business title. Fail-soft — a missing badge must
+ *  never block the one screen where decisions happen, so errors return what we have. */
+export async function worldTitlesFor(ids: (string | null | undefined)[]): Promise<Record<string, string>> {
+  const distinct = [...new Set(ids.filter((x): x is string => !!x))];
+  if (distinct.length === 0) return {};
+  const { data } = await supabase.from('knowledge_worlds').select('id, title').in('id', distinct);
+  const out: Record<string, string> = {};
+  for (const w of (data ?? []) as { id: string; title: string }[]) out[w.id] = w.title;
+  return out;
 }
 
 /**
