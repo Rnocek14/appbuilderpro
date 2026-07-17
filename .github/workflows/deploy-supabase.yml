@@ -263,8 +263,12 @@ jobs:
         run: |
           set -e
           if [ -z "$WORKER_SECRET" ]; then
-            echo "::error::arm_heartbeat needs the WORKER_SECRET repo secret."
-            exit 1
+            # SELF-PROVISION: no repo secret — mint one and give BOTH sides the same value
+            # (function env via secrets set, cron via the arm call). Rotating is harmless:
+            # only the heartbeat and workers use it, and this sets both ends atomically.
+            echo "No WORKER_SECRET repo secret — provisioning a fresh shared secret."
+            WORKER_SECRET=$(openssl rand -hex 24)
+            supabase secrets set "WORKER_SECRET=$WORKER_SECRET" "CRON_SECRET=$WORKER_SECRET" --project-ref "$PROJECT_REF" >/dev/null
           fi
           body=$(jq -n --arg q "select public.garvis_arm_heartbeat('https://${PROJECT_REF}.supabase.co/functions/v1', '${WORKER_SECRET}');" '{query:$q}')
           curl -sf -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
