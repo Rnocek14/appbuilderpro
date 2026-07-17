@@ -10,7 +10,9 @@
 
 import type { Vertical } from '../verticals';
 import type { ProspectAuditRow, TechFingerprint } from '../clientHuntRun';
-import { CAPABILITIES, isDeliverable, type SignalKind } from './registry';
+// .ts extension: this module is also imported by the standing-worker EDGE function (Deno strict
+// resolver). Type-only imports above it are erased and need none.
+import { CAPABILITIES, isDeliverable, type SignalKind } from './registry.ts';
 
 export interface DetectedSignal {
   id: string;              // e.g. 'manual_process:manual_intake'

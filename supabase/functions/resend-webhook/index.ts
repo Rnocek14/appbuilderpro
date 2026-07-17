@@ -85,6 +85,25 @@ Deno.serve(async (req) => {
     messageId = m?.id ?? null;
   }
 
+  // ENGAGEMENT (app_0081): delivered/opened/clicked land on the message row instead of being
+  // discarded — "opened 3x but silent" becomes a visible follow-up signal.
+  if (messageId && type === 'delivered') {
+    await admin.from('outreach_messages').update({ delivered_at: event.created_at ?? new Date().toISOString() })
+      .eq('id', messageId).is('delivered_at', null);
+  }
+  if (messageId && type === 'opened') {
+    const now = event.created_at ?? new Date().toISOString();
+    const { data: cur } = await admin.from('outreach_messages').select('opened_at, open_count').eq('id', messageId).maybeSingle();
+    await admin.from('outreach_messages').update({
+      opened_at: (cur as { opened_at?: string } | null)?.opened_at ?? now,
+      open_count: ((cur as { open_count?: number } | null)?.open_count ?? 0) + 1,
+    }).eq('id', messageId);
+  }
+  if (messageId && type === 'clicked') {
+    await admin.from('outreach_messages').update({ clicked_at: event.created_at ?? new Date().toISOString() })
+      .eq('id', messageId).is('clicked_at', null);
+  }
+
   // Advance message/campaign status on terminal events.
   if (messageId && (type === 'bounced' || type === 'failed')) {
     await admin.from('outreach_messages').update({ status: 'bounced' }).eq('id', messageId);

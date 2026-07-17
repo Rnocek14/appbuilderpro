@@ -103,5 +103,11 @@ create policy "agent_runs owner all" on public.agent_runs
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- ---------- realtime (stream portfolio + agent activity to the Garvis dashboard) ----------
+do $pub$ begin
 alter publication supabase_realtime add table public.apps;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;
+do $pub$ begin
 alter publication supabase_realtime add table public.agent_runs;
+exception when duplicate_object then null;  -- already a member (manual-paste era)
+end $pub$;

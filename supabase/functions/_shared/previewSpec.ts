@@ -409,6 +409,9 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     if (s.type === 'hero') {
       const img = typeof s.props.image === 'string' ? s.props.image : undefined;
       s.props.image = img && photos.some((p) => p.url === img) ? img : photos[0]?.url;
+      // The REAL phone rides into the hero so the call button dials it — never digits parsed out
+      // of an AI-written button label ("Call us today" → dead tel: link).
+      if (profile.phone) s.props.phone = profile.phone;
     }
     if (s.type === 'gallery' || s.type === 'showcase') {
       s.props.photos = photos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
@@ -487,10 +490,14 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'trust':
+        // HONESTY: every line is either observed (rating, review count, location, phone) or
+        // behavioral (what the site itself offers). Never 'Licensed & insured' or 'Satisfaction
+        // guaranteed' — claims nobody verified have no place on a pitched demo.
         sections.push({ type, props: { items: [
-          profile.google_rating ? `${profile.google_rating.toFixed(1)}★ on Google` : 'Locally owned & operated',
-          profile.review_count ? `${profile.review_count}+ customer reviews` : 'Satisfaction guaranteed',
-          'Licensed & insured', 'Free estimates',
+          profile.google_rating ? `${profile.google_rating.toFixed(1)}★ on Google` : `Professional ${profile.industry.toLowerCase()}`,
+          profile.review_count ? `${profile.review_count}+ customer reviews` : (loc ? `Serving ${loc.split(',')[0]} & nearby` : 'Serving the local area'),
+          'Free, no-obligation quotes',
+          profile.phone ? `Call ${profile.phone}` : 'Fast online quotes',
         ] } });
         break;
       case 'services':
@@ -532,7 +539,9 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         sections.push({ type, props: { heading: 'Common questions', faqs: [
           { q: 'How do I get a quote?', a: `Use the form below or call${profile.phone ? ` ${profile.phone}` : ' us'} — quotes are free and carry no obligation.` },
           { q: 'What areas do you cover?', a: profile.service_area?.length ? profile.service_area.join(', ') : (loc || 'Our local area and surrounding communities.') },
-          { q: 'Are you licensed and insured?', a: 'Yes — fully licensed and insured for your protection.' },
+          // No invented licensing claim — the one question a fallback site can answer honestly is
+          // how the site itself behaves.
+          { q: 'How quickly will I hear back?', a: `Your request goes straight to ${name} the moment you send it.` },
         ] } });
         break;
       case 'hours':

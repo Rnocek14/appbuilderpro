@@ -109,17 +109,46 @@ export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unk
   return raw;
 }
 
+/** One automation the audit GROUNDS for this prospect — a structural slice of AutomationProposal
+ *  (kept import-free so this Deno-shared module adds no new import chain). `evidence` is what was
+ *  actually observed; the paragraph never claims anything without it. */
+export interface PitchUpsell { title: string; pitch: string; monthlyPrice: string; evidence: string }
+
+/** The grounded automation upsell paragraph — "website + automation" in one email. Every line is
+ *  anchored to an observed signal (the honesty rule); zero upsells → empty string, never filler. */
+export function automationUpsellParagraph(upsells: PitchUpsell[]): string {
+  const picks = upsells.filter((u) => u.title && u.evidence).slice(0, 2);   // 2 max — an email, not a catalog
+  if (!picks.length) return '';
+  const lines = picks.map((u) => `— ${u.evidence} ${u.pitch} (from ${u.monthlyPrice})`);
+  return `\n\nWhile I was looking, I noticed a couple of things the new site could fix on autopilot:\n${lines.join('\n')}`;
+}
+
+/** REPLY-GATED first touch — the deliverability-correct opener. 2025-26 sender data is unambiguous:
+ *  a link in email #1 raises spam scores; the winning sequence is teaser → reply → link. Same honest
+ *  voice as buildHuntPitch, zero URLs; the link goes out (approval-gated) once they answer. */
+export function buildHuntPitchTeaser(profile: BusinessProfile, upsells: PitchUpsell[] = []): string {
+  return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
+
+I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
+
+Rather than just tell you that, I went ahead and built you a new one this week.${automationUpsellParagraph(upsells)}
+
+Want the link? Just reply "send it" and it's yours. No obligation either way.`;
+}
+
 /** The deterministic outreach pitch — a byte-for-byte match of engine.ts's generatePitch FALLBACK
- *  (the honest, no-AI copy). A daily automatic order must not depend on a model call to write mail;
- *  this text is specific, truthful, links once, and closes with no pressure. */
-export function buildHuntPitch(profile: BusinessProfile, previewUrl: string): string {
+ *  (the honest, no-AI copy) when no upsells are passed. A daily automatic order must not depend on
+ *  a model call to write mail; this text is specific, truthful, links once, and closes with no
+ *  pressure. `upsells` (from detect.ts, each grounded in an observed signal) appends the
+ *  website+automation offer — the pitch sells the monthly relationship, not just the rebuild. */
+export function buildHuntPitch(profile: BusinessProfile, previewUrl: string, upsells: PitchUpsell[] = []): string {
   return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
 I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
 
 Rather than just tell you that, I built you a new one:
 
-${previewUrl}
+${previewUrl}${automationUpsellParagraph(upsells)}
 
 If you like it, publishing it takes a day. No obligation either way.`;
 }
