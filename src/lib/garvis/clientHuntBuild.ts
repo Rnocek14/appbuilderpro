@@ -123,6 +123,19 @@ export function automationUpsellParagraph(upsells: PitchUpsell[]): string {
   return `\n\nWhile I was looking, I noticed a couple of things the new site could fix on autopilot:\n${lines.join('\n')}`;
 }
 
+/** REPLY-GATED first touch — the deliverability-correct opener. 2025-26 sender data is unambiguous:
+ *  a link in email #1 raises spam scores; the winning sequence is teaser → reply → link. Same honest
+ *  voice as buildHuntPitch, zero URLs; the link goes out (approval-gated) once they answer. */
+export function buildHuntPitchTeaser(profile: BusinessProfile, upsells: PitchUpsell[] = []): string {
+  return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
+
+I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
+
+Rather than just tell you that, I went ahead and built you a new one this week.${automationUpsellParagraph(upsells)}
+
+Want the link? Just reply "send it" and it's yours. No obligation either way.`;
+}
+
 /** The deterministic outreach pitch — a byte-for-byte match of engine.ts's generatePitch FALLBACK
  *  (the honest, no-AI copy) when no upsells are passed. A daily automatic order must not depend on
  *  a model call to write mail; this text is specific, truthful, links once, and closes with no
