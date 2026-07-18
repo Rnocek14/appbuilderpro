@@ -203,14 +203,14 @@ jobs:
       # ingest-profile) + the boards' words seam (board-copy/generate-image). All self-auth.
       - name: Deploy hot functions (JWT-verified)
         run: |
-          for fn in board-copy generate-image render-design discover-media fetch-url ingest-profile; do
+          for fn in board-copy generate-image render-design discover-media fetch-url ingest-profile send-email social-publish; do
             echo "── deploying $fn ──"
             supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
           done
 
       - name: Deploy worker functions (--no-verify-jwt)
         run: |
-          for fn in inbox-draft standing-worker resend-webhook resend-inbound; do
+          for fn in inbox-draft standing-worker resend-webhook resend-inbound social-sync garvis-scorecard; do
             echo "── deploying $fn ──"
             supabase functions deploy "$fn" --project-ref "$PROJECT_REF" --no-verify-jwt
           done

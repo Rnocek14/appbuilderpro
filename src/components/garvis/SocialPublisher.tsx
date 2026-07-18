@@ -8,7 +8,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Share2, Loader2, Send, XCircle, Link2 } from 'lucide-react';
 import { KNOWN_PLATFORMS, PLATFORM_LABEL, checkDraft, type Platform } from '../../lib/garvis/social';
-import { queueSocialPost, listSocialPosts, cancelSocialPost, type SocialPostRow } from '../../lib/garvis/socialRun';
+import {
+  queueSocialPost, listSocialPosts, cancelSocialPost, listSocialMetrics, metricsLine, syncSocialNow,
+  type SocialPostRow, type PostMetricRow,
+} from '../../lib/garvis/socialRun';
 import { useConnections } from '../../hooks/useConnections';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
@@ -28,12 +31,32 @@ export function SocialPublisher({ worldId, onToast }: { worldId: string; onToast
   const [scheduleAt, setScheduleAt] = useState('');
   const [busy, setBusy] = useState(false);
   const [posts, setPosts] = useState<SocialPostRow[]>([]);
+  // Results (app_0087): real synced numbers per post — absent rows render nothing, never zeros.
+  const [metrics, setMetrics] = useState<Map<string, PostMetricRow[]>>(new Map());
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     let live = true;
-    void listSocialPosts().then((p) => { if (live) setPosts(p); }).catch(() => {});
+    void listSocialPosts().then(async (p) => {
+      if (!live) return;
+      setPosts(p);
+      const m = await listSocialMetrics(p.map((x) => x.id)).catch(() => new Map<string, PostMetricRow[]>());
+      if (live) setMetrics(m);
+    }).catch(() => {});
     return () => { live = false; };
   }, []);
+
+  const doSync = async () => {
+    setSyncing(true);
+    try {
+      const r = await syncSocialNow();
+      if (!r.available) onToast('info', 'Post analytics needs an Ayrshare Premium/Business plan — posting itself keeps working.');
+      else onToast(r.synced > 0 ? 'success' : 'info', r.synced > 0 ? `Synced results for ${r.synced} post${r.synced === 1 ? '' : 's'}.` : 'Nothing new to sync yet.');
+      const m = await listSocialMetrics(posts.map((x) => x.id)).catch(() => new Map<string, PostMetricRow[]>());
+      setMetrics(m);
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not sync results.'); }
+    finally { setSyncing(false); }
+  };
 
   const draft = useMemo(() => ({
     text, platforms, mediaUrls: mediaUrl.trim() ? [mediaUrl.trim()] : [],
@@ -113,21 +136,39 @@ export function SocialPublisher({ worldId, onToast }: { worldId: string; onToast
         </Button>
 
         {posts.length > 0 && (
-          <ul className="mt-3 space-y-1 border-t border-forge-border pt-2">
-            {posts.slice(0, 6).map((p) => (
-              <li key={p.id} className="flex items-center justify-between gap-2 text-[11px]">
-                <span className="min-w-0 flex-1 truncate text-forge-ink/80">{p.body || '(media only)'} · {p.platforms.join(', ')}</span>
-                <span className={cn('shrink-0 rounded border px-1.5 py-0.5 uppercase tracking-wide',
-                  p.status === 'posted' ? 'border-forge-ok/40 text-forge-ok'
-                    : p.status === 'failed' ? 'border-forge-warn/40 text-forge-warn'
-                      : p.status === 'scheduled' ? 'border-forge-cyan/40 text-forge-cyan'
-                        : 'border-forge-border text-forge-dim')}>{p.status}</span>
-                {p.status === 'queued' && (
-                  <button onClick={() => void doCancel(p)} title="Cancel" className="shrink-0 text-forge-dim hover:text-forge-warn"><XCircle size={12} /></button>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className="mt-3 flex items-center justify-between border-t border-forge-border pt-2">
+              <span className="text-[10px] uppercase tracking-wide text-forge-dim">Recent posts</span>
+              {posts.some((p) => p.status === 'posted' || p.status === 'scheduled') && (
+                <button onClick={() => void doSync()} disabled={syncing}
+                  title="Pull fresh like/comment/impression numbers from the provider now."
+                  className="text-[11px] text-forge-dim hover:text-forge-ember disabled:opacity-50">
+                  {syncing ? 'syncing…' : 'sync results'}
+                </button>
+              )}
+            </div>
+            <ul className="mt-1 space-y-1">
+              {posts.slice(0, 6).map((p) => {
+                const line = metricsLine(metrics.get(p.id));
+                return (
+                  <li key={p.id} className="text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 flex-1 truncate text-forge-ink/80">{p.body || '(media only)'} · {p.platforms.join(', ')}</span>
+                      <span className={cn('shrink-0 rounded border px-1.5 py-0.5 uppercase tracking-wide',
+                        p.status === 'posted' ? 'border-forge-ok/40 text-forge-ok'
+                          : p.status === 'failed' ? 'border-forge-warn/40 text-forge-warn'
+                            : p.status === 'scheduled' ? 'border-forge-cyan/40 text-forge-cyan'
+                              : 'border-forge-border text-forge-dim')}>{p.status}</span>
+                      {p.status === 'queued' && (
+                        <button onClick={() => void doCancel(p)} title="Cancel" className="shrink-0 text-forge-dim hover:text-forge-warn"><XCircle size={12} /></button>
+                      )}
+                    </div>
+                    {line && <div className="mt-0.5 text-forge-heat">{line}</div>}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </div>
     </div>

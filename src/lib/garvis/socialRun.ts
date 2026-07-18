@@ -64,6 +64,53 @@ export async function cancelSocialPost(id: string): Promise<void> {
   if (!data?.length) throw new Error('Only a still-queued post can be canceled.');
 }
 
+// ---- post analytics (app_0087) ----------------------------------------------
+// Real numbers from the provider, or nothing. A post with no metrics row renders no numbers —
+// never a fake zero. Rows are written only by the social-sync function (service role).
+
+export interface PostMetricRow {
+  post_id: string; platform: string; likes: number | null; comments: number | null;
+  shares: number | null; impressions: number | null; synced_at: string;
+}
+
+export async function listSocialMetrics(postIds: string[]): Promise<Map<string, PostMetricRow[]>> {
+  const out = new Map<string, PostMetricRow[]>();
+  if (!postIds.length) return out;
+  const { data } = await supabase.from('social_post_metrics')
+    .select('post_id, platform, likes, comments, shares, impressions, synced_at')
+    .in('post_id', postIds).limit(500);
+  for (const r of (data ?? []) as PostMetricRow[]) {
+    const arr = out.get(r.post_id) ?? [];
+    arr.push(r);
+    out.set(r.post_id, arr);
+  }
+  return out;
+}
+
+/** One-line honest summary for a post's synced metrics; '' when nothing has arrived. */
+export function metricsLine(rows: PostMetricRow[] | undefined): string {
+  if (!rows?.length) return '';
+  const sum = (pick: (r: PostMetricRow) => number | null): number | null => {
+    let any = false, total = 0;
+    for (const r of rows) { const v = pick(r); if (v !== null) { any = true; total += v; } }
+    return any ? total : null;
+  };
+  const parts: string[] = [];
+  const likes = sum((r) => r.likes); if (likes !== null) parts.push(`${likes} like${likes === 1 ? '' : 's'}`);
+  const comments = sum((r) => r.comments); if (comments !== null) parts.push(`${comments} comment${comments === 1 ? '' : 's'}`);
+  const shares = sum((r) => r.shares); if (shares !== null) parts.push(`${shares} share${shares === 1 ? '' : 's'}`);
+  const imp = sum((r) => r.impressions); if (imp !== null) parts.push(`${imp} impression${imp === 1 ? '' : 's'}`);
+  return parts.join(' · ');
+}
+
+/** Owner-initiated sync — pull fresh numbers now instead of waiting for the 6-hour clock. */
+export async function syncSocialNow(): Promise<{ synced: number; available: boolean }> {
+  const { data, error } = await supabase.functions.invoke('social-sync', { body: {} });
+  if (error) throw new Error(error.message);
+  const r = data as { synced?: number; available?: boolean };
+  return { synced: r.synced ?? 0, available: r.available ?? true };
+}
+
 // ---- per-business destinations (app_0084) -----------------------------------
 // One Ayrshare connection, many brands: each business maps to its own Ayrshare Profile-Key so
 // its posts land on ITS linked accounts. social-publish enforces the fail-closed rule — once any
