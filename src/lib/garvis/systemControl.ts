@@ -16,11 +16,11 @@ export interface SystemStatus {
   heartbeat: HeartbeatStamp[];
 }
 
-/** The 9 jobs garvis_arm_heartbeat schedules — the panel shows scheduled-vs-missing against this. */
+/** The jobs garvis_arm_heartbeat schedules (app_0088) — the panel shows scheduled-vs-missing against this. */
 export const EXPECTED_JOBS = [
   'garvis-pulse-hourly', 'garvis-worker-tick', 'garvis-standing-tick', 'garvis-followups-daily',
   'garvis-inbox-draft-daily', 'garvis-ads-watch-daily', 'garvis-invoice-chase-daily',
-  'garvis-scorecard-weekly', 'garvis-reactivate-monthly',
+  'garvis-scorecard-weekly', 'garvis-reactivate-monthly', 'garvis-consolidate-weekly',
 ] as const;
 
 export async function fetchSystemStatus(): Promise<SystemStatus> {
