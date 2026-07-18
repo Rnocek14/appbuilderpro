@@ -18,6 +18,7 @@ import { rawComplete } from '../lib/aiClient';
 import { useInbox } from '../hooks/useAutopilot';
 import type { AgentQuestion } from '../types';
 import { KIND_META } from '../components/garvis/approvalMeta';
+import { MarkWonInline } from '../components/garvis/MarkWonInline';
 import {
   listApprovals, approveAndExecute, rejectApproval, reopenApproval, listExecutionRuns, worldTitlesFor,
   type Approval, type ExecutionRun,
@@ -415,6 +416,15 @@ export default function Queue() {
                   </div>
                   {(m.kind === 'reply' || m.kind === 'mail') && m.subject && <p className="mt-1 text-xs font-medium text-forge-ink/80">{m.subject}</p>}
                   <p className="mt-0.5 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs text-forge-dim">{(m.kind === 'lead' ? m.message : m.body) || '(no message body)'}</p>
+                  {/* CLOSE THE DEAL (client-hunt loop): a warm pitch reply gets a one-click won →
+                      client book + payment link. The reply stays in the lane until you hit done,
+                      so the follow-through links stay on screen. */}
+                  {m.kind === 'reply' && m.classification === 'positive' && m.campaignId && (
+                    <div className="mt-2">
+                      <MarkWonInline campaignId={m.campaignId}
+                        onClosed={(w) => toast('success', `${w.businessName} marked won — they're in your client book.`)} />
+                    </div>
+                  )}
                   {replyTo && replyTo.kind === m.kind && replyTo.id === m.id && (
                     <div className="mt-2 space-y-2 border-t border-forge-border/60 pt-2">
                       <input autoFocus value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject"
