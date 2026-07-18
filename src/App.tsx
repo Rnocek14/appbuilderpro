@@ -53,6 +53,7 @@ const CanvasPreview = lazy(() => import('./pages/dev/CanvasPreview'));
 const ProfileHomePreview = lazy(() => import('./pages/dev/ProfileHomePreview'));
 const WebPreview = lazy(() => import('./pages/dev/WebPreview'));
 const ProspectWebPreview = lazy(() => import('./pages/dev/ProspectWebPreview'));
+const RebuildPreview = lazy(() => import('./pages/dev/RebuildPreview'));
 const WinHubPreview = lazy(() => import('./pages/dev/WinHubPreview'));
 const StudiosPreview = lazy(() => import('./pages/dev/StudiosPreview'));
 const BoardPreview = lazy(() => import('./pages/dev/BoardPreview'));
@@ -140,6 +141,7 @@ function AppRoutes() {
           {import.meta.env.DEV && <Route path="/dev/profile-home" element={<ProfileHomePreview />} />}
           {import.meta.env.DEV && <Route path="/dev/web" element={<WebPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/prospect-web" element={<ProspectWebPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/rebuild-preview" element={<RebuildPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/win-hub" element={<WinHubPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/studios" element={<StudiosPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/board" element={<BoardPreview />} />}
