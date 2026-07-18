@@ -8,7 +8,7 @@
 import { supabase } from '../supabase';
 import { rawComplete } from '../aiClient';
 import {
-  parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec, navFor, previewSlug,
+  parseBusinessProfile, assembleFallbackSpec, normalizeSpec, previewSlug,
   RECIPES,
   type BusinessProfile, type SiteSpec,
 } from './spec';
@@ -27,14 +27,26 @@ import {
 // The intelligence chain: strategy → spec → owner critique → refine → audit
 // ---------------------------------------------------------------------------
 
+/** One JSON re-ask on a prose reply — the most common degradation becomes a retry instead of a
+ *  straight fall to the deterministic floor (same discipline as the standing-worker chain). */
+async function completeJson(msgs: Parameters<typeof rawComplete>[0], maxTokens: number): Promise<unknown> {
+  const r1 = await rawComplete(msgs, maxTokens);
+  try { return extractJson(r1.text); } catch {
+    const r2 = await rawComplete([...msgs,
+      { role: 'assistant', content: r1.text.slice(0, 4000) },
+      { role: 'user', content: 'Return ONLY the JSON object — no prose, no code fences, nothing else.' },
+    ], maxTokens);
+    return extractJson(r2.text);
+  }
+}
+
 /** The marketing brief the spec executes. Deterministic fallback on any failure. */
 export async function deriveStrategy(profile: BusinessProfile): Promise<WebsiteStrategy> {
   try {
-    const r = await rawComplete([
+    return normalizeStrategy(await completeJson([
       { role: 'system', content: STRATEGY_SYSTEM },
       { role: 'user', content: JSON.stringify(profile, null, 1) },
-    ], 1800);
-    return normalizeStrategy(extractJson(r.text), profile);
+    ], 1800), profile);
   } catch {
     return fallbackStrategy(profile);
   }
@@ -46,12 +58,10 @@ export async function generateSiteSpec(
   profile: BusinessProfile, strategy?: WebsiteStrategy, critique?: OwnerCritique,
 ): Promise<{ spec: SiteSpec; source: 'ai' | 'fallback' }> {
   try {
-    const r = await rawComplete([
+    const spec = normalizeSpec(await completeJson([
       { role: 'system', content: SPEC_SYSTEM },
       { role: 'user', content: specPrompt(profile) + strategyBlock(strategy) + critiqueBlock(critique) },
-    ], 8000);
-    const spec = normalizeSpec(extractJson(r.text), profile);
-    spec.nav = navFor(spec.sections, pickRecipe(profile).cta);
+    ], 8000), profile);
     return { spec, source: 'ai' };
   } catch {
     return { spec: assembleFallbackSpec(profile), source: 'fallback' };
@@ -61,11 +71,10 @@ export async function generateSiteSpec(
 /** Owner-simulation review of a spec. Fails soft to a clean critique (no refine pass). */
 export async function critiqueSpec(profile: BusinessProfile, spec: SiteSpec): Promise<OwnerCritique> {
   try {
-    const r = await rawComplete([
+    return normalizeCritique(await completeJson([
       { role: 'system', content: CRITIQUE_SYSTEM },
       { role: 'user', content: critiqueUserPrompt(profile, spec) },
-    ], 1500);
-    return normalizeCritique(extractJson(r.text));
+    ], 1500));
   } catch {
     return { would_buy: true, feels_like_my_business: 8, weakest_part: '', issues: [] };
   }
@@ -82,15 +91,14 @@ respectful of the business, direct about the website. Output ONLY JSON:
 /** The before/after value framing shown to the owner. Deterministic fallback on failure. */
 export async function generateAudit(profile: BusinessProfile): Promise<AuditReport> {
   try {
-    const r = await rawComplete([
+    return normalizeAudit(await completeJson([
       { role: 'system', content: AUDIT_SYSTEM },
       { role: 'user', content: JSON.stringify({
         business_name: profile.business_name, industry: profile.industry, location: profile.location,
         website: profile.website ?? 'NONE FOUND', current_website_score: profile.current_website_score,
         observed_issues: profile.issues ?? [], google_rating: profile.google_rating, review_count: profile.review_count,
       }, null, 1) },
-    ], 1500);
-    return normalizeAudit(extractJson(r.text), profile);
+    ], 1500), profile);
   } catch {
     return fallbackAudit(profile);
   }

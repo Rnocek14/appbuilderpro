@@ -6,7 +6,7 @@
 // _shared module (the extensionless './spec' re-export would strand the edge bundler).
 
 import {
-  pickRecipe, usablePhotos, usableReviews, SECTION_TYPES,
+  pickRecipe, usablePhotos, usableReviews, SECTION_TYPES, FONT_LIBRARY,
 } from '../../../supabase/functions/_shared/previewSpec.ts';
 import type { BusinessProfile, SiteSpec } from '../../../supabase/functions/_shared/previewSpec.ts';
 import type { WebsiteStrategy, OwnerCritique } from './strategy';
@@ -33,15 +33,27 @@ HARD RULES:
 - Voice: a premium local agency — direct, warm, zero clichés ("Welcome to our website" is banned).
   Headlines sell the OUTCOME (a dry roof, a full table, glowing skin), not the company.
 - Theme colors are HSL triplets "H S% L%". Pick a palette that fits the business's trade and
-  brand_style — distinctive, never default blue. bg is the page paper (subtle tint reads premium).
-- FLAIR — signature design devices. Pick 2-3 that fit the trade (never all; a site that uses a few
-  deliberately stops reading as a template):
+  brand_style — distinctive, never default blue. COMMIT to a palette family and vary it per
+  business — warm cream + serif is one look among many, not the default. Families to draw from:
+  ink-on-white editorial · warm paper + earth accent · cool porcelain + deep accent · high-key
+  white + one saturated pop · deep charcoal/near-black stage (dark page) · rich tinted paper
+  (sage, blush, sand, slate). LIGHT vs DARK is a real decision: upscale dining, barbers,
+  auto performance, gyms, tattoo, nightlife, photography wear a DARK page well (bg L below 15%);
+  medical, legal, family services read best on light paper. Two businesses in one town must not
+  share a palette family.
+- FLAIR — signature design devices. Pick 1-3 that fit the trade (never all — and "grain" is NOT
+  a default; reach for it only on photo-led, craft, or cinematic brands. A site that uses a few
+  devices deliberately stops reading as a template):
     "grain"       film-grain texture over the hero and CTA band — crafts, food, cinematic, luxury
     "marquee"     the trust strip becomes an infinite scrolling proof ticker — shops, trades, gyms
     "dots"        archival dot texture on alternate sections — clinics, boutiques, airy brands
     "ruled"       engineered ruled-line texture on alternate sections — legal, editorial, ink-on-paper
     "outline"     the big CTA-banner headline set as hollow outline type — editorial, luxury, gyms
     "hard-shadow" hard offset block shadows on cards — bold trades, no-nonsense shops, brutalist
+- FONTS — choose ONLY from the library the renderer can load (listed in the user turn). Pair a
+  characterful display face with a quieter body face, chosen for THIS brand: didone serif for
+  heritage/luxury, condensed grotesk for bold trades, humanist sans for clinics. Inter is one
+  body option among many — not the answer to every site.
 - MOTION — theme.motion picks the scroll-choreography tier. Know when: "calm" (medical, legal,
   finance — reveals only, nothing showy); "lively" (most trades — kinetic headline, counting
   stats, image wipes); "cinematic" (photo-led, food, fitness, bold trades — adds a living aurora
@@ -59,15 +71,22 @@ HARD RULES:
           "stacked" (centered, monumental) | "editorial" (ink on the page paper, rule-line
           eyebrow — legal, luxury, photography) | "portal" (a small framed photo zooms through
           into a full-bleed stage as you scroll, then the headline lands — the showpiece opener;
-          needs a strong photo + lively/cinematic motion) | "layers" (the depth sandwich: backdrop
-          art → giant wordmark → the trade's iconic object floating OVER the type — available only
-          when photos tagged ai-backdrop AND ai-object exist. Use it SELECTIVELY — for the boldest
-          brands, roughly one in three eligible sites; stacked/fullbleed with the backdrop image
-          are equally strong openers. Never place role-tagged assets in galleries or about.)
+          needs a photo with role "photo" or "ai-backdrop" + lively/cinematic motion) |
+          "layers" (the depth sandwich: backdrop art → giant wordmark → the trade's iconic object
+          floating OVER the type. Available ONLY when the photo list contains role "ai-backdrop"
+          AND role "ai-object" — you can see each photo's role in the profile. Pick it for bold,
+          object-forward brands; editorial/split are stronger for professional trades.)
     services: "cards" (grid) | "rows" (indexed editorial menu — professional, no-nonsense)
     reviews: "grid" | "spotlight" (one big quote leads)
-    ctaBanner: "band" | "giant" (oversized closer)
+    ctaBanner: "band" (ink-dark editorial strip) | "giant" (oversized brand-color shout)
   Two sites in the same town must never share a skeleton — vary structure with intent.
+- PHOTO ROLES — every photo in the profile carries a role:
+    "photo"       a real photo of this business — use anywhere
+    "ai-backdrop" generated concept art — hero backgrounds ONLY, never galleries/about
+    "ai-object"   generated transparent object — the layers hero ONLY, never anywhere else
+    "ai-concept"  generated still-life concept imagery — usable in galleries, BUT the section
+                  heading must present it honestly ("The look and feel", never "Recent work" /
+                  "Our work" — it is not the business's own portfolio).
 - SCENE — trades with a hand-built scroll vignette (plumbing/sewer, electrical, roofing, HVAC,
   auto) may include ONE {"type":"scene","props":{"headline","sub","cta"}} mid-page (after
   services): a pinned, scroll-scrubbed animation (e.g. a pipe fills, springs a leak, gets clamped)
@@ -84,10 +103,21 @@ export function specPrompt(profile: BusinessProfile): string {
   const recipe = pickRecipe(profile);
   const photos = usablePhotos(profile);
   const reviews = usableReviews(profile);
+  // Photos ship WITH their roles — the model must be able to see backdrop/object eligibility
+  // (the layers/portal guidance is dead text if it only ever receives bare URLs).
+  const roleOf = (p: { alt?: string; source_type?: string }): string =>
+    p.alt === 'ai-backdrop' ? 'ai-backdrop'
+    : p.alt === 'ai-object' ? 'ai-object'
+    : p.source_type === 'ai_generated' ? 'ai-concept'
+    : 'photo';
   return `BUSINESS PROFILE:
-${JSON.stringify({ ...profile, photos: photos.map((p) => p.url), review_snippets: reviews }, null, 1)}
+${JSON.stringify({ ...profile, photos: photos.map((p) => ({ url: p.url, role: roleOf(p) })), review_snippets: reviews }, null, 1)}
 
 RECIPE: ${recipe.id} (${recipe.label}) — CTA verb: "${recipe.cta}"
+DEFAULT ART DIRECTION (diverge from it WITH INTENT — it is a floor, not a target):
+${JSON.stringify(recipe.theme, null, 1)}
+FONT LIBRARY (displayFont and bodyFont MUST come from this list — anything else is replaced):
+${FONT_LIBRARY.join(', ')}
 ALLOWED SECTION TYPES: ${SECTION_TYPES.join(', ')}
 SUGGESTED ORDER (adapt, don't slavishly follow): ${recipe.sections.join(' → ')}
 
@@ -113,8 +143,8 @@ Return:
  "tagline": str,
  "theme": {"primary": "H S% L%", "primaryInk": "H S% L%", "bg": "H S% L%", "ink": "H S% L%",
            "muted": "H S% L%", "card": "H S% L%", "border": "H S% L%", "radius": int(0-28),
-           "displayFont": "Google Font", "bodyFont": "Google Font", "tone": str,
-           "flair": [2-3 of "grain"|"marquee"|"dots"|"ruled"|"outline"|"hard-shadow"],
+           "displayFont": "from the FONT LIBRARY", "bodyFont": "from the FONT LIBRARY", "tone": str,
+           "flair": [1-3 of "grain"|"marquee"|"dots"|"ruled"|"outline"|"hard-shadow"],
            "motion": "calm"|"lively"|"cinematic"},
  "sections": [{"type": str, "variant": str?, "props": {…}}],
  "seo": {"title": str, "description": str, "keywords": [str]},
@@ -134,7 +164,7 @@ Output ONLY JSON:
 /** The strategy addendum the spec call executes (empty string when no strategy was derived). */
 export function strategyBlock(strategy?: WebsiteStrategy | null): string {
   return strategy
-    ? `\n\nMARKETING STRATEGY — the spec must EXECUTE this brief (hero follows hero_strategy, copy speaks to ideal_customer in the given tone, trust_builders surfaced, objections pre-empted):\n${JSON.stringify(strategy, null, 1)}`
+    ? `\n\nMARKETING STRATEGY — the spec must EXECUTE this brief (hero follows hero_strategy, copy speaks to ideal_customer in the given tone, trust_builders surfaced, objections pre-empted, the THEME executes color_rationale):\n${JSON.stringify(strategy, null, 1)}`
     : '';
 }
 
@@ -151,12 +181,14 @@ they built for you. React honestly:
 - Would you pay $299 to publish it?
 - Does it feel like YOUR business or a template with your name pasted in?
 - What's factually off, generically written, or missing that you'd notice immediately?
-Judge the COPY and CHOICES (headlines, claims, section order, tone) — not the technology.
+Judge the COPY, the CHOICES, and the LOOK described by the theme (does this palette family,
+font pairing, and light/dark stage feel like YOUR business — or like every other site in town?)
+— never the technology.
 Output ONLY JSON:
 {"would_buy": bool, "feels_like_my_business": int(1-10), "weakest_part": str,
  "issues": [{"section": str, "problem": str, "fix": str}]}`;
 
 /** The owner-simulation user turn: their ground truth beside the spec's copy and choices. */
 export function critiqueUserPrompt(profile: BusinessProfile, spec: SiteSpec): string {
-  return `YOUR BUSINESS (ground truth):\n${JSON.stringify({ ...profile, photos: undefined }, null, 1)}\n\nTHE WEBSITE THEY BUILT (spec):\n${JSON.stringify({ tagline: spec.tagline, theme: { tone: spec.theme.tone }, sections: spec.sections.map((s) => ({ type: s.type, props: s.props })), seo: spec.seo }, null, 1)}`;
+  return `YOUR BUSINESS (ground truth):\n${JSON.stringify({ ...profile, photos: undefined }, null, 1)}\n\nTHE WEBSITE THEY BUILT (spec):\n${JSON.stringify({ tagline: spec.tagline, theme: spec.theme, sections: spec.sections.map((s) => ({ type: s.type, variant: s.variant, props: s.props })), seo: spec.seo }, null, 1)}`;
 }

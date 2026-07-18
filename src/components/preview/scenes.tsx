@@ -14,7 +14,7 @@
 //
 // Transform/opacity only; reduced-motion and the static export get the FINAL state (p = 1).
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 const reduce = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -24,29 +24,46 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const seg = (p: number, a: number, b: number) => clamp01((p - a) / (b - a));
 
 /** Pinned scrub stage: a tall wrapper with a sticky full-height stage; children receive p 0→1.
- *  SSR/export/reduced-motion render p=1 (the finished frame) — scrubbing arms client-side.
- *  Exported for the portal hero (sections.tsx) — same engine, one implementation. */
+ *  SSR/export render p=1 (the finished frame) with the pin COLLAPSED (pv-scn-pin — the export
+ *  CSS flattens it so a frozen frame never gets 1-2 screens of dead scroll runway).
+ *  Reduced-motion renders the finished frame at natural height, no pin, no scrubbing.
+ *  The first client frame measures scroll position synchronously (useLayoutEffect) — the old
+ *  post-paint arming painted the FINISHED state for a beat, then visibly snapped to p=0. */
 export function ScrollScene({ children, heightVh = 220 }: { children: (p: number) => ReactNode; heightVh?: number }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [p, setP] = useState(1);            // final frame until the SPA arms — export ships it
+  const [p, setP] = useState(1);            // final frame for SSR/export — the pitch ships whole
+  const [reduced, setReduced] = useState(false);
+  const measure = () => {
+    const el = ref.current;
+    if (!el) return 1;
+    const r = el.getBoundingClientRect();
+    const total = r.height - window.innerHeight;
+    return total > 0 ? clamp01(-r.top / total) : 1;
+  };
+  // Synchronous first measurement — no flash-of-final-state on load.
+  useLayoutEffect(() => {
+    if (reduce()) { setReduced(true); return; }
+    setP(measure());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (reduce()) return;
     let raf = 0;
     const tick = () => {
-      const el = ref.current;
-      if (el) {
-        const r = el.getBoundingClientRect();
-        const total = r.height - window.innerHeight;
-        setP(total > 0 ? clamp01(-r.top / total) : 1);
-      }
+      setP(measure());
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  if (reduced) {
+    // Finished frame, natural height — the choreography's end state IS the designed layout.
+    return <div className="relative flex min-h-screen items-center justify-center overflow-hidden">{children(1)}</div>;
+  }
   return (
-    <div ref={ref} style={{ height: `${heightVh}vh` }} className="relative">
-      <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
+    <div ref={ref} style={{ height: `${heightVh}vh` }} className="pv-scn-pin relative">
+      <div className="pv-scn-stage sticky top-0 flex h-screen items-center justify-center overflow-hidden">
         {children(p)}
       </div>
     </div>

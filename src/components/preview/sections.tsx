@@ -43,16 +43,20 @@ function Cta({ label, secondary }: { label: string; secondary?: boolean }) {
 function Reveal({ children, delay = 0, className = '' }: { children: ReactNode; delay?: number; className?: string }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = useState(false);
+  // prefers-reduced-motion: content simply appears — the most-used device must honor it too.
+  const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === 'undefined') { setInView(true); return; }
+    if (!el || reduced || typeof IntersectionObserver === 'undefined') { setInView(true); return; }
     const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setInView(true); io.disconnect(); } }, { rootMargin: '0px 0px -8% 0px' });
     io.observe(el);
     return () => io.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const shown = inView || reduced;
   return (
-    <div ref={ref} style={{ transitionDelay: `${delay}ms`, transform: inView ? 'none' : 'translateY(18px)' }}
-      className={`transition-all duration-700 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] ${inView ? 'opacity-100' : 'opacity-0'} ${className}`}>
+    <div ref={ref} style={{ transitionDelay: `${delay}ms`, transform: shown ? 'none' : 'translateY(18px)' }}
+      className={`pv-rvl transition-all duration-700 [transition-timing-function:cubic-bezier(0.16,1,0.3,1)] ${shown ? 'opacity-100' : 'opacity-0'} ${className}`}>
       {children}
     </div>
   );
@@ -134,12 +138,15 @@ export function Hero(p: HeroProps) {
   // The ONE magnetic element per page: the hero's primary CTA, cinematic tier only.
   const primaryCta = p.cta ? (cine ? <Magnetic><Cta label={p.cta} /></Magnetic> : <Cta label={p.cta} />) : null;
 
+  // The phone icon belongs on CALL buttons only — "See Today's Menu" with a handset icon is a
+  // template fingerprint (design-audit finding).
+  const secondaryIsCall = telDigits.length >= 7 && /call|phone|dial|\d{3}/i.test(p.secondaryCta ?? '');
   const secondaryBtn = (onDark: boolean) => p.secondaryCta && (
-    <a href={telHref}
+    <a href={secondaryIsCall ? telHref : '#quote'}
       className={onDark
         ? 'inline-flex items-center gap-2 rounded-[var(--r)] border border-white/40 px-6 py-3 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/10'
         : 'inline-flex items-center gap-2 rounded-[var(--r)] border border-[hsl(var(--bor))] px-6 py-3 text-sm font-semibold text-[hsl(var(--ink))] transition-colors hover:bg-[hsl(var(--card))]'}>
-      <Phone size={15} /> {p.secondaryCta}
+      {secondaryIsCall ? <Phone size={15} /> : <ArrowRight size={15} />} {p.secondaryCta}
     </a>
   );
 
@@ -173,8 +180,9 @@ export function Hero(p: HeroProps) {
                 <img src={p.objectImage} alt="" className="relative z-10 w-[34%] max-w-[360px]"
                   style={{ transform: `translateY(${(1 - drift) * 46 - 46}px) rotate(${-9 + drift * 12}deg)`,
                     filter: 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))' }} />
-                {/* layer 4: the pitch — ALWAYS on screen (a visitor who never scrolls still gets sold) */}
-                <div className="absolute inset-x-0 bottom-8 z-20 flex flex-col items-center px-6 text-center">
+                {/* layer 4: the pitch — ALWAYS on screen (a visitor who never scrolls still gets
+                    sold). bottom-24 below md clears the fixed mobile call bar. */}
+                <div className="absolute inset-x-0 bottom-24 z-20 flex flex-col items-center px-6 text-center md:bottom-8">
                   {p.eyebrow && <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-white/80">{p.eyebrow}</p>}
                   <h1 className="pv-display max-w-3xl text-2xl font-semibold tracking-tight text-white sm:text-4xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
                   <div className="mt-5 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
@@ -255,6 +263,12 @@ export function Hero(p: HeroProps) {
       </section>
     );
   }
+  // split with no photo must not fall through to the dark fullbleed panel — the ink-on-paper
+  // editorial composition is the honest photo-less equivalent (matters most under restraint,
+  // which preserves 'split' for dignified pages that may have no imagery at all).
+  if (p.variant === 'split') {
+    return <Hero {...p} variant="editorial" />;
+  }
 
   // EDITORIAL — ink on the page paper: rule-line eyebrow, monumental left-aligned display, no
   // colored panel at all. The "expensive studio" opener for legal, real estate, photography.
@@ -294,12 +308,19 @@ export function Hero(p: HeroProps) {
       <section id="hero" className="pv-grain-host relative isolate overflow-hidden">
         {hasImage
           ? <>
-              <img src={p.image} alt="" className="pv-kenburns absolute inset-0 -z-10 h-full w-full object-cover"
-                style={cine ? { transform: `translate3d(0, ${parY.toFixed(1)}px, 0) scale(1.12)` } : undefined} />
+              {/* parallax rides a WRAPPER — an inline transform on the img itself is permanently
+                  overridden by the pv-kenburns animation's forwards fill (audit: parallax never
+                  rendered once). Over-bleed inset keeps edges covered while translating. */}
+              <div className="absolute -inset-y-[8%] inset-x-0 -z-10"
+                style={cine ? { transform: `translate3d(0, ${parY.toFixed(1)}px, 0)` } : undefined}>
+                <img src={p.image} alt="" className="pv-kenburns h-full w-full object-cover" />
+              </div>
               <div className="absolute inset-0 -z-10 bg-black/60" />
             </>
           : <>
               <div className="absolute inset-0 -z-10 bg-gradient-to-b from-[hsl(var(--ink))] via-[hsl(var(--p)/0.9)] to-[hsl(var(--p))]" />
+              {/* dark themes have near-white ink — white hero type needs a guaranteed-dark scrim */}
+              <div className="absolute inset-0 -z-10 bg-black/45" />
               {cine && <Aurora hues={[hue - 24, hue + 26, hue + 78]} />}
             </>}
         <div className="mx-auto flex min-h-[560px] w-full max-w-5xl flex-col items-center justify-center px-5 py-28 text-center sm:min-h-[640px]">
@@ -324,13 +345,18 @@ export function Hero(p: HeroProps) {
     <section id="hero" className="pv-grain-host relative isolate overflow-hidden">
       {hasImage
         ? <>
-            {/* pv-kenburns: an 18s slow zoom — the single frame reads as cinema, not a stock jpeg. */}
-            <img src={p.image} alt="" className="pv-kenburns absolute inset-0 -z-10 h-full w-full object-cover"
-              style={cine ? { transform: `translate3d(0, ${parY.toFixed(1)}px, 0) scale(1.12)` } : undefined} />
+            {/* pv-kenburns (18s slow zoom) on the img; parallax on the wrapper — an inline
+                transform on the img is permanently overridden by the animation's forwards fill. */}
+            <div className="absolute -inset-y-[8%] inset-x-0 -z-10"
+              style={cine ? { transform: `translate3d(0, ${parY.toFixed(1)}px, 0)` } : undefined}>
+              <img src={p.image} alt="" className="pv-kenburns h-full w-full object-cover" />
+            </div>
             <div className="absolute inset-0 -z-10 bg-gradient-to-r from-black/80 via-black/55 to-black/25" />
           </>
         : <>
             <div className="absolute inset-0 -z-10 bg-gradient-to-br from-[hsl(var(--p))] via-[hsl(var(--p)/0.85)] to-[hsl(var(--ink))]" />
+            {/* dark themes have near-white ink — white hero type needs a guaranteed-dark scrim */}
+            <div className="absolute inset-0 -z-10 bg-black/45" />
             {cine && <Aurora hues={[hue - 24, hue + 26, hue + 78]} />}
           </>}
       <div className="mx-auto flex min-h-[520px] w-full max-w-6xl flex-col justify-center px-5 py-24 sm:min-h-[600px] sm:px-8">
@@ -495,8 +521,12 @@ export function Reviews(p: { heading?: string; reviews?: { author: string; ratin
 
   // SPOTLIGHT — the strongest review as one big editorial quote, the rest small beneath it.
   if (p.variant === 'spotlight' && (reviews.length || p.summary)) {
+    // "Strongest" = highest-rated, at pull-quote length — NOT the longest (a rambling
+    // 400-character review set at display size reads as noise, not proof).
+    const quoteScore = (r: { rating?: number; text: string }) =>
+      (r.rating ?? 4) * 1000 - Math.abs(r.text.length - 140);
     const [spot, ...rest] = reviews.length
-      ? [...reviews].sort((a, b) => b.text.length - a.text.length)
+      ? [...reviews].sort((a, b) => quoteScore(b) - quoteScore(a))
       : [{ author: '', rating: undefined, text: p.summary ?? '' }];
     return (
       <SectionShell id="reviews" alt>
@@ -680,10 +710,16 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
           <Heading heading={p.heading} sub={p.sub} />
           <form className="mt-8 grid max-w-xl gap-4" onSubmit={(e) => void submit(e)}>
             <div className="grid gap-4 sm:grid-cols-2">
-              <input ref={name} required placeholder="Name" className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none focus:border-[hsl(var(--p))]" />
-              <input ref={contact} required placeholder="Phone or email" className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none focus:border-[hsl(var(--p))]" />
+              <label className="grid gap-1.5 text-xs font-medium text-[hsl(var(--mut))]">Name
+                <input ref={name} required placeholder="Jane Smith" className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none transition-colors focus:border-[hsl(var(--p))] focus:ring-2 focus:ring-[hsl(var(--p)/0.25)]" />
+              </label>
+              <label className="grid gap-1.5 text-xs font-medium text-[hsl(var(--mut))]">Phone or email
+                <input ref={contact} required placeholder="How should we reach you?" className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none transition-colors focus:border-[hsl(var(--p))] focus:ring-2 focus:ring-[hsl(var(--p)/0.25)]" />
+              </label>
             </div>
-            <textarea ref={msg} required placeholder="What do you need?" rows={4} className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none focus:border-[hsl(var(--p))]" />
+            <label className="grid gap-1.5 text-xs font-medium text-[hsl(var(--mut))]">What do you need?
+              <textarea ref={msg} required placeholder="Tell us a little about the job…" rows={4} className="resize-none rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none transition-colors focus:border-[hsl(var(--p))] focus:ring-2 focus:ring-[hsl(var(--p)/0.25)]" />
+            </label>
             <button type="submit" disabled={sending} className="inline-flex w-fit items-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] px-6 py-3 text-sm font-semibold text-[hsl(var(--pi))] shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-60">
               {p.cta ?? 'Send'} <ArrowRight size={15} />
             </button>
@@ -694,7 +730,7 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
           <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--mut))]">Prefer to talk?</p>
           {p.phone && <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2.5 text-base font-semibold text-[hsl(var(--ink))]"><Phone size={17} className="text-[hsl(var(--p))]" /> {p.phone}</a>}
           {p.email && <a href={`mailto:${p.email}`} className="flex items-center gap-2.5 text-sm text-[hsl(var(--ink))]"><Mail size={16} className="text-[hsl(var(--p))]" /> {p.email}</a>}
-          <p className="text-xs leading-relaxed text-[hsl(var(--mut))]">Free, no-obligation quotes. Your request goes straight to the owner.</p>
+          <p className="text-xs leading-relaxed text-[hsl(var(--mut))]">Free and no-obligation. Your message goes straight to the owner.</p>
         </div>
       </div>
     </SectionShell>
@@ -726,17 +762,19 @@ export function CtaBanner(p: { heading?: string; sub?: string; cta?: string; var
       </section>
     );
   }
+  // BAND — the ink-colored closer (audit: band and giant were the same primary panel at two
+  // sizes; now they are genuinely different compositions — dark editorial strip vs brand shout).
   return (
-    <section id="ctaBanner" className="pv-grain-host bg-[hsl(var(--p))] py-16">
+    <section id="ctaBanner" className="pv-grain-host bg-[hsl(var(--ink))] py-16">
       <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-6 px-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
         <Reveal>
-          <h2 className="pv-display text-3xl font-semibold tracking-tight text-[hsl(var(--pi))]">{p.heading}</h2>
-          {p.sub && <p className="mt-2 text-[hsl(var(--pi)/0.85)]">{p.sub}</p>}
+          <h2 className="pv-display text-3xl font-semibold tracking-tight text-[hsl(var(--bg))]">{p.heading}</h2>
+          {p.sub && <p className="mt-2 text-[hsl(var(--bg)/0.75)]">{p.sub}</p>}
         </Reveal>
         {p.cta && (
           <Reveal delay={100}>
             <button type="button" onClick={scrollToQuote}
-              className="rounded-[var(--r)] bg-[hsl(var(--pi))] px-7 py-3.5 text-sm font-bold text-[hsl(var(--p))] shadow-xl transition-transform hover:-translate-y-0.5">
+              className="rounded-[var(--r)] bg-[hsl(var(--p))] px-7 py-3.5 text-sm font-bold text-[hsl(var(--pi))] shadow-xl transition-transform hover:-translate-y-0.5">
               {p.cta}
             </button>
           </Reveal>
@@ -748,11 +786,15 @@ export function CtaBanner(p: { heading?: string; sub?: string; cta?: string; var
 
 export function SeoText(p: { heading?: string; body?: string }) {
   if (!p.body) return null;
+  // Footer small-print, not an SEO wall — a grey keyword paragraph is the one element every
+  // owner burned by a cheap SEO vendor recognizes instantly (design-audit finding).
   return (
-    <SectionShell id="seoText" tight>
-      <h2 className="text-sm font-semibold uppercase tracking-wider text-[hsl(var(--mut))]">{p.heading}</h2>
-      <p className="mt-3 max-w-3xl text-sm leading-relaxed text-[hsl(var(--mut))]">{p.body}</p>
-    </SectionShell>
+    <section id="seoText" className="border-t border-[hsl(var(--bor))] py-10">
+      <div className="mx-auto w-full max-w-6xl px-5 sm:px-8">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[hsl(var(--mut))]">{p.heading}</h2>
+        <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-[hsl(var(--mut)/0.85)]">{p.body}</p>
+      </div>
+    </section>
   );
 }
 

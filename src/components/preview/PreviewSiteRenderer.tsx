@@ -107,13 +107,17 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
         .pv-f-grain .pv-grain-host::after { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.06; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); }
         .pv-f-dots .pv-alt { background-image: radial-gradient(hsl(${spec.theme.ink} / 0.07) 1px, transparent 1px); background-size: 22px 22px; }
         .pv-f-ruled .pv-alt { background-image: repeating-linear-gradient(to bottom, transparent, transparent 31px, hsl(${spec.theme.border}) 31px, hsl(${spec.theme.border}) 32px); }
-        .pv-f-outline #ctaBanner h2 { -webkit-text-stroke: 2px hsl(${spec.theme.primaryInk}); color: transparent; font-size: clamp(2.2rem, 5vw, 4rem); line-height: 1.04; }
+        /* outline type keeps a faint fill — pure transparent read as a rendering error, and any
+           engine without text-stroke support would show an invisible headline. */
+        .pv-f-outline #ctaBanner h2 { color: hsl(${spec.theme.primaryInk} / 0.22); font-size: clamp(2.2rem, 5vw, 4rem); line-height: 1.04; }
+        @supports (-webkit-text-stroke: 2px black) { .pv-f-outline #ctaBanner h2 { -webkit-text-stroke: 2px hsl(${spec.theme.primaryInk}); } }
         .pv-f-hard-shadow .pv-card { box-shadow: 5px 5px 0 hsl(${spec.theme.ink} / 0.85); border-color: hsl(${spec.theme.ink} / 0.55); }
         .pv-f-hard-shadow .pv-card.pv-lift:hover { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 hsl(${spec.theme.ink} / 0.85); }
         .pv-marquee { overflow: hidden; }
         .pv-marquee-track { display: flex; gap: 3rem; width: max-content; animation: pv-marquee 30s linear infinite; }
         .pv-marquee:hover .pv-marquee-track { animation-play-state: paused; }
-        @keyframes pv-marquee { to { transform: translateX(-50%); } }
+        /* -50% minus half the track gap = exactly one duplicated period — no seam jump. */
+        @keyframes pv-marquee { to { transform: translateX(calc(-50% - 1.5rem)); } }
         @media (prefers-reduced-motion: reduce) { .pv-site .pv-kenburns, .pv-marquee-track { animation: none; } .pv-site .pv-lift, .pv-site .pv-nav-link { transition: none; } }
         .pv-shot *, .pv-shot *::before, .pv-shot *::after { transition: none !important; animation: none !important; opacity: 1 !important; transform: none !important; }
       `}</style>
@@ -161,8 +165,9 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
           const C = SECTION_COMPONENTS[s.type] as React.ComponentType<Record<string, unknown>>;
           const extra = s.type === 'quote' && previewSiteId && leadSubmitUrl
             ? { previewSiteId, submitUrl: leadSubmitUrl } : {};
-          // flair/motion/siteName AFTER the props spread: spec-owned knobs, never section-prop-owned.
-          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} flair={flair} motion={motion} themePrimary={spec.theme.primary} siteName={spec.business_name} /> : null;
+          // variant/flair/motion/siteName AFTER the props spread: spec-owned knobs, never
+          // section-prop-owned (a model-written props.variant must not bypass the whitelist).
+          return C ? <C key={`${s.type}-${i}`} {...s.props} {...extra} variant={s.variant} flair={flair} motion={motion} themePrimary={spec.theme.primary} siteName={spec.business_name} /> : null;
         })}
       </main>
 

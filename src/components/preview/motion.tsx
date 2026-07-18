@@ -100,7 +100,9 @@ export function Aurora({ hues, intensity = 0.32 }: { hues: number[]; intensity?:
           }}
         />
       ))}
-      <style>{'@keyframes pv-aurora { from { transform: translate3d(-10%, -6%, 0) scale(1); } to { transform: translate3d(12%, 10%, 0) scale(1.22); } }'}</style>
+      {/* media-guarded so the static export (which snapshots reduce() at SSR) still honors the
+          viewer's reduced-motion preference at view time */}
+      <style>{'@keyframes pv-aurora { from { transform: translate3d(-10%, -6%, 0) scale(1); } to { transform: translate3d(12%, 10%, 0) scale(1.22); } } @media (prefers-reduced-motion: reduce) { [style*="pv-aurora"] { animation: none !important; } }'}</style>
     </div>
   );
 }
