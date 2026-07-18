@@ -417,14 +417,24 @@ export async function draftGenerationPlan(prompt: string): Promise<{ plan: EditP
 export async function sendEdit(
   projectId: string, message: string, previewError?: string,
   onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
-  reviewMode?: boolean, signal?: AbortSignal,
+  reviewMode?: boolean, signal?: AbortSignal, branchId?: string | null,
 ): Promise<EditResult> {
+  // FEATURE BRANCH turns are agentic-only: the classic streaming paths (and the chat-edit edge
+  // function) write straight to Main, which would leak branch edits. The branch itself is the
+  // review layer — plan-first/review flags are ignored here because nothing touches Main until
+  // the verified merge. Isolation over ceremony.
+  if (branchId) {
+    if (!agentAvailable()) {
+      throw new Error('Feature branches need an Anthropic model (the agentic runtime). Switch the model in Settings, or use a regular thread.');
+    }
+    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, branchId, signal);
+  }
   // AGENTIC PATH (default when available): the model works with tools — it reads files, researches the
   // web, edits, and verifies with the real compiler, iterating until clean. This is the trust/capability
   // upgrade. Plan-first and review-before-write keep the classic single-shot path (they need the plan /
   // diff-approval protocol the tool loop doesn't produce). Non-Anthropic providers use the classic path.
   if (!planFirst && !reviewMode && agentAvailable()) {
-    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, signal);
+    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, null, signal);
   }
   // Both classic paths stream so the UI can render the edit landing file-by-file.
   // reviewMode (review-before-write) is direct-mode only for now; the edge path applies as before.

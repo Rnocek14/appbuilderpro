@@ -34,6 +34,10 @@ import { cn } from '../lib/utils';
 import { ThemeModal } from '../components/ThemeModal';
 import { AssetsModal } from '../components/AssetsModal';
 import { getThreads, createThread, renameThread, deleteThread, getActiveThread, setActiveThread, threadsEnabled, threadOf, MAIN_THREAD_ID, type Thread } from '../lib/threads';
+import { composeBranchFiles, summarizeBranch, saveBranchFile, removeBranchFile, discardBranch, loadProjectRows } from '../lib/branches';
+import { mergeBranchToMain, type MergeProgress, type MergeReport } from '../lib/mergeBranch';
+import { BranchBar, MergeModal } from '../components/BranchBar';
+import { validateProject } from '../lib/qaCheck';
 import type { Project, Deployment, EditPlan, ProjectFile } from '../types';
 import { publishThroughSpine, deployBackendThroughSpine } from '../lib/garvis/deployRun';
 
@@ -193,10 +197,13 @@ export default function ProjectWorkspace() {
   // Preview controls — lifted here so they share the Runtime bar (one toolbar row, not two).
   const [device, setDevice] = useState<Device>('desktop');
   const [showConsole, setShowConsole] = useState(false);
-  // Conversation threads — separate chat flows within this project (all edit the same code).
+  // Conversation threads — separate chat flows within this project. Threads with kind 'branch'
+  // are FEATURE BRANCHES: they also fork the code (copy-on-write overlay, lib/branches.ts).
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string>(MAIN_THREAD_ID);
   const [threadsReady, setThreadsReady] = useState(true); // false = thread_id migration not applied
+  // Merge-into-Main progress/report (the readiness-gated merge modal).
+  const [merge, setMerge] = useState<{ running: boolean; steps: MergeProgress[]; report: MergeReport | null } | null>(null);
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoSteps, setAutoSteps] = useState(5);
   const [autoLog, setAutoLog] = useState<AutopilotEvent[]>([]);
@@ -242,20 +249,58 @@ export default function ProjectWorkspace() {
     setDrafts((d) => ({ ...d, [path]: content }));
   }, []);
 
+  // FEATURE BRANCH view: when the active thread is a branch, everything the user sees and edits
+  // (file tree, editor, preview, agent) is the branch's composed overlay — Main + this branch's
+  // copy-on-write changes. On Main (or a plain chat thread) this is just `files`.
+  const activeThread = threads.find((t) => t.id === activeThreadId);
+  const activeBranchId = activeThread?.kind === 'branch' ? activeThread.id : null;
+  const viewFiles = useMemo(
+    () => (activeBranchId ? composeBranchFiles(files, activeBranchId) : files),
+    [files, activeBranchId],
+  );
+  const branchSummary = useMemo(
+    () => (activeBranchId ? summarizeBranch(files, activeBranchId) : null),
+    [files, activeBranchId],
+  );
+
   // Persist a file, then drop its draft so the editor falls back to saved content.
+  // On a branch, Save lands in the branch overlay — Main's copy stays untouched.
   const handleSaveFile = useCallback(async (path: string, content: string) => {
-    await saveFile(path, content);
+    if (activeBranchId && id) {
+      await saveBranchFile(id, activeBranchId, files, path, content);
+      await refreshFiles();
+    } else {
+      await saveFile(path, content);
+    }
     setDrafts((d) => {
       if (!(path in d)) return d;
       const next = { ...d }; delete next[path]; return next;
     });
-  }, [saveFile]);
+  }, [saveFile, activeBranchId, id, files, refreshFiles]);
+
+  // Branch-aware file-tree operations (create/rename/delete route to the overlay on a branch).
+  const handleCreateFile = useCallback(async (path: string) => {
+    if (activeBranchId && id) { await saveBranchFile(id, activeBranchId, files, path, ''); await refreshFiles(); }
+    else await createFile(path);
+  }, [activeBranchId, id, files, createFile, refreshFiles]);
+  const handleDeleteFile = useCallback(async (path: string) => {
+    if (activeBranchId && id) { await removeBranchFile(id, activeBranchId, files, path); await refreshFiles(); }
+    else await deleteFile(path);
+  }, [activeBranchId, id, files, deleteFile, refreshFiles]);
+  const handleRenameFile = useCallback(async (oldPath: string, newPath: string) => {
+    if (activeBranchId && id) {
+      const content = viewFiles.find((f) => f.path === oldPath)?.content ?? '';
+      await saveBranchFile(id, activeBranchId, files, newPath, content);
+      await removeBranchFile(id, activeBranchId, files, oldPath);
+      await refreshFiles();
+    } else await renameFile(oldPath, newPath);
+  }, [activeBranchId, id, files, viewFiles, renameFile, refreshFiles]);
 
   // Saved files with unsaved drafts overlaid — what the preview actually runs.
   const liveFiles = useMemo(() => {
-    if (Object.keys(drafts).length === 0) return files;
-    return files.map((f) => (drafts[f.path] !== undefined ? { ...f, content: drafts[f.path] } : f));
-  }, [files, drafts]);
+    if (Object.keys(drafts).length === 0) return viewFiles;
+    return viewFiles.map((f) => (drafts[f.path] !== undefined ? { ...f, content: drafts[f.path] } : f));
+  }, [viewFiles, drafts]);
 
   // Which runtime backs the preview. Imported (possibly full-stack) projects always need the
   // real WebContainer; generated projects use it only when the user flips on "Full build".
@@ -546,6 +591,16 @@ export default function ProjectWorkspace() {
 
   const reloadThreads = useCallback(async () => { if (id) setThreads(await getThreads(id)); }, [id]);
   const switchThread = (tid: string) => { if (!id) return; setActiveThreadId(tid); setActiveThread(id, tid); setTab('chat'); };
+  // Feature branches need the agentic runtime (writes route through the tool loop) AND the
+  // thread_id migration (chat separation) — same gate the switcher uses to offer the option.
+  const canBranch = threadsReady && agentAvailable();
+  const newBranch = async () => {
+    if (!id) return;
+    const t = await createThread(id, 'New branch', 'branch');
+    await reloadThreads();
+    switchThread(t.id);
+    toast('info', 'Feature branch created — edits here stay off Main until you merge.');
+  };
   const newThread = async () => {
     if (!id) return;
     const t = await createThread(id);
@@ -555,9 +610,49 @@ export default function ProjectWorkspace() {
   const handleRenameThread = async (tid: string, title: string) => { if (id) { await renameThread(id, tid, title); await reloadThreads(); } };
   const handleDeleteThread = async (tid: string) => {
     if (!id) return;
+    // Deleting a feature branch throws away its un-merged code overlay too.
+    if (threads.find((t) => t.id === tid)?.kind === 'branch') {
+      await discardBranch(id, tid);
+      await refreshFiles();
+    }
     if (activeThreadId === tid) switchThread(MAIN_THREAD_ID);
     await deleteThread(id, tid);
     await reloadThreads();
+  };
+
+  // Merge the active feature branch into Main — readiness-gated: conflicts are resolved and the
+  // merged candidate must pass checks (repairing itself if needed) BEFORE Main is written. A merge
+  // that can't get green aborts with a report and Main stays exactly as it was. No reverts, ever.
+  const handleMergeBranch = async () => {
+    if (!id || !activeBranchId || busy || merge?.running) return;
+    setMerge({ running: true, steps: [], report: null });
+    try {
+      const report = await mergeBranchToMain(id, activeBranchId, {
+        threadTitle: activeThread?.title,
+        onProgress: (p) => setMerge((m) => (m ? { ...m, steps: [...m.steps, p] } : m)),
+      });
+      setMerge((m) => (m ? { ...m, running: false, report } : m));
+      await refreshFiles();
+      if (report.ok) {
+        const n = report.merged.length + report.deletedPaths.length;
+        toast('success', n ? `Merged ${n} file change${n === 1 ? '' : 's'} into Main — verified before landing.` : 'Branch was already in sync with Main.');
+      }
+    } catch (e) {
+      setMerge((m) => (m ? {
+        ...m, running: false,
+        report: { ok: false, reason: e instanceof Error ? e.message : 'Merge failed unexpectedly — Main was not touched.', merged: [], deletedPaths: [], skippedDeletes: [], conflictsResolved: [], repairRounds: 0, checks: '' },
+      } : m));
+    }
+  };
+
+  // Throw away the branch's un-merged changes (Main untouched); the thread and its chat stay.
+  const handleDiscardBranch = async () => {
+    if (!id || !activeBranchId || busy || merge?.running) return;
+    const n = branchSummary?.changed ?? 0;
+    if (!window.confirm(`Discard this branch's ${n} un-merged file change${n === 1 ? '' : 's'}? Main is untouched; the chat stays. This can't be undone.`)) return;
+    await discardBranch(id, activeBranchId);
+    await refreshFiles();
+    toast('success', 'Branch changes discarded — it now tracks Main again.');
   };
 
   const open = (path: string) => {
@@ -574,9 +669,26 @@ export default function ProjectWorkspace() {
     });
   };
 
-  const handleRevert = async (paths: string[]) => {
+  const handleRevert = async (paths: string[], changes?: { path: string; before: string }[] | null) => {
     if (!id || !paths.length) return;
     try {
+      if (activeBranchId) {
+        // On a branch, revert from the message's own stored before-contents (version history
+        // tracks the branch's namespaced rows, so revertChangeSet's Main lookup doesn't apply).
+        // (Plain record, not a Map — lucide's Map icon import shadows the global in this file.)
+        const byPath: Record<string, string> = {};
+        for (const c of changes ?? []) byPath[c.path] = c.before;
+        const covered = paths.filter((p) => p in byPath);
+        if (!covered.length) { toast('error', 'This message has no stored diff to revert from.'); return; }
+        for (const p of covered) {
+          const before = byPath[p];
+          if (before === '') await removeBranchFile(id, activeBranchId, files, p);
+          else await saveBranchFile(id, activeBranchId, files, p, before);
+        }
+        await refreshFiles();
+        toast('success', `Reverted ${covered.length} file(s) on this branch.`);
+        return;
+      }
       const { restored, removed } = await revertChangeSet(id, paths);
       await refreshFiles();
       toast('success', `Reverted ${restored.length + removed.length} file(s) to their previous version.`);
@@ -590,19 +702,27 @@ export default function ProjectWorkspace() {
   // false — auto-fixes after you've approved the main change shouldn't re-prompt the diff modal.)
   const runPostEditChecks = async () => {
     if (!id) return;
-    let issues = await runQA(id);
+    // On a feature branch, QA must judge the BRANCH's composed files — Main's rows in the DB are
+    // exactly what this thread is diverging from.
+    const currentQA = async () => {
+      if (!activeBranchId) return runQA(id);
+      const rows = await loadProjectRows(id);
+      return validateProject(composeBranchFiles(rows, activeBranchId).filter((f) => !isMetaFile(f.path)));
+    };
+    let issues = await currentQA();
     let errs = issues.filter((i) => i.severity === 'error');
     const hadErrors = errs.length;
     // Missing files first, deterministically: one dedicated generation per file, in parallel.
     // (An edit that rewrites App.tsx to route to pages it never emitted is the worst failure —
     // asking one bounded fix stream to write them all is exactly what fails to converge.)
-    if (errs.length) {
+    // (Not on branches: createMissingModules writes straight to Main; the fix loop below covers it.)
+    if (errs.length && !activeBranchId) {
       try {
         const made = await createMissingModules(id);
         if (made.length) {
           toast('info', `Created ${made.length} missing file${made.length === 1 ? '' : 's'} the app imports…`);
           await refreshFiles();
-          issues = await runQA(id);
+          issues = await currentQA();
           errs = issues.filter((i) => i.severity === 'error');
         }
       } catch { /* best-effort — the QA loop below still runs */ }
@@ -612,9 +732,9 @@ export default function ProjectWorkspace() {
     for (let pass = 1; pass <= 3 && errs.length; pass++) {
       toast('info', `Found ${errs.length} issue${errs.length === 1 ? '' : 's'} — auto-fixing…`);
       const before = errs.length;
-      await sendEdit(id, issuesToFixRequest(errs), undefined, onStreamEvent, false, undefined, activeThreadId, false);
+      await sendEdit(id, issuesToFixRequest(errs), undefined, onStreamEvent, false, undefined, activeThreadId, false, undefined, activeBranchId);
       await refreshFiles();
-      issues = await runQA(id);
+      issues = await currentQA();
       errs = issues.filter((i) => i.severity === 'error');
       if (errs.length >= before) break; // stalled
     }
@@ -633,7 +753,7 @@ export default function ProjectWorkspace() {
         await sendEdit(
           id,
           'The live preview threw the runtime error shown below. Find the ROOT CAUSE — most often a default-vs-named import/export mismatch, or rendering undefined/an object as a component — and make the smallest correct fix.',
-          runtimeErr, onStreamEvent, false, undefined, activeThreadId, false,
+          runtimeErr, onStreamEvent, false, undefined, activeThreadId, false, undefined, activeBranchId,
         );
         await refreshFiles();
       }
@@ -649,7 +769,10 @@ export default function ProjectWorkspace() {
   const recheckTypes = async (): Promise<TsDiag[]> => {
     if (!id) return [];
     const { data } = await supabase.from('project_files').select('*').eq('project_id', id).is('deleted_at', null);
-    try { await syncFiles(id, (data ?? []) as ProjectFile[]); } catch { /* runner may be idle */ }
+    // On a branch, the container must check the branch's composed view, not Main's rows.
+    const rows = (data ?? []) as ProjectFile[];
+    const toSync = activeBranchId ? composeBranchFiles(rows, activeBranchId) : rows;
+    try { await syncFiles(id, toSync); } catch { /* runner may be idle */ }
     return runTypecheck(id);
   };
 
@@ -662,7 +785,7 @@ export default function ProjectWorkspace() {
       toast('info', `Found ${remaining.length} type error${remaining.length === 1 ? '' : 's'} — auto-fixing…`);
       const before = remaining.length;
       const msg = issuesToFixRequest(remaining.map((d) => ({ path: d.path, severity: 'error' as const, message: `Type error (line ${d.line}): ${d.message}` })));
-      await sendEdit(id, msg, undefined, onStreamEvent, false, undefined, activeThreadId, false);
+      await sendEdit(id, msg, undefined, onStreamEvent, false, undefined, activeThreadId, false, undefined, activeBranchId);
       await refreshFiles();
       remaining = await recheckTypes();
       if (remaining.length >= before) break; // stalled — repeating the same request won't converge
@@ -694,11 +817,11 @@ export default function ProjectWorkspace() {
   const stopSend = () => abortRef.current?.abort();
 
   const handleSend = async (message: string, previewError?: string, planFirst?: boolean, research?: boolean, image?: string, reviewMode?: boolean) => {
-    if (!id || busy) return;
-    // Auto-name a fresh thread from its first message, so threads get meaningful titles.
+    if (!id || busy || merge?.running) return;
+    // Auto-name a fresh thread/branch from its first message, so they get meaningful titles.
     if (activeThreadId !== MAIN_THREAD_ID) {
       const t = threads.find((x) => x.id === activeThreadId);
-      if (t && t.title === 'New thread') void renameThread(id, activeThreadId, message.slice(0, 48)).then(reloadThreads);
+      if (t && (t.title === 'New thread' || t.title === 'New branch')) void renameThread(id, activeThreadId, message.slice(0, 48)).then(reloadThreads);
     }
     setBusy(true);
     setTab('chat');
@@ -714,7 +837,7 @@ export default function ProjectWorkspace() {
         await startGeneration(id, message);
         toast('info', 'Generation started — watch the forge.');
       } else {
-        const result = await sendEdit(id, message, previewError, onStreamEvent, planFirst, image, activeThreadId, reviewMode, controller.signal);
+        const result = await sendEdit(id, message, previewError, onStreamEvent, planFirst, image, activeThreadId, reviewMode, controller.signal, activeBranchId);
         if (result.action === 'ask') {
           setAskOptions(result.options ?? []);
         } else if (result.action === 'plan') {
@@ -1031,6 +1154,17 @@ export default function ProjectWorkspace() {
           </div>
         </div>
 
+        {/* Feature-branch strip: everything below (chat, code, preview) is this branch's view. */}
+        {activeBranchId && branchSummary && (
+          <BranchBar
+            title={activeThread?.title ?? 'Branch'}
+            summary={branchSummary}
+            busy={busy || !!merge?.running}
+            onMerge={handleMergeBranch}
+            onDiscard={handleDiscardBranch}
+          />
+        )}
+
         {/* file-load failure — visible instead of an endless "Waiting for project files…" */}
         {loadError && (
           <div className="flex items-center gap-3 border-b border-forge-err/40 bg-forge-err/10 px-4 py-2 text-xs text-forge-err">
@@ -1050,12 +1184,12 @@ export default function ProjectWorkspace() {
           {tab === 'code' && (
             <div className="hidden w-52 shrink-0 border-r border-forge-border bg-forge-panel md:block">
               <FileTree
-                files={files.filter((f) => !isMetaFile(f.path))}
+                files={viewFiles.filter((f) => !isMetaFile(f.path))}
                 activePath={activePath}
                 onOpen={open}
-                onCreate={createFile}
-                onRename={renameFile}
-                onDelete={deleteFile}
+                onCreate={handleCreateFile}
+                onRename={handleRenameFile}
+                onDelete={handleDeleteFile}
               />
             </div>
           )}
@@ -1073,6 +1207,7 @@ export default function ProjectWorkspace() {
                 threadsReady={threadsReady}
                 onSwitchThread={switchThread}
                 onNewThread={newThread}
+                onNewBranch={canBranch ? newBranch : undefined}
                 onRenameThread={handleRenameThread}
                 onDeleteThread={handleDeleteThread}
                 askOptions={askOptions}
@@ -1090,7 +1225,7 @@ export default function ProjectWorkspace() {
               />
             ) : (
               <CodeEditorPane
-                files={files}
+                files={viewFiles}
                 openPaths={openPaths}
                 activePath={activePath}
                 drafts={drafts}
@@ -1154,13 +1289,23 @@ export default function ProjectWorkspace() {
             )}
             <div className="min-h-0 flex-1">
               {useWebContainer ? (
-                <WebContainerPane files={files} projectId={id!} onFixError={handleFixError} onHealTypes={healTypeErrors} aiBusy={busy} />
+                <WebContainerPane files={viewFiles} projectId={id!} onFixError={handleFixError} onHealTypes={healTypeErrors} aiBusy={busy} />
               ) : (
                 <PreviewPane files={liveFiles} onFixError={handleFixError} device={device} showConsole={showConsole} busy={busy} onSelectElement={(sel) => { setSelection(sel); setTab('chat'); }} />
               )}
             </div>
           </div>
         </div>
+
+        {/* Merge-into-Main progress + report (readiness-gated; Main only changes when green). */}
+        {merge && (
+          <MergeModal
+            running={merge.running}
+            steps={merge.steps}
+            report={merge.report}
+            onClose={() => { if (!merge.running) setMerge(null); }}
+          />
+        )}
 
         {/* Interactive shell into the running WebContainer (any project on the real runtime) */}
         {termOpen && useWebContainer && (

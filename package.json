@@ -25,6 +25,7 @@
     "verify:content": "tsx src/lib/garvis/content.verify.ts",
     "verify:safeedit": "tsx src/lib/safeedit.verify.ts",
     "verify:pendingedit": "tsx src/lib/pendingEdit.verify.ts",
+    "verify:branches": "tsx src/lib/branches.verify.ts",
     "verify:clustering": "tsx src/lib/garvis/clustering.verify.ts",
     "verify:universe": "tsx src/lib/garvis/universe.verify.ts",
     "verify:loops": "tsx src/lib/garvis/loops.verify.ts",
