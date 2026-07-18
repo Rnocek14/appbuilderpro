@@ -17,6 +17,7 @@ export interface WonClose {
   businessName: string;
   paymentLink: string | null;   // the operator's Stripe link for this tier (null = not set up yet)
   demoSlug: string | null;      // the pitched rebuild — /preview-site/<slug> — when known
+  invoiceNumber: string | null; // draft invoice minted for a one-time deal (app_0086 provenance)
 }
 
 export async function closeCampaignWon(input: {
@@ -77,6 +78,22 @@ export async function closeCampaignWon(input: {
     demoSlug = (site?.slug as string | null) ?? null;
   }
 
+  // Ledgers connect (app_0086): a one-time deal with a real price and a real email gets its DRAFT
+  // invoice minted with full provenance — nothing sends, it just appears on Money ready to queue.
+  // Monthly retainers bill through the Stripe payment link instead; no invoice invented for them.
+  let invoiceNumber: string | null = null;
+  if (tier.cadence === 'one_time' && priceCents > 0 && email) {
+    try {
+      const { createInvoice } = await import('./moneyRun');
+      const inv = await createInvoice({
+        title: `${tier.name} — ${businessName}`, toEmail: email,
+        lineItems: [{ description: tier.name, qty: 1, unit_usd: priceCents / 100 }],
+        source: 'won_deal', campaignId: camp.id as string, clientSubscriptionId: sub.id as string,
+      });
+      invoiceNumber = inv.number;
+    } catch { /* the close stands on its own — a failed draft is re-creatable on Money */ }
+  }
+
   const settings = await getBillingSettings().catch(() => ({ website_payment_link: null, automation_payment_link: null }));
   const paymentLink = tier.id === 'website' ? settings.website_payment_link : settings.automation_payment_link;
 
@@ -86,5 +103,5 @@ export async function closeCampaignWon(input: {
     payload: { key: `won:${camp.id}`, campaign_id: camp.id, subscription_id: sub.id, tier: tier.id },
   }).then(() => {}, () => {});
 
-  return { subscriptionId: sub.id as string, businessName, paymentLink, demoSlug };
+  return { subscriptionId: sub.id as string, businessName, paymentLink, demoSlug, invoiceNumber };
 }
