@@ -157,6 +157,23 @@ export interface SectionSpec {
 export const FLAIR_DEVICES = ['grain', 'marquee', 'dots', 'ruled', 'outline', 'hard-shadow'] as const;
 export type FlairDevice = (typeof FLAIR_DEVICES)[number];
 
+/** MOTION TIER — "know when to use the scroll effects" as a contract, not taste. The renderer
+ *  gates the award-kit moves by tier (DESIGN_GUIDE restraint: one signature move, calm trades
+ *  stay calm): calm = reveals only (medical, legal); lively = TextReveal headline + CountUp
+ *  stats + image wipes (default); cinematic = lively + aurora/parallax hero + magnetic CTA +
+ *  tilt cards + scroll progress (photo-led and bold trades). */
+export const MOTION_TIERS = ['calm', 'lively', 'cinematic'] as const;
+export type MotionTier = (typeof MOTION_TIERS)[number];
+
+/** Structural variants per section — different COMPOSITIONS, not palette swaps. Whitelisted here;
+ *  normalizeSpec drops anything else and falls back to the recipe's default composition. */
+export const SECTION_VARIANTS: Partial<Record<string, readonly string[]>> = {
+  hero: ['fullbleed', 'split', 'stacked', 'editorial'],
+  services: ['cards', 'rows'],
+  reviews: ['grid', 'spotlight'],
+  ctaBanner: ['band', 'giant'],
+};
+
 export interface ThemeSpec {
   /** HSL triplets, "H S% L%" (token style) — validated; renderer wraps in hsl(). */
   primary: string;
@@ -172,6 +189,8 @@ export interface ThemeSpec {
   tone: string;         // one-line art direction ("trustworthy local craftsman")
   /** 0-3 signature devices; the AI picks to fit the trade, recipes carry defaults. */
   flair?: FlairDevice[];
+  /** Scroll/motion tier — gates the award-kit moves per DESIGN_GUIDE restraint rules. */
+  motion?: MotionTier;
 }
 
 export interface SiteSpec {
@@ -204,6 +223,10 @@ export interface Recipe {
   theme: ThemeSpec;
   /** Section CTA verb — "Get a Free Quote" vs "Book a Table" vs "Book Now". */
   cta: string;
+  /** Default structural compositions per section — the fallback's look and the normalizer's
+   *  floor when the model names no (or an invalid) variant. Different verticals get genuinely
+   *  different page architecture, not a palette swap. */
+  variants?: Partial<Record<SectionType, string>>;
 }
 
 export const RECIPES: Recipe[] = [
@@ -215,9 +238,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '16 78% 44%', primaryInk: '24 40% 98%', bg: '36 30% 97%', ink: '24 24% 12%',
       muted: '24 10% 40%', card: '36 20% 99.5%', border: '30 18% 88%', radius: 8,
-      displayFont: 'Sora', bodyFont: 'Inter', tone: 'trustworthy local craftsman — bold, direct, proof-forward', flair: ['marquee', 'hard-shadow'],
+      displayFont: 'Sora', bodyFont: 'Inter', tone: 'trustworthy local craftsman — bold, direct, proof-forward', flair: ['marquee', 'hard-shadow'], motion: 'cinematic',
     },
     cta: 'Get a Free Quote',
+    variants: { services: 'cards', ctaBanner: 'band' },
   },
   {
     id: 'restaurant',
@@ -227,9 +251,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '350 62% 38%', primaryInk: '30 40% 97%', bg: '38 42% 96%', ink: '20 30% 13%',
       muted: '24 14% 38%', card: '40 40% 99%', border: '34 24% 87%', radius: 4,
-      displayFont: 'Fraunces', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, editorial — food photography leads', flair: ['grain', 'marquee'],
+      displayFont: 'Fraunces', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, editorial — food photography leads', flair: ['grain', 'marquee'], motion: 'cinematic',
     },
     cta: 'Reserve a Table',
+    variants: { hero: 'stacked', reviews: 'spotlight', ctaBanner: 'giant' },
   },
   {
     id: 'salon_spa',
@@ -239,9 +264,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '160 30% 32%', primaryInk: '150 20% 98%', bg: '80 20% 97%', ink: '160 18% 14%',
       muted: '160 8% 42%', card: '80 24% 99.5%', border: '90 12% 88%', radius: 20,
-      displayFont: 'Cormorant Garamond', bodyFont: 'Figtree', tone: 'calm, luxurious, airy — whitespace and softness', flair: ['grain', 'dots'],
+      displayFont: 'Cormorant Garamond', bodyFont: 'Figtree', tone: 'calm, luxurious, airy — whitespace and softness', flair: ['grain', 'dots'], motion: 'lively',
     },
     cta: 'Book Now',
+    variants: { hero: 'stacked', reviews: 'spotlight' },
   },
   {
     id: 'auto_services',
@@ -251,9 +277,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '210 90% 40%', primaryInk: '210 30% 98%', bg: '220 14% 96%', ink: '220 24% 12%',
       muted: '220 8% 40%', card: '220 10% 99.5%', border: '220 12% 87%', radius: 6,
-      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'competent, no-nonsense shop — steel blue, bold type, proof up front', flair: ['hard-shadow', 'marquee'],
+      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'competent, no-nonsense shop — steel blue, bold type, proof up front', flair: ['hard-shadow', 'marquee'], motion: 'lively',
     },
     cta: 'Get an Estimate',
+    variants: { services: 'rows' },
   },
   {
     id: 'dental_medical',
@@ -263,9 +290,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '190 65% 34%', primaryInk: '190 30% 98%', bg: '195 35% 97.5%', ink: '200 30% 13%',
       muted: '200 12% 42%', card: '195 30% 99.5%', border: '195 20% 89%', radius: 12,
-      displayFont: 'Schibsted Grotesk', bodyFont: 'Hanken Grotesk', tone: 'calm clinical trust — clean teal, generous whitespace, credentials visible', flair: ['dots'],
+      displayFont: 'Schibsted Grotesk', bodyFont: 'Hanken Grotesk', tone: 'calm clinical trust — clean teal, generous whitespace, credentials visible', flair: ['dots'], motion: 'calm',
     },
     cta: 'Book an Appointment',
+    variants: { services: 'cards' },
   },
   {
     id: 'legal_professional',
@@ -275,9 +303,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '222 40% 24%', primaryInk: '40 40% 96%', bg: '40 25% 97%', ink: '222 30% 12%',
       muted: '222 10% 40%', card: '40 20% 99.5%', border: '40 14% 88%', radius: 2,
-      displayFont: 'Newsreader', bodyFont: 'Figtree', tone: 'established counsel — ink navy on warm paper, serif authority, restraint', flair: ['ruled', 'outline'],
+      displayFont: 'Newsreader', bodyFont: 'Figtree', tone: 'established counsel — ink navy on warm paper, serif authority, restraint', flair: ['ruled', 'outline'], motion: 'calm',
     },
     cta: 'Request a Consultation',
+    variants: { hero: 'editorial', services: 'rows', reviews: 'spotlight' },
   },
   {
     id: 'real_estate',
@@ -287,9 +316,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '30 45% 38%', primaryInk: '36 40% 97%', bg: '36 22% 97.5%', ink: '28 26% 12%',
       muted: '28 10% 42%', card: '36 24% 99.5%', border: '32 16% 88%', radius: 0,
-      displayFont: 'Fraunces', bodyFont: 'Figtree', tone: 'quiet luxury listing — bronze on cream, editorial serif, photography leads', flair: ['outline', 'grain'],
+      displayFont: 'Fraunces', bodyFont: 'Figtree', tone: 'quiet luxury listing — bronze on cream, editorial serif, photography leads', flair: ['outline', 'grain'], motion: 'lively',
     },
     cta: 'Schedule a Showing',
+    variants: { hero: 'editorial', reviews: 'spotlight', ctaBanner: 'giant' },
   },
   {
     id: 'fitness',
@@ -299,9 +329,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '80 85% 45%', primaryInk: '80 60% 8%', bg: '220 12% 10%', ink: '60 15% 95%',
       muted: '220 6% 62%', card: '220 12% 14%', border: '220 10% 22%', radius: 8,
-      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'committed-dark energy — near-black, one electric lime accent, hard type', flair: ['outline', 'grain', 'marquee'],
+      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'committed-dark energy — near-black, one electric lime accent, hard type', flair: ['outline', 'grain', 'marquee'], motion: 'cinematic',
     },
     cta: 'Start Free Trial',
+    variants: { hero: 'stacked', ctaBanner: 'giant' },
   },
   {
     id: 'retail_boutique',
@@ -311,9 +342,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '335 45% 40%', primaryInk: '340 30% 98%', bg: '30 30% 97.5%', ink: '335 20% 14%',
       muted: '335 8% 44%', card: '30 26% 99.5%', border: '30 16% 89%', radius: 14,
-      displayFont: 'Bricolage Grotesque', bodyFont: 'Onest', tone: 'warm curated shop — berry accent on cream, product photography first', flair: ['dots', 'marquee'],
+      displayFont: 'Bricolage Grotesque', bodyFont: 'Onest', tone: 'warm curated shop — berry accent on cream, product photography first', flair: ['dots', 'marquee'], motion: 'lively',
     },
     cta: 'Visit the Shop',
+    variants: { hero: 'stacked' },
   },
   {
     id: 'pet_care',
@@ -323,9 +355,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '25 85% 50%', primaryInk: '30 50% 98%', bg: '45 40% 97%', ink: '30 26% 13%',
       muted: '30 10% 42%', card: '45 36% 99.5%', border: '40 20% 87%', radius: 18,
-      displayFont: 'Bricolage Grotesque', bodyFont: 'Figtree', tone: 'joyful and trustworthy — sunny orange, rounded softness, real pet photos', flair: ['dots', 'marquee'],
+      displayFont: 'Bricolage Grotesque', bodyFont: 'Figtree', tone: 'joyful and trustworthy — sunny orange, rounded softness, real pet photos', flair: ['dots', 'marquee'], motion: 'lively',
     },
     cta: 'Book a Visit',
+    variants: { services: 'cards' },
   },
   {
     id: 'photography_events',
@@ -335,9 +368,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '42 50% 52%', primaryInk: '40 40% 8%', bg: '240 8% 8%', ink: '40 20% 94%',
       muted: '240 5% 60%', card: '240 8% 12%', border: '240 6% 20%', radius: 0,
-      displayFont: 'Gloock', bodyFont: 'Hanken Grotesk', tone: 'gallery dark — near-black stage, champagne accent, the work IS the site', flair: ['grain', 'outline'],
+      displayFont: 'Gloock', bodyFont: 'Hanken Grotesk', tone: 'gallery dark — near-black stage, champagne accent, the work IS the site', flair: ['grain', 'outline'], motion: 'cinematic',
     },
     cta: 'Check My Date',
+    variants: { hero: 'editorial', ctaBanner: 'giant' },
   },
 ];
 
@@ -390,6 +424,7 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     bodyFont: font(t.bodyFont, recipe.theme.bodyFont),
     tone: str(t.tone, recipe.theme.tone),
     flair: rawFlair ?? recipe.theme.flair ?? [],
+    motion: MOTION_TIERS.includes(t.motion as MotionTier) ? (t.motion as MotionTier) : (recipe.theme.motion ?? 'lively'),
   };
 
   // sections: keep known types only, in given order; re-inject photo/review data from the
@@ -403,7 +438,12 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
       const type = o?.type as SectionType;
       if (!SECTION_TYPES.includes(type)) return null;
       const props = (typeof o.props === 'object' && o.props !== null ? o.props : {}) as Record<string, unknown>;
-      return { type, variant: typeof o.variant === 'string' ? o.variant : undefined, props };
+      // variant: whitelist-checked; unknown/absent → the recipe's default composition for the type
+      const allowed = SECTION_VARIANTS[type];
+      const variant = (typeof o.variant === 'string' && allowed?.includes(o.variant))
+        ? o.variant
+        : recipe.variants?.[type];
+      return { type, variant, props };
     })
     .filter((s): s is SectionSpec => s !== null);
   if (!sections.length) sections = fallback.sections;
@@ -663,6 +703,10 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         break;
     }
   }
+
+  // The recipe's structural compositions ride into the fallback — the floor is architecturally
+  // distinct per vertical, not one skeleton with different paint.
+  for (const s of sections) s.variant = s.variant ?? recipe.variants?.[s.type];
 
   const spec: SiteSpec = {
     version: 1,

@@ -106,6 +106,31 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
     JSON.stringify(noFlair.theme.flair) === JSON.stringify(pickRecipe(ROOFER).theme.flair));
 }
 
+// motion tier + structural variants (the uniqueness contract)
+{
+  const recipe = pickRecipe(ROOFER);
+  check('recipes: every recipe declares a motion tier',
+    RECIPES.every((r) => ['calm', 'lively', 'cinematic'].includes(r.theme.motion ?? '')));
+  check('normalize: bogus motion falls back to the recipe tier',
+    normalizeSpec({ theme: { motion: 'explosive' } }, ROOFER).theme.motion === recipe.theme.motion);
+  check('normalize: valid motion kept',
+    normalizeSpec({ theme: { motion: 'calm' } }, ROOFER).theme.motion === 'calm');
+  const v = normalizeSpec({ sections: [
+    { type: 'hero', props: { heading: 'H' }, variant: 'editorial' },
+    { type: 'services', props: {}, variant: 'sideways-spiral' },
+    { type: 'ctaBanner', props: {}, variant: 'giant' },
+  ] }, ROOFER);
+  check('normalize: whitelisted section variant kept', v.sections.find((s) => s.type === 'hero')?.variant === 'editorial');
+  check('normalize: unknown variant replaced by the recipe default composition',
+    v.sections.find((s) => s.type === 'services')?.variant === recipe.variants?.services);
+  check('normalize: ctaBanner giant kept', v.sections.find((s) => s.type === 'ctaBanner')?.variant === 'giant');
+  const fb = assembleFallbackSpec(ROOFER);
+  check('fallback: sections carry the recipe variant defaults',
+    fb.sections.every((s) => recipe.variants?.[s.type] === undefined || s.variant === recipe.variants[s.type]));
+  check('recipes: distinct verticals get distinct page architecture (hero variants differ)',
+    new Set(RECIPES.map((r) => r.variants?.hero ?? 'fullbleed')).size >= 3);
+}
+
 // slug + nav helpers
 check('previewSlug strips punctuation', previewSlug("Joe's Roofing & Sons!") === 'joes-roofing-sons');
 check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ type, props: {} })), 'Quote').length <= 6);

@@ -42,6 +42,19 @@ HARD RULES:
     "ruled"       engineered ruled-line texture on alternate sections — legal, editorial, ink-on-paper
     "outline"     the big CTA-banner headline set as hollow outline type — editorial, luxury, gyms
     "hard-shadow" hard offset block shadows on cards — bold trades, no-nonsense shops, brutalist
+- MOTION — theme.motion picks the scroll-choreography tier. Know when: "calm" (medical, legal,
+  finance — reveals only, nothing showy); "lively" (most trades — kinetic headline, counting
+  stats, image wipes); "cinematic" (photo-led, food, fitness, bold trades — adds a living aurora
+  or parallax hero, a magnetic CTA, tilting cards, a reading-progress line). Restraint IS the
+  craft: when unsure, step DOWN a tier.
+- STRUCTURE — sections may carry a "variant" that changes the COMPOSITION, not just the paint:
+    hero: "fullbleed" (cinematic panel) | "split" (photo beside copy — needs a photo) |
+          "stacked" (centered, monumental) | "editorial" (ink on the page paper, rule-line
+          eyebrow — legal, luxury, photography)
+    services: "cards" (grid) | "rows" (indexed editorial menu — professional, no-nonsense)
+    reviews: "grid" | "spotlight" (one big quote leads)
+    ctaBanner: "band" | "giant" (oversized closer)
+  Two sites in the same town must never share a skeleton — vary structure with intent.
 - Sections: choose ONLY from the allowed list, in a persuasive order (hero first; a quote/ctaBanner
   must appear). Skip sections the profile has no content for.
 - SEO title ≤ 60 chars with the location; description ≤ 155 chars with a call to action.
@@ -82,8 +95,9 @@ Return:
  "theme": {"primary": "H S% L%", "primaryInk": "H S% L%", "bg": "H S% L%", "ink": "H S% L%",
            "muted": "H S% L%", "card": "H S% L%", "border": "H S% L%", "radius": int(0-28),
            "displayFont": "Google Font", "bodyFont": "Google Font", "tone": str,
-           "flair": [2-3 of "grain"|"marquee"|"dots"|"ruled"|"outline"|"hard-shadow"]},
- "sections": [{"type": str, "props": {…}}],
+           "flair": [2-3 of "grain"|"marquee"|"dots"|"ruled"|"outline"|"hard-shadow"],
+           "motion": "calm"|"lively"|"cinematic"},
+ "sections": [{"type": str, "variant": str?, "props": {…}}],
  "seo": {"title": str, "description": str, "keywords": [str]},
  "footer": {"line": str}}`;
 }

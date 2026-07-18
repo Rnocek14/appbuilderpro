@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SiteSpec } from '../../lib/preview/spec';
 import { SECTION_COMPONENTS } from './sections';
+import { ScrollProgress } from './motion';
 import { Phone, Menu, X } from 'lucide-react';
 
 /** Create-or-update one <meta> in <head> — the SPA route must unfurl/read as the BUSINESS. */
@@ -79,6 +80,8 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
   // root so the device CSS below can style hosts declaratively. Shot mode drops them — a static
   // screenshot gains nothing from texture/motion, and marquee would freeze mid-scroll.
   const flair = shot ? [] : (spec.theme.flair ?? []);
+  // Motion tier gates the award-kit moves per section; shot mode forces calm (static frame).
+  const motion = shot ? 'calm' : (spec.theme.motion ?? 'lively');
 
   return (
     <div className={`pv-site min-h-screen bg-[hsl(var(--bg))] antialiased ${shot ? 'pv-shot' : ''} ${flair.map((f) => `pv-f-${f}`).join(' ')}`} style={vars}>
@@ -147,6 +150,8 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
               ))}
             </nav>
           )}
+          {/* Cinematic tier: reading-progress line under the sticky header. */}
+          {motion === 'cinematic' && <ScrollProgress />}
         </header>
       )}
 
@@ -156,8 +161,8 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
           const C = SECTION_COMPONENTS[s.type] as React.ComponentType<Record<string, unknown>>;
           const extra = s.type === 'quote' && previewSiteId && leadSubmitUrl
             ? { previewSiteId, submitUrl: leadSubmitUrl } : {};
-          // flair AFTER the props spread: the device list is theme-owned, never section-prop-owned.
-          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} flair={flair} /> : null;
+          // flair/motion AFTER the props spread: theme-owned knobs, never section-prop-owned.
+          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} flair={flair} motion={motion} themePrimary={spec.theme.primary} /> : null;
         })}
       </main>
 

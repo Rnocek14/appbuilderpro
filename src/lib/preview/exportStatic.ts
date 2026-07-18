@@ -78,8 +78,13 @@ ${opts.canonicalUrl ? `<link rel="canonical" href="${esc(opts.canonicalUrl)}">` 
 <style>${css}</style>
 <style>
 /* Static-export overrides: scroll-reveal runs on JS the export doesn't ship — content must be
-   visible immediately; the dead SPA-only controls (mobile menu toggle) are hidden. */
+   visible immediately; the dead SPA-only controls (mobile menu toggle) are hidden. The motion-kit
+   moves (TextReveal words, ImageReveal wipes) are forced to their final states the same way —
+   the exported page is the finished site, animation was progressive enhancement. */
 .pv-export .pv-site [style*="translateY"], .pv-export .pv-site .opacity-0 { opacity: 1 !important; transform: none !important; }
+.pv-export .pv-trw { transform: none !important; }
+.pv-export .pv-irv { clip-path: none !important; }
+.pv-export .pv-irv img { transform: none !important; }
 .pv-export header button[aria-label*="menu" i] { display: none; }
 html { scroll-behavior: smooth; }
 </style>
