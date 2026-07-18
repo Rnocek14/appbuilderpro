@@ -8,7 +8,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
-  CreditCard, Settings,
+  CreditCard, Settings, Wand2,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -19,6 +19,8 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Operate',
     items: [
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
+      // The whole-intent front door: one sentence → a compiled, reviewable plan over everything.
+      { to: '/garvis/orchestrate', label: 'Orchestrate', icon: Wand2 },
       { to: '/garvis/home', label: 'Canvas', icon: Compass },
       { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
