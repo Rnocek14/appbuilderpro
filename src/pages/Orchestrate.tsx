@@ -8,15 +8,15 @@
 // shows as questions (never invented). Approving runs the steps live — outcomes link to where
 // each result lives, and outbound machinery stays behind its own downstream approvals.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Wand2, Loader2, Check, X, ExternalLink, TriangleAlert, CircleHelp, SkipForward, Play, RotateCcw } from 'lucide-react';
+import { Wand2, Loader2, Check, X, ExternalLink, TriangleAlert, CircleHelp, SkipForward, Play, RotateCcw, Hourglass, Trash2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
-import { Button } from '../components/ui';
-import { cn } from '../lib/utils';
+import { Badge, Button } from '../components/ui';
+import { cn, timeAgo } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
-import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
-import { compileIntent, executePlan, type RunReport } from '../lib/garvis/orchestratorRun';
+import { planProgress, type CompiledPlan, type StepStatus } from '../lib/garvis/orchestrator';
+import { compileIntent, savePlan, runArc, listArcs, abandonArc, type RunReport, type ArcRow } from '../lib/garvis/orchestratorRun';
 import { actionById } from '../lib/garvis/actionRegistry';
 
 const RISK_LABEL = { safe: 'safe', spend: 'uses credits', outbound: 'can send' } as const;
@@ -27,8 +27,13 @@ const STATUS_META: Record<StepStatus['kind'], { icon: typeof Check; cls: string 
   done: { icon: Check, cls: 'text-forge-ok' },
   needs_review: { icon: Check, cls: 'text-forge-ember' },
   handoff: { icon: ExternalLink, cls: 'text-forge-ember' },
+  waiting: { icon: Hourglass, cls: 'text-forge-warn' },
   failed: { icon: X, cls: 'text-forge-err' },
   skipped: { icon: SkipForward, cls: 'text-forge-dim' },
+};
+
+const ARC_TONE: Record<ArcRow['status'], 'dim' | 'ember' | 'ok' | 'warn' | 'err'> = {
+  draft: 'dim', running: 'ember', waiting: 'warn', done: 'ok', failed: 'err', abandoned: 'dim',
 };
 
 export default function Orchestrate() {
@@ -40,6 +45,11 @@ export default function Orchestrate() {
   const [statuses, setStatuses] = useState<StepStatus[] | null>(null);
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<RunReport | null>(null);
+  // Durable arcs — every approved plan persists, waits at seams, and resumes here.
+  const [arcs, setArcs] = useState<ArcRow[]>([]);
+  const [resumingId, setResumingId] = useState<string | null>(null);
+  const refreshArcs = () => { void listArcs().then(setArcs).catch(() => {}); };
+  useEffect(refreshArcs, []);
 
   const compile = async () => {
     if (compiling || running) return;
@@ -62,14 +72,37 @@ export default function Orchestrate() {
     setRunning(true);
     setReport(null);
     try {
-      const rep = await executePlan(plan, setStatuses);
+      const planId = await savePlan(intent, plan);
+      const rep = await runArc(planId, setStatuses);
       setReport(rep);
-      toast(rep.failed === 0 ? 'success' : 'info',
-        `${rep.succeeded} of ${plan.steps.length} step${plan.steps.length === 1 ? '' : 's'} completed${rep.failed ? `, ${rep.failed} failed` : ''}${rep.skipped ? `, ${rep.skipped} skipped` : ''}.`);
+      const p = planProgress(rep.statuses);
+      toast(rep.state === 'done' ? 'success' : 'info',
+        rep.state === 'waiting'
+          ? `Arc parked: ${rep.waitingReason ?? 'waiting on you'} — resume it below when ready.`
+          : `${p.succeeded} of ${p.total} step${p.total === 1 ? '' : 's'} completed${p.failed ? `, ${p.failed} failed` : ''}.`);
+      refreshArcs();
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'The run stopped unexpectedly — completed steps stand.');
+      toast('error', e instanceof Error ? e.message : 'The run stopped unexpectedly — completed steps stand and the arc is resumable below.');
+      refreshArcs();
     } finally {
       setRunning(false);
+    }
+  };
+
+  const resume = async (arc: ArcRow) => {
+    if (resumingId) return;
+    setResumingId(arc.id);
+    try {
+      const rep = await runArc(arc.id, () => {});
+      toast(rep.state === 'done' ? 'success' : 'info',
+        rep.state === 'done' ? `Arc "${arc.title}" finished.`
+          : rep.state === 'waiting' ? `Still waiting: ${rep.waitingReason ?? 'a prerequisite'}.`
+          : `Arc "${arc.title}" → ${rep.state}.`);
+      refreshArcs();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Resume failed — the arc is unchanged.');
+    } finally {
+      setResumingId(null);
     }
   };
 
@@ -187,11 +220,47 @@ export default function Orchestrate() {
             {report && (
               <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-3 text-xs text-forge-ink">
                 <p className="font-medium">
-                  Done — {report.succeeded} of {plan.steps.length} completed{report.failed ? `, ${report.failed} failed (their notes say why)` : ''}{report.skipped ? `, ${report.skipped} skipped` : ''}.
+                  {report.state === 'done' && `Done — all ${plan.steps.length} step${plan.steps.length === 1 ? '' : 's'} completed.`}
+                  {report.state === 'waiting' && `Arc parked — ${report.waitingReason ?? 'waiting on a prerequisite you approve'}. It resumes from the list below.`}
+                  {report.state === 'failed' && 'Some steps did not complete — their notes say why. Completed work stands.'}
+                  {report.state === 'running' && 'The arc has pending steps — resume it below.'}
                 </p>
-                <p className="mt-0.5 text-forge-dim">Completed work stands regardless of failures — follow each step's link to where its result lives.</p>
+                <p className="mt-0.5 text-forge-dim">Every approved plan is a durable arc now — it survives reloads and waits at approval seams instead of dying there.</p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* THE ARCS — every approved plan, alive until done. Waiting arcs say exactly what for. */}
+        {arcs.length > 0 && (
+          <div className="mt-6">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-forge-dim">Arcs</h2>
+            <ul className="mt-2 space-y-2">
+              {arcs.map((a) => {
+                const p = planProgress(a.statuses);
+                return (
+                  <li key={a.id} className="rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-medium text-forge-ink">{a.title}</span>
+                      <Badge tone={ARC_TONE[a.status]}>{a.status}</Badge>
+                      <span className="text-[11px] text-forge-dim">{p.succeeded}/{p.total} steps · {timeAgo(a.last_activity_at)}</span>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        {(a.status === 'waiting' || a.status === 'running' || a.status === 'draft') && (
+                          <Button size="sm" variant="outline" onClick={() => void resume(a)} loading={resumingId === a.id}>
+                            <Play size={12} /> {a.status === 'draft' ? 'Run' : 'Resume'}
+                          </Button>
+                        )}
+                        <button title="Abandon this arc" onClick={() => { void abandonArc(a.id).then(refreshArcs); }}
+                          className="rounded-md p-1.5 text-forge-dim hover:bg-forge-raised hover:text-forge-err"><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                    {a.status === 'waiting' && a.waiting_reason && (
+                      <p className="mt-1 flex items-start gap-1.5 text-xs text-forge-warn"><Hourglass size={12} className="mt-0.5 shrink-0" /> {a.waiting_reason}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
       </div>

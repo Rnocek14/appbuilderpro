@@ -214,7 +214,7 @@ export function orderSteps(steps: PlanStep[]): { order: number[]; cycleWarning: 
 
 // ---- execution status vocabulary (shared by the runner + review card) ----
 
-export type StepStatusKind = 'pending' | 'running' | 'done' | 'needs_review' | 'handoff' | 'failed' | 'skipped';
+export type StepStatusKind = 'pending' | 'running' | 'done' | 'needs_review' | 'handoff' | 'waiting' | 'failed' | 'skipped';
 
 export interface StepStatus {
   kind: StepStatusKind;
@@ -227,4 +227,37 @@ export interface StepStatus {
 /** True when the status means "this step finished its part" (dependents may proceed). */
 export function stepSucceeded(kind: StepStatusKind): boolean {
   return kind === 'done' || kind === 'needs_review' || kind === 'handoff';
+}
+
+/**
+ * A step blocked on something the OPERATOR must do first (approve a draft, link a world) — a
+ * seam, not a failure. The durable runner parks the step 'waiting' and the arc resumes after the
+ * prerequisite lands, instead of burying a retryable state as a terminal error.
+ */
+export class WaitingError extends Error {
+  constructor(message: string) { super(message); this.name = 'WaitingError'; }
+}
+
+export type PlanRunState = 'running' | 'waiting' | 'done' | 'failed';
+
+/**
+ * The arc's overall state from its step statuses: any waiting → 'waiting' (resumable); else any
+ * terminal failure/skip → 'failed' (honest: something in the arc will never finish); else all
+ * succeeded → 'done'; else still 'running' (pending work remains, nothing blocks it).
+ */
+export function derivePlanStatus(statuses: StepStatus[]): PlanRunState {
+  if (statuses.some((s) => s.kind === 'waiting')) return 'waiting';
+  if (statuses.length && statuses.every((s) => stepSucceeded(s.kind))) return 'done';
+  if (statuses.some((s) => s.kind === 'failed' || s.kind === 'skipped')) return 'failed';
+  return 'running';
+}
+
+/** Compact progress counts for arc cards. */
+export function planProgress(statuses: StepStatus[]): { succeeded: number; waiting: number; failed: number; total: number } {
+  return {
+    succeeded: statuses.filter((s) => stepSucceeded(s.kind)).length,
+    waiting: statuses.filter((s) => s.kind === 'waiting').length,
+    failed: statuses.filter((s) => s.kind === 'failed' || s.kind === 'skipped').length,
+    total: statuses.length,
+  };
 }

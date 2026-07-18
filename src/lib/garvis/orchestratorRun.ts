@@ -10,8 +10,8 @@
 
 import { supabase } from '../supabase';
 import {
-  COMPILER_SYSTEM, catalogContext, parsePlan, orderSteps, stepSucceeded,
-  type CompiledPlan, type ParsePlanResult, type StepStatus,
+  COMPILER_SYSTEM, catalogContext, parsePlan, orderSteps, stepSucceeded, derivePlanStatus,
+  WaitingError, type CompiledPlan, type ParsePlanResult, type StepStatus, type PlanStep,
 } from './orchestrator';
 import { actionSpecs } from './actionCatalog';
 import { actionById } from './actionRegistry';
@@ -47,41 +47,101 @@ export async function compileIntent(intent: string): Promise<ParsePlanResult> {
   return parsed;
 }
 
+// ---------------------------------------------------------------------------
+// Durable arcs — plans persist, wait at seams, and resume. The project loop.
+// ---------------------------------------------------------------------------
+
+export interface ArcRow {
+  id: string;
+  title: string;
+  summary: string;
+  intent: string;
+  steps: PlanStep[];
+  statuses: StepStatus[];
+  holes: string[];
+  questions: string[];
+  status: 'draft' | 'running' | 'waiting' | 'done' | 'failed' | 'abandoned';
+  waiting_reason: string | null;
+  last_activity_at: string;
+  created_at: string;
+}
+
+/** Persist a compiled plan as a durable arc (status draft — running starts on approval). */
+export async function savePlan(intent: string, plan: CompiledPlan): Promise<string> {
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const { data, error } = await supabase.from('orchestrator_plans').insert({
+    owner_id: uid, title: plan.title, summary: plan.summary, intent: intent.trim().slice(0, 2000),
+    steps: plan.steps, statuses: plan.steps.map(() => ({ kind: 'pending', note: '' })),
+    holes: plan.holes, questions: plan.questions, status: 'draft',
+  }).select('id').single();
+  if (error || !data) throw new Error(`Could not save the plan: ${error?.message ?? 'unknown'}`);
+  return (data as { id: string }).id;
+}
+
+export async function listArcs(): Promise<ArcRow[]> {
+  const { data } = await supabase.from('orchestrator_plans')
+    .select('*').neq('status', 'abandoned')
+    .order('last_activity_at', { ascending: false }).limit(30);
+  return (data as ArcRow[]) ?? [];
+}
+
+export async function abandonArc(id: string): Promise<void> {
+  await supabase.from('orchestrator_plans')
+    .update({ status: 'abandoned', updated_at: new Date().toISOString() }).eq('id', id);
+}
+
 export interface RunReport {
   statuses: StepStatus[];
-  succeeded: number;
-  failed: number;
-  skipped: number;
-  cycleWarning: boolean;
+  state: 'done' | 'waiting' | 'failed' | 'running';
+  waitingReason: string | null;
 }
 
 /**
- * Execute an approved plan. `onUpdate` fires after every status change so the review card renders
- * live progress. Sequential on purpose: most steps are model calls or DB writes where order and
- * legibility beat parallel speed, and dependencies stay simple.
+ * Run (or RESUME) an arc: already-succeeded steps keep their outcomes; pending/waiting/failed
+ * steps get attempted; a WaitingError parks the step 'waiting' (a seam — the operator approves
+ * the prerequisite and resumes); a dependency that is waiting/pending leaves this step pending
+ * (not skipped — its turn comes on resume); only a TERMINALLY failed/skipped dependency skips
+ * dependents. Statuses persist to the row after every step, so an arc survives anything.
  */
-export async function executePlan(
-  plan: CompiledPlan, onUpdate: (statuses: StepStatus[]) => void,
-): Promise<RunReport> {
-  const { order, cycleWarning } = orderSteps(plan.steps);
-  const statuses: StepStatus[] = plan.steps.map(() => ({ kind: 'pending', note: '' }));
+export async function runArc(planId: string, onUpdate: (statuses: StepStatus[]) => void): Promise<RunReport> {
+  const { data: row, error } = await supabase.from('orchestrator_plans').select('*').eq('id', planId).single();
+  if (error || !row) throw new Error('That arc no longer exists.');
+  const arc = row as ArcRow;
+  const steps = arc.steps;
+  const statuses: StepStatus[] = steps.map((_, i) => arc.statuses[i] ?? { kind: 'pending', note: '' });
+  const persist = async (patch: Record<string, unknown> = {}) => {
+    await supabase.from('orchestrator_plans').update({
+      statuses, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...patch,
+    }).eq('id', planId).then(() => {}, () => { /* persistence is best-effort mid-run; final write matters */ });
+  };
   const push = () => onUpdate([...statuses]);
+  await persist({ status: 'running', waiting_reason: null });
   push();
 
+  const { order } = orderSteps(steps);
   for (const i of order) {
-    const step = plan.steps[i];
-    // A dependency that didn't succeed poisons this step — skip with the reason, never run blind.
-    const badDep = step.after.find((a) => !stepSucceeded(statuses[a].kind));
-    if (badDep !== undefined) {
-      const depTitle = actionById(plan.steps[badDep].action)?.title ?? plan.steps[badDep].action;
-      statuses[i] = { kind: 'skipped', note: `Skipped — depends on "${depTitle}", which ${statuses[badDep].kind === 'skipped' ? 'was skipped' : 'did not complete'}.` };
+    if (stepSucceeded(statuses[i].kind)) continue; // resume: completed work stands
+    const step = steps[i];
+    // Terminal dep failure → skip. A dep merely waiting/pending → leave THIS step pending too.
+    const deps = step.after;
+    if (deps.some((a) => statuses[a].kind === 'failed' || statuses[a].kind === 'skipped')) {
+      const bad = deps.find((a) => statuses[a].kind === 'failed' || statuses[a].kind === 'skipped')!;
+      const depTitle = actionById(steps[bad].action)?.title ?? steps[bad].action;
+      statuses[i] = { kind: 'skipped', note: `Skipped — depends on "${depTitle}", which did not complete.` };
+      push(); await persist();
+      continue;
+    }
+    if (deps.some((a) => !stepSucceeded(statuses[a].kind))) {
+      statuses[i] = { kind: 'pending', note: 'Waiting for an earlier step — resumes with the arc.' };
       push();
       continue;
     }
     const def = actionById(step.action);
-    if (!def) { // registry drift (should be impossible post-gauntlet) — honest failure, not a crash
+    if (!def) {
       statuses[i] = { kind: 'failed', note: `Action "${step.action}" is no longer in the registry.` };
-      push();
+      push(); await persist();
       continue;
     }
     statuses[i] = { kind: 'running', note: `${def.title}…` };
@@ -89,25 +149,24 @@ export async function executePlan(
     try {
       statuses[i] = await def.execute(step.params);
     } catch (e) {
-      statuses[i] = { kind: 'failed', note: e instanceof Error ? e.message : `${def.title} failed.` };
+      statuses[i] = e instanceof WaitingError
+        ? { kind: 'waiting', note: e.message }
+        : { kind: 'failed', note: e instanceof Error ? e.message : `${def.title} failed.` };
     }
-    push();
+    push(); await persist();
   }
 
-  const report: RunReport = {
-    statuses,
-    succeeded: statuses.filter((s) => stepSucceeded(s.kind)).length,
-    failed: statuses.filter((s) => s.kind === 'failed').length,
-    skipped: statuses.filter((s) => s.kind === 'skipped').length,
-    cycleWarning,
-  };
+  const state = derivePlanStatus(statuses);
+  const waitingReason = statuses.find((s) => s.kind === 'waiting')?.note ?? null;
+  await persist({ status: state, waiting_reason: waitingReason });
+
   const { data: auth } = await supabase.auth.getUser();
   if (auth.user) {
     void recordMindEvent(auth.user.id, {
       event_type: 'note', source: 'orchestrator',
-      subject: `Ran plan "${plan.title}" — ${report.succeeded} succeeded, ${report.failed} failed, ${report.skipped} skipped`,
-      payload: { steps: plan.steps.map((s, i) => ({ action: s.action, outcome: statuses[i].kind })) },
+      subject: `Arc "${arc.title}" → ${state}${waitingReason ? ` (waiting: ${waitingReason.slice(0, 120)})` : ''}`,
+      payload: { plan_id: planId, steps: steps.map((s, i) => ({ action: s.action, outcome: statuses[i].kind })) },
     });
   }
-  return report;
+  return { statuses, state, waitingReason };
 }

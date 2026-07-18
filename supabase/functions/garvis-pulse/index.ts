@@ -64,19 +64,25 @@ Deno.serve(async (req) => {
       if (p.last_pulse_at && localParts(new Date(p.last_pulse_at), tz).date === today) continue; // already briefed today
 
       const since = p.last_pulse_at ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
-      const [leads, touched, replies, approvals, reminders] = await Promise.all([
+      const [leads, touched, replies, approvals, reminders, stalledArcs] = await Promise.all([
         admin.from('leads').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).gte('created_at', since),
         admin.from('leads').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).gte('first_touch_at', since),
         admin.from('replies').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).gte('received_at', since),
         admin.from('approvals').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).eq('status', 'pending'),
         admin.from('reminders').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).eq('done', false).lte('due_at', now.toISOString()),
+        // THE PROJECT LOOP'S NAG: arcs parked 'waiting' for over a day — each is one approval +
+        // one Resume click away from continuing, and forgetting them is how arcs die.
+        admin.from('orchestrator_plans').select('title, waiting_reason')
+          .eq('owner_id', p.id).eq('status', 'waiting')
+          .lt('last_activity_at', new Date(now.getTime() - 24 * 3_600_000).toISOString()).limit(3),
       ]);
       const nLeads = leads.count ?? 0, nTouched = touched.count ?? 0, nReplies = replies.count ?? 0,
         nApprovals = approvals.count ?? 0, nReminders = reminders.count ?? 0;
+      const arcs = (stalledArcs.data ?? []) as { title: string; waiting_reason: string | null }[];
 
       // Always stamp the brief-check so tomorrow's window works; only SPEAK when something's real.
       await admin.from('profiles').update({ last_pulse_at: now.toISOString() }).eq('id', p.id);
-      if (nLeads + nReplies + nApprovals + nReminders === 0) continue;                 // quiet night stays quiet
+      if (nLeads + nReplies + nApprovals + nReminders + arcs.length === 0) continue;   // quiet night stays quiet
 
       const lines = [
         `Morning brief${p.full_name ? `, ${p.full_name.split(' ')[0]}` : ''} — while you were away:`,
@@ -85,6 +91,7 @@ Deno.serve(async (req) => {
         nReplies > 0 && `• ${nReplies} new repl${nReplies === 1 ? 'y' : 'ies'} to your outreach`,
         nApprovals > 0 && `• ${nApprovals} action${nApprovals === 1 ? '' : 's'} waiting on your approval`,
         nReminders > 0 && `• ${nReminders} reminder${nReminders === 1 ? '' : 's'} due`,
+        ...arcs.map((a) => `⏸ Arc "${a.title}" has been waiting a day+: ${a.waiting_reason ?? 'a prerequisite'} — one approval + Resume continues it`),
         `Open Garvis → Command to act on all of it.`,
       ].filter(Boolean) as string[];
 

@@ -8,7 +8,7 @@
 // handoff link), never a promise. Approval-gated machinery stays approval-gated.
 
 import { supabase } from '../supabase';
-import type { ActionSpec, StepStatus } from './orchestrator';
+import { WaitingError, type ActionSpec, type StepStatus } from './orchestrator';
 import { ACTION_SPECS, actionSpecs } from './actionCatalog';
 import type { Charter, Archetype } from './workweb';
 
@@ -24,7 +24,9 @@ async function resolveWorld(title: string): Promise<{ id: string; title: string 
   const { data } = await supabase.from('knowledge_worlds')
     .select('id, title').ilike('title', `%${title}%`).limit(2);
   const rows = (data ?? []) as { id: string; title: string }[];
-  if (rows.length === 0) throw new Error(`No business named "${title}" — name an existing one exactly, or found it first.`);
+  // A missing world is a SEAM, not a failure: it usually means "approve the draft first" — the
+  // durable runner parks the step waiting and the arc resumes once the world exists.
+  if (rows.length === 0) throw new WaitingError(`No business named "${title}" yet — approve its draft on Businesses (or name an existing one exactly), then resume this arc.`);
   return rows[0];
 }
 
@@ -34,7 +36,7 @@ async function resolveArea(worldId: string, preferred: Archetype[]): Promise<Cha
   const { data } = await supabase.from('knowledge_clusters')
     .select('slug, charter').eq('world_id', worldId).limit(32);
   const rows = ((data ?? []) as { slug: string; charter: Charter | null }[]).filter((r) => r.charter);
-  if (!rows.length) throw new Error('That business has no chartered areas — approve its draft first.');
+  if (!rows.length) throw new WaitingError('That business has no chartered areas yet — approve its draft on Businesses, then resume this arc.');
   for (const p of preferred) {
     const hit = rows.find((r) => r.charter!.archetype === p);
     if (hit) return hit.charter!;
