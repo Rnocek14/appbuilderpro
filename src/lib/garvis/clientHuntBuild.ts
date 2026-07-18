@@ -96,6 +96,7 @@ export function fieldsFromPage(
   niche: string,
   fallbackName: string,
   location?: string | null,   // a REAL location (e.g. from Google Places city/state) — honest, not guessed
+  rating?: { rating: number | null; count: number | null } | null,  // REAL Places rating — display-at-use
 ): ExtractedFields {
   const name = cleanBusinessName(page.title) ?? cleanBusinessName(fallbackName) ?? fallbackName.trim();
   const trade = niche.trim() ? tradeName(niche) : '';
@@ -107,8 +108,9 @@ export function fieldsFromPage(
     location: (location && location.trim()) ? location.trim().slice(0, 120) : null,
     hours: null,
     reviews_summary: null,
-    google_rating: null,
-    review_count: null,
+    // Real Google rating when Places returned one THIS run (display-at-use, never persisted).
+    google_rating: rating?.rating ?? null,
+    review_count: rating?.count ?? null,
   };
 }
 
@@ -122,6 +124,7 @@ export interface HuntProfileInput {
   audit: SiteAudit;                                       // the honest siteAudit of their current site
   location?: string | null;                               // real city/state (e.g. from Places) — optional
   phone?: string | null;                                  // real phone (e.g. from Places) — optional
+  rating?: { rating: number | null; count: number | null } | null;  // real Places rating — optional
 }
 
 /** Merge the deterministic fields + scraped assets + audit into a raw BusinessProfile object for
@@ -129,7 +132,7 @@ export interface HuntProfileInput {
  *  (one implementation), so photo provenance + honesty are identical. A real location/phone (from
  *  Google Places) rides through when provided — never invented. */
 export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unknown> {
-  const fields = fieldsFromPage(input.page, input.niche, input.fallbackName, input.location);
+  const fields = fieldsFromPage(input.page, input.niche, input.fallbackName, input.location, input.rating ?? null);
   const ctx: ScrapeContext = {
     url: input.url,
     images: input.images,
