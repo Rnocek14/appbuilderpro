@@ -16,7 +16,7 @@ import {
 import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { supabase } from '../../../lib/supabase';
-import { listOrders, createOrder, setOrderStatus } from '../../../lib/garvis/standingRun';
+import { listOrders, createOrder, setOrderStatus, setOrderCadence, runOrderNow } from '../../../lib/garvis/standingRun';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -178,14 +178,29 @@ function AutoIdeasToggle({ worldId, clusterId, onToast }: { worldId: string; clu
         if (orderId) await setOrderStatus(orderId, 'paused');
         setState('off'); onToast('info', 'Auto-ideas paused.');
       } else if (orderId) {
-        await setOrderStatus(orderId, 'active');
-        setState(next); onToast('success', `Auto-ideas on — fresh ideas will land here ${next}. (Cadence follows the order’s original setting.)`);
+        // The chip must not lie: clicking a cadence WRITES that cadence (re-anchored grid,
+        // recomputed next_run_at, refreshed label) — not just status=active on the old schedule.
+        await setOrderCadence(orderId, next, `Auto-ideas · ${next}`);
+        setState(next); onToast('success', `Auto-ideas on — fresh ideas will land here ${next}.`);
       } else {
         const o = await createOrder({ worldId, kind: 'idea_stream', label: `Auto-ideas · ${next}`, cadence: next, config: { cluster_id: clusterId, count: 3 } });
         setOrderId(o.id); setState(next);
         onToast('success', `Auto-ideas on — Garvis will add 3 fresh ideas ${next}, grouped by date. Needs the heartbeat armed + an AI key.`);
       }
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not update auto-ideas.'); }
+    finally { setBusy(false); }
+  };
+
+  const runNow = async () => {
+    if (!orderId) return;
+    setBusy(true);
+    try {
+      const r = await runOrderNow(orderId);
+      onToast(r.failed > 0 ? 'error' : 'success',
+        r.failed > 0 ? 'The run failed — check the AI key and credits, then try again.'
+          : r.changed > 0 ? 'Fresh ideas just landed on the board — refresh to see them.'
+          : 'Ran, but nothing new arrived — the worker reported no changes.');
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not run auto-ideas now.'); }
     finally { setBusy(false); }
   };
 
@@ -196,6 +211,10 @@ function AutoIdeasToggle({ worldId, clusterId, onToast }: { worldId: string; clu
       {(['off', 'daily', 'weekly'] as const).map((v) => (
         <button key={v} disabled={busy} onClick={() => void set(v)} className={cn('cb-chip', state === v && 'cb-chip-on')}>{v}</button>
       ))}
+      {orderId && (
+        <button disabled={busy} onClick={() => void runNow()} title="One batch of fresh ideas right now — no waiting for the schedule."
+          className="cb-chip">run now</button>
+      )}
     </div>
   );
 }
