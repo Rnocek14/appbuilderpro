@@ -13,6 +13,8 @@ import { runQA, issuesToFixRequest, validateProject } from '../projectQA';
 import { readBranchState, writeBranchFile, deleteBranchFile, clearTombstone } from '../branches';
 import { ASSETS_PATH, BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
 import { PREFS_PATH, prefsContext } from '../preferences';
+import { buildKnowledgeDigest } from '../garvis/knowledge';
+import type { GarvisKnowledge } from '../../types';
 import { previewContext } from '../previewRuntime';
 import { MAIN_THREAD_ID, threadOf } from '../threads';
 import type { ProjectFile } from '../../types';
@@ -232,6 +234,17 @@ export async function agenticEdit(
     .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${(m.content ?? '').slice(0, 600)}`)
     .join('\n');
 
+  // THE OPERATOR'S LESSONS. Approved knowledge (outcomes, decisions, lessons) previously reached
+  // only Garvis agent runs — the builder never saw it, so hard-won lessons didn't shape builds.
+  // Inject the same approved-only digest here. Best-effort: an un-applied migration = no digest.
+  let knowledgeDigest = '';
+  try {
+    const { data: kRows } = await supabase
+      .from('garvis_knowledge').select('*')
+      .eq('status', 'approved').order('created_at', { ascending: false }).limit(24);
+    knowledgeDigest = buildKnowledgeDigest((kRows ?? []) as GarvisKnowledge[]);
+  } catch { /* table absent → builder simply runs without the digest */ }
+
   await insertMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
   onEvent?.({ type: 'start' });
 
@@ -239,6 +252,7 @@ export async function agenticEdit(
   const tree = [...files.keys()].sort().join('\n') || '(empty project)';
   const preamble = [
     brainContext(brain), mapContext(map), roadmapContext(roadmap), assetsMd, prefsContext(prefs),
+    knowledgeDigest,
     previewContext(),
     historyText ? `RECENT CONVERSATION:\n${historyText}` : '',
     `PROJECT FILES (call read_file to see any of these):\n${tree}`,

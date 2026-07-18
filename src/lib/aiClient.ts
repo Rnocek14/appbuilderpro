@@ -292,7 +292,9 @@ export async function researchAnswer(
     onEvent?.({ type: 'done' });
     if (error) throw new Error(await readFnError(error));
     if (data?.error) throw new Error(data.error);
-    return { action: 'discuss', explanation: (data as { answer?: string })?.answer ?? '', changed: [], deleted: [] };
+    const edgeAnswer = (data as { answer?: string })?.answer ?? '';
+    persistResearch(message, edgeAnswer);
+    return { action: 'discuss', explanation: edgeAnswer, changed: [], deleted: [] };
   }
 
   const ai = resolveAI();
@@ -349,8 +351,28 @@ export async function researchAnswer(
   const id = await insertAiMessage({ project_id: projectId, user_id: userId, role: 'assistant', content: answer, thread_id: threadId });
   // Note: web_search billing isn't in token usage, so this undercounts research a little.
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: data.usage?.input_tokens ?? 0, outputTokens: data.usage?.output_tokens ?? 0, messageId: id });
+  persistResearch(message, answer);
   onEvent?.({ type: 'done' });
   return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
+}
+
+/**
+ * RESEARCH → BRAIN. Research answers used to land in the chat transcript and evaporate — your own
+ * market analysis wasn't searchable a week later. Now every research run is also filed through
+ * ingest-document (summarized, embedded, classified, connection-surfaced) so it compounds into the
+ * knowledge base. Fire-and-forget: the chat already has the answer, so a missing function or
+ * un-applied migration must never break research itself.
+ */
+function persistResearch(question: string, answer: string): void {
+  const text = answer.trim();
+  if (!text || text.length < 200) return; // too thin to be worth filing
+  void supabase.functions.invoke('ingest-document', {
+    body: {
+      title: `Research: ${question.trim().slice(0, 120)}`,
+      extracted_text: text.slice(0, 60_000),
+      source_kind: 'research',
+    },
+  }).then(() => {}, () => { /* best-effort */ });
 }
 
 // Build a full-source digest for deep research. Includes complete file contents, ordered
