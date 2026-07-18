@@ -145,6 +145,35 @@ function findContactLink(html: string, base: string): string | null {
   return null;
 }
 
+// SHALLOW CRAWL: the pages where a local business actually says what it does. Most landing pages
+// carry a hero and a phone number; the services list, hours, and service area live one click away.
+// Same-host only, SSRF-guarded, capped — this is one polite visit, not a spider.
+const SECTION_LINK = /service|about|team|staff|gallery|portfolio|our-work|menu|pricing|areas|locations|hours/i;
+const CRAWL_PAGES = 3;
+const CRAWL_EXTRA_TEXT = 9_000;   // total extra characters appended across crawled pages
+
+function findSectionLinks(html: string, base: string): string[] {
+  let baseUrl: URL;
+  try { baseUrl = new URL(base); } catch { return []; }
+  const seen = new Set<string>([baseUrl.href]);
+  const out: string[] = [];
+  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]{0,80}?)<\/a>/gi)) {
+    if (out.length >= CRAWL_PAGES) break;
+    const href = m[1];
+    const label = m[2].replace(/<[^>]+>/g, ' ');
+    if (!SECTION_LINK.test(href) && !SECTION_LINK.test(label)) continue;
+    try {
+      const abs = new URL(href, base);
+      if (abs.hostname !== baseUrl.hostname || !urlStaticOk(abs)) continue;
+      abs.hash = '';
+      if (seen.has(abs.href)) continue;
+      seen.add(abs.href);
+      out.push(abs.href);
+    } catch { /* unparseable href — skip */ }
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const json = (b: unknown, status = 200) =>
@@ -269,7 +298,32 @@ Deno.serve(async (req) => {
     // The tech a business runs, read from their own markup (builder, booking, pixels, chat, store) —
     // computed here while we still have the raw HTML. The best qualifier for a rebuild + automation pitch.
     const tech = fingerprintTech(bodyRaw);
-    return json({ url: finalUrl, title: title || url.hostname, description, text, contentType: type, checks, tech });
+
+    // SHALLOW CRAWL: append the services/about/gallery pages' text so extraction sees what the
+    // business actually offers (checks/tech stay landing-page-only — those are homepage signals).
+    // Best-effort per page; a slow or dead section page never sinks the scrape.
+    let fullText = text;
+    const crawled: string[] = [];
+    let extraBudget = CRAWL_EXTRA_TEXT;
+    for (const link of findSectionLinks(bodyRaw, finalUrl)) {
+      if (extraBudget <= 400) break;
+      try {
+        const acX = new AbortController();
+        const tX = setTimeout(() => acX.abort(), 10_000);
+        let rX: Response;
+        try {
+          rX = await safeFetch(link, { signal: acX.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+        } finally { clearTimeout(tX); }
+        if (!rX.ok || !/html/.test(rX.headers.get('content-type') ?? '')) continue;
+        const sub = extractText((await rX.text()).slice(0, MAX_BODY)).text.slice(0, extraBudget);
+        if (sub.trim().length < 80) continue;   // nav-only shells add noise, not facts
+        const path = new URL(link).pathname || '/';
+        fullText += `\n\n[${path}]\n${sub}`;
+        extraBudget -= sub.length;
+        crawled.push(path);
+      } catch { /* skip */ }
+    }
+    return json({ url: finalUrl, title: title || url.hostname, description, text: fullText, contentType: type, checks, tech, crawled });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return json({ error: /abort/i.test(msg) ? 'The page took too long to load.' : msg }, 200);

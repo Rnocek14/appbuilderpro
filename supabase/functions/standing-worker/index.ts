@@ -630,7 +630,12 @@ const HUNT_TIME_BUDGET_MS = 90_000;
 const DISCOVER_BUDGET_MS = 55_000;   // cap discovery so building always gets a share of the window
 const PLACES_PAGES = 2;   // pages per query (≤20 results each) — bounds Places cost per search
 
-interface HuntEnv { supabaseUrl: string; workerSecret: string; serviceKey: string; appOrigin: string; placesKey: string; nowYear: number }
+interface HuntEnv {
+  supabaseUrl: string; workerSecret: string; serviceKey: string; appOrigin: string; placesKey: string; nowYear: number;
+  // Ratings seen DURING THIS RUN, keyed by place_id — used only to render the demo built in the
+  // same invocation (Places ToS: display-at-use; the lead pool never stores rating).
+  runRatings: Map<string, { rating: number | null; count: number | null }>;
+}
 interface QueryRowDB { id: string; query_text: string; keyword: string; last_run_at: string | null; exhausted: boolean; total_inserted: number; run_count: number; consecutive_zero_runs: number }
 interface LeadRow { id: string; place_id: string | null; company_name: string; keyword: string; website: string | null; phone: string | null; city: string | null; state: string | null }
 
@@ -649,6 +654,7 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
     appOrigin: Deno.env.get('APP_ORIGIN') ?? '',
     placesKey,
     nowYear: new Date(nowIso).getUTCFullYear(),
+    runRatings: new Map(),
   };
   const startedMs = Date.now();
 
@@ -711,7 +717,11 @@ async function runDiscoveryQuery(admin: any, ownerId: string, q: QueryRowDB, env
   try {
     for (const raw of await fetchPlaces(env.placesKey, q.query_text, PLACES_PAGES)) {
       const biz = parsePlace(raw, q.keyword);
-      if (biz && await insertLead(admin, ownerId, biz, q.id)) inserted++;
+      if (!biz) continue;
+      if (biz.place_id && (biz.rating != null || biz.rating_count != null)) {
+        env.runRatings.set(biz.place_id, { rating: biz.rating, count: biz.rating_count });
+      }
+      if (await insertLead(admin, ownerId, biz, q.id)) inserted++;
     }
   } catch { /* one query failing never sinks the run — still record the attempt below */ }
   const upd = exhaustionUpdate(q, inserted);
@@ -832,6 +842,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   const raw = buildHuntProfileRaw({
     url: finalUrl, niche: lead.keyword, fallbackName: lead.company_name,
     page, images, email, audit, location, phone: lead.phone,
+    rating: lead.place_id ? env.runRatings.get(lead.place_id) ?? null : null,
   });
   const { profile } = parseBusinessProfile(raw);
   if (!profile) return 'skipped';
