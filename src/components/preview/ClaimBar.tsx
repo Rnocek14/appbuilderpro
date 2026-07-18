@@ -12,6 +12,8 @@ import { tierById } from '../../lib/garvis/billing/clientTiers';
 // The public ask matches the tier the operator actually sells (clientTiers is the single source of
 // truth) — a hardcoded number here once publicly undercut the real offer by 5x.
 const WEBSITE_PRICE = (tierById('website')?.priceHint ?? 'from $1,500').replace(/\s+one-time$/, '');
+// The upsell ladder: the website lands the deal; the automation tier is the selectable upgrade.
+const AUTOMATION_TIER = tierById('website_automation');
 
 export function ClaimBar({ previewSiteId, businessName, slug, price = WEBSITE_PRICE }: {
   previewSiteId: string; businessName: string; slug: string; price?: string;
@@ -21,6 +23,7 @@ export function ClaimBar({ previewSiteId, businessName, slug, price = WEBSITE_PR
   const [name, setName] = useState('');
   const [contact, setContact] = useState('');
   const [message, setMessage] = useState('');
+  const [wantsAutomation, setWantsAutomation] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState('');
@@ -30,7 +33,10 @@ export function ClaimBar({ previewSiteId, businessName, slug, price = WEBSITE_PR
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true); setError('');
-    const res = await submitPublishRequest({ previewSiteId, name, contact, message });
+    // The upgrade choice rides the message field as a stable prefix — zero schema change, and the
+    // operator sees it verbatim in the claim (publish_requests.message + the owner webhook).
+    const finalMessage = wantsAutomation ? `[Wants ${AUTOMATION_TIER?.name ?? 'Website + Automation'}] ${message}`.trim() : message;
+    const res = await submitPublishRequest({ previewSiteId, name, contact, message: finalMessage });
     setBusy(false);
     if (res.ok) setDone(true);
     else setError('Something went wrong — please try again.');
@@ -79,6 +85,15 @@ export function ClaimBar({ previewSiteId, businessName, slug, price = WEBSITE_PR
               <input required value={contact} onChange={(e) => setContact(e.target.value)} placeholder="Email or phone"
                 className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-3.5 py-2.5 text-sm text-[hsl(var(--ink))] outline-none focus:border-[hsl(var(--p))]" />
             </div>
+            {AUTOMATION_TIER && (
+              <label className="mt-3 flex cursor-pointer items-start gap-2.5 rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-3.5 py-2.5">
+                <input type="checkbox" checked={wantsAutomation} onChange={(e) => setWantsAutomation(e.target.checked)} className="mt-0.5" />
+                <span className="text-sm text-[hsl(var(--ink))]">
+                  <span className="font-medium">Add {AUTOMATION_TIER.name} — {AUTOMATION_TIER.priceHint}.</span>{' '}
+                  <span className="text-[hsl(var(--mut))]">{AUTOMATION_TIER.blurb}</span>
+                </span>
+              </label>
+            )}
             <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={2} placeholder="Anything you'd change? (optional)"
               className="mt-3 w-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-3.5 py-2.5 text-sm text-[hsl(var(--ink))] outline-none focus:border-[hsl(var(--p))]" />
             {error && <p className="mt-2 text-xs font-medium text-red-600">{error}</p>}

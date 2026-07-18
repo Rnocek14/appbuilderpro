@@ -140,9 +140,59 @@ export function usableReviews(profile: BusinessProfile): SourcedReview[] {
 
 export const SECTION_TYPES = [
   'hero', 'trust', 'services', 'about', 'showcase', 'gallery', 'reviews',
-  'serviceArea', 'faq', 'hours', 'map', 'quote', 'ctaBanner', 'seoText',
+  'serviceArea', 'faq', 'hours', 'map', 'quote', 'ctaBanner', 'seoText', 'scene',
 ] as const;
 export type SectionType = (typeof SECTION_TYPES)[number];
+
+/** TRADE SCENES — hand-built scroll-scrubbed vignettes (a pipe that fills, springs a leak, and
+ *  gets clamped; a wire that lights a bulb; rain deflecting off new shingles…). The AI writes ONLY
+ *  the punchline copy; the visual is picked deterministically from the trade here, so quality is
+ *  guaranteed by construction and a trade with no scene simply gets none. Max one per page. */
+export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge'] as const;
+export type SceneKind = (typeof SCENE_KINDS)[number];
+
+/** APPROPRIATENESS GUARD — some businesses must never get spectacle. For grief-adjacent
+ *  categories the page is calm by construction: no marquee, no scenes, no giant type, no
+ *  showpiece heroes, no sales-y verbs, no generated imagery. Enforced in normalizeSpec AND the
+ *  fallback — a model choice can never override it. */
+export function restraintFor(industry: string): 'dignified' | null {
+  return /funeral|cremation|cremator|memorial|hospice|grief|bereave|cemetery|mortuar|obituar|palliative/i.test(industry)
+    ? 'dignified' : null;
+}
+
+/** In-place enforcement of the dignified guard on a theme + section list (shared by the
+ *  normalizer and the fallback assembler). Returns the filtered section list. */
+export function applyRestraint(theme: ThemeSpec, sections: SectionSpec[], industry: string): SectionSpec[] {
+  if (!restraintFor(industry)) return sections;
+  theme.motion = 'calm';
+  theme.flair = (theme.flair ?? []).filter((f) => f === 'dots' || f === 'ruled').slice(0, 1);
+  const out = sections.filter((s) => s.type !== 'scene');
+  for (const s of out) {
+    if (s.type === 'hero') s.variant = s.variant === 'split' ? 'split' : 'editorial';
+    if (s.type === 'ctaBanner') s.variant = 'band';
+  }
+  return out;
+}
+
+export function sceneKindFor(industry: string): SceneKind | null {
+  const s = industry.toLowerCase();
+  if (/plumb|sewer|drain|septic/.test(s)) return 'pipe';
+  if (/electric/.test(s)) return 'circuit';
+  if (/roof|gutter/.test(s)) return 'rain';
+  if (/hvac|heating|cooling|air condition|furnace/.test(s)) return 'thermostat';
+  if (/auto|mechanic|tire|transmission|oil change|brake/.test(s)) return 'gauge';
+  return null;
+}
+
+/** Deterministic scene copy — behavioral punchlines, no claims. The floor when the model writes
+ *  none; the model may sharpen them but the visual choreography is fixed per kind. */
+export const SCENE_COPY: Record<SceneKind, { headline: string; sub: string }> = {
+  pipe: { headline: "Leaks don't wait.", sub: 'A slow drip becomes a flood on its own schedule — and gets fixed on ours.' },
+  circuit: { headline: 'Power, back where it belongs.', sub: 'From dead outlet to lit room — done safely, the first time.' },
+  rain: { headline: 'Ready before the next storm.', sub: 'New shingles shed the weather your old roof lets through.' },
+  thermostat: { headline: 'Comfort, dialed in.', sub: 'From sweltering to just right — and it holds.' },
+  gauge: { headline: 'Green across the board.', sub: 'From warning light to road-ready.' },
+};
 
 export interface SectionSpec {
   type: SectionType;
@@ -150,6 +200,29 @@ export interface SectionSpec {
   /** All copy/data the section renders — filled by the model (or the fallback assembler). */
   props: Record<string, unknown>;
 }
+
+/** SIGNATURE DEVICES — the personality toolkit ported from the app builder's theme system
+ *  (themePresets.ts PERSONALITY_CSS). A site that uses 2-3 of these stops reading as "AI
+ *  template"; the renderer activates each purely presentationally. Whitelist-validated. */
+export const FLAIR_DEVICES = ['grain', 'marquee', 'dots', 'ruled', 'outline', 'hard-shadow'] as const;
+export type FlairDevice = (typeof FLAIR_DEVICES)[number];
+
+/** MOTION TIER — "know when to use the scroll effects" as a contract, not taste. The renderer
+ *  gates the award-kit moves by tier (DESIGN_GUIDE restraint: one signature move, calm trades
+ *  stay calm): calm = reveals only (medical, legal); lively = TextReveal headline + CountUp
+ *  stats + image wipes (default); cinematic = lively + aurora/parallax hero + magnetic CTA +
+ *  tilt cards + scroll progress (photo-led and bold trades). */
+export const MOTION_TIERS = ['calm', 'lively', 'cinematic'] as const;
+export type MotionTier = (typeof MOTION_TIERS)[number];
+
+/** Structural variants per section — different COMPOSITIONS, not palette swaps. Whitelisted here;
+ *  normalizeSpec drops anything else and falls back to the recipe's default composition. */
+export const SECTION_VARIANTS: Partial<Record<string, readonly string[]>> = {
+  hero: ['fullbleed', 'split', 'stacked', 'editorial', 'portal', 'layers'],
+  services: ['cards', 'rows'],
+  reviews: ['grid', 'spotlight'],
+  ctaBanner: ['band', 'giant'],
+};
 
 export interface ThemeSpec {
   /** HSL triplets, "H S% L%" (token style) — validated; renderer wraps in hsl(). */
@@ -164,6 +237,10 @@ export interface ThemeSpec {
   displayFont: string;  // Google Font
   bodyFont: string;     // Google Font
   tone: string;         // one-line art direction ("trustworthy local craftsman")
+  /** 0-3 signature devices; the AI picks to fit the trade, recipes carry defaults. */
+  flair?: FlairDevice[];
+  /** Scroll/motion tier — gates the award-kit moves per DESIGN_GUIDE restraint rules. */
+  motion?: MotionTier;
 }
 
 export interface SiteSpec {
@@ -177,6 +254,8 @@ export interface SiteSpec {
   sections: SectionSpec[];
   seo: { title: string; description: string; keywords: string[] };
   footer: { line: string };
+  /** Any photo in the spec is AI-generated concept imagery → the footer discloses it. */
+  aiImagery?: boolean;
 }
 
 const HSL_RE = /^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$/;
@@ -196,6 +275,10 @@ export interface Recipe {
   theme: ThemeSpec;
   /** Section CTA verb — "Get a Free Quote" vs "Book a Table" vs "Book Now". */
   cta: string;
+  /** Default structural compositions per section — the fallback's look and the normalizer's
+   *  floor when the model names no (or an invalid) variant. Different verticals get genuinely
+   *  different page architecture, not a palette swap. */
+  variants?: Partial<Record<SectionType, string>>;
 }
 
 export const RECIPES: Recipe[] = [
@@ -203,13 +286,14 @@ export const RECIPES: Recipe[] = [
     id: 'contractor_lead_gen',
     label: 'Contractor / Home Services',
     match: ['roof', 'contractor', 'hvac', 'plumb', 'landscap', 'electric', 'construction', 'remodel', 'paint', 'garage', 'fence', 'concrete', 'handyman', 'pest', 'clean'],
-    sections: ['hero', 'trust', 'services', 'showcase', 'about', 'reviews', 'serviceArea', 'faq', 'quote', 'map', 'ctaBanner', 'seoText'],
+    sections: ['hero', 'trust', 'services', 'scene', 'showcase', 'about', 'reviews', 'serviceArea', 'faq', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '16 78% 44%', primaryInk: '24 40% 98%', bg: '36 30% 97%', ink: '24 24% 12%',
       muted: '24 10% 40%', card: '36 20% 99.5%', border: '30 18% 88%', radius: 8,
-      displayFont: 'Sora', bodyFont: 'Inter', tone: 'trustworthy local craftsman — bold, direct, proof-forward',
+      displayFont: 'Sora', bodyFont: 'Inter', tone: 'trustworthy local craftsman — bold, direct, proof-forward', flair: ['marquee', 'hard-shadow'], motion: 'cinematic',
     },
     cta: 'Get a Free Quote',
+    variants: { services: 'cards', ctaBanner: 'band' },
   },
   {
     id: 'restaurant',
@@ -219,9 +303,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '350 62% 38%', primaryInk: '30 40% 97%', bg: '38 42% 96%', ink: '20 30% 13%',
       muted: '24 14% 38%', card: '40 40% 99%', border: '34 24% 87%', radius: 4,
-      displayFont: 'Fraunces', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, editorial — food photography leads',
+      displayFont: 'Fraunces', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, editorial — food photography leads', flair: ['grain', 'marquee'], motion: 'cinematic',
     },
     cta: 'Reserve a Table',
+    variants: { hero: 'stacked', reviews: 'spotlight', ctaBanner: 'giant' },
   },
   {
     id: 'salon_spa',
@@ -231,21 +316,23 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '160 30% 32%', primaryInk: '150 20% 98%', bg: '80 20% 97%', ink: '160 18% 14%',
       muted: '160 8% 42%', card: '80 24% 99.5%', border: '90 12% 88%', radius: 20,
-      displayFont: 'Cormorant Garamond', bodyFont: 'Figtree', tone: 'calm, luxurious, airy — whitespace and softness',
+      displayFont: 'Cormorant Garamond', bodyFont: 'Figtree', tone: 'calm, luxurious, airy — whitespace and softness', flair: ['grain', 'dots'], motion: 'lively',
     },
     cta: 'Book Now',
+    variants: { hero: 'stacked', reviews: 'spotlight' },
   },
   {
     id: 'auto_services',
     label: 'Auto Repair / Detailing / Tires',
     match: ['auto', 'mechanic', 'tire', 'detail', 'car wash', 'body shop', 'transmission', 'oil change', 'towing', 'collision'],
-    sections: ['hero', 'trust', 'services', 'showcase', 'reviews', 'about', 'faq', 'hours', 'quote', 'map', 'ctaBanner', 'seoText'],
+    sections: ['hero', 'trust', 'services', 'scene', 'showcase', 'reviews', 'about', 'faq', 'hours', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '210 90% 40%', primaryInk: '210 30% 98%', bg: '220 14% 96%', ink: '220 24% 12%',
       muted: '220 8% 40%', card: '220 10% 99.5%', border: '220 12% 87%', radius: 6,
-      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'competent, no-nonsense shop — steel blue, bold type, proof up front',
+      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'competent, no-nonsense shop — steel blue, bold type, proof up front', flair: ['hard-shadow', 'marquee'], motion: 'lively',
     },
     cta: 'Get an Estimate',
+    variants: { services: 'rows' },
   },
   {
     id: 'dental_medical',
@@ -255,9 +342,23 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '190 65% 34%', primaryInk: '190 30% 98%', bg: '195 35% 97.5%', ink: '200 30% 13%',
       muted: '200 12% 42%', card: '195 30% 99.5%', border: '195 20% 89%', radius: 12,
-      displayFont: 'Schibsted Grotesk', bodyFont: 'Hanken Grotesk', tone: 'calm clinical trust — clean teal, generous whitespace, credentials visible',
+      displayFont: 'Schibsted Grotesk', bodyFont: 'Hanken Grotesk', tone: 'calm clinical trust — clean teal, generous whitespace, credentials visible', flair: ['dots'], motion: 'calm',
     },
     cta: 'Book an Appointment',
+    variants: { services: 'cards' },
+  },
+  {
+    id: 'care_services',
+    label: 'Funeral / Memorial / Care',
+    match: ['funeral', 'cremation', 'memorial', 'hospice', 'grief', 'bereavement', 'cemetery', 'mortuary', 'palliative'],
+    sections: ['hero', 'about', 'services', 'reviews', 'faq', 'quote', 'map', 'ctaBanner', 'seoText'],
+    theme: {
+      primary: '210 20% 30%', primaryInk: '40 30% 97%', bg: '40 22% 97.5%', ink: '215 22% 15%',
+      muted: '215 10% 44%', card: '40 18% 99.5%', border: '40 12% 89%', radius: 4,
+      displayFont: 'Cormorant Garamond', bodyFont: 'Source Sans 3', tone: 'quiet dignity — slate on warm paper, serif calm, nothing raised above a whisper', flair: ['ruled'], motion: 'calm',
+    },
+    cta: 'Contact Us',
+    variants: { hero: 'editorial', services: 'rows', reviews: 'spotlight', ctaBanner: 'band' },
   },
   {
     id: 'legal_professional',
@@ -267,9 +368,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '222 40% 24%', primaryInk: '40 40% 96%', bg: '40 25% 97%', ink: '222 30% 12%',
       muted: '222 10% 40%', card: '40 20% 99.5%', border: '40 14% 88%', radius: 2,
-      displayFont: 'Newsreader', bodyFont: 'Figtree', tone: 'established counsel — ink navy on warm paper, serif authority, restraint',
+      displayFont: 'Newsreader', bodyFont: 'Figtree', tone: 'established counsel — ink navy on warm paper, serif authority, restraint', flair: ['ruled', 'outline'], motion: 'calm',
     },
     cta: 'Request a Consultation',
+    variants: { hero: 'editorial', services: 'rows', reviews: 'spotlight' },
   },
   {
     id: 'real_estate',
@@ -279,9 +381,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '30 45% 38%', primaryInk: '36 40% 97%', bg: '36 22% 97.5%', ink: '28 26% 12%',
       muted: '28 10% 42%', card: '36 24% 99.5%', border: '32 16% 88%', radius: 0,
-      displayFont: 'Fraunces', bodyFont: 'Figtree', tone: 'quiet luxury listing — bronze on cream, editorial serif, photography leads',
+      displayFont: 'Fraunces', bodyFont: 'Figtree', tone: 'quiet luxury listing — bronze on cream, editorial serif, photography leads', flair: ['outline', 'grain'], motion: 'lively',
     },
     cta: 'Schedule a Showing',
+    variants: { hero: 'editorial', reviews: 'spotlight', ctaBanner: 'giant' },
   },
   {
     id: 'fitness',
@@ -291,9 +394,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '80 85% 45%', primaryInk: '80 60% 8%', bg: '220 12% 10%', ink: '60 15% 95%',
       muted: '220 6% 62%', card: '220 12% 14%', border: '220 10% 22%', radius: 8,
-      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'committed-dark energy — near-black, one electric lime accent, hard type',
+      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'committed-dark energy — near-black, one electric lime accent, hard type', flair: ['outline', 'grain', 'marquee'], motion: 'cinematic',
     },
     cta: 'Start Free Trial',
+    variants: { hero: 'stacked', ctaBanner: 'giant' },
   },
   {
     id: 'retail_boutique',
@@ -303,9 +407,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '335 45% 40%', primaryInk: '340 30% 98%', bg: '30 30% 97.5%', ink: '335 20% 14%',
       muted: '335 8% 44%', card: '30 26% 99.5%', border: '30 16% 89%', radius: 14,
-      displayFont: 'Bricolage Grotesque', bodyFont: 'Onest', tone: 'warm curated shop — berry accent on cream, product photography first',
+      displayFont: 'Bricolage Grotesque', bodyFont: 'Onest', tone: 'warm curated shop — berry accent on cream, product photography first', flair: ['dots', 'marquee'], motion: 'lively',
     },
     cta: 'Visit the Shop',
+    variants: { hero: 'stacked' },
   },
   {
     id: 'pet_care',
@@ -315,9 +420,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '25 85% 50%', primaryInk: '30 50% 98%', bg: '45 40% 97%', ink: '30 26% 13%',
       muted: '30 10% 42%', card: '45 36% 99.5%', border: '40 20% 87%', radius: 18,
-      displayFont: 'Bricolage Grotesque', bodyFont: 'Figtree', tone: 'joyful and trustworthy — sunny orange, rounded softness, real pet photos',
+      displayFont: 'Bricolage Grotesque', bodyFont: 'Figtree', tone: 'joyful and trustworthy — sunny orange, rounded softness, real pet photos', flair: ['dots', 'marquee'], motion: 'lively',
     },
     cta: 'Book a Visit',
+    variants: { services: 'cards' },
   },
   {
     id: 'photography_events',
@@ -327,9 +433,10 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '42 50% 52%', primaryInk: '40 40% 8%', bg: '240 8% 8%', ink: '40 20% 94%',
       muted: '240 5% 60%', card: '240 8% 12%', border: '240 6% 20%', radius: 0,
-      displayFont: 'Gloock', bodyFont: 'Hanken Grotesk', tone: 'gallery dark — near-black stage, champagne accent, the work IS the site',
+      displayFont: 'Gloock', bodyFont: 'Hanken Grotesk', tone: 'gallery dark — near-black stage, champagne accent, the work IS the site', flair: ['grain', 'outline'], motion: 'cinematic',
     },
     cta: 'Check My Date',
+    variants: { hero: 'editorial', ctaBanner: 'giant' },
   },
 ];
 
@@ -364,6 +471,11 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   const t = (r.theme ?? {}) as Record<string, unknown>;
   const hsl = (v: unknown, dflt: string) => (typeof v === 'string' && HSL_RE.test(v.trim()) ? v.trim() : dflt);
   const font = (v: unknown, dflt: string) => (typeof v === 'string' && FONT_RE.test(v.trim()) ? v.trim() : dflt);
+  // flair: whitelist-filtered signature devices, capped at 3; absent → the recipe's defaults
+  // (never zero personality). An unknown device name is dropped, never rendered.
+  const rawFlair = Array.isArray(t.flair)
+    ? (t.flair as unknown[]).filter((f): f is FlairDevice => FLAIR_DEVICES.includes(f as FlairDevice)).slice(0, 3)
+    : null;
   const theme: ThemeSpec = {
     primary: hsl(t.primary, recipe.theme.primary),
     primaryInk: hsl(t.primaryInk, recipe.theme.primaryInk),
@@ -376,11 +488,18 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     displayFont: font(t.displayFont, recipe.theme.displayFont),
     bodyFont: font(t.bodyFont, recipe.theme.bodyFont),
     tone: str(t.tone, recipe.theme.tone),
+    flair: rawFlair ?? recipe.theme.flair ?? [],
+    motion: MOTION_TIERS.includes(t.motion as MotionTier) ? (t.motion as MotionTier) : (recipe.theme.motion ?? 'lively'),
   };
 
   // sections: keep known types only, in given order; re-inject photo/review data from the
   // PROFILE with usage flags applied (never trust the model to have honored them).
   const photos = usablePhotos(profile);
+  // Role-tagged AI assets belong to the layers hero ONLY. The transparent object must never
+  // appear as a "content photo" (a floating wrench in the about section — 20-site review
+  // finding); the abstract backdrop may serve as a hero background but never galleries/about.
+  const contentPhotos = photos.filter((p) => p.alt !== 'ai-backdrop' && p.alt !== 'ai-object');
+  const heroBackdrop = photos.find((p) => p.alt === 'ai-backdrop');
   const reviews = usableReviews(profile);
   const rawSections = Array.isArray(r.sections) ? r.sections : [];
   let sections: SectionSpec[] = rawSections
@@ -389,7 +508,12 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
       const type = o?.type as SectionType;
       if (!SECTION_TYPES.includes(type)) return null;
       const props = (typeof o.props === 'object' && o.props !== null ? o.props : {}) as Record<string, unknown>;
-      return { type, variant: typeof o.variant === 'string' ? o.variant : undefined, props };
+      // variant: whitelist-checked; unknown/absent → the recipe's default composition for the type
+      const allowed = SECTION_VARIANTS[type];
+      const variant = (typeof o.variant === 'string' && allowed?.includes(o.variant))
+        ? o.variant
+        : recipe.variants?.[type];
+      return { type, variant, props };
     })
     .filter((s): s is SectionSpec => s !== null);
   if (!sections.length) sections = fallback.sections;
@@ -408,13 +532,27 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   for (const s of sections) {
     if (s.type === 'hero') {
       const img = typeof s.props.image === 'string' ? s.props.image : undefined;
-      s.props.image = img && photos.some((p) => p.url === img) ? img : photos[0]?.url;
+      s.props.image = img && (contentPhotos.some((p) => p.url === img) || img === heroBackdrop?.url)
+        ? img
+        : contentPhotos[0]?.url ?? heroBackdrop?.url;
+      // Layered depth-sandwich assets ride in by ROLE, never by model-supplied URL: the worker
+      // tags the generated pair alt 'ai-backdrop'/'ai-object'; both present → the 'layers' hero
+      // can render. A layers variant without both falls back in the renderer.
+      s.props.bgImage = heroBackdrop?.url;
+      s.props.objectImage = photos.find((p) => p.alt === 'ai-object')?.url;
       // The REAL phone rides into the hero so the call button dials it — never digits parsed out
       // of an AI-written button label ("Call us today" → dead tel: link).
       if (profile.phone) s.props.phone = profile.phone;
     }
+    if (s.type === 'about') {
+      // about.image is model-suggested — allow only real content photos (no role assets).
+      const aImg = typeof s.props.image === 'string' ? s.props.image : undefined;
+      s.props.image = aImg && contentPhotos.some((p) => p.url === aImg)
+        ? aImg
+        : contentPhotos[1]?.url ?? contentPhotos[0]?.url;
+    }
     if (s.type === 'gallery' || s.type === 'showcase') {
-      s.props.photos = photos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
+      s.props.photos = contentPhotos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
     }
     if (s.type === 'reviews') {
       s.props.reviews = reviews.map((x) => ({ author: x.author ?? 'Verified customer', rating: x.rating ?? 5, text: x.text }));
@@ -424,11 +562,32 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     }
   }
   // sections that render scraped media but have none to render get dropped, not left empty
+  // (role-tagged AI assets don't count as gallery content)
   sections = sections.filter((s) => {
-    if ((s.type === 'gallery' || s.type === 'showcase') && photos.length === 0) return false;
+    if ((s.type === 'gallery' || s.type === 'showcase') && contentPhotos.length === 0) return false;
     if (s.type === 'reviews' && reviews.length === 0 && !profile.reviews_summary) return false;
     return true;
   });
+
+  // TRADE SCENE: the visual is never model-chosen — the deterministic kind for this trade is
+  // stamped onto the props; no scene exists for the trade (or a second scene appears) → dropped.
+  const sceneKind = sceneKindFor(profile.industry);
+  let sceneSeen = false;
+  sections = sections.filter((s) => {
+    if (s.type !== 'scene') return true;
+    if (!sceneKind || sceneSeen) return false;
+    sceneSeen = true;
+    s.props = {
+      headline: str(s.props.headline, SCENE_COPY[sceneKind].headline),
+      sub: str(s.props.sub, SCENE_COPY[sceneKind].sub),
+      cta: str(s.props.cta, recipe.cta),
+      scene: sceneKind,
+    };
+    return true;
+  });
+
+  // Dignity is not a model choice — grief-adjacent categories are forced calm here.
+  sections = applyRestraint(theme, sections, profile.industry);
 
   const seoRaw = (r.seo ?? {}) as Record<string, unknown>;
   return {
@@ -446,6 +605,7 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
       keywords: Array.isArray(seoRaw.keywords) ? (seoRaw.keywords as unknown[]).filter((k): k is string => typeof k === 'string').slice(0, 12) : fallback.seo.keywords,
     },
     footer: { line: str((r.footer as Record<string, unknown>)?.line, fallback.footer.line) },
+    aiImagery: profile.photos.some((p) => p.source_type === 'ai_generated') || undefined,
   };
 }
 
@@ -545,7 +705,10 @@ function voiceFor(industry: string, name: string, city: string | null): Voice {
 
 export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const recipe = pickRecipe(profile);
-  const photos = usablePhotos(profile);
+  const allPhotos = usablePhotos(profile);
+  // Same role rule as the normalizer: the AI object/backdrop pair never masquerades as content.
+  const photos = allPhotos.filter((p) => p.alt !== 'ai-backdrop' && p.alt !== 'ai-object');
+  const heroBackdrop = allPhotos.find((p) => p.alt === 'ai-backdrop');
   const reviews = usableReviews(profile);
   const loc = profile.location ?? '';
   const name = profile.business_name;
@@ -562,7 +725,9 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
           heading: voice.heading,
           sub: profile.description ?? voice.sub,
           cta, secondaryCta: profile.phone ? `Call ${profile.phone}` : undefined,
-          image: photos[0]?.url,
+          image: photos[0]?.url ?? heroBackdrop?.url,
+          bgImage: heroBackdrop?.url,
+          objectImage: allPhotos.find((p) => p.alt === 'ai-object')?.url,
           rating: profile.google_rating, reviewCount: profile.review_count,
         } });
         break;
@@ -647,8 +812,21 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
           body: `${name} provides ${profile.services.join(', ').toLowerCase()}${loc ? ` throughout ${loc}` : ''}. ${profile.seo_keywords?.length ? `Popular searches: ${profile.seo_keywords.slice(0, 5).join(', ')}.` : ''}`,
         } });
         break;
+      case 'scene': {
+        // Only trades with a hand-built vignette get one — never a generic placeholder.
+        const kind = sceneKindFor(profile.industry);
+        if (kind) sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind } });
+        break;
+      }
     }
   }
+
+  // The recipe's structural compositions ride into the fallback — the floor is architecturally
+  // distinct per vertical, not one skeleton with different paint.
+  for (const s of sections) s.variant = s.variant ?? recipe.variants?.[s.type];
+
+  const fbTheme: ThemeSpec = { ...recipe.theme };
+  const restrainedSections = applyRestraint(fbTheme, sections, profile.industry);
 
   const spec: SiteSpec = {
     version: 1,
@@ -656,15 +834,16 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
     business_name: name,
     logoText: name,
     tagline: `${profile.industry}${loc ? ` · ${loc}` : ''}`,
-    theme: { ...recipe.theme },
+    theme: fbTheme,
     nav: [],
-    sections,
+    sections: restrainedSections,
     seo: {
       title: `${name} | ${profile.industry}${loc ? ` in ${loc}` : ''}`,
       description: profile.description ?? `${name} — ${profile.services.slice(0, 3).join(', ')}${loc ? ` in ${loc}` : ''}. ${cta} today.`,
       keywords: profile.seo_keywords?.slice(0, 12) ?? [],
     },
     footer: { line: `© ${name}. ${loc}` },
+    aiImagery: profile.photos.some((p) => p.source_type === 'ai_generated') || undefined,
   };
   spec.nav = navFor(spec.sections, recipe.cta);
   return spec;

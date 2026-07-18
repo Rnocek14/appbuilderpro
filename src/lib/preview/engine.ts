@@ -9,92 +9,23 @@ import { supabase } from '../supabase';
 import { rawComplete } from '../aiClient';
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec, navFor, previewSlug,
-  usablePhotos, usableReviews, SECTION_TYPES, RECIPES,
+  RECIPES,
   type BusinessProfile, type SiteSpec,
 } from './spec';
 import {
   fallbackStrategy, normalizeStrategy, fallbackAudit, normalizeAudit, normalizeCritique,
   critiqueWarrantsRefine, type WebsiteStrategy, type AuditReport, type OwnerCritique,
 } from './strategy';
-
-function extractJson<T>(raw: string): T {
-  const clean = raw.replace(/```json|```/g, '').trim();
-  const start = clean.indexOf('{');
-  const end = clean.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('No JSON object in model response.');
-  return JSON.parse(clean.slice(start, end + 1)) as T;
-}
-
-const SPEC_SYSTEM = `You are the art director and conversion copywriter of an elite local-business
-web agency. You produce a WEBSITE SPEC as JSON — copy, theme, and section choices for a
-component-based renderer. You never write HTML/CSS/code.
-
-HARD RULES:
-- Ground EVERY claim in the provided business profile. Never invent reviews, ratings, years in
-  business, certifications, or services that aren't in the profile. Confident, specific copy —
-  but only from facts you were given (plus universally safe lines like "free estimates").
-- Voice: a premium local agency — direct, warm, zero clichés ("Welcome to our website" is banned).
-  Headlines sell the OUTCOME (a dry roof, a full table, glowing skin), not the company.
-- Theme colors are HSL triplets "H S% L%". Pick a palette that fits the business's trade and
-  brand_style — distinctive, never default blue. bg is the page paper (subtle tint reads premium).
-- Sections: choose ONLY from the allowed list, in a persuasive order (hero first; a quote/ctaBanner
-  must appear). Skip sections the profile has no content for.
-- SEO title ≤ 60 chars with the location; description ≤ 155 chars with a call to action.
-
-Output ONLY the JSON object — no prose, no fences.`;
-
-function specPrompt(profile: BusinessProfile): string {
-  const recipe = pickRecipe(profile);
-  const photos = usablePhotos(profile);
-  const reviews = usableReviews(profile);
-  return `BUSINESS PROFILE:
-${JSON.stringify({ ...profile, photos: photos.map((p) => p.url), review_snippets: reviews }, null, 1)}
-
-RECIPE: ${recipe.id} (${recipe.label}) — CTA verb: "${recipe.cta}"
-ALLOWED SECTION TYPES: ${SECTION_TYPES.join(', ')}
-SUGGESTED ORDER (adapt, don't slavishly follow): ${recipe.sections.join(' → ')}
-
-Section prop shapes (fill ALL copy):
-- hero: { eyebrow, heading, sub, cta, secondaryCta?, image? (one of the photo urls), rating?, reviewCount? }
-  hero also takes "variant":"split" (photo panel beside the copy, on the page paper — pick it for
-  professional/editorial trades: legal, medical, real estate; full-bleed cinematic is the default)
-- trust: { items: [4 short proof points — only claims supported by the profile] }
-- services: { heading, sub, services: [{ name, blurb (specific, 1 sentence) }], cta }
-- about: { heading, body (2-3 sentences, grounded), image? }
-- showcase/gallery: { heading }  (photos are injected automatically)
-- reviews: { heading }           (review data is injected automatically)
-- serviceArea: { heading, areas: [strings] }
-- faq: { heading, faqs: [{ q, a } x3-5, grounded in the profile] }
-- hours: { heading }             (hours injected from profile if present)
-- map: { heading, address, phone }
-- quote: { heading, sub, phone, email, cta }
-- ctaBanner: { heading, sub, cta }
-- seoText: { heading, body (2-3 sentences weaving in the seo_keywords naturally) }
-
-Return:
-{"logoText": "Name|Accent (split the wordmark at a natural point for a two-tone logo, else plain name)",
- "tagline": str,
- "theme": {"primary": "H S% L%", "primaryInk": "H S% L%", "bg": "H S% L%", "ink": "H S% L%",
-           "muted": "H S% L%", "card": "H S% L%", "border": "H S% L%", "radius": int(0-28),
-           "displayFont": "Google Font", "bodyFont": "Google Font", "tone": str},
- "sections": [{"type": str, "props": {…}}],
- "seo": {"title": str, "description": str, "keywords": [str]},
- "footer": {"line": str}}`;
-}
+// The chain's prompts live in specPrompts.ts (pure, Deno-safe) so the standing-worker's automated
+// client hunt runs the IDENTICAL strategist/art-director/owner-critique brief as this browser path.
+import {
+  extractJson, SPEC_SYSTEM, specPrompt, STRATEGY_SYSTEM, CRITIQUE_SYSTEM,
+  strategyBlock, critiqueBlock, critiqueUserPrompt,
+} from './specPrompts';
 
 // ---------------------------------------------------------------------------
 // The intelligence chain: strategy → spec → owner critique → refine → audit
 // ---------------------------------------------------------------------------
-
-const STRATEGY_SYSTEM = `You are a senior marketing strategist at an elite local-business agency.
-Given a business profile, produce the MARKETING BRIEF a website must execute: who actually buys,
-what would make them pick THIS business, what the hero must communicate in 3 seconds, which proof
-elements to lead with, and which hesitations the copy must pre-empt. Ground everything in the
-profile — never invent facts, awards, or claims. Be specific to this trade and town, never generic.
-Output ONLY JSON:
-{"positioning": str, "ideal_customer": str, "tone": str, "hero_strategy": str,
- "differentiators": [str], "trust_builders": [str], "objections": [str],
- "offer_strategy": str, "photo_strategy": str, "color_rationale": str, "local_keywords": [str]}`;
 
 /** The marketing brief the spec executes. Deterministic fallback on any failure. */
 export async function deriveStrategy(profile: BusinessProfile): Promise<WebsiteStrategy> {
@@ -114,16 +45,10 @@ export async function deriveStrategy(profile: BusinessProfile): Promise<WebsiteS
 export async function generateSiteSpec(
   profile: BusinessProfile, strategy?: WebsiteStrategy, critique?: OwnerCritique,
 ): Promise<{ spec: SiteSpec; source: 'ai' | 'fallback' }> {
-  const strategyBlock = strategy
-    ? `\n\nMARKETING STRATEGY — the spec must EXECUTE this brief (hero follows hero_strategy, copy speaks to ideal_customer in the given tone, trust_builders surfaced, objections pre-empted):\n${JSON.stringify(strategy, null, 1)}`
-    : '';
-  const critiqueBlock = critique?.issues.length
-    ? `\n\nOWNER CRITIQUE OF THE PREVIOUS DRAFT — fix every issue in this revision:\n${critique.issues.map((i) => `- [${i.section}] ${i.problem} → ${i.fix}`).join('\n')}${critique.weakest_part ? `\nWeakest part overall: ${critique.weakest_part}` : ''}`
-    : '';
   try {
     const r = await rawComplete([
       { role: 'system', content: SPEC_SYSTEM },
-      { role: 'user', content: specPrompt(profile) + strategyBlock + critiqueBlock },
+      { role: 'user', content: specPrompt(profile) + strategyBlock(strategy) + critiqueBlock(critique) },
     ], 8000);
     const spec = normalizeSpec(extractJson(r.text), profile);
     spec.nav = navFor(spec.sections, pickRecipe(profile).cta);
@@ -133,23 +58,12 @@ export async function generateSiteSpec(
   }
 }
 
-const CRITIQUE_SYSTEM = `You ARE the owner of this business — busy, skeptical, protective of your
-reputation, allergic to marketing fluff. An agency you never hired just sent you this website spec
-they built for you. React honestly:
-- Would you pay $299 to publish it?
-- Does it feel like YOUR business or a template with your name pasted in?
-- What's factually off, generically written, or missing that you'd notice immediately?
-Judge the COPY and CHOICES (headlines, claims, section order, tone) — not the technology.
-Output ONLY JSON:
-{"would_buy": bool, "feels_like_my_business": int(1-10), "weakest_part": str,
- "issues": [{"section": str, "problem": str, "fix": str}]}`;
-
 /** Owner-simulation review of a spec. Fails soft to a clean critique (no refine pass). */
 export async function critiqueSpec(profile: BusinessProfile, spec: SiteSpec): Promise<OwnerCritique> {
   try {
     const r = await rawComplete([
       { role: 'system', content: CRITIQUE_SYSTEM },
-      { role: 'user', content: `YOUR BUSINESS (ground truth):\n${JSON.stringify({ ...profile, photos: undefined }, null, 1)}\n\nTHE WEBSITE THEY BUILT (spec):\n${JSON.stringify({ tagline: spec.tagline, theme: { tone: spec.theme.tone }, sections: spec.sections.map((s) => ({ type: s.type, props: s.props })), seo: spec.seo }, null, 1)}` },
+      { role: 'user', content: critiqueUserPrompt(profile, spec) },
     ], 1500);
     return normalizeCritique(extractJson(r.text));
   } catch {

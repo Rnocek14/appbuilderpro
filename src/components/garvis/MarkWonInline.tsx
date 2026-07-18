@@ -42,9 +42,17 @@ export function MarkWonInline({ campaignId, onClosed }: {
             ? <>send the payment link (<a className="text-forge-ember hover:underline" href={won.paymentLink} target="_blank" rel="noreferrer">open it</a>), </>
             : <>set your Stripe payment link on the <Link to="/garvis/client-billing" className="text-forge-ember hover:underline">Clients page</Link>, </>}
           {won.demoSlug && <>show them their site (<a className="text-forge-ember hover:underline" href={`/preview-site/${won.demoSlug}`} target="_blank" rel="noreferrer">the rebuild</a>), </>}
+          {won.invoiceNumber && <>queue invoice {won.invoiceNumber} from <Link to="/garvis/money" className="text-forge-ember hover:underline">Money</Link>, </>}
           and send your agreement from Documents → e-sign when you're ready.
           {' '}<Link to="/garvis/client-billing" className="text-forge-ember hover:underline">Open Clients →</Link>
         </p>
+        {tier === 'website' && (
+          <p className="mt-1 text-forge-dim">
+            Upsell path: once the site's live, pitch the automation upgrade — their industry-fitted
+            menu (recall reminders, review requests, win-backs) is on their row under{' '}
+            <Link to="/garvis/client-billing" className="text-forge-ember hover:underline">Clients → Automations</Link>.
+          </p>
+        )}
       </div>
     );
   }

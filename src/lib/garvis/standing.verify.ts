@@ -102,5 +102,23 @@ console.log('standing.verify');
   check('after a run, the line IS the run’s own honest line', orderStatusLine({ status: 'active', lastRunAt: now, lastResult: res, nextRunAt: 'x' }) === res.line);
 }
 
+// 8 — content_week: config parsing, deterministic slots, honest line.
+{
+  const { parseContentWeekConfig, weekSlots, contentWeekLine } = await import('./standing');
+  const cfg = parseContentWeekConfig({ platforms: ['facebook', 'instagram', 'linkedin'], postsPerWeek: 99, emailSegment: 'customer', sendHourUtc: 16 });
+  check('media-required platforms are filtered out (instagram dropped)', !!cfg && !cfg.platforms.includes('instagram') && cfg.platforms.includes('facebook'));
+  check('postsPerWeek clamps to 7', cfg!.postsPerWeek === 7);
+  check('email segment parses', cfg!.emailSegment === 'customer');
+  check('minScore defaults to the quality bar (8)', cfg!.minScore === 8);
+  check('no usable platforms → null (never a silent empty week)', parseContentWeekConfig({ platforms: ['instagram', 'tiktok'] }) === null);
+  const slots = weekSlots('2026-07-20', 4, 16);
+  check('4 slots spread Mon..Sun deterministically', slots.length === 4 && slots[0] === '2026-07-20T16:00:00.000Z' && slots[3] === '2026-07-26T16:00:00.000Z');
+  check('one slot lands Monday', weekSlots('2026-07-20', 1, 9)[0] === '2026-07-20T09:00:00.000Z');
+  const line = contentWeekLine('Week of 2026-07-20', 4, 2, true, false);
+  check('the line reports kept, discarded, email, and mode honestly',
+    line.includes('4 pieces staged') && line.includes('incl. 1 email') && line.includes('2 below the bar') && line.includes('waiting for your approval'));
+  check('auto mode says so', contentWeekLine('W', 1, 0, false, true).includes('auto-approved'));
+}
+
 console.log(`\nstanding.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} standing check(s) failed`);

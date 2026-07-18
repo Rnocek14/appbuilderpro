@@ -32,19 +32,34 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES } from '../../../src/lib/garvis/opportunityHunt.ts';
-import { buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
+// THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
+// the browser preview engine runs, so hunted prospects get the crafted site, not the template.
+import {
+  extractJson, SPEC_SYSTEM, specPrompt, STRATEGY_SYSTEM, CRITIQUE_SYSTEM,
+  strategyBlock, critiqueBlock, critiqueUserPrompt,
+} from '../../../src/lib/preview/specPrompts.ts';
+import { normalizeStrategy, normalizeCritique, critiqueWarrantsRefine, fallbackAudit } from '../../../src/lib/preview/strategy.ts';
 import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
 import { deriveSignals, proposeFromSignals } from '../../../src/lib/garvis/automation/detect.ts';
 import { detectVertical } from '../../../src/lib/garvis/verticals.ts';
 // TRIGGER ENGINE pure core (app_0076) — the same verified math the in-app runner uses.
-import { dueFires, renderTemplate, fireKey } from '../../../src/lib/garvis/automation/triggers.ts';
 import { citiesFor } from '../../../src/lib/garvis/usCities.ts';
 import {
   PLACES_FIELD_MASK, parsePlace, buildDiscoveryQueries, exhaustionUpdate,
   type PlaceRaw, type DiscoveredBiz,
 } from '../../../src/lib/garvis/placesDiscovery.ts';
-import { parseBusinessProfile, assembleFallbackSpec, previewSlug } from '../_shared/previewSpec.ts';
-import { hashPayload } from '../_shared/payloadHash.ts';
+import { parseBusinessProfile, assembleFallbackSpec, normalizeSpec, navFor, pickRecipe, previewSlug, restraintFor, type SiteSpec } from '../_shared/previewSpec.ts';
+import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
+// CONTENT WEEK (app_0088): the same editor rubric the boards use (fail-CLOSED here — an unjudged
+// draft never auto-queues) + the pure week machinery from standingCore.
+import { honestySystemPrompt, judgeSystemPrompt, judgeUserPrompt, parseJudgeVerdict } from '../_shared/copyJudge.ts';
+import { parseContentWeekConfig, weekSlots, contentWeekLine } from '../_shared/standingCore.ts';
+import { composeBatchRecipients } from '../_shared/batchCore.ts';
+// AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
+// only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
+// the owner happens to click "Run due now" in a browser tab.
+import { dueFires, renderTemplate, fireKey, type CustomerRec } from '../../../src/lib/garvis/automation/triggers.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
@@ -204,7 +219,14 @@ Deno.serve(async (req) => {
           try {
             const res = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
               method: 'POST',
-              headers: { 'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '' },
+              // The service-key bearer exists ONLY to pass the platform's verify-jwt gateway
+              // (send-email deploys JWT-verified for browser callers); the real worker auth is
+              // still x-worker-secret, checked inside the function. Without the bearer, every
+              // drain send 401s at the gateway before send-email's code runs.
+              headers: {
+                'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '',
+                Authorization: `Bearer ${serviceKey}`, apikey: serviceKey,
+              },
               body: JSON.stringify({ approval_id: apRow.id }),
             });
             if (res.ok) { r.state = 'sent'; sentNow++; await persistRecips(); }
@@ -303,74 +325,310 @@ Deno.serve(async (req) => {
     // ---- CLIENT AUTOMATION TRIGGERS (app_0076) --------------------------------------------------
     // The recurring-revenue engine ON THE CLOCK: every owner's active triggers run with the SAME
     // pure core (dueFires/renderTemplate) + claim-first trigger_fires ledger the in-app "Run due
-    // now" uses — so automations fire while the operator sleeps. Every fire enqueues a PENDING
-    // approval through the one send path; nothing sends without the owner. Bounded per tick.
+    // now" uses — so automations fire while the operator sleeps (a rule created and left alone
+    // used to fire ONLY when the owner clicked "Run due now"). Every fire enqueues a PENDING
+    // approval through the one send path; nothing sends without the owner; the trigger_fires
+    // unique index arbitrates between this drain and a concurrent browser run. Bounded per tick.
     try {
-      const FIRES_PER_TICK = 40;
-      let fired = 0;
-      // Reconcile stranded claims (claimed but never enqueued) so they retry instead of blocking.
+      // Stranded-claim sweep (mirror of the browser runner): a run that died after claiming but
+      // before enqueuing leaves approval_id null — release older than 10 min so fires retry.
       const staleCutoff = new Date(Date.parse(nowIso) - 10 * 60 * 1000).toISOString();
       await admin.from('trigger_fires').delete().is('approval_id', null).lt('created_at', staleCutoff);
 
+      interface AutoTrigRow {
+        id: string; owner_id: string; list_id: string; label: string;
+        anchor_field: 'last_service_at' | 'last_visit_at' | 'purchase_at' | 'next_due_at';
+        offset_days: number; window_days: number; template_subject: string; template_body: string;
+      }
+      interface AutoCustRow {
+        id: string; email: string | null; name: string | null; consent_basis: string | null;
+        last_service_at: string | null; last_visit_at: string | null;
+        purchase_at: string | null; next_due_at: string | null;
+      }
+      // Deterministic order + a bound far above any plausible fleet (review fix): an unordered
+      // .limit(100) let PostgREST return an arbitrary subset, so rules past the cap could be
+      // silently NEVER checked. Ordered by id, capped at 500 — the fireBudget below still bounds
+      // per-tick work, and a backlog beyond the budget drains across subsequent ticks.
       const { data: trigData } = await admin.from('automation_triggers')
-        .select('*').eq('status', 'active').limit(200);
-      const customersCache = new Map<string, { id: string; email: string | null; name: string | null; anchors: Record<string, string | null> }[]>();
-      for (const t of (trigData ?? []) as {
-        id: string; owner_id: string; list_id: string; label: string; anchor_field: string;
-        offset_days: number; window_days: number; status: 'active' | 'paused';
-        template_subject: string; template_body: string;
-      }[]) {
-        if (fired >= FIRES_PER_TICK) break;
-        const cacheKey = `${t.owner_id}:${t.list_id}`;
-        let customers = customersCache.get(cacheKey);
+        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body')
+        .eq('status', 'active').order('id', { ascending: true }).limit(500);
+
+      const custCache = new Map<string, CustomerRec[]>();
+      let fireBudget = 40; // bound tick time — a backlog drains over ticks, never in one stampede
+      for (const t of (trigData ?? []) as AutoTrigRow[]) {
+        if (fireBudget <= 0) break;
+        // Ownership re-check under service-role (RLS doesn't protect the admin client): the
+        // trigger's list must belong to the trigger's owner or nothing fires.
+        const { data: list } = await admin.from('customer_lists').select('owner_id').eq('id', t.list_id).maybeSingle();
+        if (!list || (list as { owner_id: string }).owner_id !== t.owner_id) continue;
+
+        const cacheKey = `${t.owner_id}|${t.list_id}`;
+        let customers = custCache.get(cacheKey);
         if (!customers) {
           const { data: custData } = await admin.from('customers')
-            .select('*').eq('owner_id', t.owner_id).eq('list_id', t.list_id);
-          customers = ((custData ?? []) as Record<string, string | null>[]).map((c) => ({
-            id: c.id as string, email: c.email, name: c.name,
-            anchors: {
-              last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
-              purchase_at: c.purchase_at, next_due_at: c.next_due_at,
-            },
-          }));
-          customersCache.set(cacheKey, customers);
+            .select('id, email, name, consent_basis, last_service_at, last_visit_at, purchase_at, next_due_at')
+            .eq('owner_id', t.owner_id).eq('list_id', t.list_id).limit(2000);
+          customers = ((custData ?? []) as AutoCustRow[])
+            // Consent gate (the column existed but was never checked): automations are warm/
+            // transactional by design — a cold-prospecting row never rides a recall trigger.
+            .filter((c) => (c.consent_basis ?? 'warm_transactional') === 'warm_transactional')
+            .map((c) => ({
+              id: c.id, email: c.email, name: c.name,
+              anchors: {
+                last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
+                purchase_at: c.purchase_at, next_due_at: c.next_due_at,
+              },
+            }));
+          custCache.set(cacheKey, customers);
         }
+
         const { data: fireData } = await admin.from('trigger_fires')
           .select('customer_id, fired_for').eq('owner_id', t.owner_id).eq('trigger_id', t.id);
         const firedKeys = ((fireData ?? []) as { customer_id: string; fired_for: string }[])
           .map((f) => fireKey(f.customer_id, f.fired_for));
-        const def = {
-          id: t.id, anchorField: t.anchor_field as Parameters<typeof dueFires>[0]['anchorField'],
-          offsetDays: t.offset_days, windowDays: t.window_days, status: t.status,
-        };
-        // deno-lint-ignore no-explicit-any
-        const plan = dueFires(def, customers as any, firedKeys, nowIso);
+
+        const plan = dueFires(
+          { id: t.id, anchorField: t.anchor_field, offsetDays: t.offset_days, windowDays: t.window_days, status: 'active' },
+          customers, firedKeys, nowIso,
+        );
+        let queuedForTrigger = 0;
         for (const fire of plan) {
-          if (fired >= FIRES_PER_TICK) break;
-          // CLAIM-FIRST: unique(trigger, customer, due date) makes a duplicate a no-op forever.
+          if (fireBudget <= 0) break;
+
+          // Suppression pre-check BEFORE claiming (queueHuntPitch's honesty): a known
+          // unsubscribed/bounced/complained address is never re-queued — and never claimed, so
+          // the window guard naturally retires it instead of a claim-release loop.
+          const { data: existing } = await admin.from('contacts')
+            .select('id, email_status').eq('owner_id', t.owner_id).eq('email', fire.email.toLowerCase()).maybeSingle();
+          const st = (existing as { email_status?: string } | null)?.email_status;
+          if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') continue;
+
+          // CLAIM-FIRST: the unique index rejects a duplicate/concurrent fire (23505 = skip).
           const { data: claim, error: claimErr } = await admin.from('trigger_fires')
             .insert({ owner_id: t.owner_id, trigger_id: t.id, customer_id: fire.customerId, fired_for: fire.firedFor })
             .select('id').maybeSingle();
-          if (claimErr || !claim) continue;   // 23505 = already fired; other errors retry next tick
+          if (claimErr || !claim) continue;
           const fireId = (claim as { id: string }).id;
+          fireBudget--;
+
           try {
             const cust = customers.find((c) => c.id === fire.customerId)!;
-            // deno-lint-ignore no-explicit-any
-            const subject = renderTemplate(t.template_subject, cust as any).trim() || t.label;
-            // deno-lint-ignore no-explicit-any
-            const body2 = renderTemplate(t.template_body, cust as any);
-            const ok = await queueTriggerSend(admin, t.owner_id, {
-              label: t.label, subject, body: body2, toEmail: fire.email, fireId,
-            });
-            if (!ok) throw new Error('enqueue failed');
-            fired++;
+            const subject = renderTemplate(t.template_subject, cust).trim() || t.label;
+            const bodyText = renderTemplate(t.template_body, cust);
+            const to = fire.email.toLowerCase().trim();
+
+            let contactId: string | null = existing ? (existing as { id: string }).id : null;
+            if (!contactId) {
+              const { data: c } = await admin.from('contacts')
+                .insert({ owner_id: t.owner_id, email: to, email_status: 'unknown', is_primary: true })
+                .select('id').maybeSingle();
+              if (c) contactId = (c as { id: string }).id;
+              else {
+                const { data: again } = await admin.from('contacts')
+                  .select('id').eq('owner_id', t.owner_id).eq('email', to).maybeSingle();
+                contactId = again ? (again as { id: string }).id : null;
+              }
+            }
+
+            const { data: camp } = await admin.from('outreach_campaigns')
+              .insert({ owner_id: t.owner_id, contact_id: contactId, kind: 'automation', state: 'pending_approval' })
+              .select('id').single();
+            if (!camp) throw new Error('campaign insert failed');
+            const campaignId = (camp as { id: string }).id;
+
+            const { data: msg } = await admin.from('outreach_messages').insert({
+              owner_id: t.owner_id, campaign_id: campaignId, contact_id: contactId, sequence_step: 0,
+              subject, body_text: bodyText, to_address: to, status: 'draft',
+            }).select('id').single();
+            if (!msg) throw new Error('message insert failed');
+
+            const payload = { message_id: (msg as { id: string }).id, campaign_id: campaignId };
+            const payload_hash = await hashPayload(payload);
+            const { data: ap, error: apErr } = await admin.from('approvals').insert({
+              owner_id: t.owner_id, kind: 'send_email',
+              title: `${t.label} → ${to}`,
+              preview: `${subject}\n\n${bodyText}`,
+              payload, payload_hash, requested_by: 'garvis-auto',
+            }).select('id').single();
+            if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');
+
+            await admin.from('trigger_fires').update({ approval_id: (ap as { id: string }).id }).eq('id', fireId);
+            queuedForTrigger++;
           } catch {
-            // Release the claim so the fire retries next tick — a failed fire is never lost.
+            // Release the claim so the fire retries next tick — a failed fire is never silently lost.
             await admin.from('trigger_fires').delete().eq('id', fireId);
           }
         }
+
+        if (queuedForTrigger > 0) {
+          await admin.from('mind_events').insert({
+            owner_id: t.owner_id, event_type: 'note', source: 'execution',
+            subject: `Automation "${t.label.slice(0, 120)}" queued ${queuedForTrigger} send${queuedForTrigger === 1 ? '' : 's'} for your approval`,
+            payload: { key: `auto-trigger:${t.id}:${nowIso.slice(0, 10)}`, trigger_id: t.id, queued: queuedForTrigger },
+          }).then(() => {}, () => {});
+        }
       }
-    } catch { /* trigger engine must never wedge the order tick */ }
+    } catch { /* automation drain must never wedge the order tick */ }
+
+    // ---- CONTENT WEEK DRAIN (app_0088) -------------------------------------------------------
+    // The executor HALF: a staged week executes ONLY after its approval verifies — re-checked
+    // EVERY tick (rejected/expired cancels; pending waits) AND hash-verified twice: the approval's
+    // own payload_hash, plus pieces_hash against the CURRENT pieces (post-decision tampering with
+    // the content voids the decision). Social pieces become social_posts + pre-authorized
+    // publish_post approvals executed through social-publish (Ayrshare scheduleDate spreads the
+    // week); the email becomes an outreach_batch whose EXISTING drain sends through the one send
+    // path with suppression/kill-switch/daily-cap re-checked per recipient. garvis-auto posts are
+    // capped by outreach_settings.social_daily_cap.
+    try {
+      interface WeekPiece {
+        id: string; channel: 'social' | 'email'; platform?: string | null;
+        caption?: string; hashtags?: string[]; subject?: string; body?: string; segment?: string | null;
+        media_urls?: string[]; scheduled_for: string; quality: { score: number; notes: string };
+        state: string; reason?: string; social_post_id?: string; batch_id?: string;
+      }
+      interface WeekRow {
+        id: string; owner_id: string; world_id: string | null; week_start: string;
+        pieces: WeekPiece[]; status: string; approval_id: string | null; order_id: string | null;
+      }
+      const drainUrl = Deno.env.get('SUPABASE_URL')!;
+      const { data: weeks } = await admin.from('content_weeks')
+        .select('id, owner_id, world_id, week_start, pieces, status, approval_id, order_id')
+        .in('status', ['staged', 'queued']).order('created_at', { ascending: true }).limit(5);
+      for (const wk of (weeks ?? []) as WeekRow[]) {
+        if (!wk.approval_id) continue;
+        const { data: wkAp } = await admin.from('approvals')
+          .select('id, owner_id, kind, status, payload, payload_hash').eq('id', wk.approval_id).maybeSingle();
+        if (!wkAp || wkAp.kind !== 'content_week' || wkAp.owner_id !== wk.owner_id) continue;
+        if (wkAp.status === 'rejected' || wkAp.status === 'expired') {
+          await admin.from('content_weeks').update({ status: 'canceled', finished_at: nowIso }).eq('id', wk.id);
+          continue;
+        }
+        if (wkAp.status !== 'approved') continue; // pending — the human hasn't decided yet
+        if (!(await payloadMatches(wkAp.payload, wkAp.payload_hash as string | null))) {
+          await admin.from('content_weeks').update({ status: 'canceled', finished_at: nowIso }).eq('id', wk.id);
+          continue;
+        }
+        const wkPayload = wkAp.payload as { pieces_hash?: string };
+        if ((await hashPayload(wk.pieces)) !== wkPayload.pieces_hash) {
+          // The content changed AFTER the decision — the decision no longer covers it. Refuse.
+          await admin.from('content_weeks').update({ status: 'canceled', finished_at: nowIso }).eq('id', wk.id);
+          await admin.from('mind_events').insert({
+            owner_id: wk.owner_id, event_type: 'note', source: 'execution',
+            subject: `Content week of ${wk.week_start} canceled — pieces changed after approval (hash mismatch)`,
+            payload: { key: `content-week-tamper:${wk.id}`, week_id: wk.id },
+          }).then(() => {}, () => {});
+          continue;
+        }
+
+        const { data: st } = await admin.from('outreach_settings')
+          .select('social_daily_cap').eq('owner_id', wk.owner_id).maybeSingle();
+        const socialCap = (st as { social_daily_cap?: number } | null)?.social_daily_cap ?? 4;
+
+        const pieces = wk.pieces;
+        let mutated = false;
+        for (const piece of pieces) {
+          if (piece.state !== 'staged') continue;
+          // Unfilled [EDIT] holes NEVER go out — the piece skips with the reason on the record.
+          const textOf = piece.channel === 'social'
+            ? String(piece.caption ?? '') : `${piece.subject ?? ''}\n${piece.body ?? ''}`;
+          if (/\[EDIT\b/i.test(textOf)) {
+            piece.state = 'skipped'; piece.reason = 'has unfilled [EDIT] holes'; mutated = true; continue;
+          }
+
+          if (piece.channel === 'social') {
+            // Cap gate: today's machine-queued posts across ALL sources. 0 blocks all auto posting.
+            const since = `${nowIso.slice(0, 10)}T00:00:00Z`;
+            const { count } = await admin.from('approvals')
+              .select('id', { count: 'exact', head: true })
+              .eq('owner_id', wk.owner_id).eq('kind', 'publish_post').eq('requested_by', 'garvis-auto')
+              .gte('created_at', since);
+            if ((count ?? 0) >= socialCap) break; // the rest waits for the next tick/day
+
+            const postBody = [String(piece.caption ?? ''), (piece.hashtags ?? []).map((h) => `#${h}`).join(' ')]
+              .filter(Boolean).join('\n\n');
+            const { data: post } = await admin.from('social_posts').insert({
+              owner_id: wk.owner_id, world_id: wk.world_id, body: postBody,
+              platforms: [piece.platform], media_urls: piece.media_urls ?? [],
+              scheduled_for: piece.scheduled_for, status: 'queued',
+            }).select('id').single();
+            if (!post) { piece.state = 'skipped'; piece.reason = 'post insert failed'; mutated = true; continue; }
+            const postId = (post as { id: string }).id;
+            const postPayload = { post_row_id: postId };
+            const { data: pap } = await admin.from('approvals').insert({
+              owner_id: wk.owner_id, kind: 'publish_post', world_id: wk.world_id,
+              title: `Auto: post to ${piece.platform} (${piece.quality.score}/10, week of ${wk.week_start})`,
+              preview: postBody.slice(0, 400), payload: postPayload, payload_hash: await hashPayload(postPayload),
+              status: 'approved', requested_by: 'garvis-auto', decided_via: 'content_week', decided_at: nowIso,
+            }).select('id').single();
+            if (!pap) { piece.state = 'skipped'; piece.reason = 'approval insert failed'; mutated = true; continue; }
+            await admin.from('social_posts').update({ approval_id: (pap as { id: string }).id }).eq('id', postId);
+            const res = await fetch(`${drainUrl}/functions/v1/social-publish`, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '',
+                Authorization: `Bearer ${serviceKey}`, apikey: serviceKey,
+              },
+              body: JSON.stringify({ approval_id: (pap as { id: string }).id }),
+            });
+            const out = await res.json().catch(() => ({} as { ok?: boolean; error?: string }));
+            if (res.ok && (out as { ok?: boolean }).ok !== false) {
+              piece.state = 'queued'; piece.social_post_id = postId;
+            } else {
+              piece.state = 'skipped';
+              piece.reason = String((out as { error?: string }).error ?? `HTTP ${res.status}`).slice(0, 200);
+            }
+            mutated = true;
+          } else {
+            // EMAIL: only once its slot arrives — the batch drain then sends under the daily cap.
+            if (Date.parse(piece.scheduled_for) > Date.parse(nowIso)) continue;
+            let cq = admin.from('contacts').select('id, email, full_name, email_status')
+              .eq('owner_id', wk.owner_id).limit(2000);
+            if (wk.world_id) cq = cq.eq('world_id', wk.world_id);
+            if (piece.segment && piece.segment !== 'all') cq = cq.eq('stage', piece.segment);
+            const { data: contacts } = await cq;
+            const { recipients } = composeBatchRecipients((contacts ?? []) as { id: string; email: string | null; full_name: string | null; email_status: string | null }[]);
+            if (recipients.length === 0) {
+              piece.state = 'skipped'; piece.reason = 'no sendable contacts in the segment'; mutated = true; continue;
+            }
+            const { data: batch } = await admin.from('outreach_batches').insert({
+              owner_id: wk.owner_id, world_id: wk.world_id, subject: String(piece.subject ?? ''),
+              body_text: String(piece.body ?? ''), recipients, status: 'queued',
+            }).select('id').single();
+            if (!batch) { piece.state = 'skipped'; piece.reason = 'batch insert failed'; mutated = true; continue; }
+            const batchId = (batch as { id: string }).id;
+            const bPayload = { batch_id: batchId, recipient_count: recipients.length, week_id: wk.id };
+            const { data: bap } = await admin.from('approvals').insert({
+              owner_id: wk.owner_id, kind: 'send_batch', world_id: wk.world_id,
+              title: `Auto: send "${String(piece.subject ?? '').slice(0, 80)}" to ${recipients.length} (${piece.quality.score}/10)`,
+              preview: String(piece.body ?? '').slice(0, 280), payload: bPayload, payload_hash: await hashPayload(bPayload),
+              status: 'approved', requested_by: 'garvis-auto', decided_via: 'content_week', decided_at: nowIso,
+            }).select('id').single();
+            if (bap) {
+              await admin.from('outreach_batches').update({ approval_id: (bap as { id: string }).id }).eq('id', batchId);
+              piece.state = 'queued'; piece.batch_id = batchId;
+            } else { piece.state = 'skipped'; piece.reason = 'approval insert failed'; }
+            mutated = true;
+          }
+        }
+
+        const staged = pieces.filter((p) => p.state === 'staged').length;
+        if (mutated || staged === 0) {
+          const done = staged === 0;
+          await admin.from('content_weeks').update({
+            pieces, status: done ? 'done' : 'queued', ...(done ? { finished_at: nowIso } : {}),
+          }).eq('id', wk.id);
+          if (done) {
+            const queued = pieces.filter((p) => p.state === 'queued').length;
+            const skipped = pieces.filter((p) => p.state === 'skipped').length;
+            await admin.from('mind_events').insert({
+              owner_id: wk.owner_id, event_type: 'note', source: 'execution',
+              subject: `Content week of ${wk.week_start} executed — ${queued} queued${skipped > 0 ? `, ${skipped} skipped (reasons on record)` : ''}`,
+              payload: { key: `content-week-done:${wk.id}`, week_id: wk.id, queued, skipped },
+            }).then(() => {}, () => {});
+          }
+        }
+      }
+    } catch { /* content-week drain must never wedge the order tick */ }
   }
 
   // --- pick the work: one forced order, or the due set --------------------------------------------
@@ -628,6 +886,172 @@ Deno.serve(async (req) => {
           last_result: { status: 'unreachable', line: `Idea run skipped: ${msg}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
           next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
           updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
+
+    // ---- content_week: stage ONE judged week of content as ONE approval (app_0088) ------------
+    // The producer HALF: draft N posts + 1 email grounded ONLY in the business's own facts, judge
+    // every draft against the shared editor rubric (fail-CLOSED — no verdict, no queue; below the
+    // bar → discarded with its score kept for audit), persist the week, and stage ONE approval
+    // whose payload_hash binds the exact pieces + scores the decision covers. NOTHING publishes
+    // here — the drain (below, worker block) executes only after the approval verifies.
+    if (order.kind === 'content_week') {
+      try {
+        const cfg = parseContentWeekConfig(order.config);
+        if (!cfg) throw new Error('no usable platforms in config');
+        if (!order.world_id) throw new Error('no business bound (world_id missing)');
+        await checkCredits(admin, order.owner_id, 'board_copy');
+
+        // The Monday of the current week (UTC) — the idempotency key: a re-run never doubles a week.
+        const dow = (new Date(nowIso).getUTCDay() + 6) % 7;
+        const weekStart = new Date(Date.parse(nowIso) - dow * 86_400_000).toISOString().slice(0, 10);
+        const { data: existingWeek } = await admin.from('content_weeks')
+          .select('id').eq('order_id', order.id).eq('week_start', weekStart).maybeSingle();
+        if (existingWeek) {
+          await admin.from('standing_orders').update({
+            last_run_at: nowIso, next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
+          }).eq('id', order.id).then(() => {}, () => {});
+          continue;
+        }
+
+        // GROUNDING — facts only: the world's own context + brand kit + past approved pieces
+        // (closing the voiceExample dead wire: real posted work becomes the register to match).
+        const { data: world } = await admin.from('knowledge_worlds')
+          .select('title, business_context, dna').eq('id', order.world_id).maybeSingle();
+        const { data: brand } = await admin.from('brand_kits')
+          .select('tone, compliance_line').eq('world_id', order.world_id).maybeSingle();
+        const { data: pastPosts } = await admin.from('social_posts')
+          .select('body').eq('owner_id', order.owner_id).in('status', ['posted', 'scheduled'])
+          .order('created_at', { ascending: false }).limit(5);
+        const pastBodies = ((pastPosts ?? []) as { body: string }[]).map((p) => p.body).filter(Boolean);
+        const materials: Record<string, unknown> = {
+          business: world?.title ?? '', context: world?.business_context ?? {},
+          tone: (brand as { tone?: string } | null)?.tone ?? null,
+          compliance: (brand as { compliance_line?: string } | null)?.compliance_line ?? null,
+          voiceExample: pastBodies[0] ?? null,
+          doNotRepeat: pastBodies,
+        };
+
+        const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+        let cwCost = 0, cwIn = 0, cwOut = 0;
+        const cwTrack = (r: { costUsd: number; inputTokens: number; outputTokens: number }) => {
+          cwCost += r.costUsd; cwIn += r.inputTokens; cwOut += r.outputTokens;
+        };
+        const stripF = (t: string) => t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+
+        const briefs: { channel: 'social' | 'email'; platform?: string; brief: string }[] = [];
+        for (let i = 0; i < cfg.postsPerWeek; i++) {
+          const platform = cfg.platforms[i % cfg.platforms.length];
+          briefs.push({ channel: 'social', platform, brief: `One ${platform} post for this business this week — a fresh, specific angle grounded in the materials; do not reuse an opening from the do-not-repeat list.` });
+        }
+        if (cfg.emailSegment) briefs.push({ channel: 'email', brief: `One short owner-to-person email to the business's ${cfg.emailSegment === 'all' ? '' : `${cfg.emailSegment} `}contacts this week — one useful, specific message grounded in the materials. No invented offers or urgency.` });
+
+        const slots = weekSlots(weekStart, briefs.length, cfg.sendHourUtc);
+        const pieces: Record<string, unknown>[] = [];
+        const discards: Record<string, unknown>[] = [];
+        for (let i = 0; i < briefs.length; i++) {
+          const b = briefs[i];
+          try {
+            const draftR = await complete([
+              { role: 'system', content: honestySystemPrompt(b.channel) },
+              { role: 'user', content: `CHANNEL: ${b.channel}${b.platform ? ` (platform: ${b.platform})` : ''}\nMATERIALS (the only facts you may use): ${JSON.stringify(materials)}\n\nTHE BRIEF: ${b.brief}` },
+            ], { provider: m.provider, model: m.model, maxTokens: 900 });
+            cwTrack(draftR);
+            let fields: Record<string, unknown>;
+            try { fields = JSON.parse(stripF(draftR.text)); }
+            catch { discards.push({ channel: b.channel, platform: b.platform ?? null, fields: null, quality: null, why: 'unparseable' }); continue; }
+
+            const judgeOnce = async (piece: Record<string, unknown>) => {
+              const jr = await complete([
+                { role: 'system', content: judgeSystemPrompt(b.channel) },
+                { role: 'user', content: judgeUserPrompt(materials, b.brief, piece) },
+              ], { provider: m.provider, model: m.model, maxTokens: 300 });
+              cwTrack(jr);
+              return parseJudgeVerdict(jr.text);
+            };
+            let quality = await judgeOnce(fields).catch(() => null);
+            if (quality && quality.score < cfg.minScore) {
+              // ONE revision from the editor's notes; keep the better. Same loop the boards run.
+              try {
+                const rev = await complete([
+                  { role: 'system', content: honestySystemPrompt(b.channel) },
+                  { role: 'user', content: `MATERIALS: ${JSON.stringify(materials)}\n\nTHE BRIEF: ${b.brief}\n\nYOUR FIRST DRAFT: ${JSON.stringify(fields)}\n\nA professional editor's notes on it: ${quality.notes}\n\nRewrite the piece fixing exactly those notes. Keep every honesty rule: facts from MATERIALS only, [EDIT: …] holes for unknowns, merge fields untouched. Return ONLY the strict JSON.` },
+                ], { provider: m.provider, model: m.model, maxTokens: 900 });
+                cwTrack(rev);
+                const revised = JSON.parse(stripF(rev.text)) as Record<string, unknown>;
+                const q2 = await judgeOnce(revised).catch(() => null);
+                if (q2 && q2.score > quality.score) { fields = revised; quality = q2; }
+              } catch { /* keep the first draft */ }
+            }
+            // FAIL-CLOSED: no verdict → discard (never auto-queue an unjudged draft).
+            if (!quality) { discards.push({ channel: b.channel, platform: b.platform ?? null, fields, quality: null, why: 'judge_failed' }); continue; }
+            if (quality.score < cfg.minScore) { discards.push({ channel: b.channel, platform: b.platform ?? null, fields, quality, why: 'below_bar' }); continue; }
+            pieces.push({
+              id: crypto.randomUUID(), channel: b.channel, platform: b.platform ?? null,
+              ...(b.channel === 'social'
+                ? { caption: String(fields.caption ?? ''), hashtags: Array.isArray(fields.hashtags) ? fields.hashtags : [] }
+                : { subject: String(fields.subject ?? ''), body: String(fields.body ?? ''), segment: cfg.emailSegment }),
+              media_urls: [], scheduled_for: slots[i], quality, state: 'staged',
+            });
+          } catch { discards.push({ channel: b.channel, platform: b.platform ?? null, fields: null, quality: null, why: 'judge_failed' }); }
+        }
+        await spendCredits(admin, order.owner_id, { costUsd: cwCost, kind: 'board_copy', provider: m.provider, model: m.model, inputTokens: cwIn, outputTokens: cwOut });
+        if (pieces.length === 0) throw new Error(`nothing cleared the bar (${discards.length} discarded — scores kept)`);
+
+        const { data: weekRow, error: weekErr } = await admin.from('content_weeks').insert({
+          owner_id: order.owner_id, order_id: order.id, world_id: order.world_id,
+          week_start: weekStart, pieces, discards, status: 'staged', model: m.model, cost_usd: cwCost,
+        }).select('id').single();
+        if (weekErr || !weekRow) throw new Error(weekErr?.message ?? 'week insert failed');
+        const weekId = (weekRow as { id: string }).id;
+
+        // ONE approval, hash-bound to the exact pieces + scores. AUTO mode (earned by 3 clean
+        // weeks, re-read FRESH so a just-revoked autonomy is honored) stages it pre-approved —
+        // the speed-to-lead class: visible in the Queue and the ledger, capped, killable.
+        const { data: freshOrder } = await admin.from('standing_orders').select('auto_mode').eq('id', order.id).maybeSingle();
+        const auto = !!(freshOrder as { auto_mode?: boolean } | null)?.auto_mode;
+        const scores = pieces.map((p) => (p.quality as { score: number }).score);
+        const payload = { week_id: weekId, week_start: weekStart, pieces_hash: await hashPayload(pieces), scores };
+        const payload_hash = await hashPayload(payload);
+        const nPosts = pieces.filter((p) => p.channel === 'social').length;
+        const emailIncluded = pieces.some((p) => p.channel === 'email');
+        const preview = pieces.map((p) => {
+          const q = p.quality as { score: number };
+          const first = p.channel === 'social' ? String(p.caption ?? '').split('\n')[0] : String(p.subject ?? '');
+          return `[${q.score}/10] ${p.channel === 'social' ? p.platform : 'email'}: ${first.slice(0, 110)}`;
+        }).join('\n');
+        const { data: ap, error: apErr } = await admin.from('approvals').insert({
+          owner_id: order.owner_id, kind: 'content_week', world_id: order.world_id,
+          title: `Content week of ${weekStart}: ${nPosts} post${nPosts === 1 ? '' : 's'}${emailIncluded ? ' + 1 email' : ''} — scores ${Math.min(...scores)}–${Math.max(...scores)}`,
+          preview, payload, payload_hash,
+          ...(auto
+            ? { status: 'approved', requested_by: 'garvis-auto', decided_via: 'standing_rule', decided_at: nowIso }
+            : { requested_by: 'garvis' }),
+        }).select('id').single();
+        if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');
+        await admin.from('content_weeks').update({ approval_id: (ap as { id: string }).id }).eq('id', weekId);
+
+        ran++; changed++;
+        const line = contentWeekLine(`Week of ${weekStart}`, pieces.length, discards.length, emailIncluded, auto);
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'changed', line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
+        }).eq('id', order.id);
+        await admin.from('mind_events').insert({
+          owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+          subject: line.slice(0, 300),
+          payload: { key: `content-week:${order.id}:${weekStart}`, order_id: order.id, week_id: weekId, kept: pieces.length, discarded: discards.length },
+        }).then(() => {}, () => {});
+      } catch (e) {
+        failed++;
+        const msg = e instanceof Error ? e.message.slice(0, 160) : 'unknown error';
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Content week skipped: ${msg}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
         }).eq('id', order.id).then(() => {}, () => {});
       }
       continue;
@@ -1018,18 +1442,118 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     url: finalUrl, niche: lead.keyword, fallbackName: lead.company_name,
     page, images, email, audit, location, phone: lead.phone,
     rating: lead.place_id ? env.runRatings.get(lead.place_id) ?? null : null,
+    // The facts their page literally states (named services, "since 1987", areas served) ride into
+    // the profile, so the rebuild carries THEIR specifics instead of a generic trade placeholder.
+    facts: extractSiteFacts(pageText, env.nowYear),
   });
   const { profile } = parseBusinessProfile(raw);
   if (!profile) return 'skipped';
 
-  // Save the profile + the deterministic recipe demo (identical to ingest-profile — one build path).
+  // Save the profile, then build the demo through the intelligence chain below.
   const { data: profileRow, error: pErr } = await admin.from('business_profiles').insert({
     user_id: order.owner_id, business_name: profile.business_name, industry: profile.industry,
     website_score: profile.current_website_score ?? null, profile,
   }).select('id').single();
   if (pErr || !profileRow) return 'skipped';
 
-  const spec = assembleFallbackSpec(profile);
+  // THE INTELLIGENCE CHAIN, server-side — the same strategist → art-director → owner-critique →
+  // refine pass the manual preview engine runs (src/lib/preview/engine.ts), so a hunted prospect
+  // gets the crafted, strategy-driven site. Every stage fails soft: the deterministic recipe spec
+  // is the floor, and a chain failure never loses the demo. Real cost is metered per owner.
+  let spec: SiteSpec = assembleFallbackSpec(profile);
+  let specSource: 'ai' | 'fallback' = 'fallback';
+  let strategy: Record<string, unknown> | null = null;
+  let critique: Record<string, unknown> | null = null;
+  {
+    let aiCost = 0, aiIn = 0, aiOut = 0;
+    // Standard plan model for everyone; a premium model ONLY for high-LTV verticals and ONLY
+    // when the operator opts in via AI_PREMIUM_MODEL (e.g. claude-fable-5). Cost discipline is
+    // the default — the expensive model is an explicit, targeted choice.
+    const mPlan = modelForPlan(await getUserPlan(admin, order.owner_id));
+    const premiumModel = Deno.env.get('AI_PREMIUM_MODEL');
+    const m = premiumModel && premiumProspect(profile.industry)
+      ? { provider: mPlan.provider, model: premiumModel }
+      : mPlan;
+    const track = (r: { costUsd: number; inputTokens: number; outputTokens: number }) => {
+      aiCost += r.costUsd; aiIn += r.inputTokens; aiOut += r.outputTokens;
+    };
+    try {
+      await checkCredits(admin, order.owner_id, 'board_copy');   // out of credits → template floor
+      const sR = await complete([
+        { role: 'system', content: STRATEGY_SYSTEM },
+        { role: 'user', content: JSON.stringify(profile, null, 1) },
+      ], { provider: m.provider, model: m.model, maxTokens: 1800 });
+      track(sR);
+      const strat = normalizeStrategy(extractJson(sR.text), profile);
+      // CONCEPT IMAGERY — a prospect with NO usable photos gets two honest, generic trade
+      // still-lifes (gpt-image-1) so the site opens on full-bleed art instead of a flat color
+      // field. Their own photos always win; generation is object photography only (no people/
+      // text/logos — huntImagePrompts hard rules), labeled ai_generated + can_publish:false,
+      // and fails soft (no key / refusal / no credits → the aurora hero stands).
+      if (!profile.photos.length && Deno.env.get('OPENAI_API_KEY') && !restraintFor(profile.industry)) {
+        try {
+          await checkCredits(admin, order.owner_id, 'image');
+          const made: typeof profile.photos = [];
+          const aiPhoto = (url: string, alt: string) => ({
+            url, alt, source_type: 'ai_generated', can_use_in_preview: true, can_publish: false,
+            notes: 'AI-generated concept imagery — not photos of this business',
+          });
+          // Layered depth-sandwich pair first (backdrop art + transparent iconic object) — the
+          // "I need that" hero. Trades without an iconic object get the still-life pair instead.
+          const art = huntArtPrompts(profile.industry, strat.tone);
+          if (art) {
+            const bg = await genHuntImage(admin, order.owner_id, art.backdrop, '1536x1024');
+            if (bg) made.push(aiPhoto(bg, 'ai-backdrop'));
+            const obj = await genHuntImage(admin, order.owner_id, art.object, '1024x1024', true);
+            if (obj) made.push(aiPhoto(obj, 'ai-object'));
+          }
+          if (!made.length) {
+            const [wide, tight] = huntImagePrompts(profile.industry, strat.tone);
+            for (const [prompt, size] of [[wide, '1536x1024'], [tight, '1024x1024']] as const) {
+              const url = await genHuntImage(admin, order.owner_id, prompt, size);
+              if (url) made.push(aiPhoto(url, ''));
+            }
+          }
+          if (made.length) profile.photos = made;
+        } catch { /* imagery is a bonus, never a blocker */ }
+      }
+      const gR = await complete([
+        { role: 'system', content: SPEC_SYSTEM },
+        { role: 'user', content: specPrompt(profile) + strategyBlock(strat) },
+      ], { provider: m.provider, model: m.model, maxTokens: 8000 });
+      track(gR);
+      const aiSpec = normalizeSpec(extractJson(gR.text), profile);
+      aiSpec.nav = navFor(aiSpec.sections, pickRecipe(profile).cta);
+      spec = aiSpec; specSource = 'ai';
+      strategy = strat as unknown as Record<string, unknown>;
+      // Owner-simulation critique + ONE refine — fails soft to the draft it was critiquing.
+      try {
+        const cR = await complete([
+          { role: 'system', content: CRITIQUE_SYSTEM },
+          { role: 'user', content: critiqueUserPrompt(profile, spec) },
+        ], { provider: m.provider, model: m.model, maxTokens: 1500 });
+        track(cR);
+        const crit = normalizeCritique(extractJson(cR.text));
+        critique = crit as unknown as Record<string, unknown>;
+        if (critiqueWarrantsRefine(crit)) {
+          const rR = await complete([
+            { role: 'system', content: SPEC_SYSTEM },
+            { role: 'user', content: specPrompt(profile) + strategyBlock(strat) + critiqueBlock(crit) },
+          ], { provider: m.provider, model: m.model, maxTokens: 8000 });
+          track(rR);
+          const refined = normalizeSpec(extractJson(rR.text), profile);
+          refined.nav = navFor(refined.sections, pickRecipe(profile).cta);
+          spec = refined;
+        }
+      } catch { /* keep the un-refined AI draft */ }
+    } catch { /* the deterministic recipe spec stands */ }
+    if (aiCost > 0) {
+      await spendCredits(admin, order.owner_id, {
+        costUsd: aiCost, kind: 'preview_build', provider: m.provider, model: m.model,
+        inputTokens: aiIn, outputTokens: aiOut,
+      });
+    }
+  }
   const nonce = Math.random().toString(36).slice(2, 8);   // slug isn't enumerable by guessing names
   const slug = `${previewSlug(profile.business_name)}-${nonce}`;
   const previewUrl = env.appOrigin ? `${env.appOrigin}/preview-site/${slug}` : `/preview-site/${slug}`;
@@ -1054,7 +1578,11 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   const { data: site, error: sErr } = await admin.from('preview_sites').insert({
     user_id: order.owner_id, profile_id: profileRow.id, slug,
     business_name: profile.business_name, industry: profile.industry,
-    spec, pitch, spec_source: 'fallback', status: 'preview',
+    spec, pitch, spec_source: specSource, status: 'preview',
+    strategy, critique,
+    // Deterministic owner-language report grounded in the OBSERVED audit signals (profile.issues) —
+    // the public /report page shows real problems instead of synthesizing a generic shell.
+    audit: fallbackAudit(profile),
   }).select('id').single();
   if (sErr || !site) return 'skipped';
 
@@ -1076,6 +1604,34 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     businessName: profile.business_name, pitch, previewUrl, toEmail: email,
   });
   return ok ? 'queued' : 'built';
+}
+
+/** gpt-image-1 → project-assets bucket → public URL, metered per owner (kind 'image', same real
+ *  ballpark the generate-image fn charges). Returns null on any failure — imagery never blocks. */
+// deno-lint-ignore no-explicit-any
+async function genHuntImage(admin: any, ownerId: string, prompt: string, size: '1536x1024' | '1024x1024', transparent = false): Promise<string | null> {
+  try {
+    const key = Deno.env.get('OPENAI_API_KEY');
+    if (!key) return null;
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size, quality: 'medium', ...(transparent ? { background: 'transparent' } : {}) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const b64 = data?.data?.[0]?.b64_json as string | undefined;
+    if (!res.ok || !b64) return null;
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const path = `${ownerId}/hunt/ai-${crypto.randomUUID()}.png`;
+    const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'image/png', upsert: false });
+    if (up.error) return null;
+    await spendCredits(admin, ownerId, { costUsd: size === '1024x1024' ? 0.04 : 0.07, kind: 'image', provider: 'openai', model: 'gpt-image-1' });
+    return admin.storage.from('project-assets').getPublicUrl(path).data.publicUrl as string;
+  } catch {
+    return null;
+  }
 }
 
 /** Server-side twin of queuePitch: contact → campaign → message(draft) → PENDING approval. Nothing
@@ -1133,57 +1689,4 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     payload, payload_hash, requested_by: 'garvis-auto',
   });
   return !apErr;
-}
-
-/** Server twin of the in-app trigger enqueue: contact (suppression-respecting, SELECT-FIRST) →
- *  automation campaign → draft message → PENDING approval, then stamps the fire's approval_id.
- *  Mirrors queueHuntPitch's mechanics; kind 'automation' keeps it out of cold follow-ups. */
-// deno-lint-ignore no-explicit-any
-async function queueTriggerSend(admin: any, uid: string, input: {
-  label: string; subject: string; body: string; toEmail: string; fireId: string;
-}): Promise<boolean> {
-  const to = input.toEmail.toLowerCase().trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return false;
-
-  let contactId: string;
-  const { data: existing } = await admin.from('contacts')
-    .select('id, email_status').eq('owner_id', uid).eq('email', to).maybeSingle();
-  if (existing) {
-    const st = (existing as { email_status?: string }).email_status;
-    if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') return false;  // never re-contact
-    contactId = (existing as { id: string }).id;
-  } else {
-    const { data: c } = await admin.from('contacts').insert({
-      owner_id: uid, email: to, email_status: 'unknown', is_primary: true,
-    }).select('id').maybeSingle();
-    if (c) contactId = (c as { id: string }).id;
-    else {
-      const { data: again } = await admin.from('contacts').select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
-      if (!again) return false;
-      contactId = (again as { id: string }).id;
-    }
-  }
-
-  const { data: camp } = await admin.from('outreach_campaigns').insert({
-    owner_id: uid, contact_id: contactId, kind: 'automation', state: 'pending_approval',
-  }).select('id').single();
-  if (!camp) return false;
-
-  const { data: msg } = await admin.from('outreach_messages').insert({
-    owner_id: uid, campaign_id: (camp as { id: string }).id, contact_id: contactId,
-    sequence_step: 0, subject: input.subject, body_text: input.body, to_address: to, status: 'draft',
-  }).select('id').single();
-  if (!msg) return false;
-
-  const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id };
-  const payload_hash = await hashPayload(payload);
-  const { data: ap, error: apErr } = await admin.from('approvals').insert({
-    owner_id: uid, kind: 'send_email',
-    title: `${input.label} → ${to}`,
-    preview: `${input.subject}\n\n${input.body}`,
-    payload, payload_hash, requested_by: 'garvis-auto',
-  }).select('id').single();
-  if (apErr || !ap) return false;
-  await admin.from('trigger_fires').update({ approval_id: (ap as { id: string }).id }).eq('id', input.fireId);
-  return true;
 }

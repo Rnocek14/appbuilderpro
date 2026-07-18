@@ -35,11 +35,14 @@ Deno.serve(async (req) => {
 
     // TWO callers, ONE path, every gate below shared (mirrors send-email):
     //  1) the OWNER (browser) — Authorization JWT; the approval must be theirs.
-    //  2) the STANDING WORKER (social drain) — x-worker-secret; the owner is derived FROM the
-    //     approval row, never from the caller. No requested_by class is needed here (unlike
-    //     send-email's garvis-auto batch sends): a publish_post approval only ever reaches
-    //     'approved' through the owner's decision in the Queue, so status='approved' IS the human
-    //     authority — the worker merely executes it.
+    //  2) the STANDING WORKER (x-worker-secret) — serving BOTH drains: the content-week drain
+    //     (garvis-auto staged weeks) and the social drain (operator-queued posts). The owner is
+    //     derived FROM the approval row, never from the caller. No requested_by restriction: a
+    //     publish_post approval only ever reaches 'approved' through the owner's decision in the
+    //     Queue — status='approved' IS the human authority for either class, and restricting to
+    //     garvis-auto would strand approved operator-queued posts. Everything downstream —
+    //     payload-hash check, atomic double-post claim, checkDraft, per-brand Profile-Key — is
+    //     identical either way.
     const workerSecret = Deno.env.get('WORKER_SECRET');
     const byWorker = !!workerSecret && req.headers.get('x-worker-secret') === workerSecret;
 

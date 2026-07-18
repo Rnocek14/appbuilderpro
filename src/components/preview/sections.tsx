@@ -9,6 +9,14 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Check, Star, Phone, Mail, MapPin, Clock, ChevronDown, ArrowRight, ShieldCheck } from 'lucide-react';
+// The award-kit moves (ported from the app builder scaffold) — gated by the theme's motion tier:
+// calm = reveals only; lively = TextReveal + CountUp + image wipes; cinematic = + aurora/parallax
+// hero, magnetic CTA, tilt cards. One signature move per page (DESIGN_GUIDE restraint).
+import { TextReveal, CountUp, Aurora, Magnetic, TiltDiv, ImageReveal, useParallaxY } from './motion';
+import { SceneSection, ScrollScene } from './scenes';
+
+/** hue of an "H S% L%" theme token — Aurora derives its drift colors from the real palette. */
+const hueOf = (hsl: string): number => parseInt(hsl.trim().split(/\s+/)[0], 10) || 220;
 
 const scrollToQuote = () => {
   const el = document.getElementById('quote') ?? document.getElementById('ctaBanner');
@@ -51,8 +59,9 @@ function Reveal({ children, delay = 0, className = '' }: { children: ReactNode; 
 }
 
 function SectionShell({ id, children, tight, alt }: { id: string; children: ReactNode; tight?: boolean; alt?: boolean }) {
+  // pv-alt marks alternate bands as texture hosts — the dots/ruled signature devices paint here.
   return (
-    <section id={id} className={`${alt ? 'bg-[hsl(var(--card))]' : ''} ${tight ? 'py-10' : 'py-16 sm:py-24'}`}>
+    <section id={id} className={`${alt ? 'pv-alt bg-[hsl(var(--card))]' : ''} ${tight ? 'py-10' : 'py-16 sm:py-24'}`}>
       <div className="mx-auto w-full max-w-6xl px-5 sm:px-8">{children}</div>
     </section>
   );
@@ -80,40 +89,161 @@ function Stars({ rating = 5 }: { rating?: number }) {
 // Sections
 // ---------------------------------------------------------------------------
 
-export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?: string; secondaryCta?: string; phone?: string; image?: string; rating?: number; reviewCount?: number; variant?: string }) {
+interface HeroProps {
+  eyebrow?: string; heading?: string; sub?: string; cta?: string; secondaryCta?: string;
+  phone?: string; image?: string; bgImage?: string; objectImage?: string;
+  rating?: number; reviewCount?: number; variant?: string;
+  motion?: string; themePrimary?: string; siteName?: string;
+}
+
+/** The observed-proof badge — rating/review count CountUp when the motion tier allows. */
+function RatingBadge({ rating, reviewCount, onDark, lively }: { rating: number; reviewCount?: number; onDark?: boolean; lively?: boolean }) {
+  return (
+    <div className={onDark
+      ? 'mt-8 inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-sm text-white backdrop-blur'
+      : 'mt-8 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--bor))] bg-[hsl(var(--card))] px-3.5 py-1.5 text-sm text-[hsl(var(--ink))]'}>
+      <Stars rating={rating} />
+      <span className="font-semibold">{lively ? <CountUp value={rating} decimals={1} /> : rating.toFixed(1)}</span>
+      {reviewCount != null && (
+        <span className={onDark ? 'text-white/70' : 'text-[hsl(var(--mut))]'}>
+          · {lively ? <CountUp value={reviewCount} /> : reviewCount} Google reviews
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The one hero headline — kinetic TextReveal on lively/cinematic tiers, static on calm. */
+function HeroHeadline({ text, className, lively }: { text: string; className: string; lively: boolean }) {
+  return lively
+    ? <TextReveal as="h1" text={text} className={className} style={{ textWrap: 'balance' }} />
+    : <h1 className={className} style={{ textWrap: 'balance' }}>{text}</h1>;
+}
+
+export function Hero(p: HeroProps) {
   // Call button dials the REAL phone (injected by normalizeSpec); digits parsed from the label are
   // only a fallback, and a label with no digits ("Call us today") routes to the quote form instead
   // of rendering a dead tel: link.
   const telDigits = (p.phone ?? p.secondaryCta ?? '').replace(/[^\d+]/g, '');
   const telHref = telDigits.length >= 7 ? `tel:${telDigits}` : '#quote';
   const hasImage = !!p.image;
+  const cine = p.motion === 'cinematic';
+  const lively = p.motion !== 'calm';
+  const hue = hueOf(p.themePrimary ?? '220 50% 40%');
+  const parY = useParallaxY(cine && hasImage);
+  // The ONE magnetic element per page: the hero's primary CTA, cinematic tier only.
+  const primaryCta = p.cta ? (cine ? <Magnetic><Cta label={p.cta} /></Magnetic> : <Cta label={p.cta} />) : null;
 
-  // SPLIT variant — content on the page paper, photo in a framed panel on the right. Reads
-  // editorial/professional (legal, medical, real estate); the model or recipe picks it.
+  const secondaryBtn = (onDark: boolean) => p.secondaryCta && (
+    <a href={telHref}
+      className={onDark
+        ? 'inline-flex items-center gap-2 rounded-[var(--r)] border border-white/40 px-6 py-3 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/10'
+        : 'inline-flex items-center gap-2 rounded-[var(--r)] border border-[hsl(var(--bor))] px-6 py-3 text-sm font-semibold text-[hsl(var(--ink))] transition-colors hover:bg-[hsl(var(--card))]'}>
+      <Phone size={15} /> {p.secondaryCta}
+    </a>
+  );
+
+  // LAYERS — the depth sandwich: illustrated backdrop art → a giant wordmark → the trade's iconic
+  // object floating OVER the type, drifting apart as you scroll (pseudo-3D, no models needed).
+  // Needs the AI-generated role pair (backdrop + transparent object) + motion; else falls through.
+  if (p.variant === 'layers' && p.bgImage && p.objectImage && p.motion !== 'calm') {
+    // Iteration-loop fix: the landing frame must BE the pitch. Copy is visible from the first
+    // pixel; the wordmark/object sandwich plays above it as you scroll. Wordmark scales with the
+    // name so long names never bleed off-canvas; the pin is short (no dead runway).
+    const wm = Math.min(9.5, 170 / Math.max(10, (p.siteName ?? '').length));
+    return (
+      <section id="hero" className="pv-grain-host relative isolate">
+        <ScrollScene heightVh={155}>
+          {(prog) => {
+            const drift = Math.min(1, prog / 0.75);
+            return (
+              <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[hsl(var(--ink))]">
+                {/* layer 1: backdrop art, slow drift + settle */}
+                <img src={p.bgImage} alt="" className="absolute inset-0 h-full w-full object-cover"
+                  style={{ transform: `scale(${1.16 - drift * 0.08}) translateY(${(1 - drift) * -22}px)`, opacity: 0.92 }} />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/10 to-black/70" />
+                {/* layer 2: the giant wordmark, present from the start, brightening on scroll */}
+                <div className="pv-display absolute inset-x-0 top-[30%] select-none whitespace-nowrap text-center font-bold text-white"
+                  style={{ fontSize: `clamp(2.4rem, ${wm.toFixed(2)}vw, 9rem)`, letterSpacing: '-0.03em', lineHeight: 1,
+                    transform: `translateY(${(1 - drift) * 26}px)`, opacity: 0.55 + drift * 0.45,
+                    textShadow: '0 8px 60px rgba(0,0,0,0.5)' }}>
+                  {p.siteName}
+                </div>
+                {/* layer 3: the iconic object crossing OVER the type as you scroll */}
+                <img src={p.objectImage} alt="" className="relative z-10 w-[34%] max-w-[360px]"
+                  style={{ transform: `translateY(${(1 - drift) * 46 - 46}px) rotate(${-9 + drift * 12}deg)`,
+                    filter: 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))' }} />
+                {/* layer 4: the pitch — ALWAYS on screen (a visitor who never scrolls still gets sold) */}
+                <div className="absolute inset-x-0 bottom-8 z-20 flex flex-col items-center px-6 text-center">
+                  {p.eyebrow && <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-white/80">{p.eyebrow}</p>}
+                  <h1 className="pv-display max-w-3xl text-2xl font-semibold tracking-tight text-white sm:text-4xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
+                  {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} onDark lively={lively} />}
+                </div>
+              </div>
+            );
+          }}
+        </ScrollScene>
+      </section>
+    );
+  }
+  if (p.variant === 'layers') {
+    const img = p.image ?? p.bgImage;
+    return <Hero {...p} image={img} variant={img && p.motion !== 'calm' ? 'portal' : 'stacked'} />;
+  }
+
+  // PORTAL — the zoom-through opener: a small framed image scales up into a full-bleed stage as
+  // you scroll, then the headline and CTA land on it. Needs an image + motion; falls through to
+  // the stacked composition otherwise (calm pages and photo-less profiles never get a dead pin).
+  if (p.variant === 'portal' && hasImage && p.motion !== 'calm') {
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    return (
+      <section id="hero" className="pv-grain-host relative isolate">
+        <ScrollScene heightVh={200}>
+          {(prog) => {
+            const grow = ease(Math.min(1, prog / 0.6));               // frame → full-bleed
+            const copy = Math.max(0, (prog - 0.62) / 0.3);            // then the words land
+            return (
+              <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[hsl(var(--bg))]">
+                <div
+                  className="relative overflow-hidden shadow-2xl"
+                  style={{
+                    width: `${26 + grow * 74}%`, height: `${34 + grow * 66}%`,
+                    borderRadius: `${(1 - grow) * 18}px`,
+                  }}
+                >
+                  <img src={p.image} alt="" className="h-full w-full object-cover" style={{ transform: `scale(${1.25 - grow * 0.25})` }} />
+                  <div className="absolute inset-0 bg-black/45" style={{ opacity: 0.15 + grow * 0.85 }} />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center" style={{ opacity: copy, transform: `translateY(${(1 - Math.min(1, copy)) * 26}px)` }}>
+                    {p.eyebrow && <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-white/80">{p.eyebrow}</p>}
+                    <h1 className="pv-display pv-hero-display max-w-4xl font-semibold tracking-tight text-white" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+                    {p.sub && <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-white/85">{p.sub}</p>}
+                    <div className="mt-8 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
+                    {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} onDark lively={lively} />}
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        </ScrollScene>
+      </section>
+    );
+  }
+  if (p.variant === 'portal' && (!hasImage || p.motion === 'calm')) {
+    return <Hero {...p} variant="stacked" />;
+  }
+
+  // SPLIT — content on the page paper, photo in a framed panel. Editorial/professional trades.
   if (p.variant === 'split' && hasImage) {
     return (
-      <section id="hero" className="relative isolate overflow-hidden">
+      <section id="hero" className="pv-grain-host relative isolate overflow-hidden">
         <div className="mx-auto grid w-full max-w-6xl items-center gap-10 px-5 py-16 sm:px-8 sm:py-24 lg:grid-cols-[1.1fr_1fr]">
           <Reveal>
             {p.eyebrow && <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--p))]">{p.eyebrow}</p>}
-            <h1 className="pv-display text-4xl font-semibold leading-[1.05] tracking-tight text-[hsl(var(--ink))] sm:text-6xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+            <HeroHeadline lively={lively} text={p.heading ?? ''} className="pv-display pv-hero-display font-semibold tracking-tight text-[hsl(var(--ink))]" />
             {p.sub && <p className="mt-5 max-w-xl text-lg leading-relaxed text-[hsl(var(--mut))]">{p.sub}</p>}
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              {p.cta && <Cta label={p.cta} />}
-              {p.secondaryCta && (
-                <a href={telHref}
-                  className="inline-flex items-center gap-2 rounded-[var(--r)] border border-[hsl(var(--bor))] px-6 py-3 text-sm font-semibold text-[hsl(var(--ink))] transition-colors hover:bg-[hsl(var(--card))]">
-                  <Phone size={15} /> {p.secondaryCta}
-                </a>
-              )}
-            </div>
-            {p.rating != null && (
-              <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--bor))] bg-[hsl(var(--card))] px-3.5 py-1.5 text-sm text-[hsl(var(--ink))]">
-                <Stars rating={p.rating} />
-                <span className="font-semibold">{p.rating.toFixed(1)}</span>
-                {p.reviewCount != null && <span className="text-[hsl(var(--mut))]">({p.reviewCount} reviews)</span>}
-              </div>
-            )}
+            <div className="mt-8 flex flex-wrap items-center gap-3">{primaryCta}{secondaryBtn(false)}</div>
+            {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} lively={lively} />}
           </Reveal>
           <Reveal delay={120}>
             <div className="relative overflow-hidden rounded-[calc(var(--r)*1.5)] border border-[hsl(var(--bor))] shadow-2xl">
@@ -126,47 +256,118 @@ export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?
     );
   }
 
+  // EDITORIAL — ink on the page paper: rule-line eyebrow, monumental left-aligned display, no
+  // colored panel at all. The "expensive studio" opener for legal, real estate, photography.
+  if (p.variant === 'editorial') {
+    return (
+      <section id="hero" className="pv-grain-host relative border-b border-[hsl(var(--bor))]">
+        <div className="mx-auto w-full max-w-6xl px-5 pb-14 pt-20 sm:px-8 sm:pb-20 sm:pt-28">
+          <Reveal>
+            {p.eyebrow && (
+              <div className="mb-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.25em] text-[hsl(var(--p))]">
+                <span className="h-px w-10 bg-[hsl(var(--p))]" /> {p.eyebrow}
+              </div>
+            )}
+            <HeroHeadline lively={lively} text={p.heading ?? ''} className="pv-display pv-hero-display max-w-4xl font-semibold tracking-tight text-[hsl(var(--ink))]" />
+            <div className="mt-8 flex flex-wrap items-end justify-between gap-6">
+              {p.sub && <p className="max-w-xl text-lg leading-relaxed text-[hsl(var(--mut))]">{p.sub}</p>}
+              <div className="flex flex-wrap items-center gap-3">{primaryCta}{secondaryBtn(false)}</div>
+            </div>
+            {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} lively={lively} />}
+          </Reveal>
+          {hasImage && (
+            <div className="mt-12">
+              {lively
+                ? <ImageReveal src={p.image!} className="aspect-[21/9] w-full rounded-[var(--r)]" />
+                : <img src={p.image} alt="" className="aspect-[21/9] w-full rounded-[var(--r)] object-cover" />}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  // STACKED — centered, monumental. Aurora field breathes behind it on cinematic no-photo pages,
+  // so a photo-less hero is a living color field instead of a flat gradient panel.
+  if (p.variant === 'stacked') {
+    return (
+      <section id="hero" className="pv-grain-host relative isolate overflow-hidden">
+        {hasImage
+          ? <>
+              <img src={p.image} alt="" className="pv-kenburns absolute inset-0 -z-10 h-full w-full object-cover"
+                style={cine ? { transform: `translate3d(0, ${parY.toFixed(1)}px, 0) scale(1.12)` } : undefined} />
+              <div className="absolute inset-0 -z-10 bg-black/60" />
+            </>
+          : <>
+              <div className="absolute inset-0 -z-10 bg-gradient-to-b from-[hsl(var(--ink))] via-[hsl(var(--p)/0.9)] to-[hsl(var(--p))]" />
+              {cine && <Aurora hues={[hue - 24, hue + 26, hue + 78]} />}
+            </>}
+        <div className="mx-auto flex min-h-[560px] w-full max-w-5xl flex-col items-center justify-center px-5 py-28 text-center sm:min-h-[640px]">
+          <Reveal>
+            {p.eyebrow && (
+              <p className="mb-5 inline-flex rounded-full border border-white/25 bg-white/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.22em] text-white/90 backdrop-blur">
+                {p.eyebrow}
+              </p>
+            )}
+            <HeroHeadline lively={lively} text={p.heading ?? ''} className="pv-display pv-hero-display mx-auto max-w-4xl font-semibold tracking-tight text-white" />
+            {p.sub && <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/85">{p.sub}</p>}
+            <div className="mt-9 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
+            {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} onDark lively={lively} />}
+          </Reveal>
+        </div>
+      </section>
+    );
+  }
+
+  // FULLBLEED (default) — cinematic pages get parallax photo drift, or an aurora-live gradient.
   return (
-    <section id="hero" className="relative isolate overflow-hidden">
+    <section id="hero" className="pv-grain-host relative isolate overflow-hidden">
       {hasImage
         ? <>
             {/* pv-kenburns: an 18s slow zoom — the single frame reads as cinema, not a stock jpeg. */}
-            <img src={p.image} alt="" className="pv-kenburns absolute inset-0 -z-10 h-full w-full object-cover" />
+            <img src={p.image} alt="" className="pv-kenburns absolute inset-0 -z-10 h-full w-full object-cover"
+              style={cine ? { transform: `translate3d(0, ${parY.toFixed(1)}px, 0) scale(1.12)` } : undefined} />
             <div className="absolute inset-0 -z-10 bg-gradient-to-r from-black/80 via-black/55 to-black/25" />
           </>
-        : <div className="absolute inset-0 -z-10 bg-gradient-to-br from-[hsl(var(--p))] via-[hsl(var(--p)/0.85)] to-[hsl(var(--ink))]" />}
+        : <>
+            <div className="absolute inset-0 -z-10 bg-gradient-to-br from-[hsl(var(--p))] via-[hsl(var(--p)/0.85)] to-[hsl(var(--ink))]" />
+            {cine && <Aurora hues={[hue - 24, hue + 26, hue + 78]} />}
+          </>}
       <div className="mx-auto flex min-h-[520px] w-full max-w-6xl flex-col justify-center px-5 py-24 sm:min-h-[600px] sm:px-8">
         <Reveal>
           {p.eyebrow && <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-white/75">{p.eyebrow}</p>}
-          <h1 className="pv-display max-w-2xl text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-6xl">{p.heading}</h1>
+          <HeroHeadline lively={lively} text={p.heading ?? ''} className="pv-display pv-hero-display max-w-3xl font-semibold tracking-tight text-white" />
           {p.sub && <p className="mt-5 max-w-xl text-lg leading-relaxed text-white/85">{p.sub}</p>}
-          <div className="mt-8 flex flex-wrap items-center gap-3">
-            {p.cta && <Cta label={p.cta} />}
-            {p.secondaryCta && (
-              <a href={telHref}
-                className="inline-flex items-center gap-2 rounded-[var(--r)] border border-white/40 px-6 py-3 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/10">
-                <Phone size={15} /> {p.secondaryCta}
-              </a>
-            )}
-          </div>
-          {p.rating != null && (
-            <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-sm text-white backdrop-blur">
-              <Stars rating={p.rating} />
-              <span className="font-semibold">{p.rating.toFixed(1)}</span>
-              {p.reviewCount != null && <span className="text-white/70">· {p.reviewCount} Google reviews</span>}
-            </div>
-          )}
+          <div className="mt-8 flex flex-wrap items-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
+          {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} onDark lively={lively} />}
         </Reveal>
       </div>
     </section>
   );
 }
 
-export function Trust(p: { items?: string[] }) {
+export function Trust(p: { items?: string[]; flair?: string[] }) {
+  const items = (p.items ?? []).slice(0, 4);
+  // "marquee" signature device: the static proof grid becomes an infinite scrolling ticker
+  // (track duplicated once — the -50% keyframe loops seamlessly; hover pauses it).
+  if (p.flair?.includes('marquee') && items.length >= 2) {
+    return (
+      <section id="trust" className="pv-marquee border-y border-[hsl(var(--bor))] bg-[hsl(var(--card))] py-5">
+        <div className="pv-marquee-track">
+          {[...items, ...items].map((t, i) => (
+            <span key={i} className="inline-flex shrink-0 items-center gap-2.5" aria-hidden={i >= items.length}>
+              <ShieldCheck size={18} className="shrink-0 text-[hsl(var(--p))]" />
+              <span className="whitespace-nowrap text-sm font-medium text-[hsl(var(--ink))]">{t}</span>
+            </span>
+          ))}
+        </div>
+      </section>
+    );
+  }
   return (
     <section id="trust" className="border-y border-[hsl(var(--bor))] bg-[hsl(var(--card))]">
       <div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-4 px-5 py-6 sm:grid-cols-4 sm:px-8">
-        {(p.items ?? []).slice(0, 4).map((t, i) => (
+        {items.map((t, i) => (
           <Reveal key={i} delay={i * 70} className="flex items-center gap-2.5">
             <ShieldCheck size={18} className="shrink-0 text-[hsl(var(--p))]" />
             <span className="text-sm font-medium text-[hsl(var(--ink))]">{t}</span>
@@ -177,21 +378,50 @@ export function Trust(p: { items?: string[] }) {
   );
 }
 
-export function Services(p: { heading?: string; sub?: string; services?: { name: string; blurb?: string }[]; cta?: string }) {
+export function Services(p: { heading?: string; sub?: string; services?: { name: string; blurb?: string }[]; cta?: string; variant?: string; motion?: string }) {
   const services = p.services ?? [];
+  const cine = p.motion === 'cinematic';
+
+  // ROWS — the editorial service menu: indexed hairline rows instead of a card grid. The composition
+  // that makes legal/auto/no-nonsense pages read designed, not templated.
+  if (p.variant === 'rows') {
+    return (
+      <SectionShell id="services">
+        <Heading heading={p.heading} sub={p.sub} />
+        <div className="mt-10 divide-y divide-[hsl(var(--bor))] border-y border-[hsl(var(--bor))]">
+          {services.map((s, i) => (
+            <Reveal key={i} delay={i * 60}>
+              <div className="group grid gap-1.5 py-6 sm:grid-cols-[56px_1fr_1.6fr] sm:items-baseline sm:gap-6">
+                <span className="pv-display text-sm font-semibold tabular-nums text-[hsl(var(--mut))]">{String(i + 1).padStart(2, '0')}</span>
+                <h3 className="pv-display text-xl font-semibold text-[hsl(var(--ink))] transition-colors group-hover:text-[hsl(var(--p))]">{s.name}</h3>
+                {s.blurb && <p className="text-sm leading-relaxed text-[hsl(var(--mut))]">{s.blurb}</p>}
+              </div>
+            </Reveal>
+          ))}
+        </div>
+        {p.cta && <Reveal className="mt-10"><Cta label={p.cta} /></Reveal>}
+      </SectionShell>
+    );
+  }
+
   return (
     <SectionShell id="services">
       <Heading heading={p.heading} sub={p.sub} />
       <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {services.map((s, i) => (
-          <Reveal key={i} delay={(i % 3) * 80}>
-            <div className="group h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg">
+        {services.map((s, i) => {
+          const card = (
+            <div className="pv-card pv-lift group h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-6 shadow-sm">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[hsl(var(--p)/0.12)] text-[hsl(var(--p))]"><Check size={16} /></span>
               <h3 className="pv-display mt-4 text-lg font-semibold text-[hsl(var(--ink))]">{s.name}</h3>
               {s.blurb && <p className="mt-1.5 text-sm leading-relaxed text-[hsl(var(--mut))]">{s.blurb}</p>}
             </div>
-          </Reveal>
-        ))}
+          );
+          return (
+            <Reveal key={i} delay={(i % 3) * 80}>
+              {cine ? <TiltDiv className="h-full rounded-[var(--r)]">{card}</TiltDiv> : card}
+            </Reveal>
+          );
+        })}
       </div>
       {p.cta && <Reveal className="mt-10"><Cta label={p.cta} /></Reveal>}
     </SectionShell>
@@ -213,43 +443,87 @@ export function About(p: { heading?: string; body?: string; image?: string }) {
   );
 }
 
-export function Showcase(p: { heading?: string; photos?: { url: string; alt?: string }[] }) {
+export function Showcase(p: { heading?: string; photos?: { url: string; alt?: string }[]; motion?: string }) {
   const photos = (p.photos ?? []).slice(0, 4);
   if (!photos.length) return null;
+  const lively = p.motion !== 'calm';
   return (
     <SectionShell id="showcase">
       <Heading heading={p.heading} />
       <div className="mt-10 grid gap-5 sm:grid-cols-2">
-        {photos.map((ph, i) => (
-          <Reveal key={i} delay={(i % 2) * 100}>
-            <img src={ph.url} alt={ph.alt ?? ''} loading="lazy"
-              className={`w-full rounded-[var(--r)] object-cover shadow-md ${i % 3 === 0 ? 'aspect-[16/10]' : 'aspect-[4/3]'}`} />
-          </Reveal>
-        ))}
+        {photos.map((ph, i) => {
+          const ratio = i % 3 === 0 ? 'aspect-[16/10]' : 'aspect-[4/3]';
+          return lively
+            ? <ImageReveal key={i} src={ph.url} alt={ph.alt ?? ''} delay={(i % 2) * 120}
+                className={`w-full rounded-[var(--r)] shadow-md ${ratio}`} />
+            : <Reveal key={i} delay={(i % 2) * 100}>
+                <img src={ph.url} alt={ph.alt ?? ''} loading="lazy" className={`w-full rounded-[var(--r)] object-cover shadow-md ${ratio}`} />
+              </Reveal>;
+        })}
       </div>
     </SectionShell>
   );
 }
 
-export function Gallery(p: { heading?: string; photos?: { url: string; alt?: string }[] }) {
+export function Gallery(p: { heading?: string; photos?: { url: string; alt?: string }[]; motion?: string }) {
   const photos = (p.photos ?? []).slice(0, 9);
   if (!photos.length) return null;
+  const lively = p.motion !== 'calm';
   return (
     <SectionShell id="gallery">
       <Heading heading={p.heading} />
       <div className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-3">
         {photos.map((ph, i) => (
-          <Reveal key={i} delay={(i % 3) * 70}>
-            <img src={ph.url} alt={ph.alt ?? ''} loading="lazy" className="aspect-square w-full rounded-[var(--r)] object-cover transition-transform hover:scale-[1.02]" />
-          </Reveal>
+          lively
+            ? <ImageReveal key={i} src={ph.url} alt={ph.alt ?? ''} delay={(i % 3) * 90}
+                className="aspect-square w-full rounded-[var(--r)]" imgClassName="transition-transform hover:scale-[1.03]" />
+            : <Reveal key={i} delay={(i % 3) * 70}>
+                <img src={ph.url} alt={ph.alt ?? ''} loading="lazy" className="aspect-square w-full rounded-[var(--r)] object-cover transition-transform hover:scale-[1.02]" />
+              </Reveal>
         ))}
       </div>
     </SectionShell>
   );
 }
 
-export function Reviews(p: { heading?: string; reviews?: { author: string; rating?: number; text: string }[]; summary?: string; googleRating?: number; reviewCount?: number }) {
+export function Reviews(p: { heading?: string; reviews?: { author: string; rating?: number; text: string }[]; summary?: string; googleRating?: number; reviewCount?: number; variant?: string }) {
   const reviews = (p.reviews ?? []).slice(0, 6);
+
+  // SPOTLIGHT — the strongest review as one big editorial quote, the rest small beneath it.
+  if (p.variant === 'spotlight' && (reviews.length || p.summary)) {
+    const [spot, ...rest] = reviews.length
+      ? [...reviews].sort((a, b) => b.text.length - a.text.length)
+      : [{ author: '', rating: undefined, text: p.summary ?? '' }];
+    return (
+      <SectionShell id="reviews" alt>
+        <div className="mx-auto max-w-3xl text-center">
+          <Heading heading={p.heading} />
+          <Reveal delay={80}>
+            <p aria-hidden className="pv-display mt-8 text-6xl leading-none text-[hsl(var(--p)/0.35)]">“</p>
+            <blockquote className="pv-display -mt-4 text-2xl font-medium leading-snug text-[hsl(var(--ink))] sm:text-3xl">{spot.text}</blockquote>
+            <figcaption className="mt-5 text-xs font-medium uppercase tracking-wide text-[hsl(var(--mut))]">
+              {spot.author || 'Customer review'}
+              {p.googleRating != null && <span> · {p.googleRating.toFixed(1)}★ on Google{p.reviewCount != null ? ` (${p.reviewCount})` : ''}</span>}
+            </figcaption>
+          </Reveal>
+        </div>
+        {rest.length > 0 && (
+          <div className="mt-12 grid gap-5 md:grid-cols-3">
+            {rest.slice(0, 3).map((r, i) => (
+              <Reveal key={i} delay={i * 80}>
+                <figure className="pv-card h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6 shadow-sm">
+                  <Stars rating={r.rating ?? 5} />
+                  <blockquote className="mt-3 text-sm leading-relaxed text-[hsl(var(--ink))]">“{r.text}”</blockquote>
+                  <figcaption className="mt-4 text-xs font-medium uppercase tracking-wide text-[hsl(var(--mut))]">{r.author}</figcaption>
+                </figure>
+              </Reveal>
+            ))}
+          </div>
+        )}
+      </SectionShell>
+    );
+  }
+
   return (
     <SectionShell id="reviews" alt>
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -268,7 +542,7 @@ export function Reviews(p: { heading?: string; reviews?: { author: string; ratin
         ? <div className="mt-10 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             {reviews.map((r, i) => (
               <Reveal key={i} delay={(i % 3) * 80}>
-                <figure className="h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6 shadow-sm">
+                <figure className="pv-card pv-lift h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6 shadow-sm">
                   <Stars rating={r.rating ?? 5} />
                   <blockquote className="mt-3 text-sm leading-relaxed text-[hsl(var(--ink))]">“{r.text}”</blockquote>
                   <figcaption className="mt-4 text-xs font-medium uppercase tracking-wide text-[hsl(var(--mut))]">{r.author}</figcaption>
@@ -412,7 +686,7 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
             {sent && <p className="text-sm font-medium text-[hsl(var(--p))]">{wired ? 'Sent — your request went through. You’ll hear back shortly.' : 'Thanks! This is a preview site — on the live site this reaches you instantly.'}</p>}
           </form>
         </div>
-        <div className="h-fit space-y-4 rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6">
+        <div className="pv-card h-fit space-y-4 rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6">
           <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--mut))]">Prefer to talk?</p>
           {p.phone && <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2.5 text-base font-semibold text-[hsl(var(--ink))]"><Phone size={17} className="text-[hsl(var(--p))]" /> {p.phone}</a>}
           {p.email && <a href={`mailto:${p.email}`} className="flex items-center gap-2.5 text-sm text-[hsl(var(--ink))]"><Mail size={16} className="text-[hsl(var(--p))]" /> {p.email}</a>}
@@ -423,9 +697,33 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
   );
 }
 
-export function CtaBanner(p: { heading?: string; sub?: string; cta?: string }) {
+export function CtaBanner(p: { heading?: string; sub?: string; cta?: string; variant?: string }) {
+  // GIANT — the full-width oversized closer (pairs with the "outline" flair device for hollow type).
+  if (p.variant === 'giant') {
+    return (
+      <section id="ctaBanner" className="pv-grain-host bg-[hsl(var(--p))] py-20 sm:py-28">
+        <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-8 px-5 text-center sm:px-8">
+          <Reveal>
+            <h2 className="pv-display font-bold tracking-tight text-[hsl(var(--pi))]"
+              style={{ fontSize: 'clamp(2.6rem, 7vw, 5.5rem)', lineHeight: 1.02, textWrap: 'balance' }}>
+              {p.heading}
+            </h2>
+            {p.sub && <p className="mx-auto mt-5 max-w-xl text-[hsl(var(--pi)/0.85)]">{p.sub}</p>}
+          </Reveal>
+          {p.cta && (
+            <Reveal delay={100}>
+              <button type="button" onClick={scrollToQuote}
+                className="rounded-[var(--r)] bg-[hsl(var(--pi))] px-9 py-4 text-base font-bold text-[hsl(var(--p))] shadow-xl transition-transform hover:-translate-y-0.5">
+                {p.cta}
+              </button>
+            </Reveal>
+          )}
+        </div>
+      </section>
+    );
+  }
   return (
-    <section id="ctaBanner" className="bg-[hsl(var(--p))] py-16">
+    <section id="ctaBanner" className="pv-grain-host bg-[hsl(var(--p))] py-16">
       <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-6 px-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
         <Reveal>
           <h2 className="pv-display text-3xl font-semibold tracking-tight text-[hsl(var(--pi))]">{p.heading}</h2>
@@ -458,5 +756,5 @@ export function SeoText(p: { heading?: string; body?: string }) {
 export const SECTION_COMPONENTS = {
   hero: Hero, trust: Trust, services: Services, about: About, showcase: Showcase,
   gallery: Gallery, reviews: Reviews, serviceArea: ServiceArea, faq: Faq, hours: Hours,
-  map: MapSection, quote: Quote, ctaBanner: CtaBanner, seoText: SeoText,
+  map: MapSection, quote: Quote, ctaBanner: CtaBanner, seoText: SeoText, scene: SceneSection,
 } as const;

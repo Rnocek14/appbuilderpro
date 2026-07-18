@@ -114,6 +114,151 @@ export function fieldsFromPage(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Honest fact extraction from the prospect's own page text
+// ---------------------------------------------------------------------------
+
+/** Facts a page LITERALLY states about the business — no inference, no model call. Everything here
+ *  is quotable back to the owner ("your site says…"), which is what makes the rebuilt demo read as
+ *  THEIR business instead of a template with their name pasted in. Absent facts stay absent. */
+export interface SiteFacts {
+  services: string[];              // the named services their page lists, verbatim (title-cased)
+  establishedYear: number | null;  // "Since 1987" / "Established 2003" — bounds-checked
+  serviceArea: string[];           // "Serving Fox Lake and the Chain O'Lakes" → the named places
+  familyOwned: boolean;            // the page says family-owned / family owned & operated
+  description: string | null;      // one honest line assembled ONLY from the facts above
+}
+
+const cleanListItem = (s: string, maxWords: number): string | null => {
+  const t = s.replace(/^\s*(?:and|&|\+|the)\s+/i, '').replace(/\s+/g, ' ').trim().replace(/[.:;,]+$/, '');
+  if (t.length < 3 || t.length > 40 || !/[a-z]/i.test(t) || t.split(' ').length > maxWords) return null;
+  return t;
+};
+
+/** Deterministic extraction from scraped page text. The services pattern is colon/verb-gated
+ *  ("Services: …", "we offer …") so a nav menu's bare "Services" link never yields fake items —
+ *  a page that doesn't name its services yields none and the caller keeps the generic trade name. */
+export function extractSiteFacts(text: string | null | undefined, nowYear: number): SiteFacts {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim().slice(0, 20_000);
+  const facts: SiteFacts = { services: [], establishedYear: null, serviceArea: [], familyOwned: false, description: null };
+  if (!t) return facts;
+
+  for (const m of t.matchAll(/(?:services(?:\s+include[sd]?)?\s*:|we offer|we provide|we specialize in|specializing in)\s+([^.!?]{8,300})/gi)) {
+    for (const part of m[1].split(/[,;•·|]|\band\b/i)) {
+      const item = cleanListItem(part, 5);
+      const cased = item ? titleCase(item) : null;
+      if (cased && !facts.services.includes(cased)) facts.services.push(cased);
+      if (facts.services.length >= 8) break;
+    }
+    if (facts.services.length >= 8) break;
+  }
+
+  const yearM = t.match(/\b(?:since|established(?:\s+in)?|est\.?|founded(?:\s+in)?)\s+((?:19|20)\d{2})\b/i);
+  if (yearM) {
+    const y = parseInt(yearM[1], 10);
+    if (y >= 1900 && y <= nowYear) facts.establishedYear = y;
+  }
+
+  const areaM = t.match(/\bserving\s+([A-Za-z][^.!?]{2,90}?)(?=\s+since\s+(?:19|20)\d{2}\b|[.!?]|$)/i);
+  if (areaM) {
+    for (const part of areaM[1].split(/,|\band\b|&/i)) {
+      const a = cleanListItem(part, 5);
+      // Proper-noun places only ("Fox Lake"), so "serving homeowners across the county" adds nothing.
+      if (a && /^[A-Z]/.test(a) && !facts.serviceArea.includes(a)) facts.serviceArea.push(a);
+      if (facts.serviceArea.length >= 6) break;
+    }
+  }
+
+  facts.familyOwned = /family[-\s]owned/i.test(t);
+
+  const areaPhrase = facts.serviceArea.length
+    ? `serving ${facts.serviceArea.length > 1
+        ? `${facts.serviceArea.slice(0, -1).join(', ')} and ${facts.serviceArea[facts.serviceArea.length - 1]}`
+        : facts.serviceArea[0]}`
+    : '';
+  const sincePhrase = facts.establishedYear ? `since ${facts.establishedYear}` : '';
+  const tail = [areaPhrase, sincePhrase].filter(Boolean).join(' ');
+  if (facts.familyOwned && tail) facts.description = `Family-owned, ${tail}.`;
+  else if (facts.familyOwned) facts.description = 'Family-owned and operated.';
+  else if (tail) facts.description = `${tail[0].toUpperCase()}${tail.slice(1)}.`;
+
+  return facts;
+}
+
+/** High-LTV verticals whose owners plausibly pay premium rates — the ONLY prospects worth an
+ *  upgraded (more expensive) model. The worker uses this with the AI_PREMIUM_MODEL env: unset
+ *  (the default) → everyone gets the standard plan model; set → these verticals get the premium
+ *  one. Never hardcode an expensive model here. */
+export function premiumProspect(industry: string): boolean {
+  return /law|attorney|legal|medical|dental|orthodont|surgeon|real estate|realtor|med spa|financ|wealth|account/i.test(industry);
+}
+
+// ---------------------------------------------------------------------------
+// AI concept imagery — prompts only (pure); the worker generates + stores
+// ---------------------------------------------------------------------------
+
+// Trade → still-life subject matter. Deliberately OBJECT photography (materials and tools of the
+// trade), never people, places, or "their work" — an AI image must not impersonate reality.
+const IMAGE_SUBJECTS: [RegExp, string, string][] = [
+  [/plumb|sewer|drain/i, 'copper pipes, brass fittings and a steel pipe wrench arranged on dark slate', 'water droplets beading on a polished copper pipe joint, macro'],
+  [/electric/i, 'coiled copper wire, cable spools and a voltage tester on matte black steel', 'the filament of a warm vintage bulb glowing, macro on black'],
+  [/roof|gutter/i, 'overlapping architectural shingles and copper flashing in low dramatic light', 'rain droplets bouncing off a dark shingle edge, macro'],
+  [/hvac|heating|cooling|furnace/i, 'brushed-steel ventilation fins, ducting and an analog pressure gauge', 'frost crystals forming on a copper coil, macro'],
+  [/auto|mechanic|tire|transmission/i, 'a chrome socket set and torque wrench on a dark workshop bench', 'tread of a new tire catching rim light, macro on black'],
+  [/landscap|lawn|tree/i, 'fresh-cut turf, pruning shears and leather work gloves on weathered wood', 'morning dew on blades of deep-green grass, macro'],
+  [/paint/i, 'a paint-loaded brush and rollers beside pooled paint in one brand color', 'a single thick brushstroke of wet paint across raw canvas, macro'],
+  [/clean/i, 'folded white towels, glass spray bottles and citrus on bright marble', 'soap bubbles catching iridescent light, macro'],
+  [/law|attorney|legal|account|tax|insur/i, 'a fountain pen on heavy cream paper beside an embossed blind seal', 'the nib of a fountain pen mid-stroke on cotton paper, macro'],
+  [/dental|medical|clinic|chiro|optom/i, 'clean instruments on a pale tray with soft depth of field', 'light refracting through clear glass and water, airy macro'],
+];
+
+// Trade → the ONE iconic object for the layered depth-sandwich hero (floats over the wordmark).
+const HERO_OBJECTS: [RegExp, string][] = [
+  [/plumb|sewer|drain/i, 'a professional steel pipe wrench'],
+  [/electric/i, 'a vintage glass filament bulb'],
+  [/roof|gutter/i, 'a steel framing hammer'],
+  [/hvac|heating|cooling|furnace/i, 'an analog brass pressure gauge'],
+  [/auto|mechanic|tire|transmission/i, 'a chrome torque wrench'],
+  [/landscap|lawn|tree/i, 'a pair of steel pruning shears'],
+  [/paint/i, 'a wide paint brush loaded with paint'],
+  [/law|attorney|legal|account|tax|insur/i, 'a classic fountain pen'],
+  [/clean/i, 'an amber glass spray bottle'],
+];
+
+/** The layered-hero pair: an illustrated atmospheric backdrop + ONE iconic trade object isolated
+ *  on a transparent background (gpt-image-1 background:'transparent'). Same hard honesty rules —
+ *  poster art and an object, never fake evidence of their work. Pure; the worker executes. */
+export function huntArtPrompts(industry: string, tone?: string | null): { backdrop: string; object: string } | null {
+  const obj = HERO_OBJECTS.find(([re]) => re.test(industry))?.[1];
+  if (!obj) return null;                       // no iconic object → no layered hero for this trade
+  const mood = tone && /calm|airy|luxur|soft|clinical/i.test(tone)
+    ? 'soft luminous palette, generous negative space'
+    : 'deep dramatic palette, bold sweeping forms';
+  return {
+    // Deliberate contrast: painterly ART behind, PHOTOREAL object in front — the tactile-object-
+    // over-atmosphere composition premium sites use. Never a cartoon object.
+    backdrop: `Atmospheric editorial poster artwork: abstract dramatic clouds and sweeping light, ${mood}, painterly illustration style. No people, no text, no words, no logos, no buildings, no recognizable places.`,
+    object: `${obj}, photorealistic high-detail studio product photography, floating at a slight angle, crisp edge lighting, sharp focus. Real physical object — not illustrated, not cartoon, not 3D render style. Isolated object only, transparent background, no people, no hands, no text, no logos.`,
+  };
+}
+
+/** Two honest, generic still-life prompts (wide hero + tight detail) for a trade with no usable
+ *  photos of its own. Hard rules ride in every prompt: no people, no text, no logos, no places —
+ *  concept imagery, never fake evidence of "their work". Pure; the worker executes them. */
+export function huntImagePrompts(industry: string, tone?: string | null): [string, string] {
+  const hit = IMAGE_SUBJECTS.find(([re]) => re.test(industry));
+  const wide = hit?.[1] ?? `the tools and materials of the ${industry.toLowerCase()} trade arranged as a considered still life`;
+  const tight = hit?.[2] ?? `a single tool of the ${industry.toLowerCase()} trade in dramatic close-up`;
+  const mood = tone && /calm|airy|luxur|soft|clinical/i.test(tone)
+    ? 'Bright, airy editorial photography, generous negative space, soft daylight.'
+    : 'Moody editorial photography, deep shadows, one warm key light, cinematic contrast.';
+  const rules = 'No people, no faces, no hands, no text, no words, no logos, no storefronts, no vehicles with markings. Photorealistic.';
+  return [
+    `Professional wide editorial photograph: ${wide}. ${mood} ${rules}`,
+    `Professional macro detail photograph: ${tight}. ${mood} ${rules}`,
+  ];
+}
+
 export interface HuntProfileInput {
   url: string;
   niche: string;
@@ -125,12 +270,15 @@ export interface HuntProfileInput {
   location?: string | null;                               // real city/state (e.g. from Places) — optional
   phone?: string | null;                                  // real phone (e.g. from Places) — optional
   rating?: { rating: number | null; count: number | null } | null;  // real Places rating — optional
+  facts?: SiteFacts | null;                               // extractSiteFacts(pageText) — literal page facts
 }
 
 /** Merge the deterministic fields + scraped assets + audit into a raw BusinessProfile object for
  *  parseBusinessProfile to validate. Reuses the exact same buildProfile the interactive scraper uses
  *  (one implementation), so photo provenance + honesty are identical. A real location/phone (from
- *  Google Places) rides through when provided — never invented. */
+ *  Google Places) rides through when provided — never invented. When page facts were extracted, the
+ *  services THEY list replace the generic trade placeholder and their own claims become the
+ *  description/service_area — the profile carries their words, not ours. */
 export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unknown> {
   const fields = fieldsFromPage(input.page, input.niche, input.fallbackName, input.location, input.rating ?? null);
   const ctx: ScrapeContext = {
@@ -142,6 +290,11 @@ export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unk
   };
   const raw = buildProfile(fields, ctx);
   if (input.phone && input.phone.trim()) raw.phone = input.phone.trim().slice(0, 40);  // real Places phone
+  if (input.facts) {
+    if (input.facts.services.length) raw.services = input.facts.services;
+    if (input.facts.serviceArea.length) raw.service_area = input.facts.serviceArea;
+    if (input.facts.description) raw.description = input.facts.description;
+  }
   return raw;
 }
 

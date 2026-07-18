@@ -4,9 +4,10 @@
 
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
-  usablePhotos, usableReviews, previewSlug, navFor, RECIPES,
+  usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
   type BusinessProfile,
 } from './spec';
+import { huntImagePrompts, huntArtPrompts } from '../garvis/clientHuntBuild';
 
 let passed = 0, failed = 0;
 const check = (name: string, cond: boolean) => {
@@ -90,6 +91,165 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   check('normalize: valid theme override kept', spec.theme.primary === '210 80% 40%');
   check('normalize: CTA floor enforced', spec.sections.some((s) => s.type === 'quote' || s.type === 'ctaBanner'));
   check('normalize: garbage input still yields a complete site', normalizeSpec('nonsense', ROOFER).sections.length > 5);
+}
+
+// signature-device flair (the app builder's personality kit, on prospect previews)
+{
+  check('recipes: every flair device is whitelisted', RECIPES.every((r) =>
+    (r.theme.flair ?? []).every((f) => (FLAIR_DEVICES as readonly string[]).includes(f))));
+  check('fallback: spec carries the recipe flair defaults (never zero personality)',
+    (assembleFallbackSpec(ROOFER).theme.flair ?? []).length > 0);
+  const flaired = normalizeSpec({ theme: { flair: ['grain', 'bogus-device', 'marquee', 'dots', 'ruled'] } }, ROOFER);
+  check('normalize: unknown flair devices dropped, list capped at 3',
+    JSON.stringify(flaired.theme.flair) === JSON.stringify(['grain', 'marquee', 'dots']));
+  const noFlair = normalizeSpec({ theme: { primary: '210 80% 40%' } }, ROOFER);
+  check('normalize: absent flair falls back to the recipe default',
+    JSON.stringify(noFlair.theme.flair) === JSON.stringify(pickRecipe(ROOFER).theme.flair));
+}
+
+// motion tier + structural variants (the uniqueness contract)
+{
+  const recipe = pickRecipe(ROOFER);
+  check('recipes: every recipe declares a motion tier',
+    RECIPES.every((r) => ['calm', 'lively', 'cinematic'].includes(r.theme.motion ?? '')));
+  check('normalize: bogus motion falls back to the recipe tier',
+    normalizeSpec({ theme: { motion: 'explosive' } }, ROOFER).theme.motion === recipe.theme.motion);
+  check('normalize: valid motion kept',
+    normalizeSpec({ theme: { motion: 'calm' } }, ROOFER).theme.motion === 'calm');
+  const v = normalizeSpec({ sections: [
+    { type: 'hero', props: { heading: 'H' }, variant: 'editorial' },
+    { type: 'services', props: {}, variant: 'sideways-spiral' },
+    { type: 'ctaBanner', props: {}, variant: 'giant' },
+  ] }, ROOFER);
+  check('normalize: whitelisted section variant kept', v.sections.find((s) => s.type === 'hero')?.variant === 'editorial');
+  check('normalize: unknown variant replaced by the recipe default composition',
+    v.sections.find((s) => s.type === 'services')?.variant === recipe.variants?.services);
+  check('normalize: ctaBanner giant kept', v.sections.find((s) => s.type === 'ctaBanner')?.variant === 'giant');
+  const fb = assembleFallbackSpec(ROOFER);
+  check('fallback: sections carry the recipe variant defaults',
+    fb.sections.every((s) => recipe.variants?.[s.type] === undefined || s.variant === recipe.variants[s.type]));
+  check('recipes: distinct verticals get distinct page architecture (hero variants differ)',
+    new Set(RECIPES.map((r) => r.variants?.hero ?? 'fullbleed')).size >= 3);
+}
+
+// trade scenes: hand-built visuals, deterministically keyed — never a generic placeholder
+{
+  check('sceneKindFor: plumber → pipe, electrician → circuit, roofer → rain',
+    sceneKindFor('Plumbing') === 'pipe' && sceneKindFor('Electrical Services') === 'circuit' && sceneKindFor('Roofing') === 'rain');
+  check('sceneKindFor: no scene for trades without one', sceneKindFor('Hair & Beauty') === null && sceneKindFor('Legal Services') === null);
+  const plumber = { ...ROOFER, industry: 'Plumbing' };
+  const withScene = normalizeSpec({ sections: [
+    { type: 'hero', props: { heading: 'H' } },
+    { type: 'scene', props: { headline: 'Leaks lose.', scene: 'gauge' } },   // model may NOT pick the visual
+    { type: 'scene', props: { headline: 'Second scene' } },                  // one per page
+  ] }, plumber);
+  const scenes = withScene.sections.filter((s) => s.type === 'scene');
+  check('normalize: scene kind stamped from the trade, never model-chosen', scenes.length === 1 && scenes[0].props.scene === 'pipe');
+  check('normalize: model punchline kept', scenes[0].props.headline === 'Leaks lose.');
+  const salonScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, { ...ROOFER, industry: 'Hair & Beauty' });
+  check('normalize: scene dropped for trades with no vignette', !salonScene.sections.some((s) => s.type === 'scene'));
+  const fbPlumber = assembleFallbackSpec(plumber);
+  check('fallback: plumber gets the pipe scene with honest default copy',
+    fbPlumber.sections.some((s) => s.type === 'scene' && s.props.scene === 'pipe' && s.props.headline === "Leaks don't wait."));
+  const fbRoofer = assembleFallbackSpec(ROOFER);
+  check('fallback: roofer (contractor recipe) gets the rain scene', fbRoofer.sections.some((s) => s.type === 'scene' && s.props.scene === 'rain'));
+  check('scene never enters the nav', !fbPlumber.nav.some((n) => n.anchor === 'scene'));
+}
+
+// AI concept imagery: honest prompts + the footer disclosure flag
+{
+  const [wide, tight] = huntImagePrompts('Plumbing', 'bold, direct');
+  check('image prompts are trade-specific (plumber → copper pipes)', /copper pipes/i.test(wide) && /macro/i.test(tight));
+  check('image prompts carry the hard honesty rules (no people/text/logos)',
+    [wide, tight].every((p) => /No people/.test(p) && /no logos/.test(p) && /no text/i.test(p)));
+  const [gw] = huntImagePrompts('Notary Services', null);
+  check('unknown trade still gets a generic still-life prompt', /notary services trade/i.test(gw));
+  const aiProfile = { ...ROOFER, photos: [{ url: 'https://x/ai.png', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false }] };
+  check('aiImagery flag set when photos are AI-generated', assembleFallbackSpec(aiProfile).aiImagery === true
+    && normalizeSpec({}, aiProfile).aiImagery === true);
+  check('aiImagery flag absent for real photos', assembleFallbackSpec(ROOFER).aiImagery === undefined);
+  check('portal is a whitelisted hero variant',
+    normalizeSpec({ sections: [{ type: 'hero', props: {}, variant: 'portal' }] }, ROOFER).sections[0].variant === 'portal');
+}
+
+// layered depth-sandwich hero: role-tagged AI pair rides in by ROLE, never by model URL
+{
+  const art = huntArtPrompts('Plumbing', 'bold');
+  check('art prompts: plumber gets a pipe-wrench object on transparent background',
+    !!art && /pipe wrench/i.test(art.object) && /transparent background/i.test(art.object));
+  check('art prompts: object is explicitly photoreal, never cartoon',
+    !!art && /photorealistic/i.test(art.object) && /not cartoon/i.test(art.object));
+  check('art prompts: backdrop is abstract poster art with the hard rules',
+    !!art && /No people/.test(art.backdrop) && /no text/i.test(art.backdrop) && /no buildings/i.test(art.backdrop));
+  check('art prompts: trades without an iconic object get none (still-life path instead)',
+    huntArtPrompts('Hair & Beauty', null) === null);
+  const layered = {
+    ...ROOFER,
+    photos: [
+      { url: 'https://x/bg.png', alt: 'ai-backdrop', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+      { url: 'https://x/obj.png', alt: 'ai-object', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+    ],
+  };
+  const hero = normalizeSpec({ sections: [{ type: 'hero', props: { bgImage: 'https://evil/x.png' }, variant: 'layers' }] }, layered)
+    .sections.find((s) => s.type === 'hero')!;
+  check('normalize: layers kept as a variant, role assets injected from PROFILE (model URLs overwritten)',
+    hero.variant === 'layers' && hero.props.bgImage === 'https://x/bg.png' && hero.props.objectImage === 'https://x/obj.png');
+  const noRoles = normalizeSpec({ sections: [{ type: 'hero', props: {}, variant: 'layers' }] }, ROOFER).sections[0];
+  check('normalize: layers without the role pair carries no asset props (renderer falls back)',
+    noRoles.props.bgImage === undefined && noRoles.props.objectImage === undefined);
+
+  // 20-site review finding: role assets leaked into content slots (a wrench in the about section)
+  const roleOnly = {
+    ...ROOFER,
+    photos: [
+      { url: 'https://x/bg.png', alt: 'ai-backdrop', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+      { url: 'https://x/obj.png', alt: 'ai-object', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+    ],
+  };
+  const leaky = normalizeSpec({ sections: [
+    { type: 'hero', props: { image: 'https://x/obj.png' } },
+    { type: 'about', props: { heading: 'A', body: 'b', image: 'https://x/obj.png' } },
+    { type: 'gallery', props: {} },
+    { type: 'showcase', props: {} },
+  ] }, roleOnly);
+  check('leak fix: the object never becomes a hero/about image; backdrop backs the hero',
+    leaky.sections.find((s) => s.type === 'hero')?.props.image === 'https://x/bg.png'
+    && leaky.sections.find((s) => s.type === 'about')?.props.image === undefined);
+  check('leak fix: galleries/showcases drop when only role assets exist',
+    !leaky.sections.some((s) => s.type === 'gallery' || s.type === 'showcase'));
+  const fbRole = assembleFallbackSpec(roleOnly);
+  check('leak fix: fallback equally guarded (hero uses backdrop, no photo sections)',
+    fbRole.sections[0].props.image === 'https://x/bg.png'
+    && !fbRole.sections.some((s) => s.type === 'gallery' || s.type === 'showcase'));
+}
+
+// appropriateness: the dignified restraint guard (iteration-loop finding — a funeral home was
+// routed to the contractor recipe and got 'Get a Free Quote' + giant type; never again)
+{
+  const funeral = { ...ROOFER, business_name: 'Meadowbrook Funeral Home', industry: 'Funeral Home' };
+  check('restraintFor: grief-adjacent categories detected', restraintFor('Funeral Home') === 'dignified'
+    && restraintFor('Cremation Services') === 'dignified' && restraintFor('Roofing') === null);
+  check('pickRecipe: funeral routes to care_services (never contractor)', pickRecipe(funeral).id === 'care_services');
+  check('care_services CTA is never sales-y', pickRecipe(funeral).cta === 'Contact Us');
+  const forced = normalizeSpec({
+    theme: { motion: 'cinematic', flair: ['marquee', 'grain', 'outline'] },
+    sections: [
+      { type: 'hero', props: {}, variant: 'stacked' },
+      { type: 'scene', props: { headline: 'x' } },
+      { type: 'ctaBanner', props: {}, variant: 'giant' },
+    ],
+  }, funeral);
+  check('restraint: model-chosen cinematic forced to calm', forced.theme.motion === 'calm');
+  check('restraint: loud flair stripped (quiet textures only, max 1)',
+    (forced.theme.flair ?? []).every((f) => f === 'dots' || f === 'ruled') && (forced.theme.flair ?? []).length <= 1);
+  check('restraint: scenes removed', !forced.sections.some((s) => s.type === 'scene'));
+  check('restraint: hero forced editorial, giant closer forced band',
+    forced.sections.find((s) => s.type === 'hero')?.variant === 'editorial'
+    && forced.sections.find((s) => s.type === 'ctaBanner')?.variant === 'band');
+  const fbFuneral = assembleFallbackSpec(funeral);
+  check('restraint: fallback path equally guarded',
+    fbFuneral.theme.motion === 'calm' && !fbFuneral.sections.some((s) => s.type === 'scene')
+    && fbFuneral.sections.find((s) => s.type === 'hero')?.variant === 'editorial');
 }
 
 // slug + nav helpers
