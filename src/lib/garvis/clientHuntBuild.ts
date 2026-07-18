@@ -227,8 +227,10 @@ export function huntArtPrompts(industry: string, tone?: string | null): { backdr
     ? 'soft luminous palette, generous negative space'
     : 'deep dramatic palette, bold sweeping forms';
   return {
+    // Deliberate contrast: painterly ART behind, PHOTOREAL object in front — the tactile-object-
+    // over-atmosphere composition premium sites use. Never a cartoon object.
     backdrop: `Atmospheric editorial poster artwork: abstract dramatic clouds and sweeping light, ${mood}, painterly illustration style. No people, no text, no words, no logos, no buildings, no recognizable places.`,
-    object: `${obj}, dramatic studio product photography, floating at a slight angle, crisp edge lighting. Isolated object only, transparent background, no people, no hands, no text, no logos.`,
+    object: `${obj}, photorealistic high-detail studio product photography, floating at a slight angle, crisp edge lighting, sharp focus. Real physical object — not illustrated, not cartoon, not 3D render style. Isolated object only, transparent background, no people, no hands, no text, no logos.`,
   };
 }
 

@@ -177,6 +177,8 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   const art = huntArtPrompts('Plumbing', 'bold');
   check('art prompts: plumber gets a pipe-wrench object on transparent background',
     !!art && /pipe wrench/i.test(art.object) && /transparent background/i.test(art.object));
+  check('art prompts: object is explicitly photoreal, never cartoon',
+    !!art && /photorealistic/i.test(art.object) && /not cartoon/i.test(art.object));
   check('art prompts: backdrop is abstract poster art with the hard rules',
     !!art && /No people/.test(art.backdrop) && /no text/i.test(art.backdrop) && /no buildings/i.test(art.backdrop));
   check('art prompts: trades without an iconic object get none (still-life path instead)',

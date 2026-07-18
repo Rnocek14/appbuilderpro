@@ -166,8 +166,26 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
         })}
       </main>
 
+      {/* MOBILE CALL BAR — most owners open the pitch on a phone; the strongest conversion lever
+          is a thumb-reach call button that never scrolls away. Real tel: link only (no phone → no
+          bar), quote anchor beside it. Hidden on md+ where the sticky header already carries both. */}
+      {!shot && phone && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[hsl(var(--bor))] bg-[hsl(var(--bg)/0.94)] px-4 pb-[max(env(safe-area-inset-bottom),0.7rem)] pt-2.5 backdrop-blur md:hidden">
+          <div className="flex gap-2">
+            <a href={`tel:${phone.replace(/[^\d+]/g, '')}`}
+              className="flex flex-1 items-center justify-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] py-3 text-sm font-bold text-[hsl(var(--pi))]">
+              <Phone size={15} /> Call {phone}
+            </a>
+            <a href="#quote"
+              className="flex flex-1 items-center justify-center rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] py-3 text-sm font-semibold text-[hsl(var(--ink))]">
+              {spec.nav.find((n) => n.anchor === 'quote')?.label ?? 'Get a Quote'}
+            </a>
+          </div>
+        </div>
+      )}
+
       {!shot && (
-        <footer className="border-t border-[hsl(var(--bor))] bg-[hsl(var(--card))] py-10">
+        <footer className={`border-t border-[hsl(var(--bor))] bg-[hsl(var(--card))] py-10 ${phone ? 'pb-28 md:pb-10' : ''}`}>
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-5 sm:px-8">
             <p className="pv-display text-base font-bold text-[hsl(var(--ink))]">{logoMain}{logoAccent && <span className="text-[hsl(var(--p))]">{logoAccent}</span>}</p>
             <p className="text-xs text-[hsl(var(--mut))]">{spec.footer.line}</p>
