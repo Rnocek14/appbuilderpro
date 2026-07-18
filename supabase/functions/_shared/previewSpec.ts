@@ -151,6 +151,29 @@ export type SectionType = (typeof SECTION_TYPES)[number];
 export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge'] as const;
 export type SceneKind = (typeof SCENE_KINDS)[number];
 
+/** APPROPRIATENESS GUARD — some businesses must never get spectacle. For grief-adjacent
+ *  categories the page is calm by construction: no marquee, no scenes, no giant type, no
+ *  showpiece heroes, no sales-y verbs, no generated imagery. Enforced in normalizeSpec AND the
+ *  fallback — a model choice can never override it. */
+export function restraintFor(industry: string): 'dignified' | null {
+  return /funeral|cremation|cremator|memorial|hospice|grief|bereave|cemetery|mortuar|obituar|palliative/i.test(industry)
+    ? 'dignified' : null;
+}
+
+/** In-place enforcement of the dignified guard on a theme + section list (shared by the
+ *  normalizer and the fallback assembler). Returns the filtered section list. */
+export function applyRestraint(theme: ThemeSpec, sections: SectionSpec[], industry: string): SectionSpec[] {
+  if (!restraintFor(industry)) return sections;
+  theme.motion = 'calm';
+  theme.flair = (theme.flair ?? []).filter((f) => f === 'dots' || f === 'ruled').slice(0, 1);
+  const out = sections.filter((s) => s.type !== 'scene');
+  for (const s of out) {
+    if (s.type === 'hero') s.variant = s.variant === 'split' ? 'split' : 'editorial';
+    if (s.type === 'ctaBanner') s.variant = 'band';
+  }
+  return out;
+}
+
 export function sceneKindFor(industry: string): SceneKind | null {
   const s = industry.toLowerCase();
   if (/plumb|sewer|drain|septic/.test(s)) return 'pipe';
@@ -323,6 +346,19 @@ export const RECIPES: Recipe[] = [
     },
     cta: 'Book an Appointment',
     variants: { services: 'cards' },
+  },
+  {
+    id: 'care_services',
+    label: 'Funeral / Memorial / Care',
+    match: ['funeral', 'cremation', 'memorial', 'hospice', 'grief', 'bereavement', 'cemetery', 'mortuary', 'palliative'],
+    sections: ['hero', 'about', 'services', 'reviews', 'faq', 'quote', 'map', 'ctaBanner', 'seoText'],
+    theme: {
+      primary: '210 20% 30%', primaryInk: '40 30% 97%', bg: '40 22% 97.5%', ink: '215 22% 15%',
+      muted: '215 10% 44%', card: '40 18% 99.5%', border: '40 12% 89%', radius: 4,
+      displayFont: 'Cormorant Garamond', bodyFont: 'Source Sans 3', tone: 'quiet dignity — slate on warm paper, serif calm, nothing raised above a whisper', flair: ['ruled'], motion: 'calm',
+    },
+    cta: 'Contact Us',
+    variants: { hero: 'editorial', services: 'rows', reviews: 'spotlight', ctaBanner: 'band' },
   },
   {
     id: 'legal_professional',
@@ -534,6 +570,9 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     };
     return true;
   });
+
+  // Dignity is not a model choice — grief-adjacent categories are forced calm here.
+  sections = applyRestraint(theme, sections, profile.industry);
 
   const seoRaw = (r.seo ?? {}) as Record<string, unknown>;
   return {
@@ -768,15 +807,18 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   // distinct per vertical, not one skeleton with different paint.
   for (const s of sections) s.variant = s.variant ?? recipe.variants?.[s.type];
 
+  const fbTheme: ThemeSpec = { ...recipe.theme };
+  const restrainedSections = applyRestraint(fbTheme, sections, profile.industry);
+
   const spec: SiteSpec = {
     version: 1,
     recipe: recipe.id,
     business_name: name,
     logoText: name,
     tagline: `${profile.industry}${loc ? ` · ${loc}` : ''}`,
-    theme: { ...recipe.theme },
+    theme: fbTheme,
     nav: [],
-    sections,
+    sections: restrainedSections,
     seo: {
       title: `${name} | ${profile.industry}${loc ? ` in ${loc}` : ''}`,
       description: profile.description ?? `${name} — ${profile.services.slice(0, 3).join(', ')}${loc ? ` in ${loc}` : ''}. ${cta} today.`,

@@ -48,7 +48,7 @@ import {
   PLACES_FIELD_MASK, parsePlace, buildDiscoveryQueries, exhaustionUpdate,
   type PlaceRaw, type DiscoveredBiz,
 } from '../../../src/lib/garvis/placesDiscovery.ts';
-import { parseBusinessProfile, assembleFallbackSpec, normalizeSpec, navFor, pickRecipe, previewSlug, type SiteSpec } from '../_shared/previewSpec.ts';
+import { parseBusinessProfile, assembleFallbackSpec, normalizeSpec, navFor, pickRecipe, previewSlug, restraintFor, type SiteSpec } from '../_shared/previewSpec.ts';
 import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 // CONTENT WEEK (app_0088): the same editor rubric the boards use (fail-CLOSED here — an unjudged
 // draft never auto-queues) + the pure week machinery from standingCore.
@@ -1307,7 +1307,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       // field. Their own photos always win; generation is object photography only (no people/
       // text/logos — huntImagePrompts hard rules), labeled ai_generated + can_publish:false,
       // and fails soft (no key / refusal / no credits → the aurora hero stands).
-      if (!profile.photos.length && Deno.env.get('OPENAI_API_KEY')) {
+      if (!profile.photos.length && Deno.env.get('OPENAI_API_KEY') && !restraintFor(profile.industry)) {
         try {
           await checkCredits(admin, order.owner_id, 'image');
           const made: typeof profile.photos = [];

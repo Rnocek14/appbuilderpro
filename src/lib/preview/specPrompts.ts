@@ -47,6 +47,13 @@ HARD RULES:
   stats, image wipes); "cinematic" (photo-led, food, fitness, bold trades — adds a living aurora
   or parallax hero, a magnetic CTA, tilting cards, a reading-progress line). Restraint IS the
   craft: when unsure, step DOWN a tier.
+- DIGNITY — grief-adjacent businesses (funeral, cremation, memorial, hospice, grief support)
+  get NO spectacle: calm motion, editorial composition, quiet serif warmth, and NEVER sales
+  verbs ("Get a Free Quote" is unthinkable here — "Contact Us", "Speak With Us", "We're Here").
+  The pipeline also hard-enforces this; write for it.
+- PEOPLE, NOT ONLY COMPANIES — solo practitioners (a trainer, a stylist, a tutor, a photographer)
+  read best in a personal voice: their NAME is the brand, first-person warmth fits, and the
+  page can feel like meeting them rather than a corporate brochure.
 - STRUCTURE — sections may carry a "variant" that changes the COMPOSITION, not just the paint:
     hero: "fullbleed" (cinematic panel) | "split" (photo beside copy — needs a photo) |
           "stacked" (centered, monumental) | "editorial" (ink on the page paper, rule-line

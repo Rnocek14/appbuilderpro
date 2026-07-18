@@ -4,7 +4,7 @@
 
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
-  usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor,
+  usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
   type BusinessProfile,
 } from './spec';
 import { huntImagePrompts, huntArtPrompts } from '../garvis/clientHuntBuild';
@@ -197,6 +197,35 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   const noRoles = normalizeSpec({ sections: [{ type: 'hero', props: {}, variant: 'layers' }] }, ROOFER).sections[0];
   check('normalize: layers without the role pair carries no asset props (renderer falls back)',
     noRoles.props.bgImage === undefined && noRoles.props.objectImage === undefined);
+}
+
+// appropriateness: the dignified restraint guard (iteration-loop finding — a funeral home was
+// routed to the contractor recipe and got 'Get a Free Quote' + giant type; never again)
+{
+  const funeral = { ...ROOFER, business_name: 'Meadowbrook Funeral Home', industry: 'Funeral Home' };
+  check('restraintFor: grief-adjacent categories detected', restraintFor('Funeral Home') === 'dignified'
+    && restraintFor('Cremation Services') === 'dignified' && restraintFor('Roofing') === null);
+  check('pickRecipe: funeral routes to care_services (never contractor)', pickRecipe(funeral).id === 'care_services');
+  check('care_services CTA is never sales-y', pickRecipe(funeral).cta === 'Contact Us');
+  const forced = normalizeSpec({
+    theme: { motion: 'cinematic', flair: ['marquee', 'grain', 'outline'] },
+    sections: [
+      { type: 'hero', props: {}, variant: 'stacked' },
+      { type: 'scene', props: { headline: 'x' } },
+      { type: 'ctaBanner', props: {}, variant: 'giant' },
+    ],
+  }, funeral);
+  check('restraint: model-chosen cinematic forced to calm', forced.theme.motion === 'calm');
+  check('restraint: loud flair stripped (quiet textures only, max 1)',
+    (forced.theme.flair ?? []).every((f) => f === 'dots' || f === 'ruled') && (forced.theme.flair ?? []).length <= 1);
+  check('restraint: scenes removed', !forced.sections.some((s) => s.type === 'scene'));
+  check('restraint: hero forced editorial, giant closer forced band',
+    forced.sections.find((s) => s.type === 'hero')?.variant === 'editorial'
+    && forced.sections.find((s) => s.type === 'ctaBanner')?.variant === 'band');
+  const fbFuneral = assembleFallbackSpec(funeral);
+  check('restraint: fallback path equally guarded',
+    fbFuneral.theme.motion === 'calm' && !fbFuneral.sections.some((s) => s.type === 'scene')
+    && fbFuneral.sections.find((s) => s.type === 'hero')?.variant === 'editorial');
 }
 
 // slug + nav helpers
