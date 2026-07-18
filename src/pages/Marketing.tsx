@@ -106,8 +106,16 @@ function AssetCard({ asset, onApprove, onReject, onPublish, onChannel, onCopy }:
             <Button variant="ghost" onClick={onReject} title="Reject"><X size={13} /></Button>
           </>
         )}
-        {(asset.status === 'approved' || asset.status === 'scheduled') && (
-          <Button onClick={onPublish} title="Open the prefilled composer, then mark published"><Send size={13} /> Publish</Button>
+        {asset.status === 'scheduled' && (asset.channel === 'x' || asset.channel === 'linkedin') ? (
+          // Already queued through the real social rail — the send happens from the approval Queue.
+          <span className="text-[10px] text-forge-ember">queued — approve it in the Queue to post</span>
+        ) : (asset.status === 'approved' || asset.status === 'scheduled') && (
+          <Button
+            onClick={onPublish}
+            title={asset.channel === 'x' || asset.channel === 'linkedin'
+              ? 'Queue as a real social post (posts via Ayrshare after you approve it in the Queue)'
+              : 'Open the prefilled composer, then mark published'}
+          ><Send size={13} /> Publish</Button>
         )}
         {asset.status === 'published' && asset.published_at && (
           <span className="text-[10px] text-forge-dim/70">published {timeAgo(asset.published_at)}</span>
@@ -185,7 +193,7 @@ export default function Marketing() {
             <Button onClick={onRun} loading={!!runningId} disabled={!!runningId}><Sparkles size={15} /> Run marketing worker</Button>
             {progress && <Spinner label={progress} />}
           </div>
-          <p className="mt-2 text-[11px] text-forge-dim/60">Everything comes back as drafts you review. Publishing opens a prefilled composer (X / email) — nothing posts without you.</p>
+          <p className="mt-2 text-[11px] text-forge-dim/60">Everything comes back as drafts you review. Social posts queue through the real approval spine (they post via Ayrshare after you approve); email opens a prefilled composer. Nothing goes out without you.</p>
         </Card>
 
         {loading ? (
@@ -228,7 +236,13 @@ export default function Marketing() {
                                 asset={a}
                                 onApprove={() => approveAsset(a.id)}
                                 onReject={() => rejectAsset(a.id)}
-                                onPublish={() => publishAsset(a)}
+                                onPublish={() => {
+                                  void publishAsset(a)
+                                    .then((r) => toast(r === 'queued' ? 'info' : 'success', r === 'queued'
+                                      ? 'Queued as a real social post — approve it in the Queue and it posts via Ayrshare.'
+                                      : 'Composer opened — marked published.'))
+                                    .catch((e) => toast('error', e instanceof Error ? e.message : 'Publish failed — the asset is unchanged.'));
+                                }}
                                 onChannel={(ch) => setAssetChannel(a.id, ch)}
                                 onCopy={() => copy(a)}
                               />

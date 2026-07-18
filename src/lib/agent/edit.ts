@@ -9,9 +9,12 @@ import { supabase } from '../supabase';
 import { resolveAI } from '../aiConfig';
 import { recordUsage, tagUsageSince, estimateCost } from '../usage';
 import { AGENT_BUILD_SYSTEM } from '../prompts';
-import { runQA, issuesToFixRequest } from '../projectQA';
+import { runQA, issuesToFixRequest, validateProject } from '../projectQA';
+import { readBranchState, writeBranchFile, deleteBranchFile, clearTombstone } from '../branches';
 import { ASSETS_PATH, BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
 import { PREFS_PATH, prefsContext } from '../preferences';
+import { buildKnowledgeDigest } from '../garvis/knowledge';
+import type { GarvisKnowledge } from '../../types';
 import { previewContext } from '../previewRuntime';
 import { MAIN_THREAD_ID, threadOf } from '../threads';
 import type { ProjectFile } from '../../types';
@@ -56,8 +59,13 @@ function imageBlockFromDataUrl(dataUrl: string): { type: 'image'; source: { type
  * (generation verify) it is booted headlessly on demand (mount + install + tsc, no dev server) so
  * every fresh generation is compiler-verified even with the preview closed.
  */
-async function verifyProject(projectId: string, files: Map<string, string>, deep = false): Promise<{ ok: boolean; summary: string }> {
-  const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+async function verifyProject(projectId: string, files: Map<string, string>, deep = false, qaFromFiles = false): Promise<{ ok: boolean; summary: string }> {
+  // On a feature branch the DB's Main files aren't what the agent is editing — QA must run over
+  // the branch's composed view (the live `files` map the tool executor keeps current).
+  const qaIssues = qaFromFiles
+    ? validateProject([...files].map(([path, content]) => ({ path, content })))
+    : await runQA(projectId);
+  const qaErrors = qaIssues.filter((i) => i.severity === 'error');
   let tscErrors: string | null = null; // null = not run, '' = clean, else the error list
   try {
     const wc = await import('../webcontainer');
@@ -129,7 +137,7 @@ export async function agenticVerifyAndFix(
     deleted: new Set<string>(),
     writeFile: async (path, content) => {
       await supabase.from('project_files').upsert(
-        { project_id: projectId, path, content, updated_by_ai: true },
+        { project_id: projectId, path, content, updated_by_ai: true, deleted_at: null },
         { onConflict: 'project_id,path' },
       );
     },
@@ -185,7 +193,7 @@ export async function agenticVerifyAndFix(
 export async function agenticEdit(
   projectId: string, message: string, previewError: string | undefined,
   onEvent?: (e: EditEvent) => void, image?: string, threadId: string = MAIN_THREAD_ID,
-  signal?: AbortSignal,
+  branchId: string | null = null, signal?: AbortSignal,
 ): Promise<EditResult> {
   const startedAt = Date.now(); // usage recorded during this turn is tagged to the message below
   const { data: auth } = await supabase.auth.getUser();
@@ -197,8 +205,19 @@ export async function agenticEdit(
   const all = (fileRows ?? []) as { path: string; content: string }[];
 
   // The agent operates on real source files; meta (brain/map/prefs) is context, not editable source.
-  const files = new Map<string, string>();
-  for (const f of all) if (!isMetaFile(f.path)) files.set(f.path, f.content);
+  // (isMetaFile also hides branch bookkeeping rows — Main's view never sees other branches.)
+  const mainApp = new Map<string, string>();
+  for (const f of all) if (!isMetaFile(f.path)) mainApp.set(f.path, f.content);
+
+  // FEATURE BRANCH: the agent sees and edits the branch's composed view — Main's files with this
+  // branch's copy-on-write overlay applied. All writes go to the overlay; Main is untouched.
+  const branch = branchId ? readBranchState(all, branchId) : null;
+  let files = mainApp;
+  if (branch) {
+    files = new Map(mainApp);
+    for (const p of branch.deleted) files.delete(p);
+    for (const [p, c] of branch.overrides) files.set(p, c);
+  }
 
   const brain = all.find((f) => f.path === BRAIN_PATH)?.content ?? '';
   const map = all.find((f) => f.path === MAP_PATH)?.content ?? '';
@@ -215,6 +234,17 @@ export async function agenticEdit(
     .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${(m.content ?? '').slice(0, 600)}`)
     .join('\n');
 
+  // THE OPERATOR'S LESSONS. Approved knowledge (outcomes, decisions, lessons) previously reached
+  // only Garvis agent runs — the builder never saw it, so hard-won lessons didn't shape builds.
+  // Inject the same approved-only digest here. Best-effort: an un-applied migration = no digest.
+  let knowledgeDigest = '';
+  try {
+    const { data: kRows } = await supabase
+      .from('garvis_knowledge').select('*')
+      .eq('status', 'approved').order('created_at', { ascending: false }).limit(24);
+    knowledgeDigest = buildKnowledgeDigest((kRows ?? []) as GarvisKnowledge[]);
+  } catch { /* table absent → builder simply runs without the digest */ }
+
   await insertMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
   onEvent?.({ type: 'start' });
 
@@ -222,6 +252,7 @@ export async function agenticEdit(
   const tree = [...files.keys()].sort().join('\n') || '(empty project)';
   const preamble = [
     brainContext(brain), mapContext(map), roadmapContext(roadmap), assetsMd, prefsContext(prefs),
+    knowledgeDigest,
     previewContext(),
     historyText ? `RECENT CONVERSATION:\n${historyText}` : '',
     `PROJECT FILES (call read_file to see any of these):\n${tree}`,
@@ -248,20 +279,39 @@ export async function agenticEdit(
     deleted: new Set<string>(),
     writeFile: async (path, content) => {
       recordChange(path, content);
-      await supabase.from('project_files').upsert(
-        { project_id: projectId, path, content, updated_by_ai: true },
-        { onConflict: 'project_id,path' },
-      );
+      if (branch && branchId) {
+        // First write to a Main file freezes its merge base (copy-on-write).
+        const freeze = !branch.bases.has(path) ? (mainApp.get(path) ?? null) : null;
+        if (freeze !== null) branch.bases.set(path, freeze);
+        await writeBranchFile(projectId, branchId, path, content, freeze);
+        if (branch.deleted.has(path)) {
+          branch.deleted.delete(path);
+          await clearTombstone(projectId, branchId, path);
+        }
+      } else {
+        await supabase.from('project_files').upsert(
+          { project_id: projectId, path, content, updated_by_ai: true, deleted_at: null },
+          { onConflict: 'project_id,path' },
+        );
+      }
       onEvent?.({ type: 'file-done', path });
     },
     deleteFile: async (path) => {
       recordChange(path, '');
-      await supabase.from('project_files')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('project_id', projectId).eq('path', path);
+      if (branch && branchId) {
+        const onMain = mainApp.has(path);
+        const freeze = onMain && !branch.bases.has(path) ? mainApp.get(path)! : null;
+        if (freeze !== null) branch.bases.set(path, freeze);
+        await deleteBranchFile(projectId, branchId, path, freeze, onMain);
+        if (onMain) branch.deleted.add(path);
+      } else {
+        await supabase.from('project_files')
+          .update({ deleted_at: new Date().toISOString() })
+          .eq('project_id', projectId).eq('path', path);
+      }
       onEvent?.({ type: 'deletion', path });
     },
-    typecheck: () => verifyProject(projectId, files),
+    typecheck: () => verifyProject(projectId, files, false, !!branch),
     onActivity: (label) => onEvent?.({ type: 'activity', text: label }),
   };
 

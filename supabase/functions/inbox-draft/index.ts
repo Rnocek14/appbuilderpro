@@ -26,6 +26,7 @@ async function draftReply(input: {
   firstName: string; fromName: string; business: string;
   originalSubject: string; originalBody: string; theirReply: string;
   voiceExample: string | null;
+  trackRecord: string | null;
   model: { provider: AIProvider; model: string };
 }): Promise<{ subject: string; body: string } | null> {
   const system =
@@ -35,7 +36,8 @@ async function draftReply(input: {
     'No hype, no apologies, no "hope this finds you well".' +
     (input.voiceExample
       ? `\n\nVOICE: match the owner's actual register — here is a real email they approved and sent (sound like this, never copy it):\n"""${input.voiceExample.slice(0, 900)}"""`
-      : '');
+      : '') +
+    (input.trackRecord ? `\n\n${input.trackRecord}` : '');
   const user =
     `The prospect replied to our email — draft the response.\n\n` +
     `Their first name: ${input.firstName || '(unknown)'}\nOur sender: ${input.fromName}${input.business ? ` (${input.business})` : ''}\n\n` +
@@ -97,6 +99,33 @@ Deno.serve(async (req) => {
     }
     return voiceCache.get(ownerId)!;
   };
+  // KEPT-VS-REWRITTEN FEEDBACK (app_0060): the operator's verdicts on prior AI drafts, fed back in
+  // ONLY when the record is thick enough (≥5 verdicts) and actually bad (>40% rewritten) — thin or
+  // healthy data adds nothing. HONEST LIMIT: draft_verdicts stores verdict + a ≤120-char topic, no
+  // draft text, so the block carries the measured rate and the kept drafts' topics — there is no
+  // stored prose to quote as an example. Data, not flattery.
+  const verdictCache = new Map<string, string | null>();
+  const ownerTrackRecord = async (ownerId: string) => {
+    if (!verdictCache.has(ownerId)) {
+      let block: string | null = null;
+      const { data: vs } = await admin.from('draft_verdicts')
+        .select('verdict, topic').eq('owner_id', ownerId)
+        .order('created_at', { ascending: false }).limit(50);
+      const rows = (vs ?? []) as { verdict: string; topic: string | null }[];
+      const rewritten = rows.filter((v) => v.verdict === 'rewritten').length;
+      if (rows.length >= 5 && rewritten / rows.length > 0.4) {
+        const keptTopics = rows.filter((v) => v.verdict === 'kept' && v.topic).slice(0, 2).map((v) => `"${v.topic}"`);
+        block = (
+          `TRACK RECORD (measured, not a style preference): the operator rewrote ${Math.round((rewritten / rows.length) * 100)}% ` +
+          `of their last ${rows.length} AI drafts before using them. Default to plainer, shorter, more concrete wording — ` +
+          `write the version they would keep as-is.` +
+          (keptTopics.length ? ` Drafts they kept unchanged covered: ${keptTopics.join(', ')}.` : '')
+        ).slice(0, 600);
+      }
+      verdictCache.set(ownerId, block);
+    }
+    return verdictCache.get(ownerId)!;
+  };
   for (const r of (replies ?? []) as { id: string; owner_id: string; campaign_id: string; from_address: string | null; subject: string | null; body_text: string | null; received_at: string }[]) {
     try {
       // Already answered? Any message on the campaign created AFTER their reply (draft or sent —
@@ -130,6 +159,7 @@ Deno.serve(async (req) => {
         originalBody: prior.body_text ?? '',
         theirReply: r.body_text ?? '',
         voiceExample: await ownerVoice(r.owner_id),
+        trackRecord: await ownerTrackRecord(r.owner_id),
         model: await ownerModel(r.owner_id),
       });
       if (!draft) { skipped++; continue; }

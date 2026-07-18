@@ -31,6 +31,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
+import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES } from '../../../src/lib/garvis/opportunityHunt.ts';
 import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
@@ -263,12 +264,71 @@ Deno.serve(async (req) => {
       }
     } catch { /* batch drain must never wedge the order tick */ }
 
-    // ---- AUTOMATION TRIGGER DRAIN (app_0076) -------------------------------------------------
-    // The audit's finding: rules on the Automations page fired ONLY when the owner clicked "Run
-    // due now" in a browser tab — a rule created and left alone never fired. This drain runs the
-    // same verified pure core (window guard, once-only ledger) on every tick, cross-owner, and
-    // lands each due fire as a PENDING send_email approval through the one send path. The
-    // trigger_fires unique index arbitrates between this drain and a concurrent browser run.
+    // ---- SOCIAL POST DRAIN (app_0070) ----------------------------------------------------------
+    // The missing half of social auto-posting: an APPROVED post used to publish only if the
+    // owner's browser made the call — approve-and-walk-away (or a scheduled time arriving with
+    // every laptop closed) left it queued forever. The clock now executes ALREADY-APPROVED posts
+    // through THE ONE PUBLISH PATH (social-publish, worker-secret caller); approval status, the
+    // payload-hash tamper check, the refusal gate, and the atomic double-post claim all re-check
+    // server-side per post. NOTHING here decides — a pending approval waits for the human, a
+    // rejected/expired one retires its post. Bounded per tick; never wedges the order tick.
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const POSTS_PER_TICK = 5;
+      const SOCIAL_DRAIN_BUDGET_MS = 30_000;
+      const drainStart = Date.now();
+      // Inspect more than we execute: a head-of-line block of still-pending approvals must not
+      // starve approved posts behind it (the batch drain's ordering lesson).
+      const { data: posts } = await admin.from('social_posts')
+        .select('id, owner_id, approval_id, scheduled_for, status, provider_post_id, created_at')
+        .eq('status', 'queued').not('approval_id', 'is', null).is('provider_post_id', null)
+        // "Post now" rows AND scheduled rows whose moment has arrived — never a future one.
+        .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
+        .order('created_at', { ascending: true }).limit(25);
+      let published = 0;
+      for (const p of (posts ?? []) as { id: string; owner_id: string; approval_id: string; scheduled_for: string | null }[]) {
+        if (published >= POSTS_PER_TICK || Date.now() - drainStart > SOCIAL_DRAIN_BUDGET_MS) break;
+        try {
+          const { data: ap } = await admin.from('approvals')
+            .select('id, owner_id, kind, status, result').eq('id', p.approval_id).single();
+          if (!ap || ap.kind !== 'publish_post' || ap.owner_id !== p.owner_id) continue; // never act on a mismatched record
+          if (ap.status === 'rejected' || ap.status === 'expired') {
+            // The human said no — retire the post so it can't sit "queued" forever (or clog this
+            // window). Guarded on status so a concurrent decision is never clobbered.
+            await admin.from('social_posts').update({ status: 'canceled', error: `approval ${ap.status}` })
+              .eq('id', p.id).eq('status', 'queued');
+            continue;
+          }
+          if (ap.status !== 'approved') continue; // still awaiting the human — not our call to make
+          // Already claimed = in flight from another caller/tick. social-publish's atomic claim is
+          // the real double-post guard; this check just skips a guaranteed-409 call.
+          if ((ap.result as Record<string, unknown> | null)?.send_claimed_at) continue;
+          const res = await fetch(`${supabaseUrl}/functions/v1/social-publish`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-worker-secret': workerSecret ?? '',
+              // The Bearer exists ONLY to pass the platform's verify-jwt gateway (social-publish
+              // deploys JWT-verified, like fetch-url) — its own worker check runs on x-worker-secret.
+              authorization: `Bearer ${serviceKey}`,
+              apikey: serviceKey,
+            },
+            body: JSON.stringify({ approval_id: p.approval_id }),
+          });
+          if (res.ok) published++;
+          // Non-ok: social-publish already recorded the honest outcome on the post row + the
+          // ledger (a blocked/failed post leaves status != 'queued', so the drain never spins).
+        } catch { /* one post's failure never blocks the rest */ }
+      }
+    } catch { /* social drain must never wedge the order tick */ }
+
+    // ---- CLIENT AUTOMATION TRIGGERS (app_0076) --------------------------------------------------
+    // The recurring-revenue engine ON THE CLOCK: every owner's active triggers run with the SAME
+    // pure core (dueFires/renderTemplate) + claim-first trigger_fires ledger the in-app "Run due
+    // now" uses — so automations fire while the operator sleeps (a rule created and left alone
+    // used to fire ONLY when the owner clicked "Run due now"). Every fire enqueues a PENDING
+    // approval through the one send path; nothing sends without the owner; the trigger_fires
+    // unique index arbitrates between this drain and a concurrent browser run. Bounded per tick.
     try {
       // Stranded-claim sweep (mirror of the browser runner): a run that died after claiming but
       // before enqueuing leaves approval_id null — release older than 10 min so fires retry.
@@ -584,6 +644,122 @@ Deno.serve(async (req) => {
   for (const order of (rows ?? []) as OrderRow[]) {
     // A forced run may target a paused/not-yet-due order (the owner asked); the scan only sees due ones.
     if (!body.order_id && !isDue({ status: order.status as 'active' | 'paused', nextRunAt: order.next_run_at }, nowIso)) continue;
+
+    // ---- opportunity_hunt: scheduled search sweeps → fetched pages → honest extraction --------
+    // The Opportunity Engine's unattended half: Serper queries (config.queries, derived from the
+    // operator's focus) → fetch the organic results (static HTML; unreadable pages are COUNTED
+    // and reported, never silently skipped) → ONE batched extraction call bound to the fetched
+    // URL allowlist (hallucinated links cannot enter the feed) → dedupe-at-insert into the
+    // opportunities table. READ + RECORD only — applying is the operator's move, in the feed.
+    if (order.kind === 'opportunity_hunt') {
+      try {
+        const cfg = (order.config ?? {}) as { focus?: string; region?: string | null; queries?: string[] };
+        const focus = (cfg.focus ?? '').trim();
+        if (!focus) throw new Error('no focus configured (config.focus missing)');
+        const queries = (Array.isArray(cfg.queries) && cfg.queries.length ? cfg.queries : buildQueries(focus, cfg.region)).slice(0, MAX_QUERIES);
+
+        let line: string;
+        let found = 0;
+        const serperKey = Deno.env.get('SERPER_API_KEY');
+        if (!serperKey) {
+          line = `Opportunity hunt "${focus}": SERPER_API_KEY is not set — the hunt cannot search. Add the secret and this runs on the next tick.`;
+        } else {
+          const HUNT_BUDGET_MS = 70_000;
+          const started = Date.now();
+
+          // 1. SEARCH — organic results across the angle-diverse query set, deduped by URL.
+          const candidates: { url: string; title: string }[] = [];
+          const seenUrl = new Set<string>();
+          let searched = 0;
+          for (const q of queries) {
+            if (Date.now() - started > HUNT_BUDGET_MS) break;
+            try {
+              const res = await fetch('https://google.serper.dev/search', {
+                method: 'POST',
+                headers: { 'X-API-KEY': serperKey, 'content-type': 'application/json' },
+                body: JSON.stringify({ q, num: 8 }),
+              });
+              if (!res.ok) continue;
+              searched++;
+              const data = await res.json();
+              for (const r of ((data?.organic ?? []) as { link?: string; title?: string }[])) {
+                const url = (r.link ?? '').trim();
+                if (/^https?:\/\//i.test(url) && !seenUrl.has(url)) { seenUrl.add(url); candidates.push({ url, title: r.title ?? '' }); }
+              }
+            } catch { /* one query failing never kills the sweep */ }
+          }
+
+          // 2. FETCH up to 6 result pages (SSRF-safe), keeping honest count of unreadable ones.
+          const pages: { url: string; text: string }[] = [];
+          let thin = 0;
+          for (const c of candidates.slice(0, 6)) {
+            if (Date.now() - started > HUNT_BUDGET_MS) break;
+            try {
+              const res = await safeFetch(c.url);
+              const text = normalizeContent(await res.text()).slice(0, 6000);
+              if (text.length < 200) { thin++; continue; } // JS-rendered/empty — reported, not silently skipped
+              pages.push({ url: c.url, text });
+            } catch { thin++; }
+          }
+
+          // 3. EXTRACT — one batched, credit-metered call bound to the fetched-URL allowlist.
+          if (pages.length) {
+            await checkCredits(admin, order.owner_id, 'discover');
+            const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+            const blocks = pages.map((p, i) => `PAGE ${i + 1} · ${p.url}\n${p.text}`).join('\n\n');
+            const result = await complete([
+              { role: 'system', content: EXTRACT_SYSTEM },
+              { role: 'user', content: `${blocks}\n\nExtract the real opportunities now (strict JSON array):` },
+            ], { provider: m.provider, model: m.model, maxTokens: 1600 });
+            await spendCredits(admin, order.owner_id, { costUsd: result.costUsd, kind: 'discover', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+            const items = parseOpportunities(result.text, pages.map((p) => p.url));
+
+            // 4. DEDUPE-AT-INSERT: (owner_id, dedupe_key) unique + ignoreDuplicates — only genuinely
+            //    new rows come back, so `found` is what actually entered the feed.
+            if (items.length) {
+              const rows = items.map((it) => ({
+                owner_id: order.owner_id, world_id: order.world_id ?? null, order_id: order.id,
+                title: it.title, summary: it.summary, source_url: it.source_url, kind: it.kind,
+                location: it.location, budget_text: it.budget_text, deadline_text: it.deadline_text,
+                status: 'new', dedupe_key: dedupeKey(it.source_url, it.title),
+              }));
+              const { data: inserted } = await admin.from('opportunities')
+                .upsert(rows, { onConflict: 'owner_id,dedupe_key', ignoreDuplicates: true }).select('id');
+              found = (inserted ?? []).length;
+            }
+          }
+          line = huntLine(focus, searched, pages.length, found, thin);
+        }
+
+        ran++;
+        if (found > 0) changed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: found > 0 ? 'changed' : 'unchanged', line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id);
+
+        if (found > 0) {
+          await admin.from('mind_events').insert({
+            owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+            subject: line.slice(0, 300),
+            payload: { order_id: order.id, kind: order.kind, found },
+          }).then(() => {}, () => {});
+          const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
+          await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, line).catch(() => {});
+        }
+      } catch (e) {
+        failed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Hunt failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
 
     // ---- client_hunt: a self-contained daily prospecting run ---------------------------------
     // It owns its own persistence (a rolling cursor in config, not a content hash), so it never

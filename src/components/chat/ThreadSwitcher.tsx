@@ -1,20 +1,21 @@
 import { useState } from 'react';
-import { ChevronDown, Plus, MessagesSquare, Pencil, Trash2, Check, X } from 'lucide-react';
+import { ChevronDown, Plus, MessagesSquare, Pencil, Trash2, Check, X, GitBranch } from 'lucide-react';
 import type { Thread } from '../../lib/threads';
 import { MAIN_THREAD_ID } from '../../lib/threads';
 import { cn } from '../../lib/utils';
 
 /**
  * Conversation-thread switcher shown in place of the "Assistant" title. Lets the user keep
- * separate chat flows for different ideas/features (all editing the same project). Switch, create,
- * rename, and delete threads here.
+ * separate chat flows for different ideas (threads) — and FEATURE BRANCHES, which also fork the
+ * code until merged (onNewBranch is absent when the runtime can't support them).
  */
-export function ThreadSwitcher({ threads, activeId, ready, onSwitch, onNew, onRename, onDelete }: {
+export function ThreadSwitcher({ threads, activeId, ready, onSwitch, onNew, onNewBranch, onRename, onDelete }: {
   threads: Thread[];
   activeId: string;
   ready: boolean;
   onSwitch: (id: string) => void;
   onNew: () => void;
+  onNewBranch?: () => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
 }) {
@@ -36,7 +37,9 @@ export function ThreadSwitcher({ threads, activeId, ready, onSwitch, onNew, onRe
         title="Switch conversation thread"
         className="inline-flex max-w-[220px] items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-forge-ink transition-colors hover:bg-forge-raised"
       >
-        <MessagesSquare size={13} className="shrink-0 text-forge-ember" />
+        {active?.kind === 'branch'
+          ? <GitBranch size={13} className="shrink-0 text-forge-ember" />
+          : <MessagesSquare size={13} className="shrink-0 text-forge-ember" />}
         <span className="truncate">{active?.title ?? 'Main'}</span>
         {threads.length > 1 && (
           <span className="rounded-full bg-forge-border/50 px-1.5 text-[10px] text-forge-dim">{threads.length}</span>
@@ -82,11 +85,14 @@ export function ThreadSwitcher({ threads, activeId, ready, onSwitch, onNew, onRe
                         )}
                       >
                         {t.id === activeId ? <Check size={12} className="shrink-0 text-forge-ember" /> : <span className="w-3 shrink-0" />}
+                        {t.kind === 'branch' && <GitBranch size={11} className="shrink-0 text-forge-ember" />}
                         <span className="truncate">{t.title}</span>
                       </button>
                       {t.id !== MAIN_THREAD_ID && (confirmId === t.id ? (
                         <div className="flex shrink-0 items-center gap-0.5">
-                          <span className="text-[10px] text-forge-dim">Delete?</span>
+                          <span className="text-[10px] text-forge-dim" title={t.kind === 'branch' ? 'Deleting a branch also discards its un-merged code changes' : undefined}>
+                            {t.kind === 'branch' ? 'Delete + changes?' : 'Delete?'}
+                          </span>
                           <button aria-label="Confirm delete" onClick={() => { onDelete(t.id); setConfirmId(null); }} className="rounded p-1 text-forge-err hover:bg-forge-raised"><Check size={12} /></button>
                           <button aria-label="Cancel delete" onClick={() => setConfirmId(null)} className="rounded p-1 text-forge-dim hover:bg-forge-raised"><X size={12} /></button>
                         </div>
@@ -107,6 +113,15 @@ export function ThreadSwitcher({ threads, activeId, ready, onSwitch, onNew, onRe
             >
               <Plus size={13} /> New thread
             </button>
+            {onNewBranch && (
+              <button
+                onClick={() => { onNewBranch(); setOpen(false); }}
+                title="A thread that also forks the code — edits stay off Main until you merge (verified first)"
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs text-forge-ember hover:bg-forge-raised"
+              >
+                <GitBranch size={13} /> New feature branch
+              </button>
+            )}
           </div>
         </>
       )}

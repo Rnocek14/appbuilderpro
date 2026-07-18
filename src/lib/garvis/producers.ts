@@ -16,6 +16,7 @@ import { expertiseFor, detectVertical } from './expertise';
 import { goalLineForWorld } from './goalsRun';
 import type { PlayArtifact } from './plays';
 import type { Charter } from './workweb';
+import { CRITIQUE_SYSTEM, REFINE_SYSTEM, parseCritique, needsRefine, refineInstruction, depthNote, type Critique } from './depth';
 import {
   RESEARCH_SYSTEM, SOCIAL_SYSTEM, VIDEO_SYSTEM, ANGLE_SYSTEM, ADS_SYSTEM,
   researchQueries, formatSources, appendSources, parseSocialPosts, postToDetail, researchContext,
@@ -499,34 +500,79 @@ export async function produceBusinessPlan(worldId: string, charter: Charter, opt
   // Ground in the world's EARNED research when it exists (same discipline as the angle producer).
   const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', worldId);
   const clusterIds = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
-  let findings = '';
-  if (clusterIds.length) {
+  const loadFindings = async (): Promise<string> => {
+    if (!clusterIds.length) return '';
     const { data: research } = await supabase.from('knowledge_artifacts')
       .select('title, detail').in('cluster_id', clusterIds).eq('kind', 'research')
-      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(3);
-    findings = ((research ?? []) as { title: string; detail: string | null }[])
-      .map((r) => `- ${r.title}: ${(r.detail ?? '').replace(/\s+/g, ' ').slice(0, 250)}`).join('\n');
+      .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(4);
+    // Full findings, not a 250-char teaser: a plan grounded in 3 truncated lines was research
+    // theater. Budgeted per artifact so a monster brief can't blow the context.
+    return ((research ?? []) as { title: string; detail: string | null }[])
+      .map((r) => `- ${r.title}: ${(r.detail ?? '').replace(/\s+/g, ' ').slice(0, 1200)}`).join('\n');
+  };
+  let findings = await loadFindings();
+
+  // DEPTH: no research on record → run the real research producer FIRST so the plan inherits
+  // grounded findings instead of marking everything provisional. Only grounded (cited) research
+  // counts — the framework floor is scaffolding, not findings. Its artifacts ride along in the
+  // return so the caller persists them alongside the plan.
+  const autoResearch: PlayArtifact[] = [];
+  if (!findings) {
+    try {
+      const res = await produceResearch(worldId, charter);
+      if (res.grounded && res.artifacts.length) {
+        autoResearch.push(...res.artifacts);
+        findings = res.artifacts.map((a) => `- ${a.title}: ${(a.detail ?? '').replace(/\s+/g, ' ').slice(0, 1200)}`).join('\n');
+      }
+    } catch { /* research unavailable → the plan proceeds honestly ungrounded */ }
   }
+
   try {
-    const text = await reason(
-      PLAN_SYSTEM,
-      [
-        businessContext(m),
-        findings ? `RESEARCH ON RECORD (ground the plan in this):\n${findings}` : 'RESEARCH: none on record yet — mark market claims provisional and name the scan that would confirm them.',
-        steerBlock(opts?.direction),
-      ].filter(Boolean).join('\n\n'),
+    const planContext = [
+      businessContext(m),
+      findings ? `RESEARCH ON RECORD (ground the plan in this):\n${findings}` : 'RESEARCH: none on record yet — mark market claims provisional and name the scan that would confirm them.',
+      steerBlock(opts?.direction),
+    ].filter(Boolean).join('\n\n');
+    const draft = await reason(
+      PLAN_SYSTEM, planContext,
       'Write the full operator plan now, all six == sections ==, each substantive. Plain text.',
       3200,
     );
-    const gate = parsePlan(text);
+    const gate = parsePlan(draft);
     if (gate.ok) {
+      // DEPTH: red-team the draft, then refine against every fix. Critique is an upgrade path,
+      // never a gate — an unparseable critique or a refine that gates thinner ships the DRAFT.
+      let text = draft;
+      let critique: Critique | null = null;
+      let refined = false;
+      try {
+        const critRaw = await reason(
+          CRITIQUE_SYSTEM,
+          [findings ? `RESEARCH PROVIDED TO THE AUTHOR:\n${findings}` : 'RESEARCH PROVIDED: none.', `THE DOCUMENT:\n${draft}`].join('\n\n'),
+          'Red-team this business plan now. Strict JSON.',
+          1400,
+        );
+        critique = parseCritique(critRaw);
+        if (critique && needsRefine(critique)) {
+          const revised = await reason(
+            REFINE_SYSTEM,
+            [`THE FIXES:\n${refineInstruction(critique)}`, findings ? `RESEARCH (for grounding fixes):\n${findings}` : '', `THE DOCUMENT TO REVISE:\n${draft}`].filter(Boolean).join('\n\n'),
+            'Output the full revised document now.',
+            3200,
+          );
+          if (parsePlan(revised).ok) { text = revised; refined = true; }
+        }
+      } catch { /* depth unavailable → the gated draft ships as-is */ }
+
       return {
-        artifacts: [{
+        artifacts: [...autoResearch, {
           slug: 'business-plan', kind: 'doc',
           title: `Business plan — operator's 90-day edition${findings ? '' : ' (market claims provisional)'}`,
-          detail: `${text}\n\n— Every [YOU FILL: …] is a number only you can supply; fill them and re-press with a direction to iterate. Grounded in ${findings ? 'your research on record' : 'your business context only — run Research to strengthen it'}.`,
+          detail: `${text}\n\n— Every [YOU FILL: …] is a number only you can supply; fill them and re-press with a direction to iterate. Grounded in ${findings ? 'your research on record' : 'your business context only — run Research to strengthen it'}. ${depthNote(critique, refined)}`,
         }],
-        message: 'Wrote the full operator plan — six substantive sections, unknowables marked [YOU FILL], never invented.',
+        message: refined
+          ? 'Wrote, red-teamed, and refined the operator plan — critique applied, unknowables stay [YOU FILL], never invented.'
+          : 'Wrote the full operator plan — six substantive sections, unknowables marked [YOU FILL], never invented.',
         grounded: !!findings,
       };
     }

@@ -15,6 +15,11 @@ export interface Thread {
   id: string;
   title: string;
   createdAt: string;
+  /**
+   * 'branch' = a FEATURE BRANCH: this thread also forks the code (copy-on-write overlay on Main,
+   * see lib/branches.ts) and can be merged back. Absent/'chat' = classic conversation-only thread.
+   */
+  kind?: 'chat' | 'branch';
 }
 
 /** The always-present default thread. */
@@ -56,9 +61,9 @@ function newId(): string {
   try { return crypto.randomUUID(); } catch { return `t-${Date.now()}-${Math.floor(Math.random() * 1e6)}`; }
 }
 
-export async function createThread(projectId: string, title = 'New thread'): Promise<Thread> {
+export async function createThread(projectId: string, title = 'New thread', kind: 'chat' | 'branch' = 'chat'): Promise<Thread> {
   const threads = await getThreads(projectId);
-  const thread: Thread = { id: newId(), title: title.trim() || 'New thread', createdAt: new Date().toISOString() };
+  const thread: Thread = { id: newId(), title: title.trim() || 'New thread', createdAt: new Date().toISOString(), ...(kind === 'branch' ? { kind } : {}) };
   await saveThreads(projectId, [...threads, thread]);
   return thread;
 }

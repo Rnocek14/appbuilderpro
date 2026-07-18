@@ -6,6 +6,7 @@
 import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
 import { mergePaperwork, decideSendable, type EsignRecipient } from './esign';
+import { EXTRACT_TEMPLATE_SYSTEM, parseExtractedTemplate, type ExtractedTemplate } from './paperworkExtract';
 
 export interface PaperworkTemplate {
   id: string; name: string; doc_kind: string; body: string; updated_at: string;
@@ -105,4 +106,27 @@ export async function pollEnvelopeStatus(rowId: string): Promise<{ status: strin
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
   return { status: data?.status ?? 'unknown', recipients: data?.recipients ?? [] };
+}
+
+/**
+ * TEMPLATE EXTRACTION: a pasted sample document → a reviewed, tokenized template. One
+ * credit-metered model call through the cluster-chat chokepoint; the parse gauntlet
+ * (paperworkExtract.ts) reconciles fields against the body and refuses non-documents. The result
+ * PRE-FILLS the studio editor — the operator reviews and saves; nothing persists here.
+ */
+export async function extractPaperworkTemplate(sampleText: string, hint?: string): Promise<ExtractedTemplate> {
+  const sample = sampleText.trim();
+  if (sample.length < 200) throw new Error('Paste the whole document — a fragment under ~200 characters cannot become a template.');
+  const { data, error } = await supabase.functions.invoke('cluster-chat', {
+    body: {
+      system: EXTRACT_TEMPLATE_SYSTEM,
+      context: hint ? `OPERATOR'S NOTE ABOUT THIS DOCUMENT: ${hint.slice(0, 300)}` : '',
+      history: [],
+      message: `THE SAMPLE DOCUMENT:\n${sample.slice(0, 24_000)}\n\nConvert it to a template now (strict JSON).`,
+    },
+  });
+  if (error) throw new Error(error.message);
+  const parsed = parseExtractedTemplate(((data as { text?: string })?.text ?? ''));
+  if (!parsed) throw new Error('That did not extract into a usable template — make sure it is a full document (the extractor refuses fragments rather than fabricating).');
+  return parsed;
 }

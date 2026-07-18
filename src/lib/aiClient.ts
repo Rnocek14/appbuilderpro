@@ -142,17 +142,13 @@ export interface EditResult {
 // ----------------------------------------------------------------
 
 export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
-  // ONE client-orchestrated pipeline for both direct (browser key) and cloud users: chunked short
-  // calls — shell first, then every page in PARALLEL, schema concurrent, verify + repair inline.
-  // Direct mode used to run a single serial 32k-token stream: the slowest possible shape, and one
-  // truncation could silently cost the whole tail of the app.
-  if (DIRECT || !resolveAI().ready) return chunkedGenerate(projectId, prompt, planContext);
-  const { data, error } = await supabase.functions.invoke('generate-app', {
-    body: { projectId, prompt, planContext },
-  });
-  if (error) throw new Error(await readFnError(error));
-  if (data?.error) throw new Error(data.error);
-  return data as GenerateResult;
+  // ONE pipeline, always: the chunked client orchestrator — shell first, then every page in
+  // PARALLEL against frozen contracts, schema concurrent, compile-verify + agentic repair inline.
+  // The edge `generate-app` function used to serve "edge mode + browser key" with a single serial
+  // 32k-token stream and static-QA-only healing — a strictly weaker build whose quality silently
+  // depended on which path you hit. Retired: every environment now gets the good pipeline (cloud
+  // users' model calls already relay through agent-turn, so no browser key is required).
+  return chunkedGenerate(projectId, prompt, planContext);
 }
 
 // Phased "what's next" roadmap from the Brain (intent) + Map (reality) + code. Saved so the
@@ -296,7 +292,9 @@ export async function researchAnswer(
     onEvent?.({ type: 'done' });
     if (error) throw new Error(await readFnError(error));
     if (data?.error) throw new Error(data.error);
-    return { action: 'discuss', explanation: (data as { answer?: string })?.answer ?? '', changed: [], deleted: [] };
+    const edgeAnswer = (data as { answer?: string })?.answer ?? '';
+    persistResearch(message, edgeAnswer);
+    return { action: 'discuss', explanation: edgeAnswer, changed: [], deleted: [] };
   }
 
   const ai = resolveAI();
@@ -353,8 +351,28 @@ export async function researchAnswer(
   const id = await insertAiMessage({ project_id: projectId, user_id: userId, role: 'assistant', content: answer, thread_id: threadId });
   // Note: web_search billing isn't in token usage, so this undercounts research a little.
   recordUsage({ provider: ai.provider, model: ai.model, inputTokens: data.usage?.input_tokens ?? 0, outputTokens: data.usage?.output_tokens ?? 0, messageId: id });
+  persistResearch(message, answer);
   onEvent?.({ type: 'done' });
   return { action: 'discuss', explanation: answer, changed: [], deleted: [] };
+}
+
+/**
+ * RESEARCH → BRAIN. Research answers used to land in the chat transcript and evaporate — your own
+ * market analysis wasn't searchable a week later. Now every research run is also filed through
+ * ingest-document (summarized, embedded, classified, connection-surfaced) so it compounds into the
+ * knowledge base. Fire-and-forget: the chat already has the answer, so a missing function or
+ * un-applied migration must never break research itself.
+ */
+function persistResearch(question: string, answer: string): void {
+  const text = answer.trim();
+  if (!text || text.length < 200) return; // too thin to be worth filing
+  void supabase.functions.invoke('ingest-document', {
+    body: {
+      title: `Research: ${question.trim().slice(0, 120)}`,
+      extracted_text: text.slice(0, 60_000),
+      source_kind: 'research',
+    },
+  }).then(() => {}, () => { /* best-effort */ });
 }
 
 // Build a full-source digest for deep research. Includes complete file contents, ordered
@@ -417,14 +435,24 @@ export async function draftGenerationPlan(prompt: string): Promise<{ plan: EditP
 export async function sendEdit(
   projectId: string, message: string, previewError?: string,
   onEvent?: (e: EditEvent) => void, planFirst?: boolean, image?: string, threadId: string = MAIN_THREAD_ID,
-  reviewMode?: boolean, signal?: AbortSignal,
+  reviewMode?: boolean, signal?: AbortSignal, branchId?: string | null,
 ): Promise<EditResult> {
+  // FEATURE BRANCH turns are agentic-only: the classic streaming paths (and the chat-edit edge
+  // function) write straight to Main, which would leak branch edits. The branch itself is the
+  // review layer — plan-first/review flags are ignored here because nothing touches Main until
+  // the verified merge. Isolation over ceremony.
+  if (branchId) {
+    if (!agentAvailable()) {
+      throw new Error('Feature branches need an Anthropic model (the agentic runtime). Switch the model in Settings, or use a regular thread.');
+    }
+    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, branchId, signal);
+  }
   // AGENTIC PATH (default when available): the model works with tools — it reads files, researches the
   // web, edits, and verifies with the real compiler, iterating until clean. This is the trust/capability
   // upgrade. Plan-first and review-before-write keep the classic single-shot path (they need the plan /
   // diff-approval protocol the tool loop doesn't produce). Non-Anthropic providers use the classic path.
   if (!planFirst && !reviewMode && agentAvailable()) {
-    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, signal);
+    return agenticEdit(projectId, message, previewError, onEvent, image, threadId, null, signal);
   }
   // Both classic paths stream so the UI can render the edit landing file-by-file.
   // reviewMode (review-before-write) is direct-mode only for now; the edge path applies as before.
