@@ -159,16 +159,18 @@ export function Hero(p: HeroProps) {
                 <img src={p.bgImage} alt="" className="absolute inset-0 h-full w-full object-cover"
                   style={{ transform: `scale(${1.18 - drift * 0.1}) translateY(${(1 - drift) * -26}px)`, opacity: 0.9 }} />
                 <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/65" />
-                {/* layer 2: the giant wordmark, rising between art and object */}
+                {/* layer 2: the giant wordmark rises between art and object, then parts upward
+                    and dims as the copy lands — the layers make room instead of colliding. */}
                 <div className="pv-display absolute inset-x-0 top-1/2 -translate-y-1/2 select-none whitespace-nowrap text-center font-bold text-white"
                   style={{ fontSize: 'clamp(3rem, 11vw, 11rem)', letterSpacing: '-0.03em', lineHeight: 1,
-                    transform: `translateY(calc(-50% + ${(1 - drift) * 60}px))`, opacity: 0.25 + drift * 0.75,
+                    transform: `translateY(calc(-50% + ${(1 - drift) * 60 - copy * 110}px))`,
+                    opacity: (0.25 + drift * 0.75) * (1 - copy * 0.8),
                     textShadow: '0 8px 60px rgba(0,0,0,0.45)' }}>
                   {p.siteName}
                 </div>
-                {/* layer 3: the iconic object crossing OVER the type, faster drift + tilt */}
+                {/* layer 3: the iconic object crosses OVER the type, then lifts + shrinks away */}
                 <img src={p.objectImage} alt="" className="relative z-10 w-[42%] max-w-[430px]"
-                  style={{ transform: `translateY(${(1 - drift) * 130 - 20}px) rotate(${-10 + drift * 14}deg)`,
+                  style={{ transform: `translateY(${(1 - drift) * 130 - 20 - copy * 170}px) rotate(${-10 + drift * 14}deg) scale(${1 - copy * 0.3})`,
                     filter: 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))' }} />
                 {/* layer 4: the words land */}
                 <div className="absolute inset-x-0 bottom-10 flex flex-col items-center px-6 text-center"
