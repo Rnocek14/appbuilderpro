@@ -195,7 +195,7 @@ export type MotionTier = (typeof MOTION_TIERS)[number];
 /** Structural variants per section — different COMPOSITIONS, not palette swaps. Whitelisted here;
  *  normalizeSpec drops anything else and falls back to the recipe's default composition. */
 export const SECTION_VARIANTS: Partial<Record<string, readonly string[]>> = {
-  hero: ['fullbleed', 'split', 'stacked', 'editorial'],
+  hero: ['fullbleed', 'split', 'stacked', 'editorial', 'portal'],
   services: ['cards', 'rows'],
   reviews: ['grid', 'spotlight'],
   ctaBanner: ['band', 'giant'],
@@ -231,6 +231,8 @@ export interface SiteSpec {
   sections: SectionSpec[];
   seo: { title: string; description: string; keywords: string[] };
   footer: { line: string };
+  /** Any photo in the spec is AI-generated concept imagery → the footer discloses it. */
+  aiImagery?: boolean;
 }
 
 const HSL_RE = /^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$/;
@@ -544,6 +546,7 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
       keywords: Array.isArray(seoRaw.keywords) ? (seoRaw.keywords as unknown[]).filter((k): k is string => typeof k === 'string').slice(0, 12) : fallback.seo.keywords,
     },
     footer: { line: str((r.footer as Record<string, unknown>)?.line, fallback.footer.line) },
+    aiImagery: profile.photos.some((p) => p.source_type === 'ai_generated') || undefined,
   };
 }
 
@@ -773,6 +776,7 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
       keywords: profile.seo_keywords?.slice(0, 12) ?? [],
     },
     footer: { line: `© ${name}. ${loc}` },
+    aiImagery: profile.photos.some((p) => p.source_type === 'ai_generated') || undefined,
   };
   spec.nav = navFor(spec.sections, recipe.cta);
   return spec;

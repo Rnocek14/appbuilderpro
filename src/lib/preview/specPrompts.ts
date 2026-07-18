@@ -50,7 +50,9 @@ HARD RULES:
 - STRUCTURE — sections may carry a "variant" that changes the COMPOSITION, not just the paint:
     hero: "fullbleed" (cinematic panel) | "split" (photo beside copy — needs a photo) |
           "stacked" (centered, monumental) | "editorial" (ink on the page paper, rule-line
-          eyebrow — legal, luxury, photography)
+          eyebrow — legal, luxury, photography) | "portal" (a small framed photo zooms through
+          into a full-bleed stage as you scroll, then the headline lands — the showpiece opener;
+          needs a strong photo + lively/cinematic motion)
     services: "cards" (grid) | "rows" (indexed editorial menu — professional, no-nonsense)
     reviews: "grid" | "spotlight" (one big quote leads)
     ctaBanner: "band" | "giant" (oversized closer)

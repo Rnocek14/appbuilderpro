@@ -24,8 +24,9 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const seg = (p: number, a: number, b: number) => clamp01((p - a) / (b - a));
 
 /** Pinned scrub stage: a tall wrapper with a sticky full-height stage; children receive p 0→1.
- *  SSR/export/reduced-motion render p=1 (the finished frame) — scrubbing arms client-side. */
-function ScrollScene({ children, heightVh = 220 }: { children: (p: number) => ReactNode; heightVh?: number }) {
+ *  SSR/export/reduced-motion render p=1 (the finished frame) — scrubbing arms client-side.
+ *  Exported for the portal hero (sections.tsx) — same engine, one implementation. */
+export function ScrollScene({ children, heightVh = 220 }: { children: (p: number) => ReactNode; heightVh?: number }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [p, setP] = useState(1);            // final frame until the SPA arms — export ships it
   useEffect(() => {

@@ -13,7 +13,7 @@ import { Check, Star, Phone, Mail, MapPin, Clock, ChevronDown, ArrowRight, Shiel
 // calm = reveals only; lively = TextReveal + CountUp + image wipes; cinematic = + aurora/parallax
 // hero, magnetic CTA, tilt cards. One signature move per page (DESIGN_GUIDE restraint).
 import { TextReveal, CountUp, Aurora, Magnetic, TiltDiv, ImageReveal, useParallaxY } from './motion';
-import { SceneSection } from './scenes';
+import { SceneSection, ScrollScene } from './scenes';
 
 /** hue of an "H S% L%" theme token — Aurora derives its drift colors from the real palette. */
 const hueOf = (hsl: string): number => parseInt(hsl.trim().split(/\s+/)[0], 10) || 220;
@@ -141,6 +141,47 @@ export function Hero(p: HeroProps) {
       <Phone size={15} /> {p.secondaryCta}
     </a>
   );
+
+  // PORTAL — the zoom-through opener: a small framed image scales up into a full-bleed stage as
+  // you scroll, then the headline and CTA land on it. Needs an image + motion; falls through to
+  // the stacked composition otherwise (calm pages and photo-less profiles never get a dead pin).
+  if (p.variant === 'portal' && hasImage && p.motion !== 'calm') {
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    return (
+      <section id="hero" className="pv-grain-host relative isolate">
+        <ScrollScene heightVh={200}>
+          {(prog) => {
+            const grow = ease(Math.min(1, prog / 0.6));               // frame → full-bleed
+            const copy = Math.max(0, (prog - 0.62) / 0.3);            // then the words land
+            return (
+              <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[hsl(var(--bg))]">
+                <div
+                  className="relative overflow-hidden shadow-2xl"
+                  style={{
+                    width: `${26 + grow * 74}%`, height: `${34 + grow * 66}%`,
+                    borderRadius: `${(1 - grow) * 18}px`,
+                  }}
+                >
+                  <img src={p.image} alt="" className="h-full w-full object-cover" style={{ transform: `scale(${1.25 - grow * 0.25})` }} />
+                  <div className="absolute inset-0 bg-black/45" style={{ opacity: 0.15 + grow * 0.85 }} />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center" style={{ opacity: copy, transform: `translateY(${(1 - Math.min(1, copy)) * 26}px)` }}>
+                    {p.eyebrow && <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-white/80">{p.eyebrow}</p>}
+                    <h1 className="pv-display pv-hero-display max-w-4xl font-semibold tracking-tight text-white" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+                    {p.sub && <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-white/85">{p.sub}</p>}
+                    <div className="mt-8 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
+                    {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} onDark lively={lively} />}
+                  </div>
+                </div>
+              </div>
+            );
+          }}
+        </ScrollScene>
+      </section>
+    );
+  }
+  if (p.variant === 'portal' && (!hasImage || p.motion === 'calm')) {
+    return <Hero {...p} variant="stacked" />;
+  }
 
   // SPLIT — content on the page paper, photo in a framed panel. Editorial/professional trades.
   if (p.variant === 'split' && hasImage) {

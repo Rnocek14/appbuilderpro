@@ -7,6 +7,7 @@ import {
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor,
   type BusinessProfile,
 } from './spec';
+import { huntImagePrompts } from '../garvis/clientHuntBuild';
 
 let passed = 0, failed = 0;
 const check = (name: string, cond: boolean) => {
@@ -153,6 +154,22 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   const fbRoofer = assembleFallbackSpec(ROOFER);
   check('fallback: roofer (contractor recipe) gets the rain scene', fbRoofer.sections.some((s) => s.type === 'scene' && s.props.scene === 'rain'));
   check('scene never enters the nav', !fbPlumber.nav.some((n) => n.anchor === 'scene'));
+}
+
+// AI concept imagery: honest prompts + the footer disclosure flag
+{
+  const [wide, tight] = huntImagePrompts('Plumbing', 'bold, direct');
+  check('image prompts are trade-specific (plumber → copper pipes)', /copper pipes/i.test(wide) && /macro/i.test(tight));
+  check('image prompts carry the hard honesty rules (no people/text/logos)',
+    [wide, tight].every((p) => /No people/.test(p) && /no logos/.test(p) && /no text/i.test(p)));
+  const [gw] = huntImagePrompts('Notary Services', null);
+  check('unknown trade still gets a generic still-life prompt', /notary services trade/i.test(gw));
+  const aiProfile = { ...ROOFER, photos: [{ url: 'https://x/ai.png', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false }] };
+  check('aiImagery flag set when photos are AI-generated', assembleFallbackSpec(aiProfile).aiImagery === true
+    && normalizeSpec({}, aiProfile).aiImagery === true);
+  check('aiImagery flag absent for real photos', assembleFallbackSpec(ROOFER).aiImagery === undefined);
+  check('portal is a whitelisted hero variant',
+    normalizeSpec({ sections: [{ type: 'hero', props: {}, variant: 'portal' }] }, ROOFER).sections[0].variant === 'portal');
 }
 
 // slug + nav helpers

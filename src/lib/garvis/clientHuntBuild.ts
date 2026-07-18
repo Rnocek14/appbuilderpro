@@ -185,6 +185,42 @@ export function extractSiteFacts(text: string | null | undefined, nowYear: numbe
   return facts;
 }
 
+// ---------------------------------------------------------------------------
+// AI concept imagery — prompts only (pure); the worker generates + stores
+// ---------------------------------------------------------------------------
+
+// Trade → still-life subject matter. Deliberately OBJECT photography (materials and tools of the
+// trade), never people, places, or "their work" — an AI image must not impersonate reality.
+const IMAGE_SUBJECTS: [RegExp, string, string][] = [
+  [/plumb|sewer|drain/i, 'copper pipes, brass fittings and a steel pipe wrench arranged on dark slate', 'water droplets beading on a polished copper pipe joint, macro'],
+  [/electric/i, 'coiled copper wire, cable spools and a voltage tester on matte black steel', 'the filament of a warm vintage bulb glowing, macro on black'],
+  [/roof|gutter/i, 'overlapping architectural shingles and copper flashing in low dramatic light', 'rain droplets bouncing off a dark shingle edge, macro'],
+  [/hvac|heating|cooling|furnace/i, 'brushed-steel ventilation fins, ducting and an analog pressure gauge', 'frost crystals forming on a copper coil, macro'],
+  [/auto|mechanic|tire|transmission/i, 'a chrome socket set and torque wrench on a dark workshop bench', 'tread of a new tire catching rim light, macro on black'],
+  [/landscap|lawn|tree/i, 'fresh-cut turf, pruning shears and leather work gloves on weathered wood', 'morning dew on blades of deep-green grass, macro'],
+  [/paint/i, 'a paint-loaded brush and rollers beside pooled paint in one brand color', 'a single thick brushstroke of wet paint across raw canvas, macro'],
+  [/clean/i, 'folded white towels, glass spray bottles and citrus on bright marble', 'soap bubbles catching iridescent light, macro'],
+  [/law|attorney|legal|account|tax|insur/i, 'a fountain pen on heavy cream paper beside an embossed blind seal', 'the nib of a fountain pen mid-stroke on cotton paper, macro'],
+  [/dental|medical|clinic|chiro|optom/i, 'clean instruments on a pale tray with soft depth of field', 'light refracting through clear glass and water, airy macro'],
+];
+
+/** Two honest, generic still-life prompts (wide hero + tight detail) for a trade with no usable
+ *  photos of its own. Hard rules ride in every prompt: no people, no text, no logos, no places —
+ *  concept imagery, never fake evidence of "their work". Pure; the worker executes them. */
+export function huntImagePrompts(industry: string, tone?: string | null): [string, string] {
+  const hit = IMAGE_SUBJECTS.find(([re]) => re.test(industry));
+  const wide = hit?.[1] ?? `the tools and materials of the ${industry.toLowerCase()} trade arranged as a considered still life`;
+  const tight = hit?.[2] ?? `a single tool of the ${industry.toLowerCase()} trade in dramatic close-up`;
+  const mood = tone && /calm|airy|luxur|soft|clinical/i.test(tone)
+    ? 'Bright, airy editorial photography, generous negative space, soft daylight.'
+    : 'Moody editorial photography, deep shadows, one warm key light, cinematic contrast.';
+  const rules = 'No people, no faces, no hands, no text, no words, no logos, no storefronts, no vehicles with markings. Photorealistic.';
+  return [
+    `Professional wide editorial photograph: ${wide}. ${mood} ${rules}`,
+    `Professional macro detail photograph: ${tight}. ${mood} ${rules}`,
+  ];
+}
+
 export interface HuntProfileInput {
   url: string;
   niche: string;

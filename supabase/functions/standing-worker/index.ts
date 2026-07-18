@@ -31,7 +31,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
-import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
 import {
@@ -1302,6 +1302,26 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       ], { provider: m.provider, model: m.model, maxTokens: 1800 });
       track(sR);
       const strat = normalizeStrategy(extractJson(sR.text), profile);
+      // CONCEPT IMAGERY — a prospect with NO usable photos gets two honest, generic trade
+      // still-lifes (gpt-image-1) so the site opens on full-bleed art instead of a flat color
+      // field. Their own photos always win; generation is object photography only (no people/
+      // text/logos — huntImagePrompts hard rules), labeled ai_generated + can_publish:false,
+      // and fails soft (no key / refusal / no credits → the aurora hero stands).
+      if (!profile.photos.length && Deno.env.get('OPENAI_API_KEY')) {
+        try {
+          await checkCredits(admin, order.owner_id, 'image');
+          const [wide, tight] = huntImagePrompts(profile.industry, strat.tone);
+          const made: typeof profile.photos = [];
+          for (const [prompt, size] of [[wide, '1536x1024'], [tight, '1024x1024']] as const) {
+            const url = await genHuntImage(admin, order.owner_id, prompt, size);
+            if (url) made.push({
+              url, source_type: 'ai_generated', can_use_in_preview: true, can_publish: false,
+              notes: 'AI-generated concept imagery — not photos of this business',
+            });
+          }
+          if (made.length) profile.photos = made;
+        } catch { /* imagery is a bonus, never a blocker */ }
+      }
       const gR = await complete([
         { role: 'system', content: SPEC_SYSTEM },
         { role: 'user', content: specPrompt(profile) + strategyBlock(strat) },
@@ -1389,6 +1409,34 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     businessName: profile.business_name, pitch, previewUrl, toEmail: email,
   });
   return ok ? 'queued' : 'built';
+}
+
+/** gpt-image-1 → project-assets bucket → public URL, metered per owner (kind 'image', same real
+ *  ballpark the generate-image fn charges). Returns null on any failure — imagery never blocks. */
+// deno-lint-ignore no-explicit-any
+async function genHuntImage(admin: any, ownerId: string, prompt: string, size: '1536x1024' | '1024x1024'): Promise<string | null> {
+  try {
+    const key = Deno.env.get('OPENAI_API_KEY');
+    if (!key) return null;
+    const res = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size, quality: 'medium' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const b64 = data?.data?.[0]?.b64_json as string | undefined;
+    if (!res.ok || !b64) return null;
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const path = `${ownerId}/hunt/ai-${crypto.randomUUID()}.png`;
+    const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'image/png', upsert: false });
+    if (up.error) return null;
+    await spendCredits(admin, ownerId, { costUsd: size === '1024x1024' ? 0.04 : 0.07, kind: 'image', provider: 'openai', model: 'gpt-image-1' });
+    return admin.storage.from('project-assets').getPublicUrl(path).data.publicUrl as string;
+  } catch {
+    return null;
+  }
 }
 
 /** Server-side twin of queuePitch: contact → campaign → message(draft) → PENDING approval. Nothing

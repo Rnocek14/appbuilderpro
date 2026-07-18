@@ -171,7 +171,9 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-5 sm:px-8">
             <p className="pv-display text-base font-bold text-[hsl(var(--ink))]">{logoMain}{logoAccent && <span className="text-[hsl(var(--p))]">{logoAccent}</span>}</p>
             <p className="text-xs text-[hsl(var(--mut))]">{spec.footer.line}</p>
-            <p className="mt-2 text-[10px] uppercase tracking-wider text-[hsl(var(--mut))]/70">Concept preview — not yet published</p>
+            <p className="mt-2 text-[10px] uppercase tracking-wider text-[hsl(var(--mut))]/70">
+              Concept preview — not yet published{spec.aiImagery ? ' · imagery is AI-generated concept art' : ''}
+            </p>
           </div>
         </footer>
       )}
