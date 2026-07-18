@@ -10,6 +10,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { cn } from '../lib/utils';
 import { loadHealth, type HealthReport, type Probe } from '../lib/garvis/healthRun';
 import { ClockStatus } from '../components/garvis/ClockStatus';
+import { MasterSwitch } from '../components/garvis/MasterSwitch';
 
 const PROBE_META: Record<Probe, { icon: typeof Check; cls: string; label: string }> = {
   deployed: { icon: Check, cls: 'text-forge-ok', label: 'deployed' },
@@ -49,6 +50,10 @@ export default function Health() {
 
         {/* The clock: deployment says functions EXIST; this says the heartbeat actually TICKS. */}
         <div className="mb-5"><ClockStatus /></div>
+
+        {/* The master switch: which secrets are set, which cron jobs are scheduled, and the
+            guarded arm — the line between "built" and "running" made visible. */}
+        <div className="mb-5"><MasterSwitch /></div>
 
         {!report && failed ? (
           <div className="rounded-xl border border-forge-warn/40 bg-forge-warn/10 p-4 text-sm text-forge-warn">
