@@ -67,12 +67,12 @@ function SectionShell({ id, children, tight, alt }: { id: string; children: Reac
   );
 }
 
-function Heading({ heading, sub }: { heading?: string; sub?: string }) {
+function Heading({ heading, sub, center }: { heading?: string; sub?: string; center?: boolean }) {
   if (!heading) return null;
   return (
     <Reveal>
       <h2 className="pv-display text-3xl font-semibold tracking-tight text-[hsl(var(--ink))] sm:text-4xl">{heading}</h2>
-      {sub && <p className="mt-3 max-w-2xl text-[hsl(var(--mut))]">{sub}</p>}
+      {sub && <p className={center ? 'mx-auto mt-4 text-lg leading-relaxed text-[hsl(var(--mut))]' : 'mt-3 max-w-2xl text-[hsl(var(--mut))]'}>{sub}</p>}
     </Reveal>
   );
 }
@@ -431,14 +431,18 @@ export function Services(p: { heading?: string; sub?: string; services?: { name:
 export function About(p: { heading?: string; body?: string; image?: string }) {
   return (
     <SectionShell id="about" alt>
-      <div className="grid items-center gap-10 lg:grid-cols-2">
-        <Heading heading={p.heading} sub={p.body} />
-        {p.image && (
+      {p.image ? (
+        <div className="grid items-center gap-10 lg:grid-cols-2">
+          <Heading heading={p.heading} sub={p.body} />
           <Reveal delay={120}>
             <img src={p.image} alt="" loading="lazy" className="aspect-[4/3] w-full rounded-[var(--r)] object-cover shadow-xl" />
           </Reveal>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="mx-auto max-w-3xl text-center">
+          <Heading heading={p.heading} sub={p.body} center />
+        </div>
+      )}
     </SectionShell>
   );
 }
