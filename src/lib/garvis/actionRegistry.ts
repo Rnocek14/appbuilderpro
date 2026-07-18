@@ -166,6 +166,37 @@ export const ACTIONS: ActionDef[] = [
     },
   },
   {
+    id: 'hunt_opportunities',
+    title: 'Hunt for opportunities',
+    category: 'automation',
+    risk: 'safe',
+    description: 'Standing hunt for real work: jobs, RFPs, grants, commissions, open calls matching a focus (e.g. "mural commissions and public art projects"). Runs scheduled web-search sweeps, reads the results, extracts ONLY opportunities the pages actually describe, and files them deduped in the Opportunity feed for triage. Use when the intent is about FINDING work/opportunities, not customers to pitch.',
+    params: [
+      { name: 'focus', required: true, hint: 'what to hunt, in the operator\'s words ("mural and custom art jobs")' },
+      { name: 'region', required: false, hint: 'geography to prefer ("Wisconsin", "Chicago area")' },
+      { name: 'cadence', required: false, hint: 'daily | weekly (default daily)' },
+      { name: 'world', required: false, hint: 'the business this hunt feeds (must already exist)' },
+    ],
+    produces: 'an armed daily/weekly hunt filling the Opportunity feed (needs SERPER_API_KEY + the armed heartbeat; JS-rendered pages are flagged unreadable, never silently skipped)',
+    execute: async (p) => {
+      const { buildQueries } = await import('./opportunityHunt');
+      const worldId = p.world ? (await resolveWorld(p.world)).id : null;
+      const { createOrder } = await import('./standingRun');
+      const cadence = (p.cadence === 'weekly' ? 'weekly' : 'daily') as 'daily' | 'weekly';
+      const order = await createOrder({
+        worldId, kind: 'opportunity_hunt', label: `Hunt: ${p.focus.slice(0, 60)}`, cadence,
+        config: { focus: p.focus, region: p.region ?? null, queries: buildQueries(p.focus, p.region ?? null) },
+      });
+      const { clockState } = await import('./heartbeatStatus');
+      const clock = await clockState();
+      return {
+        kind: 'done',
+        note: `Hunt "${order.label}" armed (${cadence}) — new opportunities land in the feed with a ping.${clock.state === 'alive' ? '' : ' ⚠ The heartbeat is not ticking — arm it on the Health page or this never runs.'}`,
+        link: clock.state === 'alive' ? '/garvis/opportunity-feed' : '/garvis/health',
+      };
+    },
+  },
+  {
     id: 'cadence_digest',
     title: 'Schedule a business digest',
     category: 'automation',

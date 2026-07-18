@@ -8,7 +8,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
-  CreditCard, Settings, Wand2,
+  CreditCard, Settings, Wand2, Crosshair,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -26,6 +26,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
       { to: '/garvis/webs', label: 'Businesses', icon: Waypoints },
       { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
+      // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
+      { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
       { to: '/garvis/automations', label: 'Automations', icon: Zap },
       // Renamed from "Client billing" so it stops colliding with "Money" and account "Billing":
       // three money doors, now three distinct names — agency MRR vs personal invoices vs the app's own bill.

@@ -31,6 +31,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
+import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES } from '../../../src/lib/garvis/opportunityHunt.ts';
 import { buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
 import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
 import { deriveSignals, proposeFromSignals } from '../../../src/lib/garvis/automation/detect.ts';
@@ -385,6 +386,122 @@ Deno.serve(async (req) => {
   for (const order of (rows ?? []) as OrderRow[]) {
     // A forced run may target a paused/not-yet-due order (the owner asked); the scan only sees due ones.
     if (!body.order_id && !isDue({ status: order.status as 'active' | 'paused', nextRunAt: order.next_run_at }, nowIso)) continue;
+
+    // ---- opportunity_hunt: scheduled search sweeps → fetched pages → honest extraction --------
+    // The Opportunity Engine's unattended half: Serper queries (config.queries, derived from the
+    // operator's focus) → fetch the organic results (static HTML; unreadable pages are COUNTED
+    // and reported, never silently skipped) → ONE batched extraction call bound to the fetched
+    // URL allowlist (hallucinated links cannot enter the feed) → dedupe-at-insert into the
+    // opportunities table. READ + RECORD only — applying is the operator's move, in the feed.
+    if (order.kind === 'opportunity_hunt') {
+      try {
+        const cfg = (order.config ?? {}) as { focus?: string; region?: string | null; queries?: string[] };
+        const focus = (cfg.focus ?? '').trim();
+        if (!focus) throw new Error('no focus configured (config.focus missing)');
+        const queries = (Array.isArray(cfg.queries) && cfg.queries.length ? cfg.queries : buildQueries(focus, cfg.region)).slice(0, MAX_QUERIES);
+
+        let line: string;
+        let found = 0;
+        const serperKey = Deno.env.get('SERPER_API_KEY');
+        if (!serperKey) {
+          line = `Opportunity hunt "${focus}": SERPER_API_KEY is not set — the hunt cannot search. Add the secret and this runs on the next tick.`;
+        } else {
+          const HUNT_BUDGET_MS = 70_000;
+          const started = Date.now();
+
+          // 1. SEARCH — organic results across the angle-diverse query set, deduped by URL.
+          const candidates: { url: string; title: string }[] = [];
+          const seenUrl = new Set<string>();
+          let searched = 0;
+          for (const q of queries) {
+            if (Date.now() - started > HUNT_BUDGET_MS) break;
+            try {
+              const res = await fetch('https://google.serper.dev/search', {
+                method: 'POST',
+                headers: { 'X-API-KEY': serperKey, 'content-type': 'application/json' },
+                body: JSON.stringify({ q, num: 8 }),
+              });
+              if (!res.ok) continue;
+              searched++;
+              const data = await res.json();
+              for (const r of ((data?.organic ?? []) as { link?: string; title?: string }[])) {
+                const url = (r.link ?? '').trim();
+                if (/^https?:\/\//i.test(url) && !seenUrl.has(url)) { seenUrl.add(url); candidates.push({ url, title: r.title ?? '' }); }
+              }
+            } catch { /* one query failing never kills the sweep */ }
+          }
+
+          // 2. FETCH up to 6 result pages (SSRF-safe), keeping honest count of unreadable ones.
+          const pages: { url: string; text: string }[] = [];
+          let thin = 0;
+          for (const c of candidates.slice(0, 6)) {
+            if (Date.now() - started > HUNT_BUDGET_MS) break;
+            try {
+              const res = await safeFetch(c.url);
+              const text = normalizeContent(await res.text()).slice(0, 6000);
+              if (text.length < 200) { thin++; continue; } // JS-rendered/empty — reported, not silently skipped
+              pages.push({ url: c.url, text });
+            } catch { thin++; }
+          }
+
+          // 3. EXTRACT — one batched, credit-metered call bound to the fetched-URL allowlist.
+          if (pages.length) {
+            await checkCredits(admin, order.owner_id, 'discover');
+            const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+            const blocks = pages.map((p, i) => `PAGE ${i + 1} · ${p.url}\n${p.text}`).join('\n\n');
+            const result = await complete([
+              { role: 'system', content: EXTRACT_SYSTEM },
+              { role: 'user', content: `${blocks}\n\nExtract the real opportunities now (strict JSON array):` },
+            ], { provider: m.provider, model: m.model, maxTokens: 1600 });
+            await spendCredits(admin, order.owner_id, { costUsd: result.costUsd, kind: 'discover', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+            const items = parseOpportunities(result.text, pages.map((p) => p.url));
+
+            // 4. DEDUPE-AT-INSERT: (owner_id, dedupe_key) unique + ignoreDuplicates — only genuinely
+            //    new rows come back, so `found` is what actually entered the feed.
+            if (items.length) {
+              const rows = items.map((it) => ({
+                owner_id: order.owner_id, world_id: order.world_id ?? null, order_id: order.id,
+                title: it.title, summary: it.summary, source_url: it.source_url, kind: it.kind,
+                location: it.location, budget_text: it.budget_text, deadline_text: it.deadline_text,
+                status: 'new', dedupe_key: dedupeKey(it.source_url, it.title),
+              }));
+              const { data: inserted } = await admin.from('opportunities')
+                .upsert(rows, { onConflict: 'owner_id,dedupe_key', ignoreDuplicates: true }).select('id');
+              found = (inserted ?? []).length;
+            }
+          }
+          line = huntLine(focus, searched, pages.length, found, thin);
+        }
+
+        ran++;
+        if (found > 0) changed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: found > 0 ? 'changed' : 'unchanged', line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id);
+
+        if (found > 0) {
+          await admin.from('mind_events').insert({
+            owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+            subject: line.slice(0, 300),
+            payload: { order_id: order.id, kind: order.kind, found },
+          }).then(() => {}, () => {});
+          const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
+          await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, line).catch(() => {});
+        }
+      } catch (e) {
+        failed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Hunt failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
 
     // ---- client_hunt: a self-contained daily prospecting run ---------------------------------
     // It owns its own persistence (a rolling cursor in config, not a content hash), so it never

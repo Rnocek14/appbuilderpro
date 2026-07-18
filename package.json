@@ -28,6 +28,7 @@
     "verify:branches": "tsx src/lib/branches.verify.ts",
     "verify:orchestrator": "tsx src/lib/garvis/orchestrator.verify.ts",
     "verify:depth": "tsx src/lib/garvis/depth.verify.ts",
+    "verify:opportunityhunt": "tsx src/lib/garvis/opportunityHunt.verify.ts",
     "verify:clustering": "tsx src/lib/garvis/clustering.verify.ts",
     "verify:universe": "tsx src/lib/garvis/universe.verify.ts",
     "verify:loops": "tsx src/lib/garvis/loops.verify.ts",

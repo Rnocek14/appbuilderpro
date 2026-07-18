@@ -21,7 +21,7 @@
 // the owner's approval. Its config is the HuntConfig (niche/scope/citiesPerDay/demoQuota) + a rolling
 // cursor; the worker's client_hunt branch owns it. Like every order, it only READS + queues — the
 // clock schedules the work; the human still owns the trigger out.
-export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream';
+export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream' | 'opportunity_hunt';
 export type Cadence = 'hourly' | 'daily' | 'weekly';
 export type WatchStatus = 'changed' | 'unchanged' | 'unreachable';
 
