@@ -50,7 +50,10 @@ export function SocialPublisher({ worldId, onToast }: { worldId: string; onToast
     setSyncing(true);
     try {
       const r = await syncSocialNow();
-      if (!r.available) onToast('info', 'Post analytics needs an Ayrshare Premium/Business plan — posting itself keeps working.');
+      // Honest degrade (review fix): say the ACTUAL reason — a missing connection is not a plan gate.
+      if (!r.available) onToast('info', r.reason === 'No Ayrshare connection.'
+        ? 'Connect Ayrshare in Settings → Connections first — then results can sync.'
+        : 'Post analytics needs an Ayrshare Premium/Business plan — posting itself keeps working.');
       else onToast(r.synced > 0 ? 'success' : 'info', r.synced > 0 ? `Synced results for ${r.synced} post${r.synced === 1 ? '' : 's'}.` : 'Nothing new to sync yet.');
       const m = await listSocialMetrics(posts.map((x) => x.id)).catch(() => new Map<string, PostMetricRow[]>());
       setMetrics(m);

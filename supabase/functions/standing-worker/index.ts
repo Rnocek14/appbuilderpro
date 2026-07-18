@@ -206,7 +206,14 @@ Deno.serve(async (req) => {
           try {
             const res = await fetch(`${supabaseUrl}/functions/v1/send-email`, {
               method: 'POST',
-              headers: { 'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '' },
+              // The service-key bearer exists ONLY to pass the platform's verify-jwt gateway
+              // (send-email deploys JWT-verified for browser callers); the real worker auth is
+              // still x-worker-secret, checked inside the function. Without the bearer, every
+              // drain send 401s at the gateway before send-email's code runs.
+              headers: {
+                'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '',
+                Authorization: `Bearer ${serviceKey}`, apikey: serviceKey,
+              },
               body: JSON.stringify({ approval_id: apRow.id }),
             });
             if (res.ok) { r.state = 'sent'; sentNow++; await persistRecips(); }
@@ -266,9 +273,13 @@ Deno.serve(async (req) => {
         last_service_at: string | null; last_visit_at: string | null;
         purchase_at: string | null; next_due_at: string | null;
       }
+      // Deterministic order + a bound far above any plausible fleet (review fix): an unordered
+      // .limit(100) let PostgREST return an arbitrary subset, so rules past the cap could be
+      // silently NEVER checked. Ordered by id, capped at 500 — the fireBudget below still bounds
+      // per-tick work, and a backlog beyond the budget drains across subsequent ticks.
       const { data: trigData } = await admin.from('automation_triggers')
         .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body')
-        .eq('status', 'active').limit(100);
+        .eq('status', 'active').order('id', { ascending: true }).limit(500);
 
       const custCache = new Map<string, CustomerRec[]>();
       let fireBudget = 40; // bound tick time — a backlog drains over ticks, never in one stampede

@@ -105,6 +105,7 @@ async function syncOwner(
       if (!res.ok) { skipped++; continue; }
 
       // Response shape: { <platform>: { analytics: {...} } , ...} (per Ayrshare docs research).
+      let sawAnalytics = false;
       for (const [platform, val] of Object.entries(out as Record<string, unknown>)) {
         if (!val || typeof val !== 'object') continue;
         const analytics = ((val as Record<string, unknown>).analytics ?? val) as Record<string, unknown>;
@@ -113,20 +114,23 @@ async function syncOwner(
         // A platform entry with NO recognizable numbers and no analytics object is provider noise
         // (e.g. status fields) — keep it only if the raw object has content worth keeping.
         if (Object.values(m).every((v) => v === null) && Object.keys(analytics).length === 0) continue;
+        sawAnalytics = true;
         await admin.from('social_post_metrics').upsert({
           owner_id: uid, post_id: row.id, world_id: row.world_id, platform,
           ...m, raw: analytics, synced_at: new Date().toISOString(),
         }, { onConflict: 'post_id,platform' });
       }
 
-      // Reconcile the terminal-'scheduled' gap: if the provider reports the post live, say so.
+      // Reconcile the terminal-'scheduled' gap ONLY on evidence (review fix): a 2xx envelope with
+      // no analytics payload proves nothing about the post being live — flipping status there
+      // would fabricate a posted_at. Analytics for the post = the provider has it published.
       const patch: Record<string, unknown> = { last_synced_at: new Date().toISOString() };
-      if (row.status === 'scheduled') {
+      if (row.status === 'scheduled' && sawAnalytics) {
         patch.status = 'posted';
         patch.posted_at = row.posted_at ?? new Date().toISOString();
       }
       await admin.from('social_posts').update(patch).eq('id', row.id);
-      synced++;
+      if (sawAnalytics) synced++; else skipped++;
     } catch { skipped++; }
   }
   return { synced, skipped, available };

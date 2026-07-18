@@ -19,6 +19,7 @@ import {
 } from '../lib/garvis/automation/triggersStore';
 import { loadAutomationMonth, automationMonthLine, type AutomationMonth } from '../lib/garvis/automation/report';
 import { runTriggersForOwner, type TriggerRunSummary } from '../lib/garvis/automation/triggersRun';
+import { ClockStatus } from '../components/garvis/ClockStatus';
 
 // Only capabilities that carry a triggerDefault (the date/interval ones) can become a trigger.
 const TRIGGERABLE = CAPABILITIES.filter((c) => c.triggerDefault && c.status !== 'not_built');
@@ -128,10 +129,13 @@ export default function Automations() {
         </div>
         <p className="mb-3 text-sm text-forge-dim">
           Recurring, per-customer nudges on a client’s own warm list — recall reminders, seasonal service, review requests.
-          The clock checks every rule automatically (each 15-minute heartbeat tick); due ones land in your{' '}
+          With the heartbeat armed, the clock checks every rule automatically (each 15-minute tick); due ones land in your{' '}
           <NavLink to="/garvis/queue" className="text-forge-ember hover:underline">Queue</NavLink> to approve. Nothing sends without your OK.
           “Run due now” just checks immediately instead of waiting for the tick.
         </p>
+        {/* Honesty gate (review fix): the copy above promises the clock — this banner speaks up when
+            the clock is actually stale or never armed, instead of letting the promise stand unbacked. */}
+        <div className="mb-3"><ClockStatus quiet /></div>
         {/* THE ROI LINE (app_0081/reportCore): the honest month-to-date tally that justifies the
             retainer — counted from the ledger tables, never composed. */}
         {month && (

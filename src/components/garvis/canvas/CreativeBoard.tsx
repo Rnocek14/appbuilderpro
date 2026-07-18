@@ -64,8 +64,12 @@ export interface CreativeBoardAdapter<C> {
   references?: { label: string; url?: string | null; swatches?: string[] }[];
 }
 
-export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
+export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 }: {
   adapter: CreativeBoardAdapter<C>; clusterId: string | null; onToast: Toast;
+  /** Bump to re-run hydration when something OUTSIDE this component wrote to the board server-side
+   *  (e.g. the standing-worker's run-now idea drop) — the id-deduped merge folds the new tiles in
+   *  without losing client-only ones, and the next debounced save persists the union. */
+  reloadNonce?: number;
 }) {
   const M = adapter.metrics;
   const [board, setBoard] = useState<Board<C>>(() => emptyBoard<C>());
@@ -118,7 +122,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast }: {
       }
     })();
     return () => { live = false; };
-  }, [clusterId, adapter.storageKey]);
+  }, [clusterId, adapter.storageKey, reloadNonce]);
 
   // Keep the latest save target so the unmount flush can persist a still-pending change.
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

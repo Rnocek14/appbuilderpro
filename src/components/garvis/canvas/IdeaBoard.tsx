@@ -30,6 +30,9 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
   worldId: string; clusterId: string | null; onToast: Toast; materialsOverride?: IdeaMaterials;
 }) {
   const [materials, setMaterials] = useState<IdeaMaterials | null>(materialsOverride ?? null);
+  // Bumped when the worker writes to the board server-side (run-now): re-hydration folds the fresh
+  // tiles in via the id-deduped merge, so the open board's next debounced save can't erase them.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     if (materialsOverride) { setMaterials(materialsOverride); return; }
@@ -59,7 +62,10 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
       captionOf: (c) => `${ideaKindById(c.kindId)?.emoji ?? '💡'} ${c.tag}`,
       qualityOf: (c) => c.quality ?? null,
       searchText: (c) => `${c.title} ${c.pitch} ${c.notes} ${c.tag}`,
-      extraControls: clusterId ? <AutoIdeasToggle worldId={worldId} clusterId={clusterId} onToast={onToast} /> : undefined,
+      extraControls: clusterId
+        ? <AutoIdeasToggle worldId={worldId} clusterId={clusterId} onToast={onToast}
+            onFreshIdeas={() => setReloadNonce((n) => n + 1)} />
+        : undefined,
 
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && ideaKindById(kindId)) || defaultIdeaKind();
@@ -95,7 +101,7 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
   if (!materials || !adapter) {
     return <div className="grid h-full min-h-[400px] place-items-center"><Loader2 size={20} className="animate-spin text-forge-ember" /></div>;
   }
-  return <CreativeBoard adapter={adapter} clusterId={clusterId} onToast={onToast} />;
+  return <CreativeBoard adapter={adapter} clusterId={clusterId} onToast={onToast} reloadNonce={reloadNonce} />;
 }
 
 function IdeaCard({ content }: { content: IdeaContent }) {
@@ -154,7 +160,12 @@ function IdeaFocus({ content, api, materials, worldId, clusterId, onToast }: {
 }
 
 // ---- ⚡ Auto-ideas: the idea_stream standing order, controlled from the board -----------------
-function AutoIdeasToggle({ worldId, clusterId, onToast }: { worldId: string; clusterId: string; onToast: Toast }) {
+function AutoIdeasToggle({ worldId, clusterId, onToast, onFreshIdeas }: {
+  worldId: string; clusterId: string; onToast: Toast;
+  /** Called after a run that changed the board — the parent re-hydrates so the fresh tiles are
+   *  merged into the OPEN board instead of being erased by its next debounced save. */
+  onFreshIdeas?: () => void;
+}) {
   const [state, setState] = useState<'loading' | 'off' | 'daily' | 'weekly'>('loading');
   const [orderId, setOrderId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -196,9 +207,10 @@ function AutoIdeasToggle({ worldId, clusterId, onToast }: { worldId: string; clu
     setBusy(true);
     try {
       const r = await runOrderNow(orderId);
+      if (r.changed > 0) onFreshIdeas?.();
       onToast(r.failed > 0 ? 'error' : 'success',
         r.failed > 0 ? 'The run failed — check the AI key and credits, then try again.'
-          : r.changed > 0 ? 'Fresh ideas just landed on the board — refresh to see them.'
+          : r.changed > 0 ? 'Fresh ideas just landed on the board.'
           : 'Ran, but nothing new arrived — the worker reported no changes.');
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not run auto-ideas now.'); }
     finally { setBusy(false); }

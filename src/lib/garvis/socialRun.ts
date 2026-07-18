@@ -103,12 +103,13 @@ export function metricsLine(rows: PostMetricRow[] | undefined): string {
   return parts.join(' · ');
 }
 
-/** Owner-initiated sync — pull fresh numbers now instead of waiting for the 6-hour clock. */
-export async function syncSocialNow(): Promise<{ synced: number; available: boolean }> {
+/** Owner-initiated sync — pull fresh numbers now instead of waiting for the 6-hour clock.
+ *  `reason` carries the function's honest degrade message (no connection vs plan-gated). */
+export async function syncSocialNow(): Promise<{ synced: number; available: boolean; reason: string | null }> {
   const { data, error } = await supabase.functions.invoke('social-sync', { body: {} });
   if (error) throw new Error(error.message);
-  const r = data as { synced?: number; available?: boolean };
-  return { synced: r.synced ?? 0, available: r.available ?? true };
+  const r = data as { synced?: number; available?: boolean; error?: string };
+  return { synced: r.synced ?? 0, available: r.available ?? true, reason: r.error ?? null };
 }
 
 // ---- per-business destinations (app_0084) -----------------------------------
