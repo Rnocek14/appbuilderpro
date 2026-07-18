@@ -8,7 +8,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
-  CreditCard, Settings, Wand2, Crosshair,
+  CreditCard, Settings, Wand2, Crosshair, BookUser,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -26,6 +26,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
       { to: '/garvis/webs', label: 'Businesses', icon: Waypoints },
       { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
+      // Businesses you operate FOR someone: the client, your scope, their intake, their world.
+      { to: '/garvis/client-book', label: 'Client book', icon: BookUser },
       // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
       { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
       { to: '/garvis/automations', label: 'Automations', icon: Zap },

@@ -56,6 +56,16 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     };
   },
 
+  onboard_client: async (p) => {
+    const { onboardClient } = await import('./clientEngagementRun');
+    const res = await onboardClient({ clientName: p.client_name, business: p.business, scope: p.scope, email: p.email ?? null });
+    return {
+      kind: 'needs_review',
+      note: `Engagement for ${p.client_name} opened — ${res.intakeCount} intake item(s) to collect.${res.draftProblem ? ` Their world draft failed (${res.draftProblem}) — re-run it from Businesses.` : ' Their business draft is ready: approve it on Businesses, then link it in the Client book.'}`,
+      link: '/garvis/client-book',
+    };
+  },
+
   research_market: async (p) => {
     const w = await resolveWorld(p.world);
     const charter = await resolveArea(w.id, ['intel']);

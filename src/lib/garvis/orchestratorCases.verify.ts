@@ -122,10 +122,18 @@ const CASES: Case[] = [
     actions: [], minHoles: 1,
   },
   {
-    name: 'client engagement: NOT a company founding, honest hole',
+    name: 'client engagement: onboard_client, never found_company',
     intent: 'Add my client Jane the realtor — I do her marketing',
-    compile: plan([], ['Operating a business FOR a client (intake, scope, their assets/brand) — the client-engagement layer is not built yet; founding "Jane\'s realty" as your own company would be wrong.']),
-    actions: [], minHoles: 1,
+    compile: plan([step('onboard_client', { client_name: 'Jane', business: 'residential realty', scope: 'marketing' }, W('work FOR someone else\'s business is an engagement, not the operator\'s own venture'))]),
+    actions: ['onboard_client'],
+  },
+  {
+    name: 'client onboarding + their campaign: engagement first, campaign question-gated on the world',
+    intent: 'Take on Rick\'s roofing company for marketing and paperwork, and start his first campaign',
+    compile: plan([step('onboard_client', { client_name: 'Rick', business: 'roofing company', scope: 'marketing + paperwork' }, W('the engagement and intake come first'))],
+      ['Client paperwork templating/automation — the Paperwork Engine is not built yet; the intake checklist collects his document samples meanwhile.'],
+      ['After approving Rick\'s world draft and linking it in the Client book, say "campaign for Rick\'s roofing" so the strategy grounds in his world.']),
+    actions: ['onboard_client'], minHoles: 1, minQuestions: 1,
   },
   {
     name: 'a durable position becomes a proposed thesis',
