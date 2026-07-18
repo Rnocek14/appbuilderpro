@@ -1,0 +1,69 @@
+# CI gate — the second operator. Every push runs the compiler, every pure-logic verify suite,
+# and the browser smoke tests, so a regression in the core (builder, outreach, brain) can't land
+# silently. The deploy workflow (deploy-supabase.yml) ships code; this one earns the right to.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Run every verify suite
+        # All verify:* scripts are pure-logic asserts (no DB, no network). Run each; fail on any.
+        run: |
+          set -e
+          scripts=$(node -e "const s=require('./package.json').scripts;console.log(Object.keys(s).filter(k=>k.startsWith('verify:')).join('\n'))")
+          echo "Running $(echo "$scripts" | wc -l) verify suites"
+          failed=0
+          for s in $scripts; do
+            echo "::group::$s"
+            if ! npm run -s "$s"; then echo "FAILED: $s"; failed=1; fi
+            echo "::endgroup::"
+          done
+          exit $failed
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Production build
+        run: npm run build
+
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke tests
+        # Runs against a real Vite server with no backend — proves boot, routing, auth gating.
+        run: npx playwright test

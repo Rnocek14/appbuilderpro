@@ -5,8 +5,13 @@
 // provider (Ayrshare) to whatever accounts she linked on that key. The provider API key is SEALED
 // in provider_connections — the browser never sees it.
 //
-// Deploy: in package.json functions:deploy (user-JWT). No new global secret — the provider key is
-// stored per-user via the connections hub.
+// TWO callers, ONE path (send-email's dual-caller pattern): the OWNER's browser (JWT), or the
+// standing worker's drain (x-worker-secret) executing an already-approved post unattended — the
+// owner is derived FROM the approval row, never from the caller, and every gate below is shared.
+//
+// Deploy: in package.json functions:deploy (user-JWT gateway; the worker passes a service-role
+// bearer to clear it, then authenticates on x-worker-secret). No new global secret — the provider
+// key is stored per-user via the connections hub.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
@@ -28,22 +33,38 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-    // Owner JWT only — a human approves every post.
-    const authClient = createClient(
-      Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
-    );
-    const { data: { user } } = await authClient.auth.getUser();
-    if (!user) return json({ error: 'Unauthorized' }, 401);
-    const uid = user.id;
+    // TWO callers, ONE path, every gate below shared (mirrors send-email):
+    //  1) the OWNER (browser) — Authorization JWT; the approval must be theirs.
+    //  2) the STANDING WORKER (social drain) — x-worker-secret; the owner is derived FROM the
+    //     approval row, never from the caller. No requested_by class is needed here (unlike
+    //     send-email's garvis-auto batch sends): a publish_post approval only ever reaches
+    //     'approved' through the owner's decision in the Queue, so status='approved' IS the human
+    //     authority — the worker merely executes it.
+    const workerSecret = Deno.env.get('WORKER_SECRET');
+    const byWorker = !!workerSecret && req.headers.get('x-worker-secret') === workerSecret;
 
+    // The approval is the authority to post. Verify it: correct kind, approved, and untampered.
     const { data: approval } = await admin.from('approvals')
       .select('id, owner_id, kind, status, payload, payload_hash, result').eq('id', approval_id).single();
-    if (!approval || approval.owner_id !== uid) return json({ error: 'Approval not found' }, 404);
+    if (!approval) return json({ error: 'Approval not found' }, 404);
     if (approval.kind !== 'publish_post') return json({ error: 'Approval is not a publish_post.' }, 400);
     if (approval.status !== 'approved') return json({ error: `Approval is ${approval.status}, not approved.` }, 409);
     if (!(await payloadMatches(approval.payload, approval.payload_hash as string | null))) {
       return json({ error: 'Approval payload changed since it was approved — refusing to post.' }, 409);
+    }
+
+    let uid: string;
+    if (byWorker) {
+      uid = approval.owner_id as string;
+    } else {
+      const authClient = createClient(
+        Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
+      );
+      const { data: { user } } = await authClient.auth.getUser();
+      if (!user) return json({ error: 'Unauthorized' }, 401);
+      if (approval.owner_id !== user.id) return json({ error: 'Approval not found' }, 404);
+      uid = user.id;
     }
 
     const rowId = (approval.payload as { post_row_id?: string })?.post_row_id;
@@ -73,10 +94,21 @@ Deno.serve(async (req) => {
     };
 
     // ----- gates -----
+    // An approved post whose scheduled moment has ARRIVED posts now — the drain (standing-worker)
+    // wakes it when the time comes, and a moment that just passed (≤1h: a tick's lag, a short
+    // outage) is still that moment. Anything staler keeps its past scheduleAt so checkDraft
+    // refuses it with the honest reason — a "tonight at 8" post must never quietly go out a day
+    // late. A future scheduleAt still rides to the provider for provider-side scheduling.
+    const SCHEDULE_GRACE_MS = 60 * 60 * 1000;
+    let scheduleAt = (row.scheduled_for as string | null) ?? null;
+    if (scheduleAt) {
+      const lateMs = Date.now() - new Date(scheduleAt).getTime();
+      if (lateMs >= 0 && lateMs <= SCHEDULE_GRACE_MS) scheduleAt = null;
+    }
     const draft: SocialDraft = {
       text: row.body ?? '', platforms: (row.platforms ?? []) as string[],
       mediaUrls: (row.media_urls ?? []) as string[],
-      scheduleAt: (row.scheduled_for as string | null) ?? null,
+      scheduleAt,
     };
     // Re-run the honesty/refusal gate server-side — a doc a platform would reject never goes out.
     const chk = checkDraft(draft, new Date().toISOString());

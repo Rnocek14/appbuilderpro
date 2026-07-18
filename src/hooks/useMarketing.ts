@@ -10,7 +10,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { generateCampaign } from '../lib/garvis/marketingRun';
-import { buildShareUrl } from '../lib/garvis/channels';
+import { buildShareUrl, postText } from '../lib/garvis/channels';
+import { queueSocialPost } from '../lib/garvis/socialRun';
 import type { MarketingAsset, MarketingCampaign } from '../types';
 
 export interface RunCampaignInput {
@@ -90,12 +91,27 @@ export function useMarketing() {
   const rejectAsset = async (id: string) => { must((await supabase.from('marketing_assets').update({ status: 'rejected' }).eq('id', id)).error); await refresh(); };
   const scheduleAsset = async (id: string, whenISO: string) => { must((await supabase.from('marketing_assets').update({ status: 'scheduled', scheduled_for: whenISO }).eq('id', id)).error); await refresh(); };
 
-  /** Publish: open the channel's prefilled composer (X intent / mailto) if any, then mark published. */
-  const publishAsset = async (asset: MarketingAsset) => {
-    const url = buildShareUrl((asset.channel ?? 'manual') as 'x' | 'email' | 'linkedin' | 'manual', asset.kind, asset.content);
+  /**
+   * Publish through the REAL rails where one exists. Social channels (x/linkedin) queue an actual
+   * social_post behind a PENDING approval — the same spine every other outbound uses; it posts via
+   * Ayrshare once approved in the Queue. The asset is marked 'scheduled' (queued), never
+   * 'published', because approval hasn't executed yet. Channels with no rail (email needs a
+   * human-chosen audience; 'manual') keep the prefilled-composer handoff and mark published,
+   * since the operator is genuinely doing that send themselves.
+   */
+  const publishAsset = async (asset: MarketingAsset): Promise<'queued' | 'manual'> => {
+    const channel = (asset.channel ?? 'manual') as 'x' | 'email' | 'linkedin' | 'manual';
+    if (channel === 'x' || channel === 'linkedin') {
+      await queueSocialPost({ text: postText(asset.content), platforms: [channel === 'x' ? 'twitter' : 'linkedin'] });
+      must((await supabase.from('marketing_assets').update({ status: 'scheduled', scheduled_for: new Date().toISOString() }).eq('id', asset.id)).error);
+      await refresh();
+      return 'queued';
+    }
+    const url = buildShareUrl(channel, asset.kind, asset.content);
     if (url && typeof window !== 'undefined') window.open(url, '_blank', 'noopener');
     must((await supabase.from('marketing_assets').update({ status: 'published', published_at: new Date().toISOString() }).eq('id', asset.id)).error);
     await refresh();
+    return 'manual';
   };
 
   const deleteCampaign = async (id: string) => { must((await supabase.from('marketing_campaigns').delete().eq('id', id)).error); await refresh(); };

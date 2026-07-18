@@ -11,7 +11,8 @@ import { FileSignature, Loader2, Plus, RefreshCw, Save, Send, Trash2 } from 'luc
 import { templateTokens, mergePaperwork, type EsignRecipient } from '../../lib/garvis/esign';
 import {
   listTemplates, saveTemplate, deleteTemplate, searchContacts, queueForSignature,
-  listEnvelopes, pollEnvelopeStatus, type PaperworkTemplate, type EnvelopeRow, type ContactHit,
+  listEnvelopes, pollEnvelopeStatus, extractPaperworkTemplate,
+  type PaperworkTemplate, type EnvelopeRow, type ContactHit,
 } from '../../lib/garvis/esignRun';
 import { useConnections } from '../../hooks/useConnections';
 import { cn } from '../../lib/utils';
@@ -39,6 +40,11 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
   const [name, setName] = useState('');
   const [tplBody, setTplBody] = useState('');
   const [busy, setBusy] = useState(false);
+  // Extract-from-sample: paste a client's real document → a tokenized template pre-fills the
+  // editor above for review. Nothing saves until the operator presses Save.
+  const [sampleOpen, setSampleOpen] = useState(false);
+  const [sample, setSample] = useState('');
+  const [extracting, setExtracting] = useState(false);
 
   const [title, setTitle] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -177,7 +183,42 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
             <button onClick={() => void doSaveTpl()} disabled={busy || !name.trim()}
               className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-ink hover:border-forge-ember/50 disabled:opacity-50"><Save size={12} /> Save</button>
             {selId && <button onClick={() => void doDeleteTpl()} className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:text-forge-warn"><Trash2 size={12} /> Delete</button>}
+            <button onClick={() => setSampleOpen((v) => !v)}
+              className="ml-auto flex items-center gap-1.5 rounded-lg border border-forge-ember/40 px-2.5 py-1 text-xs text-forge-ember hover:bg-forge-ember/10">
+              <FileSignature size={12} /> Extract from a sample
+            </button>
           </div>
+
+          {/* EXTRACTION: the client's real document in → a tokenized template pre-fills the editor
+              above for review. Non-varying language stays verbatim; only deal-specific values
+              become {{tokens}}. Nothing saves until the operator presses Save. */}
+          {sampleOpen && (
+            <div className="mt-2 rounded-lg border border-forge-ember/30 bg-forge-bg p-2">
+              <textarea value={sample} onChange={(e) => setSample(e.target.value)} rows={6}
+                placeholder="Paste the client's whole sample document here (a listing agreement, disclosure, invoice…)"
+                className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 font-mono text-[11px] text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />
+              <div className="mt-1.5 flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setExtracting(true);
+                    void extractPaperworkTemplate(sample)
+                      .then((t) => {
+                        setSelId(null); setName(t.name); setTplBody(t.body);
+                        setSampleOpen(false); setSample('');
+                        onToast('success', `Extracted "${t.name}" with ${t.fields.length} fill-in field(s) — review the template above, then Save.`);
+                      })
+                      .catch((e) => onToast('error', e instanceof Error ? e.message : 'Extraction failed — the sample is unchanged.'))
+                      .finally(() => setExtracting(false));
+                  }}
+                  disabled={extracting || sample.trim().length < 200}
+                  className="flex items-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1 text-xs font-medium text-forge-ember disabled:opacity-50"
+                >
+                  {extracting ? <Loader2 size={12} className="animate-spin" /> : <FileSignature size={12} />} {extracting ? 'Extracting…' : 'Extract template'}
+                </button>
+                <span className="text-[10px] text-forge-dim">Everything that doesn't vary stays verbatim; only deal-specific values become {'{{tokens}}'}.</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Merge + send */}

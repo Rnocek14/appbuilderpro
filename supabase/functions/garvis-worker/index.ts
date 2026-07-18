@@ -26,7 +26,7 @@ interface Msg { role: 'user' | 'assistant' | 'tool'; content: string }
 interface RunRow {
   id: string; owner_id: string; app_id: string | null; kind: string; title: string; input: string | null;
   status: string; phase: Mode | null; checkpoint: { step: number; history: Msg[] } | null;
-  spent_usd: number | null; budget_usd: number | null;
+  spent_usd: number | null; budget_usd: number | null; retry_count: number | null;
 }
 type Decision =
   | { kind: 'tools'; calls: { name: string; input?: Record<string, unknown> }[] }
@@ -310,6 +310,39 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
 
 // ---- the run loop (parity: src/lib/garvis/runtime.ts) ----
 
+const MAX_RETRIES = 3;
+// A transient AI/network blip must not kill a checkpointed run (the job-worker lesson, app_0058 →
+// app_0086). These substrings mark errors worth retrying; anything else (a 4xx other than 429,
+// validation, a real logic failure) fails terminally.
+const isTransient = (m: string) => /\b(429|50[0-9]|52[0-9]|timeout|timed ?out|overloaded|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|fetch failed|temporarily|rate.?limit(ed)?|service unavailable)\b/i.test(m);
+
+/** Terminal-or-retry seam for a run that threw. TRANSIENT (network, 429, 5xx) and under the cap →
+ *  requeue with exponential backoff (5m→10m→20m, capped 1h — sized for the cron tick); the claim
+ *  functions skip the run until next_attempt_at passes (app_0086), and the checkpoint means the
+ *  re-claim resumes the same step instead of restarting. Anything else fails honestly, with the
+ *  same terminal record + mind_event as before. */
+async function failOrRetry(db: SupabaseClient, run: RunRow, msg: string): Promise<void> {
+  const attempts = (run.retry_count ?? 0) + 1;
+  if (isTransient(msg) && attempts <= MAX_RETRIES) {
+    await db.from('agent_runs').update({
+      status: 'queued', retry_count: attempts,
+      next_attempt_at: new Date(Date.now() + Math.min(3_600_000, 5 * 60_000 * 2 ** (attempts - 1))).toISOString(),
+      error: `transient error — retry ${attempts}/${MAX_RETRIES} after backoff: ${msg.slice(0, 400)}`,
+      lease_until: null,
+    }).eq('id', run.id);
+    return;
+  }
+  await db.from('agent_runs').update({
+    status: 'failed', retry_count: attempts, error: msg.slice(0, 500),
+    finished_at: new Date().toISOString(), lease_until: null,
+  }).eq('id', run.id);
+  await db.from('mind_events').insert({
+    owner_id: run.owner_id, app_id: run.app_id, source: 'agent_run', event_type: 'agent_run_failed',
+    subject: `Run failed: ${run.title} — ${msg.slice(0, 140)}`.replace(/\s+/g, ' ').trim().slice(0, 280),
+    payload: { run_id: run.id, mode: run.phase ?? 'observe', worker: true },
+  }).then(() => {}, () => {});
+}
+
 async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
   const mode: Mode = run.phase ?? 'observe';
   const history: Msg[] = run.checkpoint?.history ? [...run.checkpoint.history] : [];
@@ -350,9 +383,9 @@ async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
       try { decision = normalize(parseJson<Decision>(res.text), allowed); }
       catch { decision = { kind: 'finish', output: res.text.slice(0, 2000) || 'The model returned no parseable decision.' }; }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await persist({ status: 'failed', error: msg.slice(0, 500), finished_at: new Date().toISOString(), lease_until: null });
-      await finishEvent('agent_run_failed', `Run failed: ${run.title} — ${msg.slice(0, 140)}`);
+      // Retry-or-fail seam: a transient 5xx/429/network error backs the run off instead of killing
+      // it; the checkpoint persisted after the last completed step, so the re-claim resumes here.
+      await failOrRetry(db, run, e instanceof Error ? e.message : String(e));
       return;
     }
     spent += stepCost;
@@ -385,7 +418,9 @@ async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
       spent_usd: spent,
       checkpoint: { step: step + 1, history },
       lease_until: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      retry_count: 0, next_attempt_at: null,   // real progress resets the transient-retry budget
     });
+    run.retry_count = 0;   // keep the in-memory row honest for a later step's failOrRetry
 
     if (spent >= Number(run.budget_usd ?? 0.5)) {
       await persist({ status: 'paused', error: `Budget cap of $${Number(run.budget_usd ?? 0.5).toFixed(2)} reached.`, lease_until: null });
@@ -422,17 +457,18 @@ Deno.serve(async (req) => {
     if (!run) break;
     try { await executeRun(db, run); }
     catch (e) {
-      await db.from('agent_runs').update({
-        status: 'failed', error: (e instanceof Error ? e.message : String(e)).slice(0, 500),
-        finished_at: new Date().toISOString(), lease_until: null,
-      }).eq('id', run.id);
+      // Anything escaping executeRun goes through the same retry-or-fail gate as an in-step error.
+      await failOrRetry(db, run, e instanceof Error ? e.message : String(e));
     }
   }
 
   // Queue still non-empty? Chain another invocation (fire-and-forget) instead of blowing the clock.
   if (processed === RUNS_PER_INVOCATION && secret) {
     const { count } = await db.from('agent_runs').select('id', { count: 'exact', head: true })
-      .in('status', ['queued']).limit(1);
+      .in('status', ['queued'])
+      // Runs parked in transient backoff aren't claimable yet — don't chain an invocation for them.
+      .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`)
+      .limit(1);
     if ((count ?? 0) > 0) {
       void fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/garvis-worker`, {
         method: 'POST', headers: { 'x-worker-secret': secret, 'content-type': 'application/json' }, body: '{}',

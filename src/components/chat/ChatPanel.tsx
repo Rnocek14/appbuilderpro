@@ -139,6 +139,8 @@ interface Props {
   threadsReady: boolean;
   onSwitchThread: (id: string) => void;
   onNewThread: () => void;
+  /** Create a FEATURE BRANCH (thread + code fork). Absent when the runtime can't support them. */
+  onNewBranch?: () => void;
   onRenameThread: (id: string, title: string) => void;
   onDeleteThread: (id: string) => void;
   /** Quick-reply chips for a clarifying question the assistant just asked. */
@@ -156,8 +158,9 @@ interface Props {
   defaultPlanFirst?: boolean;
   /** Initial state of the "Review" (diff-before-write) toggle — defaulted ON for imported/real projects. */
   defaultReviewEdits?: boolean;
-  /** Restore every file a prior edit changed to its pre-edit version (atomic change-set undo). */
-  onRevert?: (paths: string[]) => void;
+  /** Restore every file a prior edit changed to its pre-edit version (atomic change-set undo).
+   *  `changes` is the message's stored per-file diff when it has one — branch reverts need it. */
+  onRevert?: (paths: string[], changes?: AIMessage['changes']) => void;
   /** Element picked via the preview's Select mode — attached to the next message as precise context. */
   selection?: SelectedElement | null;
   onClearSelection?: () => void;
@@ -210,7 +213,7 @@ function ForgeProgress({ gen }: { gen: Generation }) {
   );
 }
 
-export function ChatPanel({ projectId, messages, activeGeneration, lastGeneration = null, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection, onOpenAssets }: Props) {
+export function ChatPanel({ projectId, messages, activeGeneration, lastGeneration = null, busy, threads, activeThreadId, threadsReady, onSwitchThread, onNewThread, onNewBranch, onRenameThread, onDeleteThread, askOptions = [], plan = null, onApprovePlan, stream = null, onSend, onStop, defaultPlanFirst = false, defaultReviewEdits = false, onRevert, selection = null, onClearSelection, onOpenAssets }: Props) {
   const [input, setInput] = useState('');
   const { toast } = useToast();
   // The "Remember a preference" panel + a seed taken from the most recent user message, so
@@ -368,6 +371,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, lastGeneratio
           ready={threadsReady}
           onSwitch={onSwitchThread}
           onNew={onNewThread}
+          onNewBranch={onNewBranch}
           onRename={onRenameThread}
           onDelete={onDeleteThread}
         />
@@ -428,7 +432,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, lastGeneratio
                   {m.changes!.map((c) => <FileDiffRow key={c.path} c={c} />)}
                   {onRevert && (
                     <button
-                      onClick={() => onRevert(m.files_changed)}
+                      onClick={() => onRevert(m.files_changed, m.changes)}
                       title="Restore every file this change touched to its previous version"
                       className="inline-flex items-center gap-1 rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink"
                     >
@@ -445,7 +449,7 @@ export function ChatPanel({ projectId, messages, activeGeneration, lastGeneratio
                   ))}
                   {onRevert && (
                     <button
-                      onClick={() => onRevert(m.files_changed)}
+                      onClick={() => onRevert(m.files_changed, m.changes)}
                       title="Restore every file this change touched to its previous version"
                       className="inline-flex items-center gap-1 rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink"
                     >
