@@ -65,5 +65,10 @@ jobs:
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: Browser smoke tests
-        # Runs against a real Vite server with no backend — proves boot, routing, auth gating.
+        # Real Vite server, no real backend. The harmless localhost env makes the client
+        # "configured" so the mocked-auth specs can seed a session and mount the authed pages;
+        # signed-out gating behavior is unchanged (nothing listens on 54321).
+        env:
+          VITE_SUPABASE_URL: http://localhost:54321
+          VITE_SUPABASE_ANON_KEY: test-anon-key
         run: npx playwright test

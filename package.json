@@ -32,6 +32,7 @@
     "verify:orchestratorcases": "tsx src/lib/garvis/orchestratorCases.verify.ts",
     "verify:clientengagement": "tsx src/lib/garvis/clientEngagement.verify.ts",
     "verify:paperworkextract": "tsx src/lib/garvis/paperworkExtract.verify.ts",
+    "verify:fuzz": "tsx src/lib/garvis/gauntletFuzz.verify.ts",
     "verify:clustering": "tsx src/lib/garvis/clustering.verify.ts",
     "verify:universe": "tsx src/lib/garvis/universe.verify.ts",
     "verify:loops": "tsx src/lib/garvis/loops.verify.ts",
