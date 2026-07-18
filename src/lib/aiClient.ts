@@ -142,17 +142,13 @@ export interface EditResult {
 // ----------------------------------------------------------------
 
 export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
-  // ONE client-orchestrated pipeline for both direct (browser key) and cloud users: chunked short
-  // calls — shell first, then every page in PARALLEL, schema concurrent, verify + repair inline.
-  // Direct mode used to run a single serial 32k-token stream: the slowest possible shape, and one
-  // truncation could silently cost the whole tail of the app.
-  if (DIRECT || !resolveAI().ready) return chunkedGenerate(projectId, prompt, planContext);
-  const { data, error } = await supabase.functions.invoke('generate-app', {
-    body: { projectId, prompt, planContext },
-  });
-  if (error) throw new Error(await readFnError(error));
-  if (data?.error) throw new Error(data.error);
-  return data as GenerateResult;
+  // ONE pipeline, always: the chunked client orchestrator — shell first, then every page in
+  // PARALLEL against frozen contracts, schema concurrent, compile-verify + agentic repair inline.
+  // The edge `generate-app` function used to serve "edge mode + browser key" with a single serial
+  // 32k-token stream and static-QA-only healing — a strictly weaker build whose quality silently
+  // depended on which path you hit. Retired: every environment now gets the good pipeline (cloud
+  // users' model calls already relay through agent-turn, so no browser key is required).
+  return chunkedGenerate(projectId, prompt, planContext);
 }
 
 // Phased "what's next" roadmap from the Brain (intent) + Map (reality) + code. Saved so the

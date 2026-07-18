@@ -14,7 +14,7 @@ import { ChatPanel } from '../components/chat/ChatPanel';
 import { useProjectFiles, useGenerations, useChatMessages } from '../hooks/useProjectData';
 import { useProjectSecrets } from '../hooks/useProjectSecrets';
 import { useConnections, fnError } from '../hooks/useConnections';
-import { sendEdit, startGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, revertChangeSet, applyPendingEdit, createMissingModules, type EditEvent } from '../lib/aiClient';
+import { sendEdit, startGeneration, resumeGeneration, researchAnswer, generateProjectMap, generateRoadmap, generateIdeation, analyzeDocument, generateBackendFromProject, convertProjectToTokens, revertChangeSet, applyPendingEdit, createMissingModules, type EditEvent } from '../lib/aiClient';
 import { agenticVerifyAndFix } from '../lib/agent/edit';
 import { agentAvailable } from '../lib/agent/loop';
 import { resolveAI } from '../lib/aiConfig';
@@ -231,6 +231,36 @@ export default function ProjectWorkspace() {
     if (wasGenerating.current && !isGenerating) { refreshFiles(); }
     wasGenerating.current = isGenerating;
   }, [activeGeneration, refreshFiles]);
+
+  // AUTO-RESUME an interrupted build. Generation orchestration runs in the browser tab, so a
+  // refresh/close mid-build leaves the generation stuck 'running' forever with no orchestrator
+  // behind it. Detect the zombie (no stage progress for 3+ minutes), mark it failed honestly,
+  // and resume from the durable record — automatically, not behind a button.
+  const resumedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!id || !activeGeneration || busy) return;
+    if (activeGeneration.kind !== 'create') return;
+    if (resumedFor.current === activeGeneration.id) return;
+    const stamps = (activeGeneration.stages ?? []).flatMap((s) => [s.started_at, s.finished_at]).filter(Boolean) as string[];
+    const lastProgress = stamps.length
+      ? Math.max(...stamps.map((t) => new Date(t).getTime()))
+      : new Date(activeGeneration.created_at).getTime();
+    if (Date.now() - lastProgress < 3 * 60_000) return; // still making progress (or too soon to judge)
+    resumedFor.current = activeGeneration.id;
+    void (async () => {
+      await supabase.from('project_generations')
+        .update({ status: 'failed', error: 'Interrupted — the tab orchestrating this build closed. Auto-resumed from the record.', finished_at: new Date().toISOString() })
+        .eq('id', activeGeneration.id).in('status', ['running', 'queued']);
+      await refreshGens();
+      try {
+        toast('info', 'This build was interrupted — resuming from what was already forged.');
+        await resumeGeneration(id);
+        await refreshFiles();
+      } catch (e) {
+        toast('error', e instanceof Error ? e.message : 'Auto-resume failed — start the build again (nothing was lost).');
+      }
+    })();
+  }, [id, activeGeneration, busy, refreshGens, refreshFiles, toast]);
 
   // open the entry file once generation lands
   useEffect(() => {
