@@ -28,18 +28,35 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-    // Owner JWT only — a human approves every post.
-    const authClient = createClient(
-      Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
-      { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
-    );
-    const { data: { user } } = await authClient.auth.getUser();
-    if (!user) return json({ error: 'Unauthorized' }, 401);
-    const uid = user.id;
+    // TWO callers, ONE path (the send-email gate, verbatim semantics):
+    //  1) the OWNER (browser) — Authorization JWT; the approval must be theirs.
+    //  2) the CONTENT-WEEK drain (worker) — x-worker-secret; allowed ONLY for approvals stamped
+    //     requested_by='garvis-auto' (the pre-authorized class), and the owner is derived FROM
+    //     the approval row, never from the caller. Everything downstream — payload-hash check,
+    //     atomic double-post claim, checkDraft, per-brand Profile-Key — is identical either way.
+    const workerSecret = Deno.env.get('WORKER_SECRET');
+    const byWorker = !!workerSecret && req.headers.get('x-worker-secret') === workerSecret;
 
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status, payload, payload_hash, result').eq('id', approval_id).single();
-    if (!approval || approval.owner_id !== uid) return json({ error: 'Approval not found' }, 404);
+      .select('id, owner_id, kind, status, payload, payload_hash, result, requested_by').eq('id', approval_id).single();
+    if (!approval) return json({ error: 'Approval not found' }, 404);
+
+    let uid: string;
+    if (byWorker) {
+      if (approval.requested_by !== 'garvis-auto') {
+        return json({ error: 'Worker publishes are limited to standing-rule (garvis-auto) approvals.' }, 403);
+      }
+      uid = approval.owner_id as string;
+    } else {
+      const authClient = createClient(
+        Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+        { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
+      );
+      const { data: { user } } = await authClient.auth.getUser();
+      if (!user) return json({ error: 'Unauthorized' }, 401);
+      if (approval.owner_id !== user.id) return json({ error: 'Approval not found' }, 404);
+      uid = user.id;
+    }
     if (approval.kind !== 'publish_post') return json({ error: 'Approval is not a publish_post.' }, 400);
     if (approval.status !== 'approved') return json({ error: `Approval is ${approval.status}, not approved.` }, 409);
     if (!(await payloadMatches(approval.payload, approval.payload_hash as string | null))) {

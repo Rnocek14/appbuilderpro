@@ -42,7 +42,12 @@ import {
   type PlaceRaw, type DiscoveredBiz,
 } from '../../../src/lib/garvis/placesDiscovery.ts';
 import { parseBusinessProfile, assembleFallbackSpec, previewSlug } from '../_shared/previewSpec.ts';
-import { hashPayload } from '../_shared/payloadHash.ts';
+import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
+// CONTENT WEEK (app_0088): the same editor rubric the boards use (fail-CLOSED here — an unjudged
+// draft never auto-queues) + the pure week machinery from standingCore.
+import { honestySystemPrompt, judgeSystemPrompt, judgeUserPrompt, parseJudgeVerdict } from '../_shared/copyJudge.ts';
+import { parseContentWeekConfig, weekSlots, contentWeekLine } from '../_shared/standingCore.ts';
+import { composeBatchRecipients } from '../_shared/batchCore.ts';
 // AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
@@ -397,6 +402,166 @@ Deno.serve(async (req) => {
         }
       }
     } catch { /* automation drain must never wedge the order tick */ }
+
+    // ---- CONTENT WEEK DRAIN (app_0088) -------------------------------------------------------
+    // The executor HALF: a staged week executes ONLY after its approval verifies — re-checked
+    // EVERY tick (rejected/expired cancels; pending waits) AND hash-verified twice: the approval's
+    // own payload_hash, plus pieces_hash against the CURRENT pieces (post-decision tampering with
+    // the content voids the decision). Social pieces become social_posts + pre-authorized
+    // publish_post approvals executed through social-publish (Ayrshare scheduleDate spreads the
+    // week); the email becomes an outreach_batch whose EXISTING drain sends through the one send
+    // path with suppression/kill-switch/daily-cap re-checked per recipient. garvis-auto posts are
+    // capped by outreach_settings.social_daily_cap.
+    try {
+      interface WeekPiece {
+        id: string; channel: 'social' | 'email'; platform?: string | null;
+        caption?: string; hashtags?: string[]; subject?: string; body?: string; segment?: string | null;
+        media_urls?: string[]; scheduled_for: string; quality: { score: number; notes: string };
+        state: string; reason?: string; social_post_id?: string; batch_id?: string;
+      }
+      interface WeekRow {
+        id: string; owner_id: string; world_id: string | null; week_start: string;
+        pieces: WeekPiece[]; status: string; approval_id: string | null; order_id: string | null;
+      }
+      const drainUrl = Deno.env.get('SUPABASE_URL')!;
+      const { data: weeks } = await admin.from('content_weeks')
+        .select('id, owner_id, world_id, week_start, pieces, status, approval_id, order_id')
+        .in('status', ['staged', 'queued']).order('created_at', { ascending: true }).limit(5);
+      for (const wk of (weeks ?? []) as WeekRow[]) {
+        if (!wk.approval_id) continue;
+        const { data: wkAp } = await admin.from('approvals')
+          .select('id, owner_id, kind, status, payload, payload_hash').eq('id', wk.approval_id).maybeSingle();
+        if (!wkAp || wkAp.kind !== 'content_week' || wkAp.owner_id !== wk.owner_id) continue;
+        if (wkAp.status === 'rejected' || wkAp.status === 'expired') {
+          await admin.from('content_weeks').update({ status: 'canceled', finished_at: nowIso }).eq('id', wk.id);
+          continue;
+        }
+        if (wkAp.status !== 'approved') continue; // pending — the human hasn't decided yet
+        if (!(await payloadMatches(wkAp.payload, wkAp.payload_hash as string | null))) {
+          await admin.from('content_weeks').update({ status: 'canceled', finished_at: nowIso }).eq('id', wk.id);
+          continue;
+        }
+        const wkPayload = wkAp.payload as { pieces_hash?: string };
+        if ((await hashPayload(wk.pieces)) !== wkPayload.pieces_hash) {
+          // The content changed AFTER the decision — the decision no longer covers it. Refuse.
+          await admin.from('content_weeks').update({ status: 'canceled', finished_at: nowIso }).eq('id', wk.id);
+          await admin.from('mind_events').insert({
+            owner_id: wk.owner_id, event_type: 'note', source: 'execution',
+            subject: `Content week of ${wk.week_start} canceled — pieces changed after approval (hash mismatch)`,
+            payload: { key: `content-week-tamper:${wk.id}`, week_id: wk.id },
+          }).then(() => {}, () => {});
+          continue;
+        }
+
+        const { data: st } = await admin.from('outreach_settings')
+          .select('social_daily_cap').eq('owner_id', wk.owner_id).maybeSingle();
+        const socialCap = (st as { social_daily_cap?: number } | null)?.social_daily_cap ?? 4;
+
+        const pieces = wk.pieces;
+        let mutated = false;
+        for (const piece of pieces) {
+          if (piece.state !== 'staged') continue;
+          // Unfilled [EDIT] holes NEVER go out — the piece skips with the reason on the record.
+          const textOf = piece.channel === 'social'
+            ? String(piece.caption ?? '') : `${piece.subject ?? ''}\n${piece.body ?? ''}`;
+          if (/\[EDIT\b/i.test(textOf)) {
+            piece.state = 'skipped'; piece.reason = 'has unfilled [EDIT] holes'; mutated = true; continue;
+          }
+
+          if (piece.channel === 'social') {
+            // Cap gate: today's machine-queued posts across ALL sources. 0 blocks all auto posting.
+            const since = `${nowIso.slice(0, 10)}T00:00:00Z`;
+            const { count } = await admin.from('approvals')
+              .select('id', { count: 'exact', head: true })
+              .eq('owner_id', wk.owner_id).eq('kind', 'publish_post').eq('requested_by', 'garvis-auto')
+              .gte('created_at', since);
+            if ((count ?? 0) >= socialCap) break; // the rest waits for the next tick/day
+
+            const postBody = [String(piece.caption ?? ''), (piece.hashtags ?? []).map((h) => `#${h}`).join(' ')]
+              .filter(Boolean).join('\n\n');
+            const { data: post } = await admin.from('social_posts').insert({
+              owner_id: wk.owner_id, world_id: wk.world_id, body: postBody,
+              platforms: [piece.platform], media_urls: piece.media_urls ?? [],
+              scheduled_for: piece.scheduled_for, status: 'queued',
+            }).select('id').single();
+            if (!post) { piece.state = 'skipped'; piece.reason = 'post insert failed'; mutated = true; continue; }
+            const postId = (post as { id: string }).id;
+            const postPayload = { post_row_id: postId };
+            const { data: pap } = await admin.from('approvals').insert({
+              owner_id: wk.owner_id, kind: 'publish_post', world_id: wk.world_id,
+              title: `Auto: post to ${piece.platform} (${piece.quality.score}/10, week of ${wk.week_start})`,
+              preview: postBody.slice(0, 400), payload: postPayload, payload_hash: await hashPayload(postPayload),
+              status: 'approved', requested_by: 'garvis-auto', decided_via: 'content_week', decided_at: nowIso,
+            }).select('id').single();
+            if (!pap) { piece.state = 'skipped'; piece.reason = 'approval insert failed'; mutated = true; continue; }
+            await admin.from('social_posts').update({ approval_id: (pap as { id: string }).id }).eq('id', postId);
+            const res = await fetch(`${drainUrl}/functions/v1/social-publish`, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json', 'x-worker-secret': workerSecret ?? '',
+                Authorization: `Bearer ${serviceKey}`, apikey: serviceKey,
+              },
+              body: JSON.stringify({ approval_id: (pap as { id: string }).id }),
+            });
+            const out = await res.json().catch(() => ({} as { ok?: boolean; error?: string }));
+            if (res.ok && (out as { ok?: boolean }).ok !== false) {
+              piece.state = 'queued'; piece.social_post_id = postId;
+            } else {
+              piece.state = 'skipped';
+              piece.reason = String((out as { error?: string }).error ?? `HTTP ${res.status}`).slice(0, 200);
+            }
+            mutated = true;
+          } else {
+            // EMAIL: only once its slot arrives — the batch drain then sends under the daily cap.
+            if (Date.parse(piece.scheduled_for) > Date.parse(nowIso)) continue;
+            let cq = admin.from('contacts').select('id, email, full_name, email_status')
+              .eq('owner_id', wk.owner_id).limit(2000);
+            if (wk.world_id) cq = cq.eq('world_id', wk.world_id);
+            if (piece.segment && piece.segment !== 'all') cq = cq.eq('stage', piece.segment);
+            const { data: contacts } = await cq;
+            const { recipients } = composeBatchRecipients((contacts ?? []) as { id: string; email: string | null; full_name: string | null; email_status: string | null }[]);
+            if (recipients.length === 0) {
+              piece.state = 'skipped'; piece.reason = 'no sendable contacts in the segment'; mutated = true; continue;
+            }
+            const { data: batch } = await admin.from('outreach_batches').insert({
+              owner_id: wk.owner_id, world_id: wk.world_id, subject: String(piece.subject ?? ''),
+              body_text: String(piece.body ?? ''), recipients, status: 'queued',
+            }).select('id').single();
+            if (!batch) { piece.state = 'skipped'; piece.reason = 'batch insert failed'; mutated = true; continue; }
+            const batchId = (batch as { id: string }).id;
+            const bPayload = { batch_id: batchId, recipient_count: recipients.length, week_id: wk.id };
+            const { data: bap } = await admin.from('approvals').insert({
+              owner_id: wk.owner_id, kind: 'send_batch', world_id: wk.world_id,
+              title: `Auto: send "${String(piece.subject ?? '').slice(0, 80)}" to ${recipients.length} (${piece.quality.score}/10)`,
+              preview: String(piece.body ?? '').slice(0, 280), payload: bPayload, payload_hash: await hashPayload(bPayload),
+              status: 'approved', requested_by: 'garvis-auto', decided_via: 'content_week', decided_at: nowIso,
+            }).select('id').single();
+            if (bap) {
+              await admin.from('outreach_batches').update({ approval_id: (bap as { id: string }).id }).eq('id', batchId);
+              piece.state = 'queued'; piece.batch_id = batchId;
+            } else { piece.state = 'skipped'; piece.reason = 'approval insert failed'; }
+            mutated = true;
+          }
+        }
+
+        const staged = pieces.filter((p) => p.state === 'staged').length;
+        if (mutated || staged === 0) {
+          const done = staged === 0;
+          await admin.from('content_weeks').update({
+            pieces, status: done ? 'done' : 'queued', ...(done ? { finished_at: nowIso } : {}),
+          }).eq('id', wk.id);
+          if (done) {
+            const queued = pieces.filter((p) => p.state === 'queued').length;
+            const skipped = pieces.filter((p) => p.state === 'skipped').length;
+            await admin.from('mind_events').insert({
+              owner_id: wk.owner_id, event_type: 'note', source: 'execution',
+              subject: `Content week of ${wk.week_start} executed — ${queued} queued${skipped > 0 ? `, ${skipped} skipped (reasons on record)` : ''}`,
+              payload: { key: `content-week-done:${wk.id}`, week_id: wk.id, queued, skipped },
+            }).then(() => {}, () => {});
+          }
+        }
+      }
+    } catch { /* content-week drain must never wedge the order tick */ }
   }
 
   // --- pick the work: one forced order, or the due set --------------------------------------------
@@ -538,6 +703,172 @@ Deno.serve(async (req) => {
           last_result: { status: 'unreachable', line: `Idea run skipped: ${msg}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
           next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
           updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
+
+    // ---- content_week: stage ONE judged week of content as ONE approval (app_0088) ------------
+    // The producer HALF: draft N posts + 1 email grounded ONLY in the business's own facts, judge
+    // every draft against the shared editor rubric (fail-CLOSED — no verdict, no queue; below the
+    // bar → discarded with its score kept for audit), persist the week, and stage ONE approval
+    // whose payload_hash binds the exact pieces + scores the decision covers. NOTHING publishes
+    // here — the drain (below, worker block) executes only after the approval verifies.
+    if (order.kind === 'content_week') {
+      try {
+        const cfg = parseContentWeekConfig(order.config);
+        if (!cfg) throw new Error('no usable platforms in config');
+        if (!order.world_id) throw new Error('no business bound (world_id missing)');
+        await checkCredits(admin, order.owner_id, 'board_copy');
+
+        // The Monday of the current week (UTC) — the idempotency key: a re-run never doubles a week.
+        const dow = (new Date(nowIso).getUTCDay() + 6) % 7;
+        const weekStart = new Date(Date.parse(nowIso) - dow * 86_400_000).toISOString().slice(0, 10);
+        const { data: existingWeek } = await admin.from('content_weeks')
+          .select('id').eq('order_id', order.id).eq('week_start', weekStart).maybeSingle();
+        if (existingWeek) {
+          await admin.from('standing_orders').update({
+            last_run_at: nowIso, next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
+          }).eq('id', order.id).then(() => {}, () => {});
+          continue;
+        }
+
+        // GROUNDING — facts only: the world's own context + brand kit + past approved pieces
+        // (closing the voiceExample dead wire: real posted work becomes the register to match).
+        const { data: world } = await admin.from('knowledge_worlds')
+          .select('title, business_context, dna').eq('id', order.world_id).maybeSingle();
+        const { data: brand } = await admin.from('brand_kits')
+          .select('tone, compliance_line').eq('world_id', order.world_id).maybeSingle();
+        const { data: pastPosts } = await admin.from('social_posts')
+          .select('body').eq('owner_id', order.owner_id).in('status', ['posted', 'scheduled'])
+          .order('created_at', { ascending: false }).limit(5);
+        const pastBodies = ((pastPosts ?? []) as { body: string }[]).map((p) => p.body).filter(Boolean);
+        const materials: Record<string, unknown> = {
+          business: world?.title ?? '', context: world?.business_context ?? {},
+          tone: (brand as { tone?: string } | null)?.tone ?? null,
+          compliance: (brand as { compliance_line?: string } | null)?.compliance_line ?? null,
+          voiceExample: pastBodies[0] ?? null,
+          doNotRepeat: pastBodies,
+        };
+
+        const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+        let cwCost = 0, cwIn = 0, cwOut = 0;
+        const cwTrack = (r: { costUsd: number; inputTokens: number; outputTokens: number }) => {
+          cwCost += r.costUsd; cwIn += r.inputTokens; cwOut += r.outputTokens;
+        };
+        const stripF = (t: string) => t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+
+        const briefs: { channel: 'social' | 'email'; platform?: string; brief: string }[] = [];
+        for (let i = 0; i < cfg.postsPerWeek; i++) {
+          const platform = cfg.platforms[i % cfg.platforms.length];
+          briefs.push({ channel: 'social', platform, brief: `One ${platform} post for this business this week — a fresh, specific angle grounded in the materials; do not reuse an opening from the do-not-repeat list.` });
+        }
+        if (cfg.emailSegment) briefs.push({ channel: 'email', brief: `One short owner-to-person email to the business's ${cfg.emailSegment === 'all' ? '' : `${cfg.emailSegment} `}contacts this week — one useful, specific message grounded in the materials. No invented offers or urgency.` });
+
+        const slots = weekSlots(weekStart, briefs.length, cfg.sendHourUtc);
+        const pieces: Record<string, unknown>[] = [];
+        const discards: Record<string, unknown>[] = [];
+        for (let i = 0; i < briefs.length; i++) {
+          const b = briefs[i];
+          try {
+            const draftR = await complete([
+              { role: 'system', content: honestySystemPrompt(b.channel) },
+              { role: 'user', content: `CHANNEL: ${b.channel}${b.platform ? ` (platform: ${b.platform})` : ''}\nMATERIALS (the only facts you may use): ${JSON.stringify(materials)}\n\nTHE BRIEF: ${b.brief}` },
+            ], { provider: m.provider, model: m.model, maxTokens: 900 });
+            cwTrack(draftR);
+            let fields: Record<string, unknown>;
+            try { fields = JSON.parse(stripF(draftR.text)); }
+            catch { discards.push({ channel: b.channel, platform: b.platform ?? null, fields: null, quality: null, why: 'unparseable' }); continue; }
+
+            const judgeOnce = async (piece: Record<string, unknown>) => {
+              const jr = await complete([
+                { role: 'system', content: judgeSystemPrompt(b.channel) },
+                { role: 'user', content: judgeUserPrompt(materials, b.brief, piece) },
+              ], { provider: m.provider, model: m.model, maxTokens: 300 });
+              cwTrack(jr);
+              return parseJudgeVerdict(jr.text);
+            };
+            let quality = await judgeOnce(fields).catch(() => null);
+            if (quality && quality.score < cfg.minScore) {
+              // ONE revision from the editor's notes; keep the better. Same loop the boards run.
+              try {
+                const rev = await complete([
+                  { role: 'system', content: honestySystemPrompt(b.channel) },
+                  { role: 'user', content: `MATERIALS: ${JSON.stringify(materials)}\n\nTHE BRIEF: ${b.brief}\n\nYOUR FIRST DRAFT: ${JSON.stringify(fields)}\n\nA professional editor's notes on it: ${quality.notes}\n\nRewrite the piece fixing exactly those notes. Keep every honesty rule: facts from MATERIALS only, [EDIT: …] holes for unknowns, merge fields untouched. Return ONLY the strict JSON.` },
+                ], { provider: m.provider, model: m.model, maxTokens: 900 });
+                cwTrack(rev);
+                const revised = JSON.parse(stripF(rev.text)) as Record<string, unknown>;
+                const q2 = await judgeOnce(revised).catch(() => null);
+                if (q2 && q2.score > quality.score) { fields = revised; quality = q2; }
+              } catch { /* keep the first draft */ }
+            }
+            // FAIL-CLOSED: no verdict → discard (never auto-queue an unjudged draft).
+            if (!quality) { discards.push({ channel: b.channel, platform: b.platform ?? null, fields, quality: null, why: 'judge_failed' }); continue; }
+            if (quality.score < cfg.minScore) { discards.push({ channel: b.channel, platform: b.platform ?? null, fields, quality, why: 'below_bar' }); continue; }
+            pieces.push({
+              id: crypto.randomUUID(), channel: b.channel, platform: b.platform ?? null,
+              ...(b.channel === 'social'
+                ? { caption: String(fields.caption ?? ''), hashtags: Array.isArray(fields.hashtags) ? fields.hashtags : [] }
+                : { subject: String(fields.subject ?? ''), body: String(fields.body ?? ''), segment: cfg.emailSegment }),
+              media_urls: [], scheduled_for: slots[i], quality, state: 'staged',
+            });
+          } catch { discards.push({ channel: b.channel, platform: b.platform ?? null, fields: null, quality: null, why: 'judge_failed' }); }
+        }
+        await spendCredits(admin, order.owner_id, { costUsd: cwCost, kind: 'board_copy', provider: m.provider, model: m.model, inputTokens: cwIn, outputTokens: cwOut });
+        if (pieces.length === 0) throw new Error(`nothing cleared the bar (${discards.length} discarded — scores kept)`);
+
+        const { data: weekRow, error: weekErr } = await admin.from('content_weeks').insert({
+          owner_id: order.owner_id, order_id: order.id, world_id: order.world_id,
+          week_start: weekStart, pieces, discards, status: 'staged', model: m.model, cost_usd: cwCost,
+        }).select('id').single();
+        if (weekErr || !weekRow) throw new Error(weekErr?.message ?? 'week insert failed');
+        const weekId = (weekRow as { id: string }).id;
+
+        // ONE approval, hash-bound to the exact pieces + scores. AUTO mode (earned by 3 clean
+        // weeks, re-read FRESH so a just-revoked autonomy is honored) stages it pre-approved —
+        // the speed-to-lead class: visible in the Queue and the ledger, capped, killable.
+        const { data: freshOrder } = await admin.from('standing_orders').select('auto_mode').eq('id', order.id).maybeSingle();
+        const auto = !!(freshOrder as { auto_mode?: boolean } | null)?.auto_mode;
+        const scores = pieces.map((p) => (p.quality as { score: number }).score);
+        const payload = { week_id: weekId, week_start: weekStart, pieces_hash: await hashPayload(pieces), scores };
+        const payload_hash = await hashPayload(payload);
+        const nPosts = pieces.filter((p) => p.channel === 'social').length;
+        const emailIncluded = pieces.some((p) => p.channel === 'email');
+        const preview = pieces.map((p) => {
+          const q = p.quality as { score: number };
+          const first = p.channel === 'social' ? String(p.caption ?? '').split('\n')[0] : String(p.subject ?? '');
+          return `[${q.score}/10] ${p.channel === 'social' ? p.platform : 'email'}: ${first.slice(0, 110)}`;
+        }).join('\n');
+        const { data: ap, error: apErr } = await admin.from('approvals').insert({
+          owner_id: order.owner_id, kind: 'content_week', world_id: order.world_id,
+          title: `Content week of ${weekStart}: ${nPosts} post${nPosts === 1 ? '' : 's'}${emailIncluded ? ' + 1 email' : ''} — scores ${Math.min(...scores)}–${Math.max(...scores)}`,
+          preview, payload, payload_hash,
+          ...(auto
+            ? { status: 'approved', requested_by: 'garvis-auto', decided_via: 'standing_rule', decided_at: nowIso }
+            : { requested_by: 'garvis' }),
+        }).select('id').single();
+        if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');
+        await admin.from('content_weeks').update({ approval_id: (ap as { id: string }).id }).eq('id', weekId);
+
+        ran++; changed++;
+        const line = contentWeekLine(`Week of ${weekStart}`, pieces.length, discards.length, emailIncluded, auto);
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'changed', line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
+        }).eq('id', order.id);
+        await admin.from('mind_events').insert({
+          owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+          subject: line.slice(0, 300),
+          payload: { key: `content-week:${order.id}:${weekStart}`, order_id: order.id, week_id: weekId, kept: pieces.length, discarded: discards.length },
+        }).then(() => {}, () => {});
+      } catch (e) {
+        failed++;
+        const msg = e instanceof Error ? e.message.slice(0, 160) : 'unknown error';
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Content week skipped: ${msg}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso), updated_at: nowIso,
         }).eq('id', order.id).then(() => {}, () => {});
       }
       continue;
