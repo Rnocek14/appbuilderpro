@@ -5,9 +5,9 @@
 // the client active when they pay. Nothing here charges a card directly — the automated Checkout path
 // layers on later. This is DISTINCT from FableForge's own /billing (which bills the operator for Pro).
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useSearchParams } from 'react-router-dom';
-import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, Rocket } from 'lucide-react';
+import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, Rocket, Zap } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { Button, StatCard, EmptyState, LoadError } from '../components/ui';
@@ -17,6 +17,8 @@ import {
   getBillingSettings, saveBillingSettings, listClientSubs, createClientSub, setClientStatus, deleteClientSub,
   type BillingSettings, type ClientSubRow,
 } from '../lib/garvis/billing/clientBilling';
+import { detectVertical } from '../lib/garvis/verticals';
+import { menuForVertical } from '../lib/garvis/automation/registry';
 
 const STATUS_CLS: Record<string, string> = {
   active: 'text-forge-ok', pending: 'text-forge-warn', canceled: 'text-forge-dim',
@@ -31,6 +33,8 @@ export default function ClientBilling() {
   const [settings, setSettings] = useState<BillingSettings>({ website_payment_link: null, automation_payment_link: null });
   const [subs, setSubs] = useState<ClientSubRow[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
+  // Upsell ladder rung 3: per-client custom-automation menu (industry-fitted, honest inventory).
+  const [menuFor, setMenuFor] = useState<string | null>(null);
 
   // record-a-sale form
   const [bizName, setBizName] = useState('');
@@ -186,8 +190,20 @@ export default function ClientBilling() {
                     </tr>
                   </thead>
                   <tbody>
-                    {subs.map((s) => (
-                      <tr key={s.id} className="border-t border-forge-border/60">
+                    {subs.map((s) => {
+                      const menu = menuFor === s.id
+                        ? menuForVertical(detectVertical(`${s.business_name} ${s.notes ?? ''}`))
+                        : [];
+                      const copyMenuPitch = async () => {
+                        const lines = menu.map((c) => `• ${c.title} — ${c.pitch} (${c.monthlyPrice})`);
+                        await navigator.clipboard.writeText(
+                          `Custom automations we can run for ${s.business_name}:\n${lines.join('\n')}\n\nEvery message is approved before it sends — nothing goes out without a yes.`,
+                        );
+                        toast('success', 'Automation pitch copied — paste it into your email or text.');
+                      };
+                      return (
+                      <React.Fragment key={s.id}>
+                      <tr className="border-t border-forge-border/60">
                         <td className="px-3 py-2">
                           <div className="font-medium text-forge-ink">{s.business_name}</div>
                           {s.email && <div className="text-[11px] text-forge-dim">{s.email}</div>}
@@ -201,6 +217,12 @@ export default function ClientBilling() {
                               className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:text-forge-ink">
                               {copied === s.id ? <Check size={11} className="text-forge-ok" /> : <Copy size={11} />} Link
                             </button>
+                            <button onClick={() => setMenuFor((m) => (m === s.id ? null : s.id))}
+                              title="Industry-fitted automations to pitch this client"
+                              className={cn('inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px]',
+                                menuFor === s.id ? 'border-forge-ember/50 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink')}>
+                              <Zap size={11} /> Automations
+                            </button>
                             {s.status !== 'active'
                               ? <button onClick={() => void mark(s, 'active')} className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-ok hover:bg-forge-ok/10">Mark paid</button>
                               : <button onClick={() => void mark(s, 'canceled')} className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:text-forge-ink">Cancel</button>}
@@ -208,7 +230,39 @@ export default function ClientBilling() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                      {menuFor === s.id && (
+                        <tr className="border-t border-forge-border/40 bg-forge-panel/30">
+                          <td colSpan={5} className="px-3 py-3">
+                            {/* The custom-automation menu (upsell rung 3): honest inventory only —
+                                'not_built' capabilities never appear here or anywhere. */}
+                            {menu.length === 0 ? (
+                              <p className="text-[11px] text-forge-dim">No deliverable automations match this business yet.</p>
+                            ) : (
+                              <>
+                                <div className="mb-1.5 flex items-center justify-between">
+                                  <span className="text-[10.5px] uppercase tracking-wide text-forge-dim">Recommended for their business flow</span>
+                                  <button onClick={() => void copyMenuPitch()} className="text-[11px] text-forge-ember hover:underline">Copy as pitch</button>
+                                </div>
+                                <ul className="space-y-1">
+                                  {menu.map((c) => (
+                                    <li key={c.id} className="text-[11.5px]">
+                                      <span className="font-medium text-forge-ink">{c.title}</span>
+                                      <span className="text-forge-dim"> — {c.pitch} </span>
+                                      <span className="text-forge-heat">({c.monthlyPrice})</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                                <p className="mt-1.5 text-[10.5px] text-forge-dim/80">
+                                  Set these up under Automations once they say yes — every send stays approval-gated.
+                                </p>
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

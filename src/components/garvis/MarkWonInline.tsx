@@ -46,6 +46,13 @@ export function MarkWonInline({ campaignId, onClosed }: {
           and send your agreement from Documents → e-sign when you're ready.
           {' '}<Link to="/garvis/client-billing" className="text-forge-ember hover:underline">Open Clients →</Link>
         </p>
+        {tier === 'website' && (
+          <p className="mt-1 text-forge-dim">
+            Upsell path: once the site's live, pitch the automation upgrade — their industry-fitted
+            menu (recall reminders, review requests, win-backs) is on their row under{' '}
+            <Link to="/garvis/client-billing" className="text-forge-ember hover:underline">Clients → Automations</Link>.
+          </p>
+        )}
       </div>
     );
   }
