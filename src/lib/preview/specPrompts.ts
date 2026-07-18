@@ -32,6 +32,14 @@ HARD RULES:
   Headlines sell the OUTCOME (a dry roof, a full table, glowing skin), not the company.
 - Theme colors are HSL triplets "H S% L%". Pick a palette that fits the business's trade and
   brand_style — distinctive, never default blue. bg is the page paper (subtle tint reads premium).
+- FLAIR — signature design devices. Pick 2-3 that fit the trade (never all; a site that uses a few
+  deliberately stops reading as a template):
+    "grain"       film-grain texture over the hero and CTA band — crafts, food, cinematic, luxury
+    "marquee"     the trust strip becomes an infinite scrolling proof ticker — shops, trades, gyms
+    "dots"        archival dot texture on alternate sections — clinics, boutiques, airy brands
+    "ruled"       engineered ruled-line texture on alternate sections — legal, editorial, ink-on-paper
+    "outline"     the big CTA-banner headline set as hollow outline type — editorial, luxury, gyms
+    "hard-shadow" hard offset block shadows on cards — bold trades, no-nonsense shops, brutalist
 - Sections: choose ONLY from the allowed list, in a persuasive order (hero first; a quote/ctaBanner
   must appear). Skip sections the profile has no content for.
 - SEO title ≤ 60 chars with the location; description ≤ 155 chars with a call to action.
@@ -71,7 +79,8 @@ Return:
  "tagline": str,
  "theme": {"primary": "H S% L%", "primaryInk": "H S% L%", "bg": "H S% L%", "ink": "H S% L%",
            "muted": "H S% L%", "card": "H S% L%", "border": "H S% L%", "radius": int(0-28),
-           "displayFont": "Google Font", "bodyFont": "Google Font", "tone": str},
+           "displayFont": "Google Font", "bodyFont": "Google Font", "tone": str,
+           "flair": [2-3 of "grain"|"marquee"|"dots"|"ruled"|"outline"|"hard-shadow"]},
  "sections": [{"type": str, "props": {…}}],
  "seo": {"title": str, "description": str, "keywords": [str]},
  "footer": {"line": str}}`;

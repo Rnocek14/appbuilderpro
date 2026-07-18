@@ -75,17 +75,43 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
     : [spec.logoText, ''];
   const phone = spec.sections.find((s) => s.type === 'quote')?.props.phone as string | undefined;
 
+  // Signature devices (themePresets personality kit, ported): activated as pv-f-* classes on the
+  // root so the device CSS below can style hosts declaratively. Shot mode drops them — a static
+  // screenshot gains nothing from texture/motion, and marquee would freeze mid-scroll.
+  const flair = shot ? [] : (spec.theme.flair ?? []);
+
   return (
-    <div className={`pv-site min-h-screen bg-[hsl(var(--bg))] antialiased ${shot ? 'pv-shot' : ''}`} style={vars}>
+    <div className={`pv-site min-h-screen bg-[hsl(var(--bg))] antialiased ${shot ? 'pv-shot' : ''} ${flair.map((f) => `pv-f-${f}`).join(' ')}`} style={vars}>
       {/* Scoped rules the utility classes can't express: display font on headings, smooth
-          anchor scroll, and animation kill-switch for screenshot mode. */}
+          anchor scroll, the signature-device kit, and animation kill-switch for screenshot mode. */}
       <style>{`
         .pv-site { scroll-behavior: smooth; }
         .pv-site .pv-display, .pv-site h1, .pv-site h2, .pv-site h3 { font-family: "${spec.theme.displayFont}", ${spec.theme.bodyFont}, ui-sans-serif, sans-serif; }
         .pv-site ::selection { background: hsl(${spec.theme.primary} / 0.25); }
+        .pv-site::-webkit-scrollbar-thumb { background: hsl(${spec.theme.border}); border-radius: 6px; }
         @keyframes pv-kenburns { from { transform: scale(1); } to { transform: scale(1.09); } }
         .pv-site .pv-kenburns { animation: pv-kenburns 18s ease-out forwards; }
-        @media (prefers-reduced-motion: reduce) { .pv-site .pv-kenburns { animation: none; } }
+        /* Oversized display type for the hero headline — clamp() so it stays composed on phones. */
+        .pv-site .pv-hero-display { font-size: clamp(2.5rem, 6.2vw, 4.9rem); line-height: 1.02; letter-spacing: -0.02em; }
+        /* Card hover lift — compositor-friendly, snappy spring curve. */
+        .pv-site .pv-lift { transition: transform 0.22s cubic-bezier(0.16,1,0.3,1), box-shadow 0.22s cubic-bezier(0.16,1,0.3,1); }
+        .pv-site .pv-lift:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -10px hsl(${spec.theme.ink} / 0.18); }
+        /* Nav links: underline draws in on hover. */
+        .pv-site .pv-nav-link { background-image: linear-gradient(currentColor, currentColor); background-size: 0% 1.5px; background-repeat: no-repeat; background-position: left 100%; transition: background-size 0.25s cubic-bezier(0.16,1,0.3,1), color 0.2s; padding-bottom: 2px; }
+        .pv-site .pv-nav-link:hover { background-size: 100% 1.5px; }
+        /* ---- signature devices (activated by pv-f-* on the root) ---- */
+        .pv-f-grain .pv-grain-host { position: relative; isolation: isolate; }
+        .pv-f-grain .pv-grain-host::after { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.06; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); }
+        .pv-f-dots .pv-alt { background-image: radial-gradient(hsl(${spec.theme.ink} / 0.07) 1px, transparent 1px); background-size: 22px 22px; }
+        .pv-f-ruled .pv-alt { background-image: repeating-linear-gradient(to bottom, transparent, transparent 31px, hsl(${spec.theme.border}) 31px, hsl(${spec.theme.border}) 32px); }
+        .pv-f-outline #ctaBanner h2 { -webkit-text-stroke: 2px hsl(${spec.theme.primaryInk}); color: transparent; font-size: clamp(2.2rem, 5vw, 4rem); line-height: 1.04; }
+        .pv-f-hard-shadow .pv-card { box-shadow: 5px 5px 0 hsl(${spec.theme.ink} / 0.85); border-color: hsl(${spec.theme.ink} / 0.55); }
+        .pv-f-hard-shadow .pv-card.pv-lift:hover { transform: translate(-2px, -2px); box-shadow: 8px 8px 0 hsl(${spec.theme.ink} / 0.85); }
+        .pv-marquee { overflow: hidden; }
+        .pv-marquee-track { display: flex; gap: 3rem; width: max-content; animation: pv-marquee 30s linear infinite; }
+        .pv-marquee:hover .pv-marquee-track { animation-play-state: paused; }
+        @keyframes pv-marquee { to { transform: translateX(-50%); } }
+        @media (prefers-reduced-motion: reduce) { .pv-site .pv-kenburns, .pv-marquee-track { animation: none; } .pv-site .pv-lift, .pv-site .pv-nav-link { transition: none; } }
         .pv-shot *, .pv-shot *::before, .pv-shot *::after { transition: none !important; animation: none !important; opacity: 1 !important; transform: none !important; }
       `}</style>
 
@@ -97,7 +123,7 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
             </a>
             <nav className="hidden items-center gap-6 md:flex">
               {spec.nav.map((n) => (
-                <a key={n.anchor} href={`#${n.anchor}`} className="text-sm font-medium text-[hsl(var(--mut))] transition-colors hover:text-[hsl(var(--ink))]">{n.label}</a>
+                <a key={n.anchor} href={`#${n.anchor}`} className="pv-nav-link text-sm font-medium text-[hsl(var(--mut))] hover:text-[hsl(var(--ink))]">{n.label}</a>
               ))}
             </nav>
             <div className="flex items-center gap-2">
@@ -130,7 +156,8 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
           const C = SECTION_COMPONENTS[s.type] as React.ComponentType<Record<string, unknown>>;
           const extra = s.type === 'quote' && previewSiteId && leadSubmitUrl
             ? { previewSiteId, submitUrl: leadSubmitUrl } : {};
-          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} /> : null;
+          // flair AFTER the props spread: the device list is theme-owned, never section-prop-owned.
+          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} flair={flair} /> : null;
         })}
       </main>
 

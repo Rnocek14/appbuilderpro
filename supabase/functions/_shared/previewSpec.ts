@@ -151,6 +151,12 @@ export interface SectionSpec {
   props: Record<string, unknown>;
 }
 
+/** SIGNATURE DEVICES — the personality toolkit ported from the app builder's theme system
+ *  (themePresets.ts PERSONALITY_CSS). A site that uses 2-3 of these stops reading as "AI
+ *  template"; the renderer activates each purely presentationally. Whitelist-validated. */
+export const FLAIR_DEVICES = ['grain', 'marquee', 'dots', 'ruled', 'outline', 'hard-shadow'] as const;
+export type FlairDevice = (typeof FLAIR_DEVICES)[number];
+
 export interface ThemeSpec {
   /** HSL triplets, "H S% L%" (token style) — validated; renderer wraps in hsl(). */
   primary: string;
@@ -164,6 +170,8 @@ export interface ThemeSpec {
   displayFont: string;  // Google Font
   bodyFont: string;     // Google Font
   tone: string;         // one-line art direction ("trustworthy local craftsman")
+  /** 0-3 signature devices; the AI picks to fit the trade, recipes carry defaults. */
+  flair?: FlairDevice[];
 }
 
 export interface SiteSpec {
@@ -207,7 +215,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '16 78% 44%', primaryInk: '24 40% 98%', bg: '36 30% 97%', ink: '24 24% 12%',
       muted: '24 10% 40%', card: '36 20% 99.5%', border: '30 18% 88%', radius: 8,
-      displayFont: 'Sora', bodyFont: 'Inter', tone: 'trustworthy local craftsman — bold, direct, proof-forward',
+      displayFont: 'Sora', bodyFont: 'Inter', tone: 'trustworthy local craftsman — bold, direct, proof-forward', flair: ['marquee', 'hard-shadow'],
     },
     cta: 'Get a Free Quote',
   },
@@ -219,7 +227,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '350 62% 38%', primaryInk: '30 40% 97%', bg: '38 42% 96%', ink: '20 30% 13%',
       muted: '24 14% 38%', card: '40 40% 99%', border: '34 24% 87%', radius: 4,
-      displayFont: 'Fraunces', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, editorial — food photography leads',
+      displayFont: 'Fraunces', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, editorial — food photography leads', flair: ['grain', 'marquee'],
     },
     cta: 'Reserve a Table',
   },
@@ -231,7 +239,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '160 30% 32%', primaryInk: '150 20% 98%', bg: '80 20% 97%', ink: '160 18% 14%',
       muted: '160 8% 42%', card: '80 24% 99.5%', border: '90 12% 88%', radius: 20,
-      displayFont: 'Cormorant Garamond', bodyFont: 'Figtree', tone: 'calm, luxurious, airy — whitespace and softness',
+      displayFont: 'Cormorant Garamond', bodyFont: 'Figtree', tone: 'calm, luxurious, airy — whitespace and softness', flair: ['grain', 'dots'],
     },
     cta: 'Book Now',
   },
@@ -243,7 +251,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '210 90% 40%', primaryInk: '210 30% 98%', bg: '220 14% 96%', ink: '220 24% 12%',
       muted: '220 8% 40%', card: '220 10% 99.5%', border: '220 12% 87%', radius: 6,
-      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'competent, no-nonsense shop — steel blue, bold type, proof up front',
+      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'competent, no-nonsense shop — steel blue, bold type, proof up front', flair: ['hard-shadow', 'marquee'],
     },
     cta: 'Get an Estimate',
   },
@@ -255,7 +263,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '190 65% 34%', primaryInk: '190 30% 98%', bg: '195 35% 97.5%', ink: '200 30% 13%',
       muted: '200 12% 42%', card: '195 30% 99.5%', border: '195 20% 89%', radius: 12,
-      displayFont: 'Schibsted Grotesk', bodyFont: 'Hanken Grotesk', tone: 'calm clinical trust — clean teal, generous whitespace, credentials visible',
+      displayFont: 'Schibsted Grotesk', bodyFont: 'Hanken Grotesk', tone: 'calm clinical trust — clean teal, generous whitespace, credentials visible', flair: ['dots'],
     },
     cta: 'Book an Appointment',
   },
@@ -267,7 +275,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '222 40% 24%', primaryInk: '40 40% 96%', bg: '40 25% 97%', ink: '222 30% 12%',
       muted: '222 10% 40%', card: '40 20% 99.5%', border: '40 14% 88%', radius: 2,
-      displayFont: 'Newsreader', bodyFont: 'Figtree', tone: 'established counsel — ink navy on warm paper, serif authority, restraint',
+      displayFont: 'Newsreader', bodyFont: 'Figtree', tone: 'established counsel — ink navy on warm paper, serif authority, restraint', flair: ['ruled', 'outline'],
     },
     cta: 'Request a Consultation',
   },
@@ -279,7 +287,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '30 45% 38%', primaryInk: '36 40% 97%', bg: '36 22% 97.5%', ink: '28 26% 12%',
       muted: '28 10% 42%', card: '36 24% 99.5%', border: '32 16% 88%', radius: 0,
-      displayFont: 'Fraunces', bodyFont: 'Figtree', tone: 'quiet luxury listing — bronze on cream, editorial serif, photography leads',
+      displayFont: 'Fraunces', bodyFont: 'Figtree', tone: 'quiet luxury listing — bronze on cream, editorial serif, photography leads', flair: ['outline', 'grain'],
     },
     cta: 'Schedule a Showing',
   },
@@ -291,7 +299,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '80 85% 45%', primaryInk: '80 60% 8%', bg: '220 12% 10%', ink: '60 15% 95%',
       muted: '220 6% 62%', card: '220 12% 14%', border: '220 10% 22%', radius: 8,
-      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'committed-dark energy — near-black, one electric lime accent, hard type',
+      displayFont: 'Archivo', bodyFont: 'Inter', tone: 'committed-dark energy — near-black, one electric lime accent, hard type', flair: ['outline', 'grain', 'marquee'],
     },
     cta: 'Start Free Trial',
   },
@@ -303,7 +311,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '335 45% 40%', primaryInk: '340 30% 98%', bg: '30 30% 97.5%', ink: '335 20% 14%',
       muted: '335 8% 44%', card: '30 26% 99.5%', border: '30 16% 89%', radius: 14,
-      displayFont: 'Bricolage Grotesque', bodyFont: 'Onest', tone: 'warm curated shop — berry accent on cream, product photography first',
+      displayFont: 'Bricolage Grotesque', bodyFont: 'Onest', tone: 'warm curated shop — berry accent on cream, product photography first', flair: ['dots', 'marquee'],
     },
     cta: 'Visit the Shop',
   },
@@ -315,7 +323,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '25 85% 50%', primaryInk: '30 50% 98%', bg: '45 40% 97%', ink: '30 26% 13%',
       muted: '30 10% 42%', card: '45 36% 99.5%', border: '40 20% 87%', radius: 18,
-      displayFont: 'Bricolage Grotesque', bodyFont: 'Figtree', tone: 'joyful and trustworthy — sunny orange, rounded softness, real pet photos',
+      displayFont: 'Bricolage Grotesque', bodyFont: 'Figtree', tone: 'joyful and trustworthy — sunny orange, rounded softness, real pet photos', flair: ['dots', 'marquee'],
     },
     cta: 'Book a Visit',
   },
@@ -327,7 +335,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '42 50% 52%', primaryInk: '40 40% 8%', bg: '240 8% 8%', ink: '40 20% 94%',
       muted: '240 5% 60%', card: '240 8% 12%', border: '240 6% 20%', radius: 0,
-      displayFont: 'Gloock', bodyFont: 'Hanken Grotesk', tone: 'gallery dark — near-black stage, champagne accent, the work IS the site',
+      displayFont: 'Gloock', bodyFont: 'Hanken Grotesk', tone: 'gallery dark — near-black stage, champagne accent, the work IS the site', flair: ['grain', 'outline'],
     },
     cta: 'Check My Date',
   },
@@ -364,6 +372,11 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   const t = (r.theme ?? {}) as Record<string, unknown>;
   const hsl = (v: unknown, dflt: string) => (typeof v === 'string' && HSL_RE.test(v.trim()) ? v.trim() : dflt);
   const font = (v: unknown, dflt: string) => (typeof v === 'string' && FONT_RE.test(v.trim()) ? v.trim() : dflt);
+  // flair: whitelist-filtered signature devices, capped at 3; absent → the recipe's defaults
+  // (never zero personality). An unknown device name is dropped, never rendered.
+  const rawFlair = Array.isArray(t.flair)
+    ? (t.flair as unknown[]).filter((f): f is FlairDevice => FLAIR_DEVICES.includes(f as FlairDevice)).slice(0, 3)
+    : null;
   const theme: ThemeSpec = {
     primary: hsl(t.primary, recipe.theme.primary),
     primaryInk: hsl(t.primaryInk, recipe.theme.primaryInk),
@@ -376,6 +389,7 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     displayFont: font(t.displayFont, recipe.theme.displayFont),
     bodyFont: font(t.bodyFont, recipe.theme.bodyFont),
     tone: str(t.tone, recipe.theme.tone),
+    flair: rawFlair ?? recipe.theme.flair ?? [],
   };
 
   // sections: keep known types only, in given order; re-inject photo/review data from the

@@ -51,8 +51,9 @@ function Reveal({ children, delay = 0, className = '' }: { children: ReactNode; 
 }
 
 function SectionShell({ id, children, tight, alt }: { id: string; children: ReactNode; tight?: boolean; alt?: boolean }) {
+  // pv-alt marks alternate bands as texture hosts — the dots/ruled signature devices paint here.
   return (
-    <section id={id} className={`${alt ? 'bg-[hsl(var(--card))]' : ''} ${tight ? 'py-10' : 'py-16 sm:py-24'}`}>
+    <section id={id} className={`${alt ? 'pv-alt bg-[hsl(var(--card))]' : ''} ${tight ? 'py-10' : 'py-16 sm:py-24'}`}>
       <div className="mx-auto w-full max-w-6xl px-5 sm:px-8">{children}</div>
     </section>
   );
@@ -92,11 +93,11 @@ export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?
   // editorial/professional (legal, medical, real estate); the model or recipe picks it.
   if (p.variant === 'split' && hasImage) {
     return (
-      <section id="hero" className="relative isolate overflow-hidden">
+      <section id="hero" className="pv-grain-host relative isolate overflow-hidden">
         <div className="mx-auto grid w-full max-w-6xl items-center gap-10 px-5 py-16 sm:px-8 sm:py-24 lg:grid-cols-[1.1fr_1fr]">
           <Reveal>
             {p.eyebrow && <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-[hsl(var(--p))]">{p.eyebrow}</p>}
-            <h1 className="pv-display text-4xl font-semibold leading-[1.05] tracking-tight text-[hsl(var(--ink))] sm:text-6xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+            <h1 className="pv-display pv-hero-display font-semibold tracking-tight text-[hsl(var(--ink))]" style={{ textWrap: 'balance' }}>{p.heading}</h1>
             {p.sub && <p className="mt-5 max-w-xl text-lg leading-relaxed text-[hsl(var(--mut))]">{p.sub}</p>}
             <div className="mt-8 flex flex-wrap items-center gap-3">
               {p.cta && <Cta label={p.cta} />}
@@ -127,7 +128,7 @@ export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?
   }
 
   return (
-    <section id="hero" className="relative isolate overflow-hidden">
+    <section id="hero" className="pv-grain-host relative isolate overflow-hidden">
       {hasImage
         ? <>
             {/* pv-kenburns: an 18s slow zoom — the single frame reads as cinema, not a stock jpeg. */}
@@ -138,7 +139,7 @@ export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?
       <div className="mx-auto flex min-h-[520px] w-full max-w-6xl flex-col justify-center px-5 py-24 sm:min-h-[600px] sm:px-8">
         <Reveal>
           {p.eyebrow && <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-white/75">{p.eyebrow}</p>}
-          <h1 className="pv-display max-w-2xl text-4xl font-semibold leading-[1.05] tracking-tight text-white sm:text-6xl">{p.heading}</h1>
+          <h1 className="pv-display pv-hero-display max-w-3xl font-semibold tracking-tight text-white" style={{ textWrap: 'balance' }}>{p.heading}</h1>
           {p.sub && <p className="mt-5 max-w-xl text-lg leading-relaxed text-white/85">{p.sub}</p>}
           <div className="mt-8 flex flex-wrap items-center gap-3">
             {p.cta && <Cta label={p.cta} />}
@@ -162,11 +163,28 @@ export function Hero(p: { eyebrow?: string; heading?: string; sub?: string; cta?
   );
 }
 
-export function Trust(p: { items?: string[] }) {
+export function Trust(p: { items?: string[]; flair?: string[] }) {
+  const items = (p.items ?? []).slice(0, 4);
+  // "marquee" signature device: the static proof grid becomes an infinite scrolling ticker
+  // (track duplicated once — the -50% keyframe loops seamlessly; hover pauses it).
+  if (p.flair?.includes('marquee') && items.length >= 2) {
+    return (
+      <section id="trust" className="pv-marquee border-y border-[hsl(var(--bor))] bg-[hsl(var(--card))] py-5">
+        <div className="pv-marquee-track">
+          {[...items, ...items].map((t, i) => (
+            <span key={i} className="inline-flex shrink-0 items-center gap-2.5" aria-hidden={i >= items.length}>
+              <ShieldCheck size={18} className="shrink-0 text-[hsl(var(--p))]" />
+              <span className="whitespace-nowrap text-sm font-medium text-[hsl(var(--ink))]">{t}</span>
+            </span>
+          ))}
+        </div>
+      </section>
+    );
+  }
   return (
     <section id="trust" className="border-y border-[hsl(var(--bor))] bg-[hsl(var(--card))]">
       <div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-4 px-5 py-6 sm:grid-cols-4 sm:px-8">
-        {(p.items ?? []).slice(0, 4).map((t, i) => (
+        {items.map((t, i) => (
           <Reveal key={i} delay={i * 70} className="flex items-center gap-2.5">
             <ShieldCheck size={18} className="shrink-0 text-[hsl(var(--p))]" />
             <span className="text-sm font-medium text-[hsl(var(--ink))]">{t}</span>
@@ -185,7 +203,7 @@ export function Services(p: { heading?: string; sub?: string; services?: { name:
       <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {services.map((s, i) => (
           <Reveal key={i} delay={(i % 3) * 80}>
-            <div className="group h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg">
+            <div className="pv-card pv-lift group h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-6 shadow-sm">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[hsl(var(--p)/0.12)] text-[hsl(var(--p))]"><Check size={16} /></span>
               <h3 className="pv-display mt-4 text-lg font-semibold text-[hsl(var(--ink))]">{s.name}</h3>
               {s.blurb && <p className="mt-1.5 text-sm leading-relaxed text-[hsl(var(--mut))]">{s.blurb}</p>}
@@ -268,7 +286,7 @@ export function Reviews(p: { heading?: string; reviews?: { author: string; ratin
         ? <div className="mt-10 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             {reviews.map((r, i) => (
               <Reveal key={i} delay={(i % 3) * 80}>
-                <figure className="h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6 shadow-sm">
+                <figure className="pv-card pv-lift h-full rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6 shadow-sm">
                   <Stars rating={r.rating ?? 5} />
                   <blockquote className="mt-3 text-sm leading-relaxed text-[hsl(var(--ink))]">“{r.text}”</blockquote>
                   <figcaption className="mt-4 text-xs font-medium uppercase tracking-wide text-[hsl(var(--mut))]">{r.author}</figcaption>
@@ -412,7 +430,7 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
             {sent && <p className="text-sm font-medium text-[hsl(var(--p))]">{wired ? 'Sent — your request went through. You’ll hear back shortly.' : 'Thanks! This is a preview site — on the live site this reaches you instantly.'}</p>}
           </form>
         </div>
-        <div className="h-fit space-y-4 rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6">
+        <div className="pv-card h-fit space-y-4 rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] p-6">
           <p className="text-xs font-semibold uppercase tracking-wider text-[hsl(var(--mut))]">Prefer to talk?</p>
           {p.phone && <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} className="flex items-center gap-2.5 text-base font-semibold text-[hsl(var(--ink))]"><Phone size={17} className="text-[hsl(var(--p))]" /> {p.phone}</a>}
           {p.email && <a href={`mailto:${p.email}`} className="flex items-center gap-2.5 text-sm text-[hsl(var(--ink))]"><Mail size={16} className="text-[hsl(var(--p))]" /> {p.email}</a>}
@@ -425,7 +443,7 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
 
 export function CtaBanner(p: { heading?: string; sub?: string; cta?: string }) {
   return (
-    <section id="ctaBanner" className="bg-[hsl(var(--p))] py-16">
+    <section id="ctaBanner" className="pv-grain-host bg-[hsl(var(--p))] py-16">
       <div className="mx-auto flex w-full max-w-6xl flex-col items-start gap-6 px-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
         <Reveal>
           <h2 className="pv-display text-3xl font-semibold tracking-tight text-[hsl(var(--pi))]">{p.heading}</h2>

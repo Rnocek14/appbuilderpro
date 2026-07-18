@@ -4,7 +4,7 @@
 
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
-  usablePhotos, usableReviews, previewSlug, navFor, RECIPES,
+  usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES,
   type BusinessProfile,
 } from './spec';
 
@@ -90,6 +90,20 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   check('normalize: valid theme override kept', spec.theme.primary === '210 80% 40%');
   check('normalize: CTA floor enforced', spec.sections.some((s) => s.type === 'quote' || s.type === 'ctaBanner'));
   check('normalize: garbage input still yields a complete site', normalizeSpec('nonsense', ROOFER).sections.length > 5);
+}
+
+// signature-device flair (the app builder's personality kit, on prospect previews)
+{
+  check('recipes: every flair device is whitelisted', RECIPES.every((r) =>
+    (r.theme.flair ?? []).every((f) => (FLAIR_DEVICES as readonly string[]).includes(f))));
+  check('fallback: spec carries the recipe flair defaults (never zero personality)',
+    (assembleFallbackSpec(ROOFER).theme.flair ?? []).length > 0);
+  const flaired = normalizeSpec({ theme: { flair: ['grain', 'bogus-device', 'marquee', 'dots', 'ruled'] } }, ROOFER);
+  check('normalize: unknown flair devices dropped, list capped at 3',
+    JSON.stringify(flaired.theme.flair) === JSON.stringify(['grain', 'marquee', 'dots']));
+  const noFlair = normalizeSpec({ theme: { primary: '210 80% 40%' } }, ROOFER);
+  check('normalize: absent flair falls back to the recipe default',
+    JSON.stringify(noFlair.theme.flair) === JSON.stringify(pickRecipe(ROOFER).theme.flair));
 }
 
 // slug + nav helpers
