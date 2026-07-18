@@ -114,6 +114,77 @@ export function fieldsFromPage(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Honest fact extraction from the prospect's own page text
+// ---------------------------------------------------------------------------
+
+/** Facts a page LITERALLY states about the business — no inference, no model call. Everything here
+ *  is quotable back to the owner ("your site says…"), which is what makes the rebuilt demo read as
+ *  THEIR business instead of a template with their name pasted in. Absent facts stay absent. */
+export interface SiteFacts {
+  services: string[];              // the named services their page lists, verbatim (title-cased)
+  establishedYear: number | null;  // "Since 1987" / "Established 2003" — bounds-checked
+  serviceArea: string[];           // "Serving Fox Lake and the Chain O'Lakes" → the named places
+  familyOwned: boolean;            // the page says family-owned / family owned & operated
+  description: string | null;      // one honest line assembled ONLY from the facts above
+}
+
+const cleanListItem = (s: string, maxWords: number): string | null => {
+  const t = s.replace(/^\s*(?:and|&|\+|the)\s+/i, '').replace(/\s+/g, ' ').trim().replace(/[.:;,]+$/, '');
+  if (t.length < 3 || t.length > 40 || !/[a-z]/i.test(t) || t.split(' ').length > maxWords) return null;
+  return t;
+};
+
+/** Deterministic extraction from scraped page text. The services pattern is colon/verb-gated
+ *  ("Services: …", "we offer …") so a nav menu's bare "Services" link never yields fake items —
+ *  a page that doesn't name its services yields none and the caller keeps the generic trade name. */
+export function extractSiteFacts(text: string | null | undefined, nowYear: number): SiteFacts {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim().slice(0, 20_000);
+  const facts: SiteFacts = { services: [], establishedYear: null, serviceArea: [], familyOwned: false, description: null };
+  if (!t) return facts;
+
+  for (const m of t.matchAll(/(?:services(?:\s+include[sd]?)?\s*:|we offer|we provide|we specialize in|specializing in)\s+([^.!?]{8,300})/gi)) {
+    for (const part of m[1].split(/[,;•·|]|\band\b/i)) {
+      const item = cleanListItem(part, 5);
+      const cased = item ? titleCase(item) : null;
+      if (cased && !facts.services.includes(cased)) facts.services.push(cased);
+      if (facts.services.length >= 8) break;
+    }
+    if (facts.services.length >= 8) break;
+  }
+
+  const yearM = t.match(/\b(?:since|established(?:\s+in)?|est\.?|founded(?:\s+in)?)\s+((?:19|20)\d{2})\b/i);
+  if (yearM) {
+    const y = parseInt(yearM[1], 10);
+    if (y >= 1900 && y <= nowYear) facts.establishedYear = y;
+  }
+
+  const areaM = t.match(/\bserving\s+([A-Za-z][^.!?]{2,90}?)(?=\s+since\s+(?:19|20)\d{2}\b|[.!?]|$)/i);
+  if (areaM) {
+    for (const part of areaM[1].split(/,|\band\b|&/i)) {
+      const a = cleanListItem(part, 5);
+      // Proper-noun places only ("Fox Lake"), so "serving homeowners across the county" adds nothing.
+      if (a && /^[A-Z]/.test(a) && !facts.serviceArea.includes(a)) facts.serviceArea.push(a);
+      if (facts.serviceArea.length >= 6) break;
+    }
+  }
+
+  facts.familyOwned = /family[-\s]owned/i.test(t);
+
+  const areaPhrase = facts.serviceArea.length
+    ? `serving ${facts.serviceArea.length > 1
+        ? `${facts.serviceArea.slice(0, -1).join(', ')} and ${facts.serviceArea[facts.serviceArea.length - 1]}`
+        : facts.serviceArea[0]}`
+    : '';
+  const sincePhrase = facts.establishedYear ? `since ${facts.establishedYear}` : '';
+  const tail = [areaPhrase, sincePhrase].filter(Boolean).join(' ');
+  if (facts.familyOwned && tail) facts.description = `Family-owned, ${tail}.`;
+  else if (facts.familyOwned) facts.description = 'Family-owned and operated.';
+  else if (tail) facts.description = `${tail[0].toUpperCase()}${tail.slice(1)}.`;
+
+  return facts;
+}
+
 export interface HuntProfileInput {
   url: string;
   niche: string;
@@ -125,12 +196,15 @@ export interface HuntProfileInput {
   location?: string | null;                               // real city/state (e.g. from Places) — optional
   phone?: string | null;                                  // real phone (e.g. from Places) — optional
   rating?: { rating: number | null; count: number | null } | null;  // real Places rating — optional
+  facts?: SiteFacts | null;                               // extractSiteFacts(pageText) — literal page facts
 }
 
 /** Merge the deterministic fields + scraped assets + audit into a raw BusinessProfile object for
  *  parseBusinessProfile to validate. Reuses the exact same buildProfile the interactive scraper uses
  *  (one implementation), so photo provenance + honesty are identical. A real location/phone (from
- *  Google Places) rides through when provided — never invented. */
+ *  Google Places) rides through when provided — never invented. When page facts were extracted, the
+ *  services THEY list replace the generic trade placeholder and their own claims become the
+ *  description/service_area — the profile carries their words, not ours. */
 export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unknown> {
   const fields = fieldsFromPage(input.page, input.niche, input.fallbackName, input.location, input.rating ?? null);
   const ctx: ScrapeContext = {
@@ -142,6 +216,11 @@ export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unk
   };
   const raw = buildProfile(fields, ctx);
   if (input.phone && input.phone.trim()) raw.phone = input.phone.trim().slice(0, 40);  // real Places phone
+  if (input.facts) {
+    if (input.facts.services.length) raw.services = input.facts.services;
+    if (input.facts.serviceArea.length) raw.service_area = input.facts.serviceArea;
+    if (input.facts.description) raw.description = input.facts.description;
+  }
   return raw;
 }
 

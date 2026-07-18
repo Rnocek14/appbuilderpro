@@ -1,6 +1,7 @@
 // Run: npx tsx src/lib/garvis/clientHuntBuild.verify.ts
 import {
   pickHuntTargets, cleanBusinessName, fieldsFromPage, buildHuntProfileRaw, buildHuntPitch, huntRunLine,
+  extractSiteFacts,
   type HuntProfileInput,
 } from './clientHuntBuild';
 import { auditSite, type SiteAudit } from './siteAudit';
@@ -117,6 +118,58 @@ const serper = {
     /found 12 new businesses/.test(productive) && /built 3 demos/.test(productive) && /approval/.test(productive) && /Nothing sent on its own/.test(productive));
   check('built-but-no-email is honest that nothing queued', /nothing was queued/.test(huntRunLine('Roofers hunt', 5, 2, 0)));
   check('discovered-but-not-yet-built is still reported', /found 8 new businesses/.test(huntRunLine('Roofers hunt', 8, 0, 0)) && !/built/.test(huntRunLine('Roofers hunt', 8, 0, 0)));
+}
+
+// --- extractSiteFacts: only what the page literally says survives ------------------------------
+{
+  const kowalski = "KOWALSKI PLUMBING & SEWER Serving Fox Lake and the Chain O'Lakes Since 1987 "
+    + 'Menu Home Services About Us Welcome to our web site. We are a family owned plumbing company. '
+    + 'Services: rodding, sump pumps, water heaters, sewer repair, bathroom remodel. '
+    + 'Call us at (847) 555-0134. We accept checks and cash.';
+  const f = extractSiteFacts(kowalski, 2026);
+  check('named services extracted from the explicit list (all 5)',
+    f.services.length === 5 && f.services.includes('Sump Pumps') && f.services.includes('Bathroom Remodel'));
+  check('"Since 1987" becomes the established year', f.establishedYear === 1987);
+  check('"Serving X and the Y" becomes the service area (leading "the" stripped)',
+    f.serviceArea.length === 2 && f.serviceArea[0] === 'Fox Lake' && f.serviceArea[1] === "Chain O'Lakes");
+  check('"family owned" (no hyphen) is detected', f.familyOwned === true);
+  check('the description is assembled ONLY from observed facts',
+    f.description === "Family-owned, serving Fox Lake and Chain O'Lakes since 1987.");
+}
+{
+  const f = extractSiteFacts('Family-owned and operated. We offer drain cleaning and water heater installation.', 2026);
+  check('"we offer" verb form also yields services', f.services.length === 2 && f.services[0] === 'Drain Cleaning');
+  check('family-owned detected and leads the description', f.familyOwned && f.description === 'Family-owned and operated.');
+}
+{
+  check('empty/null text → no facts, null description', extractSiteFacts(null, 2026).description === null
+    && extractSiteFacts('', 2026).services.length === 0);
+  check('a nav menu ("Home Services About Us") never yields fake services',
+    extractSiteFacts('Menu Home Services About Us Contact Welcome to the site', 2026).services.length === 0);
+  check('a future "since" year is rejected', extractSiteFacts('Proudly serving you since 2199.', 2026).establishedYear === null);
+  check('"largest 2020 selection" does not fake an est-year', extractSiteFacts('The largest 2020 selection in town', 2026).establishedYear === null);
+  check('services are capped at 8', extractSiteFacts(`Services: ${Array.from({ length: 12 }, (_, i) => `service type ${String.fromCharCode(97 + i)}`).join(', ')}.`, 2026).services.length <= 8);
+  check('"Established 2003" parses', extractSiteFacts('Established 2003, we do tile work.', 2026).establishedYear === 2003);
+}
+
+// --- buildHuntProfileRaw + facts: their words replace the generic placeholder ------------------
+{
+  const audit = auditSite({ url: 'http://kp.com', reachable: true, title: 'x', text: 'thin', hasViewport: false }, 2026);
+  const base: HuntProfileInput = {
+    url: 'http://kp.com', niche: 'plumbers', fallbackName: 'Kowalski Plumbing',
+    page: { title: 'Kowalski Plumbing' }, images: [], email: null, audit,
+  };
+  const withFacts = buildHuntProfileRaw({
+    ...base,
+    facts: { services: ['Rodding', 'Sump Pumps'], establishedYear: 1987, serviceArea: ['Fox Lake'], familyOwned: true, description: 'Family-owned, serving Fox Lake since 1987.' },
+  });
+  check('extracted services replace the generic trade placeholder',
+    Array.isArray(withFacts.services) && (withFacts.services as string[]).join(',') === 'Rodding,Sump Pumps');
+  check('service area + description ride into the profile',
+    (withFacts.service_area as string[])[0] === 'Fox Lake' && withFacts.description === 'Family-owned, serving Fox Lake since 1987.');
+  const noFacts = buildHuntProfileRaw(base);
+  check('no facts → the honest generic trade service stands, nothing invented',
+    (noFacts.services as string[]).join(',') === 'Plumbing' && noFacts.description === undefined && noFacts.service_area === undefined);
 }
 
 console.log(`\nclientHuntBuild.verify: ${passed} passed, ${failed} failed`);

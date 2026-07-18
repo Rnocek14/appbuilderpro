@@ -31,7 +31,14 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
-import { buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts } from '../../../src/lib/garvis/clientHuntBuild.ts';
+// THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
+// the browser preview engine runs, so hunted prospects get the crafted site, not the template.
+import {
+  extractJson, SPEC_SYSTEM, specPrompt, STRATEGY_SYSTEM, CRITIQUE_SYSTEM,
+  strategyBlock, critiqueBlock, critiqueUserPrompt,
+} from '../../../src/lib/preview/specPrompts.ts';
+import { normalizeStrategy, normalizeCritique, critiqueWarrantsRefine, fallbackAudit } from '../../../src/lib/preview/strategy.ts';
 import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
 import { deriveSignals, proposeFromSignals } from '../../../src/lib/garvis/automation/detect.ts';
 import { detectVertical } from '../../../src/lib/garvis/verticals.ts';
@@ -41,7 +48,7 @@ import {
   PLACES_FIELD_MASK, parsePlace, buildDiscoveryQueries, exhaustionUpdate,
   type PlaceRaw, type DiscoveredBiz,
 } from '../../../src/lib/garvis/placesDiscovery.ts';
-import { parseBusinessProfile, assembleFallbackSpec, previewSlug } from '../_shared/previewSpec.ts';
+import { parseBusinessProfile, assembleFallbackSpec, normalizeSpec, navFor, pickRecipe, previewSlug, type SiteSpec } from '../_shared/previewSpec.ts';
 import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 // CONTENT WEEK (app_0088): the same editor rubric the boards use (fail-CLOSED here — an unjudged
 // draft never auto-queues) + the pure week machinery from standingCore.
@@ -1259,18 +1266,79 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     url: finalUrl, niche: lead.keyword, fallbackName: lead.company_name,
     page, images, email, audit, location, phone: lead.phone,
     rating: lead.place_id ? env.runRatings.get(lead.place_id) ?? null : null,
+    // The facts their page literally states (named services, "since 1987", areas served) ride into
+    // the profile, so the rebuild carries THEIR specifics instead of a generic trade placeholder.
+    facts: extractSiteFacts(pageText, env.nowYear),
   });
   const { profile } = parseBusinessProfile(raw);
   if (!profile) return 'skipped';
 
-  // Save the profile + the deterministic recipe demo (identical to ingest-profile — one build path).
+  // Save the profile, then build the demo through the intelligence chain below.
   const { data: profileRow, error: pErr } = await admin.from('business_profiles').insert({
     user_id: order.owner_id, business_name: profile.business_name, industry: profile.industry,
     website_score: profile.current_website_score ?? null, profile,
   }).select('id').single();
   if (pErr || !profileRow) return 'skipped';
 
-  const spec = assembleFallbackSpec(profile);
+  // THE INTELLIGENCE CHAIN, server-side — the same strategist → art-director → owner-critique →
+  // refine pass the manual preview engine runs (src/lib/preview/engine.ts), so a hunted prospect
+  // gets the crafted, strategy-driven site. Every stage fails soft: the deterministic recipe spec
+  // is the floor, and a chain failure never loses the demo. Real cost is metered per owner.
+  let spec: SiteSpec = assembleFallbackSpec(profile);
+  let specSource: 'ai' | 'fallback' = 'fallback';
+  let strategy: Record<string, unknown> | null = null;
+  let critique: Record<string, unknown> | null = null;
+  {
+    let aiCost = 0, aiIn = 0, aiOut = 0;
+    const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+    const track = (r: { costUsd: number; inputTokens: number; outputTokens: number }) => {
+      aiCost += r.costUsd; aiIn += r.inputTokens; aiOut += r.outputTokens;
+    };
+    try {
+      await checkCredits(admin, order.owner_id, 'board_copy');   // out of credits → template floor
+      const sR = await complete([
+        { role: 'system', content: STRATEGY_SYSTEM },
+        { role: 'user', content: JSON.stringify(profile, null, 1) },
+      ], { provider: m.provider, model: m.model, maxTokens: 1800 });
+      track(sR);
+      const strat = normalizeStrategy(extractJson(sR.text), profile);
+      const gR = await complete([
+        { role: 'system', content: SPEC_SYSTEM },
+        { role: 'user', content: specPrompt(profile) + strategyBlock(strat) },
+      ], { provider: m.provider, model: m.model, maxTokens: 8000 });
+      track(gR);
+      const aiSpec = normalizeSpec(extractJson(gR.text), profile);
+      aiSpec.nav = navFor(aiSpec.sections, pickRecipe(profile).cta);
+      spec = aiSpec; specSource = 'ai';
+      strategy = strat as unknown as Record<string, unknown>;
+      // Owner-simulation critique + ONE refine — fails soft to the draft it was critiquing.
+      try {
+        const cR = await complete([
+          { role: 'system', content: CRITIQUE_SYSTEM },
+          { role: 'user', content: critiqueUserPrompt(profile, spec) },
+        ], { provider: m.provider, model: m.model, maxTokens: 1500 });
+        track(cR);
+        const crit = normalizeCritique(extractJson(cR.text));
+        critique = crit as unknown as Record<string, unknown>;
+        if (critiqueWarrantsRefine(crit)) {
+          const rR = await complete([
+            { role: 'system', content: SPEC_SYSTEM },
+            { role: 'user', content: specPrompt(profile) + strategyBlock(strat) + critiqueBlock(crit) },
+          ], { provider: m.provider, model: m.model, maxTokens: 8000 });
+          track(rR);
+          const refined = normalizeSpec(extractJson(rR.text), profile);
+          refined.nav = navFor(refined.sections, pickRecipe(profile).cta);
+          spec = refined;
+        }
+      } catch { /* keep the un-refined AI draft */ }
+    } catch { /* the deterministic recipe spec stands */ }
+    if (aiCost > 0) {
+      await spendCredits(admin, order.owner_id, {
+        costUsd: aiCost, kind: 'preview_build', provider: m.provider, model: m.model,
+        inputTokens: aiIn, outputTokens: aiOut,
+      });
+    }
+  }
   const nonce = Math.random().toString(36).slice(2, 8);   // slug isn't enumerable by guessing names
   const slug = `${previewSlug(profile.business_name)}-${nonce}`;
   const previewUrl = env.appOrigin ? `${env.appOrigin}/preview-site/${slug}` : `/preview-site/${slug}`;
@@ -1295,7 +1363,11 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   const { data: site, error: sErr } = await admin.from('preview_sites').insert({
     user_id: order.owner_id, profile_id: profileRow.id, slug,
     business_name: profile.business_name, industry: profile.industry,
-    spec, pitch, spec_source: 'fallback', status: 'preview',
+    spec, pitch, spec_source: specSource, status: 'preview',
+    strategy, critique,
+    // Deterministic owner-language report grounded in the OBSERVED audit signals (profile.issues) —
+    // the public /report page shows real problems instead of synthesizing a generic shell.
+    audit: fallbackAudit(profile),
   }).select('id').single();
   if (sErr || !site) return 'skipped';
 
