@@ -7,7 +7,7 @@ import {
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor,
   type BusinessProfile,
 } from './spec';
-import { huntImagePrompts } from '../garvis/clientHuntBuild';
+import { huntImagePrompts, huntArtPrompts } from '../garvis/clientHuntBuild';
 
 let passed = 0, failed = 0;
 const check = (name: string, cond: boolean) => {
@@ -170,6 +170,31 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   check('aiImagery flag absent for real photos', assembleFallbackSpec(ROOFER).aiImagery === undefined);
   check('portal is a whitelisted hero variant',
     normalizeSpec({ sections: [{ type: 'hero', props: {}, variant: 'portal' }] }, ROOFER).sections[0].variant === 'portal');
+}
+
+// layered depth-sandwich hero: role-tagged AI pair rides in by ROLE, never by model URL
+{
+  const art = huntArtPrompts('Plumbing', 'bold');
+  check('art prompts: plumber gets a pipe-wrench object on transparent background',
+    !!art && /pipe wrench/i.test(art.object) && /transparent background/i.test(art.object));
+  check('art prompts: backdrop is abstract poster art with the hard rules',
+    !!art && /No people/.test(art.backdrop) && /no text/i.test(art.backdrop) && /no buildings/i.test(art.backdrop));
+  check('art prompts: trades without an iconic object get none (still-life path instead)',
+    huntArtPrompts('Hair & Beauty', null) === null);
+  const layered = {
+    ...ROOFER,
+    photos: [
+      { url: 'https://x/bg.png', alt: 'ai-backdrop', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+      { url: 'https://x/obj.png', alt: 'ai-object', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+    ],
+  };
+  const hero = normalizeSpec({ sections: [{ type: 'hero', props: { bgImage: 'https://evil/x.png' }, variant: 'layers' }] }, layered)
+    .sections.find((s) => s.type === 'hero')!;
+  check('normalize: layers kept as a variant, role assets injected from PROFILE (model URLs overwritten)',
+    hero.variant === 'layers' && hero.props.bgImage === 'https://x/bg.png' && hero.props.objectImage === 'https://x/obj.png');
+  const noRoles = normalizeSpec({ sections: [{ type: 'hero', props: {}, variant: 'layers' }] }, ROOFER).sections[0];
+  check('normalize: layers without the role pair carries no asset props (renderer falls back)',
+    noRoles.props.bgImage === undefined && noRoles.props.objectImage === undefined);
 }
 
 // slug + nav helpers

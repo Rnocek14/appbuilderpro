@@ -195,7 +195,7 @@ export type MotionTier = (typeof MOTION_TIERS)[number];
 /** Structural variants per section — different COMPOSITIONS, not palette swaps. Whitelisted here;
  *  normalizeSpec drops anything else and falls back to the recipe's default composition. */
 export const SECTION_VARIANTS: Partial<Record<string, readonly string[]>> = {
-  hero: ['fullbleed', 'split', 'stacked', 'editorial', 'portal'],
+  hero: ['fullbleed', 'split', 'stacked', 'editorial', 'portal', 'layers'],
   services: ['cards', 'rows'],
   reviews: ['grid', 'spotlight'],
   ctaBanner: ['band', 'giant'],
@@ -492,6 +492,11 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     if (s.type === 'hero') {
       const img = typeof s.props.image === 'string' ? s.props.image : undefined;
       s.props.image = img && photos.some((p) => p.url === img) ? img : photos[0]?.url;
+      // Layered depth-sandwich assets ride in by ROLE, never by model-supplied URL: the worker
+      // tags the generated pair alt 'ai-backdrop'/'ai-object'; both present → the 'layers' hero
+      // can render. A layers variant without both falls back in the renderer.
+      s.props.bgImage = photos.find((p) => p.alt === 'ai-backdrop')?.url;
+      s.props.objectImage = photos.find((p) => p.alt === 'ai-object')?.url;
       // The REAL phone rides into the hero so the call button dials it — never digits parsed out
       // of an AI-written button label ("Call us today" → dead tel: link).
       if (profile.phone) s.props.phone = profile.phone;
@@ -664,6 +669,8 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
           sub: profile.description ?? voice.sub,
           cta, secondaryCta: profile.phone ? `Call ${profile.phone}` : undefined,
           image: photos[0]?.url,
+          bgImage: photos.find((p) => p.alt === 'ai-backdrop')?.url,
+          objectImage: photos.find((p) => p.alt === 'ai-object')?.url,
           rating: profile.google_rating, reviewCount: profile.review_count,
         } });
         break;

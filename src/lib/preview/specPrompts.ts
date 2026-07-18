@@ -52,7 +52,10 @@ HARD RULES:
           "stacked" (centered, monumental) | "editorial" (ink on the page paper, rule-line
           eyebrow — legal, luxury, photography) | "portal" (a small framed photo zooms through
           into a full-bleed stage as you scroll, then the headline lands — the showpiece opener;
-          needs a strong photo + lively/cinematic motion)
+          needs a strong photo + lively/cinematic motion) | "layers" (the depth sandwich: backdrop
+          art → giant wordmark → the trade's iconic object floating OVER the type, drifting apart
+          on scroll — THE showpiece when photos tagged ai-backdrop AND ai-object exist; prefer it
+          then)
     services: "cards" (grid) | "rows" (indexed editorial menu — professional, no-nonsense)
     reviews: "grid" | "spotlight" (one big quote leads)
     ctaBanner: "band" | "giant" (oversized closer)

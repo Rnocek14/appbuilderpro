@@ -204,6 +204,34 @@ const IMAGE_SUBJECTS: [RegExp, string, string][] = [
   [/dental|medical|clinic|chiro|optom/i, 'clean instruments on a pale tray with soft depth of field', 'light refracting through clear glass and water, airy macro'],
 ];
 
+// Trade → the ONE iconic object for the layered depth-sandwich hero (floats over the wordmark).
+const HERO_OBJECTS: [RegExp, string][] = [
+  [/plumb|sewer|drain/i, 'a professional steel pipe wrench'],
+  [/electric/i, 'a vintage glass filament bulb'],
+  [/roof|gutter/i, 'a steel framing hammer'],
+  [/hvac|heating|cooling|furnace/i, 'an analog brass pressure gauge'],
+  [/auto|mechanic|tire|transmission/i, 'a chrome torque wrench'],
+  [/landscap|lawn|tree/i, 'a pair of steel pruning shears'],
+  [/paint/i, 'a wide paint brush loaded with paint'],
+  [/law|attorney|legal|account|tax|insur/i, 'a classic fountain pen'],
+  [/clean/i, 'an amber glass spray bottle'],
+];
+
+/** The layered-hero pair: an illustrated atmospheric backdrop + ONE iconic trade object isolated
+ *  on a transparent background (gpt-image-1 background:'transparent'). Same hard honesty rules —
+ *  poster art and an object, never fake evidence of their work. Pure; the worker executes. */
+export function huntArtPrompts(industry: string, tone?: string | null): { backdrop: string; object: string } | null {
+  const obj = HERO_OBJECTS.find(([re]) => re.test(industry))?.[1];
+  if (!obj) return null;                       // no iconic object → no layered hero for this trade
+  const mood = tone && /calm|airy|luxur|soft|clinical/i.test(tone)
+    ? 'soft luminous palette, generous negative space'
+    : 'deep dramatic palette, bold sweeping forms';
+  return {
+    backdrop: `Atmospheric editorial poster artwork: abstract dramatic clouds and sweeping light, ${mood}, painterly illustration style. No people, no text, no words, no logos, no buildings, no recognizable places.`,
+    object: `${obj}, dramatic studio product photography, floating at a slight angle, crisp edge lighting. Isolated object only, transparent background, no people, no hands, no text, no logos.`,
+  };
+}
+
 /** Two honest, generic still-life prompts (wide hero + tight detail) for a trade with no usable
  *  photos of its own. Hard rules ride in every prompt: no people, no text, no logos, no places —
  *  concept imagery, never fake evidence of "their work". Pure; the worker executes them. */

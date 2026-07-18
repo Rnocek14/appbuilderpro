@@ -91,8 +91,9 @@ function Stars({ rating = 5 }: { rating?: number }) {
 
 interface HeroProps {
   eyebrow?: string; heading?: string; sub?: string; cta?: string; secondaryCta?: string;
-  phone?: string; image?: string; rating?: number; reviewCount?: number; variant?: string;
-  motion?: string; themePrimary?: string;
+  phone?: string; image?: string; bgImage?: string; objectImage?: string;
+  rating?: number; reviewCount?: number; variant?: string;
+  motion?: string; themePrimary?: string; siteName?: string;
 }
 
 /** The observed-proof badge — rating/review count CountUp when the motion tier allows. */
@@ -141,6 +142,53 @@ export function Hero(p: HeroProps) {
       <Phone size={15} /> {p.secondaryCta}
     </a>
   );
+
+  // LAYERS — the depth sandwich: illustrated backdrop art → a giant wordmark → the trade's iconic
+  // object floating OVER the type, drifting apart as you scroll (pseudo-3D, no models needed).
+  // Needs the AI-generated role pair (backdrop + transparent object) + motion; else falls through.
+  if (p.variant === 'layers' && p.bgImage && p.objectImage && p.motion !== 'calm') {
+    return (
+      <section id="hero" className="pv-grain-host relative isolate">
+        <ScrollScene heightVh={200}>
+          {(prog) => {
+            const drift = Math.min(1, prog / 0.65);
+            const copy = Math.max(0, (prog - 0.55) / 0.35);
+            return (
+              <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[hsl(var(--ink))]">
+                {/* layer 1: backdrop art, slow drift + settle */}
+                <img src={p.bgImage} alt="" className="absolute inset-0 h-full w-full object-cover"
+                  style={{ transform: `scale(${1.18 - drift * 0.1}) translateY(${(1 - drift) * -26}px)`, opacity: 0.9 }} />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/65" />
+                {/* layer 2: the giant wordmark, rising between art and object */}
+                <div className="pv-display absolute inset-x-0 top-1/2 -translate-y-1/2 select-none whitespace-nowrap text-center font-bold text-white"
+                  style={{ fontSize: 'clamp(3rem, 11vw, 11rem)', letterSpacing: '-0.03em', lineHeight: 1,
+                    transform: `translateY(calc(-50% + ${(1 - drift) * 60}px))`, opacity: 0.25 + drift * 0.75,
+                    textShadow: '0 8px 60px rgba(0,0,0,0.45)' }}>
+                  {p.siteName}
+                </div>
+                {/* layer 3: the iconic object crossing OVER the type, faster drift + tilt */}
+                <img src={p.objectImage} alt="" className="relative z-10 w-[42%] max-w-[430px]"
+                  style={{ transform: `translateY(${(1 - drift) * 130 - 20}px) rotate(${-10 + drift * 14}deg)`,
+                    filter: 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))' }} />
+                {/* layer 4: the words land */}
+                <div className="absolute inset-x-0 bottom-10 flex flex-col items-center px-6 text-center"
+                  style={{ opacity: copy, transform: `translateY(${(1 - Math.min(1, copy)) * 24}px)` }}>
+                  {p.eyebrow && <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-white/80">{p.eyebrow}</p>}
+                  <h1 className="pv-display max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-5xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+                  <div className="mt-6 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
+                  {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} onDark lively={lively} />}
+                </div>
+              </div>
+            );
+          }}
+        </ScrollScene>
+      </section>
+    );
+  }
+  if (p.variant === 'layers') {
+    const img = p.image ?? p.bgImage;
+    return <Hero {...p} image={img} variant={img && p.motion !== 'calm' ? 'portal' : 'stacked'} />;
+  }
 
   // PORTAL — the zoom-through opener: a small framed image scales up into a full-bleed stage as
   // you scroll, then the headline and CTA land on it. Needs an image + motion; falls through to

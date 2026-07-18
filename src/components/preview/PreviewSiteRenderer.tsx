@@ -161,8 +161,8 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
           const C = SECTION_COMPONENTS[s.type] as React.ComponentType<Record<string, unknown>>;
           const extra = s.type === 'quote' && previewSiteId && leadSubmitUrl
             ? { previewSiteId, submitUrl: leadSubmitUrl } : {};
-          // flair/motion AFTER the props spread: theme-owned knobs, never section-prop-owned.
-          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} flair={flair} motion={motion} themePrimary={spec.theme.primary} /> : null;
+          // flair/motion/siteName AFTER the props spread: spec-owned knobs, never section-prop-owned.
+          return C ? <C key={`${s.type}-${i}`} variant={s.variant} {...s.props} {...extra} flair={flair} motion={motion} themePrimary={spec.theme.primary} siteName={spec.business_name} /> : null;
         })}
       </main>
 

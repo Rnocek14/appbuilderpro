@@ -31,7 +31,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
-import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
 import {
@@ -1310,14 +1310,26 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       if (!profile.photos.length && Deno.env.get('OPENAI_API_KEY')) {
         try {
           await checkCredits(admin, order.owner_id, 'image');
-          const [wide, tight] = huntImagePrompts(profile.industry, strat.tone);
           const made: typeof profile.photos = [];
-          for (const [prompt, size] of [[wide, '1536x1024'], [tight, '1024x1024']] as const) {
-            const url = await genHuntImage(admin, order.owner_id, prompt, size);
-            if (url) made.push({
-              url, source_type: 'ai_generated', can_use_in_preview: true, can_publish: false,
-              notes: 'AI-generated concept imagery — not photos of this business',
-            });
+          const aiPhoto = (url: string, alt: string) => ({
+            url, alt, source_type: 'ai_generated', can_use_in_preview: true, can_publish: false,
+            notes: 'AI-generated concept imagery — not photos of this business',
+          });
+          // Layered depth-sandwich pair first (backdrop art + transparent iconic object) — the
+          // "I need that" hero. Trades without an iconic object get the still-life pair instead.
+          const art = huntArtPrompts(profile.industry, strat.tone);
+          if (art) {
+            const bg = await genHuntImage(admin, order.owner_id, art.backdrop, '1536x1024');
+            if (bg) made.push(aiPhoto(bg, 'ai-backdrop'));
+            const obj = await genHuntImage(admin, order.owner_id, art.object, '1024x1024', true);
+            if (obj) made.push(aiPhoto(obj, 'ai-object'));
+          }
+          if (!made.length) {
+            const [wide, tight] = huntImagePrompts(profile.industry, strat.tone);
+            for (const [prompt, size] of [[wide, '1536x1024'], [tight, '1024x1024']] as const) {
+              const url = await genHuntImage(admin, order.owner_id, prompt, size);
+              if (url) made.push(aiPhoto(url, ''));
+            }
           }
           if (made.length) profile.photos = made;
         } catch { /* imagery is a bonus, never a blocker */ }
@@ -1414,14 +1426,14 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
 /** gpt-image-1 → project-assets bucket → public URL, metered per owner (kind 'image', same real
  *  ballpark the generate-image fn charges). Returns null on any failure — imagery never blocks. */
 // deno-lint-ignore no-explicit-any
-async function genHuntImage(admin: any, ownerId: string, prompt: string, size: '1536x1024' | '1024x1024'): Promise<string | null> {
+async function genHuntImage(admin: any, ownerId: string, prompt: string, size: '1536x1024' | '1024x1024', transparent = false): Promise<string | null> {
   try {
     const key = Deno.env.get('OPENAI_API_KEY');
     if (!key) return null;
     const res = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size, quality: 'medium' }),
+      body: JSON.stringify({ model: 'gpt-image-1', prompt, n: 1, size, quality: 'medium', ...(transparent ? { background: 'transparent' } : {}) }),
     });
     const data = await res.json().catch(() => ({}));
     const b64 = data?.data?.[0]?.b64_json as string | undefined;
