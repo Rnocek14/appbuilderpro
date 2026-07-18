@@ -205,7 +205,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
   const intelMoves: WorldIntelIn[] = [];
   if (worldIds.length) {
     const { data: intel } = await supabase.from('world_intelligence')
-      .select('world_id, last_reflected_at, signals, open_questions').in('world_id', worldIds);
+      .select('world_id, last_reflected_at, signals, open_questions, recommendation').in('world_id', worldIds);
     const eventsByWorld = new Map<string, number>();
     for (const e of events) {
       const p = (e as { payload?: Record<string, unknown> | null }).payload;
@@ -225,6 +225,10 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
         events7d: ev7,
         intelAgeDays: signals.intelAgeDays ?? null,
         topOpenQuestion: ((row.open_questions as string[] | null) ?? [])[0] ?? null,
+        // Only measured verdicts qualify — adaptiveRun prefixes exactly this marker when the
+        // recommendation came from adapt()'s numbers rather than any heuristic writer.
+        recommendation: typeof row.recommendation === 'string' && row.recommendation.startsWith('From your numbers:')
+          ? row.recommendation : null,
         asOf: now.toISOString(),
       });
     }

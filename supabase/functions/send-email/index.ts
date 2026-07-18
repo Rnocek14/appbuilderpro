@@ -88,7 +88,7 @@ Deno.serve(async (req) => {
     if (!resendKey) return json({ error: 'Email is not configured (RESEND_API_KEY missing).' }, 400);
 
     const { data: msg } = await admin.from('outreach_messages')
-      .select('id, owner_id, campaign_id, contact_id, preview_site_id, subject, body_text, to_address, status, sent_at')
+      .select('id, owner_id, campaign_id, contact_id, batch_id, preview_site_id, subject, body_text, to_address, status, sent_at')
       .eq('id', messageId).single();
     if (!msg || msg.owner_id !== uid) return json({ error: 'Message not found' }, 404);
     if (msg.sent_at || msg.status === 'sent') return json({ error: 'Message already sent.' }, 409);
@@ -125,9 +125,38 @@ Deno.serve(async (req) => {
       .eq('owner_id', uid).maybeSingle();
     if (!settings) return block('Outreach settings not configured (Settings → Outreach).');
     if (!settings.outbound_enabled) return block('Outbound is DISABLED (kill switch is off).');
-    if (!settings.from_email) return block('Set a from_email in Outreach settings before sending.');
-    if (!settings.physical_address?.trim()) return block('Missing CAN-SPAM physical address in Outreach settings.');
     if ((settings.daily_send_cap ?? 0) <= 0) return block('Daily send cap must be greater than zero.');
+
+    // WHICH BRAND SENDS (app_0085): resolve the message's business (batch → contact) and use its
+    // own sender identity when one is mapped. Identity applies as a UNIT — from-name/email/reply-to
+    // never half-mix across brands; only the CAN-SPAM mailing address may fall back to the global
+    // one (brands under one roof legitimately share it). Safety gates — kill switch, daily cap,
+    // warmup, timezone — stay owner-global above: identity is per-brand, safety is per-human.
+    let worldId: string | null = null;
+    if (msg.batch_id) {
+      const { data: b } = await admin.from('outreach_batches').select('world_id').eq('id', msg.batch_id).maybeSingle();
+      worldId = (b?.world_id as string | null) ?? null;
+    }
+    if (!worldId && msg.contact_id) {
+      const { data: c } = await admin.from('contacts').select('world_id').eq('id', msg.contact_id).maybeSingle();
+      worldId = (c?.world_id as string | null) ?? null;
+    }
+    type SenderIdentity = { from_name: string | null; from_email: string | null; reply_to: string | null; company_name: string | null; physical_address: string | null };
+    let wi: SenderIdentity | null = null;
+    if (worldId) {
+      const { data } = await admin.from('world_sender_identities')
+        .select('from_name, from_email, reply_to, company_name, physical_address').eq('world_id', worldId).maybeSingle();
+      wi = (data as SenderIdentity | null) ?? null;
+    }
+    const useWorld = !!wi?.from_email;
+    const fromEmail = useWorld ? (wi!.from_email as string) : ((settings.from_email as string | null) ?? '');
+    const fromName = (useWorld ? (wi!.from_name ?? wi!.company_name) : (settings.from_name ?? settings.company_name)) ?? 'Garvis';
+    const replyTo = (useWorld ? (wi!.reply_to || wi!.from_email) : (settings.reply_to || settings.from_email)) as string;
+    const companyName = ((useWorld ? wi!.company_name : settings.company_name) ?? '') as string;
+    const physicalAddress = ((useWorld && wi!.physical_address?.trim()) ? wi!.physical_address : settings.physical_address) as string | null;
+
+    if (!fromEmail) return block('Set a from_email in Outreach settings before sending.');
+    if (!physicalAddress?.trim()) return block('Missing CAN-SPAM physical address — set it in Outreach settings (or on this business’s sender identity).');
 
     const to = (msg.to_address ?? '').trim().toLowerCase();
     if (!to) return block('Recipient email is missing.');
@@ -188,7 +217,7 @@ Deno.serve(async (req) => {
     // satisfy it). We advertise the https target first, then the mailto as a fallback. A custom
     // template, if the owner set one, takes precedence as the primary.
     const httpsUnsub = `${Deno.env.get('SUPABASE_URL')}/functions/v1/unsubscribe?m=${messageId}`;
-    const mailtoUnsub = `mailto:${settings.from_email}?subject=unsubscribe&body=Please%20remove%20${encodeURIComponent(to)}`;
+    const mailtoUnsub = `mailto:${fromEmail}?subject=unsubscribe&body=Please%20remove%20${encodeURIComponent(to)}`;
     const customUnsub = settings.unsubscribe_url_template?.trim();
     const primaryUnsub = customUnsub || httpsUnsub;
     const listUnsub = customUnsub
@@ -203,7 +232,7 @@ Deno.serve(async (req) => {
     // CAN-SPAM requires a clear, conspicuous opt-out IN THE BODY — headers alone aren't enough. The
     // body link now points at the working endpoint too, so a click actually unsubscribes.
     const optOut = `To stop receiving these emails, click ${primaryUnsub} or reply "unsubscribe".`;
-    const footer = `\n\n--\n${settings.company_name ?? ''}\n${settings.physical_address}\n${optOut}`;
+    const footer = `\n\n--\n${companyName}\n${physicalAddress}\n${optOut}`;
     const finalText = (msg.body_text ?? '') + footer;
     const bodyHtml = paragraphsToHtml(msg.body_text ?? '') + paragraphsToHtml(footer);
 
@@ -211,9 +240,9 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${resendKey}` },
       body: JSON.stringify({
-        from: `${settings.from_name ?? settings.company_name ?? 'Garvis'} <${settings.from_email}>`,
+        from: `${fromName} <${fromEmail}>`,
         to: [to],
-        reply_to: settings.reply_to || settings.from_email,
+        reply_to: replyTo,
         subject: (msg.subject ?? '').trim(),
         text: finalText,
         html: bodyHtml,
@@ -234,7 +263,7 @@ Deno.serve(async (req) => {
     const sentAt = new Date().toISOString();
 
     await admin.from('outreach_messages').update({
-      status: 'sent', sent_at: sentAt, provider_message_id: resendId, from_address: settings.from_email,
+      status: 'sent', sent_at: sentAt, provider_message_id: resendId, from_address: fromEmail,
     }).eq('id', messageId);
 
     if (msg.campaign_id) {

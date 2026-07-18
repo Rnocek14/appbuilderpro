@@ -43,10 +43,10 @@ export async function queueEmailToSegment(args: {
 }
 
 /** Live reachable counts per segment, so the owner sees who a send would reach before approving. */
-export async function emailSegmentCounts(): Promise<Record<BatchSegment, number>> {
+export async function emailSegmentCounts(worldId?: string | null): Promise<Record<BatchSegment, number>> {
   const segs: BatchSegment[] = ['all', 'new', 'contacted', 'qualified', 'customer'];
   const out = {} as Record<BatchSegment, number>;
-  await Promise.all(segs.map(async (s) => { out[s] = await segmentCount(s).catch(() => 0); }));
+  await Promise.all(segs.map(async (s) => { out[s] = await segmentCount(s, worldId).catch(() => 0); }));
   return out;
 }
 

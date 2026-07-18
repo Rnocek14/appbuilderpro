@@ -25,9 +25,10 @@ export async function loadSocialMaterials(worldId: string): Promise<SocialMateri
     loadMailerMaterials(worldId),
     getBrandKit(worldId).catch(() => null),
     loadWeb(worldId).catch(() => null),
-    // VOICE MEMORY: the most recent post the owner actually approved and published is the best
-    // example of how they sound — board-copy's VOICE section matches its register, never copies it.
-    supabase.from('social_posts').select('body').eq('status', 'posted')
+    // VOICE MEMORY: the most recent post THIS BUSINESS actually approved and published is the best
+    // example of how it sounds — board-copy's VOICE section matches its register, never copies it.
+    // world_id filter is load-bearing: without it, one business's voice bleeds into another's captions.
+    supabase.from('social_posts').select('body').eq('status', 'posted').eq('world_id', worldId)
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
       .then((r) => r.data, () => null),
   ]);

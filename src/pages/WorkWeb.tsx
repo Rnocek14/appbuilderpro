@@ -399,7 +399,7 @@ export default function WorkWeb() {
       </div>
 
       {/* Contacts — the real view behind the "View contacts" tool */}
-      {showContacts && <ContactsModal onClose={() => setShowContacts(false)} />}
+      {showContacts && <ContactsModal worldId={worldId} onClose={() => setShowContacts(false)} />}
 
       {/* Upload list modal */}
       {uploadFor && (
@@ -1075,13 +1075,14 @@ function BrandKitPanel({ worldId, onSaved }: { worldId: string; onSaved: () => v
   );
 }
 
-function ContactsModal({ onClose }: { onClose: () => void }) {
+function ContactsModal({ worldId, onClose }: { worldId: string; onClose: () => void }) {
   const [rows, setRows] = useState<ContactRow[] | null>(null);
   useEffect(() => {
     let live = true;
-    listContacts().then((r) => { if (live) setRows(r); }).catch(() => { if (live) setRows([]); });
+    // This business's audience only — the global everyone-view lives on the Contacts page.
+    listContacts(200, worldId).then((r) => { if (live) setRows(r); }).catch(() => { if (live) setRows([]); });
     return () => { live = false; };
-  }, []);
+  }, [worldId]);
   const bad = new Set(['unsubscribed', 'bounced', 'complained', 'invalid']);
   return (
     <Modal open onClose={onClose} title="Contacts — everyone you can reach">

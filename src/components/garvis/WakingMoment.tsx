@@ -16,6 +16,7 @@ const KIND_DOT: Record<NextMove['kind'], string> = {
   lead_waiting: 'bg-forge-ok',
   reply_unanswered: 'bg-forge-ok',
   approval_waiting: 'bg-forge-warn',
+  measured_recommendation: 'bg-forge-ok', // green — the only move class backed by YOUR measured rows
   followup_staged: 'bg-forge-ember',
   natural_next: 'bg-forge-ember',
   blocking_empty: 'bg-forge-warn',

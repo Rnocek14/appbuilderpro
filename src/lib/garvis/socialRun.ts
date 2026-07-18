@@ -39,6 +39,7 @@ export async function queueSocialPost(input: {
   const names = (draft.platforms as Platform[]).map((p) => PLATFORM_LABEL[p] ?? p).join(', ');
   const when = draft.scheduleAt ? ` — scheduled for ${draft.scheduleAt.slice(0, 16)}` : '';
   const approvalId = await enqueueApproval({
+    worldId: input.worldId ?? null,
     kind: 'publish_post',
     title: `Post to ${names}${when}`,
     preview: `${draft.text.slice(0, 400)}${draft.text.length > 400 ? '…' : ''}`,
@@ -61,4 +62,34 @@ export async function cancelSocialPost(id: string): Promise<void> {
     .update({ status: 'canceled' }).eq('id', id).eq('status', 'queued').select('id');
   if (error) throw new Error(error.message);
   if (!data?.length) throw new Error('Only a still-queued post can be canceled.');
+}
+
+// ---- per-business destinations (app_0084) -----------------------------------
+// One Ayrshare connection, many brands: each business maps to its own Ayrshare Profile-Key so
+// its posts land on ITS linked accounts. social-publish enforces the fail-closed rule — once any
+// mapping exists, an unmapped business's post blocks instead of hitting the wrong brand.
+
+export interface WorldSocialProfile { world_id: string; profile_key: string }
+
+export async function listWorldSocialProfiles(): Promise<WorldSocialProfile[]> {
+  const { data, error } = await supabase.from('world_social_profiles').select('world_id, profile_key');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as WorldSocialProfile[];
+}
+
+export async function setWorldSocialProfile(worldId: string, profileKey: string): Promise<void> {
+  const key = profileKey.trim();
+  if (!key) throw new Error('Paste the Profile-Key first.');
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const { error } = await supabase.from('world_social_profiles').upsert({
+    owner_id: uid, world_id: worldId, profile_key: key, updated_at: new Date().toISOString(),
+  }, { onConflict: 'world_id' });
+  if (error) throw new Error(error.message);
+}
+
+export async function clearWorldSocialProfile(worldId: string): Promise<void> {
+  const { error } = await supabase.from('world_social_profiles').delete().eq('world_id', worldId);
+  if (error) throw new Error(error.message);
 }

@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     if (!rowId) return json({ error: 'Approval payload is missing post_row_id.' }, 400);
 
     const { data: row } = await admin.from('social_posts')
-      .select('id, owner_id, body, platforms, media_urls, scheduled_for, status, provider_post_id').eq('id', rowId).single();
+      .select('id, owner_id, world_id, body, platforms, media_urls, scheduled_for, status, provider_post_id').eq('id', rowId).single();
     if (!row || row.owner_id !== uid) return json({ error: 'Post not found' }, 404);
     if (row.provider_post_id || !['queued'].includes(row.status)) return json({ error: `Post already ${row.status}.` }, 409);
 
@@ -87,8 +87,21 @@ Deno.serve(async (req) => {
 
     const scheduled = !!draft.scheduleAt;
     const headers: Record<string, string> = { 'content-type': 'application/json', Authorization: `Bearer ${conn.access_token}` };
-    // Business-plan multi-client key, if the connection stored one.
-    const profileKey = (conn.metadata as { profile_key?: string } | null)?.profile_key;
+    // WHICH BRAND'S ACCOUNTS (app_0084): a business-attributed post resolves its own Ayrshare
+    // Profile-Key. Fail-closed once the owner runs multiple destinations — a mapped setup never
+    // silently posts one brand's content to another brand's accounts. Zero mappings = the one
+    // connected account, exactly as before.
+    let profileKey = (conn.metadata as { profile_key?: string } | null)?.profile_key;
+    const { data: mappings } = await admin.from('world_social_profiles')
+      .select('world_id, profile_key').eq('owner_id', uid).limit(200);
+    const worldId = (row.world_id as string | null) ?? null;
+    if (worldId) {
+      const hit = (mappings ?? []).find((m) => m.world_id === worldId);
+      if (hit?.profile_key) profileKey = hit.profile_key as string;
+      else if ((mappings ?? []).length > 0) {
+        return await block('This business has no social destination mapped. Map its Ayrshare Profile-Key in Settings → Connections (or remove all mappings to post everything through the one connected account).');
+      }
+    }
     if (profileKey) headers['Profile-Key'] = profileKey;
 
     const res = await fetch(AYRSHARE_URL, { method: 'POST', headers, body: JSON.stringify(providerPayload(draft)) });

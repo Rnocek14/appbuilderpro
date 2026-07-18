@@ -161,10 +161,14 @@ export interface LoadedWeb {
 export interface ContactRow { id: string; full_name: string | null; email: string; email_status: string; created_at: string }
 
 /** Everyone this operator can reach — the audience behind every list upload and queue tool. */
-export async function listContacts(limit = 200): Promise<ContactRow[]> {
-  const { data } = await supabase.from('contacts')
+export async function listContacts(limit = 200, worldId?: string | null): Promise<ContactRow[]> {
+  let q = supabase.from('contacts')
     .select('id, full_name, email, email_status, created_at')
     .order('created_at', { ascending: false }).limit(limit);
+  // Inside a business, the audience is THAT business's people (multi-business P0);
+  // the global Contacts page passes no world and stays the everyone-view on purpose.
+  if (worldId) q = q.eq('world_id', worldId);
+  const { data } = await q;
   return (data ?? []) as ContactRow[];
 }
 
@@ -605,7 +609,7 @@ export async function runTool(
       const parsed = parseAudienceCsv(args?.csvText ?? '');
       if (!parsed.contacts.length) return { ok: false, message: 'No valid email rows found in that CSV.' };
       const rows = parsed.contacts.map((ct) => ({
-        owner_id: uid, full_name: ct.name, email: ct.email, email_status: 'unknown' as const, is_primary: false,
+        owner_id: uid, world_id: worldId, full_name: ct.name, email: ct.email, email_status: 'unknown' as const, is_primary: false,
       }));
       // Upsert on (owner_id, email) with ignoreDuplicates: an already-known contact is SKIPPED,
       // never overwritten — updating here would reset email_status (including 'unsubscribed')

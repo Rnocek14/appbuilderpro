@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
 import { Button, Card, Input } from '../components/ui';
 import { ConnectionsHub } from '../components/ConnectionsHub';
+import { WorldSenderIdentities } from '../components/garvis/WorldSenderIdentities';
 import {
   PROVIDERS, providerInfo, resolveAI, subscribeAIConfig,
   getProvider, getModel, getKey, setProvider, setModel, setKey, DIRECT,
@@ -376,6 +377,9 @@ function OutreachCard() {
       <div className="mt-4">
         <Button onClick={() => void save()} loading={saving}>Save outreach settings</Button>
       </div>
+
+      {/* Multi-business sender identity (app_0085): each brand sends as itself. */}
+      <WorldSenderIdentities />
     </Card>
   );
 }

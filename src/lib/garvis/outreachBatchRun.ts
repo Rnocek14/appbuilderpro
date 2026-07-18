@@ -7,7 +7,7 @@
 
 import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
-import { composeBatchRecipients, unknownTokens, batchProgress, type BatchRecipient } from './outreachBatch';
+import { composeBatchRecipients, unknownTokens, batchProgress, type BatchRecipient, computeBatchStats, type BatchEventCounts } from './outreachBatch';
 
 export type BatchSegment = 'all' | 'new' | 'contacted' | 'qualified' | 'customer';
 
@@ -17,12 +17,31 @@ export interface BatchRow {
   created_at: string; finished_at: string | null;
 }
 
-export async function segmentCount(segment: BatchSegment): Promise<number> {
+export async function segmentCount(segment: BatchSegment, worldId?: string | null): Promise<number> {
   let q = supabase.from('contacts').select('id', { count: 'exact', head: true });
   if (segment !== 'all') q = q.eq('stage', segment);
+  // Business isolation (multi-business P0): counts from inside a business see ONLY its contacts.
+  if (worldId) q = q.eq('world_id', worldId);
   const { count, error } = await q;
   if (error) throw new Error(error.message);
   return count ?? 0;
+}
+
+/** Engagement counts for a set of batches, from the app_0081 events substrate — one query. */
+export async function batchStatsFor(batchIds: string[]): Promise<Map<string, BatchEventCounts>> {
+  const out = new Map<string, BatchEventCounts>();
+  if (!batchIds.length) return out;
+  const { data } = await supabase.from('outreach_events')
+    .select('batch_id, kind').in('batch_id', batchIds).limit(5000);
+  const byBatch = new Map<string, string[]>();
+  for (const r of (data ?? []) as { batch_id: string | null; kind: string }[]) {
+    if (!r.batch_id) continue;
+    const arr = byBatch.get(r.batch_id) ?? [];
+    arr.push(r.kind);
+    byBatch.set(r.batch_id, arr);
+  }
+  for (const [id, kinds] of byBatch) out.set(id, computeBatchStats(kinds));
+  return out;
 }
 
 /** Create the batch + its ONE approval. Returns honest compose results. */
@@ -45,9 +64,13 @@ export async function createBatch(input: {
   }
 
   // True segment size first, so the caller can be told honestly when the snapshot is truncated.
-  const total = await segmentCount(input.segment);
+  const total = await segmentCount(input.segment, input.worldId);
   let q = supabase.from('contacts').select('id, email, full_name, email_status').limit(SNAPSHOT_CAP);
   if (input.segment !== 'all') q = q.eq('stage', input.segment);
+  // BUSINESS ISOLATION (multi-business audit P0): a batch launched from one business's board
+  // must never snapshot another business's people. Strict equality — legacy contacts were
+  // backfilled to the owner's first world in app_0082, so nothing leaks through null.
+  if (input.worldId) q = q.eq('world_id', input.worldId);
   const { data: contacts, error } = await q;
   if (error) throw new Error(error.message);
   const truncatedFrom = total > SNAPSHOT_CAP ? total : null;
@@ -66,6 +89,7 @@ export async function createBatch(input: {
   if (insErr || !batch) throw new Error(`Could not create the batch: ${insErr?.message ?? 'unknown error'}`);
 
   const approvalId = await enqueueApproval({
+    worldId: input.worldId ?? null,
     kind: 'send_batch',
     title: `Send "${subject}" to ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
     preview: `${body.slice(0, 280)}${body.length > 280 ? '…' : ''}\n\nThe clock drains this under your daily cap; every recipient re-checks suppression at send time.`,

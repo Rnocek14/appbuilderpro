@@ -97,6 +97,43 @@ Deno.serve(async (req) => {
         + revNow + revPrev + (overdue ?? 0);
       if (total === 0) continue; // an empty fortnight sends nothing
 
+      // PER-BUSINESS BREAKDOWN (multi-business audit): owner totals hide which brand moved.
+      // Leads, visits, and new contacts are world-stamped (app_0036 / app_0082), so each business
+      // gets its own line of the same fixed-window arithmetic. Honesty rules unchanged: only
+      // businesses and signals with something in either week appear, and the section appears at
+      // all only when 2+ businesses had activity — one business IS the totals above.
+      let worldLines: string[] = [];
+      try {
+        const { data: worlds } = await admin.from('knowledge_worlds')
+          .select('id, title').eq('owner_id', p.id).limit(12);
+        if ((worlds ?? []).length >= 2) {
+          const per = await Promise.all((worlds ?? []).map(async (w: { id: string; title: string }) => {
+            const wcnt = (table: string, col: string, from: string, to: string, extra?: (q: unknown) => unknown) => {
+              // deno-lint-ignore no-explicit-any
+              let q: any = admin.from(table).select('id', { count: 'exact', head: true })
+                .eq('owner_id', p.id).eq('world_id', w.id).gte(col, from).lt(col, to);
+              if (extra) q = extra(q);
+              return q.then((r: { count: number | null }) => r.count ?? 0);
+            };
+            const [ln, lp, vn, vp, cn, cp] = await Promise.all([
+              wcnt('leads', 'created_at', thisStart, nowIso), wcnt('leads', 'created_at', prevStart, thisStart),
+              // deno-lint-ignore no-explicit-any
+              wcnt('site_events', 'created_at', thisStart, nowIso, (q: any) => q.eq('kind', 'visit')), wcnt('site_events', 'created_at', prevStart, thisStart, (q: any) => q.eq('kind', 'visit')),
+              wcnt('contacts', 'created_at', thisStart, nowIso), wcnt('contacts', 'created_at', prevStart, thisStart),
+            ]);
+            return { title: w.title, ln, lp, vn, vp, cn, cp, any: ln + lp + vn + vp + cn + cp > 0 };
+          }));
+          const active = per.filter((x) => x.any);
+          if (active.length >= 2) {
+            const seg = (label: string, n: number, pv: number) => (n + pv > 0 ? `${label} ${arrow(n, pv)} ${n} (was ${pv})` : null);
+            worldLines = [
+              'By business:',
+              ...active.map((x) => `• ${x.title}: ${[seg('leads', x.ln, x.lp), seg('visits', x.vn, x.vp), seg('contacts', x.cn, x.cp)].filter(Boolean).join(' · ')}`),
+            ];
+          }
+        }
+      } catch { /* the breakdown is additive — its failure never blocks the scorecard */ }
+
       const line = (label: string, nowV: number, prevV: number, fmt: (n: number) => string = String) =>
         nowV + prevV > 0 ? `${arrow(nowV, prevV)} ${label}: ${fmt(nowV)} (last week ${fmt(prevV)})` : null;
       const lines = [
@@ -111,6 +148,7 @@ Deno.serve(async (req) => {
         line('New contacts', contactsNow, contactsPrev),
         line('Ad spend', adNow, adPrev, (n) => `$${n.toFixed(2)}`),
         pendingApprovals > 0 ? `⏳ ${pendingApprovals} action${pendingApprovals === 1 ? '' : 's'} waiting in Approvals` : null,
+        ...worldLines,
         `Every number is your own rows over two fixed 7-day windows. Open Garvis → Command to steer the week.`,
       ].filter(Boolean) as string[];
 

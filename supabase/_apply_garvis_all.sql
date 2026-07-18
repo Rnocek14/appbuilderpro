@@ -4541,6 +4541,40 @@ alter table public.outreach_messages add column if not exists opened_at timestam
 alter table public.outreach_messages add column if not exists clicked_at timestamptz;     -- first click
 alter table public.outreach_messages add column if not exists open_count integer not null default 0;
 
+-- ======== supabase/migrations/app_0081_outreach_events.sql ========
+-- app_0081_outreach_events.sql — STOP THROWING AWAY THE FEEDBACK.
+-- The needle audit's sharpest finding: Resend delivers opened/clicked events and resend-webhook
+-- discards them (TYPE_MAP maps them, no branch stores them), so no segment, subject line, or send
+-- time can ever be ranked. This table is the substrate every future analytics lens reads:
+-- one row per engagement event, correlated to the message (and through it the campaign/contact/
+-- batch). Writes come ONLY from service-role edge functions; owners read their own rows.
+
+create table if not exists public.outreach_events (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid not null references public.profiles(id) on delete cascade,
+  message_id  uuid references public.outreach_messages(id) on delete set null,
+  campaign_id uuid references public.outreach_campaigns(id) on delete set null,
+  contact_id  uuid references public.contacts(id) on delete set null,
+  batch_id    uuid,          -- outreach_batches.id when the message came from a bulk drain
+  kind        text not null check (kind in ('delivered','opened','clicked','bounced','complained','unsubscribed','replied')),
+  meta        jsonb not null default '{}',   -- e.g. {"url": "..."} on clicked
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists idx_outreach_events_owner_kind on public.outreach_events(owner_id, kind, created_at desc);
+create index if not exists idx_outreach_events_message on public.outreach_events(message_id);
+create index if not exists idx_outreach_events_batch on public.outreach_events(batch_id) where batch_id is not null;
+
+alter table public.outreach_events enable row level security;
+drop policy if exists "events select own" on public.outreach_events;
+create policy "events select own" on public.outreach_events for select using (owner_id = auth.uid());
+-- no insert/update policies on purpose: only service-role edge functions write events.
+
+-- Batch joinability: messages drained from a batch never carried the batch id, making
+-- per-batch open/click stats impossible. Additive column; standing-worker stamps it.
+alter table public.outreach_messages add column if not exists batch_id uuid;
+create index if not exists idx_outreach_messages_batch on public.outreach_messages(batch_id) where batch_id is not null;
+
 -- ======== supabase/migrations/app_0082_audit_proposals.sql ========
 -- app_0082_audit_proposals.sql — make "automation search" a QUERYABLE asset.
 --
@@ -4550,6 +4584,101 @@ alter table public.outreach_messages add column if not exists open_count integer
 
 alter table public.prospect_audits add column if not exists proposals text[] not null default '{}';
 create index if not exists idx_prospect_audits_proposals on public.prospect_audits using gin (proposals);
+
+-- ======== supabase/migrations/app_0082_contacts_world.sql ========
+-- app_0082_contacts_world.sql — CONTACTS BELONG TO A BUSINESS.
+-- The multi-business audit's P0: contacts had owner_id but no world_id, so a batch launched from
+-- one business's email board snapshotted the OWNER-GLOBAL list — a WealthCharts newsletter would
+-- hit the real-estate farm (a consent problem, not just a UX one). A contact now belongs to the
+-- business that acquired them; batch snapshots and segment counts filter on it.
+--
+-- Backfill assumption (stated, not hidden): every pre-existing contact was acquired in the
+-- single-business era, so they are assigned to the owner's FIRST world. New uploads and
+-- site-lead captures stamp world_id explicitly. Suppression stays owner-global on purpose —
+-- an opt-out means the PERSON opted out, not one brand's copy of them.
+
+alter table public.contacts add column if not exists world_id uuid references public.knowledge_worlds(id) on delete set null;
+create index if not exists idx_contacts_owner_world on public.contacts(owner_id, world_id);
+
+update public.contacts c
+set world_id = w.first_world
+from (
+  select owner_id, (array_agg(id order by created_at asc))[1] as first_world
+  from public.knowledge_worlds
+  group by owner_id
+) w
+where c.owner_id = w.owner_id and c.world_id is null;
+
+-- ======== supabase/migrations/app_0083_approvals_world.sql ========
+-- app_0083_approvals_world.sql — APPROVALS SAY WHICH BUSINESS THEY BELONG TO.
+-- The multi-business audit: with several brands, the Queue read "Post to Instagram" / "Send X to
+-- 41 contacts" with no brand attribution — approving meant guessing the business from the copy.
+-- Additive column, stamped by enqueueApproval when the caller knows its world; old rows stay null
+-- and render without a badge (honest: we don't invent attribution for history).
+
+alter table public.approvals add column if not exists world_id uuid references public.knowledge_worlds(id) on delete set null;
+create index if not exists idx_approvals_world on public.approvals(world_id) where world_id is not null;
+
+-- ======== supabase/migrations/app_0084_world_social_profiles.sql ========
+-- app_0084_world_social_profiles.sql — EACH BUSINESS POSTS TO ITS OWN ACCOUNTS.
+-- The multi-business audit's distribution gap: one Ayrshare connection meant every brand's posts
+-- landed on the same linked accounts — professional creation, amateur distribution. Ayrshare's
+-- multi-client plan issues a Profile-Key per client profile; this table maps business → profile.
+-- social-publish resolves post.world_id here and sends the Profile-Key header. Fail-closed rule
+-- lives in the function: once ANY mapping exists, a business-attributed post with NO mapping
+-- blocks rather than silently posting to the wrong brand's accounts. Zero mappings = today's
+-- single-account behavior, untouched.
+-- The Profile-Key is a routing identifier, not the API key — the API key stays sealed in
+-- provider_connections and never reaches the browser.
+
+create table if not exists public.world_social_profiles (
+  world_id    uuid primary key references public.knowledge_worlds(id) on delete cascade,
+  owner_id    uuid not null references public.profiles(id) on delete cascade,
+  profile_key text not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+alter table public.world_social_profiles enable row level security;
+drop policy if exists "world_social_profiles owner all" on public.world_social_profiles;
+create policy "world_social_profiles owner all" on public.world_social_profiles
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid())
+  );
+create index if not exists idx_world_social_profiles_owner on public.world_social_profiles(owner_id);
+
+-- ======== supabase/migrations/app_0085_world_sender_identity.sql ========
+-- app_0085_world_sender_identity.sql — EACH BUSINESS SENDS EMAIL AS ITSELF.
+-- The email twin of app_0084: outreach_settings is one row per owner, so with three brands every
+-- email left with the same from-address, signature company, and CAN-SPAM footer — the wrong brand
+-- on every message. This table gives a business its own sender identity; send-email resolves the
+-- message's business (batch → contact) and uses it when mapped.
+-- Identity is applied as a UNIT (name/email/reply-to never half-mix across brands); only the
+-- CAN-SPAM mailing address may fall back to the global one, because brands under one roof
+-- legitimately share a mailing address. SAFETY STAYS OWNER-GLOBAL on purpose: the kill switch,
+-- daily cap, warmup ramp, and timezone in outreach_settings govern the human, not the brand.
+
+create table if not exists public.world_sender_identities (
+  world_id         uuid primary key references public.knowledge_worlds(id) on delete cascade,
+  owner_id         uuid not null references public.profiles(id) on delete cascade,
+  from_name        text,
+  from_email       text,
+  reply_to         text,
+  company_name     text,
+  physical_address text,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+alter table public.world_sender_identities enable row level security;
+drop policy if exists "world_sender_identities owner all" on public.world_sender_identities;
+create policy "world_sender_identities owner all" on public.world_sender_identities
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid())
+  );
+create index if not exists idx_world_sender_identities_owner on public.world_sender_identities(owner_id);
 
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
