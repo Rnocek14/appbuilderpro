@@ -89,10 +89,16 @@ const CASES: Case[] = [
     actions: ['marketing_campaign'], minHoles: 1,
   },
   {
-    name: 'bulk cold blast: no catalog action, honest hole, nothing faked',
+    name: 'bulk cold blast to STRANGERS: still an honest hole, nothing faked',
     intent: 'Send a cold email blast to 5000 contractors tomorrow',
-    compile: plan([], ['Bulk cold outreach to a purchased/large list — batch sending exists in-system for imported contact segments behind approvals, but no orchestrator action arms it yet (and 5000 cold sends would trip the daily cap/warmup by design).']),
+    compile: plan([], ['Cold outreach to a list of strangers you have not imported — email_segment only reaches YOUR contacts by stage, and 5000 cold sends in a day would trip the cap/warmup by design.']),
     actions: [], minHoles: 1,
+  },
+  {
+    name: 'bulk email to OWN segment: a real single-approval batch',
+    intent: 'Email all my qualified contacts about the spring promo: subject "Spring tune-up" body "Hi {{first_name}}, spring slots are open..."',
+    compile: plan([step('email_segment', { segment: 'qualified', subject: 'Spring tune-up', body: 'Hi {{first_name}}, spring slots are open...' }, W('one dictated email to an owned segment is exactly the batch rail'))]),
+    actions: ['email_segment'],
   },
   {
     name: 'a question, not a task',

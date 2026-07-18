@@ -66,6 +66,19 @@ export const ACTION_SPECS: ActionSpec[] = [
     produces: 'a campaign with draft assets in Marketing, research-grounded when a business is named (nothing publishes without per-asset review)',
   },
   {
+    id: 'email_segment',
+    title: 'Email a contact segment',
+    category: 'marketing',
+    risk: 'outbound',
+    description: 'Send one email to a segment of the operator\'s OWN contacts (by CRM stage: all, new, contacted, qualified, customer) as a single batch behind ONE approval — suppression, caps, and warmup re-checked per recipient at send time. The subject and body must come from the intent or the operator; for cold lists of strangers there is no action (that stays a hole).',
+    params: [
+      { name: 'segment', required: true, hint: 'all | new | contacted | qualified | customer' },
+      { name: 'subject', required: true, hint: 'the email subject, from the intent' },
+      { name: 'body', required: true, hint: 'the email body, in the operator\'s voice ({{first_name}} supported)' },
+    ],
+    produces: 'a queued batch + ONE pending approval; the armed clock drains it 10 recipients per tick after approval',
+  },
+  {
     id: 'queue_social_post',
     title: 'Queue a social post',
     category: 'marketing',

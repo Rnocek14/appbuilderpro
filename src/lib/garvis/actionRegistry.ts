@@ -113,6 +113,18 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     };
   },
 
+  email_segment: async (p) => {
+    const seg = ['all', 'new', 'contacted', 'qualified', 'customer'].includes(p.segment) ? p.segment : null;
+    if (!seg) throw new Error(`Segment must be one of all/new/contacted/qualified/customer — got "${p.segment}".`);
+    const { createBatch } = await import('./outreachBatchRun');
+    const res = await createBatch({ segment: seg as 'all' | 'new' | 'contacted' | 'qualified' | 'customer', subject: p.subject, body: p.body });
+    return {
+      kind: 'needs_review',
+      note: `Batch queued to the "${seg}" segment — ${res.queued} recipient(s)${res.excluded.length ? `, ${res.excluded.length} excluded (suppression/bounces)` : ''}${res.truncatedFrom ? `, capped from ${res.truncatedFrom}` : ''}. ONE approval in the Queue releases it; the clock drains it under your daily cap.`,
+      link: '/garvis/queue',
+    };
+  },
+
   queue_social_post: async (p) => {
     const { queueSocialPost } = await import('./socialRun');
     const platforms = (p.platforms ?? 'twitter').split(',').map((s) => s.trim()).filter(Boolean);
