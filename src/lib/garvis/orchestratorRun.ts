@@ -13,7 +13,8 @@ import {
   COMPILER_SYSTEM, catalogContext, parsePlan, orderSteps, stepSucceeded,
   type CompiledPlan, type ParsePlanResult, type StepStatus,
 } from './orchestrator';
-import { actionSpecs, actionById } from './actionRegistry';
+import { actionSpecs } from './actionCatalog';
+import { actionById } from './actionRegistry';
 import { recordMindEvent } from './mindStore';
 
 async function reason(system: string, context: string, message: string): Promise<string> {
