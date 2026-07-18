@@ -36,7 +36,6 @@ import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
 import { deriveSignals, proposeFromSignals } from '../../../src/lib/garvis/automation/detect.ts';
 import { detectVertical } from '../../../src/lib/garvis/verticals.ts';
 // TRIGGER ENGINE pure core (app_0076) — the same verified math the in-app runner uses.
-import { dueFires, renderTemplate, fireKey } from '../../../src/lib/garvis/automation/triggers.ts';
 import { citiesFor } from '../../../src/lib/garvis/usCities.ts';
 import {
   PLACES_FIELD_MASK, parsePlace, buildDiscoveryQueries, exhaustionUpdate,
@@ -44,6 +43,10 @@ import {
 } from '../../../src/lib/garvis/placesDiscovery.ts';
 import { parseBusinessProfile, assembleFallbackSpec, previewSlug } from '../_shared/previewSpec.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+// AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
+// only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
+// the owner happens to click "Run due now" in a browser tab.
+import { dueFires, renderTemplate, fireKey, type CustomerRec } from '../../../src/lib/garvis/automation/triggers.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
@@ -241,77 +244,148 @@ Deno.serve(async (req) => {
       }
     } catch { /* batch drain must never wedge the order tick */ }
 
-    // ---- CLIENT AUTOMATION TRIGGERS (app_0076) --------------------------------------------------
-    // The recurring-revenue engine ON THE CLOCK: every owner's active triggers run with the SAME
-    // pure core (dueFires/renderTemplate) + claim-first trigger_fires ledger the in-app "Run due
-    // now" uses — so automations fire while the operator sleeps. Every fire enqueues a PENDING
-    // approval through the one send path; nothing sends without the owner. Bounded per tick.
+    // ---- AUTOMATION TRIGGER DRAIN (app_0076) -------------------------------------------------
+    // The audit's finding: rules on the Automations page fired ONLY when the owner clicked "Run
+    // due now" in a browser tab — a rule created and left alone never fired. This drain runs the
+    // same verified pure core (window guard, once-only ledger) on every tick, cross-owner, and
+    // lands each due fire as a PENDING send_email approval through the one send path. The
+    // trigger_fires unique index arbitrates between this drain and a concurrent browser run.
     try {
-      const FIRES_PER_TICK = 40;
-      let fired = 0;
-      // Reconcile stranded claims (claimed but never enqueued) so they retry instead of blocking.
+      // Stranded-claim sweep (mirror of the browser runner): a run that died after claiming but
+      // before enqueuing leaves approval_id null — release older than 10 min so fires retry.
       const staleCutoff = new Date(Date.parse(nowIso) - 10 * 60 * 1000).toISOString();
       await admin.from('trigger_fires').delete().is('approval_id', null).lt('created_at', staleCutoff);
 
+      interface AutoTrigRow {
+        id: string; owner_id: string; list_id: string; label: string;
+        anchor_field: 'last_service_at' | 'last_visit_at' | 'purchase_at' | 'next_due_at';
+        offset_days: number; window_days: number; template_subject: string; template_body: string;
+      }
+      interface AutoCustRow {
+        id: string; email: string | null; name: string | null; consent_basis: string | null;
+        last_service_at: string | null; last_visit_at: string | null;
+        purchase_at: string | null; next_due_at: string | null;
+      }
       const { data: trigData } = await admin.from('automation_triggers')
-        .select('*').eq('status', 'active').limit(200);
-      const customersCache = new Map<string, { id: string; email: string | null; name: string | null; anchors: Record<string, string | null> }[]>();
-      for (const t of (trigData ?? []) as {
-        id: string; owner_id: string; list_id: string; label: string; anchor_field: string;
-        offset_days: number; window_days: number; status: 'active' | 'paused';
-        template_subject: string; template_body: string;
-      }[]) {
-        if (fired >= FIRES_PER_TICK) break;
-        const cacheKey = `${t.owner_id}:${t.list_id}`;
-        let customers = customersCache.get(cacheKey);
+        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body')
+        .eq('status', 'active').limit(100);
+
+      const custCache = new Map<string, CustomerRec[]>();
+      let fireBudget = 40; // bound tick time — a backlog drains over ticks, never in one stampede
+      for (const t of (trigData ?? []) as AutoTrigRow[]) {
+        if (fireBudget <= 0) break;
+        // Ownership re-check under service-role (RLS doesn't protect the admin client): the
+        // trigger's list must belong to the trigger's owner or nothing fires.
+        const { data: list } = await admin.from('customer_lists').select('owner_id').eq('id', t.list_id).maybeSingle();
+        if (!list || (list as { owner_id: string }).owner_id !== t.owner_id) continue;
+
+        const cacheKey = `${t.owner_id}|${t.list_id}`;
+        let customers = custCache.get(cacheKey);
         if (!customers) {
           const { data: custData } = await admin.from('customers')
-            .select('*').eq('owner_id', t.owner_id).eq('list_id', t.list_id);
-          customers = ((custData ?? []) as Record<string, string | null>[]).map((c) => ({
-            id: c.id as string, email: c.email, name: c.name,
-            anchors: {
-              last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
-              purchase_at: c.purchase_at, next_due_at: c.next_due_at,
-            },
-          }));
-          customersCache.set(cacheKey, customers);
+            .select('id, email, name, consent_basis, last_service_at, last_visit_at, purchase_at, next_due_at')
+            .eq('owner_id', t.owner_id).eq('list_id', t.list_id).limit(2000);
+          customers = ((custData ?? []) as AutoCustRow[])
+            // Consent gate (the column existed but was never checked): automations are warm/
+            // transactional by design — a cold-prospecting row never rides a recall trigger.
+            .filter((c) => (c.consent_basis ?? 'warm_transactional') === 'warm_transactional')
+            .map((c) => ({
+              id: c.id, email: c.email, name: c.name,
+              anchors: {
+                last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
+                purchase_at: c.purchase_at, next_due_at: c.next_due_at,
+              },
+            }));
+          custCache.set(cacheKey, customers);
         }
+
         const { data: fireData } = await admin.from('trigger_fires')
           .select('customer_id, fired_for').eq('owner_id', t.owner_id).eq('trigger_id', t.id);
         const firedKeys = ((fireData ?? []) as { customer_id: string; fired_for: string }[])
           .map((f) => fireKey(f.customer_id, f.fired_for));
-        const def = {
-          id: t.id, anchorField: t.anchor_field as Parameters<typeof dueFires>[0]['anchorField'],
-          offsetDays: t.offset_days, windowDays: t.window_days, status: t.status,
-        };
-        // deno-lint-ignore no-explicit-any
-        const plan = dueFires(def, customers as any, firedKeys, nowIso);
+
+        const plan = dueFires(
+          { id: t.id, anchorField: t.anchor_field, offsetDays: t.offset_days, windowDays: t.window_days, status: 'active' },
+          customers, firedKeys, nowIso,
+        );
+        let queuedForTrigger = 0;
         for (const fire of plan) {
-          if (fired >= FIRES_PER_TICK) break;
-          // CLAIM-FIRST: unique(trigger, customer, due date) makes a duplicate a no-op forever.
+          if (fireBudget <= 0) break;
+
+          // Suppression pre-check BEFORE claiming (queueHuntPitch's honesty): a known
+          // unsubscribed/bounced/complained address is never re-queued — and never claimed, so
+          // the window guard naturally retires it instead of a claim-release loop.
+          const { data: existing } = await admin.from('contacts')
+            .select('id, email_status').eq('owner_id', t.owner_id).eq('email', fire.email.toLowerCase()).maybeSingle();
+          const st = (existing as { email_status?: string } | null)?.email_status;
+          if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') continue;
+
+          // CLAIM-FIRST: the unique index rejects a duplicate/concurrent fire (23505 = skip).
           const { data: claim, error: claimErr } = await admin.from('trigger_fires')
             .insert({ owner_id: t.owner_id, trigger_id: t.id, customer_id: fire.customerId, fired_for: fire.firedFor })
             .select('id').maybeSingle();
-          if (claimErr || !claim) continue;   // 23505 = already fired; other errors retry next tick
+          if (claimErr || !claim) continue;
           const fireId = (claim as { id: string }).id;
+          fireBudget--;
+
           try {
             const cust = customers.find((c) => c.id === fire.customerId)!;
-            // deno-lint-ignore no-explicit-any
-            const subject = renderTemplate(t.template_subject, cust as any).trim() || t.label;
-            // deno-lint-ignore no-explicit-any
-            const body2 = renderTemplate(t.template_body, cust as any);
-            const ok = await queueTriggerSend(admin, t.owner_id, {
-              label: t.label, subject, body: body2, toEmail: fire.email, fireId,
-            });
-            if (!ok) throw new Error('enqueue failed');
-            fired++;
+            const subject = renderTemplate(t.template_subject, cust).trim() || t.label;
+            const bodyText = renderTemplate(t.template_body, cust);
+            const to = fire.email.toLowerCase().trim();
+
+            let contactId: string | null = existing ? (existing as { id: string }).id : null;
+            if (!contactId) {
+              const { data: c } = await admin.from('contacts')
+                .insert({ owner_id: t.owner_id, email: to, email_status: 'unknown', is_primary: true })
+                .select('id').maybeSingle();
+              if (c) contactId = (c as { id: string }).id;
+              else {
+                const { data: again } = await admin.from('contacts')
+                  .select('id').eq('owner_id', t.owner_id).eq('email', to).maybeSingle();
+                contactId = again ? (again as { id: string }).id : null;
+              }
+            }
+
+            const { data: camp } = await admin.from('outreach_campaigns')
+              .insert({ owner_id: t.owner_id, contact_id: contactId, kind: 'automation', state: 'pending_approval' })
+              .select('id').single();
+            if (!camp) throw new Error('campaign insert failed');
+            const campaignId = (camp as { id: string }).id;
+
+            const { data: msg } = await admin.from('outreach_messages').insert({
+              owner_id: t.owner_id, campaign_id: campaignId, contact_id: contactId, sequence_step: 0,
+              subject, body_text: bodyText, to_address: to, status: 'draft',
+            }).select('id').single();
+            if (!msg) throw new Error('message insert failed');
+
+            const payload = { message_id: (msg as { id: string }).id, campaign_id: campaignId };
+            const payload_hash = await hashPayload(payload);
+            const { data: ap, error: apErr } = await admin.from('approvals').insert({
+              owner_id: t.owner_id, kind: 'send_email',
+              title: `${t.label} → ${to}`,
+              preview: `${subject}\n\n${bodyText}`,
+              payload, payload_hash, requested_by: 'garvis-auto',
+            }).select('id').single();
+            if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');
+
+            await admin.from('trigger_fires').update({ approval_id: (ap as { id: string }).id }).eq('id', fireId);
+            queuedForTrigger++;
           } catch {
-            // Release the claim so the fire retries next tick — a failed fire is never lost.
+            // Release the claim so the fire retries next tick — a failed fire is never silently lost.
             await admin.from('trigger_fires').delete().eq('id', fireId);
           }
         }
+
+        if (queuedForTrigger > 0) {
+          await admin.from('mind_events').insert({
+            owner_id: t.owner_id, event_type: 'note', source: 'execution',
+            subject: `Automation "${t.label.slice(0, 120)}" queued ${queuedForTrigger} send${queuedForTrigger === 1 ? '' : 's'} for your approval`,
+            payload: { key: `auto-trigger:${t.id}:${nowIso.slice(0, 10)}`, trigger_id: t.id, queued: queuedForTrigger },
+          }).then(() => {}, () => {});
+        }
       }
-    } catch { /* trigger engine must never wedge the order tick */ }
+    } catch { /* automation drain must never wedge the order tick */ }
   }
 
   // --- pick the work: one forced order, or the due set --------------------------------------------
@@ -958,57 +1032,4 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     payload, payload_hash, requested_by: 'garvis-auto',
   });
   return !apErr;
-}
-
-/** Server twin of the in-app trigger enqueue: contact (suppression-respecting, SELECT-FIRST) →
- *  automation campaign → draft message → PENDING approval, then stamps the fire's approval_id.
- *  Mirrors queueHuntPitch's mechanics; kind 'automation' keeps it out of cold follow-ups. */
-// deno-lint-ignore no-explicit-any
-async function queueTriggerSend(admin: any, uid: string, input: {
-  label: string; subject: string; body: string; toEmail: string; fireId: string;
-}): Promise<boolean> {
-  const to = input.toEmail.toLowerCase().trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return false;
-
-  let contactId: string;
-  const { data: existing } = await admin.from('contacts')
-    .select('id, email_status').eq('owner_id', uid).eq('email', to).maybeSingle();
-  if (existing) {
-    const st = (existing as { email_status?: string }).email_status;
-    if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') return false;  // never re-contact
-    contactId = (existing as { id: string }).id;
-  } else {
-    const { data: c } = await admin.from('contacts').insert({
-      owner_id: uid, email: to, email_status: 'unknown', is_primary: true,
-    }).select('id').maybeSingle();
-    if (c) contactId = (c as { id: string }).id;
-    else {
-      const { data: again } = await admin.from('contacts').select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
-      if (!again) return false;
-      contactId = (again as { id: string }).id;
-    }
-  }
-
-  const { data: camp } = await admin.from('outreach_campaigns').insert({
-    owner_id: uid, contact_id: contactId, kind: 'automation', state: 'pending_approval',
-  }).select('id').single();
-  if (!camp) return false;
-
-  const { data: msg } = await admin.from('outreach_messages').insert({
-    owner_id: uid, campaign_id: (camp as { id: string }).id, contact_id: contactId,
-    sequence_step: 0, subject: input.subject, body_text: input.body, to_address: to, status: 'draft',
-  }).select('id').single();
-  if (!msg) return false;
-
-  const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id };
-  const payload_hash = await hashPayload(payload);
-  const { data: ap, error: apErr } = await admin.from('approvals').insert({
-    owner_id: uid, kind: 'send_email',
-    title: `${input.label} → ${to}`,
-    preview: `${input.subject}\n\n${input.body}`,
-    payload, payload_hash, requested_by: 'garvis-auto',
-  }).select('id').single();
-  if (apErr || !ap) return false;
-  await admin.from('trigger_fires').update({ approval_id: (ap as { id: string }).id }).eq('id', input.fireId);
-  return true;
 }

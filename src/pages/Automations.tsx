@@ -128,7 +128,9 @@ export default function Automations() {
         </div>
         <p className="mb-3 text-sm text-forge-dim">
           Recurring, per-customer nudges on a client’s own warm list — recall reminders, seasonal service, review requests.
-          Due ones land in your <NavLink to="/garvis/queue" className="text-forge-ember hover:underline">Queue</NavLink> to approve. Nothing sends without your OK.
+          The clock checks every rule automatically (each 15-minute heartbeat tick); due ones land in your{' '}
+          <NavLink to="/garvis/queue" className="text-forge-ember hover:underline">Queue</NavLink> to approve. Nothing sends without your OK.
+          “Run due now” just checks immediately instead of waiting for the tick.
         </p>
         {/* THE ROI LINE (app_0081/reportCore): the honest month-to-date tally that justifies the
             retainer — counted from the ledger tables, never composed. */}
