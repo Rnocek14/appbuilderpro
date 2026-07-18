@@ -42,6 +42,39 @@ export function pickHuntTargets(serperData: unknown, cap: number, seen: Set<stri
 const titleCase = (s: string): string =>
   s.trim().replace(/\s+/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 
+// SEARCH KEYWORD → TRADE NAME. The keyword we hunt with ("roofers") is a person-plural; copy that
+// reuses it verbatim reads broken ("serves Austin with roofers", "Roofers done right"). Map the
+// whole LOCAL_NICHES catalog to the industry noun a human would write; unknown keywords fall back
+// to a safe singular + "Services" ("notaries" → "Notary Services").
+const TRADE_NAMES: Record<string, string> = {
+  roofers: 'Roofing', plumbers: 'Plumbing', 'hvac contractors': 'HVAC', electricians: 'Electrical',
+  landscapers: 'Landscaping', 'lawn care services': 'Lawn Care', painters: 'Painting',
+  'pressure washing services': 'Pressure Washing', 'house cleaning services': 'House Cleaning',
+  'pest control companies': 'Pest Control', 'tree service companies': 'Tree Service',
+  'fencing contractors': 'Fencing', 'concrete contractors': 'Concrete Work',
+  'garage door repair': 'Garage Door Repair', 'handyman services': 'Handyman Services',
+  'remodeling contractors': 'Remodeling', 'flooring companies': 'Flooring',
+  'window installers': 'Window Installation', 'gutter installers': 'Gutter Installation',
+  'pool service companies': 'Pool Service', 'appliance repair': 'Appliance Repair',
+  locksmiths: 'Locksmith Services', 'moving companies': 'Moving Services',
+  'junk removal services': 'Junk Removal', 'auto repair shops': 'Auto Repair',
+  'auto detailing': 'Auto Detailing', 'towing companies': 'Towing', dentists: 'Dental Care',
+  chiropractors: 'Chiropractic Care', 'med spas': 'Med Spa Services', 'dog groomers': 'Dog Grooming',
+  veterinarians: 'Veterinary Care', 'hair salons': 'Hair & Beauty', 'barber shops': 'Barbering',
+  'nail salons': 'Nail Care', 'massage therapists': 'Massage Therapy',
+  'personal trainers': 'Personal Training', optometrists: 'Eye Care', 'law firms': 'Legal Services',
+  'accounting firms': 'Accounting', 'insurance agencies': 'Insurance', florists: 'Floral Design',
+};
+
+/** The industry noun for a search keyword — mapped for the catalog, safely singularized otherwise. */
+export function tradeName(keyword: string): string {
+  const k = keyword.trim().toLowerCase();
+  if (!k) return 'Local Business';
+  if (TRADE_NAMES[k]) return TRADE_NAMES[k];
+  const singular = k.endsWith('ies') ? `${k.slice(0, -3)}y` : (k.endsWith('s') && !k.endsWith('ss')) ? k.slice(0, -1) : k;
+  return /\b(service|repair|care|work)s?\b/.test(singular) ? titleCase(singular) : `${titleCase(singular)} Services`;
+}
+
 /** A business name from the page's <title>, stripped of the tagline half most titles carry
  *  ("Joe's Roofing | Austin's #1 Roofer" → "Joe's Roofing"). Empty/junk → null so the caller can
  *  fall back to the search-result name. */
@@ -63,9 +96,10 @@ export function fieldsFromPage(
   niche: string,
   fallbackName: string,
   location?: string | null,   // a REAL location (e.g. from Google Places city/state) — honest, not guessed
+  rating?: { rating: number | null; count: number | null } | null,  // REAL Places rating — display-at-use
 ): ExtractedFields {
   const name = cleanBusinessName(page.title) ?? cleanBusinessName(fallbackName) ?? fallbackName.trim();
-  const trade = titleCase(niche.trim());
+  const trade = niche.trim() ? tradeName(niche) : '';
   return {
     business_name: name.slice(0, 120),
     industry: trade || 'Local business',
@@ -74,8 +108,9 @@ export function fieldsFromPage(
     location: (location && location.trim()) ? location.trim().slice(0, 120) : null,
     hours: null,
     reviews_summary: null,
-    google_rating: null,
-    review_count: null,
+    // Real Google rating when Places returned one THIS run (display-at-use, never persisted).
+    google_rating: rating?.rating ?? null,
+    review_count: rating?.count ?? null,
   };
 }
 
@@ -89,6 +124,7 @@ export interface HuntProfileInput {
   audit: SiteAudit;                                       // the honest siteAudit of their current site
   location?: string | null;                               // real city/state (e.g. from Places) — optional
   phone?: string | null;                                  // real phone (e.g. from Places) — optional
+  rating?: { rating: number | null; count: number | null } | null;  // real Places rating — optional
 }
 
 /** Merge the deterministic fields + scraped assets + audit into a raw BusinessProfile object for
@@ -96,7 +132,7 @@ export interface HuntProfileInput {
  *  (one implementation), so photo provenance + honesty are identical. A real location/phone (from
  *  Google Places) rides through when provided — never invented. */
 export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unknown> {
-  const fields = fieldsFromPage(input.page, input.niche, input.fallbackName, input.location);
+  const fields = fieldsFromPage(input.page, input.niche, input.fallbackName, input.location, input.rating ?? null);
   const ctx: ScrapeContext = {
     url: input.url,
     images: input.images,
@@ -109,17 +145,46 @@ export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unk
   return raw;
 }
 
+/** One automation the audit GROUNDS for this prospect — a structural slice of AutomationProposal
+ *  (kept import-free so this Deno-shared module adds no new import chain). `evidence` is what was
+ *  actually observed; the paragraph never claims anything without it. */
+export interface PitchUpsell { title: string; pitch: string; monthlyPrice: string; evidence: string }
+
+/** The grounded automation upsell paragraph — "website + automation" in one email. Every line is
+ *  anchored to an observed signal (the honesty rule); zero upsells → empty string, never filler. */
+export function automationUpsellParagraph(upsells: PitchUpsell[]): string {
+  const picks = upsells.filter((u) => u.title && u.evidence).slice(0, 2);   // 2 max — an email, not a catalog
+  if (!picks.length) return '';
+  const lines = picks.map((u) => `— ${u.evidence} ${u.pitch} (from ${u.monthlyPrice})`);
+  return `\n\nWhile I was looking, I noticed a couple of things the new site could fix on autopilot:\n${lines.join('\n')}`;
+}
+
+/** REPLY-GATED first touch — the deliverability-correct opener. 2025-26 sender data is unambiguous:
+ *  a link in email #1 raises spam scores; the winning sequence is teaser → reply → link. Same honest
+ *  voice as buildHuntPitch, zero URLs; the link goes out (approval-gated) once they answer. */
+export function buildHuntPitchTeaser(profile: BusinessProfile, upsells: PitchUpsell[] = []): string {
+  return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
+
+I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
+
+Rather than just tell you that, I went ahead and built you a new one this week.${automationUpsellParagraph(upsells)}
+
+Want the link? Just reply "send it" and it's yours. No obligation either way.`;
+}
+
 /** The deterministic outreach pitch — a byte-for-byte match of engine.ts's generatePitch FALLBACK
- *  (the honest, no-AI copy). A daily automatic order must not depend on a model call to write mail;
- *  this text is specific, truthful, links once, and closes with no pressure. */
-export function buildHuntPitch(profile: BusinessProfile, previewUrl: string): string {
+ *  (the honest, no-AI copy) when no upsells are passed. A daily automatic order must not depend on
+ *  a model call to write mail; this text is specific, truthful, links once, and closes with no
+ *  pressure. `upsells` (from detect.ts, each grounded in an observed signal) appends the
+ *  website+automation offer — the pitch sells the monthly relationship, not just the rebuild. */
+export function buildHuntPitch(profile: BusinessProfile, previewUrl: string, upsells: PitchUpsell[] = []): string {
   return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
 I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
 
 Rather than just tell you that, I built you a new one:
 
-${previewUrl}
+${previewUrl}${automationUpsellParagraph(upsells)}
 
 If you like it, publishing it takes a day. No obligation either way.`;
 }

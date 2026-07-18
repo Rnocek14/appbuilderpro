@@ -13,7 +13,7 @@ export const PLACES_FIELD_MASK = [
   'places.id', 'places.displayName', 'places.formattedAddress',
   'places.nationalPhoneNumber', 'places.internationalPhoneNumber',
   'places.websiteUri', 'places.primaryType', 'places.types',
-  'places.location', 'places.addressComponents', 'nextPageToken',
+  'places.location', 'places.addressComponents', 'places.rating', 'places.userRatingCount', 'nextPageToken',
 ].join(',');
 
 export interface PlaceRaw {
@@ -27,6 +27,8 @@ export interface PlaceRaw {
   types?: string[];
   location?: { latitude: number; longitude: number };
   addressComponents?: Array<{ longText: string; shortText: string; types: string[] }>;
+  rating?: number;
+  userRatingCount?: number;
 }
 
 /** One real business the hunt discovered — exactly what Places returned, nothing invented. */
@@ -44,6 +46,10 @@ export interface DiscoveredBiz {
   lat: number | null;
   lng: number | null;
   has_website: boolean;   // false ⇒ the strongest "I'll build you a website" prospect
+  // DISPLAY-AT-USE ONLY (Places ToS): real rating/count for the demo built in this run —
+  // never persisted to the lead pool. Null when Places has none.
+  rating: number | null;
+  rating_count: number | null;
 }
 
 /** Host, lowercased, without scheme / www / path — the persistent dedupe key for a website. */
@@ -101,6 +107,8 @@ export function parsePlace(raw: PlaceRaw, keyword: string): DiscoveredBiz | null
     lat: raw.location?.latitude ?? null,
     lng: raw.location?.longitude ?? null,
     has_website: !!website_normalized,
+    rating: typeof raw.rating === 'number' ? raw.rating : null,
+    rating_count: typeof raw.userRatingCount === 'number' ? raw.userRatingCount : null,
   };
 }
 

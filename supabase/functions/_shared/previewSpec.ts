@@ -409,6 +409,9 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     if (s.type === 'hero') {
       const img = typeof s.props.image === 'string' ? s.props.image : undefined;
       s.props.image = img && photos.some((p) => p.url === img) ? img : photos[0]?.url;
+      // The REAL phone rides into the hero so the call button dials it — never digits parsed out
+      // of an AI-written button label ("Call us today" → dead tel: link).
+      if (profile.phone) s.props.phone = profile.phone;
     }
     if (s.type === 'gallery' || s.type === 'showcase') {
       s.props.photos = photos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
@@ -465,6 +468,81 @@ export function navFor(sections: SectionSpec[], cta: string): { label: string; a
 // This is both the no-key/dev path and the floor the normalizer patches holes with.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Per-vertical VOICE for the fallback assembler. One formula for every trade read like a
+// template ("X done right in City.") — and two competitors in one town could receive
+// near-identical demos. Each class of business gets its own language, and the variant is
+// picked deterministically from the business NAME hash, so the same business always gets the
+// same site while neighbors get different ones. Copy stays behavioral/observed — no claims.
+// ---------------------------------------------------------------------------
+
+const nameHash = (s: string): number => {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+};
+
+interface Voice { heading: string; sub: string; bannerHeading: string }
+
+function voiceFor(industry: string, name: string, city: string | null): Voice {
+  const ind = industry.trim();
+  const indLc = ind.toLowerCase();
+  const inCity = city ? ` in ${city}` : '';
+  const cityOr = city ?? 'your area';
+  const pick = (arr: string[]): string => arr[nameHash(name) % arr.length];
+
+  if (/(roof|plumb|hvac|electric|landscap|lawn|paint|pressure|cleaning|pest|tree|fenc|concrete|garage|handyman|remodel|floor|window|gutter|pool|appliance|junk|moving|towing|locksmith)/.test(indLc)) {
+    return {
+      heading: pick([
+        `${ind} you can count on${inCity}.`,
+        `${cityOr}'s straightforward ${indLc} crew.`,
+        `${ind} done right${inCity}. The first time.`,
+      ]),
+      sub: pick([
+        `${name} shows up when promised, quotes it straight, and stands behind the work.`,
+        `Fast quotes, tidy job sites, and work built to last — that's ${name}.`,
+      ]),
+      bannerHeading: pick([`Need ${indLc}${inCity}? Let's talk.`, `Your ${indLc} project starts with one quote.`]),
+    };
+  }
+  if (/(dental|chiropractic|veterinary|eye care|optometr|medical|clinic|therapy)/.test(indLc)) {
+    return {
+      heading: pick([`Care that puts you first${inCity}.`, `${cityOr}'s neighborhood ${indLc} practice.`]),
+      sub: pick([
+        `${name} — modern care, clear answers, and appointments that respect your time.`,
+        `From first visit to follow-up, ${name} makes ${indLc} feel easy.`,
+      ]),
+      bannerHeading: pick([`Ready to book your visit${inCity}?`, `New patients welcome at ${name}.`]),
+    };
+  }
+  if (/(hair|barber|nail|salon|spa|beauty|grooming|massage|training|fitness)/.test(indLc)) {
+    return {
+      heading: pick([`Look forward to your next appointment.`, `${cityOr} comes to ${name} for a reason.`]),
+      sub: pick([
+        `${name} — skilled hands, easy booking, and a chair you'll come back to.`,
+        `Walk out feeling like the best version of yourself. That's the ${name} standard.`,
+      ]),
+      bannerHeading: pick([`Book your spot at ${name}.`, `Your next appointment is one click away.`]),
+    };
+  }
+  if (/(legal|law|accounting|insurance|real estate|financial|consult)/.test(indLc)) {
+    return {
+      heading: pick([`${ind}, explained in plain English${inCity}.`, `Steady hands for the decisions that matter.`]),
+      sub: pick([
+        `${name} gives you straight answers, clear fees, and someone who picks up the phone.`,
+        `When it matters, ${cityOr} calls ${name}.`,
+      ]),
+      bannerHeading: pick([`Talk it through with ${name}.`, `Get clarity on your next step.`]),
+    };
+  }
+  // Default voice — still name-varied, still behavioral.
+  return {
+    heading: pick([`${ind} done right${inCity}.`, `${cityOr}'s go-to for ${indLc}.`]),
+    sub: `${name} — ${indLc}${inCity}.`,
+    bannerHeading: `Ready to get started${inCity}?`,
+  };
+}
+
 export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const recipe = pickRecipe(profile);
   const photos = usablePhotos(profile);
@@ -473,24 +551,30 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const name = profile.business_name;
   const cta = recipe.cta;
 
+  const voice = voiceFor(profile.industry, name, loc ? loc.split(',')[0] : null);
+
   const sections: SectionSpec[] = [];
   for (const type of recipe.sections) {
     switch (type) {
       case 'hero':
         sections.push({ type, props: {
           eyebrow: loc ? `${profile.industry} · ${loc}` : profile.industry,
-          heading: `${profile.industry} done right${loc ? ` in ${loc.split(',')[0]}` : ''}.`,
-          sub: profile.description ?? `${name} — ${profile.services.slice(0, 3).join(', ')}${profile.services.length > 3 ? ' and more' : ''}.`,
+          heading: voice.heading,
+          sub: profile.description ?? voice.sub,
           cta, secondaryCta: profile.phone ? `Call ${profile.phone}` : undefined,
           image: photos[0]?.url,
           rating: profile.google_rating, reviewCount: profile.review_count,
         } });
         break;
       case 'trust':
+        // HONESTY: every line is either observed (rating, review count, location, phone) or
+        // behavioral (what the site itself offers). Never 'Licensed & insured' or 'Satisfaction
+        // guaranteed' — claims nobody verified have no place on a pitched demo.
         sections.push({ type, props: { items: [
-          profile.google_rating ? `${profile.google_rating.toFixed(1)}★ on Google` : 'Locally owned & operated',
-          profile.review_count ? `${profile.review_count}+ customer reviews` : 'Satisfaction guaranteed',
-          'Licensed & insured', 'Free estimates',
+          profile.google_rating ? `${profile.google_rating.toFixed(1)}★ on Google` : `Professional ${profile.industry.toLowerCase()}`,
+          profile.review_count ? `${profile.review_count}+ customer reviews` : (loc ? `Serving ${loc.split(',')[0]} & nearby` : 'Serving the local area'),
+          'Free, no-obligation quotes',
+          profile.phone ? `Call ${profile.phone}` : 'Fast online quotes',
         ] } });
         break;
       case 'services':
@@ -532,7 +616,9 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         sections.push({ type, props: { heading: 'Common questions', faqs: [
           { q: 'How do I get a quote?', a: `Use the form below or call${profile.phone ? ` ${profile.phone}` : ' us'} — quotes are free and carry no obligation.` },
           { q: 'What areas do you cover?', a: profile.service_area?.length ? profile.service_area.join(', ') : (loc || 'Our local area and surrounding communities.') },
-          { q: 'Are you licensed and insured?', a: 'Yes — fully licensed and insured for your protection.' },
+          // No invented licensing claim — the one question a fallback site can answer honestly is
+          // how the site itself behaves.
+          { q: 'How quickly will I hear back?', a: `Your request goes straight to ${name} the moment you send it.` },
         ] } });
         break;
       case 'hours':
@@ -550,7 +636,7 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         break;
       case 'ctaBanner':
         sections.push({ type, props: {
-          heading: `Ready to get started${loc ? ` in ${loc.split(',')[0]}` : ''}?`,
+          heading: voice.bannerHeading,
           sub: profile.phone ? `Call ${profile.phone} or request a quote online.` : 'Request a quote online — it takes 30 seconds.',
           cta,
         } });

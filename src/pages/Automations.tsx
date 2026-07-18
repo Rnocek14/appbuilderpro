@@ -17,6 +17,7 @@ import {
   listTriggers, createTriggerFromCapability, setTriggerStatus, deleteTrigger, CAPABILITIES,
   type CustomerListRow, type CustomerRow, type TriggerRow,
 } from '../lib/garvis/automation/triggersStore';
+import { loadAutomationMonth, automationMonthLine, type AutomationMonth } from '../lib/garvis/automation/report';
 import { runTriggersForOwner, type TriggerRunSummary } from '../lib/garvis/automation/triggersRun';
 
 // Only capabilities that carry a triggerDefault (the date/interval ones) can become a trigger.
@@ -42,6 +43,8 @@ export default function Automations() {
   const [csv, setCsv] = useState('');
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<TriggerRunSummary | null>(null);
+  const [month, setMonth] = useState<AutomationMonth | null>(null);
+  useEffect(() => { void loadAutomationMonth().then(setMonth); }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true); setLoadFailed(false);
@@ -123,10 +126,18 @@ export default function Automations() {
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Zap size={18} /></span>
           <h1 className="text-xl font-semibold text-forge-ink">Automations</h1>
         </div>
-        <p className="mb-5 text-sm text-forge-dim">
+        <p className="mb-3 text-sm text-forge-dim">
           Recurring, per-customer nudges on a client’s own warm list — recall reminders, seasonal service, review requests.
           Due ones land in your <NavLink to="/garvis/queue" className="text-forge-ember hover:underline">Queue</NavLink> to approve. Nothing sends without your OK.
         </p>
+        {/* THE ROI LINE (app_0081/reportCore): the honest month-to-date tally that justifies the
+            retainer — counted from the ledger tables, never composed. */}
+        {month && (
+          <p className="mb-5 rounded-xl border border-forge-border bg-forge-panel/40 px-3 py-2 text-xs text-forge-ink/90">
+            <span className="mr-1.5 font-semibold uppercase tracking-wide text-forge-ember">Report</span>
+            {automationMonthLine(month)}
+          </p>
+        )}
 
         {creatingList && (
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-forge-border bg-forge-panel/40 p-3">

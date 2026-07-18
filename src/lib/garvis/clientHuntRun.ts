@@ -5,6 +5,7 @@
 
 import { supabase } from '../supabase';
 import { parsePlace, type PlaceRaw } from './placesDiscovery';
+import { deriveSignals, proposeFromSignals } from './automation/detect';
 import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit';
 import { sweepPlan, registerDomain } from './nationalSweepCore';
 import { detectVertical } from './verticals';
@@ -211,10 +212,22 @@ export async function recordProspectAudit(input: RecordAuditInput): Promise<void
       .filter(Boolean).join(' ').trim();
     const vertical = verticalText ? detectVertical(verticalText) : null;
 
+    // AUTOMATION SEARCH at write time (app_0082): which catalog automations does THIS prospect's
+    // audit ground? Stored as capability ids so the saved-audit pool is queryable by need.
+    const view = {
+      vertical: (vertical ?? null) as Parameters<typeof proposeFromSignals>[1],
+      checks: (sc?.checks ?? {}) as { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean },
+      siteSignalIds: a.signals.map((s) => s.id),
+      text: sc?.text || null,
+      tech: sc?.tech ?? null,
+    };
+    const proposals = proposeFromSignals(deriveSignals(view), view.vertical).proposals.map((p) => p.capabilityId);
+
     const row = {
       owner_id: uid,
       url,
       host,
+      proposals,
       business_name: input.businessName ?? null,
       niche: input.niche?.trim() || null,
       area: input.area?.trim() || null,
@@ -235,12 +248,17 @@ export async function recordProspectAudit(input: RecordAuditInput): Promise<void
     };
 
     // SELECT-FIRST (house rule): refresh an existing prospect's audit rather than duplicate it.
+    // If app_0082 isn't applied yet, retry without `proposals` — never lose the audit over a column.
     const { data: existing } = await supabase.from('prospect_audits')
       .select('id').eq('owner_id', uid).eq('url', url).maybeSingle();
-    if (existing) {
-      await supabase.from('prospect_audits').update(row).eq('id', (existing as { id: string }).id);
-    } else {
-      await supabase.from('prospect_audits').insert(row);
+    const write = async (r: Record<string, unknown>) =>
+      existing
+        ? supabase.from('prospect_audits').update(r).eq('id', (existing as { id: string }).id)
+        : supabase.from('prospect_audits').insert(r);
+    const { error: wErr } = await write(row);
+    if (wErr && /proposals/.test(wErr.message)) {
+      const { proposals: _drop, ...legacy } = row;
+      await write(legacy);
     }
   } catch { /* best-effort: persistence never breaks the audit UI */ }
 }
@@ -261,6 +279,7 @@ export interface ProspectAuditRow {
   signals: AuditSignal[];
   strengths: string[];
   vertical: string | null;
+  proposals?: string[];          // detected automation capability ids (app_0082)
   checks: Record<string, boolean>;
   tech: Partial<TechFingerprint>;
   meta_title: string | null;

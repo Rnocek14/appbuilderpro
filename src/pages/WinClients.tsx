@@ -14,6 +14,9 @@ import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, 
 import { US_CITIES, US_STATES, citiesFor, type SweepScope } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
 import { huntSummary, type HuntConfig } from '../lib/garvis/clientHuntSchedule';
+import { deriveSignals, proposeFromSignals } from '../lib/garvis/automation/detect';
+import { automationUpsellParagraph } from '../lib/garvis/clientHuntBuild';
+import { detectVertical } from '../lib/garvis/verticals';
 import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder, runOrderNow } from '../lib/garvis/standingRun';
 import { orderStatusLine, type StandingOrder } from '../lib/garvis/standing';
 import { type Verdict } from '../lib/garvis/siteAudit';
@@ -109,6 +112,21 @@ export default function WinClients() {
       if (!res.ok) { toast('error', (res.errors ?? ['Couldn’t build from that site.']).join(' ')); return; }
       const bizName = res.profile?.business_name || b.name;
       const industry = res.profile?.industry || niche.trim() || 'Local business';
+      // AUTOMATION SEARCH → PITCH (interactive path): ground the "we can fix X on autopilot" lines
+      // in the audit we already ran during Find. No observed signals → no upsell lines, ever.
+      let pitch = res.row!.pitch;
+      if (b.audit) {
+        const view = {
+          vertical: detectVertical([niche, bizName, industry].filter(Boolean).join(' ')),
+          checks: {}, siteSignalIds: b.audit.signals.map((s) => s.id), text: null, tech: null,
+        };
+        const sigs = deriveSignals(view);
+        const { proposals } = proposeFromSignals(sigs, view.vertical);
+        pitch += automationUpsellParagraph(proposals.map((p) => ({
+          title: p.title, pitch: p.pitch, monthlyPrice: p.monthlyPrice,
+          evidence: sigs.find((s) => s.id === p.matchedSignal)?.evidence ?? '',
+        })));
+      }
       // The scrape already found a published email; fall back to a dedicated contact scan.
       const email = res.profile?.email ?? (b.url ? await findContactEmail(b.url) : null);
       let queued = false;
@@ -116,7 +134,7 @@ export default function WinClients() {
         try {
           await queuePitch({
             previewSiteId: res.row!.id, businessProfileId: res.row!.profile_id ?? null,
-            businessName: bizName, industry, pitch: res.row!.pitch, previewUrl: res.previewUrl!, toEmail: email,
+            businessName: bizName, industry, pitch, previewUrl: res.previewUrl!, toEmail: email,
           });
           queued = true;
         } catch (e) { toast('error', emsg(e)); }

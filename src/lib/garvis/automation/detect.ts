@@ -10,7 +10,9 @@
 
 import type { Vertical } from '../verticals';
 import type { ProspectAuditRow, TechFingerprint } from '../clientHuntRun';
-import { CAPABILITIES, isDeliverable, type SignalKind } from './registry';
+// .ts extension: this module is also imported by the standing-worker EDGE function (Deno strict
+// resolver). Type-only imports above it are erased and need none.
+import { CAPABILITIES, isDeliverable, type SignalKind } from './registry.ts';
 
 export interface DetectedSignal {
   id: string;              // e.g. 'manual_process:manual_intake'
@@ -70,7 +72,9 @@ function techComputed(tech: Partial<TechFingerprint> | null): tech is TechFinger
 const DIY_BUILDERS = new Set(['wix', 'squarespace', 'godaddy', 'weebly']);
 
 // "Call us to book / for a quote" — presence means the funnel runs through a phone by hand.
-const PHONE_FUNNEL = /(call (us )?(to|for|and)?\s?(book|schedule|make an appointment)|call (us )?(for|to get) (a )?(free )?(quote|estimate|pricing|appointment)|call today|give us a call)/i;
+// Broadened after a live-content run missed "call our office to schedule an appointment" —
+// the subject can be us/our office/the office/name-elided, with optional filler before the verb.
+const PHONE_FUNNEL = /(call\s+(us|our office|the office)?\s*(today\s+)?(to|for|and)?\s*(book|schedule|make an appointment)|call\s+(us\s+|our office\s+|the office\s+)?(for|to get)\s+(a\s+)?(free\s+)?(quote|estimate|pricing|appointment)|call today|give us a call)/i;
 // Verticals where booking/scheduling is core to how they make money.
 const BOOKING_VERTICALS: Vertical[] = ['health', 'home_services', 'events', 'food'];
 

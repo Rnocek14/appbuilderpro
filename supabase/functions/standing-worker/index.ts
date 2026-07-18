@@ -33,6 +33,10 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { buildHuntProfileRaw, buildHuntPitch, huntRunLine } from '../../../src/lib/garvis/clientHuntBuild.ts';
 import { auditSite } from '../../../src/lib/garvis/siteAudit.ts';
+import { deriveSignals, proposeFromSignals } from '../../../src/lib/garvis/automation/detect.ts';
+import { detectVertical } from '../../../src/lib/garvis/verticals.ts';
+// TRIGGER ENGINE pure core (app_0076) — the same verified math the in-app runner uses.
+import { dueFires, renderTemplate, fireKey } from '../../../src/lib/garvis/automation/triggers.ts';
 import { citiesFor } from '../../../src/lib/garvis/usCities.ts';
 import {
   PLACES_FIELD_MASK, parsePlace, buildDiscoveryQueries, exhaustionUpdate,
@@ -236,6 +240,78 @@ Deno.serve(async (req) => {
         }
       }
     } catch { /* batch drain must never wedge the order tick */ }
+
+    // ---- CLIENT AUTOMATION TRIGGERS (app_0076) --------------------------------------------------
+    // The recurring-revenue engine ON THE CLOCK: every owner's active triggers run with the SAME
+    // pure core (dueFires/renderTemplate) + claim-first trigger_fires ledger the in-app "Run due
+    // now" uses — so automations fire while the operator sleeps. Every fire enqueues a PENDING
+    // approval through the one send path; nothing sends without the owner. Bounded per tick.
+    try {
+      const FIRES_PER_TICK = 40;
+      let fired = 0;
+      // Reconcile stranded claims (claimed but never enqueued) so they retry instead of blocking.
+      const staleCutoff = new Date(Date.parse(nowIso) - 10 * 60 * 1000).toISOString();
+      await admin.from('trigger_fires').delete().is('approval_id', null).lt('created_at', staleCutoff);
+
+      const { data: trigData } = await admin.from('automation_triggers')
+        .select('*').eq('status', 'active').limit(200);
+      const customersCache = new Map<string, { id: string; email: string | null; name: string | null; anchors: Record<string, string | null> }[]>();
+      for (const t of (trigData ?? []) as {
+        id: string; owner_id: string; list_id: string; label: string; anchor_field: string;
+        offset_days: number; window_days: number; status: 'active' | 'paused';
+        template_subject: string; template_body: string;
+      }[]) {
+        if (fired >= FIRES_PER_TICK) break;
+        const cacheKey = `${t.owner_id}:${t.list_id}`;
+        let customers = customersCache.get(cacheKey);
+        if (!customers) {
+          const { data: custData } = await admin.from('customers')
+            .select('*').eq('owner_id', t.owner_id).eq('list_id', t.list_id);
+          customers = ((custData ?? []) as Record<string, string | null>[]).map((c) => ({
+            id: c.id as string, email: c.email, name: c.name,
+            anchors: {
+              last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
+              purchase_at: c.purchase_at, next_due_at: c.next_due_at,
+            },
+          }));
+          customersCache.set(cacheKey, customers);
+        }
+        const { data: fireData } = await admin.from('trigger_fires')
+          .select('customer_id, fired_for').eq('owner_id', t.owner_id).eq('trigger_id', t.id);
+        const firedKeys = ((fireData ?? []) as { customer_id: string; fired_for: string }[])
+          .map((f) => fireKey(f.customer_id, f.fired_for));
+        const def = {
+          id: t.id, anchorField: t.anchor_field as Parameters<typeof dueFires>[0]['anchorField'],
+          offsetDays: t.offset_days, windowDays: t.window_days, status: t.status,
+        };
+        // deno-lint-ignore no-explicit-any
+        const plan = dueFires(def, customers as any, firedKeys, nowIso);
+        for (const fire of plan) {
+          if (fired >= FIRES_PER_TICK) break;
+          // CLAIM-FIRST: unique(trigger, customer, due date) makes a duplicate a no-op forever.
+          const { data: claim, error: claimErr } = await admin.from('trigger_fires')
+            .insert({ owner_id: t.owner_id, trigger_id: t.id, customer_id: fire.customerId, fired_for: fire.firedFor })
+            .select('id').maybeSingle();
+          if (claimErr || !claim) continue;   // 23505 = already fired; other errors retry next tick
+          const fireId = (claim as { id: string }).id;
+          try {
+            const cust = customers.find((c) => c.id === fire.customerId)!;
+            // deno-lint-ignore no-explicit-any
+            const subject = renderTemplate(t.template_subject, cust as any).trim() || t.label;
+            // deno-lint-ignore no-explicit-any
+            const body2 = renderTemplate(t.template_body, cust as any);
+            const ok = await queueTriggerSend(admin, t.owner_id, {
+              label: t.label, subject, body: body2, toEmail: fire.email, fireId,
+            });
+            if (!ok) throw new Error('enqueue failed');
+            fired++;
+          } catch {
+            // Release the claim so the fire retries next tick — a failed fire is never lost.
+            await admin.from('trigger_fires').delete().eq('id', fireId);
+          }
+        }
+      }
+    } catch { /* trigger engine must never wedge the order tick */ }
   }
 
   // --- pick the work: one forced order, or the due set --------------------------------------------
@@ -554,7 +630,12 @@ const HUNT_TIME_BUDGET_MS = 90_000;
 const DISCOVER_BUDGET_MS = 55_000;   // cap discovery so building always gets a share of the window
 const PLACES_PAGES = 2;   // pages per query (≤20 results each) — bounds Places cost per search
 
-interface HuntEnv { supabaseUrl: string; workerSecret: string; serviceKey: string; appOrigin: string; placesKey: string; nowYear: number }
+interface HuntEnv {
+  supabaseUrl: string; workerSecret: string; serviceKey: string; appOrigin: string; placesKey: string; nowYear: number;
+  // Ratings seen DURING THIS RUN, keyed by place_id — used only to render the demo built in the
+  // same invocation (Places ToS: display-at-use; the lead pool never stores rating).
+  runRatings: Map<string, { rating: number | null; count: number | null }>;
+}
 interface QueryRowDB { id: string; query_text: string; keyword: string; last_run_at: string | null; exhausted: boolean; total_inserted: number; run_count: number; consecutive_zero_runs: number }
 interface LeadRow { id: string; place_id: string | null; company_name: string; keyword: string; website: string | null; phone: string | null; city: string | null; state: string | null }
 
@@ -573,6 +654,7 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
     appOrigin: Deno.env.get('APP_ORIGIN') ?? '',
     placesKey,
     nowYear: new Date(nowIso).getUTCFullYear(),
+    runRatings: new Map(),
   };
   const startedMs = Date.now();
 
@@ -635,7 +717,11 @@ async function runDiscoveryQuery(admin: any, ownerId: string, q: QueryRowDB, env
   try {
     for (const raw of await fetchPlaces(env.placesKey, q.query_text, PLACES_PAGES)) {
       const biz = parsePlace(raw, q.keyword);
-      if (biz && await insertLead(admin, ownerId, biz, q.id)) inserted++;
+      if (!biz) continue;
+      if (biz.place_id && (biz.rating != null || biz.rating_count != null)) {
+        env.runRatings.set(biz.place_id, { rating: biz.rating, count: biz.rating_count });
+      }
+      if (await insertLead(admin, ownerId, biz, q.id)) inserted++;
     }
   } catch { /* one query failing never sinks the run — still record the attempt below */ }
   const upd = exhaustionUpdate(q, inserted);
@@ -726,11 +812,18 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   let finalUrl = lead.website ?? '';
   // Default (no site, or an unreachable one): an honest "no website" audit — no invented score.
   let audit = auditSite({ url: finalUrl, reachable: false }, env.nowYear);
+  // Kept for automation detection below — the pitch upsell is grounded ONLY in what was observed.
+  let pageChecks: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean } = {};
+  let pageText = '';
+  let pageTech: Record<string, unknown> | null = null;
 
   if (lead.website) {
     const text = await scrapePage(lead.website, 'text', env);
     if (text && !text.error && text.checks) {   // reachable HTML — read their real site
       const checks = text.checks as { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
+      pageChecks = checks;
+      pageText = (text.text as string) ?? '';
+      pageTech = (text.tech as Record<string, unknown> | undefined) ?? null;
       finalUrl = (typeof text.url === 'string' && text.url) || lead.website;
       page = { title: (text.title as string) ?? null, description: (text.description as string) ?? null };
       const imgResp = await scrapePage(lead.website, 'images', env);
@@ -749,6 +842,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   const raw = buildHuntProfileRaw({
     url: finalUrl, niche: lead.keyword, fallbackName: lead.company_name,
     page, images, email, audit, location, phone: lead.phone,
+    rating: lead.place_id ? env.runRatings.get(lead.place_id) ?? null : null,
   });
   const { profile } = parseBusinessProfile(raw);
   if (!profile) return 'skipped';
@@ -764,7 +858,23 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   const nonce = Math.random().toString(36).slice(2, 8);   // slug isn't enumerable by guessing names
   const slug = `${previewSlug(profile.business_name)}-${nonce}`;
   const previewUrl = env.appOrigin ? `${env.appOrigin}/preview-site/${slug}` : `/preview-site/${slug}`;
-  const pitch = buildHuntPitch(profile, previewUrl);
+
+  // AUTOMATION SEARCH → PITCH: run the grounded detector on what we actually observed and put the
+  // "website + automation $/mo" offer in the email. Zero observed signals → zero upsell lines.
+  const view = {
+    vertical: detectVertical([lead.keyword, page.title ?? '', pageText].filter(Boolean).join(' ')),
+    checks: pageChecks,
+    siteSignalIds: audit.signals.map((s) => s.id),
+    text: pageText || null,
+    tech: pageTech,
+  };
+  const sigs = deriveSignals(view);
+  const { proposals } = proposeFromSignals(sigs, view.vertical);
+  const upsells = proposals.map((p) => ({
+    title: p.title, pitch: p.pitch, monthlyPrice: p.monthlyPrice,
+    evidence: sigs.find((s) => s.id === p.matchedSignal)?.evidence ?? '',
+  }));
+  const pitch = buildHuntPitch(profile, previewUrl, upsells);
 
   const { data: site, error: sErr } = await admin.from('preview_sites').insert({
     user_id: order.owner_id, profile_id: profileRow.id, slug,
@@ -848,4 +958,57 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     payload, payload_hash, requested_by: 'garvis-auto',
   });
   return !apErr;
+}
+
+/** Server twin of the in-app trigger enqueue: contact (suppression-respecting, SELECT-FIRST) →
+ *  automation campaign → draft message → PENDING approval, then stamps the fire's approval_id.
+ *  Mirrors queueHuntPitch's mechanics; kind 'automation' keeps it out of cold follow-ups. */
+// deno-lint-ignore no-explicit-any
+async function queueTriggerSend(admin: any, uid: string, input: {
+  label: string; subject: string; body: string; toEmail: string; fireId: string;
+}): Promise<boolean> {
+  const to = input.toEmail.toLowerCase().trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return false;
+
+  let contactId: string;
+  const { data: existing } = await admin.from('contacts')
+    .select('id, email_status').eq('owner_id', uid).eq('email', to).maybeSingle();
+  if (existing) {
+    const st = (existing as { email_status?: string }).email_status;
+    if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') return false;  // never re-contact
+    contactId = (existing as { id: string }).id;
+  } else {
+    const { data: c } = await admin.from('contacts').insert({
+      owner_id: uid, email: to, email_status: 'unknown', is_primary: true,
+    }).select('id').maybeSingle();
+    if (c) contactId = (c as { id: string }).id;
+    else {
+      const { data: again } = await admin.from('contacts').select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
+      if (!again) return false;
+      contactId = (again as { id: string }).id;
+    }
+  }
+
+  const { data: camp } = await admin.from('outreach_campaigns').insert({
+    owner_id: uid, contact_id: contactId, kind: 'automation', state: 'pending_approval',
+  }).select('id').single();
+  if (!camp) return false;
+
+  const { data: msg } = await admin.from('outreach_messages').insert({
+    owner_id: uid, campaign_id: (camp as { id: string }).id, contact_id: contactId,
+    sequence_step: 0, subject: input.subject, body_text: input.body, to_address: to, status: 'draft',
+  }).select('id').single();
+  if (!msg) return false;
+
+  const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id };
+  const payload_hash = await hashPayload(payload);
+  const { data: ap, error: apErr } = await admin.from('approvals').insert({
+    owner_id: uid, kind: 'send_email',
+    title: `${input.label} → ${to}`,
+    preview: `${input.subject}\n\n${input.body}`,
+    payload, payload_hash, requested_by: 'garvis-auto',
+  }).select('id').single();
+  if (apErr || !ap) return false;
+  await admin.from('trigger_fires').update({ approval_id: (ap as { id: string }).id }).eq('id', input.fireId);
+  return true;
 }
