@@ -60,9 +60,10 @@ HARD RULES:
           eyebrow — legal, luxury, photography) | "portal" (a small framed photo zooms through
           into a full-bleed stage as you scroll, then the headline lands — the showpiece opener;
           needs a strong photo + lively/cinematic motion) | "layers" (the depth sandwich: backdrop
-          art → giant wordmark → the trade's iconic object floating OVER the type, drifting apart
-          on scroll — THE showpiece when photos tagged ai-backdrop AND ai-object exist; prefer it
-          then)
+          art → giant wordmark → the trade's iconic object floating OVER the type — available only
+          when photos tagged ai-backdrop AND ai-object exist. Use it SELECTIVELY — for the boldest
+          brands, roughly one in three eligible sites; stacked/fullbleed with the backdrop image
+          are equally strong openers. Never place role-tagged assets in galleries or about.)
     services: "cards" (grid) | "rows" (indexed editorial menu — professional, no-nonsense)
     reviews: "grid" | "spotlight" (one big quote leads)
     ctaBanner: "band" | "giant" (oversized closer)

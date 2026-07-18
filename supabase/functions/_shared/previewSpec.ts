@@ -495,6 +495,11 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   // sections: keep known types only, in given order; re-inject photo/review data from the
   // PROFILE with usage flags applied (never trust the model to have honored them).
   const photos = usablePhotos(profile);
+  // Role-tagged AI assets belong to the layers hero ONLY. The transparent object must never
+  // appear as a "content photo" (a floating wrench in the about section — 20-site review
+  // finding); the abstract backdrop may serve as a hero background but never galleries/about.
+  const contentPhotos = photos.filter((p) => p.alt !== 'ai-backdrop' && p.alt !== 'ai-object');
+  const heroBackdrop = photos.find((p) => p.alt === 'ai-backdrop');
   const reviews = usableReviews(profile);
   const rawSections = Array.isArray(r.sections) ? r.sections : [];
   let sections: SectionSpec[] = rawSections
@@ -527,18 +532,27 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   for (const s of sections) {
     if (s.type === 'hero') {
       const img = typeof s.props.image === 'string' ? s.props.image : undefined;
-      s.props.image = img && photos.some((p) => p.url === img) ? img : photos[0]?.url;
+      s.props.image = img && (contentPhotos.some((p) => p.url === img) || img === heroBackdrop?.url)
+        ? img
+        : contentPhotos[0]?.url ?? heroBackdrop?.url;
       // Layered depth-sandwich assets ride in by ROLE, never by model-supplied URL: the worker
       // tags the generated pair alt 'ai-backdrop'/'ai-object'; both present → the 'layers' hero
       // can render. A layers variant without both falls back in the renderer.
-      s.props.bgImage = photos.find((p) => p.alt === 'ai-backdrop')?.url;
+      s.props.bgImage = heroBackdrop?.url;
       s.props.objectImage = photos.find((p) => p.alt === 'ai-object')?.url;
       // The REAL phone rides into the hero so the call button dials it — never digits parsed out
       // of an AI-written button label ("Call us today" → dead tel: link).
       if (profile.phone) s.props.phone = profile.phone;
     }
+    if (s.type === 'about') {
+      // about.image is model-suggested — allow only real content photos (no role assets).
+      const aImg = typeof s.props.image === 'string' ? s.props.image : undefined;
+      s.props.image = aImg && contentPhotos.some((p) => p.url === aImg)
+        ? aImg
+        : contentPhotos[1]?.url ?? contentPhotos[0]?.url;
+    }
     if (s.type === 'gallery' || s.type === 'showcase') {
-      s.props.photos = photos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
+      s.props.photos = contentPhotos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
     }
     if (s.type === 'reviews') {
       s.props.reviews = reviews.map((x) => ({ author: x.author ?? 'Verified customer', rating: x.rating ?? 5, text: x.text }));
@@ -548,8 +562,9 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     }
   }
   // sections that render scraped media but have none to render get dropped, not left empty
+  // (role-tagged AI assets don't count as gallery content)
   sections = sections.filter((s) => {
-    if ((s.type === 'gallery' || s.type === 'showcase') && photos.length === 0) return false;
+    if ((s.type === 'gallery' || s.type === 'showcase') && contentPhotos.length === 0) return false;
     if (s.type === 'reviews' && reviews.length === 0 && !profile.reviews_summary) return false;
     return true;
   });
@@ -690,7 +705,10 @@ function voiceFor(industry: string, name: string, city: string | null): Voice {
 
 export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const recipe = pickRecipe(profile);
-  const photos = usablePhotos(profile);
+  const allPhotos = usablePhotos(profile);
+  // Same role rule as the normalizer: the AI object/backdrop pair never masquerades as content.
+  const photos = allPhotos.filter((p) => p.alt !== 'ai-backdrop' && p.alt !== 'ai-object');
+  const heroBackdrop = allPhotos.find((p) => p.alt === 'ai-backdrop');
   const reviews = usableReviews(profile);
   const loc = profile.location ?? '';
   const name = profile.business_name;
@@ -707,9 +725,9 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
           heading: voice.heading,
           sub: profile.description ?? voice.sub,
           cta, secondaryCta: profile.phone ? `Call ${profile.phone}` : undefined,
-          image: photos[0]?.url,
-          bgImage: photos.find((p) => p.alt === 'ai-backdrop')?.url,
-          objectImage: photos.find((p) => p.alt === 'ai-object')?.url,
+          image: photos[0]?.url ?? heroBackdrop?.url,
+          bgImage: heroBackdrop?.url,
+          objectImage: allPhotos.find((p) => p.alt === 'ai-object')?.url,
           rating: profile.google_rating, reviewCount: profile.review_count,
         } });
         break;

@@ -147,37 +147,37 @@ export function Hero(p: HeroProps) {
   // object floating OVER the type, drifting apart as you scroll (pseudo-3D, no models needed).
   // Needs the AI-generated role pair (backdrop + transparent object) + motion; else falls through.
   if (p.variant === 'layers' && p.bgImage && p.objectImage && p.motion !== 'calm') {
+    // Iteration-loop fix: the landing frame must BE the pitch. Copy is visible from the first
+    // pixel; the wordmark/object sandwich plays above it as you scroll. Wordmark scales with the
+    // name so long names never bleed off-canvas; the pin is short (no dead runway).
+    const wm = Math.min(9.5, 170 / Math.max(10, (p.siteName ?? '').length));
     return (
       <section id="hero" className="pv-grain-host relative isolate">
-        <ScrollScene heightVh={200}>
+        <ScrollScene heightVh={155}>
           {(prog) => {
-            const drift = Math.min(1, prog / 0.65);
-            const copy = Math.max(0, (prog - 0.55) / 0.35);
+            const drift = Math.min(1, prog / 0.75);
             return (
               <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-[hsl(var(--ink))]">
                 {/* layer 1: backdrop art, slow drift + settle */}
                 <img src={p.bgImage} alt="" className="absolute inset-0 h-full w-full object-cover"
-                  style={{ transform: `scale(${1.18 - drift * 0.1}) translateY(${(1 - drift) * -26}px)`, opacity: 0.9 }} />
-                <div className="absolute inset-0 bg-gradient-to-b from-black/35 via-transparent to-black/65" />
-                {/* layer 2: the giant wordmark rises between art and object, then parts upward
-                    and dims as the copy lands — the layers make room instead of colliding. */}
-                <div className="pv-display absolute inset-x-0 top-1/2 -translate-y-1/2 select-none whitespace-nowrap text-center font-bold text-white"
-                  style={{ fontSize: 'clamp(3rem, 11vw, 11rem)', letterSpacing: '-0.03em', lineHeight: 1,
-                    transform: `translateY(calc(-50% + ${(1 - drift) * 60 - copy * 110}px))`,
-                    opacity: (0.25 + drift * 0.75) * (1 - copy * 0.8),
-                    textShadow: '0 8px 60px rgba(0,0,0,0.45)' }}>
+                  style={{ transform: `scale(${1.16 - drift * 0.08}) translateY(${(1 - drift) * -22}px)`, opacity: 0.92 }} />
+                <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/10 to-black/70" />
+                {/* layer 2: the giant wordmark, present from the start, brightening on scroll */}
+                <div className="pv-display absolute inset-x-0 top-[30%] select-none whitespace-nowrap text-center font-bold text-white"
+                  style={{ fontSize: `clamp(2.4rem, ${wm.toFixed(2)}vw, 9rem)`, letterSpacing: '-0.03em', lineHeight: 1,
+                    transform: `translateY(${(1 - drift) * 26}px)`, opacity: 0.55 + drift * 0.45,
+                    textShadow: '0 8px 60px rgba(0,0,0,0.5)' }}>
                   {p.siteName}
                 </div>
-                {/* layer 3: the iconic object crosses OVER the type, then lifts + shrinks away */}
-                <img src={p.objectImage} alt="" className="relative z-10 w-[42%] max-w-[430px]"
-                  style={{ transform: `translateY(${(1 - drift) * 130 - 20 - copy * 170}px) rotate(${-10 + drift * 14}deg) scale(${1 - copy * 0.3})`,
+                {/* layer 3: the iconic object crossing OVER the type as you scroll */}
+                <img src={p.objectImage} alt="" className="relative z-10 w-[34%] max-w-[360px]"
+                  style={{ transform: `translateY(${(1 - drift) * 46 - 46}px) rotate(${-9 + drift * 12}deg)`,
                     filter: 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))' }} />
-                {/* layer 4: the words land */}
-                <div className="absolute inset-x-0 bottom-10 flex flex-col items-center px-6 text-center"
-                  style={{ opacity: copy, transform: `translateY(${(1 - Math.min(1, copy)) * 24}px)` }}>
+                {/* layer 4: the pitch — ALWAYS on screen (a visitor who never scrolls still gets sold) */}
+                <div className="absolute inset-x-0 bottom-8 z-20 flex flex-col items-center px-6 text-center">
                   {p.eyebrow && <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-white/80">{p.eyebrow}</p>}
-                  <h1 className="pv-display max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-5xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
-                  <div className="mt-6 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
+                  <h1 className="pv-display max-w-3xl text-2xl font-semibold tracking-tight text-white sm:text-4xl" style={{ textWrap: 'balance' }}>{p.heading}</h1>
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-3">{primaryCta}{secondaryBtn(true)}</div>
                   {p.rating != null && <RatingBadge rating={p.rating} reviewCount={p.reviewCount} onDark lively={lively} />}
                 </div>
               </div>

@@ -185,6 +185,14 @@ export function extractSiteFacts(text: string | null | undefined, nowYear: numbe
   return facts;
 }
 
+/** High-LTV verticals whose owners plausibly pay premium rates — the ONLY prospects worth an
+ *  upgraded (more expensive) model. The worker uses this with the AI_PREMIUM_MODEL env: unset
+ *  (the default) → everyone gets the standard plan model; set → these verticals get the premium
+ *  one. Never hardcode an expensive model here. */
+export function premiumProspect(industry: string): boolean {
+  return /law|attorney|legal|medical|dental|orthodont|surgeon|real estate|realtor|med spa|financ|wealth|account/i.test(industry);
+}
+
 // ---------------------------------------------------------------------------
 // AI concept imagery — prompts only (pure); the worker generates + stores
 // ---------------------------------------------------------------------------

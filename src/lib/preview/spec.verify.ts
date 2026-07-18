@@ -197,6 +197,30 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   const noRoles = normalizeSpec({ sections: [{ type: 'hero', props: {}, variant: 'layers' }] }, ROOFER).sections[0];
   check('normalize: layers without the role pair carries no asset props (renderer falls back)',
     noRoles.props.bgImage === undefined && noRoles.props.objectImage === undefined);
+
+  // 20-site review finding: role assets leaked into content slots (a wrench in the about section)
+  const roleOnly = {
+    ...ROOFER,
+    photos: [
+      { url: 'https://x/bg.png', alt: 'ai-backdrop', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+      { url: 'https://x/obj.png', alt: 'ai-object', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+    ],
+  };
+  const leaky = normalizeSpec({ sections: [
+    { type: 'hero', props: { image: 'https://x/obj.png' } },
+    { type: 'about', props: { heading: 'A', body: 'b', image: 'https://x/obj.png' } },
+    { type: 'gallery', props: {} },
+    { type: 'showcase', props: {} },
+  ] }, roleOnly);
+  check('leak fix: the object never becomes a hero/about image; backdrop backs the hero',
+    leaky.sections.find((s) => s.type === 'hero')?.props.image === 'https://x/bg.png'
+    && leaky.sections.find((s) => s.type === 'about')?.props.image === undefined);
+  check('leak fix: galleries/showcases drop when only role assets exist',
+    !leaky.sections.some((s) => s.type === 'gallery' || s.type === 'showcase'));
+  const fbRole = assembleFallbackSpec(roleOnly);
+  check('leak fix: fallback equally guarded (hero uses backdrop, no photo sections)',
+    fbRole.sections[0].props.image === 'https://x/bg.png'
+    && !fbRole.sections.some((s) => s.type === 'gallery' || s.type === 'showcase'));
 }
 
 // appropriateness: the dignified restraint guard (iteration-loop finding — a funeral home was

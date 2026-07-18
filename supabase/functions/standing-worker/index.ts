@@ -31,7 +31,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
-import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
 import {
@@ -1290,7 +1290,14 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   let critique: Record<string, unknown> | null = null;
   {
     let aiCost = 0, aiIn = 0, aiOut = 0;
-    const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+    // Standard plan model for everyone; a premium model ONLY for high-LTV verticals and ONLY
+    // when the operator opts in via AI_PREMIUM_MODEL (e.g. claude-fable-5). Cost discipline is
+    // the default — the expensive model is an explicit, targeted choice.
+    const mPlan = modelForPlan(await getUserPlan(admin, order.owner_id));
+    const premiumModel = Deno.env.get('AI_PREMIUM_MODEL');
+    const m = premiumModel && premiumProspect(profile.industry)
+      ? { provider: mPlan.provider, model: premiumModel }
+      : mPlan;
     const track = (r: { costUsd: number; inputTokens: number; outputTokens: number }) => {
       aiCost += r.costUsd; aiIn += r.inputTokens; aiOut += r.outputTokens;
     };
