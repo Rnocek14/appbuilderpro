@@ -126,6 +126,18 @@ export const ACTION_SPECS: ActionSpec[] = [
     produces: 'the builder pre-filled with this idea — generation, verification and deploy happen there',
   },
   {
+    id: 'template_document',
+    title: 'Template paperwork',
+    category: 'company',
+    risk: 'safe',
+    description: 'Open the Paperwork studio to turn a real sample document into a reusable fill-in template (paste the sample there — extraction tokenizes only deal-specific values, keeps everything else verbatim), then fill + send for signature through the approval-gated DocuSign rail. Use when the intent involves templating, recurring documents, contracts, or e-signature. Pass `world` to open the client\'s/business\'s own studio. TRIGGERED automation (deal stage → auto-fill → auto-send) does not exist yet — that part goes in holes.',
+    params: [
+      { name: 'world', required: false, hint: 'the business whose paperwork this is (must already exist)' },
+      { name: 'note', required: false, hint: 'which documents to template, from the intent' },
+    ],
+    produces: 'the Paperwork studio ready for the sample paste — extract, review, save, fill, and queue for signature (every send behind an approval)',
+  },
+  {
     id: 'record_thesis',
     title: 'Record an operating thesis',
     category: 'setup',

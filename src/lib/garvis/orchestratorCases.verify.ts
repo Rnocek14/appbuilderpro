@@ -116,10 +116,11 @@ const CASES: Case[] = [
     actions: ['found_company', 'found_company'],
   },
   {
-    name: 'paperwork + DocuSign: not built, honest hole',
+    name: 'paperwork: templating is a real step, TRIGGERED automation stays a hole',
     intent: 'Template my listing paperwork and automate DocuSign for every new client',
-    compile: plan([], ['Document templating + DocuSign automation — the e-sign rail exists but templating/auto-fill/trigger wiring (the Paperwork Engine) is not built yet.']),
-    actions: [], minHoles: 1,
+    compile: plan([step('template_document', { note: 'listing paperwork' }, W('sample→template extraction, fill, and approval-gated signature sends exist in the studio'))],
+      ['Fully automatic per-new-client DocuSign (trigger → auto-fill → auto-send with no review) — sends stay behind approvals, and trigger wiring is not built yet.']),
+    actions: ['template_document'], minHoles: 1,
   },
   {
     name: 'client engagement: onboard_client, never found_company',

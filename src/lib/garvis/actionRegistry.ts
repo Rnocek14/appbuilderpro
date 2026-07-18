@@ -169,6 +169,15 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     link: `/new?idea=${encodeURIComponent(p.idea)}`,
   }),
 
+  template_document: async (p) => {
+    const link = p.world ? `/garvis/webs/${(await resolveWorld(p.world)).id}` : '/garvis/webs';
+    return {
+      kind: 'handoff',
+      note: `The Paperwork studio is ready${p.world ? ` in ${p.world}'s business` : ' (open the business it belongs to)'} — paste the sample document, extract the template, review, and Save.${p.note ? ` (${p.note.slice(0, 120)})` : ''}`,
+      link,
+    };
+  },
+
   record_thesis: async (p) => {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id;
