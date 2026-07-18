@@ -1,156 +1,121 @@
-# The Path to Best-in-Class
+# The Operating Brain — Audit & Plan
 
-A full-codebase audit (July 2026) and the plan that follows from it. Three deep passes were made:
-generation + preview pipeline, ship/monetize/trust layers, and product surface/focus. This doc is
-the synthesis. File references are current as of the audit.
+A full-codebase audit (July 2026), read through the correct lens: **this is a personal operating
+system for one operator** — create ideas, build them into products (FableForge), ship them, and
+market/run them (Garvis). It is not a SaaS competing for strangers. The bar is not "would a
+stranger pay?" — it is **"does this multiply me, and does it keep running when I'm not looking?"**
 
----
-
-## The verdict in three sentences
-
-The engineering underneath this product is genuinely high-taste — shell-contracts-then-parallel-pages
-generation, a compiler-verified agentic edit loop, real one-click Netlify + Supabase-provisioning
-deploys, a production-grade credits/Stripe engine, and now branch-per-feature with readiness-gated
-merges. But the product is unfocused (the builder is ~15-20% of 78k LOC, buried 14th in a
-Garvis-branded nav), and its best guarantee — "verified" — is *conditional* in ways users can't see.
-Being the best isn't about adding features: it's one identity decision, making the trust guarantee
-unconditional, and sharpening the agent until the loop is flawless for a stranger.
-
-## The wedge: trust
-
-Every competitor (Lovable, Bolt, v0, Replit) generates plausible code fast. None of them make this
-promise: **"Nothing lands broken. Ever."** The pieces already exist here and nowhere else together:
-
-- Edits verified by the real TypeScript compiler with relentless self-repair (`agent/edit.ts`)
-- Feature branches with copy-on-write isolation and merges that must pass QA + tsc *before* Main is
-  touched — no reverts, structurally (`branchCore.ts`, `mergeBranch.ts`)
-- Per-message diff cards + atomic change-set revert (`message_changes` migration)
-- A design-direction system that commits real token bundles, not vibes (`generateDesignDirections`)
-
-That's the brand: **the app builder that never ships you a broken app.** Everything below serves it.
-
-## The identity decision (make it once, this week)
-
-Two products fight in one app: FableForge (builder) and Garvis (business OS). The nav, landing, 404
-target, and RUNBOOK all say Garvis; the repo name, README, and the differentiated engineering say
-FableForge. Recommendation — don't kill either; **sequence them into one story:**
-
-> **Build it. Ship it. Run it.** FableForge builds and ships the app; Garvis runs the business
-> around it (outreach, billing, automations) after it ships.
-
-Concretely:
-1. Landing + signup lead with the builder. Post-auth lands on `/dashboard` (or `/new` with a prompt
-   box focused), not `/garvis/command`.
-2. Nav: builder first (Projects, New app, Import, Autopilot), "Operate (Garvis)" as a collapsed
-   section or a mode switch. Garvis is the *post-ship* upsell, which is a moat no competitor has —
-   Lovable stops at deploy.
-3. Sever the one hard coupling: `ProjectWorkspace` imports `deployRun` from garvis (deploy through
-   the approval spine). Keep the spine, but move the interface into a neutral module so the builder
-   ships standalone.
+Three deep audit passes were made: generation + preview pipeline, ship/monetize/trust layers, and
+product surface. This doc is the synthesis, re-prioritized for the operating-brain reality.
 
 ---
 
-## P0 — Make the guarantee true (the next 2-3 weeks)
+## What the audit actually found (through this lens)
 
-**1. One generation pipeline.** `generate-app/index.ts` is a rotting single-shot fork (one 32k
-stream, static-QA-only healing, no compile gate) whose header falsely claims parity with the far
-better client `chunkedGenerate`. Delete it or reduce it to a thin trigger for the real pipeline.
-"Which pipeline built my app" must never silently determine quality.
+**The machine is far more real than its own docs claim.**
+- Build: shell-contracts-then-parallel-pages generation, compiler-verified agentic edits with
+  relentless repair, branch-per-feature with readiness-gated merges (nothing lands broken).
+- Ship: real one-click Netlify deploys, real Supabase provisioning + backend/edge-function/cron
+  deploys, GitHub export.
+- Market/monetize: preview-site prospecting funnel with claim/lead capture, outreach machinery,
+  and a per-app AI gateway that meters **client apps** against credits at a 1.25× margin — that's
+  not a paywall for FableForge, it's *revenue infrastructure for apps you ship to clients*.
+- Trust: RLS is genuinely careful, with documented audit fixes and privilege pins.
 
-**2. Durable generation.** Orchestration runs in a browser tab today — refresh mid-build kills the
-product's headline action. Either move orchestration to an edge/job worker (there's already a
-`job-worker` function), or make `resumeGeneration` automatic on workspace load (detect an
-interrupted build, resume without being asked). Automatic resume is days, not weeks, and buys 80%.
+**The real weaknesses for an operating brain are different from a SaaS's:**
+1. **Unattended reliability is the whole game, and it's the least protected.** The brain runs
+   heartbeats, workers, outreach, billing chases. You vibe-code your own brain — and nothing gates
+   a regression: the only CI workflow *deploys*; the builder core has zero e2e; 6 of 86 verify
+   suites cover the builder. A silent break in a loop you trust is the worst failure this system
+   can have, because there's no second operator to notice.
+2. **Brain-critical intelligence requires an open browser tab.** Autopilot, roadmap, ideation,
+   backend-gen, doc analysis are DIRECT-mode-only (browser key in localStorage, `aiClient.ts`
+   "edge mirror coming" cluster). An operating brain must think **while you sleep** — anything
+   that dies when the tab closes isn't a brain, it's a dashboard.
+3. **Generation orchestration lives in the tab too.** Refresh mid-build kills the headline action;
+   `resumeGeneration` exists but is manual and conditional.
+4. **"Verified" silently degrades.** The compile gate needs WebContainer isolation; absent that,
+   "clean" means "passed regex checks" and the UI doesn't tell you which you got. You are the one
+   consuming this signal — it must be honest with you.
+5. **The edge generation path is a rotting fork** (single 32k stream, static-QA healing only,
+   header falsely claims parity with the good client pipeline).
+6. **Operator UX debt inside Garvis**: three memory rooms (Memory/Mind/Brain), three money rooms
+   (Money/ClientBilling/Billing), an orphan `/garvis` route, stale README/RUNBOOK that describe
+   deploy as stubbed. For a single operator, every duplicate room is daily friction.
 
-**3. Honest verification badges.** `generationCompileGate` silently degrades to "passed regex
-checks" when WebContainer/cross-origin isolation is unavailable, and the agentic verify is
-Anthropic-only. Surface the truth as a per-build/per-edit badge: `✓ compiled` vs `✓ static checks`
-vs `⚠ unverified`. Trust brands die on one discovered lie; this one is currently discoverable.
-
-**4. Close the DIRECT-mode fork.** The "edge mirror coming" cluster (`generateRoadmap`,
-`generateIdeation`, `decideNextStep`/autopilot, `analyzeDocument`, `generateBackendFromProject`,
-map gen) hard-requires browser keys — so production users get broken features, and DIRECT users get
-unmetered spend with keys in localStorage (which the landing page falsely says never happens).
-Route them all through the `agent-turn`/`cloudComplete` relay that already exists, meter them with
-the credits chokepoint, and make DIRECT a dev-only flag.
-
-**5. Pricing coherence.** Pricing page says $19/500 generations; the credits engine says $49/2500
-credits; `plan_tier` lacks the `starter` the code references; `Billing.tsx` shows generation counts
-and "stub mode" copy instead of the real credit balance. Pick the credits story (it's built and
-sound), update Pricing/Billing to show credits, add the enum value.
-
-**6. CI gate.** One workflow: `tsc --noEmit` + all `verify:*` suites + 3 Playwright specs
-(generate→preview renders; edit→diff card appears; branch→merge lands). Today the only workflow
-*deploys*; nothing stops a regression in the core loop. The builder currently has 6 of 86 verify
-suites and zero e2e — invert that ratio where it counts.
-
-## P1 — Sharpen the agent (the quality ceiling)
-
-The edit agent has 5 tools: list, read, write-whole-file, delete, typecheck (+ web_search). Highest
-leverage upgrades, in order:
-
-**1. `edit_file` (string-replace patches).** Whole-file rewrites are slow, expensive, and the #1
-truncation risk on big files. A str-replace tool with exact-match semantics cuts tokens/latency by
-3-5× on surgical edits and eliminates the "half a file" failure class the truncation guard exists
-for.
-
-**2. `see_preview` (vision).** The screenshot machinery already exists (`captureScreenshot`,
-html2canvas, preview snapshots). Give the agent a tool that returns a screenshot of the running
-preview and let it self-critique against the DESIGN_GUIDE rubric it was prompted with. "The agent
-looks at what it built and fixes what looks wrong" is a visible, demoable differentiator nobody
-does well, and it directly attacks the AI-slop-design problem the prompts fight blind today.
-
-**3. `grep` tool.** On imported/large projects the agent reads files by guess. A search tool makes
-edits on real codebases dramatically better — and imported projects are the expansion market.
-
-**4. Prompt-cache the loop.** `rawComplete` caches its system block; verify `callModel` in
-`agent/loop.ts` does the same for system + the growing message prefix (cache_control on the last
-stable block). Agent turns are the product's hottest path; this is a large cost/latency win.
-
-**5. Post-merge/branch polish.** `useProjectFiles` refetches *everything* on any row change —
-branch writes (work + base rows) double the churn. Debounce, or scope the realtime refresh.
-
-## P2 — Make branches the headline
-
-Branches + verified merge just landed and nobody in the category has it. Ship the story:
-
-1. **Compare view**: two Fast-preview iframes side by side (Fast runtime has no single-instance
-   limit), Main vs branch or branch vs branch, one click from the BranchBar. This is the demo.
-2. **Branch share links**: publish a branch preview to a URL (the `PreviewSite` plumbing pattern
-   exists) — "try both, tell me which" is a shareable growth loop.
-3. **Then canvas**: the spatial branch/feature map (nodes = branches, chats attached) over the
-   branch data model, with compare as its killer interaction. Spike it like `GalaxyView` was.
-
-## P3 — Complete the ship story
-
-1. **Custom domains** (explicitly not built; `prompts.ts:727`). Netlify's DNS/alias API makes this
-   days of work, and it's table stakes for "ship real products."
-2. **Share/handoff**: public read-only project links; GitHub export already exists — surface it.
-3. **Delete the `recordDeployment` stub buttons** still sitting next to the real Publish button.
-4. **Preflight/health panel** for operators: the ~12 secrets and ~10 functions the ship path needs,
-   checked and green/red, instead of failure-by-toast-string.
-5. Teams/multiplayer: later. Single-player polish beats half-multiplayer.
-
-## North-star metrics (define now, chart weekly)
-
-- **First-forge success rate**: % of new-user generations that compile *and* render without error,
-  no intervention. (This is the whole product in one number.)
-- **Verified-edit rate**: % of edit turns ending `✓ compiled`.
-- **Time-to-first-preview** from prompt submit.
-- **Merge integrity**: % of branch merges landing green (target: 100% by construction).
-
-## Quick wins (do in one afternoon)
-
-- Fix the landing-page claim about keys never touching the browser (false in DIRECT mode).
-- `Garvis.tsx` raw emerald/red → forge tokens; retire the orphan `/garvis` route.
-- README/RUNBOOK: document the real deploy path (docs still describe the stub as reality).
-- Snapshot-trigger hygiene: exclude `/.fableforge/branches/` rows from `project_file_versions`
-  growth if version-table bloat shows up.
-- `pendingEdit` captured on one thread can be applied after switching threads — snapshot the
-  thread/branch id into the pending edit.
+**What dissolves under this lens** (was in the SaaS framing, now deprioritized): stranger
+onboarding, social login, pricing-page coherence, FableForge-as-product billing UX, teams /
+multiplayer, brand "identity decision." Keep the credits engine — it meters *client* apps — but
+the $19-vs-$49 pricing page contradiction only matters if FableForge is ever sold as SaaS.
 
 ---
 
-*The one-line summary: pick the builder as the front door, make "verified" unconditional and
-honest, give the agent eyes and a scalpel, and let branches carry the launch. The craftsmanship is
-already best-in-class; the coherence isn't — yet.*
+## The plan
+
+### P0 — The brain must not lie to you, and must not die when the tab closes
+
+1. **CI as your second operator.** One workflow on every push: `tsc --noEmit` + all `verify:*`
+   suites + 3 Playwright specs (generate→preview renders; edit→diff card; branch→merge green).
+   You are protecting *future you* from *tonight's you*.
+2. **Move brain-critical intelligence server-side.** Finish the "edge mirror" cluster through the
+   existing `agent-turn`/`cloudComplete` relay so autopilot, roadmap, ideation, backend-gen, and
+   doc analysis run headless — then wire the ones that matter into the existing `job-worker` /
+   pg_cron spine so they can run scheduled, unattended. This is the single biggest step from
+   "dashboard" to "brain."
+3. **Durable generation.** Auto-resume interrupted builds on workspace load (detect + continue,
+   no button). Later: move orchestration into `job-worker` entirely.
+4. **Honest verification badges.** `✓ compiled` vs `✓ static checks` vs `⚠ unverified` on every
+   build and edit. You need to know which promise you're holding.
+5. **Kill the fork.** Delete or thin-out `generate-app/index.ts` so every build goes through the
+   good pipeline regardless of environment.
+
+### P1 — Sharpen the agent (multiplies everything downstream)
+
+1. **`edit_file` (string-replace patches)** — whole-file rewrites are the top cost/latency/
+   truncation source. A scalpel makes every edit 3-5× cheaper and faster.
+2. **`see_preview` (vision)** — screenshot machinery already exists (`captureScreenshot`,
+   snapshots). Let the agent look at what it built and self-critique against the DESIGN_GUIDE it
+   was prompted with. Directly attacks design-slop with a feedback loop instead of rules.
+3. **`grep` tool** — makes the agent competent on imported/larger codebases.
+4. **Prompt-cache the agent loop** (system + stable message prefix) — hottest path in the system.
+5. **Realtime churn**: `useProjectFiles` refetches everything on any row change; branch writes
+   double the churn (work + base rows). Debounce/scope it.
+
+### P2 — Branches as the idea-exploration engine
+
+You built branches to explore ideas without risk. Complete that story for yourself:
+1. **Compare view** — two Fast previews side by side (no single-instance limit), Main vs branch.
+   Decide between directions by *looking*, not remembering.
+2. **Branch share links** — publish a branch preview to a URL for a client/friend: "which one?"
+3. **Canvas** — the spatial branch/feature map over the branch data model, chats attached,
+   compare as the killer interaction. This is also the natural home for idea → branch → merge →
+   shipped lineage: the visible shape of the operating brain.
+
+### P3 — Close the operator loops
+
+1. **One room per job.** Merge Memory/Mind/Brain into one knowledge room; Money/ClientBilling
+   into one revenue room (account `/billing` stays separate — it's plumbing). Retire the orphan
+   `/garvis` route and dev-only spikes that graduated or died.
+2. **Ship → market seam.** When an app deploys, the brain should *offer the next move* (preview
+   site, outreach campaign, social post) — the modules exist; make deploy emit the trigger.
+3. **Preflight panel.** The ship path depends on ~12 secrets and ~10 functions; one green/red
+   health surface instead of failure-by-toast. (You are your own ops team.)
+4. **Custom domains for client sites** — this one survives the lens change: apps you ship *for
+   clients* on `*.netlify.app` undercut the agency story. Netlify's DNS/alias API, days of work.
+5. **Truth in docs**: README/RUNBOOK still describe deploy as stubbed; the `recordDeployment`
+   stub buttons still sit next to the real Publish button. Delete both lies.
+
+---
+
+## North-star metrics (for an operating brain)
+
+- **Idea → live URL time** (prompt to deployed product, no intervention).
+- **First-forge success rate** — % of generations that compile *and* render clean on the first try.
+- **Unattended hours** — how long the brain runs (workers, autopilot, outreach) without you
+  touching it or it breaking. This is the metric that makes it a *brain*.
+- **Merge integrity** — % of branch merges landing green (100% by construction; watch it hold).
+
+---
+
+*One-line summary: the craftsmanship is already there — make the brain honest with you, make it
+run while you sleep, give the agent eyes and a scalpel, and let branches be how you think.*
