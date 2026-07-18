@@ -13,6 +13,7 @@ import { Check, Star, Phone, Mail, MapPin, Clock, ChevronDown, ArrowRight, Shiel
 // calm = reveals only; lively = TextReveal + CountUp + image wipes; cinematic = + aurora/parallax
 // hero, magnetic CTA, tilt cards. One signature move per page (DESIGN_GUIDE restraint).
 import { TextReveal, CountUp, Aurora, Magnetic, TiltDiv, ImageReveal, useParallaxY } from './motion';
+import { SceneSection } from './scenes';
 
 /** hue of an "H S% L%" theme token — Aurora derives its drift colors from the real palette. */
 const hueOf = (hsl: string): number => parseInt(hsl.trim().split(/\s+/)[0], 10) || 220;
@@ -664,5 +665,5 @@ export function SeoText(p: { heading?: string; body?: string }) {
 export const SECTION_COMPONENTS = {
   hero: Hero, trust: Trust, services: Services, about: About, showcase: Showcase,
   gallery: Gallery, reviews: Reviews, serviceArea: ServiceArea, faq: Faq, hours: Hours,
-  map: MapSection, quote: Quote, ctaBanner: CtaBanner, seoText: SeoText,
+  map: MapSection, quote: Quote, ctaBanner: CtaBanner, seoText: SeoText, scene: SceneSection,
 } as const;

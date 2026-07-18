@@ -140,9 +140,36 @@ export function usableReviews(profile: BusinessProfile): SourcedReview[] {
 
 export const SECTION_TYPES = [
   'hero', 'trust', 'services', 'about', 'showcase', 'gallery', 'reviews',
-  'serviceArea', 'faq', 'hours', 'map', 'quote', 'ctaBanner', 'seoText',
+  'serviceArea', 'faq', 'hours', 'map', 'quote', 'ctaBanner', 'seoText', 'scene',
 ] as const;
 export type SectionType = (typeof SECTION_TYPES)[number];
+
+/** TRADE SCENES — hand-built scroll-scrubbed vignettes (a pipe that fills, springs a leak, and
+ *  gets clamped; a wire that lights a bulb; rain deflecting off new shingles…). The AI writes ONLY
+ *  the punchline copy; the visual is picked deterministically from the trade here, so quality is
+ *  guaranteed by construction and a trade with no scene simply gets none. Max one per page. */
+export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge'] as const;
+export type SceneKind = (typeof SCENE_KINDS)[number];
+
+export function sceneKindFor(industry: string): SceneKind | null {
+  const s = industry.toLowerCase();
+  if (/plumb|sewer|drain|septic/.test(s)) return 'pipe';
+  if (/electric/.test(s)) return 'circuit';
+  if (/roof|gutter/.test(s)) return 'rain';
+  if (/hvac|heating|cooling|air condition|furnace/.test(s)) return 'thermostat';
+  if (/auto|mechanic|tire|transmission|oil change|brake/.test(s)) return 'gauge';
+  return null;
+}
+
+/** Deterministic scene copy — behavioral punchlines, no claims. The floor when the model writes
+ *  none; the model may sharpen them but the visual choreography is fixed per kind. */
+export const SCENE_COPY: Record<SceneKind, { headline: string; sub: string }> = {
+  pipe: { headline: "Leaks don't wait.", sub: 'A slow drip becomes a flood on its own schedule — and gets fixed on ours.' },
+  circuit: { headline: 'Power, back where it belongs.', sub: 'From dead outlet to lit room — done safely, the first time.' },
+  rain: { headline: 'Ready before the next storm.', sub: 'New shingles shed the weather your old roof lets through.' },
+  thermostat: { headline: 'Comfort, dialed in.', sub: 'From sweltering to just right — and it holds.' },
+  gauge: { headline: 'Green across the board.', sub: 'From warning light to road-ready.' },
+};
 
 export interface SectionSpec {
   type: SectionType;
@@ -234,7 +261,7 @@ export const RECIPES: Recipe[] = [
     id: 'contractor_lead_gen',
     label: 'Contractor / Home Services',
     match: ['roof', 'contractor', 'hvac', 'plumb', 'landscap', 'electric', 'construction', 'remodel', 'paint', 'garage', 'fence', 'concrete', 'handyman', 'pest', 'clean'],
-    sections: ['hero', 'trust', 'services', 'showcase', 'about', 'reviews', 'serviceArea', 'faq', 'quote', 'map', 'ctaBanner', 'seoText'],
+    sections: ['hero', 'trust', 'services', 'scene', 'showcase', 'about', 'reviews', 'serviceArea', 'faq', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '16 78% 44%', primaryInk: '24 40% 98%', bg: '36 30% 97%', ink: '24 24% 12%',
       muted: '24 10% 40%', card: '36 20% 99.5%', border: '30 18% 88%', radius: 8,
@@ -273,7 +300,7 @@ export const RECIPES: Recipe[] = [
     id: 'auto_services',
     label: 'Auto Repair / Detailing / Tires',
     match: ['auto', 'mechanic', 'tire', 'detail', 'car wash', 'body shop', 'transmission', 'oil change', 'towing', 'collision'],
-    sections: ['hero', 'trust', 'services', 'showcase', 'reviews', 'about', 'faq', 'hours', 'quote', 'map', 'ctaBanner', 'seoText'],
+    sections: ['hero', 'trust', 'services', 'scene', 'showcase', 'reviews', 'about', 'faq', 'hours', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '210 90% 40%', primaryInk: '210 30% 98%', bg: '220 14% 96%', ink: '220 24% 12%',
       muted: '220 8% 40%', card: '220 10% 99.5%', border: '220 12% 87%', radius: 6,
@@ -481,6 +508,23 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   sections = sections.filter((s) => {
     if ((s.type === 'gallery' || s.type === 'showcase') && photos.length === 0) return false;
     if (s.type === 'reviews' && reviews.length === 0 && !profile.reviews_summary) return false;
+    return true;
+  });
+
+  // TRADE SCENE: the visual is never model-chosen — the deterministic kind for this trade is
+  // stamped onto the props; no scene exists for the trade (or a second scene appears) → dropped.
+  const sceneKind = sceneKindFor(profile.industry);
+  let sceneSeen = false;
+  sections = sections.filter((s) => {
+    if (s.type !== 'scene') return true;
+    if (!sceneKind || sceneSeen) return false;
+    sceneSeen = true;
+    s.props = {
+      headline: str(s.props.headline, SCENE_COPY[sceneKind].headline),
+      sub: str(s.props.sub, SCENE_COPY[sceneKind].sub),
+      cta: str(s.props.cta, recipe.cta),
+      scene: sceneKind,
+    };
     return true;
   });
 
@@ -701,6 +745,12 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
           body: `${name} provides ${profile.services.join(', ').toLowerCase()}${loc ? ` throughout ${loc}` : ''}. ${profile.seo_keywords?.length ? `Popular searches: ${profile.seo_keywords.slice(0, 5).join(', ')}.` : ''}`,
         } });
         break;
+      case 'scene': {
+        // Only trades with a hand-built vignette get one — never a generic placeholder.
+        const kind = sceneKindFor(profile.industry);
+        if (kind) sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind } });
+        break;
+      }
     }
   }
 

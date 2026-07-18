@@ -4,7 +4,7 @@
 
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
-  usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES,
+  usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor,
   type BusinessProfile,
 } from './spec';
 
@@ -129,6 +129,30 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
     fb.sections.every((s) => recipe.variants?.[s.type] === undefined || s.variant === recipe.variants[s.type]));
   check('recipes: distinct verticals get distinct page architecture (hero variants differ)',
     new Set(RECIPES.map((r) => r.variants?.hero ?? 'fullbleed')).size >= 3);
+}
+
+// trade scenes: hand-built visuals, deterministically keyed — never a generic placeholder
+{
+  check('sceneKindFor: plumber → pipe, electrician → circuit, roofer → rain',
+    sceneKindFor('Plumbing') === 'pipe' && sceneKindFor('Electrical Services') === 'circuit' && sceneKindFor('Roofing') === 'rain');
+  check('sceneKindFor: no scene for trades without one', sceneKindFor('Hair & Beauty') === null && sceneKindFor('Legal Services') === null);
+  const plumber = { ...ROOFER, industry: 'Plumbing' };
+  const withScene = normalizeSpec({ sections: [
+    { type: 'hero', props: { heading: 'H' } },
+    { type: 'scene', props: { headline: 'Leaks lose.', scene: 'gauge' } },   // model may NOT pick the visual
+    { type: 'scene', props: { headline: 'Second scene' } },                  // one per page
+  ] }, plumber);
+  const scenes = withScene.sections.filter((s) => s.type === 'scene');
+  check('normalize: scene kind stamped from the trade, never model-chosen', scenes.length === 1 && scenes[0].props.scene === 'pipe');
+  check('normalize: model punchline kept', scenes[0].props.headline === 'Leaks lose.');
+  const salonScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, { ...ROOFER, industry: 'Hair & Beauty' });
+  check('normalize: scene dropped for trades with no vignette', !salonScene.sections.some((s) => s.type === 'scene'));
+  const fbPlumber = assembleFallbackSpec(plumber);
+  check('fallback: plumber gets the pipe scene with honest default copy',
+    fbPlumber.sections.some((s) => s.type === 'scene' && s.props.scene === 'pipe' && s.props.headline === "Leaks don't wait."));
+  const fbRoofer = assembleFallbackSpec(ROOFER);
+  check('fallback: roofer (contractor recipe) gets the rain scene', fbRoofer.sections.some((s) => s.type === 'scene' && s.props.scene === 'rain'));
+  check('scene never enters the nav', !fbPlumber.nav.some((n) => n.anchor === 'scene'));
 }
 
 // slug + nav helpers

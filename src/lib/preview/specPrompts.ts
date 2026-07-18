@@ -55,6 +55,12 @@ HARD RULES:
     reviews: "grid" | "spotlight" (one big quote leads)
     ctaBanner: "band" | "giant" (oversized closer)
   Two sites in the same town must never share a skeleton — vary structure with intent.
+- SCENE — trades with a hand-built scroll vignette (plumbing/sewer, electrical, roofing, HVAC,
+  auto) may include ONE {"type":"scene","props":{"headline","sub","cta"}} mid-page (after
+  services): a pinned, scroll-scrubbed animation (e.g. a pipe fills, springs a leak, gets clamped)
+  ending on your punchline + CTA. You write ONLY that copy — a short, visceral punchline tied to
+  the trade's pain ("Leaks don't wait."), never a claim. The pipeline picks the visual and drops
+  the section for trades without one.
 - Sections: choose ONLY from the allowed list, in a persuasive order (hero first; a quote/ctaBanner
   must appear). Skip sections the profile has no content for.
 - SEO title ≤ 60 chars with the location; description ≤ 155 chars with a call to action.
