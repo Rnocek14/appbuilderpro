@@ -18,6 +18,7 @@ import { loadSocialMaterials, generateSocialTileImage, queueSocialTile } from '.
 import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { PLATFORM_LABEL } from '../../../lib/garvis/campaignCore';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
+import { ContentWeekToggle } from './ContentWeekToggle';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
 
@@ -68,11 +69,15 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
         ? '🎨 AI imagery is off — the brand card is a preview, so these posts go out as text. Attach a photo, or connect an image key to generate + attach imagery.'
         : 'Real facts fill in; unknowns show as [EDIT] holes. Nothing posts from here — Queue sends it through Approvals first.',
       extraControls: (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10.5px] uppercase tracking-wide text-forge-dim">Platform</span>
-          {PLATFORM_ORDER.map((p) => (
-            <button key={p} onClick={() => setPlatform(p)} className={cn('cb-chip', platform === p && 'cb-chip-on')}>{PLATFORM_EMOJI[p]} {PLATFORM_LABEL[p]}</button>
-          ))}
+        <div className="flex w-full flex-col gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10.5px] uppercase tracking-wide text-forge-dim">Platform</span>
+            {PLATFORM_ORDER.map((p) => (
+              <button key={p} onClick={() => setPlatform(p)} className={cn('cb-chip', platform === p && 'cb-chip-on')}>{PLATFORM_EMOJI[p]} {PLATFORM_LABEL[p]}</button>
+            ))}
+          </div>
+          {/* THE PRODUCER (app_0088): a judged week of content staged as ONE approval, weekly. */}
+          {worldId && <ContentWeekToggle worldId={worldId} onToast={onToast} />}
         </div>
       ),
       captionOf: (c) => `${PLATFORM_LABEL[c.platform]} · ${socialKindById(c.kindId)?.label ?? 'Post'}${c.imageMode === 'ai' ? ' · AI' : c.imageMode === 'photo' ? ' · photo' : ''}`,

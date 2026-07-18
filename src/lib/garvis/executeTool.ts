@@ -419,7 +419,7 @@ async function dispatch(call: GarvisToolCall, ctx: GarvisToolContext): Promise<u
         .filter((i) => i.description && i.unit_usd >= 0);
       const amount = Number(input.amount_usd ?? 0);
       if (!lineItems.length && amount > 0) lineItems = [{ description: title, qty: 1, unit_usd: amount }];
-      const inv = await createInvoice({ title, toEmail, lineItems, dueDate: typeof input.due_date === 'string' ? input.due_date : null });
+      const inv = await createInvoice({ title, toEmail, lineItems, dueDate: typeof input.due_date === 'string' ? input.due_date : null, source: 'garvis_tool' });
       return {
         ok: true, number: inv.number, amount_usd: inv.amount_usd, status: inv.status,
         note: 'DRAFT created — nothing has been sent. Use queue_invoice_send to stage it; the email still waits for the owner in Approvals. The owner can edit it at /garvis/money.',

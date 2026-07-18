@@ -86,6 +86,20 @@ export async function setOrderStatus(id: string, status: 'active' | 'paused'): P
   if (error) throw new Error(error.message);
 }
 
+/** Honest cadence change: writes the cadence, re-anchors the grid at now, recomputes next_run_at,
+ *  and activates. Without the recompute, weekly→daily would still wait out the old weekly slot —
+ *  the chip would lie. Optionally refreshes a cadence-bearing label so panels stay truthful too. */
+export async function setOrderCadence(id: string, cadence: Cadence, label?: string): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    cadence, status: 'active', anchor_at: nowIso,
+    next_run_at: nextRunAfter(cadence, nowIso, nowIso), updated_at: nowIso,
+  };
+  if (label) patch.label = label;
+  const { error } = await supabase.from('standing_orders').update(patch).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
 export async function deleteOrder(id: string): Promise<void> {
   const { error } = await supabase.from('standing_orders').delete().eq('id', id);
   if (error) throw new Error(error.message);

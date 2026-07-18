@@ -179,3 +179,12 @@ export function capabilitiesForSignal(signalId: string, vertical: Vertical | nul
     (c.verticals.includes('any') || (vertical != null && c.verticals.includes(vertical))),
   );
 }
+
+/** The custom-automation MENU for one business — the upsell ladder's third rung. The website lands
+ *  the deal, the automation tier is the general upgrade, and THIS is the business-flow-specific
+ *  pitch: every deliverable capability that fits the client's industry (or applies anywhere).
+ *  Only honest inventory — 'not_built' entries never appear. */
+export function menuForVertical(vertical: Vertical): Capability[] {
+  return CAPABILITIES.filter((c) => isDeliverable(c) &&
+    (c.verticals.includes('any') || c.verticals.includes(vertical)));
+}

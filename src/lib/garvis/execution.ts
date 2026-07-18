@@ -10,7 +10,8 @@ import { hashPayload } from './payloadHash';
 
 export type ApprovalKind =
   | 'send_email' | 'publish_post' | 'deploy_site' | 'deploy_backend'
-  | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature';
+  | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature'
+  | 'content_week';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface Approval {
@@ -133,6 +134,29 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     // every tick and drains the batch through THE ONE SEND PATH — suppression, contact status,
     // kill switch, and the daily cap re-check per recipient at send time. Approving here only
     // records the human decision; nothing sends in this call.
+    return { ok: true, result: { approved: true, executed: false, drains: true } };
+  }
+
+  if (a.kind === 'content_week') {
+    // Same drain contract as send_batch: the worker executes after re-verifying this approval
+    // (and the pieces hash) every tick. Here we only record the decision — plus the GRADUATED
+    // AUTONOMY streak: an approval WITHOUT edits extends the clean streak toward auto-mode;
+    // an edited week resets it (the machine didn't earn that one on its own).
+    const weekId = a.payload?.week_id as string | undefined;
+    if (weekId) {
+      const { data: wk } = await supabase.from('content_weeks')
+        .select('edited, order_id').eq('id', weekId).maybeSingle();
+      const orderId = (wk as { order_id: string | null } | null)?.order_id;
+      if (orderId) {
+        if ((wk as { edited: boolean }).edited) {
+          await supabase.from('standing_orders').update({ clean_approvals: 0 }).eq('id', orderId).then(() => {}, () => {});
+        } else {
+          const { data: ord } = await supabase.from('standing_orders').select('clean_approvals').eq('id', orderId).maybeSingle();
+          const streak = ((ord as { clean_approvals?: number } | null)?.clean_approvals ?? 0) + 1;
+          await supabase.from('standing_orders').update({ clean_approvals: streak }).eq('id', orderId).then(() => {}, () => {});
+        }
+      }
+    }
     return { ok: true, result: { approved: true, executed: false, drains: true } };
   }
 
@@ -321,6 +345,20 @@ export async function rejectApproval(id: string): Promise<void> {
   if (invoiceId) {
     await supabase.from('invoices').update({ status: 'draft', sent_at: null, updated_at: new Date().toISOString() })
       .eq('id', invoiceId).eq('status', 'sent').then(() => {}, () => {});
+  }
+
+  // Rejecting a content week REVOKES autonomy (safe regression: streak to 0, auto-mode off) and
+  // cancels the staged week — the drain also honors the rejection, this just closes it promptly.
+  if (inv.kind === 'content_week' && inv.payload?.week_id) {
+    const weekId = inv.payload.week_id as string;
+    const { data: wk } = await supabase.from('content_weeks').select('order_id').eq('id', weekId).maybeSingle();
+    const orderId = (wk as { order_id: string | null } | null)?.order_id;
+    if (orderId) {
+      await supabase.from('standing_orders').update({ clean_approvals: 0, auto_mode: false }).eq('id', orderId).then(() => {}, () => {});
+    }
+    await supabase.from('content_weeks')
+      .update({ status: 'canceled', finished_at: new Date().toISOString() })
+      .eq('id', weekId).in('status', ['staged', 'queued']).then(() => {}, () => {});
   }
 }
 

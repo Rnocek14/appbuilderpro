@@ -9,8 +9,10 @@ import { invoiceEmail, invoiceTotal, type InvoiceLike, type LineItem } from './m
 
 export interface InvoiceRow extends InvoiceLike {
   id: string; world_id: string | null; contact_id: string | null; created_at: string;
+  // Provenance (app_0086): where the money came from — so revenue teaches, not just totals.
+  source: string; lead_id: string | null; campaign_id: string | null; client_subscription_id: string | null;
 }
-const COLS = 'id, world_id, contact_id, number, title, to_email, line_items, amount_usd, due_date, payment_url, status, last_chase_stage, sent_at, paid_at, created_at';
+const COLS = 'id, world_id, contact_id, number, title, to_email, line_items, amount_usd, due_date, payment_url, status, last_chase_stage, sent_at, paid_at, created_at, source, lead_id, campaign_id, client_subscription_id';
 
 export async function listInvoices(status?: 'draft' | 'sent' | 'paid' | 'void'): Promise<InvoiceRow[]> {
   let q = supabase.from('invoices').select(COLS).order('created_at', { ascending: false }).limit(200);
@@ -23,6 +25,9 @@ export async function listInvoices(status?: 'draft' | 'sent' | 'paid' | 'void'):
 export async function createInvoice(input: {
   title: string; toEmail: string; lineItems: LineItem[];
   dueDate?: string | null; paymentUrl?: string | null; worldId?: string | null;
+  /** Provenance (app_0086): which door the money came through. Defaults to 'manual' (the form). */
+  source?: 'manual' | 'garvis_tool' | 'won_deal';
+  leadId?: string | null; campaignId?: string | null; clientSubscriptionId?: string | null;
 }): Promise<InvoiceRow> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
@@ -54,6 +59,8 @@ export async function createInvoice(input: {
       owner_id: uid, world_id: input.worldId ?? null, contact_id: contactId,
       number, title: input.title.trim(), to_email: to, line_items: items,
       amount_usd: invoiceTotal(items), due_date: input.dueDate || null, payment_url: input.paymentUrl?.trim() || null,
+      source: input.source ?? 'manual', lead_id: input.leadId ?? null,
+      campaign_id: input.campaignId ?? null, client_subscription_id: input.clientSubscriptionId ?? null,
     }).select(COLS).single();
     if (data) return data as InvoiceRow;
     lastError = error?.message ?? lastError;

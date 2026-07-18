@@ -159,7 +159,12 @@ export default function Money() {
                         {r.status === 'sent' && stage >= 2 ? STAGE_LABEL[stage] : r.status}
                       </Badge>
                     </div>
-                    <div className="mt-0.5 text-xs text-forge-dim">{r.to_email}{r.due_date ? ` · due ${r.due_date}` : ''} · {usd(r.amount_usd)}</div>
+                    <div className="mt-0.5 text-xs text-forge-dim">
+                      {r.to_email}{r.due_date ? ` · due ${r.due_date}` : ''} · {usd(r.amount_usd)}
+                      {/* Provenance (app_0086): revenue that knows where it came from. 'manual' is the default door — no chip. */}
+                      {r.source === 'garvis_tool' && <span className="ml-1.5 rounded border border-forge-border px-1 py-px text-[10px]">via Garvis</span>}
+                      {r.source === 'won_deal' && <span className="ml-1.5 rounded border border-forge-ok/40 px-1 py-px text-[10px] text-forge-ok">won deal</span>}
+                    </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
                     {r.status === 'draft' && (

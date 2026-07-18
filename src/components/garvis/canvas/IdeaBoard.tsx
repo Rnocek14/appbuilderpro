@@ -16,7 +16,7 @@ import {
 import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { supabase } from '../../../lib/supabase';
-import { listOrders, createOrder, setOrderStatus } from '../../../lib/garvis/standingRun';
+import { listOrders, createOrder, setOrderStatus, setOrderCadence, runOrderNow } from '../../../lib/garvis/standingRun';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -30,6 +30,9 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
   worldId: string; clusterId: string | null; onToast: Toast; materialsOverride?: IdeaMaterials;
 }) {
   const [materials, setMaterials] = useState<IdeaMaterials | null>(materialsOverride ?? null);
+  // Bumped when the worker writes to the board server-side (run-now): re-hydration folds the fresh
+  // tiles in via the id-deduped merge, so the open board's next debounced save can't erase them.
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     if (materialsOverride) { setMaterials(materialsOverride); return; }
@@ -59,7 +62,10 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
       captionOf: (c) => `${ideaKindById(c.kindId)?.emoji ?? '💡'} ${c.tag}`,
       qualityOf: (c) => c.quality ?? null,
       searchText: (c) => `${c.title} ${c.pitch} ${c.notes} ${c.tag}`,
-      extraControls: clusterId ? <AutoIdeasToggle worldId={worldId} clusterId={clusterId} onToast={onToast} /> : undefined,
+      extraControls: clusterId
+        ? <AutoIdeasToggle worldId={worldId} clusterId={clusterId} onToast={onToast}
+            onFreshIdeas={() => setReloadNonce((n) => n + 1)} />
+        : undefined,
 
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && ideaKindById(kindId)) || defaultIdeaKind();
@@ -95,7 +101,7 @@ export function IdeaBoard({ worldId, clusterId, onToast, materialsOverride }: {
   if (!materials || !adapter) {
     return <div className="grid h-full min-h-[400px] place-items-center"><Loader2 size={20} className="animate-spin text-forge-ember" /></div>;
   }
-  return <CreativeBoard adapter={adapter} clusterId={clusterId} onToast={onToast} />;
+  return <CreativeBoard adapter={adapter} clusterId={clusterId} onToast={onToast} reloadNonce={reloadNonce} />;
 }
 
 function IdeaCard({ content }: { content: IdeaContent }) {
@@ -154,7 +160,12 @@ function IdeaFocus({ content, api, materials, worldId, clusterId, onToast }: {
 }
 
 // ---- ⚡ Auto-ideas: the idea_stream standing order, controlled from the board -----------------
-function AutoIdeasToggle({ worldId, clusterId, onToast }: { worldId: string; clusterId: string; onToast: Toast }) {
+function AutoIdeasToggle({ worldId, clusterId, onToast, onFreshIdeas }: {
+  worldId: string; clusterId: string; onToast: Toast;
+  /** Called after a run that changed the board — the parent re-hydrates so the fresh tiles are
+   *  merged into the OPEN board instead of being erased by its next debounced save. */
+  onFreshIdeas?: () => void;
+}) {
   const [state, setState] = useState<'loading' | 'off' | 'daily' | 'weekly'>('loading');
   const [orderId, setOrderId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,14 +189,30 @@ function AutoIdeasToggle({ worldId, clusterId, onToast }: { worldId: string; clu
         if (orderId) await setOrderStatus(orderId, 'paused');
         setState('off'); onToast('info', 'Auto-ideas paused.');
       } else if (orderId) {
-        await setOrderStatus(orderId, 'active');
-        setState(next); onToast('success', `Auto-ideas on — fresh ideas will land here ${next}. (Cadence follows the order’s original setting.)`);
+        // The chip must not lie: clicking a cadence WRITES that cadence (re-anchored grid,
+        // recomputed next_run_at, refreshed label) — not just status=active on the old schedule.
+        await setOrderCadence(orderId, next, `Auto-ideas · ${next}`);
+        setState(next); onToast('success', `Auto-ideas on — fresh ideas will land here ${next}.`);
       } else {
         const o = await createOrder({ worldId, kind: 'idea_stream', label: `Auto-ideas · ${next}`, cadence: next, config: { cluster_id: clusterId, count: 3 } });
         setOrderId(o.id); setState(next);
         onToast('success', `Auto-ideas on — Garvis will add 3 fresh ideas ${next}, grouped by date. Needs the heartbeat armed + an AI key.`);
       }
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not update auto-ideas.'); }
+    finally { setBusy(false); }
+  };
+
+  const runNow = async () => {
+    if (!orderId) return;
+    setBusy(true);
+    try {
+      const r = await runOrderNow(orderId);
+      if (r.changed > 0) onFreshIdeas?.();
+      onToast(r.failed > 0 ? 'error' : 'success',
+        r.failed > 0 ? 'The run failed — check the AI key and credits, then try again.'
+          : r.changed > 0 ? 'Fresh ideas just landed on the board.'
+          : 'Ran, but nothing new arrived — the worker reported no changes.');
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not run auto-ideas now.'); }
     finally { setBusy(false); }
   };
 
@@ -196,6 +223,10 @@ function AutoIdeasToggle({ worldId, clusterId, onToast }: { worldId: string; clu
       {(['off', 'daily', 'weekly'] as const).map((v) => (
         <button key={v} disabled={busy} onClick={() => void set(v)} className={cn('cb-chip', state === v && 'cb-chip-on')}>{v}</button>
       ))}
+      {orderId && (
+        <button disabled={busy} onClick={() => void runNow()} title="One batch of fresh ideas right now — no waiting for the schedule."
+          className="cb-chip">run now</button>
+      )}
     </div>
   );
 }
