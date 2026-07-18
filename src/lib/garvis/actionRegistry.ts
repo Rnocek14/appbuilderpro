@@ -90,9 +90,9 @@ export const ACTIONS: ActionDef[] = [
     title: 'Write the business plan',
     category: 'planning',
     risk: 'spend',
-    description: 'Produce and persist the business plan for an EXISTING business, grounded in its DNA and any earned research artifacts. Order it after research_market for the same business.',
+    description: 'MULTI-PASS business plan for an EXISTING business: auto-runs grounded research when none is on record, drafts against the full findings, red-teams the draft (consultant slop, unsupported claims, hollow operations), and refines against every fix. Order after research_market when both appear.',
     params: [{ name: 'world', required: true, hint: 'the business name (must already exist)' }],
-    produces: 'a persisted business-plan artifact in the business (substance-gated — thin output is rejected, not shipped)',
+    produces: 'a persisted, red-teamed business-plan artifact (plus the research it auto-ran, if any); thin output rejected, never shipped',
     execute: async (p) => {
       const w = await resolveWorld(p.world);
       const charter = await resolveArea(w.id, ['intel', 'studio']);
@@ -106,19 +106,38 @@ export const ACTIONS: ActionDef[] = [
     title: 'Generate a marketing campaign',
     category: 'marketing',
     risk: 'spend',
-    description: 'Run the 3-stage campaign generator (strategy+calendar → posts → email/landing copy). Everything lands as DRAFTS the operator reviews in Marketing; social drafts can then queue through the real approval-gated posting rail.',
+    description: 'Run the 3-stage campaign generator (strategy+calendar → posts → email/landing copy). Pass `world` to ground the strategy in that business\'s newest research brief. Everything lands as DRAFTS the operator reviews in Marketing; social drafts can then queue through the real approval-gated posting rail.',
     params: [
       { name: 'subject', required: true, hint: 'what the campaign is selling/announcing' },
       { name: 'brief', required: false, hint: 'angle, audience, constraints — in the operator\'s words' },
+      { name: 'world', required: false, hint: 'an existing business whose research should ground the strategy' },
     ],
-    produces: 'a campaign with draft assets in Marketing (nothing publishes without per-asset review)',
+    produces: 'a campaign with draft assets in Marketing, research-grounded when a business is named (nothing publishes without per-asset review)',
     execute: async (p) => {
       const { data: auth } = await supabase.auth.getUser();
       const uid = auth.user?.id;
       if (!uid) throw new Error('Not signed in.');
+      // Named business → its newest earned research grounds the strategy stage.
+      let research: string | null = null;
+      if (p.world) {
+        const w = await resolveWorld(p.world);
+        const { data: clusterRows } = await supabase.from('knowledge_clusters').select('id').eq('world_id', w.id);
+        const ids = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+        if (ids.length) {
+          const { data: r } = await supabase.from('knowledge_artifacts')
+            .select('title, detail').in('cluster_id', ids).eq('kind', 'research')
+            .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(1);
+          const row = (r ?? [])[0] as { title: string; detail: string | null } | undefined;
+          if (row?.detail) research = `${row.title}\n${row.detail}`;
+        }
+      }
       const { generateCampaign } = await import('./marketingRun');
-      const res = await generateCampaign({ ownerId: uid, subject: p.subject, brief: p.brief ?? null, appId: null });
-      return { kind: 'needs_review', note: `Campaign drafted — ${res.summary ?? 'review the assets and approve what should ship'}.`, link: '/garvis/marketing' };
+      const res = await generateCampaign({ ownerId: uid, subject: p.subject, brief: p.brief ?? null, appId: null, research });
+      return {
+        kind: 'needs_review',
+        note: `Campaign drafted${research ? ' (strategy grounded in the business\'s research)' : ' (ungrounded — no research on record for it)'} — ${res.summary ?? 'review the assets and approve what should ship'}.`,
+        link: '/garvis/marketing',
+      };
     },
   },
   {

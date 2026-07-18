@@ -22,6 +22,9 @@ export interface GenerateCampaignInput {
   subject: string;
   brief?: string | null;
   appId?: string | null;
+  /** Grounded research to shape the strategy (e.g. a world's newest research brief). The strategy
+   *  stage consumes it as context; without it the campaign is honestly ungrounded. */
+  research?: string | null;
   onProgress?: (stage: string) => void;
 }
 
@@ -50,8 +53,17 @@ export async function generateCampaign(input: GenerateCampaignInput): Promise<Ge
       const { data } = await supabase.from('garvis_app_profiles').select('purpose, audience, business_model').eq('app_id', input.appId).maybeSingle();
       if (data) profile = `purpose: ${data.purpose ?? ''}\naudience: ${data.audience ?? ''}\nbusiness model: ${data.business_model ?? ''}`;
     }
+    // Research rides in through the profile context block (no change to the verified pure
+    // builders): grounded findings shape the strategy instead of the model's priors.
+    const research = (input.research ?? '').trim();
+    if (research) {
+      profile = [profile, `RESEARCH ON RECORD (ground the strategy in this — never contradict it):\n${research.slice(0, 5000)}`]
+        .filter(Boolean).join('\n\n');
+    }
 
-    input.onProgress?.('Researching the market & shaping strategy…');
+    // HONEST LABEL: this stage does not research — it either uses research handed to it or runs
+    // ungrounded. The old "Researching the market…" line claimed work that never happened.
+    input.onProgress?.(research ? 'Shaping strategy from your research…' : 'Shaping strategy (no research provided — grounding is from the brief only)…');
     const r1 = await rawComplete([{ role: 'system', content: STRATEGY_SYSTEM }, { role: 'user', content: buildStrategyUser(input.subject, input.brief, profile) }], 1600);
     tokIn += r1.inputTokens; tokOut += r1.outputTokens;
     const strat = parseStrategy(r1.text);
