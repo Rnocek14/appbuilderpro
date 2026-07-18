@@ -21,7 +21,9 @@
 // the owner's approval. Its config is the HuntConfig (niche/scope/citiesPerDay/demoQuota) + a rolling
 // cursor; the worker's client_hunt branch owns it. Like every order, it only READS + queues — the
 // clock schedules the work; the human still owns the trigger out.
-export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream';
+// 'content_week' is the WEEKLY PRODUCER (level-10 Spec 2): stage a judged week of content — N
+// social posts + 1 email — as ONE approval; the drain executes only after the approval verifies.
+export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream' | 'content_week';
 export type Cadence = 'hourly' | 'daily' | 'weekly';
 export type WatchStatus = 'changed' | 'unchanged' | 'unreachable';
 
@@ -184,4 +186,65 @@ export function orderStatusLine(order: Pick<StandingOrder, 'status' | 'lastRunAt
   if (order.status === 'paused') return 'Paused — not checking.';
   if (!order.lastRunAt || !order.lastResult) return `Hasn’t run yet — first run scheduled for ${order.nextRunAt}.`;
   return order.lastResult.line;
+}
+
+// ---- content_week: config + deterministic scheduling (level-10 Spec 2) ------------------------
+// Pure and verified (standing.verify.ts). The worker owns the I/O; these own the shape of a week.
+
+import { MEDIA_REQUIRED, KNOWN_PLATFORMS } from './socialCore.ts';
+
+export interface ContentWeekConfig {
+  platforms: string[];        // text-safe platforms only (media-required ones are filtered out)
+  postsPerWeek: number;       // 1..7
+  emailSegment: 'all' | 'new' | 'contacted' | 'qualified' | 'customer' | null; // null = no email piece
+  sendHourUtc: number;        // 0..23 — the hour each piece is scheduled at
+  minScore: number;           // the QUALITY BAR — drafts below it are discarded, never queued
+}
+
+const EMAIL_SEGMENTS = new Set(['all', 'new', 'contacted', 'qualified', 'customer']);
+
+/** Parse an order's config into a safe ContentWeekConfig, or null when unusable (no platforms).
+ *  Media-required platforms (instagram/tiktok/…) are dropped: staged pieces are text-first and
+ *  checkDraft would refuse them at publish — filtering here is honest, not silent failure. */
+export function parseContentWeekConfig(config: unknown): ContentWeekConfig | null {
+  const c = (config ?? {}) as Record<string, unknown>;
+  const textSafe = (KNOWN_PLATFORMS as readonly string[]).filter((p) => !(MEDIA_REQUIRED as readonly string[]).includes(p));
+  const raw = Array.isArray(c.platforms) ? (c.platforms as unknown[]).map(String) : [];
+  const platforms = raw.filter((p) => textSafe.includes(p));
+  if (platforms.length === 0) return null;
+  const seg = typeof c.emailSegment === 'string' && EMAIL_SEGMENTS.has(c.emailSegment)
+    ? (c.emailSegment as ContentWeekConfig['emailSegment']) : null;
+  const n = (v: unknown, d: number, lo: number, hi: number) => {
+    const x = Number(v);
+    return Number.isFinite(x) ? Math.max(lo, Math.min(hi, Math.round(x))) : d;
+  };
+  return {
+    platforms,
+    postsPerWeek: n(c.postsPerWeek, 4, 1, 7),
+    emailSegment: seg,
+    sendHourUtc: n(c.sendHourUtc, 16, 0, 23),
+    minScore: n(c.minScore, 8, 1, 10),
+  };
+}
+
+/** Deterministic slots spread across the week: Mon..Sun at sendHourUtc, evenly spaced by count.
+ *  Pure — the caller supplies the week start (a yyyy-mm-dd Monday). */
+export function weekSlots(weekStartIso: string, count: number, sendHourUtc: number): string[] {
+  const base = Date.parse(`${weekStartIso}T00:00:00Z`);
+  if (!Number.isFinite(base) || count <= 0) return [];
+  const out: string[] = [];
+  // Spread over 7 days: 1 → Mon; 2 → Mon/Thu; 4 → Mon/Wed/Fri/Sun; 7 → daily.
+  for (let i = 0; i < count; i++) {
+    const day = count === 1 ? 0 : Math.round((i * 6) / (count - 1));
+    out.push(new Date(base + day * 86_400_000 + sendHourUtc * 3_600_000).toISOString());
+  }
+  return out;
+}
+
+/** The honest last_result line for a content_week run. */
+export function contentWeekLine(label: string, kept: number, discarded: number, emailIncluded: boolean, auto: boolean): string {
+  const pieces = `${kept} piece${kept === 1 ? '' : 's'} staged${emailIncluded ? ' (incl. 1 email)' : ''}`;
+  const bar = discarded > 0 ? `; ${discarded} below the bar, discarded (scores kept)` : '';
+  const mode = auto ? ' — auto-approved (standing rule)' : ' — waiting for your approval';
+  return `${label}: ${pieces}${bar}${mode}`;
 }
