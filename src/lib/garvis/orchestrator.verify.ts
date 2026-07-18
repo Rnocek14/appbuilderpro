@@ -3,7 +3,7 @@
 // The parse gauntlet is the trust boundary between the model's proposal and real execution —
 // every drop/coerce rule is proven here.
 
-import { parsePlan, orderSteps, catalogContext, stepSucceeded, MAX_STEPS, type ActionSpec } from './orchestrator';
+import { parsePlan, orderSteps, catalogContext, stepSucceeded, derivePlanStatus, planProgress, MAX_STEPS, type ActionSpec, type StepStatus } from './orchestrator';
 
 let passed = 0;
 let failed = 0;
@@ -80,6 +80,16 @@ const ctx = catalogContext(SPECS);
 check('catalog lists every action id', SPECS.every((s) => ctx.includes(s.id)));
 check('catalog spells out required params', ctx.includes('url (required)'));
 check('stepSucceeded treats review/handoff as success', stepSucceeded('done') && stepSucceeded('needs_review') && stepSucceeded('handoff') && !stepSucceeded('failed') && !stepSucceeded('skipped'));
+
+// ---- the project loop's status algebra ----
+const st = (kinds: StepStatus['kind'][]): StepStatus[] => kinds.map((kind) => ({ kind, note: '' }));
+check('any waiting step parks the whole arc as waiting', derivePlanStatus(st(['done', 'waiting', 'pending'])) === 'waiting');
+check('all succeeded (incl. review/handoff) is done', derivePlanStatus(st(['done', 'needs_review', 'handoff'])) === 'done');
+check('a terminal failure with nothing waiting is failed', derivePlanStatus(st(['done', 'failed', 'skipped'])) === 'failed');
+check('waiting outranks failure (resume may unblock the rest)', derivePlanStatus(st(['failed', 'waiting'])) === 'waiting');
+check('pending work with no blockers is still running', derivePlanStatus(st(['done', 'pending'])) === 'running');
+const prog = planProgress(st(['done', 'waiting', 'failed', 'skipped', 'pending']));
+check('planProgress counts succeeded/waiting/failed(+skipped) against total', prog.succeeded === 1 && prog.waiting === 1 && prog.failed === 2 && prog.total === 5);
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} orchestrator check(s) failed`);
