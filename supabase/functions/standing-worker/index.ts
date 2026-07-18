@@ -241,6 +241,64 @@ Deno.serve(async (req) => {
       }
     } catch { /* batch drain must never wedge the order tick */ }
 
+    // ---- SOCIAL POST DRAIN (app_0070) ----------------------------------------------------------
+    // The missing half of social auto-posting: an APPROVED post used to publish only if the
+    // owner's browser made the call — approve-and-walk-away (or a scheduled time arriving with
+    // every laptop closed) left it queued forever. The clock now executes ALREADY-APPROVED posts
+    // through THE ONE PUBLISH PATH (social-publish, worker-secret caller); approval status, the
+    // payload-hash tamper check, the refusal gate, and the atomic double-post claim all re-check
+    // server-side per post. NOTHING here decides — a pending approval waits for the human, a
+    // rejected/expired one retires its post. Bounded per tick; never wedges the order tick.
+    try {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const POSTS_PER_TICK = 5;
+      const SOCIAL_DRAIN_BUDGET_MS = 30_000;
+      const drainStart = Date.now();
+      // Inspect more than we execute: a head-of-line block of still-pending approvals must not
+      // starve approved posts behind it (the batch drain's ordering lesson).
+      const { data: posts } = await admin.from('social_posts')
+        .select('id, owner_id, approval_id, scheduled_for, status, provider_post_id, created_at')
+        .eq('status', 'queued').not('approval_id', 'is', null).is('provider_post_id', null)
+        // "Post now" rows AND scheduled rows whose moment has arrived — never a future one.
+        .or(`scheduled_for.is.null,scheduled_for.lte.${nowIso}`)
+        .order('created_at', { ascending: true }).limit(25);
+      let published = 0;
+      for (const p of (posts ?? []) as { id: string; owner_id: string; approval_id: string; scheduled_for: string | null }[]) {
+        if (published >= POSTS_PER_TICK || Date.now() - drainStart > SOCIAL_DRAIN_BUDGET_MS) break;
+        try {
+          const { data: ap } = await admin.from('approvals')
+            .select('id, owner_id, kind, status, result').eq('id', p.approval_id).single();
+          if (!ap || ap.kind !== 'publish_post' || ap.owner_id !== p.owner_id) continue; // never act on a mismatched record
+          if (ap.status === 'rejected' || ap.status === 'expired') {
+            // The human said no — retire the post so it can't sit "queued" forever (or clog this
+            // window). Guarded on status so a concurrent decision is never clobbered.
+            await admin.from('social_posts').update({ status: 'canceled', error: `approval ${ap.status}` })
+              .eq('id', p.id).eq('status', 'queued');
+            continue;
+          }
+          if (ap.status !== 'approved') continue; // still awaiting the human — not our call to make
+          // Already claimed = in flight from another caller/tick. social-publish's atomic claim is
+          // the real double-post guard; this check just skips a guaranteed-409 call.
+          if ((ap.result as Record<string, unknown> | null)?.send_claimed_at) continue;
+          const res = await fetch(`${supabaseUrl}/functions/v1/social-publish`, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-worker-secret': workerSecret ?? '',
+              // The Bearer exists ONLY to pass the platform's verify-jwt gateway (social-publish
+              // deploys JWT-verified, like fetch-url) — its own worker check runs on x-worker-secret.
+              authorization: `Bearer ${serviceKey}`,
+              apikey: serviceKey,
+            },
+            body: JSON.stringify({ approval_id: p.approval_id }),
+          });
+          if (res.ok) published++;
+          // Non-ok: social-publish already recorded the honest outcome on the post row + the
+          // ledger (a blocked/failed post leaves status != 'queued', so the drain never spins).
+        } catch { /* one post's failure never blocks the rest */ }
+      }
+    } catch { /* social drain must never wedge the order tick */ }
+
     // ---- CLIENT AUTOMATION TRIGGERS (app_0076) --------------------------------------------------
     // The recurring-revenue engine ON THE CLOCK: every owner's active triggers run with the SAME
     // pure core (dueFires/renderTemplate) + claim-first trigger_fires ledger the in-app "Run due
