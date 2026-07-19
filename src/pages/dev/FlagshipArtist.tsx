@@ -10,7 +10,9 @@
 // All scroll-scrubbed via ScrollScene (export/reduced-motion safe by construction).
 
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ScrollScene } from '../../components/preview/scenes';
+import { saveFlagshipAsProject } from '../../lib/flagshipProject';
 
 interface Piece {
   url: string;
@@ -161,6 +163,8 @@ export default function FlagshipArtist() {
     return injected?.pieces?.length ? injected : DEFAULT_MANIFEST;
   }, []);
   const { pieces } = manifest;
+  const navigate = useNavigate();
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | string>('idle');
   const [heroLoaded, setHeroLoaded] = useState(false);
   // The page's two faces aren't part of the app shell's font set — load them here.
   useEffect(() => {
@@ -191,6 +195,22 @@ export default function FlagshipArtist() {
   return (
     <div className="bg-[#0c0b0e] text-white antialiased"
       style={{ ['--fl-display' as string]: '"Cormorant Garamond", Georgia, serif', fontFamily: '"Jost", "Inter", ui-sans-serif, sans-serif' }}>
+      {/* the bridge into the builder: this experience becomes a real, editable, deployable project */}
+      <button
+        onClick={async () => {
+          if (saveState === 'saving') return;
+          setSaveState('saving');
+          try {
+            const id = await saveFlagshipAsProject();
+            navigate(`/project/${id}`);
+          } catch (e) {
+            setSaveState(e instanceof Error ? e.message : 'Could not save — try again.');
+          }
+        }}
+        className="fixed right-5 top-5 z-50 rounded-full border border-white/20 bg-black/40 px-5 py-2.5 text-xs font-semibold tracking-wide text-white/85 backdrop-blur transition-colors hover:bg-black/60 hover:text-white"
+      >
+        {saveState === 'idle' ? 'Save to My Projects' : saveState === 'saving' ? 'Saving…' : saveState}
+      </button>
       {/* CHAPTER 1 — the name over the work's own glow */}
       <ScrollScene heightVh={170}>
         {(p) => {
