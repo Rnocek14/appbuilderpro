@@ -15,13 +15,19 @@ import { ScrollScene } from '../../components/preview/scenes';
 interface Piece {
   url: string;
   title: string;
-  medium: string;
-  year: string;
+  /** optional — omitted when unknown; captions never invent facts about the work */
+  medium?: string;
+  year?: string;
+  /** optional motion version (muted H.264 loop) — shown in the works grid */
+  video?: string;
   /** dominant color of the piece, css value — drives the chapter stage behind it */
   accent: string;
   /** paper-light piece (ink drawing) vs dark canvas — captions adapt */
   light?: boolean;
 }
+
+/** "oil on linen, 2021" / "2021" / "" — whatever is actually known, nothing more. */
+const metaLine = (p: Piece) => [p.medium, p.year].filter(Boolean).join(', ');
 interface Manifest {
   artist: string;
   discipline: string;
@@ -73,7 +79,7 @@ function Tunnel({ pieces, p }: { pieces: Piece[]; p: number }) {
               <div className="absolute -bottom-10 left-0 text-sm tracking-wide text-white/85"
                 style={{ opacity: passing, transform: `translateY(${(1 - passing) * 10}px)` }}>
                 <span className="font-semibold">{piece.title}</span>
-                <span className="text-white/50"> — {piece.medium}, {piece.year}</span>
+                {metaLine(piece) && <span className="text-white/50"> — {metaLine(piece)}</span>}
               </div>
             </div>
           </div>
@@ -108,7 +114,7 @@ function DeepZoom({ piece, p }: { piece: Piece; p: number }) {
       <div className="absolute inset-x-0 bottom-[10%] px-6 text-center"
         style={{ opacity: caption, transform: `translateY(${(1 - caption) * 22}px)` }}>
         <p className="mx-auto max-w-2xl text-2xl leading-relaxed text-white/90 sm:text-3xl" style={{ fontFamily: 'var(--fl-display)' }}>
-          "{piece.title}" — up close, the weather is still moving.
+          "{piece.title}" — up close, the surface is still moving.
         </p>
       </div>
     </div>
@@ -131,7 +137,7 @@ function DepthDrift({ piece, p }: { piece: Piece; p: number }) {
         style={{ maxHeight: '62vh', maxWidth: '42vw', transform: `translateY(${(1 - t) * 60 - 30}px) scale(${0.96 + t * 0.06})`, boxShadow: `0 50px 100px -20px rgb(0 0 0 / 0.8)` }} />
       <div className="absolute bottom-[9%] left-1/2 -translate-x-1/2 text-center"
         style={{ opacity: seg(p, 0.55, 0.72) }}>
-        <p className="text-sm uppercase tracking-[0.25em] text-white/60">{piece.title} · {piece.medium}, {piece.year}</p>
+        <p className="text-sm uppercase tracking-[0.25em] text-white/60">{piece.title}{metaLine(piece) ? ` · ${metaLine(piece)}` : ''}</p>
       </div>
     </div>
   );
@@ -210,10 +216,18 @@ export default function FlagshipArtist() {
         <div className="mt-12 grid gap-x-10 gap-y-16 sm:grid-cols-2">
           {pieces.map((piece, i) => (
             <figure key={i} className={i % 3 === 0 ? 'sm:translate-y-10' : ''}>
-              <img src={piece.url} alt={piece.title} loading="lazy"
-                className="w-full border-[10px] border-[#f4f1ea] shadow-xl transition-transform duration-500 hover:-translate-y-1.5" />
+              {piece.video ? (
+                // the piece in motion — muted loop with the still as poster, same frame treatment
+                <video src={piece.video} muted loop autoPlay playsInline preload="metadata"
+                  className="w-full border-[10px] border-[#f4f1ea] shadow-xl transition-transform duration-500 hover:-translate-y-1.5" />
+              ) : (
+                <img src={piece.url} alt={piece.title} loading="lazy"
+                  className="w-full border-[10px] border-[#f4f1ea] shadow-xl transition-transform duration-500 hover:-translate-y-1.5" />
+              )}
               <figcaption className="mt-4 text-sm text-white/70">
-                <span className="font-semibold text-white/90">{piece.title}</span> — {piece.medium}, {piece.year}
+                <span className="font-semibold text-white/90">{piece.title}</span>
+                {metaLine(piece) && <> — {metaLine(piece)}</>}
+                {piece.video && <span className="text-white/45"> · in motion</span>}
               </figcaption>
             </figure>
           ))}
