@@ -149,7 +149,7 @@ function AppRoutes() {
           {import.meta.env.DEV && <Route path="/dev/web" element={<WebPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/prospect-web" element={<ProspectWebPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/rebuild-preview" element={<RebuildPreview />} />}
-          {import.meta.env.DEV && <Route path="/dev/flagship-artist" element={<FlagshipArtist />} />}
+          <Route path="/dev/flagship-artist" element={<FlagshipArtist />} />
           {import.meta.env.DEV && <Route path="/dev/win-hub" element={<WinHubPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/studios" element={<StudiosPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/board" element={<BoardPreview />} />}
