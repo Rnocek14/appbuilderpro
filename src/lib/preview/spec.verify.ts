@@ -5,7 +5,7 @@
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
-  seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats,
+  seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats, universalChapter,
   type BusinessProfile,
 } from './spec';
 import { huntImagePrompts, huntArtPrompts, paletteHueName } from '../garvis/clientHuntBuild';
@@ -157,22 +157,27 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   const scenes = withScene.sections.filter((s) => s.type === 'scene');
   check('normalize: scene kind stamped from the trade, never model-chosen', scenes.length === 1 && scenes[0].props.scene === 'pipe');
   check('normalize: model punchline kept', scenes[0].props.headline === 'Leaks lose.');
-  // A non-vignette trade now gets the glass quant chapter — with OBSERVED stats injected —
-  // and only when it has at least two real numbers to stage.
+  // A non-vignette trade rotates into the glass chapter (observed stats) or the ribbon chapter
+  // (claim-staged) — deterministic per business, never dropped, never invented data.
+  const expectKind = universalChapter(ROOFER.business_name, glassStats(ROOFER).length);
   const salonScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: { stats: [{ value: '99★', label: 'invented by the model' }] } }] }, { ...ROOFER, industry: 'Hair & Beauty' });
-  const glassSec = salonScene.sections.find((s) => s.type === 'scene');
-  check('normalize: non-vignette trade gets the glass chapter with profile-truth stats (model stats overwritten)',
-    glassSec?.props.scene === 'glass'
-    && (glassSec?.props.stats as { value: string }[])?.some((x) => x.value === '4.8★')
-    && !(glassSec?.props.stats as { value: string }[])?.some((x) => x.value === '99★'));
+  const uniSec = salonScene.sections.find((s) => s.type === 'scene');
+  check('normalize: non-vignette trade gets the seeded universal chapter (model stats overwritten)',
+    uniSec?.props.scene === expectKind
+    && !(uniSec?.props.stats as { value: string }[] | undefined)?.some((x) => x.value === '99★')
+    && (expectKind !== 'glass' || (uniSec?.props.stats as { value: string }[])?.some((x) => x.value === '4.8★')));
+  check('universalChapter: deterministic, and thin data always falls to ribbon',
+    universalChapter('Same Name', 4) === universalChapter('Same Name', 4)
+    && universalChapter('Anything At All', 1) === 'ribbon'
+    && ['glass', 'ribbon'].includes(universalChapter('Another Biz', 3)));
   const thinProfile = { ...ROOFER, industry: 'Hair & Beauty', google_rating: undefined, review_count: undefined, services: ['Cuts'], service_area: [] };
   const thinScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, thinProfile);
-  check('normalize: glass chapter dropped when fewer than two observed stats exist',
-    !thinScene.sections.some((s) => s.type === 'scene'));
+  check('normalize: fewer than two observed stats → the ribbon chapter (claim needs no data)',
+    thinScene.sections.find((s) => s.type === 'scene')?.props.scene === 'ribbon');
   check('glassStats: only observed facts, capped at 4',
     glassStats(ROOFER).length >= 2 && glassStats(ROOFER).every((x) => x.value && x.label) && glassStats(ROOFER).length <= 4);
   const funeralGlass = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, { ...ROOFER, industry: 'Funeral Home' });
-  check('restraint: dignified categories never get the glass chapter either',
+  check('restraint: dignified categories never get the universal chapters either',
     !funeralGlass.sections.some((s) => s.type === 'scene'));
   const fbPlumber = assembleFallbackSpec(plumber);
   check('fallback: plumber gets the pipe scene with honest default copy',

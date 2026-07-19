@@ -90,11 +90,13 @@ HARD RULES:
 - SCENE — ONE {"type":"scene","props":{"headline","sub","cta"}} mid-page (after services) is a
   pinned, scroll-scrubbed showpiece. Trades with a hand-built vignette (plumbing/sewer,
   electrical, roofing, HVAC, auto) get theirs (a pipe fills, springs a leak, gets clamped).
-  EVERY other trade gets THE QUANT CHAPTER: the business's real numbers (rating, review count,
-  years, services) staged as glass panels settling out of 3D space over a brand-color field —
-  include it when the numbers are strong (a 4.5+ rating with real reviews is worth staging;
-  the pipeline injects the stats and drops the scene when there are fewer than two). You write
-  ONLY the copy — a short, visceral punchline ("The numbers speak first."), never a claim.
+  EVERY other trade gets one of the universal chapters (the pipeline picks which,
+  deterministically): THE QUANT CHAPTER — the business's real numbers staged as glass panels
+  settling out of 3D space over a brand-color field — or THE CLAIM CHAPTER — drifting
+  brand-hue paper ribbons behind one poster-scale line. Include a scene when the business has
+  something worth staging (a 4.5+ rating with real reviews, or one strong honest claim). You
+  write ONLY the copy — a short, visceral punchline ("The numbers speak first."), never a claim
+  of fact you weren't given.
 - Sections: choose ONLY from the allowed list, in a persuasive order (hero first; a quote/ctaBanner
   must appear). Skip sections the profile has no content for.
 - SEO title ≤ 60 chars with the location; description ≤ 155 chars with a call to action.

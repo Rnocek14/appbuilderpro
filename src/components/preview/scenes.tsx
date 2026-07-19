@@ -317,10 +317,137 @@ function GlassScene({ p, stats, headline, sub, cta, hue }: {
   );
 }
 
+/** Tiny deterministic PRNG — the same business renders the same ribbon field every time. */
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** THE RIBBON CHAPTER — drifting brand-hue paper strips floating in depth behind a
+ *  poster-scale claim (the award-site "shredded paper over a dark stage" move, canvas 2D —
+ *  no WebGL, nothing to break). Strip positions are a pure function of (seed, p): scrubbing
+ *  is exact, resume is exact, and the export/reduced-motion frame is simply p=1 over the
+ *  gradient stage (the canvas is progressive enhancement — SSR ships the composed type). */
+function RibbonScene({ p, headline, sub, cta, hue, seed }: {
+  p: number; headline: string; sub?: string; cta?: string; hue: number; seed: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const rect = canvas.parentElement!.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+    const rand = mulberry32(seed);
+    const N = 36;
+    for (let i = 0; i < N; i++) {
+      const depth = 0.3 + rand() * 0.7;                // far strips: smaller, dimmer, slower
+      const x0 = rand() * 1.2 - 0.1;
+      const y0 = rand() * 1.6;
+      const len = (110 + rand() * 260) * depth;
+      const thick = (16 + rand() * 26) * depth;
+      const ang0 = rand() * Math.PI * 2;
+      const spin = (rand() - 0.5) * 2.2;
+      const drift = (0.55 + rand() * 0.75) * depth;    // scroll-scrubbed float
+      const hueJ = hue + (rand() - 0.5) * 26;
+      const bow = (rand() - 0.5) * thick * 3.2;        // the curl that reads as paper, not a bar
+      const y = ((y0 - p * drift) % 1.6 + 1.6) % 1.6 - 0.3;
+      const x = x0 + Math.sin(p * 4 + i) * 0.02 * depth;
+      ctx.save();
+      ctx.translate(x * w, y * h);
+      ctx.rotate(ang0 + p * spin);
+      // far strips soften into atmosphere; near strips stay crisp
+      ctx.filter = depth < 0.48 ? 'blur(3px)' : depth < 0.7 ? 'blur(1px)' : 'none';
+      const grad = ctx.createLinearGradient(-len / 2, 0, len / 2, 0);
+      grad.addColorStop(0, `hsl(${hueJ} 74% ${54 + depth * 16}% / ${0.35 + depth * 0.5})`);
+      grad.addColorStop(0.55, `hsl(${hueJ + 8} 68% ${44 + depth * 18}% / ${0.3 + depth * 0.5})`);
+      grad.addColorStop(1, `hsl(${hueJ + 16} 58% ${36 + depth * 16}% / ${0.25 + depth * 0.42})`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(-len / 2, -thick / 2);
+      ctx.quadraticCurveTo(0, -thick / 2 + bow, len / 2, -thick / 2);
+      ctx.lineTo(len / 2, thick / 2);
+      ctx.quadraticCurveTo(0, thick / 2 + bow, -len / 2, thick / 2);
+      ctx.closePath();
+      ctx.fill();
+      // a sheen line along one edge sells the fold
+      ctx.strokeStyle = `hsl(${hueJ} 80% 78% / ${0.16 + depth * 0.2})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-len / 2, -thick / 2);
+      ctx.quadraticCurveTo(0, -thick / 2 + bow, len / 2, -thick / 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.filter = 'none';
+  }, [p, hue, seed]);
+  const arrive = seg(p, 0.18, 0.42);
+  const ctaShow = seg(p, 0.52, 0.7);
+  return (
+    <div className="relative h-full w-full overflow-hidden">
+      {/* stage: near-black with a breath of the brand hue — canvas strips float over it */}
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(110% 90% at 50% ${20 + p * 18}%, hsl(${hue} 45% 13%), hsl(${hue} 55% 6%) 75%)`,
+      }} />
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden />
+      <div className="absolute inset-0" style={{ background: 'radial-gradient(130% 100% at 50% 50%, transparent 52%, rgb(0 0 0 / 0.5))' }} />
+      {/* the claim, poster scale — the type IS the show */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+        <h2 className="pv-display max-w-4xl font-bold tracking-tight text-white"
+          style={{ fontSize: 'clamp(2.6rem, 6.5vw, 5.8rem)', lineHeight: 1.04, textWrap: 'balance',
+            opacity: arrive, transform: `translateY(${(1 - arrive) * 30}px) scale(${0.95 + arrive * 0.05})` }}>
+          {headline}
+        </h2>
+        {sub && (
+          <p className="mx-auto mt-5 max-w-xl text-lg text-white/70"
+            style={{ opacity: ctaShow, transform: `translateY(${(1 - ctaShow) * 18}px)` }}>
+            {sub}
+          </p>
+        )}
+        {cta && (
+          <div style={{ opacity: ctaShow, transform: `translateY(${(1 - ctaShow) * 18}px)` }}>
+            <button type="button"
+              onClick={() => (document.getElementById('quote') ?? document.getElementById('ctaBanner'))?.scrollIntoView({ behavior: 'smooth' })}
+              className="mt-7 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-[hsl(var(--ink))] shadow-xl transition-transform hover:-translate-y-0.5">
+              {cta}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** The 'scene' section — normalizeSpec guarantees `scene` is a valid kind for this trade. */
 export function SceneSection(p: { headline?: string; sub?: string; cta?: string; scene?: string; motion?: string;
-  stats?: { value: string; label: string }[]; themePrimary?: string }) {
+  stats?: { value: string; label: string }[]; themePrimary?: string; siteName?: string }) {
   const hue = parseInt((p.themePrimary ?? '220 50% 40%').split(/\s+/)[0], 10) || 220;
+  // The ribbon chapter: drifting paper strips behind the poster claim, seeded by the business.
+  if (p.scene === 'ribbon') {
+    let seed = 7;
+    for (const ch of p.siteName ?? p.headline ?? 'ribbon') seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    const ribbon = (prog: number) => (
+      <RibbonScene p={prog} headline={p.headline ?? ''} sub={p.sub} cta={p.cta} hue={hue} seed={seed} />
+    );
+    return (
+      <section id="scene" className="pv-grain-host relative isolate">
+        {p.motion === 'calm'
+          ? <div className="relative h-[80vh]">{ribbon(1)}</div>
+          : <ScrollScene heightVh={190}>{ribbon}</ScrollScene>}
+      </section>
+    );
+  }
   // The quant chapter is its own full-bleed stage (the SVG vignettes are centered illustrations).
   if (p.scene === 'glass') {
     if (!p.stats?.length) return null;

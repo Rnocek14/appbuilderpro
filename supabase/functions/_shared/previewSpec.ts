@@ -148,8 +148,18 @@ export type SectionType = (typeof SECTION_TYPES)[number];
  *  gets clamped; a wire that lights a bulb; rain deflecting off new shingles…). The AI writes ONLY
  *  the punchline copy; the visual is picked deterministically from the trade here, so quality is
  *  guaranteed by construction and a trade with no scene simply gets none. Max one per page. */
-export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge', 'glass'] as const;
+export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge', 'glass', 'ribbon'] as const;
 export type SceneKind = (typeof SCENE_KINDS)[number];
+
+/** The universal chapter for trades without a hand-built vignette: the business name hashes
+ *  into 'glass' (observed stats staged as 3D panels) or 'ribbon' (drifting brand-hue paper
+ *  strips behind a poster-scale claim). Glass needs 2+ real stats to earn its runway — thin
+ *  data falls to ribbon, which stages the CLAIM, so every eligible page still gets a
+ *  showpiece. Deterministic: the same business always renders the same chapter. */
+export function universalChapter(businessName: string, statCount: number): SceneKind {
+  const pick = nameHash(`${businessName}:chapter`) % 2 === 0 ? 'glass' : 'ribbon';
+  return pick === 'glass' && statCount < 2 ? 'ribbon' : pick;
+}
 
 /** APPROPRIATENESS GUARD — some businesses must never get spectacle. For grief-adjacent
  *  categories the page is calm by construction: no marquee, no scenes, no giant type, no
@@ -218,6 +228,7 @@ export const SCENE_COPY: Record<SceneKind, { headline: string; sub: string }> = 
   thermostat: { headline: 'Comfort, dialed in.', sub: 'From sweltering to just right — and it holds.' },
   gauge: { headline: 'Green across the board.', sub: 'From warning light to road-ready.' },
   glass: { headline: 'The numbers speak first.', sub: 'What the neighbors already know.' },
+  ribbon: { headline: "Some things you can't fake.", sub: 'Reputation is earned one job at a time.' },
 };
 
 export interface SectionSpec {
@@ -684,22 +695,24 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
 
   // TRADE SCENE: the visual is never model-chosen — the deterministic kind for this trade is
   // stamped onto the props; no scene exists for the trade (or a second scene appears) → dropped.
-  const sceneKind = sceneKindFor(profile.industry);
-  // The quant chapter stages only OBSERVED numbers — fewer than two real stats and the scene
-  // doesn't earn its scroll runway.
-  const sceneStats = sceneKind === 'glass' ? glassStats(profile) : null;
+  // Trade vignettes win; 'glass' from sceneKindFor is the UNIVERSAL marker, resolved by name
+  // hash into glass (2+ observed stats required) or ribbon (stages the claim, needs none).
+  const tradeKind = sceneKindFor(profile.industry);
+  const uniStats = tradeKind === 'glass' ? glassStats(profile) : null;
+  const sceneKind = tradeKind === 'glass'
+    ? universalChapter(profile.business_name, uniStats?.length ?? 0)
+    : tradeKind;
   let sceneSeen = false;
   sections = sections.filter((s) => {
     if (s.type !== 'scene') return true;
     if (!sceneKind || sceneSeen) return false;
-    if (sceneKind === 'glass' && (sceneStats?.length ?? 0) < 2) return false;
     sceneSeen = true;
     s.props = {
       headline: str(s.props.headline, SCENE_COPY[sceneKind].headline),
       sub: str(s.props.sub, SCENE_COPY[sceneKind].sub),
       cta: str(s.props.cta, recipe.cta),
       scene: sceneKind,
-      ...(sceneKind === 'glass' ? { stats: sceneStats } : {}),
+      ...(sceneKind === 'glass' ? { stats: uniStats } : {}),
     };
     return true;
   });
@@ -948,14 +961,15 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'scene': {
-        // Trade vignettes first; every other trade gets the quant chapter when it has the
-        // numbers to earn it (two+ observed stats) — never a generic placeholder.
-        const kind = sceneKindFor(profile.industry);
-        if (kind === 'glass') {
+        // Trade vignettes first; every other trade rotates into glass (stats-staged, needs
+        // two+ observed numbers) or ribbon (claim-staged) — never a generic placeholder.
+        const tKind = sceneKindFor(profile.industry);
+        if (tKind === 'glass') {
           const stats = glassStats(profile);
-          if (stats.length >= 2) sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind, stats } });
-        } else if (kind) {
-          sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind } });
+          const kind = universalChapter(name, stats.length);
+          sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind, ...(kind === 'glass' ? { stats } : {}) } });
+        } else if (tKind) {
+          sections.push({ type, props: { ...SCENE_COPY[tKind], cta, scene: tKind } });
         }
         break;
       }
