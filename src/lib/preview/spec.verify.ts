@@ -5,7 +5,7 @@
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
-  seededVariant, SECTION_VARIANTS, FONT_LIBRARY,
+  seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats,
   type BusinessProfile,
 } from './spec';
 import { huntImagePrompts, huntArtPrompts, paletteHueName } from '../garvis/clientHuntBuild';
@@ -146,7 +146,8 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
 {
   check('sceneKindFor: plumber → pipe, electrician → circuit, roofer → rain',
     sceneKindFor('Plumbing') === 'pipe' && sceneKindFor('Electrical Services') === 'circuit' && sceneKindFor('Roofing') === 'rain');
-  check('sceneKindFor: no scene for trades without one', sceneKindFor('Hair & Beauty') === null && sceneKindFor('Legal Services') === null);
+  check('sceneKindFor: every other trade gets the quant chapter (glass)',
+    sceneKindFor('Hair & Beauty') === 'glass' && sceneKindFor('Legal Services') === 'glass');
   const plumber = { ...ROOFER, industry: 'Plumbing' };
   const withScene = normalizeSpec({ sections: [
     { type: 'hero', props: { heading: 'H' } },
@@ -156,8 +157,23 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   const scenes = withScene.sections.filter((s) => s.type === 'scene');
   check('normalize: scene kind stamped from the trade, never model-chosen', scenes.length === 1 && scenes[0].props.scene === 'pipe');
   check('normalize: model punchline kept', scenes[0].props.headline === 'Leaks lose.');
-  const salonScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, { ...ROOFER, industry: 'Hair & Beauty' });
-  check('normalize: scene dropped for trades with no vignette', !salonScene.sections.some((s) => s.type === 'scene'));
+  // A non-vignette trade now gets the glass quant chapter — with OBSERVED stats injected —
+  // and only when it has at least two real numbers to stage.
+  const salonScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: { stats: [{ value: '99★', label: 'invented by the model' }] } }] }, { ...ROOFER, industry: 'Hair & Beauty' });
+  const glassSec = salonScene.sections.find((s) => s.type === 'scene');
+  check('normalize: non-vignette trade gets the glass chapter with profile-truth stats (model stats overwritten)',
+    glassSec?.props.scene === 'glass'
+    && (glassSec?.props.stats as { value: string }[])?.some((x) => x.value === '4.8★')
+    && !(glassSec?.props.stats as { value: string }[])?.some((x) => x.value === '99★'));
+  const thinProfile = { ...ROOFER, industry: 'Hair & Beauty', google_rating: undefined, review_count: undefined, services: ['Cuts'], service_area: [] };
+  const thinScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, thinProfile);
+  check('normalize: glass chapter dropped when fewer than two observed stats exist',
+    !thinScene.sections.some((s) => s.type === 'scene'));
+  check('glassStats: only observed facts, capped at 4',
+    glassStats(ROOFER).length >= 2 && glassStats(ROOFER).every((x) => x.value && x.label) && glassStats(ROOFER).length <= 4);
+  const funeralGlass = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, { ...ROOFER, industry: 'Funeral Home' });
+  check('restraint: dignified categories never get the glass chapter either',
+    !funeralGlass.sections.some((s) => s.type === 'scene'));
   const fbPlumber = assembleFallbackSpec(plumber);
   check('fallback: plumber gets the pipe scene with honest default copy',
     fbPlumber.sections.some((s) => s.type === 'scene' && s.props.scene === 'pipe' && s.props.headline === "Leaks don't wait."));

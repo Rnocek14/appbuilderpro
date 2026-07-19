@@ -148,7 +148,7 @@ export type SectionType = (typeof SECTION_TYPES)[number];
  *  gets clamped; a wire that lights a bulb; rain deflecting off new shingles…). The AI writes ONLY
  *  the punchline copy; the visual is picked deterministically from the trade here, so quality is
  *  guaranteed by construction and a trade with no scene simply gets none. Max one per page. */
-export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge'] as const;
+export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge', 'glass'] as const;
 export type SceneKind = (typeof SCENE_KINDS)[number];
 
 /** APPROPRIATENESS GUARD — some businesses must never get spectacle. For grief-adjacent
@@ -181,7 +181,32 @@ export function sceneKindFor(industry: string): SceneKind | null {
   if (/roof|gutter/.test(s)) return 'rain';
   if (/hvac|heating|cooling|air condition|furnace/.test(s)) return 'thermostat';
   if (/auto|mechanic|tire|transmission|oil change|brake/.test(s)) return 'gauge';
-  return null;
+  // Every other trade gets THE QUANT CHAPTER — floating glass stat cards built from the
+  // business's observed numbers. Universal because the data rides in from the profile; the
+  // normalizer drops the scene when there aren't at least two real stats to stage, and
+  // restraint strips it entirely for dignified categories.
+  return 'glass';
+}
+
+/** The observed numbers the glass chapter may stage — every card is a fact from the profile,
+ *  never a synthesized claim. Fewer than two facts → the chapter doesn't earn its runway. */
+export function glassStats(profile: BusinessProfile): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  if (profile.google_rating != null) {
+    out.push({ value: `${profile.google_rating.toFixed(1)}★`, label: 'Google rating' });
+  }
+  if (profile.review_count != null && profile.review_count > 0) {
+    out.push({ value: String(profile.review_count), label: 'Google reviews' });
+  }
+  const since = /\bsince\s+((?:19|20)\d{2})\b/i.exec(profile.description ?? '')?.[1];
+  if (since) out.push({ value: `Since ${since}`, label: 'serving the area' });
+  if (profile.services.length >= 3) {
+    out.push({ value: String(profile.services.length), label: 'services offered' });
+  }
+  if (profile.service_area && profile.service_area.length >= 2) {
+    out.push({ value: String(profile.service_area.length), label: 'communities served' });
+  }
+  return out.slice(0, 4);
 }
 
 /** Deterministic scene copy — behavioral punchlines, no claims. The floor when the model writes
@@ -192,6 +217,7 @@ export const SCENE_COPY: Record<SceneKind, { headline: string; sub: string }> = 
   rain: { headline: 'Ready before the next storm.', sub: 'New shingles shed the weather your old roof lets through.' },
   thermostat: { headline: 'Comfort, dialed in.', sub: 'From sweltering to just right — and it holds.' },
   gauge: { headline: 'Green across the board.', sub: 'From warning light to road-ready.' },
+  glass: { headline: 'The numbers speak first.', sub: 'What the neighbors already know.' },
 };
 
 export interface SectionSpec {
@@ -659,16 +685,21 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   // TRADE SCENE: the visual is never model-chosen — the deterministic kind for this trade is
   // stamped onto the props; no scene exists for the trade (or a second scene appears) → dropped.
   const sceneKind = sceneKindFor(profile.industry);
+  // The quant chapter stages only OBSERVED numbers — fewer than two real stats and the scene
+  // doesn't earn its scroll runway.
+  const sceneStats = sceneKind === 'glass' ? glassStats(profile) : null;
   let sceneSeen = false;
   sections = sections.filter((s) => {
     if (s.type !== 'scene') return true;
     if (!sceneKind || sceneSeen) return false;
+    if (sceneKind === 'glass' && (sceneStats?.length ?? 0) < 2) return false;
     sceneSeen = true;
     s.props = {
       headline: str(s.props.headline, SCENE_COPY[sceneKind].headline),
       sub: str(s.props.sub, SCENE_COPY[sceneKind].sub),
       cta: str(s.props.cta, recipe.cta),
       scene: sceneKind,
+      ...(sceneKind === 'glass' ? { stats: sceneStats } : {}),
     };
     return true;
   });
@@ -917,9 +948,15 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'scene': {
-        // Only trades with a hand-built vignette get one — never a generic placeholder.
+        // Trade vignettes first; every other trade gets the quant chapter when it has the
+        // numbers to earn it (two+ observed stats) — never a generic placeholder.
         const kind = sceneKindFor(profile.industry);
-        if (kind) sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind } });
+        if (kind === 'glass') {
+          const stats = glassStats(profile);
+          if (stats.length >= 2) sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind, stats } });
+        } else if (kind) {
+          sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind } });
+        }
         break;
       }
     }

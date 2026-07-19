@@ -260,8 +260,81 @@ const SCENES: Record<string, (props: { p: number }) => ReactNode> = {
   gauge: (props) => <GaugeScene {...props} />,
 };
 
+/** THE QUANT CHAPTER — floating glass stat cards settling out of 3D space over a brand-hue
+ *  stage (the award-site "glass panels over rich color" move, in pure CSS perspective — no
+ *  WebGL, works in the export, cheap on phones). Every number is an OBSERVED fact injected by
+ *  normalizeSpec (rating, review count, services, since-year) — theater for the truth, never
+ *  invented proof. */
+function GlassScene({ p, stats, headline, sub, cta, hue }: {
+  p: number; stats: { value: string; label: string }[];
+  headline: string; sub?: string; cta?: string; hue: number;
+}) {
+  // Asymmetric settle positions (percent offsets from center) for up to 4 cards.
+  const SLOTS = [
+    { x: -26, y: -18, r: -5 }, { x: 24, y: -26, r: 6 },
+    { x: -20, y: 16, r: 4 }, { x: 26, y: 12, r: -6 },
+  ];
+  const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+  return (
+    <div className="relative h-full w-full overflow-hidden" style={{ perspective: '1200px' }}>
+      {/* the stage: deep brand-hue field, drifting slightly as the chapter plays */}
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(120% 90% at ${18 + p * 10}% 8%, hsl(${hue} 82% ${36 - p * 7}%), hsl(${hue} 85% 10%) 72%), hsl(${hue} 85% 10%)`,
+      }} />
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(58% 48% at ${78 - p * 12}% ${86 - p * 20}%, hsl(${(hue + 34) % 360} 80% 50% / 0.5), transparent 70%)`,
+      }} />
+      {/* corner vignette keeps the glass edges reading crisp against the color field */}
+      <div className="absolute inset-0" style={{ background: 'radial-gradient(140% 110% at 50% 50%, transparent 55%, rgb(0 0 0 / 0.45))' }} />
+      {stats.slice(0, 4).map((s, i) => {
+        const t = ease(seg(p, 0.04 + i * 0.11, 0.34 + i * 0.11));
+        const slot = SLOTS[i];
+        return (
+          <div key={i} className="absolute left-1/2 top-1/2 rounded-2xl border border-white/20 bg-white/10 px-7 py-5 text-center shadow-2xl backdrop-blur-xl"
+            style={{
+              transform: `translate(-50%, -50%) translate3d(${slot.x * (0.4 + t * 0.6)}vw, ${slot.y * t + (1 - t) * 46}vh, ${(1 - t) * -420}px) rotateX(${(1 - t) * 38}deg) rotateZ(${slot.r * t}deg)`,
+              opacity: Math.min(1, t * 1.6),
+            }}>
+            <div className="pv-display text-4xl font-bold text-white sm:text-5xl">{s.value}</div>
+            <div className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-white/65">{s.label}</div>
+          </div>
+        );
+      })}
+      {/* punchline + CTA land once the cards have settled */}
+      <div className="absolute inset-x-0 bottom-[12%] px-6 text-center"
+        style={{ opacity: seg(p, 0.62, 0.78), transform: `translateY(${(1 - seg(p, 0.62, 0.78)) * 24}px)` }}>
+        <h2 className="pv-display mx-auto max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-5xl" style={{ textWrap: 'balance' }}>{headline}</h2>
+        {sub && <p className="mx-auto mt-3 max-w-xl text-white/75">{sub}</p>}
+        {cta && (
+          <button type="button"
+            onClick={() => (document.getElementById('quote') ?? document.getElementById('ctaBanner'))?.scrollIntoView({ behavior: 'smooth' })}
+            className="mt-6 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-[hsl(var(--ink))] shadow-xl transition-transform hover:-translate-y-0.5">
+            {cta}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** The 'scene' section — normalizeSpec guarantees `scene` is a valid kind for this trade. */
-export function SceneSection(p: { headline?: string; sub?: string; cta?: string; scene?: string; motion?: string }) {
+export function SceneSection(p: { headline?: string; sub?: string; cta?: string; scene?: string; motion?: string;
+  stats?: { value: string; label: string }[]; themePrimary?: string }) {
+  const hue = parseInt((p.themePrimary ?? '220 50% 40%').split(/\s+/)[0], 10) || 220;
+  // The quant chapter is its own full-bleed stage (the SVG vignettes are centered illustrations).
+  if (p.scene === 'glass') {
+    if (!p.stats?.length) return null;
+    const glass = (prog: number) => (
+      <GlassScene p={prog} stats={p.stats!} headline={p.headline ?? ''} sub={p.sub} cta={p.cta} hue={hue} />
+    );
+    return (
+      <section id="scene" className="pv-grain-host relative isolate">
+        {p.motion === 'calm'
+          ? <div className="relative h-[80vh]">{glass(1)}</div>
+          : <ScrollScene heightVh={190}>{glass}</ScrollScene>}
+      </section>
+    );
+  }
   const draw = p.scene ? SCENES[p.scene] : null;
   if (!draw) return null;
   // Calm tier / reduced motion: ScrollScene stays at the finished frame — an illustration, not a ride.
