@@ -14,7 +14,7 @@
 //
 // Transform/opacity only; reduced-motion and the static export get the FINAL state (p = 1).
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 const reduce = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -24,29 +24,46 @@ const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const seg = (p: number, a: number, b: number) => clamp01((p - a) / (b - a));
 
 /** Pinned scrub stage: a tall wrapper with a sticky full-height stage; children receive p 0→1.
- *  SSR/export/reduced-motion render p=1 (the finished frame) — scrubbing arms client-side.
- *  Exported for the portal hero (sections.tsx) — same engine, one implementation. */
+ *  SSR/export render p=1 (the finished frame) with the pin COLLAPSED (pv-scn-pin — the export
+ *  CSS flattens it so a frozen frame never gets 1-2 screens of dead scroll runway).
+ *  Reduced-motion renders the finished frame at natural height, no pin, no scrubbing.
+ *  The first client frame measures scroll position synchronously (useLayoutEffect) — the old
+ *  post-paint arming painted the FINISHED state for a beat, then visibly snapped to p=0. */
 export function ScrollScene({ children, heightVh = 220 }: { children: (p: number) => ReactNode; heightVh?: number }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [p, setP] = useState(1);            // final frame until the SPA arms — export ships it
+  const [p, setP] = useState(1);            // final frame for SSR/export — the pitch ships whole
+  const [reduced, setReduced] = useState(false);
+  const measure = () => {
+    const el = ref.current;
+    if (!el) return 1;
+    const r = el.getBoundingClientRect();
+    const total = r.height - window.innerHeight;
+    return total > 0 ? clamp01(-r.top / total) : 1;
+  };
+  // Synchronous first measurement — no flash-of-final-state on load.
+  useLayoutEffect(() => {
+    if (reduce()) { setReduced(true); return; }
+    setP(measure());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (reduce()) return;
     let raf = 0;
     const tick = () => {
-      const el = ref.current;
-      if (el) {
-        const r = el.getBoundingClientRect();
-        const total = r.height - window.innerHeight;
-        setP(total > 0 ? clamp01(-r.top / total) : 1);
-      }
+      setP(measure());
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  if (reduced) {
+    // Finished frame, natural height — the choreography's end state IS the designed layout.
+    return <div className="relative flex min-h-screen items-center justify-center overflow-hidden">{children(1)}</div>;
+  }
   return (
-    <div ref={ref} style={{ height: `${heightVh}vh` }} className="relative">
-      <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
+    <div ref={ref} style={{ height: `${heightVh}vh` }} className="pv-scn-pin relative">
+      <div className="pv-scn-stage sticky top-0 flex h-screen items-center justify-center overflow-hidden">
         {children(p)}
       </div>
     </div>
@@ -243,8 +260,208 @@ const SCENES: Record<string, (props: { p: number }) => ReactNode> = {
   gauge: (props) => <GaugeScene {...props} />,
 };
 
+/** THE QUANT CHAPTER — floating glass stat cards settling out of 3D space over a brand-hue
+ *  stage (the award-site "glass panels over rich color" move, in pure CSS perspective — no
+ *  WebGL, works in the export, cheap on phones). Every number is an OBSERVED fact injected by
+ *  normalizeSpec (rating, review count, services, since-year) — theater for the truth, never
+ *  invented proof. */
+function GlassScene({ p, stats, headline, sub, cta, hue }: {
+  p: number; stats: { value: string; label: string }[];
+  headline: string; sub?: string; cta?: string; hue: number;
+}) {
+  // Asymmetric settle positions (percent offsets from center) for up to 4 cards.
+  const SLOTS = [
+    { x: -26, y: -18, r: -5 }, { x: 24, y: -26, r: 6 },
+    { x: -20, y: 16, r: 4 }, { x: 26, y: 12, r: -6 },
+  ];
+  const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+  return (
+    <div className="relative h-full w-full overflow-hidden" style={{ perspective: '1200px' }}>
+      {/* the stage: deep brand-hue field, drifting slightly as the chapter plays */}
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(120% 90% at ${18 + p * 10}% 8%, hsl(${hue} 82% ${36 - p * 7}%), hsl(${hue} 85% 10%) 72%), hsl(${hue} 85% 10%)`,
+      }} />
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(58% 48% at ${78 - p * 12}% ${86 - p * 20}%, hsl(${(hue + 34) % 360} 80% 50% / 0.5), transparent 70%)`,
+      }} />
+      {/* corner vignette keeps the glass edges reading crisp against the color field */}
+      <div className="absolute inset-0" style={{ background: 'radial-gradient(140% 110% at 50% 50%, transparent 55%, rgb(0 0 0 / 0.45))' }} />
+      {stats.slice(0, 4).map((s, i) => {
+        const t = ease(seg(p, 0.04 + i * 0.11, 0.34 + i * 0.11));
+        const slot = SLOTS[i];
+        return (
+          <div key={i} className="absolute left-1/2 top-1/2 rounded-2xl border border-white/20 bg-white/10 px-7 py-5 text-center shadow-2xl backdrop-blur-xl"
+            style={{
+              transform: `translate(-50%, -50%) translate3d(${slot.x * (0.4 + t * 0.6)}vw, ${slot.y * t + (1 - t) * 46}vh, ${(1 - t) * -420}px) rotateX(${(1 - t) * 38}deg) rotateZ(${slot.r * t}deg)`,
+              opacity: Math.min(1, t * 1.6),
+            }}>
+            <div className="pv-display text-4xl font-bold text-white sm:text-5xl">{s.value}</div>
+            <div className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-white/65">{s.label}</div>
+          </div>
+        );
+      })}
+      {/* punchline + CTA land once the cards have settled */}
+      <div className="absolute inset-x-0 bottom-[12%] px-6 text-center"
+        style={{ opacity: seg(p, 0.62, 0.78), transform: `translateY(${(1 - seg(p, 0.62, 0.78)) * 24}px)` }}>
+        <h2 className="pv-display mx-auto max-w-3xl text-3xl font-semibold tracking-tight text-white sm:text-5xl" style={{ textWrap: 'balance' }}>{headline}</h2>
+        {sub && <p className="mx-auto mt-3 max-w-xl text-white/75">{sub}</p>}
+        {cta && (
+          <button type="button"
+            onClick={() => (document.getElementById('quote') ?? document.getElementById('ctaBanner'))?.scrollIntoView({ behavior: 'smooth' })}
+            className="mt-6 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-[hsl(var(--ink))] shadow-xl transition-transform hover:-translate-y-0.5">
+            {cta}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Tiny deterministic PRNG — the same business renders the same ribbon field every time. */
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** THE RIBBON CHAPTER — drifting brand-hue paper strips floating in depth behind a
+ *  poster-scale claim (the award-site "shredded paper over a dark stage" move, canvas 2D —
+ *  no WebGL, nothing to break). Strip positions are a pure function of (seed, p): scrubbing
+ *  is exact, resume is exact, and the export/reduced-motion frame is simply p=1 over the
+ *  gradient stage (the canvas is progressive enhancement — SSR ships the composed type). */
+function RibbonScene({ p, headline, sub, cta, hue, seed }: {
+  p: number; headline: string; sub?: string; cta?: string; hue: number; seed: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    const rect = canvas.parentElement!.getBoundingClientRect();
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const w = rect.width, h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+    const rand = mulberry32(seed);
+    const N = 36;
+    for (let i = 0; i < N; i++) {
+      const depth = 0.3 + rand() * 0.7;                // far strips: smaller, dimmer, slower
+      const x0 = rand() * 1.2 - 0.1;
+      const y0 = rand() * 1.6;
+      const len = (110 + rand() * 260) * depth;
+      const thick = (16 + rand() * 26) * depth;
+      const ang0 = rand() * Math.PI * 2;
+      const spin = (rand() - 0.5) * 2.2;
+      const drift = (0.55 + rand() * 0.75) * depth;    // scroll-scrubbed float
+      const hueJ = hue + (rand() - 0.5) * 26;
+      const bow = (rand() - 0.5) * thick * 3.2;        // the curl that reads as paper, not a bar
+      const y = ((y0 - p * drift) % 1.6 + 1.6) % 1.6 - 0.3;
+      const x = x0 + Math.sin(p * 4 + i) * 0.02 * depth;
+      ctx.save();
+      ctx.translate(x * w, y * h);
+      ctx.rotate(ang0 + p * spin);
+      // far strips soften into atmosphere; near strips stay crisp
+      ctx.filter = depth < 0.48 ? 'blur(3px)' : depth < 0.7 ? 'blur(1px)' : 'none';
+      const grad = ctx.createLinearGradient(-len / 2, 0, len / 2, 0);
+      grad.addColorStop(0, `hsl(${hueJ} 74% ${54 + depth * 16}% / ${0.35 + depth * 0.5})`);
+      grad.addColorStop(0.55, `hsl(${hueJ + 8} 68% ${44 + depth * 18}% / ${0.3 + depth * 0.5})`);
+      grad.addColorStop(1, `hsl(${hueJ + 16} 58% ${36 + depth * 16}% / ${0.25 + depth * 0.42})`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(-len / 2, -thick / 2);
+      ctx.quadraticCurveTo(0, -thick / 2 + bow, len / 2, -thick / 2);
+      ctx.lineTo(len / 2, thick / 2);
+      ctx.quadraticCurveTo(0, thick / 2 + bow, -len / 2, thick / 2);
+      ctx.closePath();
+      ctx.fill();
+      // a sheen line along one edge sells the fold
+      ctx.strokeStyle = `hsl(${hueJ} 80% 78% / ${0.16 + depth * 0.2})`;
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-len / 2, -thick / 2);
+      ctx.quadraticCurveTo(0, -thick / 2 + bow, len / 2, -thick / 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.filter = 'none';
+  }, [p, hue, seed]);
+  const arrive = seg(p, 0.18, 0.42);
+  const ctaShow = seg(p, 0.52, 0.7);
+  return (
+    <div className="relative h-full w-full overflow-hidden">
+      {/* stage: near-black with a breath of the brand hue — canvas strips float over it */}
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(110% 90% at 50% ${20 + p * 18}%, hsl(${hue} 45% 13%), hsl(${hue} 55% 6%) 75%)`,
+      }} />
+      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden />
+      <div className="absolute inset-0" style={{ background: 'radial-gradient(130% 100% at 50% 50%, transparent 52%, rgb(0 0 0 / 0.5))' }} />
+      {/* the claim, poster scale — the type IS the show */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+        <h2 className="pv-display max-w-4xl font-bold tracking-tight text-white"
+          style={{ fontSize: 'clamp(2.6rem, 6.5vw, 5.8rem)', lineHeight: 1.04, textWrap: 'balance',
+            opacity: arrive, transform: `translateY(${(1 - arrive) * 30}px) scale(${0.95 + arrive * 0.05})` }}>
+          {headline}
+        </h2>
+        {sub && (
+          <p className="mx-auto mt-5 max-w-xl text-lg text-white/70"
+            style={{ opacity: ctaShow, transform: `translateY(${(1 - ctaShow) * 18}px)` }}>
+            {sub}
+          </p>
+        )}
+        {cta && (
+          <div style={{ opacity: ctaShow, transform: `translateY(${(1 - ctaShow) * 18}px)` }}>
+            <button type="button"
+              onClick={() => (document.getElementById('quote') ?? document.getElementById('ctaBanner'))?.scrollIntoView({ behavior: 'smooth' })}
+              className="mt-7 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-[hsl(var(--ink))] shadow-xl transition-transform hover:-translate-y-0.5">
+              {cta}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** The 'scene' section — normalizeSpec guarantees `scene` is a valid kind for this trade. */
-export function SceneSection(p: { headline?: string; sub?: string; cta?: string; scene?: string; motion?: string }) {
+export function SceneSection(p: { headline?: string; sub?: string; cta?: string; scene?: string; motion?: string;
+  stats?: { value: string; label: string }[]; themePrimary?: string; siteName?: string }) {
+  const hue = parseInt((p.themePrimary ?? '220 50% 40%').split(/\s+/)[0], 10) || 220;
+  // The ribbon chapter: drifting paper strips behind the poster claim, seeded by the business.
+  if (p.scene === 'ribbon') {
+    let seed = 7;
+    for (const ch of p.siteName ?? p.headline ?? 'ribbon') seed = (seed * 31 + ch.charCodeAt(0)) >>> 0;
+    const ribbon = (prog: number) => (
+      <RibbonScene p={prog} headline={p.headline ?? ''} sub={p.sub} cta={p.cta} hue={hue} seed={seed} />
+    );
+    return (
+      <section id="scene" className="pv-grain-host relative isolate">
+        {p.motion === 'calm'
+          ? <div className="relative h-[80vh]">{ribbon(1)}</div>
+          : <ScrollScene heightVh={190}>{ribbon}</ScrollScene>}
+      </section>
+    );
+  }
+  // The quant chapter is its own full-bleed stage (the SVG vignettes are centered illustrations).
+  if (p.scene === 'glass') {
+    if (!p.stats?.length) return null;
+    const glass = (prog: number) => (
+      <GlassScene p={prog} stats={p.stats!} headline={p.headline ?? ''} sub={p.sub} cta={p.cta} hue={hue} />
+    );
+    return (
+      <section id="scene" className="pv-grain-host relative isolate">
+        {p.motion === 'calm'
+          ? <div className="relative h-[80vh]">{glass(1)}</div>
+          : <ScrollScene heightVh={190}>{glass}</ScrollScene>}
+      </section>
+    );
+  }
   const draw = p.scene ? SCENES[p.scene] : null;
   if (!draw) return null;
   // Calm tier / reduced motion: ScrollScene stays at the finished frame — an illustration, not a ride.

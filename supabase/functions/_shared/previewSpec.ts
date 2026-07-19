@@ -148,8 +148,18 @@ export type SectionType = (typeof SECTION_TYPES)[number];
  *  gets clamped; a wire that lights a bulb; rain deflecting off new shingles…). The AI writes ONLY
  *  the punchline copy; the visual is picked deterministically from the trade here, so quality is
  *  guaranteed by construction and a trade with no scene simply gets none. Max one per page. */
-export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge'] as const;
+export const SCENE_KINDS = ['pipe', 'circuit', 'rain', 'thermostat', 'gauge', 'glass', 'ribbon'] as const;
 export type SceneKind = (typeof SCENE_KINDS)[number];
+
+/** The universal chapter for trades without a hand-built vignette: the business name hashes
+ *  into 'glass' (observed stats staged as 3D panels) or 'ribbon' (drifting brand-hue paper
+ *  strips behind a poster-scale claim). Glass needs 2+ real stats to earn its runway — thin
+ *  data falls to ribbon, which stages the CLAIM, so every eligible page still gets a
+ *  showpiece. Deterministic: the same business always renders the same chapter. */
+export function universalChapter(businessName: string, statCount: number): SceneKind {
+  const pick = nameHash(`${businessName}:chapter`) % 2 === 0 ? 'glass' : 'ribbon';
+  return pick === 'glass' && statCount < 2 ? 'ribbon' : pick;
+}
 
 /** APPROPRIATENESS GUARD — some businesses must never get spectacle. For grief-adjacent
  *  categories the page is calm by construction: no marquee, no scenes, no giant type, no
@@ -181,7 +191,32 @@ export function sceneKindFor(industry: string): SceneKind | null {
   if (/roof|gutter/.test(s)) return 'rain';
   if (/hvac|heating|cooling|air condition|furnace/.test(s)) return 'thermostat';
   if (/auto|mechanic|tire|transmission|oil change|brake/.test(s)) return 'gauge';
-  return null;
+  // Every other trade gets THE QUANT CHAPTER — floating glass stat cards built from the
+  // business's observed numbers. Universal because the data rides in from the profile; the
+  // normalizer drops the scene when there aren't at least two real stats to stage, and
+  // restraint strips it entirely for dignified categories.
+  return 'glass';
+}
+
+/** The observed numbers the glass chapter may stage — every card is a fact from the profile,
+ *  never a synthesized claim. Fewer than two facts → the chapter doesn't earn its runway. */
+export function glassStats(profile: BusinessProfile): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  if (profile.google_rating != null) {
+    out.push({ value: `${profile.google_rating.toFixed(1)}★`, label: 'Google rating' });
+  }
+  if (profile.review_count != null && profile.review_count > 0) {
+    out.push({ value: String(profile.review_count), label: 'Google reviews' });
+  }
+  const since = /\bsince\s+((?:19|20)\d{2})\b/i.exec(profile.description ?? '')?.[1];
+  if (since) out.push({ value: `Since ${since}`, label: 'serving the area' });
+  if (profile.services.length >= 3) {
+    out.push({ value: String(profile.services.length), label: 'services offered' });
+  }
+  if (profile.service_area && profile.service_area.length >= 2) {
+    out.push({ value: String(profile.service_area.length), label: 'communities served' });
+  }
+  return out.slice(0, 4);
 }
 
 /** Deterministic scene copy — behavioral punchlines, no claims. The floor when the model writes
@@ -192,6 +227,8 @@ export const SCENE_COPY: Record<SceneKind, { headline: string; sub: string }> = 
   rain: { headline: 'Ready before the next storm.', sub: 'New shingles shed the weather your old roof lets through.' },
   thermostat: { headline: 'Comfort, dialed in.', sub: 'From sweltering to just right — and it holds.' },
   gauge: { headline: 'Green across the board.', sub: 'From warning light to road-ready.' },
+  glass: { headline: 'The numbers speak first.', sub: 'What the neighbors already know.' },
+  ribbon: { headline: "Some things you can't fake.", sub: 'Reputation is earned one job at a time.' },
 };
 
 export interface SectionSpec {
@@ -259,8 +296,25 @@ export interface SiteSpec {
 }
 
 const HSL_RE = /^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$/;
-const FONT_RE = /^[a-zA-Z0-9 ]{2,40}$/;
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
+/** Vetted Google Fonts the renderer can actually load. A model-invented face used to pass the
+ *  old shape-only regex, 404 at fonts.googleapis.com, and silently render as system sans — the
+ *  worst possible outcome for a "premium" demo. Off-list → the recipe's pairing. */
+export const FONT_LIBRARY: readonly string[] = [
+  // display serifs / didones / slabs
+  'Playfair Display', 'Cormorant Garamond', 'Fraunces', 'DM Serif Display', 'Newsreader',
+  'Gloock', 'Libre Caslon Text', 'Lora', 'Bitter', 'Source Serif 4', 'Spectral', 'Marcellus',
+  'Libre Bodoni', 'Instrument Serif', 'Young Serif', 'Abril Fatface', 'Zilla Slab',
+  // display sans / grotesks / condensed (Google Fonts ONLY — the renderer loads from
+  // fonts.googleapis.com; a Fontshare-only face like Clash Display would 404 to system sans)
+  'Sora', 'Archivo', 'Oswald', 'Barlow Condensed', 'Bricolage Grotesque', 'Schibsted Grotesk',
+  'Space Grotesk', 'Anton', 'Bebas Neue', 'Unbounded', 'Syne', 'Outfit',
+  // body faces
+  'Inter', 'Figtree', 'Hanken Grotesk', 'Onest', 'Source Sans 3', 'DM Sans', 'Lato', 'Jost',
+  'Nunito', 'Work Sans', 'Manrope', 'Public Sans', 'Karla', 'Epilogue', 'Mulish', 'Albert Sans',
+];
+const FONT_SET = new Set(FONT_LIBRARY.map((f) => f.toLowerCase()));
 
 // ---------------------------------------------------------------------------
 // Industry recipes — section order + default art direction per vertical
@@ -285,7 +339,7 @@ export const RECIPES: Recipe[] = [
   {
     id: 'contractor_lead_gen',
     label: 'Contractor / Home Services',
-    match: ['roof', 'contractor', 'hvac', 'plumb', 'landscap', 'electric', 'construction', 'remodel', 'paint', 'garage', 'fence', 'concrete', 'handyman', 'pest', 'clean'],
+    match: ['roof', 'contractor', 'hvac', 'plumb', 'landscap', 'electric', 'construction', 'remodel', 'paint', 'garage', 'fence', 'concrete', 'handyman', 'pest', 'clean', 'lawn', 'tree', 'gutter', 'window', 'floor', 'carpet', 'junk', 'moving', 'pressure wash', 'appliance', 'locksmith', 'pool'],
     sections: ['hero', 'trust', 'services', 'scene', 'showcase', 'about', 'reviews', 'serviceArea', 'faq', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '16 78% 44%', primaryInk: '24 40% 98%', bg: '36 30% 97%', ink: '24 24% 12%',
@@ -337,7 +391,7 @@ export const RECIPES: Recipe[] = [
   {
     id: 'dental_medical',
     label: 'Dental / Medical / Clinics',
-    match: ['dental', 'dentist', 'orthodont', 'medical', 'clinic', 'chiro', 'physio', 'therapy', 'optom', 'veterinar', 'pediatric', 'urgent care'],
+    match: ['dental', 'dentist', 'orthodont', 'medical', 'clinic', 'chiro', 'physio', 'therapy', 'optom', 'veterinar', 'pediatric', 'urgent care', 'eye care'],
     sections: ['hero', 'trust', 'services', 'about', 'reviews', 'faq', 'hours', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '190 65% 34%', primaryInk: '190 30% 98%', bg: '195 35% 97.5%', ink: '200 30% 13%',
@@ -402,7 +456,7 @@ export const RECIPES: Recipe[] = [
   {
     id: 'retail_boutique',
     label: 'Retail / Boutique / Florist',
-    match: ['boutique', 'retail', 'store', 'shop', 'florist', 'flower', 'gift', 'jewel', 'antique', 'bookstore', 'furniture'],
+    match: ['boutique', 'retail', 'store', 'shop', 'florist', 'floral', 'flower', 'gift', 'jewel', 'antique', 'bookstore', 'furniture'],
     sections: ['hero', 'gallery', 'about', 'services', 'reviews', 'hours', 'map', 'faq', 'ctaBanner', 'seoText'],
     theme: {
       primary: '335 45% 40%', primaryInk: '340 30% 98%', bg: '30 30% 97.5%', ink: '335 20% 14%',
@@ -415,7 +469,7 @@ export const RECIPES: Recipe[] = [
   {
     id: 'pet_care',
     label: 'Pet Care / Grooming / Boarding',
-    match: ['pet', 'dog', 'cat', 'groom', 'kennel', 'boarding', 'daycare', 'walker', 'animal'],
+    match: ['pet', 'dog', 'cat', 'groom', 'kennel', 'boarding', 'daycare', 'walker', 'animal', 'dog training', 'dog train'],
     sections: ['hero', 'services', 'gallery', 'reviews', 'about', 'trust', 'faq', 'hours', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '25 85% 50%', primaryInk: '30 50% 98%', bg: '45 40% 97%', ink: '30 26% 13%',
@@ -441,14 +495,45 @@ export const RECIPES: Recipe[] = [
 ];
 
 /** Pick the recipe for a profile — recommended_site_type wins, then industry/category keywords,
- *  else the contractor recipe (the most universal local-service layout). */
+ *  else the contractor recipe (the most universal local-service layout).
+ *  Keywords match only at WORD START and the LONGEST match wins: raw substring matching sent
+ *  barbers to the restaurant recipe ('bar' inside "Barbering"), lawn care to the law firm
+ *  ('law' inside "Lawn"), and carpet cleaners to pet care ('pet' inside "carpet"). */
 export function pickRecipe(profile: BusinessProfile): Recipe {
   const hints = [profile.recommended_site_type, profile.industry, profile.category]
     .filter(Boolean).join(' ').toLowerCase();
   const byId = RECIPES.find((r) => hints.includes(r.id));
   if (byId) return byId;
-  for (const r of RECIPES) if (r.match.some((m) => hints.includes(m))) return r;
-  return RECIPES[0];
+  const wordStart = (m: string) => {
+    const i = hints.indexOf(m);
+    for (let at = i; at !== -1; at = hints.indexOf(m, at + 1)) {
+      const before = at === 0 ? ' ' : hints[at - 1];
+      if (!/[a-z0-9]/.test(before)) return true;
+    }
+    return false;
+  };
+  let best: Recipe | null = null;
+  let bestLen = 0;
+  for (const r of RECIPES) {
+    for (const m of r.match) {
+      if (m.length > bestLen && wordStart(m)) { best = r; bestLen = m.length; }
+    }
+  }
+  return best ?? RECIPES[0];
+}
+
+/** Deterministic per-business variant rotation — the anti-sameness seed. When the model names
+ *  no (or an invalid) variant, the OLD behavior collapsed every site in a vertical to the
+ *  recipe's single default composition (20-run finding: ctaBanner "giant" on 20/20). Now the
+ *  business name hashes into the valid pool, so neighbors get different skeletons by
+ *  construction while the same business always re-renders identically. The showpiece heroes
+ *  (portal/layers) stay opt-in — they need specific assets/motion and are chosen by intent. */
+export function seededVariant(businessName: string, type: SectionType, recipe: Recipe): string | undefined {
+  const opts = SECTION_VARIANTS[type];
+  if (!opts?.length) return recipe.variants?.[type];
+  const pool = type === 'hero' ? opts.filter((v) => v !== 'portal' && v !== 'layers') : opts;
+  if (!pool.length) return recipe.variants?.[type];
+  return pool[nameHash(`${businessName}:${type}`) % pool.length];
 }
 
 // ---------------------------------------------------------------------------
@@ -469,13 +554,27 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
 
   // theme: accept only valid fields, else recipe default
   const t = (r.theme ?? {}) as Record<string, unknown>;
-  const hsl = (v: unknown, dflt: string) => (typeof v === 'string' && HSL_RE.test(v.trim()) ? v.trim() : dflt);
-  const font = (v: unknown, dflt: string) => (typeof v === 'string' && FONT_RE.test(v.trim()) ? v.trim() : dflt);
-  // flair: whitelist-filtered signature devices, capped at 3; absent → the recipe's defaults
-  // (never zero personality). An unknown device name is dropped, never rendered.
-  const rawFlair = Array.isArray(t.flair)
+  // HSL: shape AND range — "720 300% 50%" hue-wraps into a color the model never intended.
+  const hsl = (v: unknown, dflt: string) => {
+    if (typeof v !== 'string' || !HSL_RE.test(v.trim())) return dflt;
+    const [h, sPct, l] = v.trim().split(/\s+/).map(parseFloat);
+    return h <= 360 && sPct <= 100 && l <= 100 ? v.trim() : dflt;
+  };
+  // Fonts: must be in the vetted library — an invented face 404s at Google Fonts and silently
+  // renders as system sans, which is worse than any real fallback.
+  const font = (v: unknown, dflt: string) => {
+    if (typeof v !== 'string') return dflt;
+    const name = v.trim();
+    return FONT_SET.has(name.toLowerCase())
+      ? FONT_LIBRARY.find((f) => f.toLowerCase() === name.toLowerCase()) ?? dflt
+      : dflt;
+  };
+  // flair: whitelist-filtered signature devices, capped at 3; absent OR entirely invalid → the
+  // recipe's defaults (never zero personality). An unknown device name is dropped, never rendered.
+  const flairFiltered = Array.isArray(t.flair)
     ? (t.flair as unknown[]).filter((f): f is FlairDevice => FLAIR_DEVICES.includes(f as FlairDevice)).slice(0, 3)
     : null;
+  const rawFlair = flairFiltered?.length ? flairFiltered : null;
   const theme: ThemeSpec = {
     primary: hsl(t.primary, recipe.theme.primary),
     primaryInk: hsl(t.primaryInk, recipe.theme.primaryInk),
@@ -484,7 +583,7 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     muted: hsl(t.muted, recipe.theme.muted),
     card: hsl(t.card, recipe.theme.card),
     border: hsl(t.border, recipe.theme.border),
-    radius: typeof t.radius === 'number' ? clamp(t.radius, 0, 28) : recipe.theme.radius,
+    radius: Number.isFinite(t.radius as number) ? clamp(t.radius as number, 0, 28) : recipe.theme.radius,
     displayFont: font(t.displayFont, recipe.theme.displayFont),
     bodyFont: font(t.bodyFont, recipe.theme.bodyFont),
     tone: str(t.tone, recipe.theme.tone),
@@ -494,7 +593,11 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
 
   // sections: keep known types only, in given order; re-inject photo/review data from the
   // PROFILE with usage flags applied (never trust the model to have honored them).
-  const photos = usablePhotos(profile);
+  const allUsable = usablePhotos(profile);
+  // Dignified categories never show generated imagery — not as backdrop, object, OR still-life.
+  const photos = restraintFor(profile.industry)
+    ? allUsable.filter((p) => p.source_type !== 'ai_generated')
+    : allUsable;
   // Role-tagged AI assets belong to the layers hero ONLY. The transparent object must never
   // appear as a "content photo" (a floating wrench in the about section — 20-site review
   // finding); the abstract backdrop may serve as a hero background but never galleries/about.
@@ -502,17 +605,23 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   const heroBackdrop = photos.find((p) => p.alt === 'ai-backdrop');
   const reviews = usableReviews(profile);
   const rawSections = Array.isArray(r.sections) ? r.sections : [];
+  const seenTypes = new Set<SectionType>();
   let sections: SectionSpec[] = rawSections
     .map((s): SectionSpec | null => {
       const o = s as Record<string, unknown>;
       const type = o?.type as SectionType;
       if (!SECTION_TYPES.includes(type)) return null;
+      if (seenTypes.has(type)) return null; // two heroes / three ctaBanners never render
+      seenTypes.add(type);
       const props = (typeof o.props === 'object' && o.props !== null ? o.props : {}) as Record<string, unknown>;
-      // variant: whitelist-checked; unknown/absent → the recipe's default composition for the type
+      // A model-written props.variant would ride the props spread past the whitelist — strip it.
+      delete props.variant;
+      // variant: whitelist-checked; unknown/absent → seeded rotation through the valid pool, so
+      // unspecified choices produce per-business VARIETY instead of one per-vertical default.
       const allowed = SECTION_VARIANTS[type];
       const variant = (typeof o.variant === 'string' && allowed?.includes(o.variant))
         ? o.variant
-        : recipe.variants?.[type];
+        : seededVariant(profile.business_name, type, recipe);
       return { type, variant, props };
     })
     .filter((s): s is SectionSpec => s !== null);
@@ -560,18 +669,40 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
       s.props.googleRating = profile.google_rating;
       s.props.reviewCount = profile.review_count;
     }
+    // Contact/data sections carry PROFILE truth, never model transcription — a mistyped phone
+    // is a dead tel: link on the one section built to convert. (The prompt has promised this
+    // injection since day one; it now actually happens.)
+    if (s.type === 'hours' && profile.hours) s.props.hours = profile.hours;
+    if (s.type === 'quote') {
+      if (profile.phone) s.props.phone = profile.phone;
+      if (profile.email) s.props.email = profile.email;
+    }
+    if (s.type === 'map') {
+      if (profile.location) s.props.address = profile.location;
+      if (profile.phone) s.props.phone = profile.phone;
+    }
+    if (s.type === 'serviceArea' && profile.service_area?.length) s.props.areas = profile.service_area;
   }
-  // sections that render scraped media but have none to render get dropped, not left empty
+  // sections that render scraped media/data but have none to render get dropped, not left empty
   // (role-tagged AI assets don't count as gallery content)
   sections = sections.filter((s) => {
     if ((s.type === 'gallery' || s.type === 'showcase') && contentPhotos.length === 0) return false;
     if (s.type === 'reviews' && reviews.length === 0 && !profile.reviews_summary) return false;
+    if (s.type === 'hours' && !profile.hours) return false;
+    if (s.type === 'map' && !profile.location && typeof s.props.address !== 'string') return false;
+    if (s.type === 'serviceArea' && !profile.service_area?.length && !Array.isArray(s.props.areas)) return false;
     return true;
   });
 
   // TRADE SCENE: the visual is never model-chosen — the deterministic kind for this trade is
   // stamped onto the props; no scene exists for the trade (or a second scene appears) → dropped.
-  const sceneKind = sceneKindFor(profile.industry);
+  // Trade vignettes win; 'glass' from sceneKindFor is the UNIVERSAL marker, resolved by name
+  // hash into glass (2+ observed stats required) or ribbon (stages the claim, needs none).
+  const tradeKind = sceneKindFor(profile.industry);
+  const uniStats = tradeKind === 'glass' ? glassStats(profile) : null;
+  const sceneKind = tradeKind === 'glass'
+    ? universalChapter(profile.business_name, uniStats?.length ?? 0)
+    : tradeKind;
   let sceneSeen = false;
   sections = sections.filter((s) => {
     if (s.type !== 'scene') return true;
@@ -582,12 +713,20 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
       sub: str(s.props.sub, SCENE_COPY[sceneKind].sub),
       cta: str(s.props.cta, recipe.cta),
       scene: sceneKind,
+      ...(sceneKind === 'glass' ? { stats: uniStats } : {}),
     };
     return true;
   });
 
   // Dignity is not a model choice — grief-adjacent categories are forced calm here.
   sections = applyRestraint(theme, sections, profile.industry);
+
+  // marquee needs a trust section to live on — flair pointing at a host that doesn't exist is
+  // a silent no-op that reads as "this site has no personality".
+  if (theme.flair?.includes('marquee') && !sections.some((s) => s.type === 'trust')) {
+    theme.flair = theme.flair.filter((f) => f !== 'marquee');
+    if (!theme.flair.length) theme.flair = ['grain'];
+  }
 
   const seoRaw = (r.seo ?? {}) as Record<string, unknown>;
   return {
@@ -597,7 +736,9 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     logoText: str(r.logoText, fallback.logoText),
     tagline: str(r.tagline, fallback.tagline),
     theme,
-    nav: fallback.nav, // deterministic — derived from the final section list below
+    // nav derived from the FINAL section list — the fallback's nav pointed at sections the
+    // normalized page may not have (dead anchors) and missed ones it does.
+    nav: navFor(sections, recipe.cta),
     sections,
     seo: {
       title: str(seoRaw.title, fallback.seo.title),
@@ -705,10 +846,16 @@ function voiceFor(industry: string, name: string, city: string | null): Voice {
 
 export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const recipe = pickRecipe(profile);
-  const allPhotos = usablePhotos(profile);
+  // Dignified categories never show generated imagery (same rule as the normalizer).
+  const allPhotos = restraintFor(profile.industry)
+    ? usablePhotos(profile).filter((p) => p.source_type !== 'ai_generated')
+    : usablePhotos(profile);
   // Same role rule as the normalizer: the AI object/backdrop pair never masquerades as content.
   const photos = allPhotos.filter((p) => p.alt !== 'ai-backdrop' && p.alt !== 'ai-object');
   const heroBackdrop = allPhotos.find((p) => p.alt === 'ai-backdrop');
+  // AI still-lifes are concept art — a gallery of them must never claim to be the business's
+  // own portfolio ("Recent work" over generated images is a lie).
+  const aiOnlyPhotos = photos.length > 0 && photos.every((p) => p.source_type === 'ai_generated');
   const reviews = usableReviews(profile);
   const loc = profile.location ?? '';
   const name = profile.business_name;
@@ -758,10 +905,10 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'showcase':
-        if (photos.length) sections.push({ type, props: { heading: 'Recent work', photos: photos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
+        if (photos.length) sections.push({ type, props: { heading: aiOnlyPhotos ? 'The look and feel' : 'Recent work', photos: photos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
         break;
       case 'gallery':
-        if (photos.length) sections.push({ type, props: { heading: 'Gallery', photos: photos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
+        if (photos.length) sections.push({ type, props: { heading: aiOnlyPhotos ? 'The look and feel' : 'Gallery', photos: photos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
         break;
       case 'reviews':
         if (reviews.length || profile.reviews_summary) sections.push({ type, props: {
@@ -807,26 +954,40 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'seoText':
+        // No "Popular searches:" keyword dump — that's the one line every owner burned by a
+        // cheap SEO vendor recognizes as spam. Keywords belong woven into prose, or nowhere.
         sections.push({ type, props: {
           heading: `${profile.industry} in ${loc || 'your area'}`,
-          body: `${name} provides ${profile.services.join(', ').toLowerCase()}${loc ? ` throughout ${loc}` : ''}. ${profile.seo_keywords?.length ? `Popular searches: ${profile.seo_keywords.slice(0, 5).join(', ')}.` : ''}`,
+          body: `${name} provides ${profile.services.slice(0, 6).join(', ').toLowerCase()}${loc ? ` throughout ${loc} and nearby communities` : ''}.`,
         } });
         break;
       case 'scene': {
-        // Only trades with a hand-built vignette get one — never a generic placeholder.
-        const kind = sceneKindFor(profile.industry);
-        if (kind) sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind } });
+        // Trade vignettes first; every other trade rotates into glass (stats-staged, needs
+        // two+ observed numbers) or ribbon (claim-staged) — never a generic placeholder.
+        const tKind = sceneKindFor(profile.industry);
+        if (tKind === 'glass') {
+          const stats = glassStats(profile);
+          const kind = universalChapter(name, stats.length);
+          sections.push({ type, props: { ...SCENE_COPY[kind], cta, scene: kind, ...(kind === 'glass' ? { stats } : {}) } });
+        } else if (tKind) {
+          sections.push({ type, props: { ...SCENE_COPY[tKind], cta, scene: tKind } });
+        }
         break;
       }
     }
   }
 
-  // The recipe's structural compositions ride into the fallback — the floor is architecturally
-  // distinct per vertical, not one skeleton with different paint.
-  for (const s of sections) s.variant = s.variant ?? recipe.variants?.[s.type];
+  // Seeded structural compositions ride into the fallback — the floor is architecturally
+  // distinct per BUSINESS, not one skeleton per vertical with different paint.
+  for (const s of sections) s.variant = s.variant ?? seededVariant(name, s.type, recipe);
 
   const fbTheme: ThemeSpec = { ...recipe.theme };
   const restrainedSections = applyRestraint(fbTheme, sections, profile.industry);
+  // marquee with no trust section to host it is a silent no-op (restaurant/retail/pet recipes).
+  if (fbTheme.flair?.includes('marquee') && !restrainedSections.some((s) => s.type === 'trust')) {
+    fbTheme.flair = fbTheme.flair.filter((f) => f !== 'marquee');
+    if (!fbTheme.flair.length) fbTheme.flair = ['grain'];
+  }
 
   const spec: SiteSpec = {
     version: 1,

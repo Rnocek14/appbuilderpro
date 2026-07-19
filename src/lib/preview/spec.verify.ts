@@ -5,9 +5,10 @@
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
+  seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats, universalChapter,
   type BusinessProfile,
 } from './spec';
-import { huntImagePrompts, huntArtPrompts } from '../garvis/clientHuntBuild';
+import { huntImagePrompts, huntArtPrompts, paletteHueName } from '../garvis/clientHuntBuild';
 
 let passed = 0, failed = 0;
 const check = (name: string, cond: boolean) => {
@@ -122,12 +123,21 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
     { type: 'ctaBanner', props: {}, variant: 'giant' },
   ] }, ROOFER);
   check('normalize: whitelisted section variant kept', v.sections.find((s) => s.type === 'hero')?.variant === 'editorial');
-  check('normalize: unknown variant replaced by the recipe default composition',
-    v.sections.find((s) => s.type === 'services')?.variant === recipe.variants?.services);
+  check('normalize: unknown variant replaced by the seeded rotation (deterministic, whitelisted)',
+    v.sections.find((s) => s.type === 'services')?.variant === seededVariant(ROOFER.business_name, 'services', recipe)
+    && ['cards', 'rows'].includes(v.sections.find((s) => s.type === 'services')?.variant ?? ''));
   check('normalize: ctaBanner giant kept', v.sections.find((s) => s.type === 'ctaBanner')?.variant === 'giant');
   const fb = assembleFallbackSpec(ROOFER);
-  check('fallback: sections carry the recipe variant defaults',
-    fb.sections.every((s) => recipe.variants?.[s.type] === undefined || s.variant === recipe.variants[s.type]));
+  check('fallback: sections carry seeded, whitelisted variants',
+    fb.sections.every((s) => SECTION_VARIANTS[s.type] === undefined || SECTION_VARIANTS[s.type]!.includes(s.variant ?? '')));
+  check('seeded variants: same business always gets the same composition',
+    seededVariant("Joe's Roofing", 'ctaBanner', recipe) === seededVariant("Joe's Roofing", 'ctaBanner', recipe));
+  check('seeded variants: neighbors diverge (anti-sameness — 20/20 sites shared the giant closer)',
+    new Set(['Alpha Co', 'Bravo LLC', 'Carter & Sons', 'Delta Works', 'Echo Trades']
+      .map((n) => `${seededVariant(n, 'hero', recipe)}|${seededVariant(n, 'ctaBanner', recipe)}`).values()).size >= 2);
+  check('seeded variants: hero rotation never lands on the showpiece variants (portal/layers are opt-in)',
+    ['Alpha Co', 'Bravo LLC', 'Carter & Sons', 'Delta Works', 'Echo Trades', 'Foxtrot Inc']
+      .every((n) => !['portal', 'layers'].includes(seededVariant(n, 'hero', recipe) ?? '')));
   check('recipes: distinct verticals get distinct page architecture (hero variants differ)',
     new Set(RECIPES.map((r) => r.variants?.hero ?? 'fullbleed')).size >= 3);
 }
@@ -136,7 +146,8 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
 {
   check('sceneKindFor: plumber → pipe, electrician → circuit, roofer → rain',
     sceneKindFor('Plumbing') === 'pipe' && sceneKindFor('Electrical Services') === 'circuit' && sceneKindFor('Roofing') === 'rain');
-  check('sceneKindFor: no scene for trades without one', sceneKindFor('Hair & Beauty') === null && sceneKindFor('Legal Services') === null);
+  check('sceneKindFor: every other trade gets the quant chapter (glass)',
+    sceneKindFor('Hair & Beauty') === 'glass' && sceneKindFor('Legal Services') === 'glass');
   const plumber = { ...ROOFER, industry: 'Plumbing' };
   const withScene = normalizeSpec({ sections: [
     { type: 'hero', props: { heading: 'H' } },
@@ -146,8 +157,28 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
   const scenes = withScene.sections.filter((s) => s.type === 'scene');
   check('normalize: scene kind stamped from the trade, never model-chosen', scenes.length === 1 && scenes[0].props.scene === 'pipe');
   check('normalize: model punchline kept', scenes[0].props.headline === 'Leaks lose.');
-  const salonScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, { ...ROOFER, industry: 'Hair & Beauty' });
-  check('normalize: scene dropped for trades with no vignette', !salonScene.sections.some((s) => s.type === 'scene'));
+  // A non-vignette trade rotates into the glass chapter (observed stats) or the ribbon chapter
+  // (claim-staged) — deterministic per business, never dropped, never invented data.
+  const expectKind = universalChapter(ROOFER.business_name, glassStats(ROOFER).length);
+  const salonScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: { stats: [{ value: '99★', label: 'invented by the model' }] } }] }, { ...ROOFER, industry: 'Hair & Beauty' });
+  const uniSec = salonScene.sections.find((s) => s.type === 'scene');
+  check('normalize: non-vignette trade gets the seeded universal chapter (model stats overwritten)',
+    uniSec?.props.scene === expectKind
+    && !(uniSec?.props.stats as { value: string }[] | undefined)?.some((x) => x.value === '99★')
+    && (expectKind !== 'glass' || (uniSec?.props.stats as { value: string }[])?.some((x) => x.value === '4.8★')));
+  check('universalChapter: deterministic, and thin data always falls to ribbon',
+    universalChapter('Same Name', 4) === universalChapter('Same Name', 4)
+    && universalChapter('Anything At All', 1) === 'ribbon'
+    && ['glass', 'ribbon'].includes(universalChapter('Another Biz', 3)));
+  const thinProfile = { ...ROOFER, industry: 'Hair & Beauty', google_rating: undefined, review_count: undefined, services: ['Cuts'], service_area: [] };
+  const thinScene = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, thinProfile);
+  check('normalize: fewer than two observed stats → the ribbon chapter (claim needs no data)',
+    thinScene.sections.find((s) => s.type === 'scene')?.props.scene === 'ribbon');
+  check('glassStats: only observed facts, capped at 4',
+    glassStats(ROOFER).length >= 2 && glassStats(ROOFER).every((x) => x.value && x.label) && glassStats(ROOFER).length <= 4);
+  const funeralGlass = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'scene', props: {} }] }, { ...ROOFER, industry: 'Funeral Home' });
+  check('restraint: dignified categories never get the universal chapters either',
+    !funeralGlass.sections.some((s) => s.type === 'scene'));
   const fbPlumber = assembleFallbackSpec(plumber);
   check('fallback: plumber gets the pipe scene with honest default copy',
     fbPlumber.sections.some((s) => s.type === 'scene' && s.props.scene === 'pipe' && s.props.headline === "Leaks don't wait."));
@@ -158,12 +189,18 @@ check('consulting routes to the professional recipe', pickRecipe({ ...ROOFER, in
 
 // AI concept imagery: honest prompts + the footer disclosure flag
 {
-  const [wide, tight] = huntImagePrompts('Plumbing', 'bold, direct');
+  const [wide, tight] = huntImagePrompts('Plumbing', 'bold, direct')!;
   check('image prompts are trade-specific (plumber → copper pipes)', /copper pipes/i.test(wide) && /macro/i.test(tight));
   check('image prompts carry the hard honesty rules (no people/text/logos)',
     [wide, tight].every((p) => /No people/.test(p) && /no logos/.test(p) && /no text/i.test(p)));
-  const [gw] = huntImagePrompts('Notary Services', null);
+  const [gw] = huntImagePrompts('Notary Services', null)!;
   check('unknown trade still gets a generic still-life prompt', /notary services trade/i.test(gw));
+  check('image prompts refuse dignified categories (belt to the worker gate\'s suspenders)',
+    huntImagePrompts('Funeral Home', null) === null && huntArtPrompts('Funeral Home', null) === null);
+  check('image prompts carry the site palette when hinted',
+    /copper|amber|orange/i.test(huntImagePrompts('Plumbing', null, '16 78% 44%')![0])
+    && /deep blue|slate/i.test(huntArtPrompts('Plumbing', null, '210 90% 40%')!.backdrop)
+    && paletteHueName('160 30% 32%') === 'deep green and forest tones');
   const aiProfile = { ...ROOFER, photos: [{ url: 'https://x/ai.png', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false }] };
   check('aiImagery flag set when photos are AI-generated', assembleFallbackSpec(aiProfile).aiImagery === true
     && normalizeSpec({}, aiProfile).aiImagery === true);
@@ -310,6 +347,110 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   // variant survives normalization (the renderer dispatches on it — dropping it kills layouts)
   const withVariant = normalizeSpec({ sections: [{ type: 'hero', variant: 'split', props: { heading: 'Hi' } }] }, ROOFER);
   check('normalizeSpec preserves section variant', withVariant.sections[0].variant === 'split');
+}
+
+// ---------------------------------------------------------------------------
+// Deep-audit fix wave: routing word-boundaries, font whitelist, HSL ranges,
+// injection parity, nav recompute, dedupe, whitelist bypass, marquee host
+// ---------------------------------------------------------------------------
+{
+  const mk = (industry: string): BusinessProfile => ({ business_name: 'X', industry, services: ['a'], photos: [] });
+  // Substring misroutes that shipped wrong designs in the live hunt:
+  check('routing: barber never gets the restaurant recipe (\'bar\' in "Barbering")',
+    pickRecipe(mk('Barbering')).id === 'salon_spa' && pickRecipe(mk('Barber Shop')).id === 'salon_spa');
+  check('routing: lawn care never gets the law-firm recipe (\'law\' in "Lawn")',
+    pickRecipe(mk('Lawn Care')).id === 'contractor_lead_gen');
+  check('routing: carpet cleaning never gets pet care (\'pet\' in "carpet")',
+    pickRecipe(mk('Carpet Cleaning')).id === 'contractor_lead_gen');
+  check('routing: dog training goes to pet care, not the gym',
+    pickRecipe(mk('Dog Training')).id === 'pet_care');
+  check('routing: floral design + eye care route to their real verticals (TRADE_NAMES alignment)',
+    pickRecipe(mk('Floral Design')).id === 'retail_boutique' && pickRecipe(mk('Eye Care')).id === 'dental_medical');
+  check('routing: a real bar still gets the restaurant recipe',
+    pickRecipe(mk('Bar & Grill')).id === 'restaurant');
+
+  // Font whitelist: hallucinated faces used to 404 at Google Fonts → silent system sans.
+  const fontSpec = normalizeSpec({ theme: { displayFont: 'Totally Invented Serif', bodyFont: 'lato' } }, ROOFER);
+  check('fonts: off-library face falls to the recipe pairing', fontSpec.theme.displayFont === pickRecipe(ROOFER).theme.displayFont);
+  check('fonts: library face accepted case-insensitively (canonical casing restored)', fontSpec.theme.bodyFont === 'Lato');
+  check('fonts: library covers every recipe pairing', RECIPES.every((r) =>
+    FONT_LIBRARY.some((f) => f.toLowerCase() === r.theme.displayFont.toLowerCase())
+    && FONT_LIBRARY.some((f) => f.toLowerCase() === r.theme.bodyFont.toLowerCase())));
+
+  // HSL range + radius NaN
+  const hslSpec = normalizeSpec({ theme: { primary: '720 300% 50%', bg: '20 30% 96%', radius: Number.NaN } }, ROOFER);
+  check('theme: out-of-range HSL rejected, in-range kept, NaN radius rejected',
+    hslSpec.theme.primary === pickRecipe(ROOFER).theme.primary && hslSpec.theme.bg === '20 30% 96%'
+    && Number.isFinite(hslSpec.theme.radius));
+
+  // All-invalid flair must fall to the recipe default, not an empty list
+  check('flair: an entirely-invalid flair list falls back to the recipe default (never zero personality)',
+    (normalizeSpec({ theme: { flair: ['sparkles', 'lasers'] } }, ROOFER).theme.flair ?? []).length > 0);
+
+  // Injection parity: profile truth rides into hours/quote/map; empty-data sections drop
+  const withHours = { ...ROOFER, hours: { Mon: '9-5' }, email: 'joe@x.com', service_area: ['Lake Geneva', 'Elkhorn'] };
+  const inj = normalizeSpec({ sections: [
+    { type: 'hero', props: {} },
+    { type: 'hours', props: {} },
+    { type: 'quote', props: { phone: '111-111-1111', email: 'wrong@model.com' } },
+    { type: 'map', props: { address: 'Hallucinated St 5' } },
+    { type: 'serviceArea', props: { areas: ['Made-up Town'] } },
+  ] }, withHours);
+  check('injection: hours/quote/map/serviceArea carry PROFILE truth, not model transcription',
+    JSON.stringify(inj.sections.find((s) => s.type === 'hours')?.props.hours) === JSON.stringify({ Mon: '9-5' })
+    && inj.sections.find((s) => s.type === 'quote')?.props.phone === ROOFER.phone
+    && inj.sections.find((s) => s.type === 'quote')?.props.email === 'joe@x.com'
+    && inj.sections.find((s) => s.type === 'map')?.props.address === ROOFER.location
+    && JSON.stringify(inj.sections.find((s) => s.type === 'serviceArea')?.props.areas) === JSON.stringify(['Lake Geneva', 'Elkhorn']));
+  const noHours = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'hours', props: {} }] }, ROOFER);
+  check('injection: an hours section with no profile hours is dropped, never rendered empty',
+    !noHours.sections.some((s) => s.type === 'hours'));
+
+  // Nav recompute: anchors must match the FINAL normalized section list (dead-anchor bug)
+  const navSpec = normalizeSpec({ sections: [
+    { type: 'hero', props: {} }, { type: 'services', props: { services: [{ name: 'a', blurb: 'b' }] } },
+    { type: 'faq', props: { faqs: [{ q: 'q', a: 'a' }] } },
+  ] }, ROOFER);
+  check('nav: derived from the normalized page (no anchors to sections that do not exist)',
+    navSpec.nav.every((n) => navSpec.sections.some((s) => s.type === n.anchor))
+    && navSpec.nav.some((n) => n.anchor === 'faq'));
+
+  // Dedupe: a model emitting two heroes / three banners renders one of each
+  const dup = normalizeSpec({ sections: [
+    { type: 'hero', props: { heading: 'One' } }, { type: 'hero', props: { heading: 'Two' } },
+    { type: 'ctaBanner', props: {} }, { type: 'ctaBanner', props: {} }, { type: 'ctaBanner', props: {} },
+  ] }, ROOFER);
+  check('dedupe: duplicate section types collapse to the first occurrence',
+    dup.sections.filter((s) => s.type === 'hero').length === 1
+    && dup.sections.filter((s) => s.type === 'ctaBanner').length === 1);
+
+  // Whitelist bypass: a model-written props.variant must never reach the renderer
+  const bypass = normalizeSpec({ sections: [{ type: 'hero', variant: 'editorial', props: { variant: 'layers' } }] }, ROOFER);
+  check('whitelist: props.variant stripped (renderer receives only the validated variant)',
+    bypass.sections[0].variant === 'editorial' && bypass.sections[0].props.variant === undefined);
+
+  // Marquee needs a trust host — flair pointing nowhere is stripped
+  const noTrust = normalizeSpec({ theme: { flair: ['marquee'] }, sections: [{ type: 'hero', props: {} }] }, ROOFER);
+  check('flair: marquee stripped when the page has no trust section to host it',
+    !(noTrust.theme.flair ?? []).includes('marquee') && (noTrust.theme.flair ?? []).length > 0);
+
+  // Dignified categories: generated imagery stripped at the spec layer too
+  const funeralAi: BusinessProfile = { ...ROOFER, industry: 'Funeral Home', photos: [
+    { url: 'https://x/still.png', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+  ] };
+  check('restraint: AI still-lifes never reach a dignified page (normalize + fallback)',
+    !JSON.stringify(normalizeSpec({}, funeralAi).sections).includes('https://x/still.png')
+    && !JSON.stringify(assembleFallbackSpec(funeralAi).sections).includes('https://x/still.png'));
+
+  // Honest gallery heading when every content photo is generated
+  const aiGallery: BusinessProfile = { ...ROOFER, photos: [
+    { url: 'https://x/c1.png', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+    { url: 'https://x/c2.png', source_type: 'ai_generated', can_use_in_preview: true, can_publish: false },
+  ] };
+  const fbAi = assembleFallbackSpec(aiGallery);
+  const gal = fbAi.sections.find((s) => s.type === 'showcase' || s.type === 'gallery');
+  check('honesty: an all-AI gallery is never titled "Recent work"',
+    !gal || !/recent work|our work/i.test(String(gal.props.heading)));
 }
 
 console.log(`\npreview-spec.verify: ${passed} passed, ${failed} failed`);

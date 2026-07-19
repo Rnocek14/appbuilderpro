@@ -16,6 +16,7 @@ import { parseSerperOrganic } from './marketIntel.ts';
 import { domainOf } from './nationalSweepCore.ts';
 import { auditIssues, type SiteAudit } from './siteAudit.ts';
 import { buildProfile, type ExtractedFields, type ScrapeContext } from '../preview/scrapeProfileCore.ts';
+import { restraintFor } from '../../../supabase/functions/_shared/previewSpec.ts';
 import type { BusinessProfile } from '../preview/spec';
 
 // Big aggregators/directories aren't prospects — we want a business's OWN (beatable) site.
@@ -228,34 +229,56 @@ const HERO_OBJECTS: [RegExp, string][] = [
 /** The layered-hero pair: an illustrated atmospheric backdrop + ONE iconic trade object isolated
  *  on a transparent background (gpt-image-1 background:'transparent'). Same hard honesty rules —
  *  poster art and an object, never fake evidence of their work. Pure; the worker executes. */
-export function huntArtPrompts(industry: string, tone?: string | null): { backdrop: string; object: string } | null {
+export function huntArtPrompts(industry: string, tone?: string | null, paletteHint?: string | null): { backdrop: string; object: string } | null {
+  if (restraintFor(industry)) return null;     // dignified categories never get generated imagery
   const obj = HERO_OBJECTS.find(([re]) => re.test(industry))?.[1];
   if (!obj) return null;                       // no iconic object → no layered hero for this trade
   const mood = tone && /calm|airy|luxur|soft|clinical/i.test(tone)
     ? 'soft luminous palette, generous negative space'
     : 'deep dramatic palette, bold sweeping forms';
+  // Palette tie-in: the backdrop art carries the SITE's hue family so the hero and theme read
+  // as one designed brand instead of a stock image dropped onto a palette it never met.
+  const hueName = paletteHint ? paletteHueName(paletteHint) : null;
+  const colorLine = hueName ? ` Dominant color family: ${hueName}.` : '';
   return {
     // Deliberate contrast: painterly ART behind, PHOTOREAL object in front — the tactile-object-
     // over-atmosphere composition premium sites use. Never a cartoon object.
-    backdrop: `Atmospheric editorial poster artwork: abstract dramatic clouds and sweeping light, ${mood}, painterly illustration style. No people, no text, no words, no logos, no buildings, no recognizable places.`,
+    backdrop: `Atmospheric editorial poster artwork: abstract dramatic clouds and sweeping light, ${mood}, painterly illustration style.${colorLine} No people, no text, no words, no logos, no buildings, no recognizable places.`,
     object: `${obj}, photorealistic high-detail studio product photography, floating at a slight angle, crisp edge lighting, sharp focus. Real physical object — not illustrated, not cartoon, not 3D render style. Isolated object only, transparent background, no people, no hands, no text, no logos.`,
   };
+}
+
+/** "H S% L%" → a color-family phrase an image model understands. Exported for tests. */
+export function paletteHueName(hsl: string): string | null {
+  const h = parseFloat(hsl.trim().split(/\s+/)[0]);
+  if (!Number.isFinite(h)) return null;
+  if (h < 15 || h >= 345) return 'deep red and crimson';
+  if (h < 45) return 'burnt orange, copper and amber';
+  if (h < 70) return 'warm gold and ochre';
+  if (h < 165) return 'deep green and forest tones';
+  if (h < 200) return 'teal and sea glass';
+  if (h < 250) return 'deep blue and slate';
+  if (h < 290) return 'indigo and violet';
+  return 'plum and berry tones';
 }
 
 /** Two honest, generic still-life prompts (wide hero + tight detail) for a trade with no usable
  *  photos of its own. Hard rules ride in every prompt: no people, no text, no logos, no places —
  *  concept imagery, never fake evidence of "their work". Pure; the worker executes them. */
-export function huntImagePrompts(industry: string, tone?: string | null): [string, string] {
+export function huntImagePrompts(industry: string, tone?: string | null, paletteHint?: string | null): [string, string] | null {
+  if (restraintFor(industry)) return null;     // dignified categories never get generated imagery
   const hit = IMAGE_SUBJECTS.find(([re]) => re.test(industry));
   const wide = hit?.[1] ?? `the tools and materials of the ${industry.toLowerCase()} trade arranged as a considered still life`;
   const tight = hit?.[2] ?? `a single tool of the ${industry.toLowerCase()} trade in dramatic close-up`;
   const mood = tone && /calm|airy|luxur|soft|clinical/i.test(tone)
     ? 'Bright, airy editorial photography, generous negative space, soft daylight.'
     : 'Moody editorial photography, deep shadows, one warm key light, cinematic contrast.';
+  const hueName = paletteHint ? paletteHueName(paletteHint) : null;
+  const colorLine = hueName ? ` Color accents in ${hueName}.` : '';
   const rules = 'No people, no faces, no hands, no text, no words, no logos, no storefronts, no vehicles with markings. Photorealistic.';
   return [
-    `Professional wide editorial photograph: ${wide}. ${mood} ${rules}`,
-    `Professional macro detail photograph: ${tight}. ${mood} ${rules}`,
+    `Professional wide editorial photograph: ${wide}. ${mood}${colorLine} ${rules}`,
+    `Professional macro detail photograph: ${tight}. ${mood}${colorLine} ${rules}`,
   ];
 }
 
