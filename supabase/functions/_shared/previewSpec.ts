@@ -306,9 +306,10 @@ export const FONT_LIBRARY: readonly string[] = [
   'Playfair Display', 'Cormorant Garamond', 'Fraunces', 'DM Serif Display', 'Newsreader',
   'Gloock', 'Libre Caslon Text', 'Lora', 'Bitter', 'Source Serif 4', 'Spectral', 'Marcellus',
   'Libre Bodoni', 'Instrument Serif', 'Young Serif', 'Abril Fatface', 'Zilla Slab',
-  // display sans / grotesks / condensed
+  // display sans / grotesks / condensed (Google Fonts ONLY — the renderer loads from
+  // fonts.googleapis.com; a Fontshare-only face like Clash Display would 404 to system sans)
   'Sora', 'Archivo', 'Oswald', 'Barlow Condensed', 'Bricolage Grotesque', 'Schibsted Grotesk',
-  'Space Grotesk', 'Anton', 'Bebas Neue', 'Unbounded', 'Syne', 'Clash Display', 'Outfit',
+  'Space Grotesk', 'Anton', 'Bebas Neue', 'Unbounded', 'Syne', 'Outfit',
   // body faces
   'Inter', 'Figtree', 'Hanken Grotesk', 'Onest', 'Source Sans 3', 'DM Sans', 'Lato', 'Jost',
   'Nunito', 'Work Sans', 'Manrope', 'Public Sans', 'Karla', 'Epilogue', 'Mulish', 'Albert Sans',

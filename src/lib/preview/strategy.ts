@@ -191,7 +191,9 @@ export function normalizeCritique(raw: unknown): OwnerCritique {
 }
 
 /** Should the refine pass run? Only when the simulated owner found real problems — a clean
- *  critique shouldn't burn a second generation. */
+ *  critique shouldn't burn a second generation. (The design-aware critique finds two nits on
+ *  nearly every draft — the 10-site live batch refined 10/10 at the old ≥2 threshold, doubling
+ *  cost for marginal gains. Refine now means: wouldn't buy, weak identity, or a real pile.) */
 export function critiqueWarrantsRefine(c: OwnerCritique): boolean {
-  return !c.would_buy || c.feels_like_my_business <= 7 || c.issues.length >= 2;
+  return !c.would_buy || c.feels_like_my_business <= 6 || c.issues.length >= 4;
 }
