@@ -36,13 +36,25 @@ interface Manifest {
   pieces: Piece[];
 }
 
-const FALLBACK: Manifest = {
-  artist: 'Odessa Marsh',
-  discipline: 'Paintings & Works on Paper',
-  statement: 'Abstraction rooted in Midwestern weather — fields, storms, and the hour after they pass.',
-  email: 'studio@odessamarsh.art',
-  pieces: [],
+// The first real import: five works living in public/flagship/ (four are motion pieces).
+// Artist name is read from the signature on the large canvas; statement + email are
+// placeholder copy to be replaced with the artist's own words and inbox.
+const DEFAULT_MANIFEST: Manifest = {
+  artist: 'C. Scharpf',
+  discipline: 'Paintings & Works in Motion',
+  statement: 'Figurative worlds in oil and ink — myth, omen, and skies that carry both.',
+  email: 'studio@example.com',
+  pieces: [
+    { url: '/flagship/pegasus.jpg', title: 'Untitled (Warrior and Angel)', accent: '#8ea6c8' },
+    { url: '/flagship/astrolabe.jpg', title: 'Astrolabe Sky', accent: '#b08a4e', video: '/flagship/astrolabe.mp4' },
+    { url: '/flagship/city.jpg', title: 'City Pains', accent: '#9c5c32', video: '/flagship/city.mp4' },
+    { url: '/flagship/esteban.jpg', title: 'Esteban', accent: '#a8784e', light: true, video: '/flagship/esteban.mp4' },
+    { url: '/flagship/war.jpg', title: 'Elongated War', accent: '#7a5a34', video: '/flagship/war.mp4' },
+  ],
 };
+
+const FONTS_HREF =
+  'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Jost:wght@400;600&display=swap';
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 const seg = (p: number, a: number, b: number) => clamp01((p - a) / (b - a));
@@ -146,10 +158,18 @@ function DepthDrift({ piece, p }: { piece: Piece; p: number }) {
 export default function FlagshipArtist() {
   const manifest: Manifest = useMemo(() => {
     const injected = (window as unknown as { __FLAGSHIP__?: Manifest }).__FLAGSHIP__;
-    return injected?.pieces?.length ? injected : FALLBACK;
+    return injected?.pieces?.length ? injected : DEFAULT_MANIFEST;
   }, []);
   const { pieces } = manifest;
   const [heroLoaded, setHeroLoaded] = useState(false);
+  // The page's two faces aren't part of the app shell's font set — load them here.
+  useEffect(() => {
+    if (document.querySelector(`link[href="${FONTS_HREF}"]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = FONTS_HREF;
+    document.head.appendChild(link);
+  }, []);
   useEffect(() => {
     if (!pieces.length) return;
     const img = new Image();
