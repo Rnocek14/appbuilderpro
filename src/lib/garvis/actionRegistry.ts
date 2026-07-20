@@ -276,6 +276,13 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     return { kind: 'done', note: `"${order.label}" armed — daily discovery, honest site audits, demo builds, and pitches that WAIT in your Queue (needs GOOGLE_PLACES_API_KEY + the armed heartbeat).`, link: '/garvis/automations' };
   },
 
+  mount_room: async (p) => {
+    const w = await resolveWorld(p.world);
+    const { mountRoom } = await import('./roomsRun');
+    await mountRoom({ worldId: w.id, title: p.title, url: p.url });
+    return { kind: 'done', note: `Room "${p.title.trim()}" mounted in ${w.title} — open the business and use it in-place.`, link: `/garvis/webs/${w.id}` };
+  },
+
   add_contact: async (p) => {
     const { data: auth } = await supabase.auth.getUser();
     const uid = auth.user?.id;

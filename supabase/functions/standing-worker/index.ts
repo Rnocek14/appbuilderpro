@@ -1793,7 +1793,7 @@ async function queueHuntPitch(admin: any, uid: string, input: {
 const SERVER_ACTIONS = new Set([
   'hunt_opportunities', 'watch_page', 'cadence_digest', 'record_thesis', 'check_master_switch',
   'add_reminder', 'add_contact', 'create_invoice', 'start_idea_stream', 'start_client_hunt',
-  'start_content_week',
+  'start_content_week', 'mount_room',
 ]);
 
 // deno-lint-ignore no-explicit-any
@@ -1914,6 +1914,15 @@ async function execServerAction(admin: any, ownerId: string, action: string, p: 
         if (error.code !== '23505') break;
       }
       throw new Error(lastErr);
+    }
+    case 'mount_room': {
+      if (!/^https:\/\/.+\..+/.test(p.url ?? '')) throw new Error('A room needs a full https:// URL.');
+      const w = await needWorld(p.world);
+      const { error } = await admin.from('world_rooms').insert({
+        owner_id: ownerId, world_id: w.id, title: (p.title ?? '').trim() || 'Room', url: p.url.trim(), kind: 'deployed',
+      });
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `Room "${(p.title ?? '').trim()}" mounted in ${w.title} unattended.`, link: '/garvis/webs' };
     }
     case 'check_master_switch': {
       const { data } = await admin.from('system_heartbeat').select('last_tick_at').order('last_tick_at', { ascending: false }).limit(1);

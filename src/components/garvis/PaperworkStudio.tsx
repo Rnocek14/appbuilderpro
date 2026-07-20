@@ -48,6 +48,19 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
   const [sampleOpen, setSampleOpen] = useState(false);
   const [sample, setSample] = useState('');
   const [extracting, setExtracting] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+
+  const uploadSample = async (file: File) => {
+    setUploadingDoc(true);
+    try {
+      const { extractText } = await import('../../lib/docExtract');
+      const text = (await extractText(file)).trim();
+      if (text.length < 200) throw new Error('That file extracted to almost nothing — a scan without OCR? Paste the text instead.');
+      setSample(text);
+      onToast('success', `"${file.name}" read (${text.length.toLocaleString()} chars) — press Extract template.`);
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not read that file.'); }
+    finally { setUploadingDoc(false); }
+  };
 
   const [title, setTitle] = useState('');
   const [fields, setFields] = useState<Record<string, string>>({});
@@ -198,6 +211,15 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
               become {{tokens}}. Nothing saves until the operator presses Save. */}
           {sampleOpen && (
             <div className="mt-2 rounded-lg border border-forge-ember/30 bg-forge-bg p-2">
+              <div className="mb-1.5 flex items-center gap-2">
+                {/* Upload → text (app_0099 back half): PDF/DOCX/TXT extracted client-side with the
+                    same libs the brain uses — the file never leaves the browser unextracted. */}
+                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+                  {uploadingDoc ? <Loader2 size={11} className="animate-spin" /> : <FileSignature size={11} />} Upload the document (PDF, DOCX, TXT)
+                  <input type="file" accept=".pdf,.docx,.txt,.md" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadSample(f); e.target.value = ''; }} />
+                </label>
+                <span className="text-[10px] text-forge-dim/70">or paste below</span>
+              </div>
               <textarea value={sample} onChange={(e) => setSample(e.target.value)} rows={6}
                 placeholder="Paste the client's whole sample document here (a listing agreement, disclosure, invoice…)"
                 className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 font-mono text-[11px] text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />

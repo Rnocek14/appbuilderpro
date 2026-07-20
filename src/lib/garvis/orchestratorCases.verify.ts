@@ -75,11 +75,11 @@ const CASES: Case[] = [
     actions: [], minQuestions: 1,
   },
   {
-    name: 'the wardrobe room: a custom tool routes to the builder, embedding is an honest hole',
+    name: 'the wardrobe room: build in the builder, then mount_room brings it home (no longer a hole)',
     intent: 'Build me a wardrobe room where I render t-shirt designs, try print placements, and compare shirt brands',
     compile: plan([step('build_app', { idea: 'A wardrobe room: upload t-shirt designs, render them on shirt mockups, drag print placement, compare shirt brands/colors side by side, save favorites' }, W('a purpose-built interactive tool is a builder job'))],
-      ['Using the wardrobe room INSIDE Garvis as an embedded canvas — generated apps open in the builder/deployed URL today, not as in-system rooms.']),
-    actions: ['build_app'], minHoles: 1,
+      [], ['After deploying it, say "mount <its URL> as the Wardrobe room in <business>" — mounting needs the deployed URL, and then you use it without leaving Garvis.']),
+    actions: ['build_app'], minQuestions: 1,
   },
   {
     name: 'campaign with an over-reach: drafting is real, blanket auto-posting is a hole',
@@ -314,6 +314,18 @@ const CASES: Case[] = [
     intent: 'Find me web design clients — go after landscapers',
     compile: plan([step('start_client_hunt', { niche: 'landscapers' }, W('automatic discovery, audits, demos, and pitch drafts are the hunt machine'))]),
     actions: ['start_client_hunt'],
+  },
+  {
+    name: 'mount a deployed tool as an in-business room (the wardrobe room comes home)',
+    intent: 'Mount https://wardrobe.fableforge.app as the Wardrobe room in my Threadline business',
+    compile: plan([step('mount_room', { world: 'Threadline', title: 'Wardrobe room', url: 'https://wardrobe.fableforge.app' }, W('a deployed tool used in-place belongs inside its business'))]),
+    actions: ['mount_room'],
+  },
+  {
+    name: 'mount WITHOUT a URL demotes to a question, never an invented link',
+    intent: 'Put the wardrobe tool inside my Threadline business',
+    compile: plan([step('mount_room', { world: 'Threadline', title: 'Wardrobe room' }, W('mounting is the ask but no deployed URL was given'))]),
+    actions: [], minQuestions: 1,
   },
   {
     name: 'a named person with an email lands in the CRM',

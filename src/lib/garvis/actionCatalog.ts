@@ -237,6 +237,19 @@ export const ACTION_SPECS: ActionSpec[] = [
     produces: 'an armed daily hunt (needs GOOGLE_PLACES_API_KEY + the armed heartbeat); pitches wait in the Queue',
   },
   {
+    id: 'mount_room',
+    title: 'Mount a room',
+    category: 'app',
+    risk: 'safe',
+    description: 'Mount an already-DEPLOYED app as a room INSIDE an existing business — the operator uses it in-place (the wardrobe room pattern: build_app makes the tool, deploy publishes it, mount_room brings it home). The URL must COME FROM THE INTENT or an earlier deploy — never invent one; missing → question. For a tool that does not exist yet, use build_app first and note the mount as the follow-up.',
+    params: [
+      { name: 'world', required: true, hint: 'the business the room belongs to (must already exist)' },
+      { name: 'title', required: true, hint: 'what to call the room ("Wardrobe room")' },
+      { name: 'url', required: true, hint: 'the deployed app\'s https:// URL, from the intent or the deploy' },
+    ],
+    produces: 'the app embedded as a room on that business\'s pages — used without leaving Garvis',
+  },
+  {
     id: 'add_contact',
     title: 'Add a contact',
     category: 'company',
