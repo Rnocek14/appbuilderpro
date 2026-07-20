@@ -1,5 +1,20 @@
 # Full System Scan — July 19, 2026
 
+> **ADDENDUM (July 20): the fix campaign landed.** Every defect in §3's ledger is closed
+> (B1–B18), plus the delivery pipeline from §5 and the first two structural builds from §4:
+> app_0092 restored content weeks + the 11-job heartbeat (dual secret headers, full disarm);
+> all 96 verify suites now run in CI (40 were orphaned); `deno check` covers all 56 edge
+> functions (it found 28 real type errors on first run — the parseJson-null class across six
+> functions — all fixed) and deploys are gated on a tests job; the migration-collision guard
+> (verify:migrations) makes the B1/B2 bug class un-shippable; the six world-isolation leaks are
+> closed (paperwork/envelopes/signers/Money/MLS/sender identity); extracted paperwork fields
+> persist; credits are pinned to auth.uid(); fetch timeouts everywhere; payload hashes on every
+> approval minter; and the two structural builds — the ARC WAKE LOOP (structured blockers,
+> atomic claims, worker wake sweep, self-resuming arcs) and the SITUATION MODEL (one budgeted
+> current-state digest consumed by both the Orchestrator compile and the Commander). Still open
+> from §4: full server-side executor porting, catalog expansion, Custom Rooms, generalized
+> earned autonomy, engine self-tuning, senses, nightly canary, DocuSign back half.
+
 Six parallel deep audits over the entire codebase: the app builder, the intelligence core, marketing
 & outbound, automation & scraping, clients/paperwork/money, and infrastructure/security. Every
 capability was classified (done-verified / done-unverified / partial / stub / missing) and its
