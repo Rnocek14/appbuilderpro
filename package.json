@@ -41,6 +41,7 @@
     "verify:preview": "tsx src/lib/preview/spec.verify.ts",
     "verify:mind": "tsx src/lib/garvis/mind.verify.ts",
     "verify:workweb": "tsx src/lib/garvis/workweb.verify.ts",
+    "verify:workshops": "node --import tsx src/lib/garvis/workshops.verify.ts",
     "verify:clusterchat": "tsx src/lib/garvis/clusterChat.verify.ts",
     "verify:nextmove": "tsx src/lib/garvis/nextMove.verify.ts",
     "verify:worldintel": "tsx src/lib/garvis/worldIntel.verify.ts",

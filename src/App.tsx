@@ -44,6 +44,7 @@ const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
 const Working = lazy(() => import('./pages/Working'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
+const Workshops = lazy(() => import('./pages/Workshops'));
 const WorkWebs = lazy(() => import('./pages/WorkWebs'));
 const WorkWeb = lazy(() => import('./pages/WorkWeb'));
 const SystemAltitude = lazy(() => import('./pages/SystemAltitude'));
@@ -61,6 +62,7 @@ const FlagshipArtist = lazy(() => import('./pages/dev/FlagshipArtist'));
 const WinHubPreview = lazy(() => import('./pages/dev/WinHubPreview'));
 const StudiosPreview = lazy(() => import('./pages/dev/StudiosPreview'));
 const BoardPreview = lazy(() => import('./pages/dev/BoardPreview'));
+const WorkshopsPreview = lazy(() => import('./pages/dev/WorkshopsPreview'));
 
 function Protected({ children, adminOnly }: { children: ReactNode; adminOnly?: boolean }) {
   const { session, profile, loading } = useAuth();
@@ -124,6 +126,8 @@ function AppRoutes() {
           <Route path="/garvis/working" element={<Protected><Working /></Protected>} />
           <Route path="/garvis/setup" element={<Protected><ClientReadiness /></Protected>} />
           <Route path="/garvis/approvals" element={<Navigate to="/garvis/queue" replace />} />
+          <Route path="/garvis/workshops" element={<Protected><Workshops /></Protected>} />
+          <Route path="/garvis/studios" element={<Navigate to="/garvis/workshops" replace />} />
           <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
           <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
           <Route path="/garvis/system/:worldId" element={<Protected><SystemAltitude /></Protected>} />
@@ -153,6 +157,7 @@ function AppRoutes() {
           {import.meta.env.DEV && <Route path="/dev/win-hub" element={<WinHubPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/studios" element={<StudiosPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/board" element={<BoardPreview />} />}
+          {import.meta.env.DEV && <Route path="/dev/workshops" element={<WorkshopsPreview />} />}
           {/* PUBLIC — the link business owners open from the outreach email (no login). */}
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />

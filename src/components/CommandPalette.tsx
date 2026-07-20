@@ -80,6 +80,7 @@ export function CommandPalette({ open, onClose }: Props) {
       { id: 'a-galaxy-flat', label: 'Galaxy (2D map)', icon: Telescope, run: () => navigate('/garvis/universe?mode=flat') },
       { id: 'a-explore', label: 'Explore (rabbitholes)', icon: Search, run: () => navigate('/garvis/explore') },
       { id: 'a-health', label: 'Health (system status)', icon: ShieldCheck, run: () => navigate('/garvis/health') },
+      { id: 'a-studios', label: 'Studios → Workshops', icon: Sparkles, run: () => navigate('/garvis/workshops') },
       { id: 'a-control', label: 'Mission Control — activity (legacy)', icon: ShieldCheck, run: () => navigate('/garvis/control') },
       { id: 'a-overview', label: 'Portfolio overview (legacy)', icon: Waypoints, run: () => navigate('/garvis') },
       // Keep old search terms findable even though the nav labels changed (muscle memory: "universe", "brain").

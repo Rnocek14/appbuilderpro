@@ -4,7 +4,7 @@
 // a ledger — its tools, artifacts, and results all in one place. Approval-gated by construction.
 
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Waypoints, Loader2, ArrowLeft, Play, Sparkles, Upload, Send, Eye, FileText, FileImage,
   ShieldCheck, ChevronRight, Circle, Orbit,
@@ -32,6 +32,7 @@ import { StudioChat } from '../components/garvis/StudioChat';
 import { PanelBoundary } from '../components/garvis/PanelBoundary';
 import { GenerationReadiness } from '../components/garvis/GenerationReadiness';
 import { StudioHero } from '../components/garvis/StudioHero';
+import { WorkshopHeader } from '../components/garvis/WorkshopHeader';
 import { ADS_SPEC } from '../lib/garvis/adsStudio';
 import { COPY_SPEC } from '../lib/garvis/copyStudio';
 import { FirstRunGuide } from '../components/garvis/FirstRunGuide';
@@ -71,6 +72,9 @@ export default function WorkWeb() {
   const { worldId = '' } = useParams();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedArea = searchParams.get('area');
+  const workshopMode = searchParams.get('workshop') === '1';
   const [web, setWeb] = useState<LoadedWeb | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
@@ -124,10 +128,9 @@ export default function WorkWeb() {
       if (w) {
         // Deep links from the System altitude carry ?area=<slug> — a planet click should land on
         // exactly that production area, not the default first one.
-        const area = new URLSearchParams(window.location.search).get('area');
         setSelected((prev) => {
           if (prev && w.clusters.some((c) => c.slug === prev && c.charter)) return prev;
-          if (area && w.clusters.some((c) => c.slug === area && c.charter)) return area;
+          if (requestedArea && w.clusters.some((c) => c.slug === requestedArea && c.charter)) return requestedArea;
           // Single-purpose worlds (answering desk / document studio / data workspace) should OPEN on
           // their studio — the working surface — not on the vault/intel the model emitted first.
           const studio = w.clusters.find((c) => c.charter?.flavor === 'assist' || c.charter?.flavor === 'deliver' || c.charter?.flavor === 'data' || c.charter?.flavor === 'tracker');
@@ -139,9 +142,9 @@ export default function WorkWeb() {
     } finally {
       setLoading(false);
     }
-  }, [worldId, toast]);
+  }, [worldId, toast, requestedArea]);
 
-  useEffect(() => { void refresh(); }, [worldId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void refresh(); }, [refresh]);
 
   const selectedCluster = useMemo(() => web?.clusters.find((c) => c.slug === selected) ?? null, [web, selected]);
 
@@ -230,6 +233,92 @@ export default function WorkWeb() {
   // Real-estate businesses get listing-shaped announcements; everyone else gets generic ones.
   const hasCampaign = !noOutreach;
   const realEstate = /real.?estate|realtor|realty|listing|propert|broker|\bhomes?\b/i.test(web.title);
+
+  // A workshop is deliberately not the business dashboard. The same proven Workspace renders,
+  // with its real generators, files, artifacts, chat, approvals, and modals — but the operator sees
+  // one outcome and one creative rhythm instead of the surrounding operating-system controls.
+  if (workshopMode) {
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+          <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-forge-dim">
+            <Link to="/garvis/workshops" className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1.5 transition-colors hover:border-forge-ember/40 hover:text-forge-ink">
+              <ArrowLeft size={13} /> All workshops
+            </Link>
+            <span className="text-forge-dim/40">/</span>
+            <Link to={`/garvis/webs/${worldId}`} className="transition-colors hover:text-forge-ink">{web.title}</Link>
+            <span className="text-forge-dim/40">/</span>
+            <span className="text-forge-ink">{selectedCluster?.title ?? 'Workshop'}</span>
+            <Link
+              to={`/garvis/webs/${worldId}`}
+              className="ml-auto flex items-center gap-1 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-forge-raised hover:text-forge-ink"
+            >Open business command center <ChevronRight size={13} /></Link>
+          </div>
+
+          {!selectedCluster || !selectedCluster.charter ? (
+            <div className="rounded-2xl border border-forge-border bg-forge-panel p-8 text-center">
+              <p className="text-sm text-forge-dim">That workshop is not available in this business.</p>
+              <Link to="/garvis/workshops" className="mt-3 inline-flex items-center gap-1 text-sm text-forge-ember">Choose another workshop <ChevronRight size={14} /></Link>
+            </div>
+          ) : (
+            <>
+              <WorkshopHeader businessTitle={web.title} cluster={selectedCluster} />
+              <div className="rounded-3xl border border-forge-border bg-forge-panel/55 p-4 shadow-xl shadow-black/5 sm:p-6">
+                <Workspace
+                  key={selectedCluster.id}
+                  cluster={selectedCluster}
+                  worldId={worldId}
+                  webTitle={web.title}
+                  results={{ sent: web.rollup.messagesSent, replies: web.rollup.replies, pendingApprovals: selectedCluster.pendingApprovals }}
+                  busyTool={busyTool}
+                  onTool={(t) => void doTool(selectedCluster, t)}
+                  onChanged={() => void refresh()}
+                  productLab={productLab}
+                  assistDesk={assistDesk}
+                  docStudio={docStudio}
+                  dataStudio={dataStudio}
+                  trackerDesk={trackerDesk}
+                  workshopMode
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        {showContacts && <ContactsModal worldId={worldId} onClose={() => setShowContacts(false)} />}
+        {uploadFor && (
+          <UploadListModal
+            cluster={uploadFor}
+            onClose={() => setUploadFor(null)}
+            onDone={async (csv) => {
+              try {
+                const res = await runTool(worldId, uploadFor, 'upload-list', { csvText: csv });
+                toast(res.ok ? 'success' : 'error', res.message);
+                if (res.ok) await refresh();
+              } catch (e) {
+                toast('error', e instanceof Error ? e.message : 'Upload failed.');
+              } finally { setUploadFor(null); }
+            }}
+          />
+        )}
+        {queueFor && (
+          <QueueModal
+            cluster={queueFor}
+            onClose={() => setQueueFor(null)}
+            onDone={async (email, name) => {
+              try {
+                const res = await runTool(worldId, queueFor, 'queue-sequence', { toEmail: email, contactName: name });
+                toast(res.ok ? 'success' : 'error', res.message);
+                if (res.ok) await refresh();
+              } catch (e) {
+                toast('error', e instanceof Error ? e.message : 'Could not queue the email.');
+              } finally { setQueueFor(null); }
+            }}
+          />
+        )}
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
@@ -563,7 +652,7 @@ function CreateMoreBar({ worldId, cluster, onDone, ideaTitles = [] }: { worldId:
   );
 }
 
-function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk, docStudio, dataStudio, trackerDesk }: {
+function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onChanged, productLab, assistDesk, docStudio, dataStudio, trackerDesk, workshopMode }: {
   cluster: WebCluster; worldId: string; webTitle: string;
   results: { sent: number; replies: number; pendingApprovals: number };
   busyTool: string | null; onTool: (t: WorkTool) => void; onChanged: () => void;
@@ -572,6 +661,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
   docStudio?: boolean;
   dataStudio?: boolean;
   trackerDesk?: boolean;
+  workshopMode?: boolean;
 }) {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -625,13 +715,17 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
 
   return (
     <div>
-      <div className="mb-1 flex items-center gap-2">
-        <h2 className="text-lg font-semibold text-forge-ink">{cluster.title}</h2>
-        {meta && <Badge tone={meta.tone}>{meta.label}</Badge>}
-        {cluster.liveStatus && cluster.liveStatus !== 'dormant' && <Badge tone={cluster.liveStatus === 'waiting' ? 'warn' : cluster.liveStatus === 'done' ? 'ok' : 'ember'}>{cluster.liveStatus}</Badge>}
-      </div>
-      <p className="text-sm text-forge-dim">{cluster.summary}</p>
-      {meta && <p className="mt-0.5 text-xs text-forge-dim/70">{meta.tagline}</p>}
+      {!workshopMode && (
+        <>
+          <div className="mb-1 flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-forge-ink">{cluster.title}</h2>
+            {meta && <Badge tone={meta.tone}>{meta.label}</Badge>}
+            {cluster.liveStatus && cluster.liveStatus !== 'dormant' && <Badge tone={cluster.liveStatus === 'waiting' ? 'warn' : cluster.liveStatus === 'done' ? 'ok' : 'ember'}>{cluster.liveStatus}</Badge>}
+          </div>
+          <p className="text-sm text-forge-dim">{cluster.summary}</p>
+          {meta && <p className="mt-0.5 text-xs text-forge-dim/70">{meta.tagline}</p>}
+        </>
+      )}
 
       {cluster.pendingApprovals > 0 && (
         <Link to="/garvis/queue" className="mt-3 flex items-center gap-1.5 rounded-lg border border-forge-warn/40 bg-forge-warn/10 px-3 py-2 text-xs text-forge-warn">
@@ -642,7 +736,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* THE STUDIO HERO — names what this studio makes and gives ONE obvious Generate action.
           The answer to "I don't even know how to generate it." Only for studio areas; other
           archetypes (vault, audience, ledger…) have their own dedicated panels below. */}
-      {cluster.charter?.archetype === 'studio' && (
+      {cluster.charter?.archetype === 'studio' && (!workshopMode || cluster.charter.flavor === 'feature_lab') && (
         <div className="mt-3">
           <StudioHero
             cluster={cluster}
@@ -911,7 +1005,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         ) : artifacts.length === 0 ? (
           <p className="text-sm text-forge-dim/70">
             {cluster.charter?.archetype === 'studio'
-              ? 'Nothing here yet — use the studio above to make your first piece. It lands here.'
+              ? 'Nothing here yet — use the workshop above to make your first piece. It lands here.'
               : 'Nothing here yet. Use a tool above to get started.'}
           </p>
         ) : (

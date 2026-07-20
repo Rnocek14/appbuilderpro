@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Play, Boxes, Maximize2, StopCircle } from 'lucide-react';
+import { Sparkles, Send, Play, Boxes, Maximize2, StopCircle, Hammer, ArrowRight } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { WakingMoment } from '../components/garvis/WakingMoment';
 import { RemindersCard } from '../components/garvis/RemindersCard';
@@ -152,7 +152,18 @@ export default function Command() {
 
           {messages.length === 0 && (
             <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-5">
-              <div className="mb-3 flex items-center gap-2 text-forge-dim"><Boxes size={16} className="text-forge-ember" /> <span className="text-sm">Try one of these — or just say what's on your mind:</span></div>
+              <button
+                onClick={() => navigate('/garvis/workshops')}
+                className="group mb-4 flex w-full items-center gap-3 rounded-xl border border-forge-ember/30 bg-gradient-to-r from-forge-ember/10 to-transparent p-3 text-left transition-colors hover:border-forge-ember/55 hover:from-forge-ember/15"
+              >
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-forge-ember/30 bg-forge-ember/10 text-forge-ember"><Hammer size={17} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-forge-ink">Open a workshop</span>
+                  <span className="block text-[11px] text-forge-dim">Pick one outcome—video, campaign, research, app idea, document, data—and make it in a focused room.</span>
+                </span>
+                <ArrowRight size={15} className="text-forge-ember transition-transform group-hover:translate-x-1" />
+              </button>
+              <div className="mb-3 flex items-center gap-2 text-forge-dim"><Boxes size={16} className="text-forge-ember" /> <span className="text-sm">Or try one of these — or just say what's on your mind:</span></div>
               <div className="flex flex-wrap gap-2">
                 {SUGGESTIONS.map((s) => (
                   <button key={s} onClick={() => send(s)} className="rounded-full border border-forge-border px-3 py-1.5 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">

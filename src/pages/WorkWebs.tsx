@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus, Orbit, Telescope, Sparkles, X, Check } from 'lucide-react';
+import { Waypoints, Loader2, ArrowRight, Building2, Rocket, Plus, Orbit, Telescope, Sparkles, X, Check, Hammer } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Card, Badge, EmptyState, Spinner, Button } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -112,11 +112,18 @@ export default function WorkWebs() {
             <h1 className="text-xl font-semibold text-forge-ink">Businesses</h1>
             <p className="text-sm text-forge-dim">A business here isn't a checklist — it's a living operation. Every area is a workspace with its own tools.</p>
           </div>
-          <button
-            onClick={() => navigate('/garvis/universe')}
-            title="Universe altitude — every world in one sky, the x-ray of Garvis's living memory"
-            className="ml-auto flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
-          ><Telescope size={13} /> Universe</button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => navigate('/garvis/workshops')}
+              title="Open one focused room and make something"
+              className="flex items-center gap-1.5 rounded-lg border border-forge-ember/35 bg-forge-ember/10 px-2.5 py-1 text-xs font-medium text-forge-ember transition-colors hover:bg-forge-ember/15"
+            ><Hammer size={13} /> Workshops</button>
+            <button
+              onClick={() => navigate('/garvis/universe')}
+              title="Universe altitude — every world in one sky, the x-ray of Garvis's living memory"
+              className="flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink"
+            ><Telescope size={13} /> Universe</button>
+          </div>
         </div>
 
         {/* THE ALWAYS-WORKS PATH FIRST: deterministic templates build a whole venture in one click,
