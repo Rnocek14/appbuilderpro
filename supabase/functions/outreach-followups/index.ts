@@ -16,6 +16,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const MAX_FOLLOWUPS = 2;
@@ -128,11 +129,12 @@ Deno.serve(async (req) => {
 
     // Enqueue the approval (never auto-send).
     if (newMsg) {
+      const apPayload = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
       await admin.from('approvals').insert({
         owner_id: camp.owner_id, kind: 'send_email', requested_by: 'worker',
         title: `Follow-up #${n} to ${first.to_address}`,
         preview: `${draft.subject}\n\n${draft.body}`,
-        payload: { message_id: (newMsg as { id: string }).id, campaign_id: camp.id },
+        payload: apPayload, payload_hash: await hashPayload(apPayload),
       });
       drafted++;
     }
@@ -193,11 +195,12 @@ Deno.serve(async (req) => {
     // Enqueue the approval (never auto-send). The signal is stated HERE, to the owner — never in
     // the email itself.
     if (newMsg) {
+      const apPayload = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
       await admin.from('approvals').insert({
         owner_id: camp.owner_id, kind: 'send_email', requested_by: 'worker',
         title: `Follow-up (opened ${m.open_count}×, no reply) to ${m.to_address}`,
         preview: `SIGNAL: they opened the last email ${m.open_count} times and never replied.\n\n${draft.subject}\n\n${draft.body}`,
-        payload: { message_id: (newMsg as { id: string }).id, campaign_id: camp.id },
+        payload: apPayload, payload_hash: await hashPayload(apPayload),
       });
       hotDrafted++;
     }

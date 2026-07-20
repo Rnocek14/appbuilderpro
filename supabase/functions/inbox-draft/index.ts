@@ -19,6 +19,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
 import { complete, modelForPlan, getProviderConfig, type AIProvider } from '../_shared/ai.ts';
 import { getUserPlan } from '../_shared/credits.ts';
 
@@ -173,11 +174,12 @@ Deno.serve(async (req) => {
       }).select('id').single();
       if (!newMsg) { skipped++; continue; }
 
+      const apPayload = { message_id: (newMsg as { id: string }).id, campaign_id: r.campaign_id, reply_id: r.id };
       await admin.from('approvals').insert({
         owner_id: r.owner_id, kind: 'send_email', requested_by: 'worker',
         title: `Reply draft → ${r.from_address ?? prior.to_address} (they wrote back)`,
         preview: `THEY SAID: ${(r.body_text ?? '').slice(0, 200)}\n\nDRAFT:\n${draft.subject}\n\n${draft.body}`,
-        payload: { message_id: (newMsg as { id: string }).id, campaign_id: r.campaign_id, reply_id: r.id },
+        payload: apPayload, payload_hash: await hashPayload(apPayload),
       });
       drafted++;
     } catch { skipped++; /* one thread's failure never blocks the rest */ }

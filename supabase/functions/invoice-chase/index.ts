@@ -11,6 +11,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
@@ -91,11 +92,12 @@ Deno.serve(async (req) => {
         sequence_step: stage, subject: copy.subject, body_text: copy.body, to_address: inv.to_email, status: 'draft',
       }).select('id').single();
       if (!msg) { skipped++; continue; }
+      const apPayload = { message_id: msg.id, invoice_id: inv.id, chase_stage: stage };
       await admin.from('approvals').insert({
         owner_id: inv.owner_id, kind: 'send_email', status: 'pending', requested_by: 'worker',
         title: `${['', 'Reminder', 'Due note', 'Past-due follow-up', 'Final notice'][stage]} for ${inv.number} → ${inv.to_email}`,
         preview: `${copy.subject}\n\n${copy.body.slice(0, 400)}`,
-        payload: { message_id: msg.id, invoice_id: inv.id, chase_stage: stage },
+        payload: apPayload, payload_hash: await hashPayload(apPayload),
       });
       await admin.from('invoices').update({ last_chase_stage: stage, updated_at: now.toISOString() }).eq('id', inv.id);
       drafted++;

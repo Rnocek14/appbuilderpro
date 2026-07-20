@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
     }
     if (profileKey) headers['Profile-Key'] = profileKey;
 
-    const res = await fetch(AYRSHARE_URL, { method: 'POST', headers, body: JSON.stringify(providerPayload(draft)) });
+    const res = await fetch(AYRSHARE_URL, { method: 'POST', headers, body: JSON.stringify(providerPayload(draft)), signal: AbortSignal.timeout(30_000) });
     const out = await res.json().catch(() => ({} as Record<string, unknown>));
     if (!res.ok) {
       const msg = String((out as { message?: string })?.message ?? `HTTP ${res.status}`);

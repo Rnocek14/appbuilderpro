@@ -14,5 +14,7 @@ export default defineConfig({
   plugins: [react()],
   server: { port: 5173, headers: crossOriginIsolation },
   preview: { headers: crossOriginIsolation },
-  build: { sourcemap: true },
+  // 'hidden': maps are still emitted for debugging/error tooling but dist HTML/JS carries no
+  // sourceMappingURL reference, so deploying dist as-is no longer serves the full source tree.
+  build: { sourcemap: 'hidden' },
 });

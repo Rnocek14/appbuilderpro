@@ -20,6 +20,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 
@@ -72,18 +73,27 @@ Deno.serve(async (req) => {
       if (!dormantIds.length) continue;
       ownersSwept++;
 
-      // Exclusions in bulk: replies on record since the window opened, and open drafts.
+      // Exclusions in bulk: contacts who replied since the window opened, and open drafts.
+      // Replies carry only campaign_id — resolve to contacts through their campaigns (scan B18:
+      // the replied set used to be fetched and discarded, so a replied-then-quiet contact could
+      // be re-drafted).
       const [{ data: replied }, { data: openDrafts }] = await Promise.all([
-        admin.from('replies').select('campaign_id, contact_id:campaign_id').eq('owner_id', uid).gte('received_at', dormantAfter).limit(1000),
+        admin.from('replies').select('campaign_id').eq('owner_id', uid).gte('received_at', dormantAfter).limit(1000),
         admin.from('outreach_messages').select('contact_id').eq('owner_id', uid).in('status', ['draft', 'scheduled']).limit(1000),
       ]);
-      void replied; // replies lack contact_id directly; the per-contact status check below covers it
+      const repliedCampaigns = [...new Set(((replied ?? []) as { campaign_id: string | null }[]).map((r) => r.campaign_id).filter(Boolean))] as string[];
+      const repliedContacts = new Set<string>();
+      if (repliedCampaigns.length) {
+        const { data: camps } = await admin.from('outreach_campaigns')
+          .select('contact_id').eq('owner_id', uid).in('id', repliedCampaigns).limit(1000);
+        for (const c of (camps ?? []) as { contact_id: string | null }[]) if (c.contact_id) repliedContacts.add(c.contact_id);
+      }
       const hasDraft = new Set(((openDrafts ?? []) as { contact_id: string | null }[]).map((d) => d.contact_id).filter(Boolean));
 
       let made = 0;
       for (const contactId of dormantIds) {
         if (made >= MAX_PER_OWNER) break;
-        if (hasDraft.has(contactId)) continue;
+        if (hasDraft.has(contactId) || repliedContacts.has(contactId)) continue;
         const last = lastByContact.get(contactId)!;
 
         // Contact must still be contactable — and the suppression check FAILS CLOSED.
@@ -116,11 +126,12 @@ Deno.serve(async (req) => {
           sequence_step: 0, subject, body_text: body, to_address: email, status: 'draft',
         }).select('id').single();
         if (!msg) continue;
+        const apPayload = { message_id: msg.id, sweep: 'reactivation' };
         await admin.from('approvals').insert({
           owner_id: uid, kind: 'send_email', status: 'pending', requested_by: 'garvis',
           title: `Reactivation draft → ${email}`,
           preview: `${subject}\n\n${body.slice(0, 400)}`,
-          payload: { message_id: msg.id, sweep: 'reactivation' },
+          payload: apPayload, payload_hash: await hashPayload(apPayload),
         }).then(() => {}, () => {});
         made++; drafted++;
       }

@@ -70,6 +70,14 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Monotonic guard (scan B18): DocuSign Connect redelivers and reorders — a stale 'sent'
+    // event must never drag a completed/declined/voided envelope back to life. Terminal states
+    // only ever advance to other terminal states.
+    const RANK: Record<string, number> = { queued: 0, sent: 1, delivered: 2, completed: 3, declined: 3, voided: 3 };
+    const current = String(row.status ?? '');
+    if ((RANK[mapped] ?? 0) < (RANK[current] ?? 0)) {
+      return json({ ok: true, note: `stale event (${mapped} after ${current}) — ignored` });
+    }
     const patch: Record<string, unknown> = { status: mapped, recipients };
     if (mapped === 'completed') patch.completed_at = payload.data?.envelopeSummary?.completedDateTime ?? new Date().toISOString();
     await admin.from('esign_envelopes').update(patch).eq('id', row.id);
