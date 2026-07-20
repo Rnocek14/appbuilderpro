@@ -32,6 +32,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES } from '../../../src/lib/garvis/opportunityHunt.ts';
+import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
 import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
@@ -160,6 +161,20 @@ Deno.serve(async (req) => {
           `▶ "${String(arc.title).slice(0, 120)}" is unblocked — open Orchestrate and it continues on its own.`).catch(() => {});
       }
     } catch { /* the wake sweep must never wedge the order tick */ }
+
+    // ---- ARC ADVANCE (server-side execution of mechanical steps) -----------------------------
+    // A 'ready' arc advances RIGHT HERE for every step whose action is purely mechanical
+    // (standing orders, records, reminders, invoices — no model, no browser). Creative steps
+    // (founding, plans, campaigns) stop the advance and leave the arc 'ready' for the client
+    // visit. Zero presence required for the mechanical tail of a project.
+    try {
+      const { data: readyArcs } = await admin.from('orchestrator_plans')
+        .select('id, owner_id, title, steps, statuses')
+        .eq('status', 'ready').limit(5);
+      for (const arc of (readyArcs ?? []) as { id: string; owner_id: string; title: string; steps: PlanStep[]; statuses: StepStatus[] }[]) {
+        await advanceArcServerSide(admin, arc, nowIso).catch(() => {});
+      }
+    } catch { /* arc advance must never wedge the order tick */ }
 
     // ---- BULK SEND DRAIN (app_0064) ----------------------------------------------------------
     // One human approval covers a snapshotted batch; the clock drains it a slice per tick by
@@ -1729,4 +1744,206 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     payload, payload_hash, requested_by: 'garvis-auto',
   });
   return !apErr;
+}
+
+// ============================================================================
+// ARC ADVANCE (app_0095, second half): server-side execution of MECHANICAL arc
+// steps. The client's actionRegistry stays the authority for creative actions
+// (models, browser rails); this list is strictly the subset that is pure DB
+// work — the two implementations must agree on outcomes, and the coverage
+// suite pins the catalog they both serve.
+// ============================================================================
+
+const SERVER_ACTIONS = new Set([
+  'hunt_opportunities', 'watch_page', 'cadence_digest', 'record_thesis', 'check_master_switch',
+  'add_reminder', 'add_contact', 'create_invoice', 'start_idea_stream', 'start_client_hunt',
+  'start_content_week',
+]);
+
+// deno-lint-ignore no-explicit-any
+async function resolveWorldSrv(admin: any, ownerId: string, title: string): Promise<{ id: string; title: string } | null> {
+  const { data } = await admin.from('knowledge_worlds')
+    .select('id, title').eq('owner_id', ownerId).ilike('title', `%${title}%`).limit(2);
+  const rows = (data ?? []) as { id: string; title: string }[];
+  if (rows.length === 1) return rows[0];
+  const exact = rows.filter((r) => r.title.toLowerCase() === title.toLowerCase());
+  return exact.length === 1 ? exact[0] : null;
+}
+
+/** One mechanical step, server-side. Mirrors the client executors' outcomes; a missing world
+ *  parks the step waiting (same seam), and anything unexpected fails the step honestly. */
+// deno-lint-ignore no-explicit-any
+async function execServerAction(admin: any, ownerId: string, action: string, p: Record<string, string>, nowIso: string): Promise<StepStatus> {
+  const needWorld = async (title: string) => {
+    const w = await resolveWorldSrv(admin, ownerId, title);
+    if (!w) throw { waiting: `No business named "${title}" yet — approve its draft, then this continues on its own.` };
+    return w;
+  };
+  const order = async (row: Record<string, unknown>, note: string): Promise<StepStatus> => {
+    const { error } = await admin.from('standing_orders').insert({
+      owner_id: ownerId, status: 'active', anchor_at: nowIso, next_run_at: nowIso, ...row,
+    });
+    if (error) throw new Error(error.message);
+    return { kind: 'done', note, link: '/garvis/automations' };
+  };
+
+  switch (action) {
+    case 'hunt_opportunities': {
+      const worldId = p.world ? (await needWorld(p.world)).id : null;
+      const cadence = p.cadence === 'weekly' ? 'weekly' : 'daily';
+      return order({
+        world_id: worldId, kind: 'opportunity_hunt', label: `Hunt: ${p.focus.slice(0, 60)}`, cadence,
+        config: { focus: p.focus, region: p.region ?? null, queries: buildQueries(p.focus, p.region ?? null) },
+      }, `Hunt "${p.focus.slice(0, 60)}" armed (${cadence}) unattended — new opportunities land in the feed.`);
+    }
+    case 'watch_page': {
+      if (!/^https?:\/\/.+\..+/.test(p.url ?? '')) throw new Error('A watch needs a full URL.');
+      const cadence = ['hourly', 'daily', 'weekly'].includes(p.cadence ?? '') ? p.cadence : 'daily';
+      return order({ world_id: null, kind: 'watch_url', label: p.label, cadence, config: { url: p.url } },
+        `Watch "${p.label}" armed (${cadence}) unattended.`);
+    }
+    case 'cadence_digest': {
+      const w = await needWorld(p.world);
+      const cadence = p.cadence === 'daily' ? 'daily' : 'weekly';
+      return order({ world_id: w.id, kind: 'cadence_digest', label: `${w.title} digest`, cadence, config: {} },
+        `Digest for ${w.title} armed (${cadence}) unattended.`);
+    }
+    case 'start_idea_stream': {
+      const w = await needWorld(p.world);
+      const cadence = p.cadence === 'daily' ? 'daily' : 'weekly';
+      return order({ world_id: w.id, kind: 'idea_stream', label: `${w.title} idea stream`, cadence, config: {} },
+        `Idea stream for ${w.title} armed (${cadence}) unattended.`);
+    }
+    case 'start_client_hunt': {
+      const searches = Math.min(20, Math.max(1, Number(p.searches_per_day) || 6));
+      const label = p.niche ? `Daily hunt: ${p.niche.trim()}` : 'Daily hunt: all local businesses';
+      return order({
+        world_id: null, kind: 'client_hunt', label, cadence: 'daily',
+        config: { niches: p.niche ? [p.niche.trim()] : [], scope: { mode: 'topN', n: 50 }, searchesPerDay: searches, demoQuota: 2, cursor: 0 },
+      }, `"${label}" armed unattended — pitches wait in the Queue.`);
+    }
+    case 'start_content_week': {
+      const w = await needWorld(p.world);
+      const posts = Math.min(7, Math.max(1, Number(p.posts_per_week) || 3));
+      const seg = ['all', 'new', 'contacted', 'qualified', 'customer'].includes(p.email_segment ?? '') ? p.email_segment : null;
+      return order({
+        world_id: w.id, kind: 'content_week', label: `Content week: ${posts} post${posts === 1 ? '' : 's'}${seg ? ' + email' : ''}`,
+        cadence: 'weekly', config: { platforms: ['twitter', 'linkedin'], postsPerWeek: posts, emailSegment: seg, sendHourUtc: 16, minScore: 6 },
+      }, `Weekly content for ${w.title} armed unattended — each week stages as ONE approval.`);
+    }
+    case 'record_thesis': {
+      const { error } = await admin.from('garvis_knowledge').insert({
+        owner_id: ownerId, kind: 'decision', title: (p.title ?? '').slice(0, 80), body: p.body,
+        source: 'orchestrator', status: 'proposed',
+      });
+      if (error) throw new Error(error.message);
+      return { kind: 'needs_review', note: `Thesis "${(p.title ?? '').slice(0, 60)}" filed as proposed knowledge — approve it on Memory.`, link: '/garvis/memory' };
+    }
+    case 'add_reminder': {
+      const due = p.due_at && !Number.isNaN(Date.parse(p.due_at)) ? new Date(p.due_at).toISOString() : null;
+      const { error } = await admin.from('reminders').insert({ owner_id: ownerId, title: p.title, due_at: due });
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `Reminder set unattended: "${p.title.slice(0, 80)}".`, link: '/garvis/home' };
+    }
+    case 'add_contact': {
+      const email = (p.email ?? '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw new Error(`"${p.email}" is not a valid email.`);
+      const worldId = p.world ? (await needWorld(p.world)).id : null;
+      const { data: existing } = await admin.from('contacts').select('id').eq('owner_id', ownerId).eq('email', email).maybeSingle();
+      if (existing) return { kind: 'done', note: `${email} is already in the CRM — nothing duplicated.`, link: '/garvis/contacts' };
+      const { error } = await admin.from('contacts').insert({
+        owner_id: ownerId, world_id: worldId, full_name: (p.name ?? '').trim(), email, email_status: 'unknown', is_primary: false,
+      });
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `${(p.name ?? '').trim()} (${email}) added to the CRM unattended.`, link: '/garvis/contacts' };
+    }
+    case 'create_invoice': {
+      const amount = Number(p.amount_usd);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error(`"${p.amount_usd}" is not a billable amount.`);
+      const to = (p.to_email ?? '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) throw new Error(`"${p.to_email}" is not a valid billing email.`);
+      const worldId = p.world ? (await needWorld(p.world)).id : null;
+      const year = new Date().getFullYear();
+      const { count } = await admin.from('invoices').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId);
+      let lastErr = 'Could not create the invoice.';
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const number = `INV-${year}-${String((count ?? 0) + 1 + attempt).padStart(3, '0')}`;
+        const { error } = await admin.from('invoices').insert({
+          owner_id: ownerId, world_id: worldId, number, title: p.title, to_email: to,
+          line_items: [{ description: p.title, qty: 1, unit_usd: amount }], amount_usd: amount,
+          due_date: p.due_date || null, source: 'garvis_tool',
+        });
+        if (!error) return { kind: 'done', note: `Invoice ${number} drafted unattended for $${amount.toFixed(2)} → ${to}. Queue its send from Money (approval-gated).`, link: '/garvis/money' };
+        lastErr = error.message;
+        if (error.code !== '23505') break;
+      }
+      throw new Error(lastErr);
+    }
+    case 'check_master_switch': {
+      const { data } = await admin.from('system_heartbeat').select('last_tick_at').order('last_tick_at', { ascending: false }).limit(1);
+      const last = (data?.[0] as { last_tick_at?: string } | undefined)?.last_tick_at;
+      const age = last ? Math.round((Date.now() - Date.parse(last)) / 60000) : null;
+      return age !== null && age <= 120
+        ? { kind: 'done', note: `The clock is alive — last tick ${age} min ago.`, link: '/garvis/health' }
+        : { kind: 'needs_review', note: 'The heartbeat looks stale from here — check the Health page.', link: '/garvis/health' };
+    }
+    default:
+      throw new Error(`"${action}" is not a server-executable action.`);
+  }
+}
+
+/** Advance one 'ready' arc as far as its mechanical steps allow. Claims the arc (same CAS the
+ *  client uses), executes SERVER_ACTIONS in topological order, stops at the first creative step
+ *  (arc stays 'ready' for the client visit), and releases the claim with an honest status. */
+// deno-lint-ignore no-explicit-any
+async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: string; title: string; steps: PlanStep[]; statuses: StepStatus[] }, nowIso: string): Promise<void> {
+  const { data: claimed } = await admin.from('orchestrator_plans')
+    .update({ claimed_until: new Date(Date.now() + 5 * 60_000).toISOString() })
+    .eq('id', arc.id)
+    .or(`claimed_until.is.null,claimed_until.lt.${new Date().toISOString()}`)
+    .select('id').maybeSingle();
+  if (!claimed) return; // a client run owns it — never fight
+
+  const steps = arc.steps;
+  const statuses: StepStatus[] = steps.map((_, i) => arc.statuses?.[i] ?? { kind: 'pending', note: '' });
+  let advanced = 0;
+  let blockedOnCreative = false;
+  const { order: topo } = orderSteps(steps);
+  for (const i of topo) {
+    if (stepSucceeded(statuses[i].kind)) continue;
+    const deps = steps[i].after;
+    if (deps.some((a) => statuses[a].kind === 'failed' || statuses[a].kind === 'skipped')) {
+      statuses[i] = { kind: 'skipped', note: 'Skipped — a prerequisite did not complete.' };
+      continue;
+    }
+    if (deps.some((a) => !stepSucceeded(statuses[a].kind))) { continue; }
+    if (!SERVER_ACTIONS.has(steps[i].action)) { blockedOnCreative = true; continue; }
+    try {
+      statuses[i] = await execServerAction(admin, arc.owner_id, steps[i].action, steps[i].params, nowIso);
+      advanced++;
+    } catch (e) {
+      const waiting = (e as { waiting?: string })?.waiting;
+      statuses[i] = waiting
+        ? { kind: 'waiting', note: waiting }
+        : { kind: 'failed', note: e instanceof Error ? e.message : 'The step failed server-side.' };
+    }
+  }
+
+  // waiting > done/failed > ready: a parked step re-enters the wake sweep; anything still
+  // pending (creative steps, dep chains) leaves the arc 'ready' for the client visit.
+  const derived = derivePlanStatus(statuses);
+  const status = derived === 'waiting' ? 'waiting' : derived === 'done' ? 'done' : derived === 'failed' ? 'failed' : 'ready';
+  const waitingReason = statuses.find((s) => s.kind === 'waiting')?.note ?? null;
+  await admin.from('orchestrator_plans').update({
+    statuses, status, waiting_reason: waitingReason,
+    last_activity_at: nowIso, updated_at: nowIso, claimed_until: null,
+  }).eq('id', arc.id);
+
+  if (advanced > 0) {
+    await admin.from('mind_events').insert({
+      owner_id: arc.owner_id, event_type: 'note', source: 'orchestrator',
+      subject: `⚙ Arc "${String(arc.title).slice(0, 100)}": ${advanced} step(s) executed unattended${status === 'done' ? ' — the arc is DONE' : blockedOnCreative ? ' — creative steps wait for your next visit' : ''}.`,
+      payload: { key: `arc-advance:${arc.id}:${nowIso.slice(0, 13)}`, plan_id: arc.id, advanced },
+    }).then(() => {}, () => {});
+  }
 }
