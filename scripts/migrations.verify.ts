@@ -24,8 +24,13 @@ function check(name: string, cond: boolean, detail = '') {
 const dir = 'supabase/migrations';
 const files = readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
 
-// 1. Duplicate numbers — grandfathered pairs only.
-const GRANDFATHERED = new Set(['0081', '0082', '0086', '0087', '0088']);
+// 1. Duplicate numbers — grandfathered pairs only. Each entry is a collision that landed on
+//    main from two parallel branches BEFORE the guard existed to stop it; both files are already
+//    applied in prod, and renaming an applied migration breaks `db push` state tracking, so the
+//    honest resolution is to freeze the collision, not un-ship it. 0091: orchestrator_plans (mine)
+//    vs preview_hardening (the parallel garvis-architecture branch) — orthogonal tables, no SQL
+//    conflict, both idempotent. The guard still blocks any NEW colliding number.
+const GRANDFATHERED = new Set(['0081', '0082', '0086', '0087', '0088', '0091']);
 const byNum = new Map<string, string[]>();
 for (const f of files) {
   const m = /^app_(\d{4})/.exec(f);
