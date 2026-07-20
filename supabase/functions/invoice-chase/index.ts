@@ -9,8 +9,10 @@
 // Secrets: CRON_SECRET (x-cron-secret). Deploy: supabase functions deploy invoice-chase --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { cronAuthorized } from '../_shared/cronGate.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 
 interface Inv {
@@ -45,10 +47,10 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...cors, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const secret = Deno.env.get('CRON_SECRET');
-  if (!secret || req.headers.get('x-cron-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
+  if (!cronAuthorized(req)) return json({ error: 'Unauthorized' }, 401);
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  await stampHeartbeat(admin, 'garvis-invoice-chase-daily');
   const now = new Date();
 
   const { data: invoices, error } = await admin.from('invoices')

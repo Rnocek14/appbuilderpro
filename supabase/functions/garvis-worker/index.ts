@@ -19,6 +19,8 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { complete, corsHeaders, parseJson, modelForPlan, type AIMessage } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { notifyText } from '../_shared/notify.ts';
+import { cronAuthorized } from '../_shared/cronGate.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { toolsFor } from '../../../src/lib/garvis/tools.ts';
 
 type Mode = 'observe' | 'plan' | 'act';
@@ -438,8 +440,7 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const secret = Deno.env.get('WORKER_SECRET');
-  const bySecret = !!secret && req.headers.get('x-worker-secret') === secret;
+  const bySecret = cronAuthorized(req);
   if (!bySecret) {
     // Any signed-in user may nudge the worker (it only ever runs owner-scoped work).
     const authClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -449,6 +450,8 @@ Deno.serve(async (req) => {
   }
 
   const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  // Stamp liveness only for real clock ticks — a user nudge proves nothing about the cron.
+  if (bySecret) await stampHeartbeat(db, 'garvis-worker-tick');
   let processed = 0;
   for (; processed < RUNS_PER_INVOCATION; processed++) {
     const { data, error } = await db.rpc('claim_next_agent_run_service');

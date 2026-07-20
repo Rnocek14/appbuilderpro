@@ -18,8 +18,10 @@
 // Deploy: supabase functions deploy outreach-reactivate --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { cronAuthorized } from '../_shared/cronGate.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 
 const MAX_PER_OWNER = 10;
 const DORMANT_MIN_DAYS = 60;
@@ -34,10 +36,10 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...cors, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const secret = Deno.env.get('CRON_SECRET');
-  if (!secret || req.headers.get('x-cron-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
+  if (!cronAuthorized(req)) return json({ error: 'Unauthorized' }, 401);
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  await stampHeartbeat(admin, 'garvis-reactivate-monthly');
   const now = Date.now();
   const dormantAfter = new Date(now - DORMANT_MAX_DAYS * 24 * 3_600_000).toISOString();
   const dormantBefore = new Date(now - DORMANT_MIN_DAYS * 24 * 3_600_000).toISOString();

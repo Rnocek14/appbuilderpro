@@ -18,6 +18,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { notifyText } from '../_shared/notify.ts';
 import { detectAdAnomalies, type AdDayRow } from '../_shared/adsWatchCore.ts';
+import { cronAuthorized } from '../_shared/cronGate.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 const MAX_ALERTS_PER_OWNER = 5;   // one push, capped — a broken account must not become spam
@@ -28,10 +30,10 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...cors, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const secret = Deno.env.get('WORKER_SECRET');
-  if (!secret || req.headers.get('x-worker-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
+  if (!cronAuthorized(req)) return json({ error: 'Unauthorized' }, 401);
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  await stampHeartbeat(admin, 'garvis-ads-watch-daily');
   const today = new Date().toISOString().slice(0, 10);
 
   // Owners with a configured ad connection (an account id in config).

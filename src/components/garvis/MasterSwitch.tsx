@@ -1,9 +1,9 @@
 // src/components/garvis/MasterSwitch.tsx
 // THE MASTER SWITCH — the audit's biggest single finding made visible and fixable in one place:
-// the entire unattended layer (9 cron jobs) hangs off one garvis_arm_heartbeat() call that was
-// documented only in a migration comment, plus ~16 server secrets nothing ever listed. This panel
-// shows exactly which secrets are set (presence only — values never reach the browser), which of
-// the 9 jobs are actually scheduled, and offers the guarded Arm button.
+// the entire unattended layer (all EXPECTED_JOBS cron jobs) hangs off one garvis_arm_heartbeat()
+// call that was documented only in a migration comment, plus ~16 server secrets nothing ever
+// listed. This panel shows exactly which secrets are set (presence only — values never reach the
+// browser), which jobs are actually scheduled, and offers the guarded Arm button.
 
 import { useEffect, useState } from 'react';
 import { Loader2, Power, Check, X, Zap } from 'lucide-react';
@@ -77,7 +77,7 @@ export function MasterSwitch() {
         <p className="mt-3 flex items-center gap-2 text-xs text-forge-dim"><Loader2 size={13} className="animate-spin" /> Checking the switch…</p>
       ) : (
         <div className="mt-3 space-y-4">
-          {/* Cron jobs: exists-and-active vs missing, against the 9 the arm call creates. */}
+          {/* Cron jobs: exists-and-active vs missing, against the full set the arm call creates. */}
           <div>
             <p className="text-[10px] uppercase tracking-wide text-forge-dim">Scheduled jobs {status.cronError && <span className="text-forge-warn">({status.cronError})</span>}</p>
             <ul className="mt-1.5 grid gap-x-4 gap-y-1 sm:grid-cols-2">

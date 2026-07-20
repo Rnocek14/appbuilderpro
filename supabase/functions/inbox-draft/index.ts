@@ -17,10 +17,12 @@
 // Deploy: supabase functions deploy inbox-draft --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { cronAuthorized } from '../_shared/cronGate.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, modelForPlan, getProviderConfig, type AIProvider } from '../_shared/ai.ts';
 import { getUserPlan } from '../_shared/credits.ts';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 
 async function draftReply(input: {
   firstName: string; fromName: string; business: string;
@@ -65,8 +67,7 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...cors, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const secret = Deno.env.get('CRON_SECRET');
-  if (!secret || req.headers.get('x-cron-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
+  if (!cronAuthorized(req)) return json({ error: 'Unauthorized' }, 401);
   const KEY_FOR: Record<string, string | null> = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', local: null };
   const envKey = KEY_FOR[getProviderConfig().provider];
   if (envKey && !Deno.env.get(envKey)) {
@@ -74,6 +75,7 @@ Deno.serve(async (req) => {
   }
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  await stampHeartbeat(admin, 'garvis-inbox-draft-daily');
   const windowStart = new Date(Date.now() - 14 * 24 * 3_600_000).toISOString();
 
   // Recent positive replies, oldest first (answer the longest-waiting human first).
