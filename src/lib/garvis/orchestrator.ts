@@ -93,6 +93,10 @@ export const COMPILER_SYSTEM = `You are the ORCHESTRATOR of a single-operator bu
 speaks one intent — often a whole venture — and you compile it into an ordered plan of concrete steps drawn ONLY
 from the ACTION CATALOG provided as context.
 
+When a SITUATION block is provided, plan from it: reference existing businesses by their EXACT titles (never
+invent or re-found one that already exists), do not duplicate work an existing arc is already doing or waiting
+to finish, and prefer steps that advance what is actually in flight.
+
 Return STRICT JSON only (no fences, no preamble):
 {"title":"<=60 chars naming the plan",
  "summary":"2-3 sentences: your read of what the operator wants — they verify understanding here",

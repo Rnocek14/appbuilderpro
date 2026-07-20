@@ -106,7 +106,8 @@
     "verify:visualgrammar": "tsx src/lib/garvis/visualGrammar.verify.ts",
     "verify:weblayout": "tsx src/lib/garvis/webLayout.verify.ts",
     "verify:scrapeprofile": "tsx src/lib/preview/scrapeProfile.verify.ts",
-    "verify:migrations": "tsx scripts/migrations.verify.ts"
+    "verify:migrations": "tsx scripts/migrations.verify.ts",
+    "verify:situation": "tsx src/lib/garvis/situation.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

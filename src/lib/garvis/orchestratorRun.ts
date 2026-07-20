@@ -16,6 +16,7 @@ import {
 import { actionSpecs } from './actionCatalog';
 import { actionById } from './actionRegistry';
 import { recordMindEvent } from './mindStore';
+import { assembleSituation } from './situationRun';
 
 async function reason(system: string, context: string, message: string): Promise<string> {
   const { data, error } = await supabase.functions.invoke('cluster-chat', {
@@ -34,7 +35,12 @@ export async function compileIntent(intent: string): Promise<ParsePlanResult> {
     return { plan: null, problems: ['Say the whole thing — a sentence or three about what you want set up.'], warnings: [] };
   }
   const specs = actionSpecs();
-  const raw = await reason(COMPILER_SYSTEM, catalogContext(specs), clean);
+  // SITUATION-AWARE COMPILES (holy-grail gap 3): the compiler used to see only the catalog and
+  // the sentence — "the t-shirt company" was planned blind and discovered reality at runtime.
+  // Now the current state (businesses by exact title, live/blocked arcs, clients, the clock)
+  // rides along; fail-soft — a broken probe compiles the old way rather than not at all.
+  const situation = await assembleSituation().catch(() => '');
+  const raw = await reason(COMPILER_SYSTEM, [catalogContext(specs), situation].filter(Boolean).join('\n\n'), clean);
   const parsed = parsePlan(raw, specs);
   if (parsed.plan) {
     const { data: auth } = await supabase.auth.getUser();

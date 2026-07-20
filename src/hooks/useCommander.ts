@@ -14,6 +14,7 @@ import { useMissions } from './useMissions';
 import { useMind } from './useMind';
 import { goalsDigest } from '../lib/garvis/goalsRun';
 import { retrieveForPrompt } from '../lib/garvis/ask';
+import { assembleSituation } from '../lib/garvis/situationRun';
 import { runGarvisAct } from '../lib/garvis';
 import { patchWorkingState, loadWorkingState, clearCanvasIfMatches } from '../lib/garvis/workingStateRun';
 
@@ -162,9 +163,13 @@ export function useCommander() {
 
       // The owner's PROJECT GOALS steer the front door (goalsRun, fail-soft '') and REFLEXIVE
       // RETRIEVAL grounds it (ask.ts) — the front door now answers from what's actually on
-      // record, cited, alongside the identity/mind digest. Both fail-soft.
-      const [goals, knowledge] = await Promise.all([goalsDigest(), retrieveForPrompt(text)]);
-      const mind = [mindContext(), goals, knowledge].filter(Boolean).join('\n\n');
+      // record, cited, alongside the identity/mind digest. All fail-soft. SITUATION (gap 10):
+      // the same current-state digest the Orchestrator compiles from — one assembler, one
+      // reality, every planning surface.
+      const [goals, knowledge, situation] = await Promise.all([
+        goalsDigest(), retrieveForPrompt(text), assembleSituation().catch(() => ''),
+      ]);
+      const mind = [mindContext(), situation, goals, knowledge].filter(Boolean).join('\n\n');
 
       const r = await rawComplete([
         { role: 'system', content: COMMANDER_SYSTEM },
