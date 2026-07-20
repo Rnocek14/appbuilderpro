@@ -250,12 +250,32 @@ export function stepSucceeded(kind: StepStatusKind): boolean {
 }
 
 /**
+ * What a parked step is actually waiting FOR, in machine-checkable form. The standing-worker's
+ * wake sweep re-checks these on the clock and flips the arc to 'ready' the moment the blocker
+ * clears — the system notices instead of the operator remembering.
+ *   world_exists — a business with (roughly) this title must exist (approve its draft)
+ *   world_area   — the world exists but has no chartered areas yet (approving the draft creates them)
+ *   world_named  — ambiguity only the operator can resolve (exact naming); never auto-cleared
+ *   other        — humanly described in the message; never auto-cleared
+ */
+export interface WaitingOn {
+  kind: 'world_exists' | 'world_area' | 'world_named' | 'other';
+  title?: string;
+  world_id?: string;
+}
+
+/**
  * A step blocked on something the OPERATOR must do first (approve a draft, link a world) — a
  * seam, not a failure. The durable runner parks the step 'waiting' and the arc resumes after the
  * prerequisite lands, instead of burying a retryable state as a terminal error.
  */
 export class WaitingError extends Error {
-  constructor(message: string) { super(message); this.name = 'WaitingError'; }
+  readonly waitingOn: WaitingOn;
+  constructor(message: string, waitingOn?: WaitingOn) {
+    super(message);
+    this.name = 'WaitingError';
+    this.waitingOn = waitingOn ?? { kind: 'other' };
+  }
 }
 
 export type PlanRunState = 'running' | 'waiting' | 'done' | 'failed';

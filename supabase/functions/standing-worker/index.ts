@@ -121,6 +121,46 @@ Deno.serve(async (req) => {
       }
     } catch { /* reminder firing must never wedge the order tick */ }
 
+    // ---- ARC WAKE SWEEP (app_0095) -----------------------------------------------------------
+    // Waiting arcs carry a machine-checkable blocker (waiting_on). When the blocker has cleared —
+    // the business draft got approved, the chartered areas landed — flip the arc to 'ready':
+    // the Orchestrate page auto-resumes ready arcs on sight, and the owner gets one honest line.
+    // The system notices, so the operator doesn't have to remember.
+    try {
+      const { data: blocked } = await admin.from('orchestrator_plans')
+        .select('id, owner_id, title, waiting_on')
+        .eq('status', 'waiting').not('waiting_on', 'is', null).limit(20);
+      for (const arc of (blocked ?? []) as { id: string; owner_id: string; title: string; waiting_on: { kind?: string; title?: string; world_id?: string } }[]) {
+        const w = arc.waiting_on ?? {};
+        let cleared = false;
+        if (w.kind === 'world_exists' && w.title) {
+          // Cleared when the world resolves the same way the executor will: one match, or an
+          // exact-title match among two. ('world_named'/'other' need the operator — never auto.)
+          const { data: worlds } = await admin.from('knowledge_worlds')
+            .select('id, title').eq('owner_id', arc.owner_id).ilike('title', `%${w.title}%`).limit(2);
+          const rows = (worlds ?? []) as { title: string }[];
+          cleared = rows.length === 1
+            || rows.filter((r) => r.title.toLowerCase() === String(w.title).toLowerCase()).length === 1;
+        } else if (w.kind === 'world_area' && w.world_id) {
+          const { data: areas } = await admin.from('knowledge_clusters')
+            .select('id').eq('world_id', w.world_id).not('charter', 'is', null).limit(1);
+          cleared = ((areas ?? []).length > 0);
+        }
+        if (!cleared) continue;
+        await admin.from('orchestrator_plans')
+          .update({ status: 'ready', updated_at: nowIso, last_activity_at: nowIso })
+          .eq('id', arc.id).eq('status', 'waiting');
+        await admin.from('mind_events').insert({
+          owner_id: arc.owner_id, event_type: 'note', source: 'orchestrator',
+          subject: `▶ Arc "${String(arc.title).slice(0, 120)}" is unblocked — it resumes when you next open Orchestrate.`,
+          payload: { key: `arc-ready:${arc.id}`, plan_id: arc.id },
+        }).then(() => {}, () => {});
+        const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', arc.owner_id).maybeSingle();
+        await notifyText((prof as { webhook_url?: string } | null)?.webhook_url,
+          `▶ "${String(arc.title).slice(0, 120)}" is unblocked — open Orchestrate and it continues on its own.`).catch(() => {});
+      }
+    } catch { /* the wake sweep must never wedge the order tick */ }
+
     // ---- BULK SEND DRAIN (app_0064) ----------------------------------------------------------
     // One human approval covers a snapshotted batch; the clock drains it a slice per tick by
     // pushing each recipient through THE ONE SEND PATH (send-email), so suppression, contact

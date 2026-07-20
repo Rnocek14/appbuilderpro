@@ -26,13 +26,13 @@ async function resolveWorld(title: string): Promise<{ id: string; title: string 
   const rows = (data ?? []) as { id: string; title: string }[];
   // A missing world is a SEAM, not a failure: it usually means "approve the draft first" — the
   // durable runner parks the step waiting and the arc resumes once the world exists.
-  if (rows.length === 0) throw new WaitingError(`No business named "${title}" yet — approve its draft on Businesses (or name an existing one exactly), then resume this arc.`);
+  if (rows.length === 0) throw new WaitingError(`No business named "${title}" yet — approve its draft on Businesses (or name an existing one exactly), then resume this arc.`, { kind: 'world_exists', title });
   if (rows.length > 1) {
     // Two candidates: an exact-title match wins; otherwise refuse — running against the wrong
     // business is worse than pausing. Same seam as "missing": name it exactly and resume.
     const exact = rows.filter((r) => r.title.toLowerCase() === title.toLowerCase());
     if (exact.length !== 1) {
-      throw new WaitingError(`More than one business matches "${title}" (${rows.map((r) => `"${r.title}"`).join(', ')}) — name the one you mean exactly, then resume this arc.`);
+      throw new WaitingError(`More than one business matches "${title}" (${rows.map((r) => `"${r.title}"`).join(', ')}) — name the one you mean exactly, then resume this arc.`, { kind: 'world_named', title });
     }
     return exact[0];
   }
@@ -45,7 +45,7 @@ async function resolveArea(worldId: string, preferred: Archetype[]): Promise<Cha
   const { data } = await supabase.from('knowledge_clusters')
     .select('slug, charter').eq('world_id', worldId).limit(32);
   const rows = ((data ?? []) as { slug: string; charter: Charter | null }[]).filter((r) => r.charter);
-  if (!rows.length) throw new WaitingError('That business has no chartered areas yet — approve its draft on Businesses, then resume this arc.');
+  if (!rows.length) throw new WaitingError('That business has no chartered areas yet — approve its draft on Businesses, then resume this arc.', { kind: 'world_area', world_id: worldId });
   for (const p of preferred) {
     const hit = rows.find((r) => r.charter!.archetype === p);
     if (hit) return hit.charter!;
