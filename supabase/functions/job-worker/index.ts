@@ -151,6 +151,9 @@ async function step(job: Job): Promise<boolean> {
     ], { maxTokens: 4000, provider: m.provider, model: m.model });
     await spend(job, res.costUsd, res, 'decompose');
     const plan = parseJson<{ milestones: { title: string; description: string }[]; questions?: never[] }>(res.text);
+    // parseJson returns null on garbage — throw so the retry/backoff seam handles it as a step
+    // failure instead of null flowing into the milestone writes.
+    if (!plan) throw new Error('decompose: the model returned unparseable JSON');
 
     const milestones = (plan.milestones ?? []).slice(0, 8);
     for (let i = 0; i < milestones.length; i++) {
@@ -215,6 +218,7 @@ async function step(job: Job): Promise<boolean> {
       changes: { path: string; content: string }[]; deletions?: string[]; summary?: string;
       conventions?: string | null; decisions?: { decision: string; reason: string }[];
     }>(res.text);
+    if (!out) throw new Error('build: the model returned unparseable JSON');
 
     await applyChanges(job, out.changes ?? [], out.deletions ?? []);
     await admin.from('job_milestones').update({ summary: out.summary ?? null }).eq('id', current.id);
@@ -244,6 +248,7 @@ async function step(job: Job): Promise<boolean> {
     ], { maxTokens: 2000, provider: m.provider, model: m.model });
     await spend(job, res.costUsd, res, 'validate');
     const verdict = parseJson<{ ok: boolean; problems?: string[] }>(res.text);
+    if (!verdict) throw new Error('validate: the model returned unparseable JSON');
 
     if (verdict.ok) {
       await admin.from('job_milestones').update({ status: 'done' }).eq('id', current.id);
@@ -267,6 +272,7 @@ async function step(job: Job): Promise<boolean> {
     ], { maxTokens: 16000, provider: m.provider, model: m.model });
     await spend(job, fix.costUsd, fix, 'fix');
     const patch = parseJson<{ changes: { path: string; content: string }[]; deletions?: string[] }>(fix.text);
+    if (!patch) throw new Error('fix: the model returned unparseable JSON');
     await applyChanges(job, patch.changes ?? [], patch.deletions ?? []);
     await admin.from('jobs').update({ phase: 'validate', fix_attempts: job.fix_attempts + 1 }).eq('id', job.id);
     return true;

@@ -89,7 +89,19 @@ export function useMarketing() {
   const setAssetChannel = async (id: string, channel: string) => { must((await supabase.from('marketing_assets').update({ channel }).eq('id', id)).error); await refresh(); };
   const approveAsset = async (id: string) => { must((await supabase.from('marketing_assets').update({ status: 'approved' }).eq('id', id)).error); await refresh(); };
   const rejectAsset = async (id: string) => { must((await supabase.from('marketing_assets').update({ status: 'rejected' }).eq('id', id)).error); await refresh(); };
-  const scheduleAsset = async (id: string, whenISO: string) => { must((await supabase.from('marketing_assets').update({ status: 'scheduled', scheduled_for: whenISO }).eq('id', id)).error); await refresh(); };
+  /** Schedule = queue on the REAL social rail with a future fire time (scan B6: the old version
+   *  only stamped status='scheduled' and nothing ever drained marketing_assets — the label lied).
+   *  The post waits as a pending approval; once approved, the standing-worker social drain posts
+   *  it when its moment arrives. Channels with no automated sender refuse honestly. */
+  const scheduleAsset = async (asset: MarketingAsset, whenISO: string) => {
+    const channel = (asset.channel ?? 'manual') as 'x' | 'email' | 'linkedin' | 'manual';
+    if (channel !== 'x' && channel !== 'linkedin') {
+      throw new Error('Scheduling runs on the social rail — email/manual assets have no automated sender; use Publish when you are ready to send it yourself.');
+    }
+    await queueSocialPost({ text: postText(asset.content), platforms: [channel === 'x' ? 'twitter' : 'linkedin'], scheduleAt: whenISO });
+    must((await supabase.from('marketing_assets').update({ status: 'scheduled', scheduled_for: whenISO }).eq('id', asset.id)).error);
+    await refresh();
+  };
 
   /**
    * Publish through the REAL rails where one exists. Social channels (x/linkedin) queue an actual

@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-worker-secret': secret,
+            'x-worker-secret': Deno.env.get('WORKER_SECRET') ?? '',
             Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
           },
           body: JSON.stringify({ mode: 'sync', provider, owner_id: ownerId }),

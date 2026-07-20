@@ -16,7 +16,7 @@
 // Secrets: supabase secrets set WORKER_SECRET=<random>   (used by the cron tick / self-chain)
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
-import { complete, corsHeaders, parseJson, modelForPlan, type AIMessage } from '../_shared/ai.ts';
+import { complete, corsHeaders, parseJson, modelForPlan, type AIMessage, type AIProvider } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { cronAuthorized } from '../_shared/cronGate.ts';
@@ -114,7 +114,7 @@ const UPDATABLE_APP_FIELDS = new Set(['stage', 'goals', 'monthly_revenue', 'depl
 const KNOWLEDGE_KINDS = new Set(['decision', 'outcome', 'lesson']);
 const GOAL_STATUSES = new Set(['proposed', 'active', 'achieved', 'paused', 'abandoned']);
 
-interface Ctx { db: SupabaseClient; ownerId: string; appId: string | null; runId: string; provider: string; model: string }
+interface Ctx { db: SupabaseClient; ownerId: string; appId: string | null; runId: string; provider: AIProvider; model: string }
 
 async function proposeKnowledge(kind: 'decision' | 'outcome', input: Record<string, unknown>, ctx: Ctx): Promise<unknown> {
   if (typeof input.title !== 'string' || typeof input.body !== 'string') throw new Error(`${kind} proposal requires title and body`);
@@ -231,8 +231,7 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
         { role: 'system', content: 'You are a senior short-form video scriptwriter. Produce a SCRIPT ONLY. Output EXACTLY ONE JSON object: {"hook":str,"script":str,"caption":str,"cta":str,"visual_beats":[str],"confidence":num}. Ground in provided material; never imply a rendered video.' },
         { role: 'user', content: `TOPIC: ${s('topic')}\nAUDIENCE: ${s('audience')}\nGOAL: ${s('goal')}\nPLATFORM: ${s('platform') || 'short-form'}\nSOURCE: ${s('source_material')}` },
       ] as AIMessage[], { maxTokens: 1200, provider: ctx.provider, model: ctx.model });
-      let parsed: Record<string, unknown> = {};
-      try { parsed = parseJson(res.text); } catch { parsed = { script: res.text }; }
+      const parsed: Record<string, unknown> = parseJson<Record<string, unknown>>(res.text) ?? { script: res.text };
       return { short: { ...parsed, fidelity: 'script_only', required_approval: true } };
     }
     case 'list_goals': {
@@ -382,7 +381,9 @@ async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
         costUsd: res.costUsd, kind: 'garvis', provider: m.provider, model: m.model,
         inputTokens: res.inputTokens, outputTokens: res.outputTokens,
       });
-      try { decision = normalize(parseJson<Decision>(res.text), allowed); }
+      // parseJson returns null on garbage (never throws) — fail soft into a finish either way.
+      const rawDecision = parseJson<Decision>(res.text);
+      try { decision = rawDecision ? normalize(rawDecision, allowed) : { kind: 'finish', output: res.text.slice(0, 2000) || 'The model returned no parseable decision.' }; }
       catch { decision = { kind: 'finish', output: res.text.slice(0, 2000) || 'The model returned no parseable decision.' }; }
     } catch (e) {
       // Retry-or-fail seam: a transient 5xx/429/network error backs the run off instead of killing
@@ -466,7 +467,8 @@ Deno.serve(async (req) => {
   }
 
   // Queue still non-empty? Chain another invocation (fire-and-forget) instead of blowing the clock.
-  if (processed === RUNS_PER_INVOCATION && secret) {
+  const chainSecret = Deno.env.get('WORKER_SECRET');
+  if (processed === RUNS_PER_INVOCATION && bySecret && chainSecret) {
     const { count } = await db.from('agent_runs').select('id', { count: 'exact', head: true })
       .in('status', ['queued'])
       // Runs parked in transient backoff aren't claimable yet — don't chain an invocation for them.
@@ -474,7 +476,7 @@ Deno.serve(async (req) => {
       .limit(1);
     if ((count ?? 0) > 0) {
       void fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/garvis-worker`, {
-        method: 'POST', headers: { 'x-worker-secret': secret, 'content-type': 'application/json' }, body: '{}',
+        method: 'POST', headers: { 'x-worker-secret': chainSecret, 'content-type': 'application/json' }, body: '{}',
       }).catch(() => {});
     }
   }

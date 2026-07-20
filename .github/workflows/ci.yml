@@ -52,6 +52,21 @@ jobs:
       - name: Production build
         run: npm run build
 
+  # The 56 edge functions were typechecked NOWHERE (scan risk #1) — tsconfig covers src/ only,
+  # so a type-broken worker only surfaced at deploy. deno check follows each function's real
+  # import graph (including the src/ modules workers share) under supabase/functions/deno.json.
+  deno-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Typecheck all edge functions
+        working-directory: supabase/functions
+        run: deno check --quiet */index.ts
+
   e2e-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25

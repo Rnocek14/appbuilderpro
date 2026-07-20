@@ -133,11 +133,14 @@ async function runPipeline(db: SupabaseClient, genId: string, projectId: string,
   // glitch doesn't hard-fail the whole generation.
   const askJson = async <T,>(messages: AIMessage[], maxTokens = 8192): Promise<T> => {
     const text = await ask(messages, maxTokens);
-    try { return parseJson<T>(text); }
-    catch {
-      const fixed = await ask([{ role: 'system', content: 'Return ONLY the corrected JSON object — no prose, no fences.' }, { role: 'user', content: text }], maxTokens);
-      return parseJson<T>(fixed);
-    }
+    // parseJson returns null on garbage (never throws) — one repair round-trip, then a real
+    // error so the pipeline's failure handler records it instead of null flowing onward.
+    const first = parseJson<T>(text);
+    if (first !== null) return first;
+    const fixed = await ask([{ role: 'system', content: 'Return ONLY the corrected JSON object — no prose, no fences.' }, { role: 'user', content: text }], maxTokens);
+    const second = parseJson<T>(fixed);
+    if (second !== null) return second;
+    throw new Error('The model returned unparseable JSON even after a repair round-trip.');
   };
   const writeFile = async (path: string, content: string) => {
     await db.from('project_files').upsert(
