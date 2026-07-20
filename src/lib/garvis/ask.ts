@@ -235,7 +235,9 @@ export async function askGarvis(question: string, opts?: { worldId?: string }): 
 
   try {
     const { data, error } = await supabase.functions.invoke('cluster-chat', {
-      body: { system: ASK_SYSTEM, context: `${goalLine ? `${goalLine}\n\n` : ''}SOURCES:\n${context}`, history: [], message: q },
+      // format:'raw' — ASK_SYSTEM demands plain prose ("No JSON"); the studio decision suffix
+      // directly contradicted it at the shared chokepoint.
+      body: { system: ASK_SYSTEM, context: `${goalLine ? `${goalLine}\n\n` : ''}SOURCES:\n${context}`, history: [], message: q, format: 'raw' },
     });
     if (error) throw new Error(error.message);
     const answer = ((data as { text?: string })?.text ?? '').trim();

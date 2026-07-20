@@ -29,6 +29,12 @@ export const MIND_EVENT_TYPES = [
   'outcome_observed',     // mirrored when a journal entry is closed
   'artifact_imported',    // a doc/file/source entered the record
   'note',                 // a free-form observation from the owner
+  // Server-written types (edge functions insert these directly; the July 2026 scan found them
+  // outside the contract — the vocabulary below IS the promise consolidation and nextMove read
+  // against, so every server writer's type belongs here).
+  'email_sent',           // send-email: an approved email actually left
+  'reply_received',       // resend-inbound: a real human replied
+  'credit_topup',         // stripe-webhook: credits were purchased
 ] as const;
 export type MindEventType = (typeof MIND_EVENT_TYPES)[number];
 

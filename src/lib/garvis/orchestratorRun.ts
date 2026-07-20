@@ -19,7 +19,9 @@ import { recordMindEvent } from './mindStore';
 
 async function reason(system: string, context: string, message: string): Promise<string> {
   const { data, error } = await supabase.functions.invoke('cluster-chat', {
-    body: { system, context, history: [], message },
+    // format:'raw' — the compiler's system prompt defines its own JSON schema; the studio
+    // decision-JSON suffix would contradict it.
+    body: { system, context, history: [], message, format: 'raw' },
   });
   if (error) throw new Error(error.message);
   return ((data as { text?: string })?.text ?? '').trim();

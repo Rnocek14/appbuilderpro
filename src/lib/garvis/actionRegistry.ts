@@ -27,6 +27,15 @@ async function resolveWorld(title: string): Promise<{ id: string; title: string 
   // A missing world is a SEAM, not a failure: it usually means "approve the draft first" — the
   // durable runner parks the step waiting and the arc resumes once the world exists.
   if (rows.length === 0) throw new WaitingError(`No business named "${title}" yet — approve its draft on Businesses (or name an existing one exactly), then resume this arc.`);
+  if (rows.length > 1) {
+    // Two candidates: an exact-title match wins; otherwise refuse — running against the wrong
+    // business is worse than pausing. Same seam as "missing": name it exactly and resume.
+    const exact = rows.filter((r) => r.title.toLowerCase() === title.toLowerCase());
+    if (exact.length !== 1) {
+      throw new WaitingError(`More than one business matches "${title}" (${rows.map((r) => `"${r.title}"`).join(', ')}) — name the one you mean exactly, then resume this arc.`);
+    }
+    return exact[0];
+  }
   return rows[0];
 }
 

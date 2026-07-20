@@ -39,16 +39,19 @@ const gauntlet = parsePlan(JSON.stringify({
   steps: [
     { action: 'invented_action', params: {}, why: 'This action does not exist anywhere.', after: [] },        // unknown → dropped
     { action: 'found_company', params: { intent: 'agency' }, why: 'short', after: [] },                        // why too thin → dropped
-    { action: 'watch_page', params: { url: 'https://a.gov/rfps', label: 'RFPs', bogus: 'x' }, why: 'Watch the grant board for changes.', after: [0] }, // unknown param stripped, dangling after cleaned
+    { action: 'watch_page', params: { url: 'https://a.gov/rfps', label: 'RFPs', bogus: 'x' }, why: 'Watch the grant board for changes.', after: [9] }, // unknown param stripped, never-existed after cleaned
     { action: 'business_plan', params: {}, why: 'A plan would ground the work here.', after: [] },             // missing required → dropped to questions
+    { action: 'watch_page', params: { url: 'https://b.gov/rfps', label: 'More' }, why: 'Watch the second board too.', after: [0] }, // depends on the DROPPED step 0 → cascade-dropped
   ],
   holes: [], questions: [],
 }), SPECS);
 check('unknown action is dropped with a warning', gauntlet.plan!.steps.every((s) => s.action !== 'invented_action') && gauntlet.warnings.some((w) => w.includes('invented_action')));
 check('why-less step is dropped', gauntlet.plan!.steps.every((s) => s.action !== 'found_company'));
 check('unknown param is stripped', !('bogus' in gauntlet.plan!.steps[0].params));
-check('dangling after reference is cleaned', gauntlet.plan!.steps[0].after.length === 0);
+check('never-existed after reference is cleaned', gauntlet.plan!.steps[0].after.length === 0);
 check('missing required param demotes to a question', gauntlet.plan!.steps.every((s) => s.action !== 'business_plan') && gauntlet.plan!.questions.some((q) => q.includes('Write the business plan')));
+check('a step depending on a dropped step is cascade-dropped, never run without its prerequisite',
+  gauntlet.plan!.steps.length === 1 && gauntlet.warnings.some((w) => w.includes('depended on a step that was dropped')));
 
 // ---- fences + failure modes ----
 const fenced = parsePlan('```json\n' + JSON.stringify({ title: 't', summary: 's', steps: [], holes: ['h'], questions: [] }) + '\n```', SPECS);

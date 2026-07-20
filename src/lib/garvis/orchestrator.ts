@@ -173,9 +173,29 @@ export function parsePlan(raw: string, specs: ActionSpec[]): ParsePlanResult {
     survivors.push({ step: { action: actionId, params, why, after }, origIndex: i });
   });
 
+  // Second pass: a survivor that depended on a DROPPED step must not silently run without its
+  // prerequisite — cascade the drop, transitively. (References to indexes that never existed are
+  // model noise and are simply removed below, as before.)
+  const droppedIdx = new Set<number>();
+  rawSteps.slice(0, MAX_STEPS).forEach((_, i) => { if (!survivors.some((s) => s.origIndex === i)) droppedIdx.add(i); });
+  let remaining = survivors;
+  let cascaded = true;
+  while (cascaded) {
+    cascaded = false;
+    remaining = remaining.filter(({ step, origIndex }) => {
+      if (step.after.some((a) => droppedIdx.has(a))) {
+        warnings.push(`Dropped ${specById.get(step.action)?.title ?? step.action}: it depended on a step that was dropped.`);
+        droppedIdx.add(origIndex);
+        cascaded = true;
+        return false;
+      }
+      return true;
+    });
+  }
+
   // Remap `after` from original indexes to survivor indexes; dangling references are dropped.
-  const newIndex = new Map(survivors.map((s, idx) => [s.origIndex, idx]));
-  const steps = survivors.map(({ step }) => ({
+  const newIndex = new Map(remaining.map((s, idx) => [s.origIndex, idx]));
+  const steps = remaining.map(({ step }) => ({
     ...step,
     after: step.after.map((a) => newIndex.get(a)).filter((a): a is number => a !== undefined),
   }));
