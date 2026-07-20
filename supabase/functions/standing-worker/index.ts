@@ -1366,6 +1366,12 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
 
   // --- BUILD: up to demoQuota fresh leads → demo + pitch, NO-WEBSITE prospects first --------------
   let built = 0; let queued = 0;
+  // Stale-claim sweep: a crash mid-build leaves a lead 'building' forever — older than 2h means
+  // that run is dead; return it to the queue (mirrors the batch drain's claim discipline).
+  await admin.from('discovered_businesses')
+    .update({ status: 'new', updated_at: nowIso })
+    .eq('owner_id', order.owner_id).eq('status', 'building')
+    .lt('updated_at', new Date(Date.now() - 2 * 3600_000).toISOString());
   const { data: leads } = await admin.from('discovered_businesses')
     .select('id, place_id, company_name, keyword, website, phone, city, state')
     .eq('owner_id', order.owner_id).eq('status', 'new')
@@ -1373,12 +1379,19 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
     .limit(cfg.demoQuota);
   for (const lead of (leads ?? []) as LeadRow[]) {
     if (Date.now() - startedMs > HUNT_TIME_BUDGET_MS) break;
+    // CLAIM FIRST: flip new → building before any expensive work. A crash between the preview
+    // insert and the 'built' update used to re-run the whole chain next day — duplicate demo,
+    // duplicate pitch email to a real business. No claim → someone else has it → skip silently.
+    const { data: claimRows } = await admin.from('discovered_businesses')
+      .update({ status: 'building', updated_at: new Date().toISOString() })
+      .eq('id', lead.id).eq('status', 'new').select('id');
+    if (!claimRows?.length) continue;
     try {
       const outcome = await buildDemoForLead(admin, order, lead, env);
       if (outcome === 'queued') { built++; queued++; }
       else if (outcome === 'built') built++;
       else await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: nowIso }).eq('id', lead.id);
-    } catch { /* one lead failing never sinks the day */ }
+    } catch { /* one lead failing never sinks the day — the stale sweep reclaims it next run */ }
   }
 
   return { discovered, built, queued, line: huntRunLine(order.label, discovered, built, queued) };
@@ -1555,32 +1568,58 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   let specSource: 'ai' | 'fallback' = 'fallback';
   let strategy: Record<string, unknown> | null = null;
   let critique: Record<string, unknown> | null = null;
+  // Build log — the answer to "why is this demo a template?" without usage-event archaeology.
+  const buildLog: Record<string, unknown> = { stage: 'start', imagery: 0 };
   {
     let aiCost = 0, aiIn = 0, aiOut = 0;
-    // Standard plan model for everyone; a premium model ONLY for high-LTV verticals and ONLY
-    // when the operator opts in via AI_PREMIUM_MODEL (e.g. claude-fable-5). Cost discipline is
-    // the default — the expensive model is an explicit, targeted choice.
-    const mPlan = modelForPlan(await getUserPlan(admin, order.owner_id));
-    const premiumModel = Deno.env.get('AI_PREMIUM_MODEL');
-    const m = premiumModel && premiumProspect(profile.industry)
-      ? { provider: mPlan.provider, model: premiumModel }
+    // Standard plan model for everyone; a premium model ONLY for high-LTV verticals, ONLY on a
+    // paying plan, and ONLY when the operator opts in via AI_PREMIUM_MODEL. A model id that
+    // can't run on the configured provider is ignored (one bad env var must not silently
+    // template every premium lead), and cost discipline stays the default.
+    const plan = await getUserPlan(admin, order.owner_id);
+    const mPlan = modelForPlan(plan);
+    const premiumRaw = Deno.env.get('AI_PREMIUM_MODEL');
+    const premiumCompatible = !!premiumRaw &&
+      (mPlan.provider === 'anthropic' ? /^claude/i.test(premiumRaw) : !/^claude/i.test(premiumRaw));
+    if (premiumRaw && !premiumCompatible) console.warn(`AI_PREMIUM_MODEL ${premiumRaw} incompatible with provider ${mPlan.provider} — ignored`);
+    const m = premiumRaw && premiumCompatible && plan !== 'free' && premiumProspect(profile.industry)
+      ? { provider: mPlan.provider, model: premiumRaw }
       : mPlan;
+    buildLog.model = m.model;
     const track = (r: { costUsd: number; inputTokens: number; outputTokens: number }) => {
       aiCost += r.costUsd; aiIn += r.inputTokens; aiOut += r.outputTokens;
     };
+    // One JSON re-ask on a prose reply — the most common chain degradation, now a retry
+    // instead of a straight fall to the template floor.
+    const completeJson = async (msgs: Parameters<typeof complete>[0], maxTokens: number): Promise<unknown> => {
+      const r1 = await complete(msgs, { provider: m.provider, model: m.model, maxTokens });
+      track(r1);
+      try { return extractJson(r1.text); } catch {
+        const r2 = await complete([...msgs,
+          { role: 'assistant', content: r1.text.slice(0, 4000) },
+          { role: 'user', content: 'Return ONLY the JSON object — no prose, no code fences, nothing else.' },
+        ], { provider: m.provider, model: m.model, maxTokens });
+        track(r2);
+        return extractJson(r2.text);
+      }
+    };
     try {
       await checkCredits(admin, order.owner_id, 'board_copy');   // out of credits → template floor
-      const sR = await complete([
-        { role: 'system', content: STRATEGY_SYSTEM },
-        { role: 'user', content: JSON.stringify(profile, null, 1) },
-      ], { provider: m.provider, model: m.model, maxTokens: 1800 });
-      track(sR);
-      const strat = normalizeStrategy(extractJson(sR.text), profile);
-      // CONCEPT IMAGERY — a prospect with NO usable photos gets two honest, generic trade
-      // still-lifes (gpt-image-1) so the site opens on full-bleed art instead of a flat color
-      // field. Their own photos always win; generation is object photography only (no people/
-      // text/logos — huntImagePrompts hard rules), labeled ai_generated + can_publish:false,
-      // and fails soft (no key / refusal / no credits → the aurora hero stands).
+      // STRATEGY — its own failure domain: a prose-only strategist must not cost the lead the
+      // spec AND the imagery (the browser path has always degraded per-stage; now the worker does).
+      let strat = normalizeStrategy({}, profile);
+      try {
+        strat = normalizeStrategy(await completeJson([
+          { role: 'system', content: STRATEGY_SYSTEM },
+          { role: 'user', content: JSON.stringify(profile, null, 1) },
+        ], 1800), profile);
+        buildLog.stage = 'strategy';
+      } catch (e) { buildLog.strategy_error = String((e as Error)?.message ?? e).slice(0, 200); }
+      strategy = strat as unknown as Record<string, unknown>;
+      // CONCEPT IMAGERY — a prospect with NO usable photos gets honest concept art (gpt-image-1)
+      // so the site opens on full-bleed art instead of a flat color field. Their own photos
+      // always win; generation is object photography only, labeled ai_generated +
+      // can_publish:false, and fails soft (no key / refusal / no credits → the aurora hero).
       if (!profile.photos.length && Deno.env.get('OPENAI_API_KEY') && !restraintFor(profile.industry)) {
         try {
           await checkCredits(admin, order.owner_id, 'image');
@@ -1589,55 +1628,63 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
             url, alt, source_type: 'ai_generated', can_use_in_preview: true, can_publish: false,
             notes: 'AI-generated concept imagery — not photos of this business',
           });
-          // Layered depth-sandwich pair first (backdrop art + transparent iconic object) — the
-          // "I need that" hero. Trades without an iconic object get the still-life pair instead.
-          const art = huntArtPrompts(profile.industry, strat.tone);
+          // The image prompts carry the recipe's primary hue so hero art and theme read as one
+          // designed brand. Backdrop FIRST — a lone transparent object is unusable (the layers
+          // hero needs both), so the object is only ever generated after a successful backdrop.
+          const paletteHint = pickRecipe(profile).theme.primary;
+          const art = huntArtPrompts(profile.industry, strat.tone, paletteHint);
           if (art) {
             const bg = await genHuntImage(admin, order.owner_id, art.backdrop, '1536x1024');
             if (bg) made.push(aiPhoto(bg, 'ai-backdrop'));
-            const obj = await genHuntImage(admin, order.owner_id, art.object, '1024x1024', true);
+            const obj = bg ? await genHuntImage(admin, order.owner_id, art.object, '1024x1024', true) : null;
             if (obj) made.push(aiPhoto(obj, 'ai-object'));
           }
           if (!made.length) {
-            const [wide, tight] = huntImagePrompts(profile.industry, strat.tone);
-            for (const [prompt, size] of [[wide, '1536x1024'], [tight, '1024x1024']] as const) {
-              const url = await genHuntImage(admin, order.owner_id, prompt, size);
-              if (url) made.push(aiPhoto(url, ''));
+            const still = huntImagePrompts(profile.industry, strat.tone, paletteHint);
+            if (still) {
+              for (const [prompt, size] of [[still[0], '1536x1024'], [still[1], '1024x1024']] as const) {
+                const url = await genHuntImage(admin, order.owner_id, prompt, size);
+                if (url) made.push(aiPhoto(url, ''));
+              }
             }
           }
-          if (made.length) profile.photos = made;
-        } catch { /* imagery is a bonus, never a blocker */ }
+          if (made.length) {
+            profile.photos = made;
+            buildLog.imagery = made.length;
+            // Re-floor with the imagery in place: a spec-call failure below must still ship the
+            // paid art instead of orphaning it (the old fallback predated the photos mutation).
+            spec = assembleFallbackSpec(profile);
+          }
+        } catch (e) { buildLog.imagery_error = String((e as Error)?.message ?? e).slice(0, 200); }
       }
-      const gR = await complete([
+      const aiSpec = normalizeSpec(await completeJson([
         { role: 'system', content: SPEC_SYSTEM },
         { role: 'user', content: specPrompt(profile) + strategyBlock(strat) },
-      ], { provider: m.provider, model: m.model, maxTokens: 8000 });
-      track(gR);
-      const aiSpec = normalizeSpec(extractJson(gR.text), profile);
-      aiSpec.nav = navFor(aiSpec.sections, pickRecipe(profile).cta);
+      ], 8000), profile);
       spec = aiSpec; specSource = 'ai';
-      strategy = strat as unknown as Record<string, unknown>;
+      buildLog.stage = 'spec';
       // Owner-simulation critique + ONE refine — fails soft to the draft it was critiquing.
       try {
-        const cR = await complete([
+        const crit = normalizeCritique(await completeJson([
           { role: 'system', content: CRITIQUE_SYSTEM },
           { role: 'user', content: critiqueUserPrompt(profile, spec) },
-        ], { provider: m.provider, model: m.model, maxTokens: 1500 });
-        track(cR);
-        const crit = normalizeCritique(extractJson(cR.text));
+        ], 1500));
         critique = crit as unknown as Record<string, unknown>;
+        buildLog.stage = 'critique';
         if (critiqueWarrantsRefine(crit)) {
-          const rR = await complete([
+          const refined = normalizeSpec(await completeJson([
             { role: 'system', content: SPEC_SYSTEM },
             { role: 'user', content: specPrompt(profile) + strategyBlock(strat) + critiqueBlock(crit) },
-          ], { provider: m.provider, model: m.model, maxTokens: 8000 });
-          track(rR);
-          const refined = normalizeSpec(extractJson(rR.text), profile);
-          refined.nav = navFor(refined.sections, pickRecipe(profile).cta);
+          ], 8000), profile);
           spec = refined;
+          buildLog.stage = 'refined';
         }
       } catch { /* keep the un-refined AI draft */ }
-    } catch { /* the deterministic recipe spec stands */ }
+    } catch (e) {
+      // The deterministic recipe spec stands — and the log says WHY it's a template.
+      buildLog.chain_error = String((e as Error)?.message ?? e).slice(0, 200);
+    }
+    buildLog.cost_usd = Math.round(aiCost * 10000) / 10000;
     if (aiCost > 0) {
       await spendCredits(admin, order.owner_id, {
         costUsd: aiCost, kind: 'preview_build', provider: m.provider, model: m.model,
@@ -1670,7 +1717,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     user_id: order.owner_id, profile_id: profileRow.id, slug,
     business_name: profile.business_name, industry: profile.industry,
     spec, pitch, spec_source: specSource, status: 'preview',
-    strategy, critique,
+    strategy, critique, build_log: buildLog,
     // Deterministic owner-language report grounded in the OBSERVED audit signals (profile.issues) —
     // the public /report page shows real problems instead of synthesizing a generic shell.
     audit: fallbackAudit(profile),

@@ -57,7 +57,9 @@ export async function buildStaticSiteHtml(spec: SiteSpec, opts: ExportOpts = {})
   const css = await collectCss();
   const fams = [...new Set([spec.theme.displayFont, spec.theme.bodyFont])]
     .map((f) => `family=${f.replace(/ /g, '+')}:wght@400;500;600;700`).join('&');
-  const heroImg = spec.sections.find((s) => s.type === 'hero')?.props.image as string | undefined;
+  // layers heroes carry only bgImage — og:image/preload must not miss the showpiece variant.
+  const heroSec = spec.sections.find((s) => s.type === 'hero');
+  const heroImg = (heroSec?.props.image ?? heroSec?.props.bgImage) as string | undefined;
 
   return `<!doctype html>
 <html lang="en">
@@ -81,10 +83,14 @@ ${opts.canonicalUrl ? `<link rel="canonical" href="${esc(opts.canonicalUrl)}">` 
    visible immediately; the dead SPA-only controls (mobile menu toggle) are hidden. The motion-kit
    moves (TextReveal words, ImageReveal wipes) are forced to their final states the same way —
    the exported page is the finished site, animation was progressive enhancement. */
-.pv-export .pv-site [style*="translateY"], .pv-export .pv-site .opacity-0 { opacity: 1 !important; transform: none !important; }
+.pv-export .pv-rvl { opacity: 1 !important; transform: none !important; }
 .pv-export .pv-trw { transform: none !important; }
 .pv-export .pv-irv { clip-path: none !important; }
 .pv-export .pv-irv img { transform: none !important; }
+/* Pinned scenes ship their finished frame — collapse the scrub runway so the export never has
+   1-2 screens of scroll where nothing moves (the frame IS the layout, no pin needed). */
+.pv-export .pv-scn-pin { height: auto !important; }
+.pv-export .pv-scn-pin .pv-scn-stage { position: relative !important; height: auto !important; min-height: 100vh; }
 .pv-export header button[aria-label*="menu" i] { display: none; }
 html { scroll-behavior: smooth; }
 </style>
