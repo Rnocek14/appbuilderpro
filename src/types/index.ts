@@ -255,6 +255,7 @@ export interface AgentRun {
 export interface GarvisCheckpoint {
   step: number;
   history: { role: 'user' | 'assistant' | 'tool'; content: string }[];
+  pendingQuestion?: { question: string; options: string[] };
 }
 
 // ---- Garvis knowledge layer (app_0005) — the durable "Learn" store ----
@@ -334,7 +335,7 @@ export interface GarvisOpportunity {
 
 // ---- Garvis Mission orchestrator (app_0011) — the Jarvis front door + worker dispatch ----
 export type WorkerKind = 'research' | 'analytics' | 'marketing' | 'bug' | 'builder';
-export type MissionStatus = 'planning' | 'planned' | 'running' | 'review' | 'done' | 'failed';
+export type MissionStatus = 'planning' | 'planned' | 'running' | 'review' | 'partial' | 'done' | 'failed' | 'cancelled';
 export type TaskStatus = 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'skipped';
 
 /** A produced work-product (a report, a diagnosis, a plan). Marketing additionally writes its own tables. */

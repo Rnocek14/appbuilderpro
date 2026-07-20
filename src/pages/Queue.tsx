@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
+import { Bot, Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
 import { useUndoBar } from '../components/garvis/UndoBar';
 import { AppShell } from '../components/layout/AppShell';
 import { Badge, Button, EmptyState, Input, Skeleton, LoadError } from '../components/ui';
@@ -16,7 +16,9 @@ import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { rawComplete } from '../lib/aiClient';
 import { useInbox } from '../hooks/useAutopilot';
+import { useAgentRunQuestions } from '../hooks/useAgentRunQuestions';
 import type { AgentQuestion } from '../types';
+import type { AgentRunQuestion } from '../lib/garvis/agentRunQuestions';
 import { KIND_META } from '../components/garvis/approvalMeta';
 import { MarkWonInline } from '../components/garvis/MarkWonInline';
 import {
@@ -31,6 +33,7 @@ import {
 type Row =
   | { key: string; lane: 'decision'; a: Approval }
   | { key: string; lane: 'question'; q: AgentQuestion }
+  | { key: string; lane: 'agent_question'; q: AgentRunQuestion }
   | { key: string; lane: 'message'; m: InboxItem };
 
 export default function Queue() {
@@ -43,6 +46,7 @@ export default function Queue() {
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const { questions, answer, skip } = useInbox();
   const pendingQuestions = useMemo(() => questions.filter((q) => q.status === 'pending'), [questions]);
+  const runInbox = useAgentRunQuestions();
 
   const [actingId, setActingId] = useState<string | null>(null);
   const [sel, setSel] = useState(0);
@@ -85,8 +89,9 @@ export default function Queue() {
     let failed = false;
     try { setApprovals(await listApprovals('pending')); } catch { failed = true; setApprovals((prev) => prev ?? []); }
     try { setItems(await loadInbox()); } catch { failed = true; setItems((prev) => prev ?? []); }
+    try { await runInbox.refresh(); } catch { failed = true; }
     setLoadFailed(failed);
-  }, []);
+  }, [runInbox.refresh]);
   useEffect(() => { void refresh(); }, [refresh]);
 
   // Re-pull when the tab regains focus (deep scan P2): the queue used to refresh only on mount and
@@ -112,9 +117,10 @@ export default function Queue() {
 
   const rows: Row[] = useMemo(() => [
     ...(approvals ?? []).map((a): Row => ({ key: `d-${a.id}`, lane: 'decision', a })),
+    ...runInbox.questions.map((q): Row => ({ key: `aq-${q.id}`, lane: 'agent_question', q })),
     ...pendingQuestions.map((q): Row => ({ key: `q-${q.id}`, lane: 'question', q })),
     ...(items ?? []).map((m): Row => ({ key: `m-${m.kind}-${m.id}`, lane: 'message', m })),
-  ], [approvals, pendingQuestions, items]);
+  ], [approvals, runInbox.questions, pendingQuestions, items]);
 
   useEffect(() => { setSel((s) => Math.min(s, Math.max(0, rows.length - 1))); }, [rows.length]);
   useEffect(() => {
@@ -135,8 +141,9 @@ export default function Queue() {
       } else {
         const res = await approveAndExecute(a);
         if (res.ok) {
-          const r = res.result as { executed?: boolean; url?: string | null; needsWorkspace?: boolean; projectId?: string } | undefined;
-          if (a.kind === 'deploy_site' && r?.url) { toast('success', `Deployed — live at ${r.url}`); window.open(r.url, '_blank'); }
+          const r = res.result as { executed?: boolean; live?: boolean; state?: string; url?: string | null; needsWorkspace?: boolean; projectId?: string } | undefined;
+          if (a.kind === 'deploy_site' && r?.live && r.url) { toast('success', `Deployed — live at ${r.url}`); window.open(r.url, '_blank'); }
+          else if (a.kind === 'deploy_site' && r?.state === 'building') toast('info', 'Deploy accepted — hosting is still finishing the build.');
           else if (r?.needsWorkspace && r.projectId) { toast('info', 'Approved — open the project and Publish to complete.'); navigate(`/project/${r.projectId}`); }
           else if (r?.executed !== false) toast('success', a.kind === 'send_email' ? 'Approved and sent.' : 'Approved and executed.');
           else if ((r as { drains?: boolean } | undefined)?.drains) toast('success', 'Approved — the clock drains it under your daily cap; watch progress on Contacts.');
@@ -252,7 +259,7 @@ export default function Queue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, sel, tab, approvals, items, actingId]);
 
-  const loading = approvals === null || items === null;
+  const loading = approvals === null || items === null || runInbox.loading;
   const selKey = rows[sel]?.key;
   const laneHead = (label: string) => (
     <h2 className="mb-2 mt-5 text-xs font-medium uppercase tracking-wide text-forge-dim first:mt-0">{label}</h2>
@@ -270,7 +277,7 @@ export default function Queue() {
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="text-xl font-semibold text-forge-ink">Queue</h1>
-            <p className="text-sm text-forge-dim">Everything waiting on you — decisions, blocked builds, and people who wrote in. One pass, then back to work.</p>
+            <p className="text-sm text-forge-dim">Everything waiting on you — decisions, blocked Garvis work, builds, and people who wrote in. One pass, then back to work.</p>
           </div>
           <div className="flex shrink-0 rounded-lg border border-forge-border p-0.5 text-xs">
             {(['queue', 'history'] as const).map((t) => (
@@ -348,11 +355,11 @@ export default function Queue() {
             ))}
           </div>
         ) : rows.length === 0 ? (
-          loadFailed ? (
+          loadFailed || runInbox.failed ? (
             <LoadError message="Couldn’t load the Queue — this isn’t “nothing to do,” it’s a load error." onRetry={() => void refresh()} />
           ) : (
             <EmptyState icon={<ShieldCheck size={20} />} title="Queue is clear"
-              body="Approvals, blocked build questions, replies, and website leads all land here. Right now: nothing needs you." />
+              body="Approvals, Garvis questions, blocked build questions, replies, and website leads all land here. Right now: nothing needs you." />
           )
         ) : (
           <>
@@ -382,6 +389,16 @@ export default function Queue() {
                     </button>
                   </div>
                   {a.preview && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg border border-forge-border bg-forge-panel/60 p-2 text-[11px] text-forge-dim">{a.preview}</pre>}
+                </li>
+              ))}
+            </ul>
+
+            {runInbox.questions.length > 0 && laneHead('Garvis questions — work is blocked on your answer')}
+            <ul className="space-y-2">
+              {runInbox.questions.map((q) => (
+                <li key={`aq-${q.id}`} ref={(el) => { if (el) rowRefs.current.set(`aq-${q.id}`, el); }}
+                  className={selectable(`aq-${q.id}`)} onMouseEnter={() => setSel(rows.findIndex((r) => r.key === `aq-${q.id}`))}>
+                  <AgentRunQuestionRow q={q} onAnswer={runInbox.answer} onSkip={runInbox.skip} />
                 </li>
               ))}
             </ul>
@@ -464,6 +481,48 @@ export default function Queue() {
       {/* Undo bar — reversible actions act instantly and regret politely. */}
       {undoBar}
     </AppShell>
+  );
+}
+
+/** A general Garvis clarification resumes the exact checkpointed agent run. */
+function AgentRunQuestionRow({ q, onAnswer, onSkip }: {
+  q: AgentRunQuestion;
+  onAnswer: (id: string, text: string) => Promise<void>;
+  onSkip: (id: string) => Promise<void>;
+}) {
+  const { toast } = useToast();
+  const [custom, setCustom] = useState('');
+  const [busy, setBusy] = useState(false);
+  const send = async (text: string) => {
+    if (!text.trim()) return;
+    setBusy(true);
+    try { await onAnswer(q.id, text.trim()); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Could not resume that run.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div>
+      <div className="flex items-start gap-2">
+        <Bot size={14} className="mt-0.5 shrink-0 text-forge-ember" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] uppercase tracking-wide text-forge-dim">{q.title}</p>
+          <p className="mt-0.5 text-sm text-forge-ink">{q.question}</p>
+        </div>
+        <Badge tone="warn">Blocking</Badge>
+        <span className="text-[10px] text-forge-dim">{timeAgo(q.createdAt)}</span>
+      </div>
+      {q.options.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {q.options.map((opt) => <Button key={opt} size="sm" variant="outline" disabled={busy} onClick={() => void send(opt)}>{opt}</Button>)}
+        </div>
+      )}
+      <div className="mt-2 flex gap-2">
+        <Input placeholder="Answer Garvis…" value={custom} onChange={(e) => setCustom(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && void send(custom)} />
+        <Button size="sm" disabled={busy || !custom.trim()} onClick={() => void send(custom)}>Resume</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void onSkip(q.id)}>Use judgment</Button>
+      </div>
+    </div>
   );
 }
 

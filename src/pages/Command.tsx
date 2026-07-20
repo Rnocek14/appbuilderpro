@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Play, Boxes, Maximize2 } from 'lucide-react';
+import { Sparkles, Send, Play, Boxes, Maximize2, StopCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { WakingMoment } from '../components/garvis/WakingMoment';
 import { RemindersCard } from '../components/garvis/RemindersCard';
@@ -35,7 +35,7 @@ const SUGGESTIONS = [
   'What can you do?',
 ];
 
-function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMission; tasks: GarvisTask[]; onRun: () => void; running: boolean }) {
+function MissionBlock({ mission, tasks, onRun, onStop, running }: { mission: GarvisMission; tasks: GarvisTask[]; onRun: () => void; onStop: () => void; running: boolean }) {
   const done = tasks.filter((t) => t.status === 'done').length;
   return (
     <div className="mt-2 rounded-lg border border-forge-ember/30 bg-forge-ember/5 p-3">
@@ -50,7 +50,7 @@ function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMissi
             the DB row still saying running. Resume re-dispatches (done tasks are skipped) instead
             of leaving an eternal spinner with no way forward. */}
         {mission.status === 'running' && (running
-          ? <span className="ml-auto"><Spinner label="working…" /></span>
+          ? <span className="ml-auto flex items-center gap-2"><Spinner label="working…" /><Button variant="ghost" onClick={onStop}><StopCircle size={13} /> Stop</Button></span>
           : <Button onClick={onRun} className="ml-auto"><Play size={13} /> Resume</Button>)}
       </div>
       {tasks.length > 0
@@ -63,7 +63,7 @@ function MissionBlock({ mission, tasks, onRun, running }: { mission: GarvisMissi
 }
 
 export default function Command() {
-  const { messages, thinking, send, missions, tasksByMission, runMission, busyId, canvas, closeCanvas } = useCommander();
+  const { messages, thinking, send, missions, tasksByMission, runMission, cancelMission, busyId, canvas, closeCanvas } = useCommander();
   const { toast } = useToast();
   const navigate = useNavigate();
   const { loading: oppLoading, scan } = useOpportunities();
@@ -114,6 +114,7 @@ export default function Command() {
             mission={mission}
             tasks={tasksByMission[mission.id] ?? []}
             onRun={() => runMission(mission.id)}
+            onStop={() => { void cancelMission(mission.id).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stop that mission.')); }}
             running={busyId === mission.id}
           />
         )}

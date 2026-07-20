@@ -347,6 +347,24 @@ export function toolsFor(mode: GarvisMode): GarvisTool[] {
   return GARVIS_TOOLS.filter((t) => t.modes.includes(mode));
 }
 
+/**
+ * The unattended worker is intentionally honest about its smaller executor. Keep this manifest
+ * beside the canonical schemas so it cannot advertise browser-only capabilities. A static parity
+ * verification compares this list with the worker's actual dispatch cases.
+ */
+export const GARVIS_SERVER_TOOL_NAMES = [
+  'list_apps', 'get_app', 'query_metrics', 'recent_runs', 'get_repo_state', 'get_app_profile',
+  'recall_knowledge', 'log_decision', 'record_outcome', 'generate_short_script', 'list_goals',
+  'list_capabilities', 'propose_goal', 'register_capability', 'propose_recommendation',
+  'update_app', 'enqueue_run',
+] as const;
+
+const GARVIS_SERVER_TOOL_SET = new Set<string>(GARVIS_SERVER_TOOL_NAMES);
+
+export function toolsForServer(mode: GarvisMode): GarvisTool[] {
+  return toolsFor(mode).filter((t) => GARVIS_SERVER_TOOL_SET.has(t.name));
+}
+
 /** Defense-in-depth: also enforced inside executeTool, not just at the loop boundary. */
 export function isToolAllowed(name: string, mode: GarvisMode): boolean {
   const tool = GARVIS_TOOLS.find((t) => t.name === name);

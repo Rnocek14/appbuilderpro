@@ -14,7 +14,7 @@
 export * from './types';
 export { GARVIS_TOOLS, toolsFor, isToolAllowed } from './tools';
 export { executeTool } from './executeTool';
-export { claimNextRun, runGarvisTask, drainQueue } from './runtime';
+export { claimNextRun, claimRun, runGarvisTask, drainQueue } from './runtime';
 export { diagnosticModel } from './diagnosticModel';
 export { brainModel } from './brainModel';
 
@@ -38,7 +38,7 @@ export { TRIAGE_SYSTEM, buildTriageUser, parseTriageResponse, groupVerdicts, app
 export type { Verdict, TriageVerdict, TriageReport, TriageAppInput, TriageInput } from './triage';
 
 import { supabase } from '../supabase';
-import { claimNextRun, runGarvisTask } from './runtime';
+import { runGarvisTask } from './runtime';
 import { diagnosticModel } from './diagnosticModel';
 import { brainModel } from './brainModel';
 import { buildKnowledgeDigest } from './knowledge';
@@ -46,6 +46,7 @@ import { buildGoalsDigest, buildCapabilitiesDigest } from './objective';
 import { buildProfilesDigest } from './profiles';
 import { buildLivenessDigest, latestByApp } from './liveness';
 import { buildOpenLoopsDigest } from './followup';
+import { loadMindRecordContext } from './mindContextRun';
 import type { AgentRun, AppLiveness, GarvisAppProfile, GarvisCapability, GarvisConstraints, GarvisGoal, GarvisKnowledge } from '../../types';
 import type { RuntimeEvent } from './types';
 
@@ -142,14 +143,35 @@ async function openLoopsContext(appId?: string | null): Promise<string> {
 }
 
 async function assembleRunInput(appId: string | null | undefined, baseInput: string): Promise<string> {
-  const [objective, profiles, liveness, openLoops, knowledge] = await Promise.all([
+  const [mind, objective, profiles, liveness, openLoops, knowledge] = await Promise.all([
+    loadMindRecordContext({ appId, budgetChars: 4_000 }),
     objectiveContext(appId),
     profilesContext(appId),
     livenessContext(appId),
     openLoopsContext(appId),
     approvedKnowledgeDigest(appId),
   ]);
-  return [objective, profiles, liveness, openLoops, knowledge, baseInput].filter(Boolean).join('\n\n');
+  return [mind, objective, profiles, liveness, openLoops, knowledge, baseInput].filter(Boolean).join('\n\n');
+}
+
+/** Atomically create + lease an interactive run. It is never visible as queued, so the unattended
+ * worker cannot claim it between two browser round trips. */
+async function createClaimedRun(input: {
+  kind: AgentRun['kind']; title: string; phase: AgentRun['phase']; budgetUsd: number;
+  detail: string; appId?: string | null;
+}): Promise<AgentRun> {
+  const { data, error } = await supabase.rpc('create_and_claim_agent_run', {
+    p_kind: input.kind,
+    p_title: input.title,
+    p_phase: input.phase,
+    p_budget_usd: input.budgetUsd,
+    p_input: input.detail,
+    p_app_id: input.appId ?? null,
+  });
+  if (error) throw new Error(error.message);
+  const run = ((data as AgentRun[] | null) ?? [])[0];
+  if (!run) throw new Error('Could not create the Garvis run.');
+  return run;
 }
 
 /**
@@ -162,18 +184,10 @@ export async function runtimeSelfTest(onEvent?: (e: RuntimeEvent) => void): Prom
   const userId = auth.user?.id;
   if (!userId) throw new Error('runtimeSelfTest requires an authenticated user.');
 
-  await supabase.from('agent_runs').insert({
-    owner_id: userId,
-    kind: 'analyze',
-    title: 'Garvis runtime self-test',
-    status: 'queued',
-    phase: 'observe',
-    budget_usd: 0,
-    input: 'Diagnostic: verify gate + tool dispatch + checkpoint + logging.',
+  const run = await createClaimedRun({
+    kind: 'analyze', title: 'Garvis runtime self-test', phase: 'observe', budgetUsd: 0,
+    detail: 'Diagnostic: verify gate + tool dispatch + checkpoint + logging.',
   });
-
-  const run = await claimNextRun();
-  if (!run) return null;
   await runGarvisTask(run, { model: diagnosticModel, onEvent });
 
   const { data } = await supabase.from('agent_runs').select('*').eq('id', run.id).maybeSingle();
@@ -201,19 +215,14 @@ export async function recommendNextAction(
     'Inspect the relevant apps and their recent metrics, then recommend the single highest-leverage ' +
     'next action THAT MOVES AN ACTIVE GOAL within the stated constraints. Ground every claim in the ' +
     'data you fetch; if metrics are missing, say so plainly.';
-  await supabase.from('agent_runs').insert({
-    owner_id: userId,
-    app_id: opts.appId ?? null,
+  const run = await createClaimedRun({
+    appId: opts.appId ?? null,
     kind: 'recommend',
     title: `What should I focus on next for ${scope}?`,
-    status: 'queued',
     phase: 'plan', // read-only + propose_recommendation; no write tools are exposed here
-    budget_usd: opts.budgetUsd ?? 0.25,
-    input: await assembleRunInput(opts.appId, baseInput),
+    budgetUsd: opts.budgetUsd ?? 0.25,
+    detail: await assembleRunInput(opts.appId, baseInput),
   });
-
-  const run = await claimNextRun();
-  if (!run) return null;
   await runGarvisTask(run, { model: brainModel, onEvent: opts.onEvent });
 
   const { data } = await supabase.from('agent_runs').select('*').eq('id', run.id).maybeSingle();
@@ -233,19 +242,11 @@ export async function runGarvisAct(
   const userId = auth.user?.id;
   if (!userId) throw new Error('runGarvisAct requires an authenticated user.');
 
-  await supabase.from('agent_runs').insert({
-    owner_id: userId,
-    app_id: opts.appId ?? null,
-    kind: 'content',
-    title: opts.title,
-    status: 'queued',
-    phase: 'act',
-    budget_usd: opts.budgetUsd ?? 0.5,
-    input: await assembleRunInput(opts.appId, opts.input),
+  const run = await createClaimedRun({
+    appId: opts.appId ?? null,
+    kind: 'content', title: opts.title, phase: 'act', budgetUsd: opts.budgetUsd ?? 0.5,
+    detail: await assembleRunInput(opts.appId, opts.input),
   });
-
-  const run = await claimNextRun();
-  if (!run) return null;
   await runGarvisTask(run, { model: brainModel, onEvent: opts.onEvent });
 
   const { data } = await supabase.from('agent_runs').select('*').eq('id', run.id).maybeSingle();

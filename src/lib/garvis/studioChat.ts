@@ -1,11 +1,10 @@
 // src/lib/garvis/studioChat.ts
 // Impure dispatcher for the Cluster Studio chat: compile context (pure) → call the cluster-chat edge
 // fn → parse the decision (pure) → EXECUTE it through owner-scoped paths → persist the transcript.
-// The chat can only ever: reply, create an artifact, revise one (new version), or PROPOSE an
-// approval. It never sends — that boundary is the same one send-email enforces.
+// The chat can only ever reply, create an artifact, or revise one (new version). Consequential
+// actions use dedicated controls that can construct and validate a real executable payload.
 
 import { supabase } from '../supabase';
-import { enqueueApproval } from './execution';
 import { createArtifact, reviseArtifact, listClusterArtifacts, listClusterFiles, getBrandKit, listStudioMessages, saveStudioMessage } from './artifacts';
 import {
   STUDIO_SYSTEM, compileStudioContext, parseStudioDecision,
@@ -102,7 +101,6 @@ export interface StudioTurnResult {
   decision: StudioDecision;
   reply: string;                 // what to show the user
   changed: boolean;              // did an artifact get created/revised (caller should refresh)
-  approvalId?: string;
   costUsd: number;
 }
 
@@ -162,15 +160,5 @@ async function executeDecision(clusterId: string, decision: StudioDecision): Pro
       return { reply: decision.note, changed: true };
     }
 
-    case 'propose_approval': {
-      const approvalId = await enqueueApproval({
-        kind: decision.approval_kind,
-        title: decision.title,
-        preview: decision.preview,
-        payload: { source: 'studio-chat', cluster_id: clusterId },
-        requestedBy: 'worker',
-      });
-      return { reply: `${decision.note} — waiting in Approvals.`, changed: false, approvalId };
-    }
   }
 }

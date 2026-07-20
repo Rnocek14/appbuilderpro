@@ -1,11 +1,11 @@
 // src/lib/garvis/clusterChat.verify.ts
 // Standalone verification of the Cluster Studio chat pure core (run: `npm run verify:clusterchat`).
 // Guards: context budget + ordering, tolerant decision parsing (garbage → reply, never throw,
-// nothing unsafe from malformed output), approval-kind whitelist, diff correctness.
+// nothing unsafe from malformed output), no payload-less approvals, diff correctness.
 
 import {
   compileStudioContext, buildStudioUser, parseStudioDecision, describeDecision, diffLines,
-  PROPOSABLE_APPROVAL_KINDS, STUDIO_SYSTEM,
+  STUDIO_SYSTEM,
   type StudioContextInput, type StudioTurn,
 } from './clusterChat';
 import { makeCharter, toolsFor } from './workweb';
@@ -78,7 +78,7 @@ const baseInput: StudioContextInput = {
   check('history capped to last 6 turns', !u.includes('turn 13') && u.includes('turn 19'));
 }
 
-// 3. Decision parsing — the four kinds.
+// 3. Decision parsing — the three safe kinds.
 {
   const r = parseStudioDecision('{"kind":"reply","text":"Target the lakefront list first."}');
   check('parses reply', r.kind === 'reply' && r.text.includes('lakefront'));
@@ -95,19 +95,15 @@ const baseInput: StudioContextInput = {
 
   const v = parseStudioDecision('{"kind":"revise_artifact","slug":"postcard-a","detail":"FRONT: Quietly, your shoreline appreciated.","note":"more luxury"}');
   check('parses revise_artifact', v.kind === 'revise_artifact' && v.slug === 'postcard-a' && v.note === 'more luxury');
-
-  const a = parseStudioDecision('{"kind":"propose_approval","approval_kind":"crm_action","title":"Log follow-up call","preview":"Call the seller Tuesday","note":"queued"}');
-  check('parses propose_approval', a.kind === 'propose_approval' && a.approval_kind === 'crm_action');
 }
 
 // 4. Safety: malformed/unsafe output degrades to reply — never throws, never acts.
 {
   check('garbage prose → reply', parseStudioDecision('I think you should send it now!').kind === 'reply');
   check('unknown kind → reply', parseStudioDecision('{"kind":"send_everything_now"}').kind === 'reply');
-  check('approval kind outside whitelist → reply', parseStudioDecision('{"kind":"propose_approval","approval_kind":"launch_missiles","title":"t","preview":"p"}').kind === 'reply');
-  check('apply_migration is NOT proposable from chat', !(PROPOSABLE_APPROVAL_KINDS as readonly string[]).includes('apply_migration'));
-  check('send_email is NOT proposable from chat (needs a constructed message)', parseStudioDecision('{"kind":"propose_approval","approval_kind":"send_email","title":"t","preview":"p"}').kind === 'reply');
-  check('spend is NOT proposable from chat', !(PROPOSABLE_APPROVAL_KINDS as readonly string[]).includes('spend'));
+  check('payload-less publish approval → inert reply', parseStudioDecision('{"kind":"propose_approval","approval_kind":"publish_post","title":"t","preview":"p"}').kind === 'reply');
+  check('payload-less deploy approval → inert reply', parseStudioDecision('{"kind":"propose_approval","approval_kind":"deploy_site","title":"t","preview":"p"}').kind === 'reply');
+  check('payload-less CRM approval → inert reply', parseStudioDecision('{"kind":"propose_approval","approval_kind":"crm_action","title":"t","preview":"p"}').kind === 'reply');
   check('revise without detail → reply', parseStudioDecision('{"kind":"revise_artifact","slug":"postcard-a"}').kind === 'reply');
   check('create without title → reply', parseStudioDecision('{"kind":"create_artifact","artifact":{"kind":"doc","detail":"D"}}').kind === 'reply');
   check('fenced JSON still parses', parseStudioDecision('```json\n{"kind":"reply","text":"hi"}\n```').kind === 'reply');
@@ -115,11 +111,12 @@ const baseInput: StudioContextInput = {
 }
 
 // 5. System prompt states the contract + the safety rule.
-check('system prompt names all four decisions', ['"reply"', 'create_artifact', 'revise_artifact', 'propose_approval'].every((k) => STUDIO_SYSTEM.includes(k)));
+check('system prompt names all three decisions', ['"reply"', 'create_artifact', 'revise_artifact'].every((k) => STUDIO_SYSTEM.includes(k)));
+check('system prompt does not advertise payload-less approvals', !STUDIO_SYSTEM.includes('propose_approval'));
 check('system prompt states the cannot-send rule', STUDIO_SYSTEM.includes('cannot send') || STUDIO_SYSTEM.includes('You cannot send'));
 
 // 6. describeDecision.
-check('describeDecision summarizes approval', describeDecision({ kind: 'propose_approval', approval_kind: 'crm_action', title: 't', preview: 'p', note: 'Queued a follow-up' }).includes('Approvals'));
+check('describeDecision summarizes artifact work', describeDecision({ kind: 'create_artifact', artifact: { kind: 'doc', title: 'T', detail: 'D' }, note: 'Created it' }) === 'Created it');
 
 // 7. diffLines.
 {

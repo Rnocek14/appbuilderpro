@@ -14,6 +14,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { projectSupabaseToken } from '../_shared/oauth.ts';
+import { payloadMatches } from '../_shared/payloadHash.ts';
 
 interface DeployFn { slug: string; source: string; verifyJwt?: boolean }
 interface DeploySecret { name: string; value: string }
@@ -26,6 +27,7 @@ Deno.serve(async (req) => {
 
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
+  let releaseExecutionClaim: ((extra?: Record<string, unknown>) => Promise<void>) | null = null;
   try {
     // AUTHZ — this wields the privileged Management token, so it must be an authenticated FableForge
     // user acting on a project they own (confused-deputy guard). Never deploy on behalf of an
@@ -48,14 +50,18 @@ Deno.serve(async (req) => {
     // the request body — otherwise a caller could point an approval-for-project-B at project A.
     if (!approval_id) return json({ error: 'This deploy must go through Approvals — deploy from the project workspace.' }, 400);
     const { data: approval } = await admin.from('approvals')
-      .select('id, owner_id, kind, status, payload, result').eq('id', approval_id).single();
+      .select('id, owner_id, kind, status, payload, payload_hash, result').eq('id', approval_id).single();
     if (!approval || approval.owner_id !== user.id || approval.kind !== 'deploy_backend' || approval.status !== 'approved') {
       return json({ error: 'No approved deploy_backend approval found for this deploy.' }, 403);
     }
+    if (!(await payloadMatches(approval.payload, approval.payload_hash as string | null))) {
+      return json({ error: 'Approval payload changed after review — create a new backend deploy approval.' }, 409);
+    }
     // Idempotency: a fully-executed approval is spent — never replay it (deep scan: approvals were
     // never consumed, so one approved id could drive repeated real deploys).
-    if ((approval.result as { executed?: boolean } | null)?.executed) {
-      return json({ error: 'This deploy was already executed — start a new deploy from the workspace.' }, 409);
+    const previous = approval.result as { executed?: boolean; results?: { step: string; ok: boolean; detail?: string }[]; deploy_claimed_at?: string } | null;
+    if (previous?.executed) {
+      return json({ ok: true, replayed: true, results: previous.results ?? [] });
     }
 
     // BIND target + payload to the approval. project_id, functions, secrets all come from what the
@@ -84,6 +90,29 @@ Deno.serve(async (req) => {
     // Managed (FableForge Cloud) DBs use the platform token; user-owned DBs use the user's OAuth token.
     const token = await projectSupabaseToken(admin, user.id, (project.supabase_managed as boolean) ?? false);
     if (!token) return json({ error: 'Connect Supabase (Settings → Connections), or set the SB_MANAGEMENT_TOKEN edge secret.' }, 400);
+
+    // Same atomic, expiring single-flight claim as deploy-site. Function/secret deploys are
+    // idempotent, but concurrent invocations would still falsify the execution ledger and status.
+    const priorResult = (previous ?? {}) as Record<string, unknown>;
+    const priorClaim = typeof priorResult.deploy_claimed_at === 'string' ? priorResult.deploy_claimed_at : null;
+    const claimAge = priorClaim ? Date.now() - Date.parse(priorClaim) : Number.POSITIVE_INFINITY;
+    if (priorClaim && Number.isFinite(claimAge) && claimAge < 60 * 60 * 1000) {
+      return json({ error: 'This backend deploy is already in flight.' }, 409);
+    }
+    const claimAt = new Date().toISOString();
+    let claimQ = admin.from('approvals')
+      .update({ result: { ...priorResult, deploy_claimed_at: claimAt } })
+      .eq('id', approval_id).eq('status', 'approved');
+    claimQ = priorClaim
+      ? claimQ.eq('result->>deploy_claimed_at', priorClaim)
+      : claimQ.is('result->>deploy_claimed_at', null);
+    const { data: claimed, error: claimError } = await claimQ.select('id');
+    if (claimError || !claimed?.length) return json({ error: 'This backend deploy is already in flight.' }, 409);
+    releaseExecutionClaim = async (extra = {}) => {
+      await admin.from('approvals').update({
+        result: { ...priorResult, ...extra, deploy_claimed_at: null },
+      }).eq('id', approval_id).eq('result->>deploy_claimed_at', claimAt);
+    };
 
     const api = (path: string, init: RequestInit) =>
       fetch(`https://api.supabase.com/v1/projects/${projectRef}${path}`, {
@@ -198,17 +227,27 @@ select cron.schedule(
       }
     }
 
-    if (!results.length) { await ledger('failed', 'Nothing to deploy — no functions or secrets provided.'); return json({ error: 'Nothing to deploy — no functions or secrets provided.' }, 400); }
+    if (!results.length) {
+      await ledger('failed', 'Nothing to deploy — no functions or secrets provided.');
+      await releaseExecutionClaim({ error: 'Nothing to deploy — no functions or secrets provided.' });
+      releaseExecutionClaim = null;
+      return json({ error: 'Nothing to deploy — no functions or secrets provided.' }, 400);
+    }
     const allOk = results.every((r) => r.ok);
     const failedSteps = results.filter((r) => !r.ok).map((r) => `${r.step}: ${r.detail ?? 'failed'}`);
     await ledger(allOk ? 'ok' : 'failed', allOk ? null : failedSteps.join(' | ').slice(0, 800), { steps: results.length });
     // Consume the approval only on a clean deploy — a partial failure stays retryable (idempotent
     // upserts), a full success can never be replayed.
-    if (allOk) {
-      await admin.from('approvals').update({ result: { executed: true, steps: results.length } }).eq('id', approval_id).then(() => {}, () => {});
-    }
+    await admin.from('approvals').update({
+      result: {
+        executed: allOk, steps: results.length, results,
+        deploy_claimed_at: allOk ? claimAt : null,
+      },
+    }).eq('id', approval_id).eq('result->>deploy_claimed_at', claimAt).then(() => {}, () => {});
+    releaseExecutionClaim = null;
     return json({ ok: allOk, results }, allOk ? 200 : 207);
   } catch (e) {
+    await releaseExecutionClaim?.({ error: e instanceof Error ? e.message.slice(0, 500) : String(e).slice(0, 500) }).catch(() => {});
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });

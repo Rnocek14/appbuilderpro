@@ -110,14 +110,22 @@ function buildUserMessage(req: BrainRequest): string {
 /** Coerce the model's JSON into a validated decision, gated to the tools we actually offered. */
 function normalize(raw: RawDecision, allowed: Set<string>): RawDecision {
   if (raw?.kind === 'tools') {
-    const calls = (raw.calls ?? []).filter((c) => c && allowed.has(c.name));
+    const calls = (Array.isArray(raw.calls) ? raw.calls : [])
+      .filter((c) => c && typeof c.name === 'string' && allowed.has(c.name));
     if (!calls.length) {
       return { kind: 'finish', output: 'No valid tool call was produced for this mode.', };
     }
-    return { kind: 'tools', calls: calls.map((c) => ({ name: c.name, input: c.input ?? {} })) };
+    return { kind: 'tools', calls: calls.map((c) => ({
+      name: c.name,
+      input: c.input && typeof c.input === 'object' && !Array.isArray(c.input) ? c.input : {},
+    })) };
   }
   if (raw?.kind === 'await_approval') {
-    return { kind: 'await_approval', question: String(raw.question ?? 'Decision needed.'), options: raw.options };
+    const question = String(raw.question ?? '').trim().slice(0, 2000) || 'Decision needed.';
+    const options = Array.isArray(raw.options)
+      ? raw.options.filter((x): x is string => typeof x === 'string').map((x) => x.trim().slice(0, 300)).filter(Boolean).slice(0, 8)
+      : undefined;
+    return { kind: 'await_approval', question, options };
   }
   // default to finish
   return {

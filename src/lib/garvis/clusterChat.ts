@@ -8,11 +8,10 @@
 //   reply             — just talk (advice, options, critique)
 //   create_artifact   — a new artifact lands in this cluster
 //   revise_artifact   — a new VERSION of an existing artifact (v1 is preserved by the DB trigger)
-//   propose_approval  — enqueue an approval; the chat can NEVER send/publish/spend directly
 //
-// The safety story is structural: the edge function only reasons; the client executes; and the only
-// outward-facing verb it can produce is a PROPOSAL into the approval queue (app_0022). Same
-// discipline as garvis-brain's mode gate, collapsed to a studio-sized contract.
+// Consequential actions are deliberately absent. A publish/deploy/send approval needs a typed,
+// validated resource payload; free-form chat cannot construct one safely. Studios draft artifacts,
+// while their dedicated controls prepare executable approvals.
 
 import type { ArtifactKind } from './clustering';
 import type { Charter, WorkTool } from './workweb';
@@ -22,23 +21,12 @@ import { ARCHETYPES } from './workweb';
 // Decision contract
 // ---------------------------------------------------------------------------
 
-// Approval kinds the chat may PROPOSE. Deliberately EXCLUDES send_email and spend: a real send needs
-// a constructed outreach_message (recipient + list), which only the Queue tool can build safely — a
-// bare chat-proposed send_email would carry no message_id and fail send-email's guard. So the chat
-// drafts email COPY as an artifact and points the owner at the Queue tool for the actual send. The
-// kinds here are ones the approval queue records safely without a pre-built payload.
-export const PROPOSABLE_APPROVAL_KINDS = [
-  'publish_post', 'deploy_site', 'crm_action',
-] as const;
-export type ProposableApprovalKind = (typeof PROPOSABLE_APPROVAL_KINDS)[number];
-
 const ARTIFACT_KINDS: ArtifactKind[] = ['image', 'video', 'diagram', 'research', 'doc', 'link', 'post', 'data'];
 
 export type StudioDecision =
   | { kind: 'reply'; text: string }
   | { kind: 'create_artifact'; artifact: { slug?: string; kind: ArtifactKind; title: string; detail: string }; note: string }
-  | { kind: 'revise_artifact'; slug: string; title?: string; detail: string; note: string }
-  | { kind: 'propose_approval'; approval_kind: ProposableApprovalKind; title: string; preview: string; note: string };
+  | { kind: 'revise_artifact'; slug: string; title?: string; detail: string; note: string };
 
 // ---------------------------------------------------------------------------
 // System prompt
@@ -51,7 +39,7 @@ the brand kit, known unknowns, and recent results. You are a sharp creative/stra
 concrete, calm, zero hype. If the BUSINESS block is absent or a fact isn't in the context, say so
 rather than inventing it.
 
-You return EXACTLY ONE JSON object per turn — one of these four decisions:
+You return EXACTLY ONE JSON object per turn — one of these three decisions:
 
 1. {"kind":"reply","text":"..."}
    Talk: answer, critique, compare options, recommend. Use when no artifact should change.
@@ -63,10 +51,6 @@ You return EXACTLY ONE JSON object per turn — one of these four decisions:
    Improve an existing artifact. Return the COMPLETE new content, not a diff. The system preserves
    the old version automatically.
 
-4. {"kind":"propose_approval","approval_kind":"publish_post|deploy_site|crm_action","title":"...","preview":"exactly what would happen","note":"one line"}
-   Put a fully-previewed action into the owner's approval queue. You cannot publish, deploy, or act —
-   you can only PROPOSE. Nothing happens until the owner approves.
-
 RULES:
 - One decision per turn. JSON only, no prose around it, no markdown fences.
 - Revise beats create when the user is clearly iterating on an existing artifact.
@@ -74,7 +58,9 @@ RULES:
 - Match the brand kit's tone when writing copy. Keep the studio's flavor (a postcard is not a tweet).
 - To actually EMAIL someone: you cannot send. Draft/revise the email copy as an artifact, then tell the
   owner to use the "Queue send" tool to pick a recipient or list — that tool attaches the recipient and
-  routes the send through the approval queue. Never claim an email was sent.`;
+  routes the send through the approval queue. Publishing and deployment likewise use their dedicated
+  studio/workspace controls, which construct the required payload. Never claim an action was queued or
+  executed from chat.`;
 
 // ---------------------------------------------------------------------------
 // Context pack — compiled, ordered, byte-budgeted (same discipline as mind.ts)
@@ -241,14 +227,6 @@ export function parseStudioDecision(raw: string): StudioDecision {
         note: str(p.note, 300) || 'Revised',
       };
     }
-    case 'propose_approval': {
-      const ak = p.approval_kind as ProposableApprovalKind;
-      if (!PROPOSABLE_APPROVAL_KINDS.includes(ak)) return fallback;
-      const title = str(p.title, 200);
-      const preview = str(p.preview, 8000);
-      if (!title || !preview) return fallback;
-      return { kind: 'propose_approval', approval_kind: ak, title, preview, note: str(p.note, 300) || 'Queued for approval' };
-    }
     default:
       return fallback;
   }
@@ -260,7 +238,6 @@ export function describeDecision(d: StudioDecision): string {
     case 'reply': return d.text;
     case 'create_artifact': return d.note;
     case 'revise_artifact': return d.note;
-    case 'propose_approval': return `${d.note} — waiting in Approvals.`;
   }
 }
 
