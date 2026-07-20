@@ -171,6 +171,84 @@ export const ACTION_SPECS: ActionSpec[] = [
     params: [],
     produces: 'an honest reading of the clock (alive / stale / never ticked) with the fix location',
   },
+  // ---- catalog expansion (July 2026): every clickable capability becomes an action ----
+  {
+    id: 'create_invoice',
+    title: 'Create an invoice',
+    category: 'company',
+    risk: 'safe',
+    description: 'Create a DRAFT invoice (a record — nothing sends). Use when the intent says to bill/invoice someone for a stated amount. The amount and recipient email must COME FROM THE INTENT — never invent either; missing → question. Sending happens later through the approval-gated Queue.',
+    params: [
+      { name: 'title', required: true, hint: 'what the invoice is for' },
+      { name: 'to_email', required: true, hint: 'the client\'s billing email, from the intent' },
+      { name: 'amount_usd', required: true, hint: 'the amount in dollars, from the intent (never invented)' },
+      { name: 'world', required: false, hint: 'which business bills (must already exist) — it signs as that brand' },
+      { name: 'due_date', required: false, hint: 'YYYY-MM-DD if the intent states one' },
+    ],
+    produces: 'a draft invoice on the Money page — queue its send from there (approval-gated; the chase ladder runs from the due date)',
+  },
+  {
+    id: 'add_reminder',
+    title: 'Set a reminder',
+    category: 'setup',
+    risk: 'safe',
+    description: 'A timed reminder that fires through the heartbeat (mind event + webhook nudge when due). Use for "remind me to…", follow-up moments, and deadlines stated in the intent.',
+    params: [
+      { name: 'title', required: true, hint: 'what to be reminded of' },
+      { name: 'due_at', required: false, hint: 'ISO date/time if the intent states when' },
+    ],
+    produces: 'a reminder that fires when due (needs the armed heartbeat for timed firing)',
+  },
+  {
+    id: 'start_content_week',
+    title: 'Start weekly content production',
+    category: 'marketing',
+    risk: 'spend',
+    description: 'Standing order: every week, draft N judged social posts (+ optionally one segment email) grounded in an EXISTING business\'s real facts, staged behind ONE approval. Drafts below the quality bar are discarded, never queued. Use for "keep my socials active", "weekly content", "post regularly".',
+    params: [
+      { name: 'world', required: true, hint: 'the business whose voice and facts ground the content (must already exist)' },
+      { name: 'posts_per_week', required: false, hint: '1-7 (default 3)' },
+      { name: 'email_segment', required: false, hint: 'all | new | contacted | qualified | customer — omit for no email piece' },
+    ],
+    produces: 'an armed weekly content order — each week lands as one reviewable approval (auto-mode is EARNED later via 3 clean approvals)',
+  },
+  {
+    id: 'start_idea_stream',
+    title: 'Start an idea stream',
+    category: 'automation',
+    risk: 'spend',
+    description: 'Standing order that drops fresh, non-repeating business ideas/angles for an EXISTING business onto its board on a cadence. Use for "keep ideas coming", "brainstorm weekly".',
+    params: [
+      { name: 'world', required: true, hint: 'the business the ideas are for (must already exist)' },
+      { name: 'cadence', required: false, hint: 'daily | weekly (default weekly)' },
+    ],
+    produces: 'an armed idea stream feeding that business\'s board (fires only while the heartbeat is armed)',
+  },
+  {
+    id: 'start_client_hunt',
+    title: 'Start the daily client hunt',
+    category: 'automation',
+    risk: 'spend',
+    description: 'The fully-automatic client acquisition machine: every day it discovers real local businesses (Google Places), audits their sites, builds demo previews, and stages pitch emails as PENDING approvals — nothing sends itself. Use for "find me clients", "get me web-design leads". Niche comes from the intent when stated.',
+    params: [
+      { name: 'niche', required: false, hint: 'business type to hunt ("realtors", "landscapers") — omit to hunt every local type' },
+      { name: 'searches_per_day', required: false, hint: 'daily search budget (default 6)' },
+    ],
+    produces: 'an armed daily hunt (needs GOOGLE_PLACES_API_KEY + the armed heartbeat); pitches wait in the Queue',
+  },
+  {
+    id: 'add_contact',
+    title: 'Add a contact',
+    category: 'company',
+    risk: 'safe',
+    description: 'Add a person to the CRM. Name/email must COME FROM THE INTENT — never invent contact details; missing email → question. Use when the intent introduces a real person to work with.',
+    params: [
+      { name: 'name', required: true, hint: 'the person\'s name, from the intent' },
+      { name: 'email', required: true, hint: 'their email, from the intent (never invented)' },
+      { name: 'world', required: false, hint: 'which business this contact belongs to (must already exist)' },
+    ],
+    produces: 'a CRM contact (email_status unknown until proven — sends still pass every gate)',
+  },
 ];
 
 /** The pure specs (what the compiler prompt and the coverage suite see). */
