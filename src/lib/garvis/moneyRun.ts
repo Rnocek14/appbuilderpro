@@ -14,9 +14,14 @@ export interface InvoiceRow extends InvoiceLike {
 }
 const COLS = 'id, world_id, contact_id, number, title, to_email, line_items, amount_usd, due_date, payment_url, status, last_chase_stage, sent_at, paid_at, created_at, source, lead_id, campaign_id, client_subscription_id';
 
-export async function listInvoices(status?: 'draft' | 'sent' | 'paid' | 'void'): Promise<InvoiceRow[]> {
+/** world: undefined = every business (the old behavior); a world id = that business only;
+ *  'none' = invoices never assigned to a business. The scan's B8: with several ventures + client
+ *  businesses, one merged list made per-business revenue unknowable. */
+export async function listInvoices(status?: 'draft' | 'sent' | 'paid' | 'void', world?: string | 'none'): Promise<InvoiceRow[]> {
   let q = supabase.from('invoices').select(COLS).order('created_at', { ascending: false }).limit(200);
   if (status) q = q.eq('status', status);
+  if (world === 'none') q = q.is('world_id', null);
+  else if (world) q = q.eq('world_id', world);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data ?? []) as InvoiceRow[];
@@ -75,9 +80,20 @@ export async function queueInvoiceSend(invoice: InvoiceRow): Promise<void> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
-  const { data: os } = await supabase.from('outreach_settings').select('from_name, company_name').eq('owner_id', uid).maybeSingle();
-  const fromName = ((os as { from_name?: string | null } | null)?.from_name ?? '').trim()
-    || ((os as { company_name?: string | null } | null)?.company_name ?? '').trim() || 'Me';
+  // Per-brand identity (B8): a world-scoped invoice signs as ITS business (app_0085), applied as
+  // a unit; only an unscoped invoice falls back to the owner-global outreach_settings identity.
+  let fromName = '';
+  if (invoice.world_id) {
+    const { data: wsi } = await supabase.from('world_sender_identities')
+      .select('from_name, company_name').eq('world_id', invoice.world_id).maybeSingle();
+    fromName = ((wsi as { from_name?: string | null } | null)?.from_name ?? '').trim()
+      || ((wsi as { company_name?: string | null } | null)?.company_name ?? '').trim();
+  }
+  if (!fromName) {
+    const { data: os } = await supabase.from('outreach_settings').select('from_name, company_name').eq('owner_id', uid).maybeSingle();
+    fromName = ((os as { from_name?: string | null } | null)?.from_name ?? '').trim()
+      || ((os as { company_name?: string | null } | null)?.company_name ?? '').trim() || 'Me';
+  }
   const email = invoiceEmail(invoice, fromName);
 
   const { data: camp, error: cErr } = await supabase.from('outreach_campaigns').insert({

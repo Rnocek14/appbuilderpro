@@ -735,7 +735,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* MARKET DATA from the owner's own RESO/MLS feed — computed stats, honest empty state,
           and the sold-by-zip number the Farm's turnover math needs. */}
       {cluster.charter?.flavor === 'market' && (
-        <PanelBoundary name="market data"><MarketDataPanel onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+        <PanelBoundary name="market data"><MarketDataPanel worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* Video as a real product: a timed, captioned storyboard from this world's own photos —

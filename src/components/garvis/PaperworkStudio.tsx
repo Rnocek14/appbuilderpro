@@ -39,6 +39,9 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
   const [selId, setSelId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [tplBody, setTplBody] = useState('');
+  // Extracted field meta ({token,label,hint}) — persisted with the template (app_0093) so the
+  // fill form can show the grounded hint instead of a bare token name.
+  const [fieldMeta, setFieldMeta] = useState<{ token: string; label: string; hint: string }[]>([]);
   const [busy, setBusy] = useState(false);
   // Extract-from-sample: paste a client's real document → a tokenized template pre-fills the
   // editor above for review. Nothing saves until the operator presses Save.
@@ -55,12 +58,12 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
 
   useEffect(() => {
     let live = true;
-    void listTemplates().then((t) => {
+    void listTemplates(worldId).then((t) => {
       if (!live) return;
       setTemplates(t);
-      if (t[0]) { setSelId(t[0].id); setName(t[0].name); setTplBody(t[0].body); }
+      if (t[0]) { setSelId(t[0].id); setName(t[0].name); setTplBody(t[0].body); setFieldMeta(t[0].fields); }
     }).catch((e) => onToast('error', e instanceof Error ? e.message : 'Could not load templates (is app_0065 applied?)'));
-    void listEnvelopes().then((e) => { if (live) setEnvelopes(e); }).catch(() => {});
+    void listEnvelopes(12, worldId).then((e) => { if (live) setEnvelopes(e); }).catch(() => {});
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -68,12 +71,12 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
   const tokens = useMemo(() => templateTokens(tplBody), [tplBody]);
   const merged = useMemo(() => mergePaperwork(tplBody, fields), [tplBody, fields]);
 
-  const pick = (t: PaperworkTemplate) => { setSelId(t.id); setName(t.name); setTplBody(t.body); };
+  const pick = (t: PaperworkTemplate) => { setSelId(t.id); setName(t.name); setTplBody(t.body); setFieldMeta(t.fields); };
 
   const doSaveTpl = async () => {
     try {
       setBusy(true);
-      const saved = await saveTemplate({ id: selId ?? undefined, name, body: tplBody, worldId });
+      const saved = await saveTemplate({ id: selId ?? undefined, name, body: tplBody, worldId, fields: fieldMeta });
       setTemplates((ts) => {
         const rest = (ts ?? []).filter((x) => x.id !== saved.id);
         return [saved, ...rest];
@@ -88,6 +91,7 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
     setSelId(null);
     setName(starter?.name.replace(' (starter)', '') ?? 'New template');
     setTplBody(starter?.body ?? 'Dear {{client_name}},\n\n…\n\n{{your_name}}');
+    setFieldMeta([]);
   };
 
   const doDeleteTpl = async () => {
@@ -103,7 +107,7 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
 
   const doSearch = async (q: string) => {
     setContactQ(q);
-    try { setHits(await searchContacts(q)); } catch { setHits([]); }
+    try { setHits(await searchContacts(q, worldId)); } catch { setHits([]); }
   };
 
   const useContact = (c: ContactHit) => {
@@ -124,7 +128,7 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
       await queueForSignature({ title, templateBody: tplBody, fields, recipients: signers, templateId: selId, worldId });
       onToast('success', `Queued for approval — approve it in the Queue and it goes to DocuSign.`);
       setTitle(''); setSigners([]);
-      setEnvelopes(await listEnvelopes());
+      setEnvelopes(await listEnvelopes(12, worldId));
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not queue.'); }
     finally { setBusy(false); }
   };
@@ -132,7 +136,7 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
   const doPoll = async (row: EnvelopeRow) => {
     try {
       const res = await pollEnvelopeStatus(row.id);
-      setEnvelopes(await listEnvelopes());
+      setEnvelopes(await listEnvelopes(12, worldId));
       onToast('info', `Status: ${res.status}.`);
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Poll failed.'); }
   };
@@ -203,7 +207,7 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
                     setExtracting(true);
                     void extractPaperworkTemplate(sample)
                       .then((t) => {
-                        setSelId(null); setName(t.name); setTplBody(t.body);
+                        setSelId(null); setName(t.name); setTplBody(t.body); setFieldMeta(t.fields);
                         setSampleOpen(false); setSample('');
                         onToast('success', `Extracted "${t.name}" with ${t.fields.length} fill-in field(s) — review the template above, then Save.`);
                       })
@@ -253,14 +257,18 @@ export function PaperworkStudio({ worldId, onToast }: { worldId: string; onToast
 
           {tokens.length > 0 && (
             <div className="mt-2 grid grid-cols-2 gap-1.5">
-              {tokens.map((t) => (
-                <label key={t} className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wide text-forge-dim">
-                  {t.replace(/_/g, ' ')}
-                  <input value={fields[t] ?? ''} onChange={(e) => setFields((f) => ({ ...f, [t]: e.target.value }))}
-                    className={cn('rounded-lg border bg-forge-bg px-2 py-1 text-xs normal-case text-forge-ink focus:outline-none',
-                      (fields[t] ?? '').trim() ? 'border-forge-border focus:border-forge-ember/60' : 'border-forge-warn/50')} />
-                </label>
-              ))}
+              {tokens.map((t) => {
+                const meta = fieldMeta.find((m) => m.token === t);
+                return (
+                  <label key={t} className="flex flex-col gap-0.5 text-[10px] uppercase tracking-wide text-forge-dim" title={meta?.hint || undefined}>
+                    {meta?.label || t.replace(/_/g, ' ')}
+                    <input value={fields[t] ?? ''} onChange={(e) => setFields((f) => ({ ...f, [t]: e.target.value }))}
+                      placeholder={meta?.hint ?? ''}
+                      className={cn('rounded-lg border bg-forge-bg px-2 py-1 text-xs normal-case text-forge-ink placeholder:text-forge-dim/50 focus:outline-none',
+                        (fields[t] ?? '').trim() ? 'border-forge-border focus:border-forge-ember/60' : 'border-forge-warn/50')} />
+                  </label>
+                );
+              })}
             </div>
           )}
 

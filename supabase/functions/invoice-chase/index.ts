@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
   const now = new Date();
 
   const { data: invoices, error } = await admin.from('invoices')
-    .select('id, owner_id, contact_id, number, title, to_email, amount_usd, due_date, payment_url, status, paid_at, last_chase_stage')
+    .select('id, owner_id, world_id, contact_id, number, title, to_email, amount_usd, due_date, payment_url, status, paid_at, last_chase_stage')
     .eq('status', 'sent').not('due_date', 'is', null).limit(500);
   if (error) return json({ error: error.message }, 500);
 
@@ -67,8 +67,19 @@ Deno.serve(async (req) => {
       const { data: os } = await admin.from('outreach_settings')
         .select('from_name, company_name, outbound_enabled').eq('owner_id', inv.owner_id).maybeSingle();
       if (!(os as { outbound_enabled?: boolean } | null)?.outbound_enabled) { skipped++; continue; }
-      const fromName = ((os as { from_name?: string | null } | null)?.from_name ?? '').trim()
-        || ((os as { company_name?: string | null } | null)?.company_name ?? '').trim() || 'Me';
+      // Per-brand identity (scan B8): a world-scoped invoice chases as ITS business (app_0085,
+      // applied as a unit); only unscoped invoices fall back to the owner-global identity.
+      let fromName = '';
+      if ((inv as { world_id?: string | null }).world_id) {
+        const { data: wsi } = await admin.from('world_sender_identities')
+          .select('from_name, company_name').eq('world_id', (inv as { world_id?: string | null }).world_id).maybeSingle();
+        fromName = ((wsi as { from_name?: string | null } | null)?.from_name ?? '').trim()
+          || ((wsi as { company_name?: string | null } | null)?.company_name ?? '').trim();
+      }
+      if (!fromName) {
+        fromName = ((os as { from_name?: string | null } | null)?.from_name ?? '').trim()
+          || ((os as { company_name?: string | null } | null)?.company_name ?? '').trim() || 'Me';
+      }
       const copy = chaseCopy(stage, inv, fromName);
 
       const { data: camp } = await admin.from('outreach_campaigns').insert({
