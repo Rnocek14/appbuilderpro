@@ -441,14 +441,19 @@ export default function Settings() {
   const { toast } = useToast();
   const [fullName, setFullName] = useState(profile?.full_name ?? '');
   const [webhookUrl, setWebhookUrl] = useState(profile?.webhook_url ?? '');
+  const [calendarUrl, setCalendarUrl] = useState((profile as { calendar_ics_url?: string | null } | null)?.calendar_ics_url ?? '');
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const saveProfile = async () => {
     if (!profile) return;
+    if (calendarUrl.trim() && !/^https:\/\//.test(calendarUrl.trim())) { toast('error', 'The calendar feed must be an https:// ICS URL.'); return; }
     setSaving(true);
     const { error } = await supabase.from('profiles')
-      .update({ full_name: fullName.trim(), webhook_url: webhookUrl.trim() || null, updated_at: new Date().toISOString() })
+      .update({
+        full_name: fullName.trim(), webhook_url: webhookUrl.trim() || null,
+        calendar_ics_url: calendarUrl.trim() || null, updated_at: new Date().toISOString(),
+      })
       .eq('id', profile.id);
     setSaving(false);
     if (error) toast('error', error.message);
@@ -506,6 +511,20 @@ export default function Settings() {
               <span className="mt-1 block">
                 Autopilot pings this when a build finishes, fails, pauses, or needs an answer — so you can
                 check in from your phone.
+              </span>
+            </label>
+            <label className="block text-xs text-forge-dim">
+              <span>📅 Calendar feed (secret ICS URL — Google Calendar → Settings → "Secret address in iCal format")</span>
+              <Input
+                className="mt-1"
+                placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"
+                value={calendarUrl}
+                onChange={(e) => setCalendarUrl(e.target.value)}
+              />
+              <span className="mt-1 block">
+                The morning brief includes your next 24h of events, so Garvis plans around the day you
+                actually have. Read-only; clear the field to disconnect. Recurring events show only their
+                original date (not expanded yet — honest limitation).
               </span>
             </label>
             <Button onClick={saveProfile} loading={saving}>Save changes</Button>

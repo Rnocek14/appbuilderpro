@@ -3,7 +3,7 @@
 // no DB. The extraction gauntlet is the trust boundary between the model and the feed — the
 // allowlist rule (no hallucinated links) and the never-guess field rules are proven here.
 
-import { buildQueries, parseOpportunities, dedupeKey, huntLine, MAX_QUERIES, MAX_FOUND_PER_RUN } from './opportunityHunt';
+import { buildQueries, parseOpportunities, dedupeKey, huntLine, MAX_QUERIES, MAX_FOUND_PER_RUN, QUERY_VARIANTS, DRY_RUNS_BEFORE_ROTATE } from './opportunityHunt';
 
 let passed = 0;
 let failed = 0;
@@ -17,6 +17,18 @@ const qs = buildQueries('mural and custom art jobs', 'Wisconsin');
 check(`queries are capped at ${MAX_QUERIES} and deduped`, qs.length <= MAX_QUERIES && new Set(qs).size === qs.length);
 check('queries carry the focus and the region', qs.every((q) => q.includes('mural and custom art jobs')) && qs.some((q) => q.includes('Wisconsin')));
 check('region is optional', buildQueries('grants').every((q) => !q.includes('undefined') && !q.includes('null')));
+
+// ---- self-tuning rotation (holy-grail gap 5) ----
+const v0 = buildQueries('mural jobs', 'Wisconsin', 0);
+const v1 = buildQueries('mural jobs', 'Wisconsin', 1);
+const v2 = buildQueries('mural jobs', 'Wisconsin', 2);
+check(`${QUERY_VARIANTS} distinct query vocabularies exist`, QUERY_VARIANTS >= 3);
+check('each variant is a genuinely different vocabulary', v0.join('|') !== v1.join('|') && v1.join('|') !== v2.join('|') && v0.join('|') !== v2.join('|'));
+check('every variant still carries the focus', [v0, v1, v2].every((set) => set.every((q) => q.includes('mural jobs'))));
+check('every variant still carries the region somewhere', [v0, v1, v2].every((set) => set.some((q) => q.includes('Wisconsin'))));
+check('variants wrap deterministically', buildQueries('mural jobs', null, QUERY_VARIANTS).join('|') === buildQueries('mural jobs', null, 0).join('|'));
+check('default variant is the original phrasing', buildQueries('mural jobs', 'Wisconsin').join('|') === v0.join('|'));
+check(`rotation waits for ${DRY_RUNS_BEFORE_ROTATE} dry runs`, DRY_RUNS_BEFORE_ROTATE >= 2);
 
 // ---- parseOpportunities: the gauntlet ----
 const PAGES = ['https://city.example.gov/public-art/rfps', 'https://calls.example.org/open'];

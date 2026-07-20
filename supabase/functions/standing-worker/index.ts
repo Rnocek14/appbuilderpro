@@ -31,7 +31,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
-import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES } from '../../../src/lib/garvis/opportunityHunt.ts';
+import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES, DRY_RUNS_BEFORE_ROTATE, QUERY_VARIANTS } from '../../../src/lib/garvis/opportunityHunt.ts';
 import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
 import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
@@ -708,10 +708,15 @@ Deno.serve(async (req) => {
     // opportunities table. READ + RECORD only — applying is the operator's move, in the feed.
     if (order.kind === 'opportunity_hunt') {
       try {
-        const cfg = (order.config ?? {}) as { focus?: string; region?: string | null; queries?: string[] };
+        const cfg = (order.config ?? {}) as { focus?: string; region?: string | null; queries?: string[]; dry_streak?: number; variant?: number };
         const focus = (cfg.focus ?? '').trim();
         if (!focus) throw new Error('no focus configured (config.focus missing)');
-        const queries = (Array.isArray(cfg.queries) && cfg.queries.length ? cfg.queries : buildQueries(focus, cfg.region)).slice(0, MAX_QUERIES);
+        // SELF-TUNING (holy-grail gap 5): the variant picks the query vocabulary; a hunt that has
+        // been dry DRY_RUNS_BEFORE_ROTATE runs in a row rotates to the next angle set instead of
+        // repeating a dead phrasing forever. Deterministic and stated in last_result.
+        const variant = Number(cfg.variant) || 0;
+        const queries = (variant === 0 && Array.isArray(cfg.queries) && cfg.queries.length
+          ? cfg.queries : buildQueries(focus, cfg.region, variant)).slice(0, MAX_QUERIES);
 
         let line: string;
         let found = 0;
@@ -745,16 +750,36 @@ Deno.serve(async (req) => {
           }
 
           // 2. FETCH up to 6 result pages (SSRF-safe), keeping honest count of unreadable ones.
+          // RENDERED-FETCH SENSE (holy-grail gap 7): a page too thin for static HTML gets ONE
+          // second chance through Serper's scrape endpoint, which executes JS — the class of
+          // portal the hunt used to only be able to flag now actually gets read. Fail-soft: a
+          // scrape miss keeps the honest `thin` count exactly as before.
           const pages: { url: string; text: string }[] = [];
           let thin = 0;
+          let rendered = 0;
           for (const c of candidates.slice(0, 6)) {
             if (Date.now() - started > HUNT_BUDGET_MS) break;
+            let text = '';
             try {
               const res = await safeFetch(c.url);
-              const text = normalizeContent(await res.text()).slice(0, 6000);
-              if (text.length < 200) { thin++; continue; } // JS-rendered/empty — reported, not silently skipped
-              pages.push({ url: c.url, text });
-            } catch { thin++; }
+              text = normalizeContent(await res.text()).slice(0, 6000);
+            } catch { /* fall through to the rendered attempt */ }
+            if (text.length < 200) {
+              try {
+                const sr = await fetch('https://scrape.serper.dev', {
+                  method: 'POST', signal: AbortSignal.timeout(20_000),
+                  headers: { 'X-API-KEY': serperKey, 'content-type': 'application/json' },
+                  body: JSON.stringify({ url: c.url }),
+                });
+                if (sr.ok) {
+                  const out = (await sr.json().catch(() => ({}))) as { text?: string; markdown?: string };
+                  const renderedText = normalizeContent(String(out.text ?? out.markdown ?? '')).slice(0, 6000);
+                  if (renderedText.length >= 200) { text = renderedText; rendered++; }
+                }
+              } catch { /* rendered attempt is best-effort */ }
+            }
+            if (text.length < 200) { thin++; continue; } // truly unreadable — reported, never silently skipped
+            pages.push({ url: c.url, text });
           }
 
           // 3. EXTRACT — one batched, credit-metered call bound to the fetched-URL allowlist.
@@ -784,12 +809,23 @@ Deno.serve(async (req) => {
             }
           }
           line = huntLine(focus, searched, pages.length, found, thin);
+          if (rendered > 0) line += ` (${rendered} JS-rendered page${rendered === 1 ? '' : 's'} read via the rendered fetch)`;
         }
 
         ran++;
         if (found > 0) changed++;
+        // Dry-streak accounting: only real searches count (a missing key is not a dry run).
+        const searchedThisRun = !!serperKey;
+        let dryStreak = searchedThisRun ? (found > 0 ? 0 : (Number(cfg.dry_streak) || 0) + 1) : (Number(cfg.dry_streak) || 0);
+        let nextVariant = variant;
+        if (dryStreak >= DRY_RUNS_BEFORE_ROTATE) {
+          nextVariant = (variant + 1) % QUERY_VARIANTS;
+          dryStreak = 0;
+          line += ` Rotated search angles after ${DRY_RUNS_BEFORE_ROTATE} dry runs (vocabulary ${nextVariant + 1}/${QUERY_VARIANTS}).`;
+        }
         await admin.from('standing_orders').update({
           last_run_at: nowIso,
+          config: { ...cfg, dry_streak: dryStreak, variant: nextVariant },
           last_result: { status: found > 0 ? 'changed' : 'unchanged', line, hash: null, excerpt: null, checkedAt: nowIso },
           next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
           updated_at: nowIso,
