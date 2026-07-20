@@ -12,6 +12,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
@@ -92,13 +93,21 @@ Deno.serve(async (req) => {
         sequence_step: stage, subject: copy.subject, body_text: copy.body, to_address: inv.to_email, status: 'draft',
       }).select('id').single();
       if (!msg) { skipped++; continue; }
-      const apPayload = { message_id: msg.id, invoice_id: inv.id, chase_stage: stage };
-      await admin.from('approvals').insert({
-        owner_id: inv.owner_id, kind: 'send_email', status: 'pending', requested_by: 'worker',
+      // Earned autonomy (app_0097): a granted 'invoice_chase' class self-approves under its
+      // daily cap and executes through the one send path. Otherwise: pending, as ever.
+      const auto = await autonomyAllowed(admin, inv.owner_id, 'invoice_chase');
+      const apPayload: Record<string, unknown> = { message_id: msg.id, invoice_id: inv.id, chase_stage: stage };
+      if (auto) apPayload.autonomy_class = 'invoice_chase';
+      const { data: apRow } = await admin.from('approvals').insert({
+        owner_id: inv.owner_id, kind: 'send_email',
+        ...(auto
+          ? { requested_by: 'garvis-auto', status: 'approved', decided_via: 'autonomy_grant', decided_at: new Date().toISOString() }
+          : { status: 'pending', requested_by: 'worker' }),
         title: `${['', 'Reminder', 'Due note', 'Past-due follow-up', 'Final notice'][stage]} for ${inv.number} → ${inv.to_email}`,
         preview: `${copy.subject}\n\n${copy.body.slice(0, 400)}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
-      });
+      }).select('id').single();
+      if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       await admin.from('invoices').update({ last_chase_stage: stage, updated_at: now.toISOString() }).eq('id', inv.id);
       drafted++;
     } catch { skipped++; /* one invoice's failure never blocks the rest */ }

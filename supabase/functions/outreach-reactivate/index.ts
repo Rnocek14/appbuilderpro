@@ -21,6 +21,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 
@@ -126,13 +127,21 @@ Deno.serve(async (req) => {
           sequence_step: 0, subject, body_text: body, to_address: email, status: 'draft',
         }).select('id').single();
         if (!msg) continue;
-        const apPayload = { message_id: msg.id, sweep: 'reactivation' };
-        await admin.from('approvals').insert({
-          owner_id: uid, kind: 'send_email', status: 'pending', requested_by: 'garvis',
+        // Earned autonomy (app_0097): a granted 'reactivation' class self-approves under its
+        // daily cap and executes through the one send path. Otherwise: pending, as ever.
+        const auto = await autonomyAllowed(admin, uid, 'reactivation');
+        const apPayload: Record<string, unknown> = { message_id: msg.id, sweep: 'reactivation' };
+        if (auto) apPayload.autonomy_class = 'reactivation';
+        const { data: apRow } = await admin.from('approvals').insert({
+          owner_id: uid, kind: 'send_email',
+          ...(auto
+            ? { requested_by: 'garvis-auto', status: 'approved', decided_via: 'autonomy_grant', decided_at: new Date().toISOString() }
+            : { status: 'pending', requested_by: 'garvis' }),
           title: `Reactivation draft → ${email}`,
           preview: `${subject}\n\n${body.slice(0, 400)}`,
           payload: apPayload, payload_hash: await hashPayload(apPayload),
-        }).then(() => {}, () => {});
+        }).select('id').maybeSingle();
+        if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
         made++; drafted++;
       }
 

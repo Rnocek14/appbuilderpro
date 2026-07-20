@@ -20,6 +20,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 import { complete, modelForPlan, getProviderConfig, type AIProvider } from '../_shared/ai.ts';
 import { getUserPlan } from '../_shared/credits.ts';
 
@@ -174,13 +175,21 @@ Deno.serve(async (req) => {
       }).select('id').single();
       if (!newMsg) { skipped++; continue; }
 
-      const apPayload = { message_id: (newMsg as { id: string }).id, campaign_id: r.campaign_id, reply_id: r.id };
-      await admin.from('approvals').insert({
-        owner_id: r.owner_id, kind: 'send_email', requested_by: 'worker',
+      // Earned autonomy (app_0097): a granted 'inbox_reply' class self-approves under its
+      // daily cap and executes through the one send path. Otherwise: pending, as ever.
+      const auto = await autonomyAllowed(admin, r.owner_id, 'inbox_reply');
+      const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: r.campaign_id, reply_id: r.id };
+      if (auto) apPayload.autonomy_class = 'inbox_reply';
+      const { data: apRow } = await admin.from('approvals').insert({
+        owner_id: r.owner_id, kind: 'send_email',
+        ...(auto
+          ? { requested_by: 'garvis-auto', status: 'approved', decided_via: 'autonomy_grant', decided_at: new Date().toISOString() }
+          : { requested_by: 'worker' }),
         title: `Reply draft → ${r.from_address ?? prior.to_address} (they wrote back)`,
         preview: `THEY SAID: ${(r.body_text ?? '').slice(0, 200)}\n\nDRAFT:\n${draft.subject}\n\n${draft.body}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
-      });
+      }).select('id').single();
+      if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       drafted++;
     } catch { skipped++; /* one thread's failure never blocks the rest */ }
   }
