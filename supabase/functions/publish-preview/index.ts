@@ -22,7 +22,9 @@ const cors = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-worker-secret',
 };
 
-async function sha1Hex(bytes: Uint8Array): Promise<string> {
+// Uint8Array<ArrayBuffer> (not the default ArrayBufferLike) so it satisfies BufferSource under Deno's
+// strict lib — the same natural type TextEncoder().encode / new Uint8Array(ArrayBuffer) produce.
+async function sha1Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const d = await crypto.subtle.digest('SHA-1', bytes);
   return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -63,7 +65,8 @@ Deno.serve(async (req) => {
     const htmlPath = publishedHtmlPath(ownerId, previewSiteId);
 
     // Resolve the HTML: the operator sends it (and we stash it); the worker re-publishes the stash.
-    let bytes: Uint8Array;
+    // Uint8Array<ArrayBuffer> (concrete backing) so it satisfies BufferSource/BodyInit under Deno.
+    let bytes: Uint8Array<ArrayBuffer>;
     if (typeof html === 'string' && html.trim().length > 200) {
       bytes = new TextEncoder().encode(html);
       // Only the operator path reaches here with html; stash it (upsert) for later webhook re-publish.
