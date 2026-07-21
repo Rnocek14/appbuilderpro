@@ -1,7 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+// The cast keeps this file checkable OUTSIDE Vite too (deno check follows worker imports into
+// src/): Vite injects import.meta.env at build/dev time either way.
+const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+const url = viteEnv.VITE_SUPABASE_URL;
+const anonKey = viteEnv.VITE_SUPABASE_ANON_KEY;
 
 export const supabaseConfigured = Boolean(url && anonKey);
 // Exposed for streaming edge-function calls, which must bypass supabase-js

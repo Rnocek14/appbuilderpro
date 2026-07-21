@@ -26,7 +26,7 @@ interface Account { account_id: string; base_uri: string; is_default: boolean }
 async function resolveAccount(token: string): Promise<{ ok: true; accountId: string; baseUri: string } | { ok: false; error: string }> {
   // userinfo-based resolution (harvested from lakegen's one good idea here): the account and
   // base_uri come from the CONNECTED token, so env/account drift can't 401 every call.
-  const r = await fetch(`${AUTH_BASE}/oauth/userinfo`, { headers: { Authorization: `Bearer ${token}` } });
+  const r = await fetch(`${AUTH_BASE}/oauth/userinfo`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30_000) });
   if (!r.ok) return { ok: false, error: `DocuSign userinfo ${r.status} — reconnect DocuSign.` };
   const u = await r.json() as { accounts?: Account[] };
   const acct = (u.accounts ?? []).find((a) => a.is_default) ?? (u.accounts ?? [])[0];
@@ -157,7 +157,7 @@ Deno.serve(async (req) => {
     const envReq = envelopeRequest({ title: row.title, docBase64, signers: recipients, webhookUrl });
 
     const res = await fetch(`${acct.baseUri}/restapi/v2.1/accounts/${acct.accountId}/envelopes`, {
-      method: 'POST',
+      method: 'POST', signal: AbortSignal.timeout(60_000),
       headers: { 'content-type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(envReq),
     });

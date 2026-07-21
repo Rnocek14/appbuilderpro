@@ -91,7 +91,7 @@ async function syncOwner(
 
     try {
       const res = await fetch(ANALYTICS_URL, {
-        method: 'POST', headers,
+        method: 'POST', headers, signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({ id: row.provider_post_id, platforms: row.platforms?.length ? row.platforms : undefined }),
       });
       const out = await res.json().catch(() => ({} as Record<string, unknown>));

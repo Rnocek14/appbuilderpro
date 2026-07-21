@@ -31,7 +31,8 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 // verified in src; this worker is only the I/O around them (Google Places, fetch-url scrape, DB
 // writes). Discovery is the swift-prep-pros model: a self-exhausting query queue over Places.
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
-import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES } from '../../../src/lib/garvis/opportunityHunt.ts';
+import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES, DRY_RUNS_BEFORE_ROTATE, QUERY_VARIANTS } from '../../../src/lib/garvis/opportunityHunt.ts';
+import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
 import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
@@ -120,6 +121,60 @@ Deno.serve(async (req) => {
         await admin.from('reminders').update({ notified_at: nowIso }).eq('id', r.id);
       }
     } catch { /* reminder firing must never wedge the order tick */ }
+
+    // ---- ARC WAKE SWEEP (app_0095) -----------------------------------------------------------
+    // Waiting arcs carry a machine-checkable blocker (waiting_on). When the blocker has cleared —
+    // the business draft got approved, the chartered areas landed — flip the arc to 'ready':
+    // the Orchestrate page auto-resumes ready arcs on sight, and the owner gets one honest line.
+    // The system notices, so the operator doesn't have to remember.
+    try {
+      const { data: blocked } = await admin.from('orchestrator_plans')
+        .select('id, owner_id, title, waiting_on')
+        .eq('status', 'waiting').not('waiting_on', 'is', null).limit(20);
+      for (const arc of (blocked ?? []) as { id: string; owner_id: string; title: string; waiting_on: { kind?: string; title?: string; world_id?: string } }[]) {
+        const w = arc.waiting_on ?? {};
+        let cleared = false;
+        if (w.kind === 'world_exists' && w.title) {
+          // Cleared when the world resolves the same way the executor will: one match, or an
+          // exact-title match among two. ('world_named'/'other' need the operator — never auto.)
+          const { data: worlds } = await admin.from('knowledge_worlds')
+            .select('id, title').eq('owner_id', arc.owner_id).ilike('title', `%${w.title}%`).limit(2);
+          const rows = (worlds ?? []) as { title: string }[];
+          cleared = rows.length === 1
+            || rows.filter((r) => r.title.toLowerCase() === String(w.title).toLowerCase()).length === 1;
+        } else if (w.kind === 'world_area' && w.world_id) {
+          const { data: areas } = await admin.from('knowledge_clusters')
+            .select('id').eq('world_id', w.world_id).not('charter', 'is', null).limit(1);
+          cleared = ((areas ?? []).length > 0);
+        }
+        if (!cleared) continue;
+        await admin.from('orchestrator_plans')
+          .update({ status: 'ready', updated_at: nowIso, last_activity_at: nowIso })
+          .eq('id', arc.id).eq('status', 'waiting');
+        await admin.from('mind_events').insert({
+          owner_id: arc.owner_id, event_type: 'note', source: 'orchestrator',
+          subject: `▶ Arc "${String(arc.title).slice(0, 120)}" is unblocked — it resumes when you next open Orchestrate.`,
+          payload: { key: `arc-ready:${arc.id}`, plan_id: arc.id },
+        }).then(() => {}, () => {});
+        const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', arc.owner_id).maybeSingle();
+        await notifyText((prof as { webhook_url?: string } | null)?.webhook_url,
+          `▶ "${String(arc.title).slice(0, 120)}" is unblocked — open Orchestrate and it continues on its own.`).catch(() => {});
+      }
+    } catch { /* the wake sweep must never wedge the order tick */ }
+
+    // ---- ARC ADVANCE (server-side execution of mechanical steps) -----------------------------
+    // A 'ready' arc advances RIGHT HERE for every step whose action is purely mechanical
+    // (standing orders, records, reminders, invoices — no model, no browser). Creative steps
+    // (founding, plans, campaigns) stop the advance and leave the arc 'ready' for the client
+    // visit. Zero presence required for the mechanical tail of a project.
+    try {
+      const { data: readyArcs } = await admin.from('orchestrator_plans')
+        .select('id, owner_id, title, steps, statuses')
+        .eq('status', 'ready').limit(5);
+      for (const arc of (readyArcs ?? []) as { id: string; owner_id: string; title: string; steps: PlanStep[]; statuses: StepStatus[] }[]) {
+        await advanceArcServerSide(admin, arc, nowIso).catch(() => {});
+      }
+    } catch { /* arc advance must never wedge the order tick */ }
 
     // ---- BULK SEND DRAIN (app_0064) ----------------------------------------------------------
     // One human approval covers a snapshotted batch; the clock drains it a slice per tick by
@@ -653,10 +708,15 @@ Deno.serve(async (req) => {
     // opportunities table. READ + RECORD only — applying is the operator's move, in the feed.
     if (order.kind === 'opportunity_hunt') {
       try {
-        const cfg = (order.config ?? {}) as { focus?: string; region?: string | null; queries?: string[] };
+        const cfg = (order.config ?? {}) as { focus?: string; region?: string | null; queries?: string[]; dry_streak?: number; variant?: number };
         const focus = (cfg.focus ?? '').trim();
         if (!focus) throw new Error('no focus configured (config.focus missing)');
-        const queries = (Array.isArray(cfg.queries) && cfg.queries.length ? cfg.queries : buildQueries(focus, cfg.region)).slice(0, MAX_QUERIES);
+        // SELF-TUNING (holy-grail gap 5): the variant picks the query vocabulary; a hunt that has
+        // been dry DRY_RUNS_BEFORE_ROTATE runs in a row rotates to the next angle set instead of
+        // repeating a dead phrasing forever. Deterministic and stated in last_result.
+        const variant = Number(cfg.variant) || 0;
+        const queries = (variant === 0 && Array.isArray(cfg.queries) && cfg.queries.length
+          ? cfg.queries : buildQueries(focus, cfg.region, variant)).slice(0, MAX_QUERIES);
 
         let line: string;
         let found = 0;
@@ -690,16 +750,36 @@ Deno.serve(async (req) => {
           }
 
           // 2. FETCH up to 6 result pages (SSRF-safe), keeping honest count of unreadable ones.
+          // RENDERED-FETCH SENSE (holy-grail gap 7): a page too thin for static HTML gets ONE
+          // second chance through Serper's scrape endpoint, which executes JS — the class of
+          // portal the hunt used to only be able to flag now actually gets read. Fail-soft: a
+          // scrape miss keeps the honest `thin` count exactly as before.
           const pages: { url: string; text: string }[] = [];
           let thin = 0;
+          let rendered = 0;
           for (const c of candidates.slice(0, 6)) {
             if (Date.now() - started > HUNT_BUDGET_MS) break;
+            let text = '';
             try {
               const res = await safeFetch(c.url);
-              const text = normalizeContent(await res.text()).slice(0, 6000);
-              if (text.length < 200) { thin++; continue; } // JS-rendered/empty — reported, not silently skipped
-              pages.push({ url: c.url, text });
-            } catch { thin++; }
+              text = normalizeContent(await res.text()).slice(0, 6000);
+            } catch { /* fall through to the rendered attempt */ }
+            if (text.length < 200) {
+              try {
+                const sr = await fetch('https://scrape.serper.dev', {
+                  method: 'POST', signal: AbortSignal.timeout(20_000),
+                  headers: { 'X-API-KEY': serperKey, 'content-type': 'application/json' },
+                  body: JSON.stringify({ url: c.url }),
+                });
+                if (sr.ok) {
+                  const out = (await sr.json().catch(() => ({}))) as { text?: string; markdown?: string };
+                  const renderedText = normalizeContent(String(out.text ?? out.markdown ?? '')).slice(0, 6000);
+                  if (renderedText.length >= 200) { text = renderedText; rendered++; }
+                }
+              } catch { /* rendered attempt is best-effort */ }
+            }
+            if (text.length < 200) { thin++; continue; } // truly unreadable — reported, never silently skipped
+            pages.push({ url: c.url, text });
           }
 
           // 3. EXTRACT — one batched, credit-metered call bound to the fetched-URL allowlist.
@@ -729,12 +809,23 @@ Deno.serve(async (req) => {
             }
           }
           line = huntLine(focus, searched, pages.length, found, thin);
+          if (rendered > 0) line += ` (${rendered} JS-rendered page${rendered === 1 ? '' : 's'} read via the rendered fetch)`;
         }
 
         ran++;
         if (found > 0) changed++;
+        // Dry-streak accounting: only real searches count (a missing key is not a dry run).
+        const searchedThisRun = !!serperKey;
+        let dryStreak = searchedThisRun ? (found > 0 ? 0 : (Number(cfg.dry_streak) || 0) + 1) : (Number(cfg.dry_streak) || 0);
+        let nextVariant = variant;
+        if (dryStreak >= DRY_RUNS_BEFORE_ROTATE) {
+          nextVariant = (variant + 1) % QUERY_VARIANTS;
+          dryStreak = 0;
+          line += ` Rotated search angles after ${DRY_RUNS_BEFORE_ROTATE} dry runs (vocabulary ${nextVariant + 1}/${QUERY_VARIANTS}).`;
+        }
         await admin.from('standing_orders').update({
           last_run_at: nowIso,
+          config: { ...cfg, dry_streak: dryStreak, variant: nextVariant },
           last_result: { status: found > 0 ? 'changed' : 'unchanged', line, hash: null, excerpt: null, checkedAt: nowIso },
           next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
           updated_at: nowIso,
@@ -1736,4 +1827,215 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     payload, payload_hash, requested_by: 'garvis-auto',
   });
   return !apErr;
+}
+
+// ============================================================================
+// ARC ADVANCE (app_0095, second half): server-side execution of MECHANICAL arc
+// steps. The client's actionRegistry stays the authority for creative actions
+// (models, browser rails); this list is strictly the subset that is pure DB
+// work — the two implementations must agree on outcomes, and the coverage
+// suite pins the catalog they both serve.
+// ============================================================================
+
+const SERVER_ACTIONS = new Set([
+  'hunt_opportunities', 'watch_page', 'cadence_digest', 'record_thesis', 'check_master_switch',
+  'add_reminder', 'add_contact', 'create_invoice', 'start_idea_stream', 'start_client_hunt',
+  'start_content_week', 'mount_room',
+]);
+
+// deno-lint-ignore no-explicit-any
+async function resolveWorldSrv(admin: any, ownerId: string, title: string): Promise<{ id: string; title: string } | null> {
+  const { data } = await admin.from('knowledge_worlds')
+    .select('id, title').eq('owner_id', ownerId).ilike('title', `%${title}%`).limit(2);
+  const rows = (data ?? []) as { id: string; title: string }[];
+  if (rows.length === 1) return rows[0];
+  const exact = rows.filter((r) => r.title.toLowerCase() === title.toLowerCase());
+  return exact.length === 1 ? exact[0] : null;
+}
+
+/** One mechanical step, server-side. Mirrors the client executors' outcomes; a missing world
+ *  parks the step waiting (same seam), and anything unexpected fails the step honestly. */
+// deno-lint-ignore no-explicit-any
+async function execServerAction(admin: any, ownerId: string, action: string, p: Record<string, string>, nowIso: string): Promise<StepStatus> {
+  const needWorld = async (title: string) => {
+    const w = await resolveWorldSrv(admin, ownerId, title);
+    if (!w) throw { waiting: `No business named "${title}" yet — approve its draft, then this continues on its own.` };
+    return w;
+  };
+  const order = async (row: Record<string, unknown>, note: string): Promise<StepStatus> => {
+    const { error } = await admin.from('standing_orders').insert({
+      owner_id: ownerId, status: 'active', anchor_at: nowIso, next_run_at: nowIso, ...row,
+    });
+    if (error) throw new Error(error.message);
+    return { kind: 'done', note, link: '/garvis/automations' };
+  };
+
+  switch (action) {
+    case 'hunt_opportunities': {
+      const worldId = p.world ? (await needWorld(p.world)).id : null;
+      const cadence = p.cadence === 'weekly' ? 'weekly' : 'daily';
+      return order({
+        world_id: worldId, kind: 'opportunity_hunt', label: `Hunt: ${p.focus.slice(0, 60)}`, cadence,
+        config: { focus: p.focus, region: p.region ?? null, queries: buildQueries(p.focus, p.region ?? null) },
+      }, `Hunt "${p.focus.slice(0, 60)}" armed (${cadence}) unattended — new opportunities land in the feed.`);
+    }
+    case 'watch_page': {
+      if (!/^https?:\/\/.+\..+/.test(p.url ?? '')) throw new Error('A watch needs a full URL.');
+      const cadence = ['hourly', 'daily', 'weekly'].includes(p.cadence ?? '') ? p.cadence : 'daily';
+      return order({ world_id: null, kind: 'watch_url', label: p.label, cadence, config: { url: p.url } },
+        `Watch "${p.label}" armed (${cadence}) unattended.`);
+    }
+    case 'cadence_digest': {
+      const w = await needWorld(p.world);
+      const cadence = p.cadence === 'daily' ? 'daily' : 'weekly';
+      return order({ world_id: w.id, kind: 'cadence_digest', label: `${w.title} digest`, cadence, config: {} },
+        `Digest for ${w.title} armed (${cadence}) unattended.`);
+    }
+    case 'start_idea_stream': {
+      const w = await needWorld(p.world);
+      const cadence = p.cadence === 'daily' ? 'daily' : 'weekly';
+      return order({ world_id: w.id, kind: 'idea_stream', label: `${w.title} idea stream`, cadence, config: {} },
+        `Idea stream for ${w.title} armed (${cadence}) unattended.`);
+    }
+    case 'start_client_hunt': {
+      const searches = Math.min(20, Math.max(1, Number(p.searches_per_day) || 6));
+      const label = p.niche ? `Daily hunt: ${p.niche.trim()}` : 'Daily hunt: all local businesses';
+      return order({
+        world_id: null, kind: 'client_hunt', label, cadence: 'daily',
+        config: { niches: p.niche ? [p.niche.trim()] : [], scope: { mode: 'topN', n: 50 }, searchesPerDay: searches, demoQuota: 2, cursor: 0 },
+      }, `"${label}" armed unattended — pitches wait in the Queue.`);
+    }
+    case 'start_content_week': {
+      const w = await needWorld(p.world);
+      const posts = Math.min(7, Math.max(1, Number(p.posts_per_week) || 3));
+      const seg = ['all', 'new', 'contacted', 'qualified', 'customer'].includes(p.email_segment ?? '') ? p.email_segment : null;
+      return order({
+        world_id: w.id, kind: 'content_week', label: `Content week: ${posts} post${posts === 1 ? '' : 's'}${seg ? ' + email' : ''}`,
+        cadence: 'weekly', config: { platforms: ['twitter', 'linkedin'], postsPerWeek: posts, emailSegment: seg, sendHourUtc: 16, minScore: 6 },
+      }, `Weekly content for ${w.title} armed unattended — each week stages as ONE approval.`);
+    }
+    case 'record_thesis': {
+      const { error } = await admin.from('garvis_knowledge').insert({
+        owner_id: ownerId, kind: 'decision', title: (p.title ?? '').slice(0, 80), body: p.body,
+        source: 'orchestrator', status: 'proposed',
+      });
+      if (error) throw new Error(error.message);
+      return { kind: 'needs_review', note: `Thesis "${(p.title ?? '').slice(0, 60)}" filed as proposed knowledge — approve it on Memory.`, link: '/garvis/memory' };
+    }
+    case 'add_reminder': {
+      const due = p.due_at && !Number.isNaN(Date.parse(p.due_at)) ? new Date(p.due_at).toISOString() : null;
+      const { error } = await admin.from('reminders').insert({ owner_id: ownerId, title: p.title, due_at: due });
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `Reminder set unattended: "${p.title.slice(0, 80)}".`, link: '/garvis/home' };
+    }
+    case 'add_contact': {
+      const email = (p.email ?? '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw new Error(`"${p.email}" is not a valid email.`);
+      const worldId = p.world ? (await needWorld(p.world)).id : null;
+      const { data: existing } = await admin.from('contacts').select('id').eq('owner_id', ownerId).eq('email', email).maybeSingle();
+      if (existing) return { kind: 'done', note: `${email} is already in the CRM — nothing duplicated.`, link: '/garvis/contacts' };
+      const { error } = await admin.from('contacts').insert({
+        owner_id: ownerId, world_id: worldId, full_name: (p.name ?? '').trim(), email, email_status: 'unknown', is_primary: false,
+      });
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `${(p.name ?? '').trim()} (${email}) added to the CRM unattended.`, link: '/garvis/contacts' };
+    }
+    case 'create_invoice': {
+      const amount = Number(p.amount_usd);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error(`"${p.amount_usd}" is not a billable amount.`);
+      const to = (p.to_email ?? '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) throw new Error(`"${p.to_email}" is not a valid billing email.`);
+      const worldId = p.world ? (await needWorld(p.world)).id : null;
+      const year = new Date().getFullYear();
+      const { count } = await admin.from('invoices').select('id', { count: 'exact', head: true }).eq('owner_id', ownerId);
+      let lastErr = 'Could not create the invoice.';
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const number = `INV-${year}-${String((count ?? 0) + 1 + attempt).padStart(3, '0')}`;
+        const { error } = await admin.from('invoices').insert({
+          owner_id: ownerId, world_id: worldId, number, title: p.title, to_email: to,
+          line_items: [{ description: p.title, qty: 1, unit_usd: amount }], amount_usd: amount,
+          due_date: p.due_date || null, source: 'garvis_tool',
+        });
+        if (!error) return { kind: 'done', note: `Invoice ${number} drafted unattended for $${amount.toFixed(2)} → ${to}. Queue its send from Money (approval-gated).`, link: '/garvis/money' };
+        lastErr = error.message;
+        if (error.code !== '23505') break;
+      }
+      throw new Error(lastErr);
+    }
+    case 'mount_room': {
+      if (!/^https:\/\/.+\..+/.test(p.url ?? '')) throw new Error('A room needs a full https:// URL.');
+      const w = await needWorld(p.world);
+      const { error } = await admin.from('world_rooms').insert({
+        owner_id: ownerId, world_id: w.id, title: (p.title ?? '').trim() || 'Room', url: p.url.trim(), kind: 'deployed',
+      });
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `Room "${(p.title ?? '').trim()}" mounted in ${w.title} unattended.`, link: '/garvis/webs' };
+    }
+    case 'check_master_switch': {
+      const { data } = await admin.from('system_heartbeat').select('last_tick_at').order('last_tick_at', { ascending: false }).limit(1);
+      const last = (data?.[0] as { last_tick_at?: string } | undefined)?.last_tick_at;
+      const age = last ? Math.round((Date.now() - Date.parse(last)) / 60000) : null;
+      return age !== null && age <= 120
+        ? { kind: 'done', note: `The clock is alive — last tick ${age} min ago.`, link: '/garvis/health' }
+        : { kind: 'needs_review', note: 'The heartbeat looks stale from here — check the Health page.', link: '/garvis/health' };
+    }
+    default:
+      throw new Error(`"${action}" is not a server-executable action.`);
+  }
+}
+
+/** Advance one 'ready' arc as far as its mechanical steps allow. Claims the arc (same CAS the
+ *  client uses), executes SERVER_ACTIONS in topological order, stops at the first creative step
+ *  (arc stays 'ready' for the client visit), and releases the claim with an honest status. */
+// deno-lint-ignore no-explicit-any
+async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: string; title: string; steps: PlanStep[]; statuses: StepStatus[] }, nowIso: string): Promise<void> {
+  const { data: claimed } = await admin.from('orchestrator_plans')
+    .update({ claimed_until: new Date(Date.now() + 5 * 60_000).toISOString() })
+    .eq('id', arc.id)
+    .or(`claimed_until.is.null,claimed_until.lt.${new Date().toISOString()}`)
+    .select('id').maybeSingle();
+  if (!claimed) return; // a client run owns it — never fight
+
+  const steps = arc.steps;
+  const statuses: StepStatus[] = steps.map((_, i) => arc.statuses?.[i] ?? { kind: 'pending', note: '' });
+  let advanced = 0;
+  let blockedOnCreative = false;
+  const { order: topo } = orderSteps(steps);
+  for (const i of topo) {
+    if (stepSucceeded(statuses[i].kind)) continue;
+    const deps = steps[i].after;
+    if (deps.some((a) => statuses[a].kind === 'failed' || statuses[a].kind === 'skipped')) {
+      statuses[i] = { kind: 'skipped', note: 'Skipped — a prerequisite did not complete.' };
+      continue;
+    }
+    if (deps.some((a) => !stepSucceeded(statuses[a].kind))) { continue; }
+    if (!SERVER_ACTIONS.has(steps[i].action)) { blockedOnCreative = true; continue; }
+    try {
+      statuses[i] = await execServerAction(admin, arc.owner_id, steps[i].action, steps[i].params, nowIso);
+      advanced++;
+    } catch (e) {
+      const waiting = (e as { waiting?: string })?.waiting;
+      statuses[i] = waiting
+        ? { kind: 'waiting', note: waiting }
+        : { kind: 'failed', note: e instanceof Error ? e.message : 'The step failed server-side.' };
+    }
+  }
+
+  // waiting > done/failed > ready: a parked step re-enters the wake sweep; anything still
+  // pending (creative steps, dep chains) leaves the arc 'ready' for the client visit.
+  const derived = derivePlanStatus(statuses);
+  const status = derived === 'waiting' ? 'waiting' : derived === 'done' ? 'done' : derived === 'failed' ? 'failed' : 'ready';
+  const waitingReason = statuses.find((s) => s.kind === 'waiting')?.note ?? null;
+  await admin.from('orchestrator_plans').update({
+    statuses, status, waiting_reason: waitingReason,
+    last_activity_at: nowIso, updated_at: nowIso, claimed_until: null,
+  }).eq('id', arc.id);
+
+  if (advanced > 0) {
+    await admin.from('mind_events').insert({
+      owner_id: arc.owner_id, event_type: 'note', source: 'orchestrator',
+      subject: `⚙ Arc "${String(arc.title).slice(0, 100)}": ${advanced} step(s) executed unattended${status === 'done' ? ' — the arc is DONE' : blockedOnCreative ? ' — creative steps wait for your next visit' : ''}.`,
+      payload: { key: `arc-advance:${arc.id}:${nowIso.slice(0, 13)}`, plan_id: arc.id, advanced },
+    }).then(() => {}, () => {});
+  }
 }

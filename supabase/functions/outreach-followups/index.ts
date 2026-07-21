@@ -14,8 +14,12 @@
 // any scheduler: POST with header x-cron-secret.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { cronAuthorized } from '../_shared/cronGate.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
+import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const MAX_FOLLOWUPS = 2;
 
 async function draftFollowup(subject: string, body: string, firstName: string, n: number): Promise<{ subject: string; body: string } | null> {
@@ -78,10 +82,10 @@ Deno.serve(async (req) => {
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...cors, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const secret = Deno.env.get('CRON_SECRET');
-  if (!secret || req.headers.get('x-cron-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
+  if (!cronAuthorized(req)) return json({ error: 'Unauthorized' }, 401);
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  await stampHeartbeat(admin, 'garvis-followups-daily');
   const limit = Math.min(25, Number(new URL(req.url).searchParams.get('limit') ?? 10));
   const nowIso = new Date().toISOString();
 
@@ -126,12 +130,21 @@ Deno.serve(async (req) => {
 
     // Enqueue the approval (never auto-send).
     if (newMsg) {
-      await admin.from('approvals').insert({
-        owner_id: camp.owner_id, kind: 'send_email', requested_by: 'worker',
+      // Earned autonomy (app_0097): a granted 'followup' class self-approves under its daily
+      // cap and executes through the one send path (every gate re-runs there). Otherwise: pending.
+      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup');
+      const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
+      if (auto) apPayload.autonomy_class = 'followup';
+      const { data: apRow } = await admin.from('approvals').insert({
+        owner_id: camp.owner_id, kind: 'send_email',
+        ...(auto
+          ? { requested_by: 'garvis-auto', status: 'approved', decided_via: 'autonomy_grant', decided_at: new Date().toISOString() }
+          : { requested_by: 'worker' }),
         title: `Follow-up #${n} to ${first.to_address}`,
         preview: `${draft.subject}\n\n${draft.body}`,
-        payload: { message_id: (newMsg as { id: string }).id, campaign_id: camp.id },
-      });
+        payload: apPayload, payload_hash: await hashPayload(apPayload),
+      }).select('id').single();
+      if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       drafted++;
     }
   }
@@ -191,12 +204,19 @@ Deno.serve(async (req) => {
     // Enqueue the approval (never auto-send). The signal is stated HERE, to the owner — never in
     // the email itself.
     if (newMsg) {
-      await admin.from('approvals').insert({
-        owner_id: camp.owner_id, kind: 'send_email', requested_by: 'worker',
+      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup');
+      const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
+      if (auto) apPayload.autonomy_class = 'followup';
+      const { data: apRow } = await admin.from('approvals').insert({
+        owner_id: camp.owner_id, kind: 'send_email',
+        ...(auto
+          ? { requested_by: 'garvis-auto', status: 'approved', decided_via: 'autonomy_grant', decided_at: new Date().toISOString() }
+          : { requested_by: 'worker' }),
         title: `Follow-up (opened ${m.open_count}×, no reply) to ${m.to_address}`,
         preview: `SIGNAL: they opened the last email ${m.open_count} times and never replied.\n\n${draft.subject}\n\n${draft.body}`,
-        payload: { message_id: (newMsg as { id: string }).id, campaign_id: camp.id },
-      });
+        payload: apPayload, payload_hash: await hashPayload(apPayload),
+      }).select('id').single();
+      if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       hotDrafted++;
     }
   }

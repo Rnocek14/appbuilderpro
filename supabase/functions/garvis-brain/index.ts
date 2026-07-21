@@ -184,11 +184,10 @@ Deno.serve(async (req) => {
     inputTokens: result.inputTokens, outputTokens: result.outputTokens,
   });
 
-  let raw: RawDecision;
-  try {
-    raw = parseJson<RawDecision>(result.text);
-  } catch {
-    // The model didn't return parseable JSON — fail soft into a finish so the run doesn't hang.
+  // parseJson returns null on garbage (it does NOT throw — the old catch here never fired, and
+  // null flowed into normalize; the deno-check gate caught it). Fail soft into a finish.
+  const raw = parseJson<RawDecision>(result.text);
+  if (!raw) {
     return json({
       kind: 'finish',
       output: result.text.slice(0, 2000) || 'The model returned no parseable decision.',

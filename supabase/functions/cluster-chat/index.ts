@@ -20,6 +20,11 @@ interface ChatRequest {
   context?: string;   // compiled studio context (byte-budgeted client-side)
   history?: { role: 'user' | 'garvis'; content: string }[];
   message?: string;
+  // 'raw': trust the system prompt's own output contract instead of appending the studio
+  // decision-JSON instruction. The orchestrator compiler (different JSON schema) and Ask
+  // synthesis (plain prose, explicitly "No JSON") share this chokepoint — for them the suffix
+  // was contradiction noise. Default 'decision' keeps every studio caller unchanged.
+  format?: 'decision' | 'raw';
 }
 
 const MAX_CONTEXT = 12000;
@@ -58,7 +63,8 @@ Deno.serve(async (req) => {
       { role: 'system', content: system },
       {
         role: 'user',
-        content: [context, history && `RECENT CONVERSATION:\n${history}`, `OWNER SAYS: ${message}`, 'Respond with exactly one decision JSON object.']
+        content: [context, history && `RECENT CONVERSATION:\n${history}`, `OWNER SAYS: ${message}`,
+          body.format === 'raw' ? '' : 'Respond with exactly one decision JSON object.']
           .filter(Boolean).join('\n\n'),
       },
     ];

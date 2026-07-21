@@ -23,7 +23,16 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
     const body = (await req.json().catch(() => ({}))) as { returnUrl?: string };
-    const returnUrl = (body.returnUrl && /^https?:\/\//.test(body.returnUrl)) ? body.returnUrl : (req.headers.get('origin') ?? '');
+    // Same-origin only (scan B18): this mirrored create-checkout's open-redirect fix — any
+    // http(s) URL used to be accepted, making the portal link an open-redirect primitive.
+    const origin = req.headers.get('origin') ?? '';
+    let returnUrl = origin;
+    if (body.returnUrl) {
+      try {
+        const u = new URL(body.returnUrl);
+        if (origin && u.origin === origin) returnUrl = body.returnUrl;
+      } catch { /* malformed → fall back to the caller's origin */ }
+    }
     if (!returnUrl) return json({ error: 'returnUrl is required.' }, 400);
 
     const stripe = stripeClient();

@@ -9,8 +9,12 @@
 // Secrets: CRON_SECRET (x-cron-secret). Deploy: supabase functions deploy invoice-chase --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { cronAuthorized } from '../_shared/cronGate.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
+import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 
 interface Inv {
@@ -45,14 +49,14 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...cors, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
-  const secret = Deno.env.get('CRON_SECRET');
-  if (!secret || req.headers.get('x-cron-secret') !== secret) return json({ error: 'Unauthorized' }, 401);
+  if (!cronAuthorized(req)) return json({ error: 'Unauthorized' }, 401);
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  await stampHeartbeat(admin, 'garvis-invoice-chase-daily');
   const now = new Date();
 
   const { data: invoices, error } = await admin.from('invoices')
-    .select('id, owner_id, contact_id, number, title, to_email, amount_usd, due_date, payment_url, status, paid_at, last_chase_stage')
+    .select('id, owner_id, world_id, contact_id, number, title, to_email, amount_usd, due_date, payment_url, status, paid_at, last_chase_stage')
     .eq('status', 'sent').not('due_date', 'is', null).limit(500);
   if (error) return json({ error: error.message }, 500);
 
@@ -65,8 +69,19 @@ Deno.serve(async (req) => {
       const { data: os } = await admin.from('outreach_settings')
         .select('from_name, company_name, outbound_enabled').eq('owner_id', inv.owner_id).maybeSingle();
       if (!(os as { outbound_enabled?: boolean } | null)?.outbound_enabled) { skipped++; continue; }
-      const fromName = ((os as { from_name?: string | null } | null)?.from_name ?? '').trim()
-        || ((os as { company_name?: string | null } | null)?.company_name ?? '').trim() || 'Me';
+      // Per-brand identity (scan B8): a world-scoped invoice chases as ITS business (app_0085,
+      // applied as a unit); only unscoped invoices fall back to the owner-global identity.
+      let fromName = '';
+      if ((inv as { world_id?: string | null }).world_id) {
+        const { data: wsi } = await admin.from('world_sender_identities')
+          .select('from_name, company_name').eq('world_id', (inv as { world_id?: string | null }).world_id).maybeSingle();
+        fromName = ((wsi as { from_name?: string | null } | null)?.from_name ?? '').trim()
+          || ((wsi as { company_name?: string | null } | null)?.company_name ?? '').trim();
+      }
+      if (!fromName) {
+        fromName = ((os as { from_name?: string | null } | null)?.from_name ?? '').trim()
+          || ((os as { company_name?: string | null } | null)?.company_name ?? '').trim() || 'Me';
+      }
       const copy = chaseCopy(stage, inv, fromName);
 
       const { data: camp } = await admin.from('outreach_campaigns').insert({
@@ -78,12 +93,21 @@ Deno.serve(async (req) => {
         sequence_step: stage, subject: copy.subject, body_text: copy.body, to_address: inv.to_email, status: 'draft',
       }).select('id').single();
       if (!msg) { skipped++; continue; }
-      await admin.from('approvals').insert({
-        owner_id: inv.owner_id, kind: 'send_email', status: 'pending', requested_by: 'worker',
+      // Earned autonomy (app_0097): a granted 'invoice_chase' class self-approves under its
+      // daily cap and executes through the one send path. Otherwise: pending, as ever.
+      const auto = await autonomyAllowed(admin, inv.owner_id, 'invoice_chase');
+      const apPayload: Record<string, unknown> = { message_id: msg.id, invoice_id: inv.id, chase_stage: stage };
+      if (auto) apPayload.autonomy_class = 'invoice_chase';
+      const { data: apRow } = await admin.from('approvals').insert({
+        owner_id: inv.owner_id, kind: 'send_email',
+        ...(auto
+          ? { requested_by: 'garvis-auto', status: 'approved', decided_via: 'autonomy_grant', decided_at: new Date().toISOString() }
+          : { status: 'pending', requested_by: 'worker' }),
         title: `${['', 'Reminder', 'Due note', 'Past-due follow-up', 'Final notice'][stage]} for ${inv.number} → ${inv.to_email}`,
         preview: `${copy.subject}\n\n${copy.body.slice(0, 400)}`,
-        payload: { message_id: msg.id, invoice_id: inv.id, chase_stage: stage },
-      });
+        payload: apPayload, payload_hash: await hashPayload(apPayload),
+      }).select('id').single();
+      if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       await admin.from('invoices').update({ last_chase_stage: stage, updated_at: now.toISOString() }).eq('id', inv.id);
       drafted++;
     } catch { skipped++; /* one invoice's failure never blocks the rest */ }

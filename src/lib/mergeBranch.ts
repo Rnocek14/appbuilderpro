@@ -229,27 +229,36 @@ export async function mergeBranchToMain(
     return report;
   }
 
-  // 5. COMMIT — the candidate is green; land it and clear the branch overlay.
+  // 5. COMMIT — the candidate is green; land it and clear the branch overlay. All content
+  // upserts go in ONE statement (scan B18: the per-file loop could crash mid-commit and leave a
+  // half-written Main — verification guaranteed greenness, not write atomicity). A single batched
+  // upsert is one PostgREST request → one transaction: it lands whole or not at all.
   progress('commit', 'Checks passed — writing the merge to Main…');
   const messageChanges: { path: string; before: string; after: string; additions: number; deletions: number }[] = [];
+  const upsertRows: { project_id: string; path: string; content: string; updated_by_ai: boolean; deleted_at: null }[] = [];
   for (const [path, content] of candidate) {
     const before = mainApp.get(path);
     if (before === content) continue;
-    const { error } = await supabase.from('project_files').upsert(
-      { project_id: projectId, path, content, updated_by_ai: true, deleted_at: null },
-      { onConflict: 'project_id,path' },
-    );
-    if (error) throw new Error(`Merge write failed at ${path}: ${error.message}`);
+    upsertRows.push({ project_id: projectId, path, content, updated_by_ai: true, deleted_at: null });
     report.merged.push(path);
     messageChanges.push({ path, before: before ?? '', after: content, ...diffstat(before ?? '', content) });
   }
-  for (const c of active) {
-    if (c.action !== 'delete') continue;
-    await supabase.from('project_files')
+  if (upsertRows.length) {
+    const { error } = await supabase.from('project_files').upsert(upsertRows, { onConflict: 'project_id,path' });
+    if (error) throw new Error(`Merge write failed — Main is unchanged, the branch is intact: ${error.message}`);
+  }
+  const deletePaths = active.filter((c) => c.action === 'delete').map((c) => c.path);
+  if (deletePaths.length) {
+    // One statement for all soft-deletes too; a failure here leaves extra files present (never
+    // broken code), and the thrown error says exactly what to re-run.
+    const { error } = await supabase.from('project_files')
       .update({ deleted_at: new Date().toISOString() })
-      .eq('project_id', projectId).eq('path', c.path);
-    report.deletedPaths.push(c.path);
-    messageChanges.push({ path: c.path, before: mainApp.get(c.path) ?? '', after: '', ...diffstat(mainApp.get(c.path) ?? '', '') });
+      .eq('project_id', projectId).in('path', deletePaths);
+    if (error) throw new Error(`Merge landed but ${deletePaths.length} deletion(s) did not (${error.message}) — re-run the merge to finish them.`);
+    for (const path of deletePaths) {
+      report.deletedPaths.push(path);
+      messageChanges.push({ path, before: mainApp.get(path) ?? '', after: '', ...diffstat(mainApp.get(path) ?? '', '') });
+    }
   }
   await discardBranch(projectId, branchId);
 

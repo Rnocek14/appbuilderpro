@@ -54,6 +54,7 @@ Deno.serve(async (req) => {
     ], { maxTokens: 4000, provider: m.provider, model: m.model });
     await spendCredits(admin, user.id, { costUsd: r.costUsd, kind: 'plan', provider: m.provider, model: m.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens });
     const p = parseJson<{ summary?: string; steps?: string[]; fileHints?: string[]; options?: string[]; openQuestions?: string[] }>(r.text);
+    if (!p) return json({ error: 'The model returned an unparseable plan — try again.' }, 502);
     const plan = {
       summary: (p.summary ?? '').trim(),
       steps: p.steps ?? [],

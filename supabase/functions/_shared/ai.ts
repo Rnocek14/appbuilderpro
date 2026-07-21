@@ -4,6 +4,15 @@
 
 export type AIProvider = 'anthropic' | 'openai' | 'openrouter' | 'local';
 
+// Every provider call gets a hard wall-clock cap (scan B15: zero fetch timeouts across the fleet
+// meant one hung provider stalled a whole cron tick until the platform killed it). 300s is far
+// above any healthy call — this exists to convert "hangs forever" into a typed, retryable error.
+const FETCH_TIMEOUT_MS = 300_000;
+function fetchT(url: string, init: RequestInit): Promise<Response> {
+  return fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+}
+
+
 export interface AIMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
@@ -81,7 +90,7 @@ export async function complete(
     if (provider === 'anthropic') {
       const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
       const rest = messages.filter((m) => m.role !== 'system');
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetchT('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -111,7 +120,7 @@ export async function complete(
       : provider === 'openrouter' ? Deno.env.get('OPENROUTER_API_KEY')
       : 'local';
 
-    const res = await fetch(`${base}/chat/completions`, {
+    const res = await fetchT(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
@@ -153,7 +162,7 @@ export async function completeVision(
         ...images.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mediaType, data: im.base64 } })),
         { type: 'text', text: userText },
       ];
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetchT('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -186,7 +195,7 @@ export async function completeVision(
       { type: 'text', text: userText },
       ...images.map((im) => ({ type: 'image_url', image_url: { url: `data:${im.mediaType};base64,${im.base64}` } })),
     ];
-    const res = await fetch(`${base}/chat/completions`, {
+    const res = await fetchT(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
       body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content }] }),
@@ -243,7 +252,7 @@ export async function completeStream(
   if (provider === 'anthropic') {
     const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
     const rest = messages.filter((m) => m.role !== 'system');
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetchT('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -274,7 +283,7 @@ export async function completeStream(
     provider === 'openai' ? Deno.env.get('OPENAI_API_KEY')
     : provider === 'openrouter' ? Deno.env.get('OPENROUTER_API_KEY')
     : 'local';
-  const res = await fetch(`${base}/chat/completions`, {
+  const res = await fetchT(`${base}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
     body: JSON.stringify({ model, max_tokens: maxTokens, messages, stream: true, stream_options: { include_usage: true } }),
@@ -308,7 +317,7 @@ export async function completeWithWebSearch(
   const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n');
   const rest = messages.filter((m) => m.role !== 'system');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetchT('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',

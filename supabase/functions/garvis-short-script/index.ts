@@ -100,12 +100,8 @@ Deno.serve(async (req) => {
     inputTokens: result.inputTokens, outputTokens: result.outputTokens,
   });
 
-  let parsed: Record<string, unknown> = {};
-  try {
-    parsed = parseJson<Record<string, unknown>>(result.text);
-  } catch {
-    parsed = { script: result.text };
-  }
+  // parseJson returns null on garbage (never throws) — the fallback lives on the null branch.
+  const parsed: Record<string, unknown> = parseJson<Record<string, unknown>>(result.text) ?? { script: result.text };
 
   // Stub-honesty is part of the contract: the server stamps it, and the client re-stamps it too.
   return json({

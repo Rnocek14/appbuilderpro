@@ -33,7 +33,7 @@ const STATUS_META: Record<StepStatus['kind'], { icon: typeof Check; cls: string 
 };
 
 const ARC_TONE: Record<ArcRow['status'], 'dim' | 'ember' | 'ok' | 'warn' | 'err'> = {
-  draft: 'dim', running: 'ember', waiting: 'warn', done: 'ok', failed: 'err', abandoned: 'dim',
+  draft: 'dim', running: 'ember', waiting: 'warn', ready: 'ember', done: 'ok', failed: 'err', abandoned: 'dim',
 };
 
 export default function Orchestrate() {
@@ -50,6 +50,25 @@ export default function Orchestrate() {
   const [resumingId, setResumingId] = useState<string | null>(null);
   const refreshArcs = () => { void listArcs().then(setArcs).catch(() => {}); };
   useEffect(refreshArcs, []);
+
+  // AUTO-RESUME (app_0095): the worker's wake sweep flips unblocked arcs to 'ready'; the moment
+  // this page sees one, it continues the work by itself — the operator's approval already
+  // happened, presence is the only thing that was missing. One at a time, then re-check.
+  useEffect(() => {
+    const ready = arcs.find((a) => a.status === 'ready');
+    if (!ready || resumingId) return;
+    setResumingId(ready.id);
+    void runArc(ready.id, () => {})
+      .then((rep) => {
+        toast(rep.state === 'done' ? 'success' : 'info',
+          rep.state === 'done' ? `▶ Arc "${ready.title}" was unblocked — finished on its own.`
+            : rep.state === 'waiting' ? `▶ Arc "${ready.title}" advanced, now waiting: ${rep.waitingReason ?? 'a prerequisite'}.`
+            : `▶ Arc "${ready.title}" resumed → ${rep.state}.`);
+      })
+      .catch(() => { /* claim contention or transient — the arc stays ready for the next look */ })
+      .finally(() => { setResumingId(null); refreshArcs(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arcs]);
 
   const compile = async () => {
     if (compiling || running) return;
@@ -245,7 +264,7 @@ export default function Orchestrate() {
                       <Badge tone={ARC_TONE[a.status]}>{a.status}</Badge>
                       <span className="text-[11px] text-forge-dim">{p.succeeded}/{p.total} steps · {timeAgo(a.last_activity_at)}</span>
                       <div className="ml-auto flex items-center gap-1.5">
-                        {(a.status === 'waiting' || a.status === 'running' || a.status === 'draft') && (
+                        {(a.status === 'waiting' || a.status === 'running' || a.status === 'draft' || a.status === 'ready') && (
                           <Button size="sm" variant="outline" onClick={() => void resume(a)} loading={resumingId === a.id}>
                             <Play size={12} /> {a.status === 'draft' ? 'Run' : 'Resume'}
                           </Button>
@@ -256,6 +275,9 @@ export default function Orchestrate() {
                     </div>
                     {a.status === 'waiting' && a.waiting_reason && (
                       <p className="mt-1 flex items-start gap-1.5 text-xs text-forge-warn"><Hourglass size={12} className="mt-0.5 shrink-0" /> {a.waiting_reason}</p>
+                    )}
+                    {a.status === 'ready' && (
+                      <p className="mt-1 flex items-start gap-1.5 text-xs text-forge-ember"><Play size={12} className="mt-0.5 shrink-0" /> Unblocked — the prerequisite landed; resuming automatically.</p>
                     )}
                   </li>
                 );

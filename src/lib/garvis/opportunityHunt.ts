@@ -38,22 +38,48 @@ export interface FoundOpportunity {
 export const MAX_QUERIES = 4;
 export const MAX_FOUND_PER_RUN = 12;
 
-/**
- * Deterministic query set from focus + region. Angle-diverse on purpose (open calls, RFPs,
- * commissions, applications) — one search phrasing misses what another catches.
- */
-export function buildQueries(focus: string, region?: string | null): string[] {
-  const f = focus.trim().replace(/\s+/g, ' ');
-  const r = (region ?? '').trim();
-  const geo = r ? ` ${r}` : '';
-  const qs = [
+/** How many consecutive dry runs before the hunt rotates its own query angles (self-tuning). */
+export const DRY_RUNS_BEFORE_ROTATE = 3;
+
+/** The angle sets a hunt rotates through when a phrasing stops yielding. Variant 0 is the
+ *  original; each further variant tries a genuinely different search vocabulary. Deterministic —
+ *  same variant, same queries — so a rotation is reproducible and honest in last_result. */
+const ANGLE_SETS: ((f: string, geo: string) => string[])[] = [
+  (f, geo) => [
     `${f} open call${geo}`,
     `${f} RFP application deadline${geo}`,
     `"call for artists" ${f}${geo}`,
     `${f} commission opportunity apply${geo}`,
-  ];
-  return [...new Set(qs.map((q) => q.replace(/\s+/g, ' ').trim()))].slice(0, MAX_QUERIES);
+  ],
+  (f, geo) => [
+    `${f} "now accepting" proposals${geo}`,
+    `${f} grant program apply 2026${geo}`,
+    `${f} "request for qualifications"${geo}`,
+    `hiring ${f}${geo}`,
+  ],
+  (f, geo) => [
+    `${f} "submit your" application${geo}`,
+    `${f} contract opportunity bid${geo}`,
+    `${f} residency OR fellowship apply${geo}`,
+    `${f} "deadline extended"${geo}`,
+  ],
+];
+
+/**
+ * Deterministic query set from focus + region. Angle-diverse on purpose (open calls, RFPs,
+ * commissions, applications) — one search phrasing misses what another catches. `variant`
+ * rotates the whole vocabulary (self-tuning: the worker bumps it after DRY_RUNS_BEFORE_ROTATE
+ * consecutive dry runs, wrapping — a hunt never gets stuck on one dead phrasing).
+ */
+export function buildQueries(focus: string, region?: string | null, variant = 0): string[] {
+  const f = focus.trim().replace(/\s+/g, ' ');
+  const r = (region ?? '').trim();
+  const geo = r ? ` ${r}` : '';
+  const set = ANGLE_SETS[((variant % ANGLE_SETS.length) + ANGLE_SETS.length) % ANGLE_SETS.length];
+  return [...new Set(set(f, geo).map((q) => q.replace(/\s+/g, ' ').trim()))].slice(0, MAX_QUERIES);
 }
+
+export const QUERY_VARIANTS = ANGLE_SETS.length;
 
 export const EXTRACT_SYSTEM = `You extract real, currently-open OPPORTUNITIES (jobs, RFPs, grants, commissions,
 open calls) from fetched web pages, for one operator hunting work.
