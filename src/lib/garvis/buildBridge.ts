@@ -9,6 +9,7 @@
 
 import { supabase } from '../supabase';
 import { recordMindEvent } from './mindStore';
+import { ensurePortfolioAppForProject } from './productLifecycle';
 import { patchWorkingState, loadWorkingState } from './workingStateRun';
 import { getBrandKit } from './artifacts';
 import { compileWebsiteBrief, type WebsitePhoto } from './websiteBrief';
@@ -171,6 +172,9 @@ export async function bindProjectToWorld(projectId: string, handoff: WorldBuildH
   }
 
   await supabase.from('projects').update({ world_id: handoff.worldId }).eq('id', projectId);
+  await ensurePortfolioAppForProject(projectId).catch((e) => {
+    console.warn('[garvis] project created but portfolio link failed:', e instanceof Error ? e.message : e);
+  });
 
   // G5: stamp this project onto the world's site channel so events are attributable to the app
   // that produced them (the channel was provisioned at brief time; fail-soft if absent).

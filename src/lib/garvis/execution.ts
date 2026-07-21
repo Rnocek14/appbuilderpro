@@ -6,6 +6,7 @@
 // the vision's "approval required before sending/posting/deploying/charging + external actions logged".
 
 import { supabase } from '../supabase';
+import { markProjectAppLaunched } from './productLifecycle';
 import { hashPayload } from './payloadHash';
 
 export type ApprovalKind =
@@ -163,12 +164,20 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
   // deploy_site: a REAL executor. The build ran client-side; its bundle was captured into
   // deploy_bundles at authorization time (requestSiteDeploy). Load it, deploy via deploy-site,
   // capture the live URL, record it everywhere, and delete the one-shot bundle.
-  if (a.kind === 'deploy_site') return await executeSiteDeploy(a);
+  if (a.kind === 'deploy_site') {
+    const res = await executeSiteDeploy(a);
+    if (!res.ok) await revertToPending(a.id);
+    return res;
+  }
 
   // deploy_backend: a REAL executor. Functions + secrets were captured into the approval payload
   // at authorization time (requestBackendDeploy); deploy-backend re-verifies the approval
   // server-side and writes the execution_runs row itself.
-  if (a.kind === 'deploy_backend') return await executeBackendDeploy(a);
+  if (a.kind === 'deploy_backend') {
+    const res = await executeBackendDeploy(a);
+    if (!res.ok) await revertToPending(a.id);
+    return res;
+  }
 
   if (a.kind === 'publish_post') {
     const { data, error } = await supabase.functions.invoke('social-publish', { body: { approval_id: a.id } });
@@ -218,16 +227,16 @@ async function executeSiteDeploy(a: Approval): Promise<{ ok: boolean; error?: st
   }
 
   const { data: bundle } = await supabase.from('deploy_bundles')
-    .select('files, site_id').eq('id', bundleId).eq('owner_id', uid).maybeSingle();
+    .select('id').eq('id', bundleId).eq('owner_id', uid).maybeSingle();
   if (!bundle) {
     await ledger('The captured build for this deploy is gone (already deployed or expired) — Publish again from the workspace.', { approval_id: a.id, bundle_id: bundleId });
     return { ok: true, result: { approved: true, executed: false } };
   }
 
-  const files = (bundle as { files: unknown }).files;
-  const siteId = (bundle as { site_id: string | null }).site_id ?? undefined;
   const { data, error } = await supabase.functions.invoke('deploy-site', {
-    body: { approval_id: a.id, projectId, siteId, files, netlifyToken: (a.payload?.netlify_token as string | undefined) },
+    // The edge executor resolves project, bundle, bytes, site id, and token from the approved,
+    // hashed row. Sending them again would create a second mutable source of truth.
+    body: { approval_id: a.id },
   });
   if (error) return { ok: false, error: error.message };
   const res = data as { ok?: boolean; error?: string; siteId?: string; url?: string; state?: string };
@@ -242,7 +251,10 @@ async function executeSiteDeploy(a: Approval): Promise<{ ok: boolean; error?: st
     project_id: projectId, user_id: uid, target: 'netlify',
     status: live ? 'live' : 'building', url, logs: 'Deployed via the approval spine.',
   }).then(() => {}, () => {});
-  await supabase.from('approvals').update({ result: { executed: true, url, site_id: res?.siteId ?? siteId ?? null } }).eq('id', a.id);
+  await supabase.from('approvals').update({
+    result: { executed: true, live, state: res?.state ?? 'building', url, site_id: res?.siteId ?? null },
+  }).eq('id', a.id);
+  if (live && url) await markProjectAppLaunched(projectId, url).catch(() => {});
   if (url) {
     await supabase.from('knowledge_artifacts').update({ url, detail: `Live at ${url}. Re-publish from the project workspace anytime; deploys route through Approvals.` })
       .eq('kind', 'link').eq('slug', 'website-app').eq('owner_id', uid)
@@ -257,7 +269,10 @@ async function executeSiteDeploy(a: Approval): Promise<{ ok: boolean; error?: st
   // One-shot: the captured build is consumed.
   await supabase.from('deploy_bundles').delete().eq('id', bundleId).then(() => {}, () => {});
 
-  return { ok: !!(res?.ok ?? url), result: { approved: true, executed: true, url, site_id: res?.siteId ?? siteId ?? null } };
+  return {
+    ok: !!(res?.ok ?? url),
+    result: { approved: true, executed: true, live, state: res?.state ?? 'building', url, site_id: res?.siteId ?? null },
+  };
 }
 
 /** The deploy_backend executor. The functions + secrets were captured into the approval payload at
@@ -307,7 +322,7 @@ async function executeBackendDeploy(a: Approval): Promise<{ ok: boolean; error?:
 
   return res?.ok
     ? { ok: true, result: { approved: true, executed: true, results: res?.results } }
-    : { ok: false, error: `Backend deploy: ${failed.map((f) => `${f.step} — ${f.detail ?? 'failed'}`).join('; ').slice(0, 400)}`, result: { approved: true, executed: true, results: res?.results } };
+    : { ok: false, error: `Backend deploy: ${failed.map((f) => `${f.step} — ${f.detail ?? 'failed'}`).join('; ').slice(0, 400)}`, result: { approved: true, executed: false, results: res?.results } };
 }
 
 /** The cluster ids of the world a project is bound to (for updating its website-app artifact). */

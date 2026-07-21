@@ -25,8 +25,17 @@ export async function claimNextRun(): Promise<AgentRun | null> {
   return rows[0] ?? null;
 }
 
+/** Claim one exact run created by this owner. Interactive commands must never claim "next". */
+export async function claimRun(runId: string): Promise<AgentRun | null> {
+  const { data, error } = await supabase.rpc('claim_agent_run', { p_run_id: runId });
+  if (error) throw new Error(error.message);
+  const rows = (data as AgentRun[] | null) ?? [];
+  return rows[0] ?? null;
+}
+
 async function persist(runId: string, patch: Record<string, unknown>): Promise<void> {
-  await supabase.from('agent_runs').update(patch).eq('id', runId);
+  const { error } = await supabase.from('agent_runs').update(patch).eq('id', runId);
+  if (error) throw new Error(`Could not checkpoint Garvis run: ${error.message}`);
 }
 
 /** Execute one claimed run to a terminal/paused state. Resolves when it finishes, pauses, or stops. */
@@ -77,11 +86,18 @@ export async function runGarvisTask(run: AgentRun, opts: RunOptions): Promise<vo
     spent += Number(decision.costUsd ?? 0);
 
     if (decision.kind === 'await_approval') {
+      const waitingHistory: GarvisMessage[] = [
+        ...history,
+        { role: 'assistant', content: decision.question },
+      ];
       await persist(run.id, {
         status: 'waiting_approval',
         spent_usd: spent,
         output: decision.question,
-        checkpoint: { step, history } satisfies GarvisCheckpoint,
+        checkpoint: {
+          step, history: waitingHistory,
+          pendingQuestion: { question: decision.question, options: decision.options ?? [] },
+        } satisfies GarvisCheckpoint,
         lease_until: null,
       });
       emit({ runId: run.id, step, phase: mode, status: 'awaiting_approval', detail: decision.question });

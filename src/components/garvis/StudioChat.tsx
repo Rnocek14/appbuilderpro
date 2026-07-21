@@ -1,11 +1,10 @@
 // src/components/garvis/StudioChat.tsx
 // The chat that lives inside a production area — the thing that makes a cluster a STUDIO. Talk to it
-// ("make the postcard more luxury") and it creates/revises artifacts or queues an approval. It never
-// sends: the only outward verb it can produce is a proposal into the Approval queue.
+// ("make the postcard more luxury") and it creates/revises artifacts. Consequential actions use
+// dedicated studio controls that can construct a complete, executable approval payload.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Sparkles, Send, Loader2, ShieldCheck } from 'lucide-react';
+import { Sparkles, Send, Loader2 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { useToast } from '../../context/ToastContext';
@@ -51,7 +50,6 @@ export function StudioChat({ worldId, webTitle, objective, clusterId, cluster, t
       const res = await runStudioTurn(clusterId, ctx, message);
       setMessages((prev) => [...prev, { id: `tmp-${Math.random()}`, role: 'garvis', content: res.reply, decision: res.decision, created_at: new Date().toISOString() }]);
       if (res.changed) { onChanged(); }
-      if (res.decision.kind === 'propose_approval') toast('info', 'Queued for approval — nothing sent.');
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'The studio could not respond.');
       setMessages((prev) => [...prev, { id: `tmp-${Math.random()}`, role: 'garvis', content: '(that turn failed — try again)', decision: null, created_at: new Date().toISOString() }]);
@@ -65,7 +63,7 @@ export function StudioChat({ worldId, webTitle, objective, clusterId, cluster, t
       <div className="flex items-center gap-2 border-b border-forge-border px-3 py-2">
         <Sparkles size={14} className="text-forge-ember" />
         <span className="text-xs font-medium text-forge-ink">Ask this studio</span>
-        <span className="ml-auto text-[10px] text-forge-dim">creates & revises here · sends nothing without approval</span>
+        <span className="ml-auto text-[10px] text-forge-dim">creates & revises here · actions use typed controls</span>
       </div>
 
       {messages.length > 0 && (
@@ -76,9 +74,6 @@ export function StudioChat({ worldId, webTitle, objective, clusterId, cluster, t
                 'max-w-[85%] rounded-lg px-3 py-1.5 text-xs',
                 m.role === 'user' ? 'bg-forge-ember/15 text-forge-ink' : 'bg-forge-raised text-forge-dim',
               )}>
-                {m.decision?.kind === 'propose_approval' && (
-                  <Link to="/garvis/queue" className="mb-1 flex items-center gap-1 text-forge-warn"><ShieldCheck size={11} /> waiting in the Queue</Link>
-                )}
                 {m.content}
               </div>
             </div>
@@ -92,7 +87,7 @@ export function StudioChat({ worldId, webTitle, objective, clusterId, cluster, t
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }}
-          placeholder={`e.g. "make the copy more luxury" · "queue touch 1 to the lakefront list"`}
+          placeholder={`e.g. "make the copy more luxury" · "turn this research into a seller letter"`}
           disabled={busy}
           className="flex-1 rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 disabled:opacity-50"
         />

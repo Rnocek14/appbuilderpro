@@ -1,8 +1,9 @@
 // supabase/functions/garvis-worker/index.ts
 // The UNATTENDED Garvis runner — the server-side counterpart of src/lib/garvis/runtime.ts, so
 // queued agent_runs execute with every laptop closed. A pg_cron tick (or a POST from anywhere
-// with the worker secret, or any signed-in user "nudging") claims runnable runs across all
-// owners and steps them exactly like the client chassis: mode-gated tools re-applied every
+// with the worker secret) claims runnable runs across all owners. A signed-in nudge is strictly
+// owner-scoped and may target one exact run. Both paths step work like the client chassis:
+// mode-gated tools re-applied every
 // step, checkpoints persisted every step, per-owner credit metering on every reasoning call,
 // and a hard budget cap.
 //
@@ -21,7 +22,7 @@ import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } fro
 import { notifyText } from '../_shared/notify.ts';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
-import { toolsFor } from '../../../src/lib/garvis/tools.ts';
+import { toolsForServer } from '../../../src/lib/garvis/tools.ts';
 
 type Mode = 'observe' | 'plan' | 'act';
 interface Msg { role: 'user' | 'assistant' | 'tool'; content: string }
@@ -97,12 +98,20 @@ function buildUserMessage(run: RunRow, mode: Mode, history: Msg[], tools: { name
 
 function normalize(raw: Decision, allowed: Set<string>): Decision {
   if (raw?.kind === 'tools') {
-    const calls = (raw.calls ?? []).filter((c) => c && allowed.has(c.name));
+    const calls = (Array.isArray(raw.calls) ? raw.calls : [])
+      .filter((c) => c && typeof c.name === 'string' && allowed.has(c.name));
     if (!calls.length) return { kind: 'finish', output: 'No valid tool call was produced for this mode.' };
-    return { kind: 'tools', calls: calls.map((c) => ({ name: c.name, input: c.input ?? {} })) };
+    return { kind: 'tools', calls: calls.map((c) => ({
+      name: c.name,
+      input: c.input && typeof c.input === 'object' && !Array.isArray(c.input) ? c.input : {},
+    })) };
   }
   if (raw?.kind === 'await_approval') {
-    return { kind: 'await_approval', question: String(raw.question ?? 'Decision needed.'), options: raw.options };
+    const question = String(raw.question ?? '').trim().slice(0, 2000) || 'Decision needed.';
+    const options = Array.isArray(raw.options)
+      ? raw.options.filter((x): x is string => typeof x === 'string').map((x) => x.trim().slice(0, 300)).filter(Boolean).slice(0, 8)
+      : undefined;
+    return { kind: 'await_approval', question, options };
   }
   return { kind: 'finish', output: String((raw as { output?: string })?.output ?? 'Done.'), recommendation: (raw as { recommendation?: string })?.recommendation };
 }
@@ -116,12 +125,25 @@ const GOAL_STATUSES = new Set(['proposed', 'active', 'achieved', 'paused', 'aban
 
 interface Ctx { db: SupabaseClient; ownerId: string; appId: string | null; runId: string; provider: AIProvider; model: string }
 
+/** Service-role queries do not get RLS as a backstop. Resolve every model-supplied app id through
+ * an explicit owner check before using it on an inserted row. */
+async function ownedAppId(inputAppId: unknown, ctx: Ctx): Promise<string | null> {
+  const appId = typeof inputAppId === 'string' ? inputAppId : ctx.appId;
+  if (!appId) return null;
+  const { data, error } = await ctx.db.from('apps').select('id')
+    .eq('owner_id', ctx.ownerId).eq('id', appId).is('deleted_at', null).maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('App not found.');
+  return appId;
+}
+
 async function proposeKnowledge(kind: 'decision' | 'outcome', input: Record<string, unknown>, ctx: Ctx): Promise<unknown> {
   if (typeof input.title !== 'string' || typeof input.body !== 'string') throw new Error(`${kind} proposal requires title and body`);
   const confidence = typeof input.confidence === 'number' ? Math.max(0, Math.min(1, input.confidence)) : null;
+  const appId = await ownedAppId(input.app_id, ctx);
   const { data, error } = await ctx.db.from('garvis_knowledge').insert({
     owner_id: ctx.ownerId,
-    app_id: (typeof input.app_id === 'string' ? input.app_id : null) ?? ctx.appId,
+    app_id: appId,
     run_id: ctx.runId,
     kind, title: input.title, body: input.body,
     source: typeof input.source === 'string' ? input.source : 'run',
@@ -172,7 +194,8 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
     }
     case 'query_metrics': {
       if (typeof input.app_id !== 'string') throw new Error('query_metrics requires app_id');
-      const days = typeof input.days === 'number' ? input.days : 30;
+      const days = typeof input.days === 'number' && Number.isFinite(input.days)
+        ? Math.max(1, Math.min(Math.floor(input.days), 90)) : 30;
       const { data, error } = await db.from('app_metrics')
         .select('metric_date, source, visitors, signups, active_users, revenue')
         .eq('owner_id', ownerId).eq('app_id', input.app_id)
@@ -183,7 +206,8 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
       return { rows, totals: { visitors: sum('visitors'), signups: sum('signups'), revenue: sum('revenue') } };
     }
     case 'recent_runs': {
-      const limit = typeof input.limit === 'number' ? Math.min(input.limit, 50) : 10;
+      const limit = typeof input.limit === 'number' && Number.isFinite(input.limit)
+        ? Math.max(1, Math.min(Math.floor(input.limit), 50)) : 10;
       let q = db.from('agent_runs').select('id, app_id, kind, title, status, recommendation, created_at, finished_at')
         .eq('owner_id', ownerId).order('created_at', { ascending: false }).limit(limit);
       if (typeof input.app_id === 'string') q = q.eq('app_id', input.app_id);
@@ -209,7 +233,8 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
       return data ? { profile: data } : { profile: null, note: 'No profile generated for this app yet.' };
     }
     case 'recall_knowledge': {
-      const limit = typeof input.limit === 'number' ? Math.min(input.limit, 50) : 20;
+      const limit = typeof input.limit === 'number' && Number.isFinite(input.limit)
+        ? Math.max(1, Math.min(Math.floor(input.limit), 50)) : 20;
       let q = db.from('garvis_knowledge').select('id, app_id, kind, title, body, source, confidence, tags, created_at')
         .eq('owner_id', ownerId).eq('status', 'approved').order('created_at', { ascending: false }).limit(limit);
       if (typeof input.app_id === 'string') q = q.eq('app_id', input.app_id);
@@ -253,9 +278,10 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
     }
     case 'propose_goal': {
       if (typeof input.title !== 'string') throw new Error('propose_goal requires title');
+      const appId = await ownedAppId(input.app_id, ctx);
       const { data, error } = await db.from('garvis_goals').insert({
         owner_id: ownerId,
-        app_id: (typeof input.app_id === 'string' ? input.app_id : null) ?? ctx.appId,
+        app_id: appId,
         title: input.title,
         description: typeof input.description === 'string' ? input.description : null,
         priority: typeof input.priority === 'number' ? input.priority : 3,
@@ -268,9 +294,10 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
     }
     case 'register_capability': {
       if (typeof input.name !== 'string' || typeof input.description !== 'string') throw new Error('register_capability requires name and description');
+      const appId = await ownedAppId(input.app_id, ctx);
       const { data, error } = await db.from('garvis_capabilities').insert({
         owner_id: ownerId,
-        app_id: (typeof input.app_id === 'string' ? input.app_id : null) ?? ctx.appId,
+        app_id: appId,
         name: input.name, description: input.description,
         input_spec: typeof input.input_spec === 'string' ? input.input_spec : null,
         output_spec: typeof input.output_spec === 'string' ? input.output_spec : null,
@@ -288,19 +315,22 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
       const patch: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(input.patch as Record<string, unknown>)) if (UPDATABLE_APP_FIELDS.has(k)) patch[k] = v;
       if (!Object.keys(patch).length) throw new Error('update_app: no updatable fields in patch');
-      const { error } = await db.from('apps').update(patch).eq('owner_id', ownerId).eq('id', input.id);
+      const { data, error } = await db.from('apps').update(patch)
+        .eq('owner_id', ownerId).eq('id', input.id).select('id').maybeSingle();
       if (error) throw new Error(error.message);
+      if (!data) throw new Error('App not found.');
       return { ok: true, updated: Object.keys(patch) };
     }
     case 'enqueue_run': {
       const kind = String(input.kind);
       if (!ALLOWED_RUN_KINDS.has(kind)) throw new Error(`enqueue_run: invalid kind "${kind}"`);
       if (typeof input.title !== 'string') throw new Error('enqueue_run requires title');
+      const appId = await ownedAppId(input.app_id, ctx);
       const { data, error } = await db.from('agent_runs').insert({
         owner_id: ownerId,
-        app_id: (input.app_id as string) ?? null,
+        app_id: appId,
         kind, title: input.title, status: 'queued',
-        input: (input.input as string) ?? null,
+        input: typeof input.input === 'string' ? input.input : null,
       }).select('id').single();
       if (error) throw new Error(error.message);
       return { ok: true, run_id: data.id };
@@ -325,18 +355,20 @@ const isTransient = (m: string) => /\b(429|50[0-9]|52[0-9]|timeout|timed ?out|ov
 async function failOrRetry(db: SupabaseClient, run: RunRow, msg: string): Promise<void> {
   const attempts = (run.retry_count ?? 0) + 1;
   if (isTransient(msg) && attempts <= MAX_RETRIES) {
-    await db.from('agent_runs').update({
+    const { error } = await db.from('agent_runs').update({
       status: 'queued', retry_count: attempts,
       next_attempt_at: new Date(Date.now() + Math.min(3_600_000, 5 * 60_000 * 2 ** (attempts - 1))).toISOString(),
       error: `transient error — retry ${attempts}/${MAX_RETRIES} after backoff: ${msg.slice(0, 400)}`,
       lease_until: null,
     }).eq('id', run.id);
+    if (error) throw new Error(`Could not requeue Garvis run: ${error.message}`);
     return;
   }
-  await db.from('agent_runs').update({
+  const { error } = await db.from('agent_runs').update({
     status: 'failed', retry_count: attempts, error: msg.slice(0, 500),
     finished_at: new Date().toISOString(), lease_until: null,
   }).eq('id', run.id);
+  if (error) throw new Error(`Could not fail Garvis run: ${error.message}`);
   await db.from('mind_events').insert({
     owner_id: run.owner_id, app_id: run.app_id, source: 'agent_run', event_type: 'agent_run_failed',
     subject: `Run failed: ${run.title} — ${msg.slice(0, 140)}`.replace(/\s+/g, ' ').trim().slice(0, 280),
@@ -349,7 +381,10 @@ async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
   const history: Msg[] = run.checkpoint?.history ? [...run.checkpoint.history] : [];
   let step = run.checkpoint?.step ?? 0;
   let spent = Number(run.spent_usd ?? 0);
-  const persist = (patch: Record<string, unknown>) => db.from('agent_runs').update(patch).eq('id', run.id);
+  const persist = async (patch: Record<string, unknown>): Promise<void> => {
+    const { error } = await db.from('agent_runs').update(patch).eq('id', run.id);
+    if (error) throw new Error(`Could not checkpoint Garvis run: ${error.message}`);
+  };
   const finishEvent = (event_type: string, subject: string) =>
     db.from('mind_events').insert({
       owner_id: run.owner_id, app_id: run.app_id, source: 'agent_run', event_type,
@@ -357,7 +392,8 @@ async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
     }).then(() => {}, () => {});
 
   const m = modelForPlan(await getUserPlan(db, run.owner_id));
-  const tools = toolsFor(mode);
+  // Never advertise a schema unless this server executor has the matching dispatch case.
+  const tools = toolsForServer(mode);
   const allowed = new Set(tools.map((t) => t.name));
   const ctx: Ctx = { db, ownerId: run.owner_id, appId: run.app_id, runId: run.id, provider: m.provider, model: m.model };
 
@@ -394,7 +430,12 @@ async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
     spent += stepCost;
 
     if (decision.kind === 'await_approval') {
-      await persist({ status: 'waiting_approval', spent_usd: spent, output: decision.question, checkpoint: { step, history }, lease_until: null });
+      const waitingHistory: Msg[] = [...history, { role: 'assistant', content: decision.question }];
+      await persist({
+        status: 'waiting_approval', spent_usd: spent, output: decision.question,
+        checkpoint: { step, history: waitingHistory, pendingQuestion: { question: decision.question, options: decision.options ?? [] } },
+        lease_until: null,
+      });
       const { data: owner } = await db.from('profiles').select('webhook_url').eq('id', run.owner_id).single();
       await notifyText((owner as { webhook_url?: string } | null)?.webhook_url,
         `❓ Garvis needs a decision — ${run.title}\n${decision.question}`);
@@ -430,7 +471,7 @@ async function executeRun(db: SupabaseClient, run: RunRow): Promise<void> {
       return;
     }
   }
-  await db.from('agent_runs').update({ status: 'paused', error: `Step cap of ${MAX_STEPS} reached.`, lease_until: null }).eq('id', run.id);
+  await persist({ status: 'paused', error: `Step cap of ${MAX_STEPS} reached.`, lease_until: null });
 }
 
 // ---- entry: cron tick / secret POST / signed-in nudge ----
@@ -441,10 +482,20 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
+  // #51 agent-run identity: an explicit run_id (a signed-in nudge targeting one run) must be a
+  // real UUID before it reaches claim_agent_run.
+  const body = await req.json().catch(() => ({})) as { run_id?: unknown };
+  const requestedRunId = typeof body.run_id === 'string' ? body.run_id : null;
+  if (requestedRunId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestedRunId)) {
+    return json({ error: 'run_id must be a UUID.' }, 400);
+  }
+  // #50 shared cron gate: either x-worker-secret or x-cron-secret (constant-time). A user nudge
+  // (no secret) claims through the authenticated RPC below.
   const bySecret = cronAuthorized(req);
+  let authClient: SupabaseClient | null = null;
   if (!bySecret) {
-    // Any signed-in user may nudge the worker (it only ever runs owner-scoped work).
-    const authClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
+    // Signed-in nudges claim through the authenticated RPC, so they can only start their own work.
+    authClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } });
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: 'Unauthorized' }, 401);
@@ -454,8 +505,14 @@ Deno.serve(async (req) => {
   // Stamp liveness only for real clock ticks — a user nudge proves nothing about the cron.
   if (bySecret) await stampHeartbeat(db, 'garvis-worker-tick');
   let processed = 0;
-  for (; processed < RUNS_PER_INVOCATION; processed++) {
-    const { data, error } = await db.rpc('claim_next_agent_run_service');
+  const runLimit = bySecret ? RUNS_PER_INVOCATION : 1;
+  for (; processed < runLimit; processed++) {
+    const claim = bySecret
+      ? await db.rpc('claim_next_agent_run_service')
+      : requestedRunId
+        ? await authClient!.rpc('claim_agent_run', { p_run_id: requestedRunId })
+        : await authClient!.rpc('claim_next_agent_run');
+    const { data, error } = claim;
     if (error) return json({ error: error.message, processed }, 500);
     const run = ((data as RunRow[] | null) ?? [])[0];
     if (!run) break;

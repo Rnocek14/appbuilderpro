@@ -9,6 +9,7 @@ import {
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
   CreditCard, Settings, Activity, Wand2, Crosshair, BookUser,
+  Hammer,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -19,6 +20,9 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Operate',
     items: [
       { to: '/garvis/command', label: 'Command', icon: Sparkles },
+      // Focused, outcome-shaped rooms over every business capability. This is the inviting
+      // "make something" door; Businesses remains the command center for the whole operation.
+      { to: '/garvis/workshops', label: 'Workshops', icon: Hammer },
       // The whole-intent front door: one sentence → a compiled, reviewable plan over everything.
       { to: '/garvis/orchestrate', label: 'Orchestrate', icon: Wand2 },
       { to: '/garvis/home', label: 'Canvas', icon: Compass },

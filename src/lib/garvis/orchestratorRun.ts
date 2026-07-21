@@ -132,11 +132,14 @@ export async function runArc(planId: string, onUpdate: (statuses: StepStatus[]) 
   const steps = arc.steps;
   const statuses: StepStatus[] = steps.map((_, i) => arc.statuses[i] ?? { kind: 'pending', note: '' });
   const persist = async (patch: Record<string, unknown> = {}) => {
-    await supabase.from('orchestrator_plans').update({
+    // #51 hardening: a failed checkpoint throws (honest failure, no silent stale state).
+    // #50 claim lease: renew claimed_until each step so a live run keeps ownership mid-arc.
+    const { error: persistError } = await supabase.from('orchestrator_plans').update({
       statuses, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-      claimed_until: new Date(Date.now() + CLAIM_MS).toISOString(),  // renewed per step while running
+      claimed_until: new Date(Date.now() + CLAIM_MS).toISOString(),
       ...patch,
-    }).eq('id', planId).then(() => {}, () => { /* persistence is best-effort mid-run; final write matters */ });
+    }).eq('id', planId);
+    if (persistError) throw new Error(`Could not checkpoint the arc: ${persistError.message}`);
   };
   const push = () => onUpdate([...statuses]);
   await persist({ status: 'running', waiting_reason: null, waiting_on: null });
@@ -169,6 +172,9 @@ export async function runArc(planId: string, onUpdate: (statuses: StepStatus[]) 
     }
     statuses[i] = { kind: 'running', note: `${def.title}…` };
     push();
+    // Persist BEFORE the action begins. A lost checkpoint must stop the loop before a side effect,
+    // never after it. Action-level idempotency remains the next layer for crash-after-effect cases.
+    await persist();
     try {
       statuses[i] = await def.execute(step.params);
     } catch (e) {

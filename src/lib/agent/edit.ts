@@ -14,6 +14,7 @@ import { readBranchState, writeBranchFile, deleteBranchFile, clearTombstone } fr
 import { ASSETS_PATH, BRAIN_PATH, MAP_PATH, ROADMAP_PATH, brainContext, mapContext, roadmapContext, isMetaFile } from '../projectBrain';
 import { PREFS_PATH, prefsContext } from '../preferences';
 import { buildKnowledgeDigest } from '../garvis/knowledge';
+import { loadMindRecordContext } from '../garvis/mindContextRun';
 import type { GarvisKnowledge } from '../../types';
 import { previewContext } from '../previewRuntime';
 import { MAIN_THREAD_ID, threadOf } from '../threads';
@@ -244,6 +245,7 @@ export async function agenticEdit(
       .eq('status', 'approved').order('created_at', { ascending: false }).limit(24);
     knowledgeDigest = buildKnowledgeDigest((kRows ?? []) as GarvisKnowledge[]);
   } catch { /* table absent → builder simply runs without the digest */ }
+  const mindDigest = await loadMindRecordContext({ budgetChars: 3_000 });
 
   await insertMessage({ project_id: projectId, user_id: userId, role: 'user', content: message, thread_id: threadId });
   onEvent?.({ type: 'start' });
@@ -252,7 +254,7 @@ export async function agenticEdit(
   const tree = [...files.keys()].sort().join('\n') || '(empty project)';
   const preamble = [
     brainContext(brain), mapContext(map), roadmapContext(roadmap), assetsMd, prefsContext(prefs),
-    knowledgeDigest,
+    mindDigest, knowledgeDigest,
     previewContext(),
     historyText ? `RECENT CONVERSATION:\n${historyText}` : '',
     `PROJECT FILES (call read_file to see any of these):\n${tree}`,

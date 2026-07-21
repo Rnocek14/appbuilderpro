@@ -284,6 +284,10 @@ export function useCommander() {
             text: out.trim()
               || (run?.status === 'failed'
                 ? 'That ran into a problem — the run is on the ledger with the error.'
+                : run?.status === 'queued' || run?.status === 'running'
+                  ? 'That exact run was picked up by the background worker. It is still working; progress stays on the ledger.'
+                  : run?.status === 'waiting_approval'
+                    ? 'I need one answer before I can continue. It is waiting for you in Queue.'
                 : 'Done — the results are on the record (anything outward is waiting in Approvals).'),
             // the handoff is never prose-only: a drafted world ends with the door to it
             ...(sawDraftWorld ? { action: { label: 'Review the draft →', to: '/garvis/webs' } } : {}),
@@ -302,7 +306,11 @@ export function useCommander() {
       const appId = cmd.app ? (apps.find((a) => a.name.toLowerCase() === cmd.app!.toLowerCase())?.id ?? null) : null;
       const missionId = await missionsApi.planMission({ objective: cmd.objective, subject: cmd.subject, appId });
       push({ role: 'garvis', text: cmd.preface, missionId: missionId ?? undefined });
-      if (missionId) void missionsApi.runMission(missionId);
+      if (missionId) {
+        void missionsApi.runMission(missionId).catch((e) => {
+          push({ role: 'garvis', text: `That mission stopped with an error: ${e instanceof Error ? e.message : 'unknown failure'}. Completed work is preserved on the mission.` });
+        });
+      }
       emitMindEvent({
         event_type: 'mission_planned',
         subject: `Mission: ${cmd.objective.slice(0, 200)}`,
@@ -329,6 +337,7 @@ export function useCommander() {
     missions: missionsApi.missions,
     tasksByMission: missionsApi.tasksByMission,
     runMission: missionsApi.runMission,
+    cancelMission: missionsApi.cancelMission,
     busyId: missionsApi.busyId,
   };
 }

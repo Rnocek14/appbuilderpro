@@ -59,7 +59,7 @@ const HERO: Partial<Record<Flavor, HeroConfig>> = {
 };
 
 /**
- * The studio header. Renders for studio-archetype clusters. `hasEarnedWork` (this studio has real,
+ * The workshop action header. Renders for studio-archetype clusters. `hasEarnedWork` (this area has real,
  * non-seed artifacts) collapses the big empty-state pitch into a slim "generate more" header so it
  * stops shouting once there's work on the shelf.
  */
@@ -93,7 +93,7 @@ export function StudioHero({ cluster, worldId, hasEarnedWork, onDone, onToast }:
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-medium uppercase tracking-wide text-forge-ember/80">
-            {hasEarnedWork ? 'Studio' : 'Studio · ready to work'}
+            {hasEarnedWork ? 'Workshop' : 'Workshop · ready to make'}
           </p>
           <p className="mt-0.5 text-sm font-medium text-forge-ink">Makes {cfg.makes}</p>
 
@@ -112,7 +112,7 @@ export function StudioHero({ cluster, worldId, hasEarnedWork, onDone, onToast }:
             </div>
           )}
           {!cfg.primaryTool && !hasEarnedWork && (
-            <p className="mt-2 text-[11px] text-forge-dim">Use the workspace below to get started — it’s the working surface for this studio.</p>
+            <p className="mt-2 text-[11px] text-forge-dim">Use the workspace below to get started — it’s the hands-on surface for this workshop.</p>
           )}
 
           {/* The honest line: real personalized work vs the template floor. Only speaks when it can. */}

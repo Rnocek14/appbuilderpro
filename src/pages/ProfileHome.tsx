@@ -185,10 +185,10 @@ export default function ProfileHome() {
   }, [navigate]);
 
   // Run a real studio turn against one area's cluster — the proven decide-only path (cluster-chat →
-  // create_artifact / revise_artifact / propose_approval). A turn that makes something flips
+  // create_artifact / revise_artifact). A turn that makes something flips
   // res.changed, and bumpReload re-reads the level so the new artifact blooms in as a node. Nothing
-  // is fabricated (the model gets the area's real context) and nothing outward-facing is executed —
-  // only proposed into the approval queue.
+  // is fabricated (the model gets the area's real context). Consequential actions stay on typed
+  // studio controls that can build executable approval payloads.
   const runAreaTurn = useCallback(async (worldId: string, clusterId: string, message: string): Promise<{ reply: string; note?: string }> => {
     const web = await loadWeb(worldId);
     const cluster = web?.clusters.find((c) => c.id === clusterId) ?? null;
@@ -200,8 +200,7 @@ export default function ProfileHome() {
     const ctx = await loadStudioContext({ worldId, webTitle: web.title, objective: scene?.star.objective ?? null, cluster: { title: cluster.title, summary: cluster.summary, charter: cluster.charter }, clusterId, tools: cluster.tools });
     const res = await runStudioTurn(clusterId, ctx, message);
     if (res.changed) bumpReload();
-    const note = res.decision.kind === 'propose_approval' ? 'Queued for approval — nothing sent.'
-      : res.changed ? 'Made it — it’s on your canvas.' : undefined;
+    const note = res.changed ? 'Made it — it’s on your canvas.' : undefined;
     return { reply: res.reply, note };
   }, [getScene, bumpReload]);
 

@@ -8,6 +8,7 @@
 
 import { supabase } from '../supabase';
 import { enqueueApproval, approveAndExecute, type Approval } from './execution';
+import { hashPayload } from './payloadHash';
 
 export interface SiteFile { path: string; b64: string; sha1: string }
 
@@ -67,6 +68,7 @@ export async function requestSiteDeploy(input: {
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
   if (!input.files.length) throw new Error('No built files to deploy.');
+  const bundleHash = await hashPayload(input.files);
 
   const { data: bundle, error: bErr } = await supabase.from('deploy_bundles').insert({
     owner_id: uid, project_id: input.projectId, site_id: input.siteId ?? null,
@@ -74,11 +76,25 @@ export async function requestSiteDeploy(input: {
   }).select('id').single();
   if (bErr || !bundle) throw new Error(`Could not stage the deploy: ${bErr?.message ?? 'unknown error'}`);
 
-  return enqueueApproval({
-    kind: 'deploy_site',
-    title: input.label ?? `Publish site (${input.files.length} files)`,
-    preview: `Deploy ${input.files.length} built files to hosting for this project. A live https URL is returned on success.`,
-    payload: { bundle_id: (bundle as { id: string }).id, project_id: input.projectId, ...(input.netlifyToken ? { netlify_token: input.netlifyToken } : {}) },
-    requestedBy: 'user',
-  });
+  const bundleId = (bundle as { id: string }).id;
+  try {
+    return await enqueueApproval({
+      kind: 'deploy_site',
+      title: input.label ?? `Publish site (${input.files.length} files)`,
+      preview: `Deploy ${input.files.length} built files to hosting for this project. A live https URL is returned on success.`,
+      payload: {
+        bundle_id: bundleId,
+        bundle_hash: bundleHash,
+        project_id: input.projectId,
+        site_id: input.siteId ?? null,
+        ...(input.netlifyToken ? { netlify_token: input.netlifyToken } : {}),
+      },
+      requestedBy: 'user',
+    });
+  } catch (e) {
+    // The bundle only exists to serve its approval. Do not strand large base64 blobs when the
+    // approval insert fails.
+    await supabase.from('deploy_bundles').delete().eq('id', bundleId);
+    throw e;
+  }
 }

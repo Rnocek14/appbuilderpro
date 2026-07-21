@@ -24,7 +24,7 @@ const TASK_TONE: Record<TaskStatus, 'dim' | 'ember' | 'ok' | 'warn'> = {
 function TaskRow({ task }: { task: GarvisTask }) {
   const [open, setOpen] = useState(false);
   const meta = WORKER_META[task.worker];
-  const hasResult = task.status === 'done' && task.result;
+  const hasResult = !!task.result;
   return (
     <div className="rounded border border-forge-border p-2.5">
       <div className="flex items-center gap-2">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Rocket, Sparkles, ChevronDown, ChevronRight, Play, Trash2, Check } from 'lucide-react';
+import { Rocket, Sparkles, ChevronDown, ChevronRight, Play, Trash2, Check, StopCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { MissionTasks } from '../components/garvis/MissionTasks';
 import { usePortfolio } from '../hooks/usePortfolio';
@@ -10,12 +10,12 @@ import { timeAgo } from '../lib/utils';
 import type { MissionStatus } from '../types';
 
 const MISSION_TONE: Record<MissionStatus, 'dim' | 'ember' | 'ok' | 'warn'> = {
-  planning: 'ember', planned: 'warn', running: 'ember', review: 'ok', done: 'ok', failed: 'warn',
+  planning: 'ember', planned: 'warn', running: 'ember', review: 'ok', partial: 'warn', done: 'ok', failed: 'warn', cancelled: 'dim',
 };
 
 export default function Missions() {
   const { apps } = usePortfolio();
-  const { missions, tasksByMission, loading, busyId, planMission, runMission, deleteMission } = useMissions();
+  const { missions, tasksByMission, loading, busyId, planMission, runMission, cancelMission, deleteMission } = useMissions();
   const { toast } = useToast();
   const [objective, setObjective] = useState('');
   const [appId, setAppId] = useState('');
@@ -33,8 +33,13 @@ export default function Missions() {
   };
 
   const onRun = async (id: string) => {
-    try { await runMission(id); toast('success', 'Mission complete — review the results.'); }
+    try { await runMission(id); toast('success', 'Mission finished — review the task outcomes.'); }
     catch (e) { toast('error', e instanceof Error ? e.message : 'Mission run failed.'); }
+  };
+
+  const onCancel = async (id: string) => {
+    try { await cancelMission(id); toast('info', 'Stopping after the current task returns.'); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Could not stop that mission.'); }
   };
 
   return (
@@ -96,9 +101,14 @@ export default function Missions() {
                       </div>
                       {m.summary && <p className="mt-1 text-xs text-forge-dim">{m.summary}</p>}
                     </div>
-                    {(m.status === 'planned' || m.status === 'review' || m.status === 'failed') && (
+                    {(m.status === 'planned' || m.status === 'review' || m.status === 'partial' || m.status === 'failed' || m.status === 'cancelled') && (
                       <Button onClick={() => onRun(m.id)} loading={busyId === m.id} title="Dispatch the workers">
                         <Play size={13} /> {m.status === 'planned' ? 'Run' : 'Re-run'}
+                      </Button>
+                    )}
+                    {m.status === 'running' && busyId === m.id && (
+                      <Button variant="outline" onClick={() => void onCancel(m.id)} title="Stop after the current worker returns">
+                        <StopCircle size={13} /> Stop after current task
                       </Button>
                     )}
                     <button onClick={() => { if (window.confirm(`Delete the mission "${m.objective.slice(0, 60)}" and its tasks? This can't be undone.`)) void deleteMission(m.id); }} className="text-forge-dim/60 hover:text-forge-err" title="Delete"><Trash2 size={14} /></button>
@@ -109,6 +119,9 @@ export default function Missions() {
                       <MissionTasks tasks={mTasks} />
                       {m.status === 'review' && (
                         <p className="mt-2 flex items-center gap-1 text-[11px] text-forge-ember"><Check size={12} /> Mission complete — expand each task for the deliverable.</p>
+                      )}
+                      {m.status === 'partial' && (
+                        <p className="mt-2 text-[11px] text-forge-warn">Partial result — completed work is preserved; failed tasks can be re-run.</p>
                       )}
                     </div>
                   )}
