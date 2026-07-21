@@ -5633,6 +5633,17 @@ $$;
 revoke all on function public.get_preview_by_slug(text) from public;
 grant execute on function public.get_preview_by_slug(text) to anon, authenticated;
 
+-- ======== supabase/migrations/app_0104_client_sub_stripe_ref.sql ========
+-- app_0104_client_sub_stripe_ref.sql — honest MRR both ways.
+-- When a client pays a recurring plan, Stripe creates a subscription. To mark that sale CANCELED when
+-- the client later churns (customer.subscription.deleted), the webhook must map the Stripe
+-- subscription back to our sale — so we record its id on activation. Without this, a churned client
+-- stays 'active' and keeps counting toward MRR (MRR would only ever go up, which isn't honest).
+-- Additive + idempotent.
+
+alter table public.client_subscriptions add column if not exists stripe_subscription_id text;
+create index if not exists idx_client_subs_stripe_sub on public.client_subscriptions(stripe_subscription_id);
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).

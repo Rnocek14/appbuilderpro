@@ -35,8 +35,12 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
   if (lookupErr) throw new Error(`client sale lookup failed: ${lookupErr.message}`);
   if (!sub) return false;
 
-  await admin.from('client_subscriptions')
-    .update({ status: 'active', activated_at: new Date().toISOString() }).eq('id', sub.id);
+  // Record the ACTUAL amount paid (not our default estimate) and the Stripe subscription id (so a
+  // later cancellation can mark this exact sale canceled — honest MRR both directions).
+  const activation: Record<string, unknown> = { status: 'active', activated_at: new Date().toISOString() };
+  if (typeof session.amount_total === 'number' && session.amount_total > 0) activation.price_cents = session.amount_total;
+  if (typeof session.subscription === 'string') activation.stripe_subscription_id = session.subscription;
+  await admin.from('client_subscriptions').update(activation).eq('id', sub.id);
 
   const ownerId = sub.owner_id as string;
   const previewId = sub.preview_site_id as string | null;
@@ -89,6 +93,27 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
     (owner as { webhook_url?: string } | null)?.webhook_url,
     `💰 SOLD — ${sub.business_name}\nPlan: ${sub.tier}\n${liveUrl ? `Live: ${liveUrl}` : outcome}`,
   );
+  return true;
+}
+
+/** A CLIENT's recurring plan changed on Stripe. Returns true when the subscription maps to one of our
+ *  sales (so the FableForge syncSubscription is skipped — a client's subscription is not the operator's
+ *  plan). Marks the sale canceled on delete/cancel so it stops counting toward MRR — honest churn. */
+// deno-lint-ignore no-explicit-any
+async function handleClientSubscriptionChange(admin: any, sub: Stripe.Subscription, deleted: boolean): Promise<boolean> {
+  const { data: row, error } = await admin.from('client_subscriptions')
+    .select('id, owner_id, business_name').eq('stripe_subscription_id', sub.id).maybeSingle();
+  if (error) throw new Error(`client sub lookup failed: ${error.message}`);
+  if (!row) return false;   // not one of ours → let syncSubscription handle it
+  const canceled = deleted || ['canceled', 'unpaid', 'incomplete_expired'].includes(sub.status);
+  await admin.from('client_subscriptions').update({ status: canceled ? 'canceled' : 'active' }).eq('id', row.id);
+  if (canceled) {
+    await admin.from('mind_events').insert({
+      owner_id: row.owner_id, source: 'execution', event_type: 'note',
+      subject: `Client churned — ${row.business_name} canceled their plan`,
+      payload: { kind: 'client_sale_canceled', client_subscription_id: row.id },
+    }).then(() => {}, () => {});
+  }
   return true;
 }
 
@@ -152,6 +177,8 @@ Deno.serve(async (req) => {
       case 'customer.subscription.updated':
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription;
+        // A CLIENT's plan is handled here (churn → MRR down); only the operator's own plan syncs.
+        if (await handleClientSubscriptionChange(admin, sub, event.type === 'customer.subscription.deleted')) break;
         if (typeof sub.customer === 'string') await syncSubscription(stripe, admin, sub.customer);
         break;
       }

@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
     });
     const dt = await dr.text();
     if (!dr.ok) return json({ error: `Netlify create-deploy ${dr.status}: ${dt.slice(0, 300)}` }, 502);
-    const deploy = JSON.parse(dt) as { id: string; required?: string[]; ssl_url?: string };
+    const deploy = JSON.parse(dt) as { id: string; required?: string[]; ssl_url?: string; url?: string };
     if ((deploy.required ?? []).includes(sha1)) {
       const u = await api(`/deploys/${deploy.id}/files/index.html`, {
         method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes,
@@ -105,10 +105,14 @@ Deno.serve(async (req) => {
       if (!u.ok) return json({ error: `Netlify upload ${u.status}: ${(await u.text()).slice(0, 200)}` }, 502);
     }
 
-    // 4) Poll until live — HONEST state: report 'building' if it isn't ready when the window closes.
-    let url = deploy.ssl_url ?? '';
+    // 4) Poll until live — HONEST state: 'building' if it isn't ready when the window closes. The
+    // WEBHOOK path (byWorker) must NOT poll: a paid sale re-publishes an EXISTING site (its ssl_url is
+    // already known), and awaiting a 60s poll would blow past Stripe's ~20s webhook timeout and make
+    // deliveries look flaky. It returns immediately as 'building'; Netlify finishes in seconds.
+    const pollTries = byWorker ? 0 : 30;
+    let url = deploy.ssl_url ?? deploy.url ?? '';
     let state: 'ready' | 'building' = 'building';
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < pollTries; i++) {
       const sr = await api(`/deploys/${deploy.id}`);
       if (sr.ok) {
         const s = JSON.parse(await sr.text()) as { state?: string; ssl_url?: string };
