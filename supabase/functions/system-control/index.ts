@@ -30,6 +30,7 @@ const SECRETS: { name: string; pillar: string; unlocks: string }[] = [
   { name: 'SERPER_API_KEY', pillar: 'research', unlocks: 'Web search for research + prospecting (discover-media)' },
   { name: 'PERPLEXITY_API_KEY', pillar: 'research', unlocks: 'Topic discovery in Explorer (discover-media)' },
   { name: 'GOOGLE_PLACES_API_KEY', pillar: 'prospecting', unlocks: 'Daily client hunt + business leads (discover-media, standing-worker)' },
+  { name: 'APP_ORIGIN', pillar: 'prospecting', unlocks: 'The demo-link base in prospect pitches — UNSET means hunts build demos but NO pitch is ever queued (standing-worker)' },
   { name: 'SCREENSHOT_API_KEY', pillar: 'prospecting', unlocks: 'Site screenshots for audits (shot-worker)' },
   { name: 'EMBEDDINGS_API_KEY', pillar: 'memory', unlocks: 'Semantic recall — without it the brain falls back to keyword matching (embed-worker)' },
   { name: 'ANTHROPIC_API_KEY', pillar: 'intelligence', unlocks: 'Server-side model calls (agent-turn relay, workers)' },

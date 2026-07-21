@@ -183,6 +183,17 @@ export function critiqueBlock(critique?: OwnerCritique | null): string {
     : '';
 }
 
+/** The OPERATOR's explicit change request — the highest-priority instruction on a regeneration.
+ *  The operator's own words (from the Refine box) go straight to the generator, above strategy and
+ *  simulated-owner critique, because the human is deliberately steering this demo. Capped so a
+ *  pasted essay can't blow the prompt budget. Empty when no directive is given. */
+export function directiveBlock(directive?: string | null): string {
+  const d = (directive ?? '').trim().slice(0, 800);
+  return d
+    ? `\n\nOPERATOR DIRECTIVE — the person sending this demo asked for these EXACT changes; honor them above all else, keeping everything else that already works:\n${d}`
+    : '';
+}
+
 export const CRITIQUE_SYSTEM = `You ARE the owner of this business — busy, skeptical, protective of your
 reputation, allergic to marketing fluff. An agency you never hired just sent you this website spec
 they built for you. React honestly:

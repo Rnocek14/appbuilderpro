@@ -5,7 +5,8 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox, KeyRound, Plus, Send } from 'lucide-react';
+import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox, KeyRound, Plus, Send, Wand2 } from 'lucide-react';
+import { cn } from '../lib/utils';
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card, Badge, EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
@@ -30,6 +31,8 @@ export default function PreviewEngine() {
   const [requests, setRequests] = useState<(PublishRequestRow & { business_name?: string; slug?: string })[]>([]);
   const [stats, setStats] = useState<Record<string, PreviewStats>>({});
   const [regenId, setRegenId] = useState<string | null>(null);
+  const [refineFor, setRefineFor] = useState<string | null>(null);   // which row's Refine box is open
+  const [directive, setDirective] = useState('');                    // the operator's change request
   const [queuingId, setQueuingId] = useState<string | null>(null);
   const [tokens, setTokens] = useState<IngestToken[]>([]);
   const [tokensOpen, setTokensOpen] = useState(false);
@@ -69,12 +72,16 @@ export default function PreviewEngine() {
     } finally { setBusy(false); }
   };
 
-  const regen = async (id: string) => {
+  const regen = async (id: string, directive?: string) => {
     setRegenId(id);
     try {
-      const r = await regeneratePreviewSite(id);
+      const r = await regeneratePreviewSite(id, directive);
       if (!r.ok) toast('error', r.error ?? 'Regeneration failed.');
-      else { toast('success', 'Regenerated.'); await refresh(); }
+      else {
+        toast('success', directive?.trim() ? 'Refined to your instructions — reopen the preview to see it.' : 'Regenerated.');
+        setRefineFor(null); setDirective('');
+        await refresh();
+      }
     } finally { setRegenId(null); }
   };
 
@@ -288,7 +295,13 @@ export default function PreviewEngine() {
                     {queuingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                     Queue
                   </button>
-                  <button onClick={() => void regen(r.id)} disabled={regenId === r.id} title="Regenerate spec + pitch"
+                  <button onClick={() => { setRefineFor(refineFor === r.id ? null : r.id); setDirective(''); }} disabled={regenId === r.id}
+                    title="Refine this demo — tell it what to change"
+                    className={cn('rounded-lg border p-2 transition-colors disabled:opacity-50',
+                      refineFor === r.id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink')}>
+                    <Wand2 size={14} />
+                  </button>
+                  <button onClick={() => void regen(r.id)} disabled={regenId === r.id} title="Regenerate from scratch (spec + pitch)"
                     className="rounded-lg border border-forge-border p-2 text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
                     {regenId === r.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
                   </button>
@@ -297,6 +310,24 @@ export default function PreviewEngine() {
                     <Trash2 size={14} />
                   </button>
                 </div>
+              {/* REFINE (edit this demo): the operator's own words steer the regeneration — targeted
+                  change, not a blind reroll. Keeps everything that works; changes what they name.
+                  basis-full so it wraps onto its own line in the flex-wrap card. */}
+              {refineFor === r.id && (
+                <div className="mt-1 flex basis-full flex-wrap items-center gap-1.5 border-t border-forge-border pt-2">
+                  <input
+                    value={directive}
+                    onChange={(e) => setDirective(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && directive.trim() && regenId !== r.id) void regen(r.id, directive); }}
+                    autoFocus
+                    placeholder='What to change? e.g. "make the hero about 24/7 emergency service, add a testimonials section, warmer tone"'
+                    className="min-w-[16rem] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />
+                  <button onClick={() => void regen(r.id, directive)} disabled={regenId === r.id || !directive.trim()}
+                    className="flex items-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-xs font-medium text-forge-ember disabled:opacity-50">
+                    {regenId === r.id ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} Apply change
+                  </button>
+                </div>
+              )}
               </Card>
             ))}
           </div>
