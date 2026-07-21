@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/clientHuntBuild.verify.ts
 import {
   pickHuntTargets, cleanBusinessName, fieldsFromPage, buildHuntProfileRaw, buildHuntPitch, huntRunLine,
-  extractSiteFacts,
+  extractSiteFacts, buildHuntPitchEmailHtml, automationUpsellHtml, escHtml,
   type HuntProfileInput,
 } from './clientHuntBuild';
 import { auditSite, type SiteAudit } from './siteAudit';
@@ -108,6 +108,56 @@ const serper = {
   check('the pitch mentions the current-site concern (a score was observed)', /costing you leads/.test(pitch));
   check('the pitch closes with no pressure', /no obligation/i.test(pitch.toLowerCase()));
   check('no [Name]-style placeholders leak', !/\[[A-Za-z]/.test(pitch));
+}
+
+// --- buildHuntPitchEmailHtml: SHOW the site (a real screenshot), honest + escaped --------------
+{
+  const { profile } = parseBusinessProfile(buildHuntProfileRaw({
+    url: 'http://joesroofing.com', niche: 'roofers', fallbackName: "Joe's Roofing",
+    page: { title: "Joe's Roofing" }, images: [], email: 'a@b.com',
+    audit: auditSite({ url: 'http://joesroofing.com', reachable: true, title: 'x', text: 'thin', hasViewport: false }, 2026),
+  }));
+  const url = 'https://app.example/preview-site/joes-roofing-ab12cd';
+  const shot = 'https://cdn.example/shots/joes.png';
+  const upsells = [{ title: 'Lead follow-up & intake', pitch: 'never drop a lead', monthlyPrice: '$300–600/mo', evidence: 'No contact form on your page.' }];
+
+  const html = buildHuntPitchEmailHtml(profile!, url, shot, upsells);
+  const flat = html.replace(/\s+/g, ' ');
+  check('the email embeds the actual screenshot as an <img>', html.includes(`<img src="${shot}"`));
+  // The screenshot is the clickable hero: the <a> immediately before the shot <img> points at the preview.
+  const imgIdx = flat.indexOf(`<img src="${shot}"`);
+  const heroAnchor = flat.lastIndexOf('<a href=', imgIdx);
+  check('the screenshot is a clickable hero linking to the live preview',
+    imgIdx > -1 && heroAnchor > -1 && flat.slice(heroAnchor, imgIdx).includes(`<a href="${url}"`));
+  check('names the business (apostrophe HTML-escaped, markup intact)', html.includes('Joe&#39;s Roofing'));
+  check('carries the grounded automation offer (evidence + price)', html.includes('never drop a lead') && html.includes('$300–600/mo'));
+  check('the email closes with no pressure', /no obligation/i.test(html));
+  check('NEVER promises SMS / missed-call text-back (not built)', !/text[-\s]?back|missed[-\s]?call|by text/i.test(html));
+  check('no [Name]-style placeholders leak', !/\[[A-Za-z]/.test(html));
+  check('no before/after block unless a before shot is provided', !html.includes('For comparison'));
+
+  const withBefore = buildHuntPitchEmailHtml(profile!, url, shot, upsells, 'https://cdn.example/shots/before.png');
+  check('a before shot adds the honest before/after block', withBefore.includes('For comparison') && withBefore.includes('https://cdn.example/shots/before.png'));
+
+  const noUpsell = buildHuntPitchEmailHtml(profile!, url, shot, []);
+  check('no upsells → no automation block (never an empty heading)', !noUpsell.includes('on autopilot'));
+
+  // Escaping: a hostile business name cannot break out of the markup.
+  const evil = parseBusinessProfile(buildHuntProfileRaw({
+    url: 'http://x.com', niche: 'roofers', fallbackName: '<script>alert(1)</script>',
+    page: { title: null }, images: [], email: 'a@b.com',
+    audit: auditSite({ url: 'http://x.com', reachable: true, title: 'x', text: 'thin', hasViewport: false }, 2026),
+  })).profile;
+  const evilHtml = buildHuntPitchEmailHtml(evil!, url, shot, []);
+  check('a hostile business name is HTML-escaped (no raw <script>)', !evilHtml.includes('<script>') && evilHtml.includes('&lt;script&gt;'));
+}
+
+// --- escHtml + automationUpsellHtml: escaping + grounding --------------------------------------
+{
+  check('escHtml neutralizes markup-breaking characters', escHtml(`<b>"A&B"'`) === '&lt;b&gt;&quot;A&amp;B&quot;&#39;');
+  check('automationUpsellHtml is empty without a grounded upsell', automationUpsellHtml([]) === '' && automationUpsellHtml([{ title: 't', pitch: 'p', monthlyPrice: '$1', evidence: '' }]) === '');
+  const h = automationUpsellHtml([{ title: 'X', pitch: 'do X', monthlyPrice: '$200/mo', evidence: 'because Y' }]);
+  check('automationUpsellHtml grounds each line in its observed evidence', h.includes('because Y') && h.includes('do X') && h.includes('$200/mo'));
 }
 
 // --- huntRunLine: the honest daily record (discovered + built + queued) ------------------------
