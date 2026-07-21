@@ -8,6 +8,7 @@ import { useParams } from 'react-router-dom';
 import { getPreviewSite, recordPreviewEvent, type PreviewSiteRow } from '../lib/preview/engine';
 import { PreviewSiteRenderer } from '../components/preview/PreviewSiteRenderer';
 import { ClaimBar } from '../components/preview/ClaimBar';
+import { AutomationIntake } from '../components/preview/AutomationIntake';
 import { supabaseUrl } from '../lib/supabase';
 
 export default function PreviewSite({ shot = false }: { shot?: boolean }) {
@@ -52,6 +53,9 @@ export default function PreviewSite({ shot = false }: { shot?: boolean }) {
     <>
       <PreviewSiteRenderer spec={row.spec} shot={shot} previewSiteId={row.id}
         leadSubmitUrl={`${supabaseUrl}/functions/v1/claim-submit`} />
+      {/* The custom-automation ask — turns the visit into a conversation about running their ops.
+          In-flow (not floating), so it never collides with the ClaimBar; never in the email shot. */}
+      {!shot && <AutomationIntake previewSiteId={row.id} businessName={row.business_name} theme={row.spec.theme} />}
       {/* The purchase-intent path: a preview with no way to say "yes" converts at zero. */}
       {!shot && <ClaimBar previewSiteId={row.id} businessName={row.business_name} slug={row.slug} />}
     </>

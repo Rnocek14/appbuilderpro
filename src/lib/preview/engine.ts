@@ -271,6 +271,31 @@ export async function submitPublishRequest(args: { previewSiteId: string; name: 
   return error ? { ok: false, error: error.message } : { ok: true };
 }
 
+export interface IntakeProposal { title: string; pitch: string; monthlyPrice: string }
+
+/** A prospect on the PUBLIC preview typed HOW THEY RUN THEIR BUSINESS and asked which of our
+ *  automations fit — no login. Preferred path is the automation-intake edge function: it runs the
+ *  honest, deliverable-only detection server-side, lands the hot lead in the operator's feed, and
+ *  returns the automations to show back. If the function isn't deployed, the lead must still not be
+ *  lost — it falls back to a publish_request (the Claims inbox) tagged as an automation ask, and the
+ *  prospect gets an honest "we've got it, we'll map it for you" (no fabricated proposals). */
+export async function submitAutomationIntake(args: { previewSiteId: string; description: string; email?: string }):
+  Promise<{ ok: boolean; matched?: boolean; proposals?: IntakeProposal[]; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('automation-intake', { body: args });
+    const d = data as { ok?: boolean; matched?: boolean; proposals?: IntakeProposal[] } | null;
+    if (!error && d?.ok) return { ok: true, matched: !!d.matched, proposals: d.proposals ?? [] };
+  } catch { /* fall through to the direct insert so the raised hand is never lost */ }
+  const { error } = await supabase.from('publish_requests').insert({
+    preview_site_id: args.previewSiteId,
+    name: 'Automation request',
+    contact: (args.email ?? '').trim().slice(0, 200) || 'left on the demo',
+    message: `[Automation request] ${args.description.trim()}`.slice(0, 2000),
+  });
+  // No server-side detection on the fallback path — honest empty proposals, but the lead landed.
+  return error ? { ok: false, error: error.message } : { ok: true, matched: false, proposals: [] };
+}
+
 /** Update a claim's lifecycle state (new → contacted → won/lost) — the CRM seed. */
 export async function setPublishRequestStatus(id: string, status: 'new' | 'contacted' | 'won' | 'lost'): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from('publish_requests').update({ status }).eq('id', id);
