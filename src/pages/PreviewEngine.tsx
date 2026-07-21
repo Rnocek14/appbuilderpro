@@ -5,14 +5,14 @@
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox, KeyRound, Plus, Send, Wand2 } from 'lucide-react';
+import { Globe, Sparkles, ExternalLink, RefreshCw, Trash2, Copy, Loader2, Camera, FileText, Inbox, KeyRound, Plus, Send, Wand2, Rocket } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card, Badge, EmptyState } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import {
   ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor,
-  listPublishRequests, getPreviewStats, setPublishRequestStatus,
+  listPublishRequests, getPreviewStats, setPublishRequestStatus, publishPreviewSite,
   listIngestTokens, createIngestToken, revokeIngestToken,
   type PreviewSiteRow, type PublishRequestRow, type PreviewStats, type IngestToken,
 } from '../lib/preview/engine';
@@ -34,6 +34,7 @@ export default function PreviewEngine() {
   const [refineFor, setRefineFor] = useState<string | null>(null);   // which row's Refine box is open
   const [directive, setDirective] = useState('');                    // the operator's change request
   const [queuingId, setQueuingId] = useState<string | null>(null);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
   const [tokens, setTokens] = useState<IngestToken[]>([]);
   const [tokensOpen, setTokensOpen] = useState(false);
 
@@ -100,6 +101,27 @@ export default function PreviewEngine() {
       });
       toast('success', `Exported ${r.business_name} as ${r.slug}.html — self-contained, ready for their domain.`);
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Export failed.'); }
+  };
+
+  // GO LIVE: render the finished site in-browser and host it on Netlify — one click, real URL.
+  const goLive = async (r: PreviewSiteRow) => {
+    if (r.live_url && !window.confirm(`${r.business_name} is already live at ${r.live_url}.\n\nRe-publish the current version?`)) return;
+    setPublishingId(r.id);
+    try {
+      const res = await publishPreviewSite(r.id, r.spec);
+      if (!res.ok) { toast('error', res.error ?? 'Could not publish.'); return; }
+      if (res.state === 'ready' && res.url) {
+        toast('success', `${r.business_name} is live at ${res.url}`);
+        window.open(res.url, '_blank', 'noopener');
+      } else {
+        toast('success', `Publishing ${r.business_name}… it will be live shortly${res.url ? ` at ${res.url}` : ''}.`);
+      }
+      await refresh();
+    } catch (e) {
+      toast('error', e instanceof Error ? e.message : 'Could not publish.');
+    } finally {
+      setPublishingId(null);
+    }
   };
 
   // Turn a generated pitch into a real, approval-gated outreach message (replaces copy-to-clipboard).
@@ -253,6 +275,12 @@ export default function PreviewEngine() {
                     {r.audit && <Badge tone={r.audit.score < 55 ? 'err' : 'warn'}>audit {r.audit.score}/100</Badge>}
                     {r.critique && <Badge tone={r.critique.feels_like_my_business >= 8 ? 'ok' : 'warn'}>owner {r.critique.feels_like_my_business}/10</Badge>}
                   </div>
+                  {r.live_url && (
+                    <a href={r.live_url} target="_blank" rel="noreferrer noopener"
+                      className="mt-0.5 flex items-center gap-1 truncate text-[11px] font-medium text-forge-ok hover:underline">
+                      <Rocket size={10} /> {r.live_url.replace(/^https?:\/\//, '')}
+                    </a>
+                  )}
                   <p className="mt-0.5 truncate font-mono text-[11px] text-forge-dim">
                     /preview-site/{r.slug}
                     {stats[r.id] && (stats[r.id].views > 0 || stats[r.id].returns > 0) && (
@@ -285,6 +313,13 @@ export default function PreviewEngine() {
                   <button onClick={() => void exportHtml(r)} title="Export as a self-contained .html — the deliverable a client puts on their domain (real SEO baked in)"
                     className="rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
                     Export
+                  </button>
+                  <button onClick={() => void goLive(r)} disabled={publishingId === r.id}
+                    title={r.live_url ? `Live at ${r.live_url} — re-publish the current version` : 'Go Live — host this site on a real URL, one click'}
+                    className={cn('flex items-center gap-1 rounded-lg border px-2.5 py-2 text-xs transition-colors disabled:opacity-50',
+                      r.live_url ? 'border-forge-ok/50 text-forge-ok hover:border-forge-ok' : 'border-forge-border text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink')}>
+                    {publishingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />}
+                    {r.live_url ? 'Live' : 'Go Live'}
                   </button>
                   <button onClick={() => copyPitch(r.pitch)} title="Copy pitch email"
                     className="rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">

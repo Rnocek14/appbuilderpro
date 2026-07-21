@@ -5,7 +5,7 @@
 // persistence. `ingestBusinessProfile` is THE handoff the future scraper/lead-engine calls:
 // profile JSON in → saved profile + generated spec + public preview URL + pitch out.
 
-import { supabase } from '../supabase';
+import { supabase, supabaseUrl } from '../supabase';
 import { rawComplete } from '../aiClient';
 import {
   parseBusinessProfile, assembleFallbackSpec, normalizeSpec, previewSlug,
@@ -145,6 +145,8 @@ export interface PreviewSiteRow {
   strategy: WebsiteStrategy | null;
   critique: OwnerCritique | null;
   audit: AuditReport | null;
+  live_url: string | null;
+  published_at: string | null;
   created_at: string;
 }
 
@@ -294,6 +296,47 @@ export async function submitAutomationIntake(args: { previewSiteId: string; desc
   });
   // No server-side detection on the fallback path — honest empty proposals, but the lead landed.
   return error ? { ok: false, error: error.message } : { ok: true, matched: false, proposals: [] };
+}
+
+/** GO LIVE — host a demo as a real static site. The operator's browser renders the finished
+ *  index.html (buildStaticSiteHtml — CSS is DOM-inlined, so it must run here, not server-side) and
+ *  hands the single file to publish-preview, which uploads it to Netlify and records the live URL.
+ *  The hosted site's quote form posts back through the same claim-submit endpoint the preview uses,
+ *  so leads from the LIVE site reach the operator too. Dynamic import keeps react-dom/server out of
+ *  the main bundle until a publish is actually requested. */
+export async function publishPreviewSite(previewSiteId: string, spec: SiteSpec, opts?: { customDomain?: string }):
+  Promise<{ ok: boolean; url?: string; state?: string; error?: string }> {
+  try {
+    const { buildStaticSiteHtml } = await import('./exportStatic');
+    const html = await buildStaticSiteHtml(spec, {
+      previewSiteId, leadSubmitUrl: `${supabaseUrl}/functions/v1/claim-submit`,
+    });
+    const { data, error } = await supabase.functions.invoke('publish-preview', {
+      body: { previewSiteId, html, customDomain: opts?.customDomain?.trim() || undefined },
+    });
+    if (error) return { ok: false, error: error.message };
+    const d = data as { ok?: boolean; url?: string; state?: string; error?: string } | null;
+    if (!d?.ok) return { ok: false, error: d?.error ?? 'Publish failed.' };
+    return { ok: true, url: d.url, state: d.state };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** MAKE IT MINE — a prospect on the PUBLIC preview chooses a plan and goes to pay. Creates the
+ *  pending sale server-side and returns the operator's Stripe checkout URL to redirect to. If the
+ *  operator hasn't set up a payment link, the edge fn notifies them and this returns not-ok with a
+ *  friendly message (the button never lies about being able to charge). */
+export async function startClientCheckout(args: { previewSiteId: string; tier: 'website' | 'website_automation'; email?: string }):
+  Promise<{ ok: boolean; url?: string; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('client-checkout', { body: args });
+    const d = data as { ok?: boolean; url?: string } | null;
+    if (!error && d?.ok && d.url) return { ok: true, url: d.url };
+    return { ok: false, error: 'Checkout isn’t available yet — the owner has been notified and will be in touch.' };
+  } catch {
+    return { ok: false, error: 'Checkout isn’t available right now — please try again shortly.' };
+  }
 }
 
 /** Update a claim's lifecycle state (new → contacted → won/lost) — the CRM seed. */
