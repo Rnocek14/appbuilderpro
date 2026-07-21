@@ -20,7 +20,7 @@ async function invokeMls<T>(body: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-export function MarketDataPanel({ onToast }: { onToast: Toast }) {
+export function MarketDataPanel({ worldId, onToast }: { worldId?: string; onToast: Toast }) {
   const [status, setStatus] = useState<{ connected: boolean; host: string | null; rows: number } | null>(null);
   const [baseUrl, setBaseUrl] = useState('');
   const [token, setToken] = useState('');
@@ -33,9 +33,13 @@ export function MarketDataPanel({ onToast }: { onToast: Toast }) {
     catch { setStatus(null); }
   };
   const loadRows = async () => {
-    const { data, error } = await supabase.from('mls_listings')
+    // Scan B8: world-scoped panels see their business's listings (plus legacy unscoped rows);
+    // two client realtors' markets no longer merge into one dataset.
+    let q = supabase.from('mls_listings')
       .select('listing_key, status, list_price, close_price, address1, city, zip, property_type, beds, baths, sqft, list_date, close_date, dom')
-      .order('modified_at', { ascending: false }).limit(5000);
+      .order('modified_at', { ascending: false });
+    if (worldId) q = q.or(`world_id.eq.${worldId},world_id.is.null`);
+    const { data, error } = await q.limit(5000);
     if (error) throw new Error(error.message);
     setRows((data ?? []) as MlsRow[]);
   };
@@ -69,7 +73,7 @@ export function MarketDataPanel({ onToast }: { onToast: Toast }) {
   const doSync = async () => {
     try {
       setBusy(true);
-      const res = await invokeMls<{ note?: string }>({ action: 'sync' });
+      const res = await invokeMls<{ note?: string }>({ action: 'sync', ...(worldId ? { world_id: worldId } : {}) });
       onToast('success', res.note ?? 'Synced.');
       await Promise.all([refreshStatus(), loadRows()]);
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Sync failed.'); }

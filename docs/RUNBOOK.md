@@ -85,7 +85,7 @@ select public.garvis_arm_heartbeat(
   'https://<project-ref>.supabase.co/functions/v1',
   '<the same value you set as WORKER_SECRET/CRON_SECRET>'
 );
--- → 'armed: 9 jobs (pulse, followups, worker, ads-watch, reactivate, inbox-draft, scorecard, invoice-chase, standing-tick)'
+-- → 'armed: 11 jobs (pulse, followups, worker, ads-watch, reactivate, inbox-draft, scorecard, invoice-chase, standing-tick, consolidate, social-sync)'
 ```
 
 This schedules 9 pg_cron jobs (morning pulse, follow-ups, worker tick, ads watch, reactivation,

@@ -1,6 +1,6 @@
 -- supabase/_apply_garvis_all.sql — GENERATED: EVERY migration, in dependency order:
 -- timestamped 2026* (except garvis_worker) → app_00xx → garvis_worker (needs app_0003's
--- agent_runs). Regenerate after adding a migration (keep garvis_worker last).
+-- agent_runs). Regenerate with: node scripts/generate-apply-all.mjs (keep garvis_worker last).
 -- Apply AFTER schema.sql and schema_v2_autopilot.sql (or supabase/schema_repair.sql).
 -- All migrations are additive + idempotent; re-running is safe.
 --
@@ -4679,6 +4679,892 @@ create policy "world_sender_identities owner all" on public.world_sender_identit
     and exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid())
   );
 create index if not exists idx_world_sender_identities_owner on public.world_sender_identities(owner_id);
+
+-- ======== supabase/migrations/app_0086_invoice_provenance.sql ========
+-- app_0086_invoice_provenance.sql — REVENUE KNOWS WHERE IT CAME FROM.
+-- The audit's money-path gap: invoices had no origin. "Collected $1,500" couldn't answer WHICH
+-- campaign, lead, or won deal earned it — so the scorecard's revenue line never taught anything.
+-- Additive provenance: source ('manual' for the form, 'garvis_tool' for the assistant, 'won_deal'
+-- for the client-book path) plus optional links to the lead, the originating marketing campaign
+-- (distinct from the kind='invoice' send-vehicle campaign minted at send time), and the
+-- client_subscriptions row when the invoice bills a won client. Old rows read 'manual' — honest,
+-- because the form was the only path when they were created.
+
+alter table public.invoices add column if not exists source text not null default 'manual';
+alter table public.invoices add column if not exists lead_id uuid references public.leads(id) on delete set null;
+alter table public.invoices add column if not exists campaign_id uuid references public.outreach_campaigns(id) on delete set null;
+alter table public.invoices add column if not exists client_subscription_id uuid references public.client_subscriptions(id) on delete set null;
+create index if not exists idx_invoices_subscription on public.invoices(client_subscription_id) where client_subscription_id is not null;
+
+-- ======== supabase/migrations/app_0086_loop_closing.sql ========
+-- app_0086_loop_closing.sql — AGENT-RUN RETRY/BACKOFF (the job-worker lesson, applied to agent_runs).
+--
+-- garvis-worker marked a run 'failed' on ANY thrown error, so one transient AI/network 5xx killed a
+-- checkpointed run permanently. Same fix app_0058 gave jobs, made explicit here: a bounded
+-- transient-retry counter + a backoff gate the claim functions honor. The worker requeues a
+-- transient failure with next_attempt_at in the future (5m→10m→20m, capped 1h) and resets the
+-- counter on real progress; only exhausted retries or a clearly permanent error fail terminally.
+-- Additive + idempotent.
+
+alter table public.agent_runs add column if not exists retry_count int not null default 0;
+alter table public.agent_runs add column if not exists next_attempt_at timestamptz;  -- null = claimable now
+
+-- BOTH claimants must honor the backoff — the platform worker AND the in-browser runtime. If the
+-- owner-scoped claim ignored next_attempt_at, an open laptop would re-claim a backed-off run
+-- instantly and defeat the backoff entirely.
+
+create or replace function public.claim_next_agent_run_service() returns setof public.agent_runs
+language plpgsql security definer set search_path = public as $$
+declare r public.agent_runs;
+begin
+  select * into r from agent_runs
+  where status in ('queued', 'running')
+    and (lease_until is null or lease_until < now())
+    and (next_attempt_at is null or next_attempt_at <= now())
+  order by priority desc, created_at
+  limit 1
+  for update skip locked;
+  if not found then return; end if;
+  update agent_runs set
+    status = 'running',
+    lease_until = now() + interval '10 minutes',
+    started_at = coalesce(started_at, now())
+  where id = r.id
+  returning * into r;
+  return next r;
+end $$;
+
+-- create-or-replace preserves existing grants, but restate them so this file stands alone (the
+-- whole point is that ONLY the platform worker may claim across owners).
+revoke execute on function public.claim_next_agent_run_service() from public;
+revoke execute on function public.claim_next_agent_run_service() from anon;
+revoke execute on function public.claim_next_agent_run_service() from authenticated;
+grant execute on function public.claim_next_agent_run_service() to service_role;
+
+create or replace function public.claim_next_agent_run() returns setof public.agent_runs
+language plpgsql security definer set search_path = public as $$
+declare r public.agent_runs;
+begin
+  select * into r from agent_runs
+  where owner_id = auth.uid()
+    and status in ('queued', 'running')
+    and (lease_until is null or lease_until < now())
+    and (next_attempt_at is null or next_attempt_at <= now())
+  order by priority desc, created_at
+  limit 1
+  for update skip locked;
+  if not found then return; end if;
+  update agent_runs set
+    status = 'running',
+    lease_until = now() + interval '10 minutes',
+    started_at = coalesce(started_at, now())
+  where id = r.id
+  returning * into r;
+  return next r;
+end $$;
+
+-- Owner-scoped + auth.uid() guard inside makes this safe for authenticated callers.
+revoke execute on function public.claim_next_agent_run() from anon;
+grant execute on function public.claim_next_agent_run() to authenticated;
+
+-- ======== supabase/migrations/app_0087_social_metrics.sql ========
+-- app_0087_social_metrics.sql — THE MACHINE READS ITS OWN POSTS.
+-- The audit's distribution gap, closing from the read side now: Garvis posted to social and never
+-- looked back — zero calls fetched performance, so "did that post work?" had no answer anywhere.
+-- This is the storage half (level-10 Spec 3 Phase 2, renumbered): one row per (post, platform),
+-- written ONLY by the social-sync edge function from Ayrshare's analytics API. Every metric is
+-- nullable — an absent metric stays NULL, never a fake 0 — and the raw provider object is kept
+-- verbatim so per-platform field-name corrections never lose data. Owner-read RLS, service-role
+-- writes (the ad_metrics pattern, app_0038).
+
+create table if not exists public.social_post_metrics (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles(id) on delete cascade,
+  post_id      uuid not null references public.social_posts(id) on delete cascade,
+  world_id     uuid references public.knowledge_worlds(id) on delete set null,
+  platform     text not null,
+  likes        integer,
+  comments     integer,
+  shares       integer,
+  impressions  integer,
+  video_views  integer,
+  saves        integer,
+  clicks       integer,
+  engagement   integer,
+  raw          jsonb not null default '{}',
+  synced_at    timestamptz not null default now(),
+  unique (post_id, platform)
+);
+alter table public.social_post_metrics enable row level security;
+drop policy if exists "social_post_metrics owner read" on public.social_post_metrics;
+create policy "social_post_metrics owner read" on public.social_post_metrics
+  for select using (owner_id = auth.uid());
+-- Writes arrive only via the social-sync edge function (service role).
+create index if not exists idx_social_metrics_owner on public.social_post_metrics(owner_id, synced_at desc);
+create index if not exists idx_social_metrics_world on public.social_post_metrics(world_id, synced_at desc);
+
+alter table public.social_posts add column if not exists last_synced_at timestamptz;
+
+-- Heartbeat v5: + garvis-social-sync (every 6 hours). Re-creating arm/disarm is the established
+-- upgrade path (v4 did the same); an ALREADY-ARMED install gains the job immediately via the
+-- conditional block below, a fresh install gets it when the owner arms.
+create or replace function public.garvis_arm_heartbeat(p_functions_base text, p_secret text)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare sid uuid; base text := rtrim(p_functions_base, '/');
+begin
+  if base is null or base = '' or p_secret is null or p_secret = '' then
+    return 'Pass the functions base URL and the shared secret.';
+  end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_base';
+  if sid is null then perform vault.create_secret(base, 'ff_heartbeat_base');
+  else perform vault.update_secret(sid, base); end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_secret';
+  if sid is null then perform vault.create_secret(p_secret, 'ff_heartbeat_secret');
+  else perform vault.update_secret(sid, p_secret); end if;
+
+  perform cron.schedule('garvis-pulse-hourly', '7 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-pulse', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 20000);$c$);
+  perform cron.schedule('garvis-followups-daily', '0 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-followups', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-worker-tick', '*/5 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-ads-watch-daily', '15 10 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/ads-watch', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-reactivate-monthly', '0 14 1 * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-reactivate', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-inbox-draft-daily', '45 12 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/inbox-draft', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-scorecard-weekly', '0 22 * * 0', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-scorecard', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-invoice-chase-daily', '30 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/invoice-chase', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-standing-tick', '*/15 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/standing-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-social-sync', '20 */6 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/social-sync', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+
+  return 'armed: 10 jobs (pulse, followups, worker, ads-watch, reactivate, inbox-draft, scorecard, invoice-chase, standing-tick, social-sync)';
+end; $$;
+revoke all on function public.garvis_arm_heartbeat(text, text) from public;
+revoke all on function public.garvis_arm_heartbeat(text, text) from anon;
+revoke all on function public.garvis_arm_heartbeat(text, text) from authenticated;
+
+create or replace function public.garvis_disarm_heartbeat()
+returns text language plpgsql security definer set search_path = public
+as $$
+begin
+  perform cron.unschedule('garvis-pulse-hourly'); perform cron.unschedule('garvis-followups-daily');
+  perform cron.unschedule('garvis-worker-tick'); perform cron.unschedule('garvis-ads-watch-daily');
+  perform cron.unschedule('garvis-reactivate-monthly'); perform cron.unschedule('garvis-inbox-draft-daily');
+  perform cron.unschedule('garvis-scorecard-weekly'); perform cron.unschedule('garvis-invoice-chase-daily');
+  perform cron.unschedule('garvis-standing-tick'); perform cron.unschedule('garvis-social-sync');
+  return 'disarmed';
+exception when others then return 'partially disarmed (some jobs were not scheduled)';
+end; $$;
+revoke all on function public.garvis_disarm_heartbeat() from public;
+revoke all on function public.garvis_disarm_heartbeat() from anon;
+revoke all on function public.garvis_disarm_heartbeat() from authenticated;
+
+-- An already-armed heartbeat gains the new job NOW (fresh installs get it via arm above).
+do $$
+begin
+  if exists (select 1 from vault.secrets where name = 'ff_heartbeat_base') then
+    perform cron.schedule('garvis-social-sync', '20 */6 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/social-sync', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  end if;
+exception when others then null; -- pg_cron/vault absent on this install → the arm call adds it later
+end $$;
+
+-- ======== supabase/migrations/app_0087_system_control.sql ========
+-- System control: make "is the brain actually on?" a queryable fact instead of tribal knowledge.
+--
+-- The entire unattended layer hangs off 9 pg_cron jobs armed by garvis_arm_heartbeat() — a call
+-- that lives only in a migration comment, so whether it ever ran is invisible from the app. This
+-- migration adds one read-only helper so the system-control edge function (and the Health page)
+-- can report the truth: which garvis cron jobs exist and their schedules.
+--
+-- Security: definer function, revoked from public — reachable only by the service role (the
+-- system-control function), never by browser clients. It reads cron.job (pg_cron's catalog),
+-- filtered to this system's own jobs, and returns names/schedules only — no command bodies
+-- (they embed vault-decrypted secrets in SQL text).
+--
+-- Apply once in the Supabase SQL editor (or supabase db push). Safe to re-run.
+
+create or replace function public.garvis_cron_status()
+returns table (jobname text, schedule text, active boolean)
+language sql security definer set search_path = public
+as $$
+  select j.jobname::text, j.schedule::text, j.active
+  from cron.job j
+  where j.jobname like 'garvis-%'
+  order by j.jobname;
+$$;
+
+revoke all on function public.garvis_cron_status() from public;
+
+-- ======== supabase/migrations/app_0088_consolidation_tick.sql ========
+-- The consolidation tick: schedules garvis-consolidate (mind_events → PROPOSED lessons through
+-- the existing garvis_knowledge approval gate) weekly, Monday 08:00 UTC — judgment forms at the
+-- start of the week, from the record of the last one.
+--
+-- Redefines garvis_arm_heartbeat with the 10th job. Additive + idempotent: re-run the one arm
+-- call (or the Health page's Arm button) to pick up the new tick.
+
+create or replace function public.garvis_arm_heartbeat(p_functions_base text, p_secret text)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare sid uuid; base text := rtrim(p_functions_base, '/');
+begin
+  if base is null or base = '' or p_secret is null or p_secret = '' then
+    return 'Pass the functions base URL and the shared secret.';
+  end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_base';
+  if sid is null then perform vault.create_secret(base, 'ff_heartbeat_base');
+  else perform vault.update_secret(sid, base); end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_secret';
+  if sid is null then perform vault.create_secret(p_secret, 'ff_heartbeat_secret');
+  else perform vault.update_secret(sid, p_secret); end if;
+
+  perform cron.schedule('garvis-pulse-hourly', '7 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-pulse', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 20000);$c$);
+  perform cron.schedule('garvis-followups-daily', '0 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-followups', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-worker-tick', '*/5 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-ads-watch-daily', '15 10 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/ads-watch', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-reactivate-monthly', '0 14 1 * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-reactivate', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-inbox-draft-daily', '45 12 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/inbox-draft', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-scorecard-weekly', '0 22 * * 0', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-scorecard', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-invoice-chase-daily', '30 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/invoice-chase', headers := jsonb_build_object('Content-Type','application/json','x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-standing-tick', '*/15 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/standing-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-consolidate-weekly', '0 8 * * 1', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-consolidate', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 120000);$c$);
+
+  return 'armed: 10 jobs (pulse, followups, worker, ads-watch, reactivate, inbox-draft, scorecard, invoice-chase, standing-tick, consolidate)';
+end; $$;
+revoke all on function public.garvis_arm_heartbeat(text, text) from public;
+
+-- ======== supabase/migrations/app_0088_content_week.sql ========
+-- app_0088_content_week.sql — THE CONTENT PRODUCER + GRADUATED AUTONOMY (level-10 Spec 2).
+-- One weekly standing order stages a judged week of content — N social posts + 1 email — as ONE
+-- approval card. Every draft is scored by the same editor rubric the boards use; sub-bar drafts
+-- are DISCARDED with their scores kept for audit. After 3 consecutive approved-without-edit weeks
+-- the owner may grant auto-mode: weeks then stage pre-approved (the speed-to-lead class), still
+-- visible in the Queue and the ledger, still capped, still killed by pausing the order or the
+-- outbound kill switch. Every judge score is bound into the approval's payload_hash — "the
+-- machine said this was a 9 when I approved it" is provable from the record.
+
+-- The bundle approval kind (enum ADD VALUE precedent: app_0064).
+alter type public.approval_kind add value if not exists 'content_week';
+
+-- Widen the order-kind vocabulary (the app_0079/app_0080 drop + re-add shape).
+alter table public.standing_orders drop constraint if exists standing_orders_kind_check;
+alter table public.standing_orders
+  add constraint standing_orders_kind_check
+  check (kind in ('watch_url', 'cadence_digest', 'client_hunt', 'idea_stream', 'content_week'));
+
+-- Graduated autonomy lives ON the order: consecutive approved-without-edit weeks, and the flag the
+-- owner flips once the streak has earned it. A rejection or an edited week resets both.
+alter table public.standing_orders add column if not exists clean_approvals integer not null default 0;
+alter table public.standing_orders add column if not exists auto_mode boolean not null default false;
+
+-- Social daily cap — the posting twin of daily_send_cap (email, app_0023). Governs garvis-auto
+-- posts only; 0 blocks all automated posting. Human-approved posts are not capped here.
+alter table public.outreach_settings add column if not exists social_daily_cap integer not null default 4;
+
+-- One row per staged week. pieces = the survivors (each with its judge score + notes + schedule +
+-- lifecycle state); discards = the audit of what the bar killed (scores kept). Nothing here sends:
+-- the worker's drain executes only after the approval verifies, hash-bound.
+create table if not exists public.content_weeks (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles(id) on delete cascade,
+  order_id     uuid references public.standing_orders(id) on delete set null,
+  world_id     uuid references public.knowledge_worlds(id) on delete cascade,
+  week_start   date not null,
+  pieces       jsonb not null default '[]',
+  discards     jsonb not null default '[]',
+  status       text not null default 'staged' check (status in ('staged', 'queued', 'done', 'canceled')),
+  approval_id  uuid references public.approvals(id) on delete set null,
+  edited       boolean not null default false,
+  model        text,
+  cost_usd     numeric,
+  created_at   timestamptz not null default now(),
+  finished_at  timestamptz
+);
+alter table public.content_weeks enable row level security;
+drop policy if exists "content_weeks owner all" on public.content_weeks;
+create policy "content_weeks owner all" on public.content_weeks
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create unique index if not exists uq_content_weeks_order_week on public.content_weeks(order_id, week_start);
+create index if not exists idx_content_weeks_active on public.content_weeks(status, created_at)
+  where status in ('staged', 'queued');
+
+-- ======== supabase/migrations/app_0089_opportunities.sql ========
+-- THE OPPORTUNITY ENGINE: opportunities become a first-class concept — a job/RFP/grant/commission
+-- as a structured row the hunt accumulates and the operator triages. Before this the system could
+-- watch one page or find businesses, but a found "mural commission, $18k, deadline Aug 14" had
+-- nowhere to live, dedupe, or be tracked to "applied".
+--
+-- Plus: standing_orders learns the 'opportunity_hunt' kind (scheduled Serper sweeps → fetch →
+-- honest extraction → this table). Additive + idempotent.
+
+alter table public.standing_orders drop constraint if exists standing_orders_kind_check;
+alter table public.standing_orders
+  add constraint standing_orders_kind_check
+  check (kind in ('watch_url', 'cadence_digest', 'client_hunt', 'idea_stream', 'opportunity_hunt'));
+
+create table if not exists public.opportunities (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  world_id uuid references public.knowledge_worlds(id) on delete set null,  -- which business hunts for it (null = operator-wide)
+  order_id uuid references public.standing_orders(id) on delete set null,   -- provenance: which hunt found it
+  title text not null,
+  summary text not null,                    -- what it is, from the page text only
+  source_url text not null,
+  kind text not null default 'other' check (kind in ('mural', 'public-art', 'grant', 'commission', 'job', 'other')),
+  location text,                            -- null = the page didn't say (never guessed)
+  budget_text text,                         -- verbatim from the page, else null
+  deadline_text text,                       -- verbatim from the page, else null
+  status text not null default 'new' check (status in ('new', 'saved', 'dismissed', 'applied')),
+  dedupe_key text not null,                 -- host+path :: normalized title (opportunityHunt.dedupeKey)
+  found_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (owner_id, dedupe_key)
+);
+
+create index if not exists idx_opportunities_owner_status on public.opportunities(owner_id, status, found_at desc);
+
+alter table public.opportunities enable row level security;
+drop policy if exists "opportunities owner all" on public.opportunities;
+create policy "opportunities owner all" on public.opportunities
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- ======== supabase/migrations/app_0090_client_engagements.sql ========
+-- THE CLIENT ENGAGEMENT LAYER: operating a business FOR someone becomes a first-class concept.
+-- "Add my client Jane the realtor — I do her marketing" was an honest hole: worlds model
+-- businesses, but nothing said WHOSE business a world is, what the operator does for them, or
+-- what's still needed from them. An engagement is that record: the client, the scope, the intake
+-- checklist, and (once its draft is approved) the world it operates.
+--
+-- world_id is nullable ON PURPOSE: onboarding creates the engagement immediately and drafts the
+-- client's world through the normal genesis approval ceremony — the operator links the world in
+-- the Client book after approving it. One engagement per world. Additive + idempotent.
+
+create table if not exists public.client_engagements (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  world_id uuid references public.knowledge_worlds(id) on delete set null,
+  client_name text not null,
+  client_email text,
+  business text not null,                  -- what their business is, in the operator's words
+  scope text not null,                     -- what the operator does for them ("marketing", "marketing + paperwork")
+  status text not null default 'prospect' check (status in ('prospect', 'active', 'paused', 'ended')),
+  intake jsonb not null default '[]'::jsonb,  -- [{ item: string, received: boolean }] — what's still needed from the client
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (owner_id, world_id)
+);
+
+create index if not exists idx_client_engagements_owner on public.client_engagements(owner_id, status);
+
+alter table public.client_engagements enable row level security;
+drop policy if exists "client_engagements owner all" on public.client_engagements;
+create policy "client_engagements owner all" on public.client_engagements
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- ======== supabase/migrations/app_0091_orchestrator_plans.sql ========
+-- THE PROJECT LOOP: compiled plans become DURABLE ARCS instead of one-sitting executions.
+-- Before this, a plan died at its first approval seam ("approve the company draft first") and
+-- evaporated on reload. Now a plan persists with per-step statuses, WAITS honestly at seams
+-- (waiting_reason says exactly what for), resumes with one click, and the morning brief nags
+-- arcs that have stalled. This is the difference between a compiler and a project manager.
+
+create table if not exists public.orchestrator_plans (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  summary text not null,
+  intent text not null,                        -- the operator's original sentence (provenance)
+  steps jsonb not null,                        -- PlanStep[] (action, params, why, after)
+  statuses jsonb not null default '[]',        -- StepStatus[] parallel to steps
+  holes jsonb not null default '[]',
+  questions jsonb not null default '[]',
+  status text not null default 'draft' check (status in ('draft', 'running', 'waiting', 'done', 'failed', 'abandoned')),
+  waiting_reason text,                         -- honest: what the arc is waiting for (null unless waiting)
+  last_activity_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_orchestrator_plans_owner on public.orchestrator_plans(owner_id, status, last_activity_at desc);
+
+alter table public.orchestrator_plans enable row level security;
+drop policy if exists "orchestrator_plans owner all" on public.orchestrator_plans;
+create policy "orchestrator_plans owner all" on public.orchestrator_plans
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- ======== supabase/migrations/app_0091_preview_hardening.sql ========
+-- app_0091_preview_hardening.sql
+-- Deep-audit fix wave (operation hardening):
+--
+-- 1) get_preview_by_slug leaked the ENTIRE preview_sites row (minus user_id) to anyone holding
+--    a preview slug — including the internal sales pitch email, the marketing strategy, and the
+--    simulated-owner critique ("would_buy: false, weakest_part: …"). The prospect the demo was
+--    pitched TO could read our private notes about their business. The public payload is now
+--    the render surface only: spec + audit + identity fields.
+--
+-- 2) preview_sites.build_log — per-build provenance (model, stage reached, imagery count,
+--    failure reasons, cost) so "why is this demo a template?" is answerable without joining
+--    usage-event timestamps. Server-written only; excluded from the public RPC.
+
+alter table public.preview_sites add column if not exists build_log jsonb;
+
+create or replace function public.get_preview_by_slug(p_slug text)
+returns jsonb
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select to_jsonb(p) - 'user_id' - 'pitch' - 'strategy' - 'critique' - 'build_log'
+  from public.preview_sites p
+  where p.slug = p_slug or p.id::text = p_slug
+  limit 1
+$$;
+
+revoke all on function public.get_preview_by_slug(text) from public;
+grant execute on function public.get_preview_by_slug(text) to anon, authenticated;
+
+-- ======== supabase/migrations/app_0092_heartbeat_repair.sql ========
+-- HEARTBEAT + STANDING-ORDER REPAIR. The July 2026 full-system scan found two regressions born
+-- from parallel migration branches landing out of order:
+--
+--   B1: app_0089_opportunities recreated standing_orders_kind_check WITHOUT 'content_week'
+--       (added by app_0088_content_week) — content weeks became un-creatable at the DB layer.
+--   B2: app_0088_consolidation_tick redefined garvis_arm_heartbeat WITHOUT 'garvis-social-sync'
+--       (added by app_0087_social_metrics) — social metrics stopped auto-syncing on any re-arm,
+--       and app_0088 also never redefined the disarm to include consolidate-weekly.
+--
+-- This migration is the union of both branches, plus one hardening: every job now sends BOTH
+-- x-worker-secret AND x-cron-secret (same vault secret). Before, four daily jobs sent only
+-- x-cron-secret, so a CRON_SECRET env var that differed from WORKER_SECRET made them 401
+-- silently into pg_net forever. With both headers, arming with WORKER_SECRET is sufficient
+-- regardless of which header a function checks. Additive + idempotent; re-run the arm call
+-- (or the Health page's Arm button) to pick up the 11-job schedule.
+
+-- B1: the full kind list — the union of every kind any migration has taught standing_orders.
+alter table public.standing_orders drop constraint if exists standing_orders_kind_check;
+alter table public.standing_orders
+  add constraint standing_orders_kind_check
+  check (kind in ('watch_url', 'cadence_digest', 'client_hunt', 'idea_stream', 'content_week', 'opportunity_hunt'));
+
+-- B2: the 11-job arm — 0088's ten plus social-sync restored, dual secret headers everywhere.
+create or replace function public.garvis_arm_heartbeat(p_functions_base text, p_secret text)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare sid uuid; base text := rtrim(p_functions_base, '/');
+begin
+  if base is null or base = '' or p_secret is null or p_secret = '' then
+    return 'Pass the functions base URL and the shared secret.';
+  end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_base';
+  if sid is null then perform vault.create_secret(base, 'ff_heartbeat_base');
+  else perform vault.update_secret(sid, base); end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_secret';
+  if sid is null then perform vault.create_secret(p_secret, 'ff_heartbeat_secret');
+  else perform vault.update_secret(sid, p_secret); end if;
+
+  perform cron.schedule('garvis-pulse-hourly', '7 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-pulse', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 20000);$c$);
+  perform cron.schedule('garvis-followups-daily', '0 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-followups', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-worker-tick', '*/5 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-ads-watch-daily', '15 10 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/ads-watch', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-reactivate-monthly', '0 14 1 * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-reactivate', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-inbox-draft-daily', '45 12 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/inbox-draft', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-scorecard-weekly', '0 22 * * 0', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-scorecard', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-invoice-chase-daily', '30 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/invoice-chase', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-standing-tick', '*/15 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/standing-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-consolidate-weekly', '0 8 * * 1', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-consolidate', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 120000);$c$);
+  perform cron.schedule('garvis-social-sync', '20 */6 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/social-sync', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+
+  return 'armed: 11 jobs (pulse, followups, worker, ads-watch, reactivate, inbox-draft, scorecard, invoice-chase, standing-tick, consolidate, social-sync)';
+end; $$;
+revoke all on function public.garvis_arm_heartbeat(text, text) from public;
+revoke all on function public.garvis_arm_heartbeat(text, text) from anon;
+revoke all on function public.garvis_arm_heartbeat(text, text) from authenticated;
+
+-- Disarm covers the full 11 (0087's version missed consolidate-weekly, 0088 never redefined it).
+create or replace function public.garvis_disarm_heartbeat()
+returns text language plpgsql security definer set search_path = public
+as $$
+begin
+  perform cron.unschedule('garvis-pulse-hourly'); perform cron.unschedule('garvis-followups-daily');
+  perform cron.unschedule('garvis-worker-tick'); perform cron.unschedule('garvis-ads-watch-daily');
+  perform cron.unschedule('garvis-reactivate-monthly'); perform cron.unschedule('garvis-inbox-draft-daily');
+  perform cron.unschedule('garvis-scorecard-weekly'); perform cron.unschedule('garvis-invoice-chase-daily');
+  perform cron.unschedule('garvis-standing-tick'); perform cron.unschedule('garvis-consolidate-weekly');
+  perform cron.unschedule('garvis-social-sync');
+  return 'disarmed';
+exception when others then return 'partially disarmed (some jobs were not scheduled)';
+end; $$;
+revoke all on function public.garvis_disarm_heartbeat() from public;
+revoke all on function public.garvis_disarm_heartbeat() from anon;
+revoke all on function public.garvis_disarm_heartbeat() from authenticated;
+
+-- ======== supabase/migrations/app_0093_paperwork_fields_isolation.sql ========
+-- PAPERWORK FIELD PERSISTENCE + WORLD ISOLATION (July 2026 scan, defects B7 + B8).
+--
+-- B7: template extraction produced field labels + grounded hints and the save path THREW THEM
+-- AWAY — paperwork_templates had no column for them, so the fill form showed bare token names.
+-- fields: [{ token, label, hint }] — persisted verbatim from the reviewed extraction.
+--
+-- B8 (part): the Money page can now split by business — invoices had world_id since app_0047
+-- but no read ever filtered on it; the new composite index makes the per-world list cheap.
+-- Additive + idempotent.
+
+alter table public.paperwork_templates add column if not exists fields jsonb not null default '[]'::jsonb;
+
+create index if not exists idx_invoices_owner_world on public.invoices(owner_id, world_id, created_at desc);
+
+-- ======== supabase/migrations/app_0094_credit_grant_pin.sql ========
+-- CREDIT FUNCTION PINNING (July 2026 scan, defect B10). app_0017 granted refresh_credits and
+-- spend_credits to `authenticated` with an arbitrary p_user parameter and no caller check — any
+-- signed-in session could drain any account's balance (a griefing vector that 402-pauses the
+-- whole autonomy loop) or roll a stranger's refill window. grant_credits was locked down in
+-- app_0056; these two were missed.
+--
+-- The pin: when a real JWT is present (auth.uid() not null), p_user MUST be the caller. Service
+-- role and pg_cron paths carry no user claim (auth.uid() null) and keep operating on any row —
+-- that's the edge functions' path, unchanged. Definitions otherwise identical to app_0017.
+
+create or replace function public.refresh_credits(p_user uuid)
+returns int language plpgsql security definer set search_path = public as $$
+declare v_plan plan_tier; v_balance int; v_start timestamptz;
+begin
+  if auth.uid() is not null and auth.uid() <> p_user then
+    raise exception 'refresh_credits: callers may only refresh their own balance';
+  end if;
+  select plan, credits_balance, credits_period_start into v_plan, v_balance, v_start
+    from public.profiles where id = p_user for update;
+  if not found then return 0; end if;
+  if v_start is null or now() >= v_start + interval '1 month' then
+    v_balance := public.plan_monthly_credits(v_plan);
+    update public.profiles set credits_balance = v_balance, credits_period_start = now() where id = p_user;
+  end if;
+  return v_balance;
+end;
+$$;
+
+create or replace function public.spend_credits(
+  p_user uuid, p_cost numeric, p_kind text,
+  p_provider text default null, p_model text default null,
+  p_in int default 0, p_out int default 0, p_project uuid default null
+) returns int language plpgsql security definer set search_path = public as $$
+declare v_credits int; v_balance int;
+begin
+  if auth.uid() is not null and auth.uid() <> p_user then
+    raise exception 'spend_credits: callers may only spend their own balance';
+  end if;
+  perform public.refresh_credits(p_user);
+  v_credits := greatest(1, ceil(coalesce(p_cost, 0) / public.credit_usd()))::int;
+  update public.profiles set credits_balance = greatest(0, credits_balance - v_credits)
+    where id = p_user returning credits_balance into v_balance;
+  insert into public.usage_events (user_id, project_id, event_type, provider, model, input_tokens, output_tokens, cost_usd, credits)
+    values (p_user, p_project, p_kind, p_provider, p_model, coalesce(p_in, 0), coalesce(p_out, 0), coalesce(p_cost, 0), v_credits);
+  return coalesce(v_balance, 0);
+end;
+$$;
+
+-- ======== supabase/migrations/app_0095_arc_wake.sql ========
+-- THE ARC WAKE LOOP (roadmap #1, first half): a waiting arc stops being the operator's memory
+-- burden. Parked steps now record WHAT they wait for in machine-checkable form (waiting_on);
+-- the standing-worker's wake sweep re-checks blockers on the clock and flips cleared arcs to
+-- 'ready'; the Orchestrate page auto-resumes ready arcs on sight. Plus a concurrency claim so
+-- two tabs can never double-run the same arc (statuses were last-writer-wins).
+
+alter table public.orchestrator_plans add column if not exists waiting_on jsonb;
+alter table public.orchestrator_plans add column if not exists claimed_until timestamptz;
+
+alter table public.orchestrator_plans drop constraint if exists orchestrator_plans_status_check;
+alter table public.orchestrator_plans
+  add constraint orchestrator_plans_status_check
+  check (status in ('draft', 'running', 'waiting', 'ready', 'done', 'failed', 'abandoned'));
+
+-- The wake sweep scans waiting arcs across owners on the service role.
+create index if not exists idx_orchestrator_plans_waiting on public.orchestrator_plans(status) where status = 'waiting';
+
+-- ======== supabase/migrations/app_0096_canary_tick.sql ========
+-- THE NIGHTLY CANARY JOB (holy-grail gap 9). garvis-canary proves the LIVE wiring every night
+-- at 08:30 UTC: catalog+gauntlet inside the runtime, hardened egress, a DB round-trip, the
+-- send gate REFUSING a fabricated approval, and stamp freshness. Silent when green; every
+-- owner gets one honest line + webhook nudge on failure. Redefines the arm with the 12th job
+-- (dual secret headers throughout, disarm covers all 12). Additive + idempotent; re-run the
+-- arm call (or the Health page's Arm button) to pick it up.
+
+create or replace function public.garvis_arm_heartbeat(p_functions_base text, p_secret text)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare sid uuid; base text := rtrim(p_functions_base, '/');
+begin
+  if base is null or base = '' or p_secret is null or p_secret = '' then
+    return 'Pass the functions base URL and the shared secret.';
+  end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_base';
+  if sid is null then perform vault.create_secret(base, 'ff_heartbeat_base');
+  else perform vault.update_secret(sid, base); end if;
+  select id into sid from vault.secrets where name = 'ff_heartbeat_secret';
+  if sid is null then perform vault.create_secret(p_secret, 'ff_heartbeat_secret');
+  else perform vault.update_secret(sid, p_secret); end if;
+
+  perform cron.schedule('garvis-pulse-hourly', '7 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-pulse', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 20000);$c$);
+  perform cron.schedule('garvis-followups-daily', '0 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-followups', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-worker-tick', '*/5 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 30000);$c$);
+  perform cron.schedule('garvis-ads-watch-daily', '15 10 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/ads-watch', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-reactivate-monthly', '0 14 1 * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/outreach-reactivate', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-inbox-draft-daily', '45 12 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/inbox-draft', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-scorecard-weekly', '0 22 * * 0', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-scorecard', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-invoice-chase-daily', '30 13 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/invoice-chase', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-standing-tick', '*/15 * * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/standing-worker', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-consolidate-weekly', '0 8 * * 1', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-consolidate', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 120000);$c$);
+  perform cron.schedule('garvis-social-sync', '20 */6 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/social-sync', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+  perform cron.schedule('garvis-canary-nightly', '30 8 * * *', $c$select net.http_post(url := (select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_base') || '/garvis-canary', headers := jsonb_build_object('Content-Type','application/json','x-worker-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret'),'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name = 'ff_heartbeat_secret')), body := '{}'::jsonb, timeout_milliseconds := 60000);$c$);
+
+  return 'armed: 12 jobs (pulse, followups, worker, ads-watch, reactivate, inbox-draft, scorecard, invoice-chase, standing-tick, consolidate, social-sync, canary)';
+end; $$;
+revoke all on function public.garvis_arm_heartbeat(text, text) from public;
+revoke all on function public.garvis_arm_heartbeat(text, text) from anon;
+revoke all on function public.garvis_arm_heartbeat(text, text) from authenticated;
+
+-- Disarm covers the full 11 (0087's version missed consolidate-weekly, 0088 never redefined it).
+create or replace function public.garvis_disarm_heartbeat()
+returns text language plpgsql security definer set search_path = public
+as $$
+begin
+  perform cron.unschedule('garvis-pulse-hourly'); perform cron.unschedule('garvis-followups-daily');
+  perform cron.unschedule('garvis-worker-tick'); perform cron.unschedule('garvis-ads-watch-daily');
+  perform cron.unschedule('garvis-reactivate-monthly'); perform cron.unschedule('garvis-inbox-draft-daily');
+  perform cron.unschedule('garvis-scorecard-weekly'); perform cron.unschedule('garvis-invoice-chase-daily');
+  perform cron.unschedule('garvis-standing-tick'); perform cron.unschedule('garvis-consolidate-weekly');
+  perform cron.unschedule('garvis-social-sync'); perform cron.unschedule('garvis-canary-nightly');
+  return 'disarmed';
+exception when others then return 'partially disarmed (some jobs were not scheduled)';
+end; $$;
+revoke all on function public.garvis_disarm_heartbeat() from public;
+revoke all on function public.garvis_disarm_heartbeat() from anon;
+revoke all on function public.garvis_disarm_heartbeat() from authenticated;
+
+-- ======== supabase/migrations/app_0097_autonomy.sql ========
+-- EARNED AUTONOMY, GENERALIZED (holy-grail gap 6). Trust stops being binary. The content-week
+-- loop proved the pattern (clean approvals → auto_mode → instant revoke); this table is the
+-- per-action-class trust dial for the recurring LOW-NOVELTY outbound classes — follow-ups,
+-- invoice chases, reactivation notes, inbox reply drafts. The operator GRANTS auto per class
+-- (the UI only offers it after a clean streak); the cron drafters then mint those approvals
+-- pre-approved (decided_via 'autonomy_grant', capped per day) and execute through the one send
+-- path where every gate still re-runs. Revoke is one click and instant. Cold pitches and
+-- anything novel stay manual forever — autonomy is earned per class, never global.
+
+create table if not exists public.autonomy_grants (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  action_class text not null check (action_class in ('followup', 'invoice_chase', 'reactivation', 'inbox_reply')),
+  mode text not null default 'manual' check (mode in ('manual', 'auto')),
+  daily_cap int not null default 5 check (daily_cap between 1 and 25),
+  granted_at timestamptz,
+  revoked_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (owner_id, action_class)
+);
+
+alter table public.autonomy_grants enable row level security;
+drop policy if exists "autonomy_grants owner all" on public.autonomy_grants;
+create policy "autonomy_grants owner all" on public.autonomy_grants
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- ======== supabase/migrations/app_0098_calendar_sense.sql ========
+-- THE CALENDAR SENSE (holy-grail gap 7, part b). One column: the operator's secret ICS feed URL
+-- (Google Calendar → Settings → "Secret address in iCal format"; Outlook publishes one too).
+-- The morning pulse reads the next 24h of events into the brief — Garvis finally knows what the
+-- day already holds before proposing what it should. The URL is operator-entered, fetched
+-- through safeFetch (SSRF-guarded), read-only, and removable by clearing the field.
+
+alter table public.profiles add column if not exists calendar_ics_url text;
+
+-- ======== supabase/migrations/app_0099_rooms_esign_filing.sql ========
+-- CUSTOM ROOMS v1 + SIGNED-DOCUMENT FILING (holy-grail gaps 4 + the paperwork back half).
+--
+-- world_rooms: creation that EXTENDS the creator — a built/deployed app mounted as a surface
+-- INSIDE its business (the wardrobe room: build the t-shirt design tool, deploy it, mount it,
+-- use it without leaving Garvis). v1 embeds by URL (https-only, iframe-sandboxed client-side);
+-- genesis emitting room-backed areas comes later.
+--
+-- signed_pdf_path: a completed DocuSign envelope's combined PDF gets pulled and FILED to
+-- storage — the signed artifact finally lands in the system of record instead of living only
+-- in DocuSign's inbox.
+
+create table if not exists public.world_rooms (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.profiles(id) on delete cascade,
+  world_id uuid not null references public.knowledge_worlds(id) on delete cascade,
+  title text not null,
+  url text not null,
+  kind text not null default 'deployed' check (kind in ('deployed', 'preview', 'external')),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_world_rooms_world on public.world_rooms(world_id, created_at desc);
+
+alter table public.world_rooms enable row level security;
+drop policy if exists "world_rooms owner all" on public.world_rooms;
+create policy "world_rooms owner all" on public.world_rooms
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid())
+  );
+
+alter table public.esign_envelopes add column if not exists signed_pdf_path text;
+
+-- ======== supabase/migrations/app_0100_execution_truth.sql ========
+-- app_0100_execution_truth.sql — exact run identity + resumable Garvis questions.
+--
+-- Interactive callers used to INSERT a run and then claim "the next" run. With an older queued
+-- row (or the unattended worker racing the browser), the command could execute a different run.
+-- claim_agent_run() is an owner-scoped compare-and-swap for the exact row the caller created.
+--
+-- Agent runs could also enter waiting_approval with a question but had no state transition back to
+-- queued. resume_agent_run() appends the human answer to the checkpoint history atomically and
+-- requeues that exact run. This is a clarification seam, distinct from consequence approvals.
+
+create or replace function public.create_and_claim_agent_run(
+  p_kind text,
+  p_title text,
+  p_phase text,
+  p_budget_usd numeric,
+  p_input text,
+  p_app_id uuid default null
+)
+returns setof public.agent_runs
+language plpgsql security definer set search_path = public as $$
+declare r public.agent_runs;
+begin
+  if auth.uid() is null then raise exception 'Authentication required.'; end if;
+  if p_kind not in ('research', 'content', 'build', 'analyze', 'recommend') then
+    raise exception 'Invalid run kind.';
+  end if;
+  if p_phase not in ('observe', 'plan', 'act') then raise exception 'Invalid run phase.'; end if;
+  -- SECURITY DEFINER bypasses RLS inside this function. Re-assert ownership for every
+  -- caller-supplied foreign key so a run can never be attached to another owner's app.
+  if p_app_id is not null and not exists (
+    select 1 from public.apps where id = p_app_id and owner_id = auth.uid()
+  ) then
+    raise exception 'App not found.';
+  end if;
+
+  insert into public.agent_runs (
+    owner_id, app_id, kind, title, status, phase, budget_usd, input, lease_until, started_at
+  ) values (
+    auth.uid(), p_app_id, p_kind, p_title, 'running', p_phase,
+    greatest(coalesce(p_budget_usd, 0), 0), p_input,
+    now() + interval '10 minutes', now()
+  ) returning * into r;
+
+  return next r;
+end $$;
+
+revoke execute on function public.create_and_claim_agent_run(text, text, text, numeric, text, uuid) from public;
+revoke execute on function public.create_and_claim_agent_run(text, text, text, numeric, text, uuid) from anon;
+grant execute on function public.create_and_claim_agent_run(text, text, text, numeric, text, uuid) to authenticated;
+
+create or replace function public.claim_agent_run(p_run_id uuid)
+returns setof public.agent_runs
+language plpgsql security definer set search_path = public as $$
+declare r public.agent_runs;
+begin
+  select * into r from public.agent_runs
+  where id = p_run_id
+    and owner_id = auth.uid()
+    and (
+      status = 'queued'
+      or (status = 'running' and (lease_until is null or lease_until < now()))
+    )
+    and (next_attempt_at is null or next_attempt_at <= now())
+  for update skip locked;
+
+  if not found then return; end if;
+
+  update public.agent_runs set
+    status = 'running',
+    lease_until = now() + interval '10 minutes',
+    started_at = coalesce(started_at, now())
+  where id = r.id
+  returning * into r;
+
+  return next r;
+end $$;
+
+revoke execute on function public.claim_agent_run(uuid) from public;
+revoke execute on function public.claim_agent_run(uuid) from anon;
+grant execute on function public.claim_agent_run(uuid) to authenticated;
+
+create or replace function public.resume_agent_run(p_run_id uuid, p_answer text)
+returns setof public.agent_runs
+language plpgsql security definer set search_path = public as $$
+declare
+  r public.agent_runs;
+  cp jsonb;
+  hist jsonb;
+  question text;
+begin
+  if length(trim(coalesce(p_answer, ''))) = 0 then
+    raise exception 'An answer is required.';
+  end if;
+
+  select * into r from public.agent_runs
+  where id = p_run_id
+    and owner_id = auth.uid()
+    and status = 'waiting_approval'
+  for update;
+
+  if not found then return; end if;
+
+  cp := coalesce(r.checkpoint, jsonb_build_object('step', 0, 'history', '[]'::jsonb));
+  hist := case when jsonb_typeof(cp->'history') = 'array' then cp->'history' else '[]'::jsonb end;
+  question := nullif(trim(cp #>> '{pendingQuestion,question}'), '');
+
+  -- New checkpoints already include the question as an assistant turn. Older waiting rows do
+  -- not, so repair them during resume. In both cases the model receives the actual Q/A pair.
+  if question is not null and not (
+    jsonb_array_length(hist) > 0
+    and hist->(jsonb_array_length(hist) - 1)->>'role' = 'assistant'
+    and hist->(jsonb_array_length(hist) - 1)->>'content' = question
+  ) then
+    hist := hist || jsonb_build_array(jsonb_build_object('role', 'assistant', 'content', question));
+  end if;
+  hist := hist || jsonb_build_array(jsonb_build_object('role', 'user', 'content', trim(p_answer)));
+  cp := jsonb_set(cp, '{history}', hist, true) - 'pendingQuestion';
+
+  update public.agent_runs set
+    status = 'queued',
+    checkpoint = cp,
+    output = null,
+    error = null,
+    lease_until = null,
+    next_attempt_at = null
+  where id = r.id
+  returning * into r;
+
+  return next r;
+end $$;
+
+revoke execute on function public.resume_agent_run(uuid, text) from public;
+revoke execute on function public.resume_agent_run(uuid, text) from anon;
+grant execute on function public.resume_agent_run(uuid, text) to authenticated;
+
+-- Mission outcomes need to distinguish a mixed result from a clean review, and a user stop from a
+-- failure. PostgreSQL enum additions are additive and keep every existing value untouched.
+alter type public.mission_status add value if not exists 'partial';
+alter type public.mission_status add value if not exists 'cancelled';
+
+-- One generated project represents at most one portfolio product for an owner. This turns the
+-- existing optional apps.project_id bridge into a dependable lifecycle identity.
+create unique index if not exists uq_apps_owner_project
+  on public.apps(owner_id, project_id)
+  where project_id is not null;
 
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop

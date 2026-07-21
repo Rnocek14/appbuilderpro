@@ -48,6 +48,7 @@ const MailerDesigner = lazy(() => import('../components/garvis/MailerDesigner').
 const FarmPanel = lazy(() => import('../components/garvis/FarmPanel').then((m) => ({ default: m.FarmPanel })));
 const PaperworkStudio = lazy(() => import('../components/garvis/PaperworkStudio').then((m) => ({ default: m.PaperworkStudio })));
 const MarketDataPanel = lazy(() => import('../components/garvis/MarketDataPanel').then((m) => ({ default: m.MarketDataPanel })));
+const RoomsPanel = lazy(() => import('../components/garvis/RoomsPanel').then((m) => ({ default: m.RoomsPanel })));
 const TimelinePanel = lazy(() => import('../components/garvis/TimelinePanel').then((m) => ({ default: m.TimelinePanel })));
 const SocialPublisher = lazy(() => import('../components/garvis/SocialPublisher').then((m) => ({ default: m.SocialPublisher })));
 const EmailBoard = lazy(() => import('../components/garvis/canvas/EmailBoard').then((m) => ({ default: m.EmailBoard })));
@@ -829,7 +830,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {/* MARKET DATA from the owner's own RESO/MLS feed — computed stats, honest empty state,
           and the sold-by-zip number the Farm's turnover math needs. */}
       {cluster.charter?.flavor === 'market' && (
-        <PanelBoundary name="market data"><MarketDataPanel onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+        <PanelBoundary name="market data"><MarketDataPanel worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* Video as a real product: a timed, captioned storyboard from this world's own photos —
@@ -893,6 +894,10 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'deliver' && (
         <PanelBoundary name="paperwork studio"><PaperworkStudio worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
+
+      {/* CUSTOM ROOMS (app_0099): built apps this business USES, embedded in-place — the
+          wardrobe room, a tracker, a calculator. Every area shows its world's rooms. */}
+      <PanelBoundary name="rooms"><RoomsPanel worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
 
       {/* DATA & NUMBERS WORKSPACE — a CSV becomes a typed table, honest per-column stats, and a chart
           drawn only from a real aggregation. Every number is computed in pure code; the optional read

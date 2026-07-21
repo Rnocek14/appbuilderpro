@@ -16,6 +16,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { notifyText } from '../_shared/notify.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -195,13 +196,14 @@ async function maybeInstantFirstTouch(admin: any, ownerId: string, lead: { id: s
       sequence_step: 0, subject, body_text: bodyText, to_address: lead.email, status: 'draft',
     }).select('id').single();
     if (!msg) return false;
+    const apPayload = { message_id: msg.id, standing_rule: 'auto_first_touch', lead_id: lead.id };
     const { data: approval } = await admin.from('approvals').insert({
       owner_id: ownerId, kind: 'send_email', status: 'approved',
       requested_by: 'garvis-auto', decided_via: 'standing_rule',
       decided_at: new Date().toISOString(),
       title: `Instant first touch → ${lead.email}`,
       preview: `${subject}\n\n${bodyText.slice(0, 400)}`,
-      payload: { message_id: msg.id, standing_rule: 'auto_first_touch', lead_id: lead.id },
+      payload: apPayload, payload_hash: await hashPayload(apPayload),
     }).select('id').single();
     if (!approval) return false;
 

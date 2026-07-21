@@ -9,6 +9,37 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { mapDocusignStatus, mapRecipientStatus, type EsignRecipient } from '../_shared/esignCore.ts';
+import { freshProviderToken } from '../_shared/oauth.ts';
+
+const AUTH_BASE = Deno.env.get('DOCUSIGN_AUTH_BASE') ?? 'https://account-d.docusign.com';
+
+/** FILE THE SIGNED DOCUMENT (app_0099 back half): pull the completed envelope's combined PDF
+ *  with the OWNER's own DocuSign token and land it in storage — the signed artifact reaches the
+ *  system of record instead of living only in DocuSign's inbox. Best-effort: any miss leaves
+ *  signed_pdf_path null and the envelope still completes (the operator can re-poll later). */
+// deno-lint-ignore no-explicit-any
+async function fileSignedPdf(admin: any, ownerId: string, rowId: string, envelopeId: string): Promise<void> {
+  try {
+    const token = await freshProviderToken(admin, ownerId, 'docusign');
+    if (!token) return;
+    const ui = await fetch(`${AUTH_BASE}/oauth/userinfo`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20_000) });
+    if (!ui.ok) return;
+    const u = await ui.json() as { accounts?: { account_id?: string; base_uri?: string; is_default?: boolean }[] };
+    const acct = (u.accounts ?? []).find((a) => a.is_default) ?? (u.accounts ?? [])[0];
+    if (!acct?.account_id || !acct?.base_uri) return;
+    const doc = await fetch(`${acct.base_uri}/restapi/v2.1/accounts/${acct.account_id}/envelopes/${envelopeId}/documents/combined`, {
+      headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(60_000),
+    });
+    if (!doc.ok) return;
+    const bytes = new Uint8Array(await doc.arrayBuffer());
+    if (bytes.length < 500) return; // not a real PDF — never file junk
+    const path = `${ownerId}/esign/${envelopeId}.pdf`;
+    const { error: upErr } = await admin.storage.from('project-assets')
+      .upload(path, bytes, { contentType: 'application/pdf', upsert: true });
+    if (upErr) return;
+    await admin.from('esign_envelopes').update({ signed_pdf_path: path }).eq('id', rowId);
+  } catch { /* filing is best-effort by contract */ }
+}
 
 async function hmacBase64(secret: string, raw: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
@@ -70,9 +101,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Monotonic guard (scan B18): DocuSign Connect redelivers and reorders — a stale 'sent'
+    // event must never drag a completed/declined/voided envelope back to life. Terminal states
+    // only ever advance to other terminal states.
+    const RANK: Record<string, number> = { queued: 0, sent: 1, delivered: 2, completed: 3, declined: 3, voided: 3 };
+    const current = String(row.status ?? '');
+    if ((RANK[mapped] ?? 0) < (RANK[current] ?? 0)) {
+      return json({ ok: true, note: `stale event (${mapped} after ${current}) — ignored` });
+    }
     const patch: Record<string, unknown> = { status: mapped, recipients };
     if (mapped === 'completed') patch.completed_at = payload.data?.envelopeSummary?.completedDateTime ?? new Date().toISOString();
     await admin.from('esign_envelopes').update(patch).eq('id', row.id);
+
+    if (mapped === 'completed') await fileSignedPdf(admin, row.owner_id, row.id, envelopeId);
 
     if (mapped === 'completed' || mapped === 'declined') {
       await admin.from('mind_events').insert({

@@ -11,15 +11,18 @@
 import { supabase } from '../supabase';
 import {
   COMPILER_SYSTEM, catalogContext, parsePlan, orderSteps, stepSucceeded, derivePlanStatus,
-  WaitingError, type CompiledPlan, type ParsePlanResult, type StepStatus, type PlanStep,
+  WaitingError, type CompiledPlan, type ParsePlanResult, type StepStatus, type PlanStep, type WaitingOn,
 } from './orchestrator';
 import { actionSpecs } from './actionCatalog';
 import { actionById } from './actionRegistry';
 import { recordMindEvent } from './mindStore';
+import { assembleSituation } from './situationRun';
 
 async function reason(system: string, context: string, message: string): Promise<string> {
   const { data, error } = await supabase.functions.invoke('cluster-chat', {
-    body: { system, context, history: [], message },
+    // format:'raw' — the compiler's system prompt defines its own JSON schema; the studio
+    // decision-JSON suffix would contradict it.
+    body: { system, context, history: [], message, format: 'raw' },
   });
   if (error) throw new Error(error.message);
   return ((data as { text?: string })?.text ?? '').trim();
@@ -32,7 +35,12 @@ export async function compileIntent(intent: string): Promise<ParsePlanResult> {
     return { plan: null, problems: ['Say the whole thing — a sentence or three about what you want set up.'], warnings: [] };
   }
   const specs = actionSpecs();
-  const raw = await reason(COMPILER_SYSTEM, catalogContext(specs), clean);
+  // SITUATION-AWARE COMPILES (holy-grail gap 3): the compiler used to see only the catalog and
+  // the sentence — "the t-shirt company" was planned blind and discovered reality at runtime.
+  // Now the current state (businesses by exact title, live/blocked arcs, clients, the clock)
+  // rides along; fail-soft — a broken probe compiles the old way rather than not at all.
+  const situation = await assembleSituation().catch(() => '');
+  const raw = await reason(COMPILER_SYSTEM, [catalogContext(specs), situation].filter(Boolean).join('\n\n'), clean);
   const parsed = parsePlan(raw, specs);
   if (parsed.plan) {
     const { data: auth } = await supabase.auth.getUser();
@@ -60,11 +68,14 @@ export interface ArcRow {
   statuses: StepStatus[];
   holes: string[];
   questions: string[];
-  status: 'draft' | 'running' | 'waiting' | 'done' | 'failed' | 'abandoned';
+  status: 'draft' | 'running' | 'waiting' | 'ready' | 'done' | 'failed' | 'abandoned';
   waiting_reason: string | null;
   last_activity_at: string;
   created_at: string;
 }
+
+/** How long one runArc invocation owns an arc before the claim lapses (renewed per step). */
+const CLAIM_MS = 10 * 60_000;
 
 /** Persist a compiled plan as a durable arc (status draft — running starts on approval). */
 export async function savePlan(intent: string, plan: CompiledPlan): Promise<string> {
@@ -106,21 +117,35 @@ export interface RunReport {
  * dependents. Statuses persist to the row after every step, so an arc survives anything.
  */
 export async function runArc(planId: string, onUpdate: (statuses: StepStatus[]) => void): Promise<RunReport> {
+  // ATOMIC CLAIM (scan gap: two tabs could run the same arc, statuses last-writer-wins). One
+  // conditional update takes ownership for CLAIM_MS; a live claim elsewhere refuses honestly.
+  const { data: claimed } = await supabase.from('orchestrator_plans')
+    .update({ claimed_until: new Date(Date.now() + CLAIM_MS).toISOString() })
+    .eq('id', planId)
+    .or(`claimed_until.is.null,claimed_until.lt.${new Date().toISOString()}`)
+    .select('id').maybeSingle();
+  if (!claimed) throw new Error('This arc is already running (another tab or a moment ago) — give it a minute, then try again.');
+
   const { data: row, error } = await supabase.from('orchestrator_plans').select('*').eq('id', planId).single();
   if (error || !row) throw new Error('That arc no longer exists.');
   const arc = row as ArcRow;
   const steps = arc.steps;
   const statuses: StepStatus[] = steps.map((_, i) => arc.statuses[i] ?? { kind: 'pending', note: '' });
   const persist = async (patch: Record<string, unknown> = {}) => {
+    // #51 hardening: a failed checkpoint throws (honest failure, no silent stale state).
+    // #50 claim lease: renew claimed_until each step so a live run keeps ownership mid-arc.
     const { error: persistError } = await supabase.from('orchestrator_plans').update({
-      statuses, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...patch,
+      statuses, last_activity_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      claimed_until: new Date(Date.now() + CLAIM_MS).toISOString(),
+      ...patch,
     }).eq('id', planId);
     if (persistError) throw new Error(`Could not checkpoint the arc: ${persistError.message}`);
   };
   const push = () => onUpdate([...statuses]);
-  await persist({ status: 'running', waiting_reason: null });
+  await persist({ status: 'running', waiting_reason: null, waiting_on: null });
   push();
 
+  let firstWaitingOn: WaitingOn | null = null;
   const { order } = orderSteps(steps);
   for (const i of order) {
     if (stepSucceeded(statuses[i].kind)) continue; // resume: completed work stands
@@ -153,16 +178,20 @@ export async function runArc(planId: string, onUpdate: (statuses: StepStatus[]) 
     try {
       statuses[i] = await def.execute(step.params);
     } catch (e) {
-      statuses[i] = e instanceof WaitingError
-        ? { kind: 'waiting', note: e.message }
-        : { kind: 'failed', note: e instanceof Error ? e.message : `${def.title} failed.` };
+      if (e instanceof WaitingError) {
+        statuses[i] = { kind: 'waiting', note: e.message };
+        if (!firstWaitingOn) firstWaitingOn = e.waitingOn;
+      } else {
+        statuses[i] = { kind: 'failed', note: e instanceof Error ? e.message : `${def.title} failed.` };
+      }
     }
     push(); await persist();
   }
 
   const state = derivePlanStatus(statuses);
   const waitingReason = statuses.find((s) => s.kind === 'waiting')?.note ?? null;
-  await persist({ status: state, waiting_reason: waitingReason });
+  // Release the claim; store the structured blocker so the worker's wake sweep can re-check it.
+  await persist({ status: state, waiting_reason: waitingReason, waiting_on: state === 'waiting' ? (firstWaitingOn ?? { kind: 'other' }) : null, claimed_until: null });
 
   const { data: auth } = await supabase.auth.getUser();
   if (auth.user) {

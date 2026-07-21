@@ -11,6 +11,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bot, Inbox as InboxIcon, Loader2, MessageSquareReply, ScrollText, Send, ShieldCheck } from 'lucide-react';
 import { useUndoBar } from '../components/garvis/UndoBar';
 import { AppShell } from '../components/layout/AppShell';
+import { AutonomyPanel } from '../components/garvis/AutonomyPanel';
 import { Badge, Button, EmptyState, Input, Skeleton, LoadError } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
@@ -288,6 +289,12 @@ export default function Queue() {
             ))}
           </div>
         </div>
+
+        {tab === 'queue' && (
+          <div className="mb-4">
+            <AutonomyPanel onToast={(k, m) => toast(k, m)} />
+          </div>
+        )}
 
         {tab === 'history' ? (
           <div>

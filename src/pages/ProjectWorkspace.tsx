@@ -1051,7 +1051,9 @@ export default function ProjectWorkspace() {
     if (!id) return;
     const repo = ((project?.name ?? 'fableforge-app').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)) || 'fableforge-app';
     const payload = files
-      .filter((f) => !f.path.includes('/.fableforge/') && !!f.content.trim())
+      // /.env holds the provisioned anon key (and whatever secrets land there later) — it must
+      // never ride along into a GitHub repo (scan B14). /.fableforge/ is internal state.
+      .filter((f) => !f.path.includes('/.fableforge/') && f.path !== '/.env' && !f.path.endsWith('/.env') && !!f.content.trim())
       .map((f) => ({ path: f.path.replace(/^\/+/, ''), content: f.content }));
     if (!payload.length) { toast('error', 'Nothing to export yet.'); return; }
     setDeploying(true);

@@ -18,6 +18,8 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { notifyText } from '../_shared/notify.ts';
+import { safeFetch } from '../_shared/safeFetch.ts';
+import { parseIcsEvents, calendarLine } from '../_shared/icsCore.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 
@@ -49,11 +51,11 @@ Deno.serve(async (req) => {
 
   // Owners who can receive a brief (webhook set). Paged conservatively.
   const { data: profiles, error } = await admin.from('profiles')
-    .select('id, full_name, webhook_url, last_pulse_at').not('webhook_url', 'is', null).limit(500);
+    .select('id, full_name, webhook_url, last_pulse_at, calendar_ics_url').not('webhook_url', 'is', null).limit(500);
   if (error) return json({ error: error.message }, 500);
 
   let sent = 0, checked = 0;
-  for (const p of (profiles ?? []) as { id: string; full_name: string | null; webhook_url: string; last_pulse_at: string | null }[]) {
+  for (const p of (profiles ?? []) as { id: string; full_name: string | null; webhook_url: string; last_pulse_at: string | null; calendar_ics_url?: string | null }[]) {
     checked++;
     try {
       // Their timezone (outreach settings hold it; default matches the send-cap default).
@@ -80,9 +82,22 @@ Deno.serve(async (req) => {
         nApprovals = approvals.count ?? 0, nReminders = reminders.count ?? 0;
       const arcs = (stalledArcs.data ?? []) as { title: string; waiting_reason: string | null }[];
 
+      // THE CALENDAR SENSE (app_0098): today's real events, read from the operator's own ICS
+      // feed. Fail-soft — a broken feed contributes nothing, never a guess or an error line.
+      let calendar: { line: string }[] = [];
+      if (p.calendar_ics_url && /^https:\/\//.test(p.calendar_ics_url)) {
+        try {
+          const res = await safeFetch(p.calendar_ics_url, { signal: AbortSignal.timeout(10_000) });
+          if (res.ok) {
+            const events = parseIcsEvents(await res.text(), now.toISOString(), new Date(now.getTime() + 24 * 3_600_000).toISOString(), 6);
+            calendar = events.map((e) => ({ line: calendarLine(e, tz) }));
+          }
+        } catch { /* the sense degrades to silence, never noise */ }
+      }
+
       // Always stamp the brief-check so tomorrow's window works; only SPEAK when something's real.
       await admin.from('profiles').update({ last_pulse_at: now.toISOString() }).eq('id', p.id);
-      if (nLeads + nReplies + nApprovals + nReminders + arcs.length === 0) continue;   // quiet night stays quiet
+      if (nLeads + nReplies + nApprovals + nReminders + arcs.length + calendar.length === 0) continue;   // quiet night stays quiet
 
       const lines = [
         `Morning brief${p.full_name ? `, ${p.full_name.split(' ')[0]}` : ''} — while you were away:`,
@@ -92,6 +107,7 @@ Deno.serve(async (req) => {
         nApprovals > 0 && `• ${nApprovals} action${nApprovals === 1 ? '' : 's'} waiting on your approval`,
         nReminders > 0 && `• ${nReminders} reminder${nReminders === 1 ? '' : 's'} due`,
         ...arcs.map((a) => `⏸ Arc "${a.title}" has been waiting a day+: ${a.waiting_reason ?? 'a prerequisite'} — one approval + Resume continues it`),
+        ...calendar.map((c) => c.line),
         `Open Garvis → Command to act on all of it.`,
       ].filter(Boolean) as string[];
 

@@ -93,6 +93,10 @@ export const COMPILER_SYSTEM = `You are the ORCHESTRATOR of a single-operator bu
 speaks one intent — often a whole venture — and you compile it into an ordered plan of concrete steps drawn ONLY
 from the ACTION CATALOG provided as context.
 
+When a SITUATION block is provided, plan from it: reference existing businesses by their EXACT titles (never
+invent or re-found one that already exists), do not duplicate work an existing arc is already doing or waiting
+to finish, and prefer steps that advance what is actually in flight.
+
 Return STRICT JSON only (no fences, no preamble):
 {"title":"<=60 chars naming the plan",
  "summary":"2-3 sentences: your read of what the operator wants — they verify understanding here",
@@ -173,9 +177,29 @@ export function parsePlan(raw: string, specs: ActionSpec[]): ParsePlanResult {
     survivors.push({ step: { action: actionId, params, why, after }, origIndex: i });
   });
 
+  // Second pass: a survivor that depended on a DROPPED step must not silently run without its
+  // prerequisite — cascade the drop, transitively. (References to indexes that never existed are
+  // model noise and are simply removed below, as before.)
+  const droppedIdx = new Set<number>();
+  rawSteps.slice(0, MAX_STEPS).forEach((_, i) => { if (!survivors.some((s) => s.origIndex === i)) droppedIdx.add(i); });
+  let remaining = survivors;
+  let cascaded = true;
+  while (cascaded) {
+    cascaded = false;
+    remaining = remaining.filter(({ step, origIndex }) => {
+      if (step.after.some((a) => droppedIdx.has(a))) {
+        warnings.push(`Dropped ${specById.get(step.action)?.title ?? step.action}: it depended on a step that was dropped.`);
+        droppedIdx.add(origIndex);
+        cascaded = true;
+        return false;
+      }
+      return true;
+    });
+  }
+
   // Remap `after` from original indexes to survivor indexes; dangling references are dropped.
-  const newIndex = new Map(survivors.map((s, idx) => [s.origIndex, idx]));
-  const steps = survivors.map(({ step }) => ({
+  const newIndex = new Map(remaining.map((s, idx) => [s.origIndex, idx]));
+  const steps = remaining.map(({ step }) => ({
     ...step,
     after: step.after.map((a) => newIndex.get(a)).filter((a): a is number => a !== undefined),
   }));
@@ -230,12 +254,32 @@ export function stepSucceeded(kind: StepStatusKind): boolean {
 }
 
 /**
+ * What a parked step is actually waiting FOR, in machine-checkable form. The standing-worker's
+ * wake sweep re-checks these on the clock and flips the arc to 'ready' the moment the blocker
+ * clears — the system notices instead of the operator remembering.
+ *   world_exists — a business with (roughly) this title must exist (approve its draft)
+ *   world_area   — the world exists but has no chartered areas yet (approving the draft creates them)
+ *   world_named  — ambiguity only the operator can resolve (exact naming); never auto-cleared
+ *   other        — humanly described in the message; never auto-cleared
+ */
+export interface WaitingOn {
+  kind: 'world_exists' | 'world_area' | 'world_named' | 'other';
+  title?: string;
+  world_id?: string;
+}
+
+/**
  * A step blocked on something the OPERATOR must do first (approve a draft, link a world) — a
  * seam, not a failure. The durable runner parks the step 'waiting' and the arc resumes after the
  * prerequisite lands, instead of burying a retryable state as a terminal error.
  */
 export class WaitingError extends Error {
-  constructor(message: string) { super(message); this.name = 'WaitingError'; }
+  readonly waitingOn: WaitingOn;
+  constructor(message: string, waitingOn?: WaitingOn) {
+    super(message);
+    this.name = 'WaitingError';
+    this.waitingOn = waitingOn ?? { kind: 'other' };
+  }
 }
 
 export type PlanRunState = 'running' | 'waiting' | 'done' | 'failed';

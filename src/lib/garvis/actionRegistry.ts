@@ -26,7 +26,16 @@ async function resolveWorld(title: string): Promise<{ id: string; title: string 
   const rows = (data ?? []) as { id: string; title: string }[];
   // A missing world is a SEAM, not a failure: it usually means "approve the draft first" — the
   // durable runner parks the step waiting and the arc resumes once the world exists.
-  if (rows.length === 0) throw new WaitingError(`No business named "${title}" yet — approve its draft on Businesses (or name an existing one exactly), then resume this arc.`);
+  if (rows.length === 0) throw new WaitingError(`No business named "${title}" yet — approve its draft on Businesses (or name an existing one exactly), then resume this arc.`, { kind: 'world_exists', title });
+  if (rows.length > 1) {
+    // Two candidates: an exact-title match wins; otherwise refuse — running against the wrong
+    // business is worse than pausing. Same seam as "missing": name it exactly and resume.
+    const exact = rows.filter((r) => r.title.toLowerCase() === title.toLowerCase());
+    if (exact.length !== 1) {
+      throw new WaitingError(`More than one business matches "${title}" (${rows.map((r) => `"${r.title}"`).join(', ')}) — name the one you mean exactly, then resume this arc.`, { kind: 'world_named', title });
+    }
+    return exact[0];
+  }
   return rows[0];
 }
 
@@ -36,7 +45,7 @@ async function resolveArea(worldId: string, preferred: Archetype[]): Promise<Cha
   const { data } = await supabase.from('knowledge_clusters')
     .select('slug, charter').eq('world_id', worldId).limit(32);
   const rows = ((data ?? []) as { slug: string; charter: Charter | null }[]).filter((r) => r.charter);
-  if (!rows.length) throw new WaitingError('That business has no chartered areas yet — approve its draft on Businesses, then resume this arc.');
+  if (!rows.length) throw new WaitingError('That business has no chartered areas yet — approve its draft on Businesses, then resume this arc.', { kind: 'world_area', world_id: worldId });
   for (const p of preferred) {
     const hit = rows.find((r) => r.charter!.archetype === p);
     if (hit) return hit.charter!;
@@ -212,6 +221,83 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
       note: clockLine(c),
       link: '/garvis/health',
     };
+  },
+
+  // ---- catalog expansion (July 2026) ----
+
+  create_invoice: async (p) => {
+    const amount = Number(p.amount_usd);
+    if (!Number.isFinite(amount) || amount <= 0) throw new Error(`"${p.amount_usd}" is not a billable amount — say the real number.`);
+    const worldId = p.world ? (await resolveWorld(p.world)).id : null;
+    const { createInvoice } = await import('./moneyRun');
+    const inv = await createInvoice({
+      title: p.title, toEmail: p.to_email,
+      lineItems: [{ description: p.title, qty: 1, unit_usd: amount }],
+      dueDate: p.due_date || null, worldId, source: 'garvis_tool',
+    });
+    return { kind: 'done', note: `Invoice ${inv.number} drafted for $${amount.toFixed(2)} → ${p.to_email}. Queue the send from Money when you're ready (approval-gated).`, link: '/garvis/money' };
+  },
+
+  add_reminder: async (p) => {
+    const { addReminder } = await import('./remindersRun');
+    const due = p.due_at && !Number.isNaN(Date.parse(p.due_at)) ? new Date(p.due_at).toISOString() : null;
+    await addReminder({ title: p.title, dueAt: due });
+    return { kind: 'done', note: `Reminder set: "${p.title.slice(0, 80)}"${due ? ` (fires ${new Date(due).toLocaleString()})` : ' (no time — it lives on the board)'}.`, link: '/garvis/home' };
+  },
+
+  start_content_week: async (p) => {
+    const w = await resolveWorld(p.world);
+    const posts = Math.min(7, Math.max(1, Number(p.posts_per_week) || 3));
+    const seg = ['all', 'new', 'contacted', 'qualified', 'customer'].includes(p.email_segment ?? '')
+      ? (p.email_segment as 'all' | 'new' | 'contacted' | 'qualified' | 'customer') : null;
+    const { createContentWeekOrder } = await import('./contentWeekRun');
+    const order = await createContentWeekOrder({
+      worldId: w.id,
+      config: { platforms: ['twitter', 'linkedin'], postsPerWeek: posts, emailSegment: seg, sendHourUtc: 16, minScore: 6 },
+    });
+    return { kind: 'done', note: `"${order.label}" armed for ${w.title} — each week stages as ONE approval; auto-mode is earned after 3 clean weeks.`, link: '/garvis/automations' };
+  },
+
+  start_idea_stream: async (p) => {
+    const w = await resolveWorld(p.world);
+    const { createOrder } = await import('./standingRun');
+    const cadence = (p.cadence === 'daily' ? 'daily' : 'weekly') as 'daily' | 'weekly';
+    const order = await createOrder({ worldId: w.id, kind: 'idea_stream', label: `${w.title} idea stream`, cadence });
+    return { kind: 'done', note: `Idea stream "${order.label}" armed (${cadence}) — fresh, non-repeating angles land on the board.`, link: '/garvis/automations' };
+  },
+
+  start_client_hunt: async (p) => {
+    const { createClientHuntOrder } = await import('./standingRun');
+    const searches = Math.min(20, Math.max(1, Number(p.searches_per_day) || 6));
+    const order = await createClientHuntOrder({
+      niches: p.niche ? [p.niche.trim()] : [], scope: { mode: 'topN', n: 50 },
+      searchesPerDay: searches, demoQuota: 2,
+    });
+    return { kind: 'done', note: `"${order.label}" armed — daily discovery, honest site audits, demo builds, and pitches that WAIT in your Queue (needs GOOGLE_PLACES_API_KEY + the armed heartbeat).`, link: '/garvis/automations' };
+  },
+
+  mount_room: async (p) => {
+    const w = await resolveWorld(p.world);
+    const { mountRoom } = await import('./roomsRun');
+    await mountRoom({ worldId: w.id, title: p.title, url: p.url });
+    return { kind: 'done', note: `Room "${p.title.trim()}" mounted in ${w.title} — open the business and use it in-place.`, link: `/garvis/webs/${w.id}` };
+  },
+
+  add_contact: async (p) => {
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id;
+    if (!uid) throw new Error('Not signed in.');
+    const email = p.email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) throw new Error(`"${p.email}" is not a valid email — say the real one.`);
+    const worldId = p.world ? (await resolveWorld(p.world)).id : null;
+    // Select-first: never resets email_status on an existing contact (suppression is sacred).
+    const { data: existing } = await supabase.from('contacts').select('id').eq('owner_id', uid).eq('email', email).maybeSingle();
+    if (existing) return { kind: 'done', note: `${email} is already in the CRM — nothing duplicated.`, link: '/garvis/contacts' };
+    const { error } = await supabase.from('contacts').insert({
+      owner_id: uid, world_id: worldId, full_name: p.name.trim(), email, email_status: 'unknown', is_primary: false,
+    });
+    if (error) throw new Error(error.message);
+    return { kind: 'done', note: `${p.name.trim()} (${email}) added to the CRM${p.world ? ` under ${p.world}` : ''}.`, link: '/garvis/contacts' };
   },
 };
 

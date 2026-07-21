@@ -14,6 +14,7 @@ import { useToast } from '../context/ToastContext';
 import { useUndoBar } from '../components/garvis/UndoBar';
 import { invoiceTotal, chaseStage, type LineItem } from '../lib/garvis/money';
 import { listInvoices, createInvoice, queueInvoiceSend, markInvoicePaid, unmarkInvoicePaid, voidInvoice, unvoidInvoice, type InvoiceRow } from '../lib/garvis/moneyRun';
+import { supabase } from '../lib/supabase';
 
 const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 const STAGE_LABEL = ['', 'reminder queued window', 'due', 'past due', 'final notice'];
@@ -32,13 +33,22 @@ export default function Money() {
   const [dueDate, setDueDate] = useState('');
   const [payUrl, setPayUrl] = useState('');
   const [items, setItems] = useState<LineItem[]>([{ description: '', qty: 1, unit_usd: 0 }]);
+  // Per-business money (scan B8): the page was one merged list across every venture and client.
+  // '' = all businesses, 'none' = unassigned, else a world id — totals follow the filter.
+  const [worlds, setWorlds] = useState<{ id: string; title: string }[]>([]);
+  const [worldFilter, setWorldFilter] = useState<'' | 'none' | string>('');
+  const [invoiceWorld, setInvoiceWorld] = useState('');
 
   const refresh = useCallback(async () => {
-    try { setRows(await listInvoices()); }
+    try { setRows(await listInvoices(undefined, worldFilter || undefined)); }
     catch (e) { toast('error', e instanceof Error ? e.message : 'Could not load invoices.'); }
     finally { setLoading(false); }
-  }, [toast]);
+  }, [toast, worldFilter]);
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void supabase.from('knowledge_worlds').select('id, title').order('title')
+      .then(({ data }) => setWorlds((data ?? []) as { id: string; title: string }[]));
+  }, []);
 
   const setItem = (i: number, patch: Partial<LineItem>) =>
     setItems((cur) => cur.map((it, n) => (n === i ? { ...it, ...patch } : it)));
@@ -46,7 +56,7 @@ export default function Money() {
   const save = async () => {
     setSaving(true);
     try {
-      const inv = await createInvoice({ title, toEmail, lineItems: items, dueDate: dueDate || null, paymentUrl: payUrl || null });
+      const inv = await createInvoice({ title, toEmail, lineItems: items, dueDate: dueDate || null, paymentUrl: payUrl || null, worldId: invoiceWorld || null });
       toast('success', `${inv.number} created — queue the send when you're ready.`);
       setTitle(''); setToEmail(''); setDueDate(''); setPayUrl(''); setItems([{ description: '', qty: 1, unit_usd: 0 }]); setCreating(false);
       await refresh();
@@ -84,6 +94,14 @@ export default function Money() {
 
         {/* The chase ladder runs on the clock — if the clock is dead, say so here (quiet when healthy). */}
         <ClockStatus quiet />
+          {worlds.length > 0 && (
+            <select value={worldFilter} onChange={(e) => { setLoading(true); setWorldFilter(e.target.value as '' | 'none'); }}
+              className="rounded-lg border border-forge-border bg-forge-bg px-2 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+              <option value="">All businesses</option>
+              {worlds.map((w) => <option key={w.id} value={w.id}>{w.title}</option>)}
+              <option value="none">Unassigned</option>
+            </select>
+          )}
           <div className="ml-auto flex items-center gap-3 text-sm">
             {/* Totals sum the loaded invoices (newest 200). Say so when we're at the cap, rather than
                 showing a silently-undercounted number (deep scan P2, no-invented-numbers). */}
@@ -110,6 +128,15 @@ export default function Money() {
               <label className="block text-xs text-forge-dim">Payment link (your Stripe/Square link — money goes to YOUR account)
                 <Input className="mt-1" placeholder="https://buy.stripe.com/…  (optional)" value={payUrl} onChange={(e) => setPayUrl(e.target.value)} />
               </label>
+              {worlds.length > 0 && (
+                <label className="block text-xs text-forge-dim">Business (bills as that brand; keeps its revenue separate)
+                  <select value={invoiceWorld} onChange={(e) => setInvoiceWorld(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-forge-border bg-forge-bg px-2 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+                    <option value="">No specific business</option>
+                    {worlds.map((w) => <option key={w.id} value={w.id}>{w.title}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
             <div className="mt-3 space-y-2">
               {items.map((it, i) => (

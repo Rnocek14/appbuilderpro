@@ -26,9 +26,13 @@ interface ResoProperty {
   ListingContractDate?: string; CloseDate?: string; DaysOnMarket?: number; ModificationTimestamp?: string;
 }
 
-function mapRow(uid: string, p: ResoProperty) {
+function mapRow(uid: string, p: ResoProperty, worldId: string | null) {
   return {
     owner_id: uid,
+    // Scan B8: world_id existed since app_0066 and was never written — every listing was
+    // owner-global, so two realtor clients' markets merged. The feed stays one-per-operator
+    // (provider_connections keys on user+provider); the world stamp is per sync call.
+    world_id: worldId,
     listing_key: String(p.ListingKey ?? ''),
     status: String(p.StandardStatus ?? ''),
     list_price: p.ListPrice ?? null,
@@ -64,7 +68,14 @@ Deno.serve(async (req) => {
     const uid = user.id;
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-    const body = (await req.json().catch(() => ({}))) as { action?: string; base_url?: string; token?: string };
+    const body = (await req.json().catch(() => ({}))) as { action?: string; base_url?: string; token?: string; world_id?: string };
+    // A world-scoped sync stamps rows to that business — verify the world is really the caller's.
+    let worldId: string | null = null;
+    if (body.world_id) {
+      const { data: w } = await admin.from('knowledge_worlds').select('id').eq('id', body.world_id).eq('owner_id', uid).maybeSingle();
+      if (!w) return json({ error: 'That business does not exist or is not yours.' }, 403);
+      worldId = body.world_id;
+    }
 
     if (body.action === 'save') {
       const base = (body.base_url ?? '').trim().replace(/\/+$/, '');
@@ -96,9 +107,13 @@ Deno.serve(async (req) => {
       const base = (conn?.metadata as { base_url?: string } | null)?.base_url;
       if (!conn?.access_token || !base) return json({ error: 'No MLS feed configured — save one first.' }, 400);
 
-      // Cursor: the newest ModificationTimestamp we already hold (never a guessed date).
-      const { data: newest } = await admin.from('mls_listings')
-        .select('modified_at').eq('owner_id', uid).not('modified_at', 'is', null)
+      // Cursor: the newest ModificationTimestamp we already hold (never a guessed date). A
+      // world-scoped sync cursors within that world only, so pointing the feed at a business for
+      // the first time replays the whole feed into it (1000/call, honest "more remain").
+      let newestQ = admin.from('mls_listings')
+        .select('modified_at').eq('owner_id', uid).not('modified_at', 'is', null);
+      if (worldId) newestQ = newestQ.eq('world_id', worldId);
+      const { data: newest } = await newestQ
         .order('modified_at', { ascending: false }).limit(1).maybeSingle();
       const since = (newest?.modified_at as string | undefined) ?? '1970-01-01T00:00:00Z';
 
@@ -116,7 +131,7 @@ Deno.serve(async (req) => {
         pages++;
         fetched += items.length;
         if (items.length === 0) break;
-        const rows = items.map((p) => mapRow(uid, p));
+        const rows = items.map((p) => mapRow(uid, p, worldId));
         const { error: upErr } = await admin.from('mls_listings')
           .upsert(rows, { onConflict: 'owner_id,listing_key' });
         if (upErr) return json({ error: `Could not store page ${page + 1}: ${upErr.message}`, fetched, upserted }, 500);

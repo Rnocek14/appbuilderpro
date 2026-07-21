@@ -75,11 +75,11 @@ const CASES: Case[] = [
     actions: [], minQuestions: 1,
   },
   {
-    name: 'the wardrobe room: a custom tool routes to the builder, embedding is an honest hole',
+    name: 'the wardrobe room: build in the builder, then mount_room brings it home (no longer a hole)',
     intent: 'Build me a wardrobe room where I render t-shirt designs, try print placements, and compare shirt brands',
     compile: plan([step('build_app', { idea: 'A wardrobe room: upload t-shirt designs, render them on shirt mockups, drag print placement, compare shirt brands/colors side by side, save favorites' }, W('a purpose-built interactive tool is a builder job'))],
-      ['Using the wardrobe room INSIDE Garvis as an embedded canvas — generated apps open in the builder/deployed URL today, not as in-system rooms.']),
-    actions: ['build_app'], minHoles: 1,
+      [], ['After deploying it, say "mount <its URL> as the Wardrobe room in <business>" — mounting needs the deployed URL, and then you use it without leaving Garvis.']),
+    actions: ['build_app'], minQuestions: 1,
   },
   {
     name: 'campaign with an over-reach: drafting is real, blanket auto-posting is a hole',
@@ -277,6 +277,61 @@ const CASES: Case[] = [
     compile: plan([step('send_bulk_email', { list: 'all' }, W('a model hallucinating a capability that does not exist'))],
       ['Bulk sending is not an orchestrator action yet.']),
     actions: [], minHoles: 1,
+  },
+  // ---- catalog expansion (July 2026): the new actions, each pinned ----
+  {
+    name: 'invoice with stated amount compiles; the send stays behind the Queue',
+    intent: 'Bill Jane Roe (jane@roe.com) $450 for the lakefront listing photos, due August 1st',
+    compile: plan([step('create_invoice', { title: 'Lakefront listing photos', to_email: 'jane@roe.com', amount_usd: '450', due_date: '2026-08-01' }, W('a stated amount and recipient make a real draft invoice'))]),
+    actions: ['create_invoice'],
+  },
+  {
+    name: 'invoice WITHOUT an amount demotes to a question, never an invented number',
+    intent: 'Invoice Jane for the photography work',
+    compile: plan([step('create_invoice', { title: 'Photography work' }, W('billing is the ask — but the amount and email were never stated'))]),
+    actions: [], minQuestions: 1,
+  },
+  {
+    name: 'a remind-me becomes a timed reminder',
+    intent: 'Remind me Thursday to follow up with the print shop about shirt samples',
+    compile: plan([step('add_reminder', { title: 'Follow up with the print shop about shirt samples', due_at: '2026-07-23T15:00:00Z' }, W('a timed nudge is exactly what reminders do'))]),
+    actions: ['add_reminder'],
+  },
+  {
+    name: 'weekly content for an existing business arms a judged content week',
+    intent: 'Keep Northstar\'s socials active — a few posts every week in its voice',
+    compile: plan([step('start_content_week', { world: 'Northstar', posts_per_week: '3' }, W('recurring judged content staged behind one weekly approval'))]),
+    actions: ['start_content_week'],
+  },
+  {
+    name: 'keep-ideas-coming arms an idea stream on the business board',
+    intent: 'Brainstorm fresh angles for Mural Co every week and put them on its board',
+    compile: plan([step('start_idea_stream', { world: 'Mural Co', cadence: 'weekly' }, W('a non-repeating stream of angles is the idea stream\'s job'))]),
+    actions: ['start_idea_stream'],
+  },
+  {
+    name: 'find-me-clients arms the daily hunt; pitches wait in the Queue',
+    intent: 'Find me web design clients — go after landscapers',
+    compile: plan([step('start_client_hunt', { niche: 'landscapers' }, W('automatic discovery, audits, demos, and pitch drafts are the hunt machine'))]),
+    actions: ['start_client_hunt'],
+  },
+  {
+    name: 'mount a deployed tool as an in-business room (the wardrobe room comes home)',
+    intent: 'Mount https://wardrobe.fableforge.app as the Wardrobe room in my Threadline business',
+    compile: plan([step('mount_room', { world: 'Threadline', title: 'Wardrobe room', url: 'https://wardrobe.fableforge.app' }, W('a deployed tool used in-place belongs inside its business'))]),
+    actions: ['mount_room'],
+  },
+  {
+    name: 'mount WITHOUT a URL demotes to a question, never an invented link',
+    intent: 'Put the wardrobe tool inside my Threadline business',
+    compile: plan([step('mount_room', { world: 'Threadline', title: 'Wardrobe room' }, W('mounting is the ask but no deployed URL was given'))]),
+    actions: [], minQuestions: 1,
+  },
+  {
+    name: 'a named person with an email lands in the CRM',
+    intent: 'Add Sam Ortiz, sam@ortizbuilds.com, to my contacts for Northstar',
+    compile: plan([step('add_contact', { name: 'Sam Ortiz', email: 'sam@ortizbuilds.com', world: 'Northstar' }, W('a real person from the intent belongs in the CRM'))]),
+    actions: ['add_contact'],
   },
 ];
 

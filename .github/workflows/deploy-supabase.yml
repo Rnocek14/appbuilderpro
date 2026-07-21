@@ -55,8 +55,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # THE GATE (July 2026 scan risk #1): nothing used to stand between "merge" and "prod" — a
+  # type-broken worker deployed silently and the unattended layer just stopped. Now the fleet
+  # must typecheck and every pure-logic suite must pass before a single function ships.
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Typecheck all edge functions
+        working-directory: supabase/functions
+        run: deno check --quiet */index.ts
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run every verify suite
+        run: |
+          set -e
+          scripts=$(node -e "const s=require('./package.json').scripts;console.log(Object.keys(s).filter(k=>k.startsWith('verify:')).join('\n'))")
+          failed=0
+          for s in $scripts; do
+            if ! npm run -s "$s" >/dev/null 2>&1; then echo "FAILED: $s"; failed=1; fi
+          done
+          exit $failed
+
   deploy:
     runs-on: ubuntu-latest
+    needs: tests
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

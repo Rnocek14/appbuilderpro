@@ -237,7 +237,7 @@ Deno.serve(async (req) => {
     const bodyHtml = paragraphsToHtml(msg.body_text ?? '') + paragraphsToHtml(footer);
 
     const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
+      method: 'POST', signal: AbortSignal.timeout(30_000),
       headers: { 'content-type': 'application/json', authorization: `Bearer ${resendKey}` },
       body: JSON.stringify({
         from: `${fromName} <${fromEmail}>`,

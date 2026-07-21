@@ -3,7 +3,7 @@
 // The parse gauntlet is the trust boundary between the model's proposal and real execution —
 // every drop/coerce rule is proven here.
 
-import { parsePlan, orderSteps, catalogContext, stepSucceeded, derivePlanStatus, planProgress, MAX_STEPS, type ActionSpec, type StepStatus } from './orchestrator';
+import { parsePlan, orderSteps, catalogContext, stepSucceeded, derivePlanStatus, planProgress, WaitingError, MAX_STEPS, type ActionSpec, type StepStatus } from './orchestrator';
 
 let passed = 0;
 let failed = 0;
@@ -39,16 +39,19 @@ const gauntlet = parsePlan(JSON.stringify({
   steps: [
     { action: 'invented_action', params: {}, why: 'This action does not exist anywhere.', after: [] },        // unknown → dropped
     { action: 'found_company', params: { intent: 'agency' }, why: 'short', after: [] },                        // why too thin → dropped
-    { action: 'watch_page', params: { url: 'https://a.gov/rfps', label: 'RFPs', bogus: 'x' }, why: 'Watch the grant board for changes.', after: [0] }, // unknown param stripped, dangling after cleaned
+    { action: 'watch_page', params: { url: 'https://a.gov/rfps', label: 'RFPs', bogus: 'x' }, why: 'Watch the grant board for changes.', after: [9] }, // unknown param stripped, never-existed after cleaned
     { action: 'business_plan', params: {}, why: 'A plan would ground the work here.', after: [] },             // missing required → dropped to questions
+    { action: 'watch_page', params: { url: 'https://b.gov/rfps', label: 'More' }, why: 'Watch the second board too.', after: [0] }, // depends on the DROPPED step 0 → cascade-dropped
   ],
   holes: [], questions: [],
 }), SPECS);
 check('unknown action is dropped with a warning', gauntlet.plan!.steps.every((s) => s.action !== 'invented_action') && gauntlet.warnings.some((w) => w.includes('invented_action')));
 check('why-less step is dropped', gauntlet.plan!.steps.every((s) => s.action !== 'found_company'));
 check('unknown param is stripped', !('bogus' in gauntlet.plan!.steps[0].params));
-check('dangling after reference is cleaned', gauntlet.plan!.steps[0].after.length === 0);
+check('never-existed after reference is cleaned', gauntlet.plan!.steps[0].after.length === 0);
 check('missing required param demotes to a question', gauntlet.plan!.steps.every((s) => s.action !== 'business_plan') && gauntlet.plan!.questions.some((q) => q.includes('Write the business plan')));
+check('a step depending on a dropped step is cascade-dropped, never run without its prerequisite',
+  gauntlet.plan!.steps.length === 1 && gauntlet.warnings.some((w) => w.includes('depended on a step that was dropped')));
 
 // ---- fences + failure modes ----
 const fenced = parsePlan('```json\n' + JSON.stringify({ title: 't', summary: 's', steps: [], holes: ['h'], questions: [] }) + '\n```', SPECS);
@@ -88,6 +91,12 @@ check('all succeeded (incl. review/handoff) is done', derivePlanStatus(st(['done
 check('a terminal failure with nothing waiting is failed', derivePlanStatus(st(['done', 'failed', 'skipped'])) === 'failed');
 check('waiting outranks failure (resume may unblock the rest)', derivePlanStatus(st(['failed', 'waiting'])) === 'waiting');
 check('pending work with no blockers is still running', derivePlanStatus(st(['done', 'pending'])) === 'running');
+
+// ---- structured waiting (the wake sweep's contract) ----
+check('WaitingError defaults to an un-wakeable other blocker', new WaitingError('x').waitingOn.kind === 'other');
+const we = new WaitingError('no world', { kind: 'world_exists', title: 'Northstar' });
+check('WaitingError carries the machine-checkable blocker verbatim', we.waitingOn.kind === 'world_exists' && we.waitingOn.title === 'Northstar');
+check('WaitingError stays instanceof-detectable after subclassing', we instanceof WaitingError && we.name === 'WaitingError');
 const prog = planProgress(st(['done', 'waiting', 'failed', 'skipped', 'pending']));
 check('planProgress counts succeeded/waiting/failed(+skipped) against total', prog.succeeded === 1 && prog.waiting === 1 && prog.failed === 2 && prog.total === 5);
 

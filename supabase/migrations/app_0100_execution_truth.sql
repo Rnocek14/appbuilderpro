@@ -1,4 +1,4 @@
--- app_0092_execution_truth.sql — exact run identity + resumable Garvis questions.
+-- app_0100_execution_truth.sql — exact run identity + resumable Garvis questions.
 --
 -- Interactive callers used to INSERT a run and then claim "the next" run. With an older queued
 -- row (or the unattended worker racing the browser), the command could execute a different run.
