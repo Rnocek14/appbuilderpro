@@ -75,7 +75,11 @@ Deno.serve(async (req) => {
       gapLines.length ? `Bespoke / not-yet-built:\n${gapLines.join('\n')}` : '',
     ].filter(Boolean).join('\n\n').slice(0, 4000);
 
-    const origin = Deno.env.get('APP_ORIGIN') ?? (req.headers.get('origin') ?? '');
+    // Only an http(s) origin is trusted for source_url — the request Origin header is attacker-set,
+    // so an unvalidated value (e.g. "javascript:…") could be stored and later rendered as an href in
+    // the operator's feed. Anything else falls back to a safe relative path.
+    const rawOrigin = Deno.env.get('APP_ORIGIN') ?? req.headers.get('origin') ?? '';
+    const origin = /^https?:\/\/[^\s"'<>]+$/i.test(rawOrigin) ? rawOrigin.replace(/\/+$/, '') : '';
     const sourceUrl = origin ? `${origin}/preview-site/${slug}` : `/preview-site/${slug}`;
     const dedupeKey = `${dedupePrefix}${cleanEmail || shortHash(cleanDesc)}`.slice(0, 200);
 

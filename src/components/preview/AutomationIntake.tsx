@@ -45,7 +45,10 @@ export function AutomationIntake({ previewSiteId, businessName, theme }: {
         <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[hsl(var(--bor))] bg-[hsl(var(--card))] px-3 py-1 text-xs font-medium text-[hsl(var(--mut))]">
           <Wand2 size={13} className="text-[hsl(var(--p))]" /> Automation
         </div>
-        <h2 className="pv-display text-2xl font-bold tracking-tight sm:text-3xl">Want it to run your business too?</h2>
+        <h2 className="text-2xl font-bold tracking-tight sm:text-3xl"
+          style={{ fontFamily: `"${theme.displayFont}", "${theme.bodyFont}", ui-sans-serif, sans-serif` }}>
+          Want it to run your business too?
+        </h2>
         <p className="mt-2 text-sm text-[hsl(var(--mut))] sm:text-base">
           Tell me how you operate day to day — how bookings come in, how you handle enquiries,
           invoices, follow-ups — and I&rsquo;ll show you exactly what I&rsquo;d automate for {businessName}.
