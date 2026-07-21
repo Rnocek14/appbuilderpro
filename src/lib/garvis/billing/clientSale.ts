@@ -5,7 +5,9 @@
 // No I/O here — just the deterministic tier math, the payment-link URL building, and the "what to do
 // when it's paid" decision the edge function + webhook share. Deno-safe (imported by edge functions).
 
-import { CLIENT_TIERS, type TierId, type Cadence } from './clientTiers';
+// .ts extension on the value import (CLIENT_TIERS): this module is imported by the client-checkout +
+// stripe-webhook EDGE functions (Deno strict resolver). clientTiers is pure, so it resolves cleanly.
+import { CLIENT_TIERS, type TierId, type Cadence } from './clientTiers.ts';
 
 export interface TierTerms {
   id: TierId;

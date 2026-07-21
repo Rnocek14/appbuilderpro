@@ -24,10 +24,16 @@ const cryptoProvider = Stripe.createSubtleCryptoProvider();
 // deno-lint-ignore no-explicit-any
 async function handleClientSale(admin: any, session: Stripe.Checkout.Session): Promise<boolean> {
   const ref = session.client_reference_id;
-  if (!ref) return false;
-  const { data: sub } = await admin.from('client_subscriptions')
+  // Guard the uuid column: a non-uuid ref (a FableForge session may carry none, or a non-uuid) must
+  // NOT reach .eq('id', …) — that throws "invalid input syntax for uuid", 500s the webhook, and makes
+  // Stripe retry forever. A non-uuid ref is definitively not one of our sales → let FableForge handle it.
+  if (!ref || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)) return false;
+  const { data: sub, error: lookupErr } = await admin.from('client_subscriptions')
     .select('id, owner_id, business_name, tier, preview_site_id, status').eq('id', ref).maybeSingle();
-  if (!sub) return false;   // not one of ours → let the FableForge branches handle it
+  // A REAL lookup error (transient DB fault) must retry — throw so the outer catch 500s and Stripe
+  // redelivers. Only a clean "no row" (error null, sub null) falls through to the FableForge branches.
+  if (lookupErr) throw new Error(`client sale lookup failed: ${lookupErr.message}`);
+  if (!sub) return false;
 
   await admin.from('client_subscriptions')
     .update({ status: 'active', activated_at: new Date().toISOString() }).eq('id', sub.id);
