@@ -20,7 +20,7 @@ import {
 // client hunt runs the IDENTICAL strategist/art-director/owner-critique brief as this browser path.
 import {
   extractJson, SPEC_SYSTEM, specPrompt, STRATEGY_SYSTEM, CRITIQUE_SYSTEM,
-  strategyBlock, critiqueBlock, critiqueUserPrompt,
+  strategyBlock, critiqueBlock, directiveBlock, critiqueUserPrompt,
 } from './specPrompts';
 
 // ---------------------------------------------------------------------------
@@ -55,12 +55,12 @@ export async function deriveStrategy(profile: BusinessProfile): Promise<WebsiteS
 /** Model → validated SiteSpec, EXECUTING the strategy (and optionally an owner critique — the
  *  refine pass). Falls back to the deterministic assembly on ANY failure. */
 export async function generateSiteSpec(
-  profile: BusinessProfile, strategy?: WebsiteStrategy, critique?: OwnerCritique,
+  profile: BusinessProfile, strategy?: WebsiteStrategy, critique?: OwnerCritique, directive?: string | null,
 ): Promise<{ spec: SiteSpec; source: 'ai' | 'fallback' }> {
   try {
     const spec = normalizeSpec(await completeJson([
       { role: 'system', content: SPEC_SYSTEM },
-      { role: 'user', content: specPrompt(profile) + strategyBlock(strategy) + critiqueBlock(critique) },
+      { role: 'user', content: specPrompt(profile) + strategyBlock(strategy) + critiqueBlock(critique) + directiveBlock(directive) },
     ], 8000), profile);
     return { spec, source: 'ai' };
   } catch {
@@ -219,8 +219,11 @@ export async function ingestBusinessProfile(raw: unknown): Promise<
   return { ok: true, row: row as PreviewSiteRow, previewUrl: previewUrlFor(slug), specSource: source };
 }
 
-/** Regenerate everything (strategy → spec → critique/refine → audit → pitch) from the stored profile. */
-export async function regeneratePreviewSite(id: string): Promise<{ ok: boolean; error?: string }> {
+/** Regenerate everything (strategy → spec → critique/refine → audit → pitch) from the stored
+ *  profile. An optional `directive` is the operator's own change request from the Refine box — it
+ *  rides into BOTH the first draft and the refine pass, so the demo actually moves to what they
+ *  asked for (this is the "edit this demo" path — targeted, not a blind reroll). */
+export async function regeneratePreviewSite(id: string, directive?: string | null): Promise<{ ok: boolean; error?: string }> {
   const { data: site } = await supabase.from('preview_sites').select('id, slug, profile_id').eq('id', id).single();
   if (!site) return { ok: false, error: 'Preview not found.' };
   const { data: prof } = await supabase.from('business_profiles').select('profile').eq('id', (site as { profile_id: string }).profile_id).single();
@@ -229,12 +232,14 @@ export async function regeneratePreviewSite(id: string): Promise<{ ok: boolean; 
   const profile = parsed.profile;
   const auditPromise = generateAudit(profile);
   const strategy = await deriveStrategy(profile);
-  let { spec, source } = await generateSiteSpec(profile, strategy);
+  let { spec, source } = await generateSiteSpec(profile, strategy, undefined, directive);
   let critique: OwnerCritique | null = null;
   if (source === 'ai') {
     critique = await critiqueSpec(profile, spec);
-    if (critiqueWarrantsRefine(critique)) {
-      const refined = await generateSiteSpec(profile, strategy, critique);
+    // A directive alone warrants a refine pass even when the simulated owner is content — the
+    // operator asked for a change and it must be honored.
+    if (critiqueWarrantsRefine(critique) || (directive ?? '').trim()) {
+      const refined = await generateSiteSpec(profile, strategy, critique, directive);
       if (refined.source === 'ai') spec = refined.spec;
     }
   }

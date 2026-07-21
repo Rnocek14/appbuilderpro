@@ -28,6 +28,7 @@ import { SavedAudits } from '../components/garvis/SavedAudits';
 import { CanvasScene, type CanvasNode } from '../components/garvis/canvas/CanvasScene';
 import { profileFromScrape } from '../lib/preview/scrapeProfile';
 import { queuePitch } from '../lib/garvis/outreach';
+import { HuntReadiness } from '../components/garvis/HuntReadiness';
 import { cn } from '../lib/utils';
 
 type Row = FoundBusiness & { built?: { previewUrl: string; queued: boolean; email: string | null }; building?: boolean };
@@ -296,9 +297,13 @@ export default function WinClients() {
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Globe size={18} /></span>
           <h1 className="text-xl font-semibold text-forge-ink">Win new clients</h1>
         </div>
-        <p className="mb-5 text-sm text-forge-dim">
+        <p className="mb-4 text-sm text-forge-dim">
           Find local businesses, see whose website is weak, and build them a fresh one — the pitch lands in your Queue to approve before anything sends.
         </p>
+
+        {/* Ready-to-hunt light: right where you're about to hunt, so a missing key or the
+            APP_ORIGIN silent-blocker is visible before you wonder why nothing queued. */}
+        <div className="mb-5"><HuntReadiness /></div>
 
         {/* Find bar */}
         <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-3">
