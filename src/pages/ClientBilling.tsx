@@ -18,6 +18,7 @@ import {
   type BillingSettings, type ClientSubRow,
 } from '../lib/garvis/billing/clientBilling';
 import { detectVertical } from '../lib/garvis/verticals';
+import { supabaseUrl } from '../lib/supabase';
 import { menuForVertical } from '../lib/garvis/automation/registry';
 
 const STATUS_CLS: Record<string, string> = {
@@ -132,7 +133,8 @@ export default function ClientBilling() {
             {/* Payment links */}
             <div className="mb-5 rounded-2xl border border-forge-border bg-forge-panel/40 p-4">
               <div className="mb-2 flex items-center gap-2 text-sm font-medium text-forge-ink"><LinkIcon size={15} className="text-forge-ember" /> Your Stripe payment links</div>
-              <p className="mb-3 flex items-start gap-1.5 text-[11px] text-forge-dim"><Info size={12} className="mt-0.5 shrink-0" /> Create two Payment Links in your Stripe dashboard (Products → Payment links) — one per offer — and paste them here. They’re reused for every client. See <code className="text-forge-ink">docs/client-billing-setup.md</code>.</p>
+              <p className="mb-2 flex items-start gap-1.5 text-[11px] text-forge-dim"><Info size={12} className="mt-0.5 shrink-0" /> Create two Payment Links in your Stripe dashboard (Products → Payment links) — one per offer — and paste them here. They’re reused for every client. See <code className="text-forge-ink">docs/client-billing-setup.md</code>.</p>
+              <p className="mb-3 flex items-start gap-1.5 rounded-lg bg-forge-ember/5 px-2.5 py-2 text-[11px] text-forge-dim"><Rocket size={12} className="mt-0.5 shrink-0 text-forge-ember" /> <span><span className="font-medium text-forge-ink">Auto-publish on payment:</span> in Stripe → Developers → Webhooks, add an endpoint for <code className="text-forge-ink">checkout.session.completed</code> pointing at <code className="break-all text-forge-ink">{supabaseUrl}/functions/v1/stripe-webhook</code>. When a client pays from their demo, the sale is recorded and the site goes live automatically.</span></p>
               <div className="space-y-2">
                 {CLIENT_TIERS.map((t) => (
                   <div key={t.id} className="flex flex-col gap-1 sm:flex-row sm:items-center">

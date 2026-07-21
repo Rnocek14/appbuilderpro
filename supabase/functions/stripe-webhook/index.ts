@@ -9,8 +9,82 @@
 import Stripe from 'npm:stripe@18';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { stripeClient, syncSubscription } from '../_shared/stripe.ts';
+import { notifyText } from '../_shared/notify.ts';
+import { saleActionOnPaid } from '../../../src/lib/garvis/billing/clientSale.ts';
+import { publishedHtmlPath } from '../../../src/lib/preview/publishCore.ts';
 
 const cryptoProvider = Stripe.createSubtleCryptoProvider();
+
+/** A CLIENT paying the OPERATOR for their website (Payment Link, client_reference_id = our
+ *  client_subscriptions id). Returns true when the session WAS a client sale (so the caller skips the
+ *  FableForge SaaS branches below — critical, since a $/mo client sale is mode:'subscription' and
+ *  would otherwise be mis-handled as the operator's own Pro plan). Marks the sale active and, when the
+ *  demo can be published without a browser, auto-publishes it — honestly: it never claims a site is
+ *  live that it couldn't publish. */
+// deno-lint-ignore no-explicit-any
+async function handleClientSale(admin: any, session: Stripe.Checkout.Session): Promise<boolean> {
+  const ref = session.client_reference_id;
+  if (!ref) return false;
+  const { data: sub } = await admin.from('client_subscriptions')
+    .select('id, owner_id, business_name, tier, preview_site_id, status').eq('id', ref).maybeSingle();
+  if (!sub) return false;   // not one of ours → let the FableForge branches handle it
+
+  await admin.from('client_subscriptions')
+    .update({ status: 'active', activated_at: new Date().toISOString() }).eq('id', sub.id);
+
+  const ownerId = sub.owner_id as string;
+  const previewId = sub.preview_site_id as string | null;
+  let liveUrl: string | null = null;
+  let outcome = 'recorded';
+
+  if (previewId) {
+    const { data: prev } = await admin.from('preview_sites')
+      .select('id, live_url, status').eq('id', previewId).maybeSingle();
+    liveUrl = (prev?.live_url as string | null) ?? null;
+    // Mark the demo SOLD (never downgraded from here on).
+    await admin.from('preview_sites').update({ status: 'purchased', updated_at: new Date().toISOString() }).eq('id', previewId);
+
+    const alreadyLive = !!liveUrl;
+    // Is a rendered index.html stashed? (Then we can publish with no browser.)
+    const { data: files } = await admin.storage.from('project-assets')
+      .list(`${ownerId}/published`, { search: `${previewId}.html`, limit: 1 });
+    const hasStashedHtml = Array.isArray(files) && files.some((f: { name?: string }) => f.name === `${previewId}.html`);
+
+    const action = saleActionOnPaid({ alreadyLive, hasStashedHtml });
+    if (action === 'convert') { outcome = `already live at ${liveUrl}`; }
+    else if (action === 'publish') {
+      // Server-to-server publish (worker secret) — re-publishes the stashed html.
+      try {
+        const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/publish-preview`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-worker-secret': Deno.env.get('WORKER_SECRET') ?? '',
+            authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+            apikey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+          },
+          body: JSON.stringify({ previewSiteId: previewId }),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (r.ok && (body as { url?: string }).url) { liveUrl = (body as { url: string }).url; outcome = `auto-published → ${liveUrl}`; }
+        else outcome = 'paid — click Go Live to publish';
+      } catch { outcome = 'paid — click Go Live to publish'; }
+    } else { outcome = 'paid — click Go Live to publish'; }   // 'notify'
+  }
+
+  // Tell the operator, in-app + webhook. This is a raised hand that paid — never let it land silently.
+  await admin.from('mind_events').insert({
+    owner_id: ownerId, source: 'execution', event_type: 'note',
+    subject: `💰 SOLD — ${sub.business_name} bought ${sub.tier} (${outcome})`,
+    payload: { kind: 'client_sale_paid', client_subscription_id: sub.id, preview_site_id: previewId, live_url: liveUrl },
+  }).then(() => {}, () => {});
+  const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', ownerId).maybeSingle();
+  await notifyText(
+    (owner as { webhook_url?: string } | null)?.webhook_url,
+    `💰 SOLD — ${sub.business_name}\nPlan: ${sub.tier}\n${liveUrl ? `Live: ${liveUrl}` : outcome}`,
+  );
+  return true;
+}
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('POST only', { status: 405 });
@@ -42,6 +116,10 @@ Deno.serve(async (req) => {
       case 'checkout.session.async_payment_succeeded': {
         const session = event.data.object as Stripe.Checkout.Session;
         const paid = session.payment_status === 'paid' || session.payment_status === 'no_payment_required';
+        // A CLIENT paying the operator (Payment Link) is intercepted FIRST — it must never fall through
+        // to the FableForge SaaS branches (a $/mo client sale is mode:'subscription' and would corrupt
+        // the operator's own plan). Only paid sessions convert a sale.
+        if (paid && await handleClientSale(admin, session)) break;
         if (session.mode === 'payment' && paid) {
           // Credit top-up: grant once (event idempotency above protects against replays).
           const userId = session.metadata?.user_id ?? session.client_reference_id;

@@ -323,6 +323,22 @@ export async function publishPreviewSite(previewSiteId: string, spec: SiteSpec, 
   }
 }
 
+/** MAKE IT MINE — a prospect on the PUBLIC preview chooses a plan and goes to pay. Creates the
+ *  pending sale server-side and returns the operator's Stripe checkout URL to redirect to. If the
+ *  operator hasn't set up a payment link, the edge fn notifies them and this returns not-ok with a
+ *  friendly message (the button never lies about being able to charge). */
+export async function startClientCheckout(args: { previewSiteId: string; tier: 'website' | 'website_automation'; email?: string }):
+  Promise<{ ok: boolean; url?: string; error?: string }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('client-checkout', { body: args });
+    const d = data as { ok?: boolean; url?: string } | null;
+    if (!error && d?.ok && d.url) return { ok: true, url: d.url };
+    return { ok: false, error: 'Checkout isn’t available yet — the owner has been notified and will be in touch.' };
+  } catch {
+    return { ok: false, error: 'Checkout isn’t available right now — please try again shortly.' };
+  }
+}
+
 /** Update a claim's lifecycle state (new → contacted → won/lost) — the CRM seed. */
 export async function setPublishRequestStatus(id: string, status: 'new' | 'contacted' | 'won' | 'lost'): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase.from('publish_requests').update({ status }).eq('id', id);
