@@ -13,6 +13,7 @@ import { useToast } from '../context/ToastContext';
 import {
   ingestBusinessProfile, listPreviewSites, regeneratePreviewSite, deletePreviewSite, previewUrlFor,
   listPublishRequests, getPreviewStats, setPublishRequestStatus, publishPreviewSite,
+  connectDomain, domainStatus, type DomainStatus,
   listIngestTokens, createIngestToken, revokeIngestToken,
   type PreviewSiteRow, type PublishRequestRow, type PreviewStats, type IngestToken,
 } from '../lib/preview/engine';
@@ -35,6 +36,10 @@ export default function PreviewEngine() {
   const [directive, setDirective] = useState('');                    // the operator's change request
   const [queuingId, setQueuingId] = useState<string | null>(null);
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [domainFor, setDomainFor] = useState<string | null>(null);   // which row's domain panel is open
+  const [domainInput, setDomainInput] = useState('');
+  const [domainRes, setDomainRes] = useState<DomainStatus | null>(null);
+  const [domainBusy, setDomainBusy] = useState(false);
   const [tokens, setTokens] = useState<IngestToken[]>([]);
   const [tokensOpen, setTokensOpen] = useState(false);
 
@@ -122,6 +127,28 @@ export default function PreviewEngine() {
     } finally {
       setPublishingId(null);
     }
+  };
+
+  // DOMAIN MIGRATION: point a client's existing domain at their hosted site (they keep the domain).
+  const recheckDomain = async (id: string) => {
+    setDomainBusy(true);
+    const res = await domainStatus(id);
+    setDomainBusy(false);
+    if (res.ok) setDomainRes(res);
+  };
+  const openDomain = (r: PreviewSiteRow) => {
+    if (domainFor === r.id) { setDomainFor(null); setDomainRes(null); return; }
+    setDomainFor(r.id); setDomainInput(r.custom_domain ?? ''); setDomainRes(null);
+    if (r.custom_domain) void recheckDomain(r.id);   // already connected → load live status
+  };
+  const doConnectDomain = async (r: PreviewSiteRow) => {
+    if (!domainInput.trim()) return;
+    setDomainBusy(true);
+    const res = await connectDomain(r.id, domainInput.trim());
+    setDomainBusy(false);
+    setDomainRes(res);
+    if (res.ok) { toast('success', `Set ${res.domain} — send the client the records below.`); await refresh(); }
+    else toast('error', res.error ?? 'Could not connect the domain.');
   };
 
   // Turn a generated pitch into a real, approval-gated outreach message (replaces copy-to-clipboard).
@@ -321,6 +348,16 @@ export default function PreviewEngine() {
                     {publishingId === r.id ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />}
                     {r.live_url ? 'Live' : 'Go Live'}
                   </button>
+                  {r.live_url && (
+                    <button onClick={() => openDomain(r)}
+                      title={r.custom_domain ? `Domain: ${r.custom_domain}` : 'Connect the client’s own domain'}
+                      className={cn('flex items-center gap-1 rounded-lg border px-2.5 py-2 text-xs transition-colors',
+                        domainFor === r.id ? 'border-forge-ember/60 text-forge-ember'
+                          : r.custom_domain ? 'border-forge-ok/50 text-forge-ok hover:border-forge-ok'
+                          : 'border-forge-border text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink')}>
+                      <Globe size={14} /> {r.custom_domain ? 'Domain' : 'Domain'}
+                    </button>
+                  )}
                   <button onClick={() => copyPitch(r.pitch)} title="Copy pitch email"
                     className="rounded-lg border border-forge-border px-2.5 py-2 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
                     Pitch
@@ -361,6 +398,54 @@ export default function PreviewEngine() {
                     className="flex items-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-xs font-medium text-forge-ember disabled:opacity-50">
                     {regenId === r.id ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} Apply change
                   </button>
+                </div>
+              )}
+              {/* CONNECT A DOMAIN: migrate the client's own domain onto the hosted site (DNS repoint;
+                  they keep the domain, SSL is automatic). Shows the exact records to hand the client. */}
+              {domainFor === r.id && (
+                <div className="mt-1 basis-full border-t border-forge-border pt-2.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input value={domainInput} onChange={(e) => setDomainInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void doConnectDomain(r); }}
+                      placeholder="Their domain, e.g. summitroofing.com"
+                      className="min-w-[14rem] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />
+                    <button onClick={() => void doConnectDomain(r)} disabled={domainBusy || !domainInput.trim()}
+                      className="flex items-center gap-1.5 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-xs font-medium text-forge-ember disabled:opacity-50">
+                      {domainBusy ? <Loader2 size={13} className="animate-spin" /> : <Globe size={13} />} Connect
+                    </button>
+                    {domainRes?.ok && (
+                      <button onClick={() => void recheckDomain(r.id)} disabled={domainBusy}
+                        className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-dim transition-colors hover:text-forge-ink disabled:opacity-50">Recheck</button>
+                    )}
+                  </div>
+                  {domainRes?.ok && (
+                    <div className="mt-2.5 space-y-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', domainRes.dnsVerified ? 'bg-forge-ok/15 text-forge-ok' : 'bg-forge-border/40 text-forge-dim')}>{domainRes.dnsVerified ? '✓ DNS verified' : '• Pending DNS'}</span>
+                        <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', domainRes.sslActive ? 'bg-forge-ok/15 text-forge-ok' : 'bg-forge-border/40 text-forge-dim')}>{domainRes.sslActive ? '✓ SSL active' : '• SSL pending'}</span>
+                        <span className="text-forge-dim">for <span className="font-medium text-forge-ink">{domainRes.domain}</span></span>
+                      </div>
+                      {domainRes.records && domainRes.records.length > 0 && (
+                        <div className="rounded-lg border border-forge-border bg-forge-panel/40 p-2.5">
+                          <p className="mb-1.5 text-[11px] text-forge-dim">Send the client these records to add at their domain registrar — only web records, so their email is untouched:</p>
+                          <div className="space-y-1">
+                            {domainRes.records.map((rec, i) => (
+                              <div key={i} className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
+                                <span className="rounded bg-forge-bg px-1.5 py-0.5 text-forge-ember">{rec.type}</span>
+                                <span className="text-forge-dim">host</span><span className="text-forge-ink">{rec.host}</span>
+                                <span className="text-forge-dim">→</span><span className="break-all text-forge-ink">{rec.value}</span>
+                                <button onClick={() => { void navigator.clipboard?.writeText(rec.value); toast('success', 'Value copied.'); }} title="Copy value"
+                                  className="text-forge-dim transition-colors hover:text-forge-ink"><Copy size={11} /></button>
+                                {rec.note && <span className="w-full text-forge-dim/70">{rec.note}</span>}
+                              </div>
+                            ))}
+                          </div>
+                          <p className="mt-2 text-[11px] text-forge-dim/80">Once they add these, DNS + SSL verify on their own (minutes to a few hours) — hit Recheck. Prefer fully hands-off? They can instead point their domain’s <span className="text-forge-ink">nameservers</span> to your host and you manage records — but then you must copy their existing MX (email) records over. These records never touch email.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {domainRes && !domainRes.ok && domainRes.error && <p className="mt-2 text-[11px] font-medium text-forge-err">{domainRes.error}</p>}
                 </div>
               )}
               </Card>

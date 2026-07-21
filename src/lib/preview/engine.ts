@@ -147,7 +147,34 @@ export interface PreviewSiteRow {
   audit: AuditReport | null;
   live_url: string | null;
   published_at: string | null;
+  custom_domain: string | null;
   created_at: string;
+}
+
+export interface DnsRecordRow { type: string; host: string; value: string; note?: string }
+export interface DomainStatus {
+  ok: boolean; domain?: string; netlifyHost?: string;
+  records?: DnsRecordRow[]; dnsVerified?: boolean; sslActive?: boolean; error?: string;
+}
+
+/** MIGRATE a client's existing domain onto their hosted site — sets it on the host and returns the
+ *  exact DNS records to hand the client + the live status. The site must be published first. */
+export async function connectDomain(previewSiteId: string, domain: string): Promise<DomainStatus> {
+  const { data, error } = await supabase.functions.invoke('connect-domain', { body: { previewSiteId, domain, action: 'connect' } });
+  if (!error) return (data as DomainStatus) ?? { ok: false, error: 'Could not connect the domain.' };
+  // Surface the edge function's specific message (e.g. "Publish the site first").
+  let msg = 'Could not connect the domain.';
+  try { const body = await (error as { context?: Response }).context?.json?.(); if (body?.error) msg = body.error as string; } catch { /* keep default */ }
+  return { ok: false, error: msg };
+}
+
+/** Re-check a connected domain's DNS + SSL status (the status chip). */
+export async function domainStatus(previewSiteId: string): Promise<DomainStatus> {
+  try {
+    const { data, error } = await supabase.functions.invoke('connect-domain', { body: { previewSiteId, action: 'status' } });
+    if (!error) return (data as DomainStatus) ?? { ok: false };
+    return { ok: false };
+  } catch { return { ok: false }; }
 }
 
 /** Public preview URL for a row (the route is public — no login, clean URL for emails). */
