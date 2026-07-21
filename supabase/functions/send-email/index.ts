@@ -22,6 +22,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 function paragraphsToHtml(text: string): string {
   return text.split(/\n\n+/).map((p) => `<p>${p.replace(/</g, '&lt;').replace(/\n/g, '<br/>')}</p>`).join('\n');
 }
+// Escape owner/setting text for HTML element bodies and double-quoted attributes (the CAN-SPAM
+// footer). Kept local so this "one send path" pulls in no cross-module dependency.
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 function addBusinessDaysIso(iso: string, days: number): string {
   const d = new Date(iso);
   let added = 0;
@@ -88,7 +93,7 @@ Deno.serve(async (req) => {
     if (!resendKey) return json({ error: 'Email is not configured (RESEND_API_KEY missing).' }, 400);
 
     const { data: msg } = await admin.from('outreach_messages')
-      .select('id, owner_id, campaign_id, contact_id, batch_id, preview_site_id, subject, body_text, to_address, status, sent_at')
+      .select('id, owner_id, campaign_id, contact_id, batch_id, preview_site_id, subject, body_text, body_html, to_address, status, sent_at')
       .eq('id', messageId).single();
     if (!msg || msg.owner_id !== uid) return json({ error: 'Message not found' }, 404);
     if (msg.sent_at || msg.status === 'sent') return json({ error: 'Message already sent.' }, 409);
@@ -234,7 +239,17 @@ Deno.serve(async (req) => {
     const optOut = `To stop receiving these emails, click ${primaryUnsub} or reply "unsubscribe".`;
     const footer = `\n\n--\n${companyName}\n${physicalAddress}\n${optOut}`;
     const finalText = (msg.body_text ?? '') + footer;
-    const bodyHtml = paragraphsToHtml(msg.body_text ?? '') + paragraphsToHtml(footer);
+    // The CAN-SPAM footer as HTML (company + physical address + a real unsubscribe link), so a custom
+    // HTML body keeps its required opt-out.
+    const footerHtml = `<hr style="border:none;border-top:1px solid #e5e5ea;margin:20px 0 10px"/>`
+      + `<p style="font-size:12px;line-height:1.5;color:#8a8a8f">${esc(companyName)}<br/>${esc(physicalAddress ?? '')}<br/>`
+      + `To stop receiving these emails, <a href="${esc(primaryUnsub)}" style="color:#8a8a8f">unsubscribe</a> or reply "unsubscribe".</p>`;
+    // Prefer a custom HTML body (the screenshot pitch built by buildHuntPitchEmailHtml) verbatim;
+    // otherwise derive the HTML from the plain text exactly as before. The `text` part is always the
+    // plain body + footer — the deliverability-friendly fallback every client can render.
+    const bodyHtml = (typeof msg.body_html === 'string' && msg.body_html.trim())
+      ? msg.body_html + footerHtml
+      : paragraphsToHtml(msg.body_text ?? '') + paragraphsToHtml(footer);
 
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST', signal: AbortSignal.timeout(30_000),

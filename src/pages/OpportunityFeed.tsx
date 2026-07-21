@@ -30,6 +30,14 @@ interface Opportunity {
 
 const TABS = ['new', 'saved', 'applied', 'dismissed'] as const;
 
+// Friendly badge labels for the kind enum (raw values like 'inbound_automation_request' read as
+// machine text); unknown kinds fall back to a de-slugged form.
+const KIND_LABELS: Record<string, string> = {
+  'inbound_automation_request': 'Automation request', 'public-art': 'Public art',
+  mural: 'Mural', grant: 'Grant', commission: 'Commission', job: 'Job', other: 'Other',
+};
+const kindLabel = (k: string): string => KIND_LABELS[k] ?? k.replace(/[-_]/g, ' ');
+
 export default function OpportunityFeed() {
   const { toast } = useToast();
   const [rows, setRows] = useState<Opportunity[] | null>(null);
@@ -99,7 +107,7 @@ export default function OpportunityFeed() {
                       <a href={o.source_url} target="_blank" rel="noreferrer noopener" className="text-sm font-medium text-forge-ink hover:text-forge-ember">
                         {o.title} <ExternalLink size={11} className="inline text-forge-dim" />
                       </a>
-                      <Badge tone="ember">{o.kind}</Badge>
+                      <Badge tone="ember">{kindLabel(o.kind)}</Badge>
                     </div>
                     <p className="mt-1 text-xs leading-relaxed text-forge-dim">{o.summary}</p>
                     <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-forge-dim">

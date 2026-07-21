@@ -352,7 +352,9 @@ Want the link? Just reply "send it" and it's yours. No obligation either way.`;
  *  (the honest, no-AI copy) when no upsells are passed. A daily automatic order must not depend on
  *  a model call to write mail; this text is specific, truthful, links once, and closes with no
  *  pressure. `upsells` (from detect.ts, each grounded in an observed signal) appends the
- *  website+automation offer — the pitch sells the monthly relationship, not just the rebuild. */
+ *  website+automation offer — the pitch sells the monthly relationship, not just the rebuild.
+ *  This is the PLAIN-TEXT body (the email's `text` part + deliverability fallback); the HTML body
+ *  that SHOWS the site as a screenshot is buildHuntPitchEmailHtml below. */
 export function buildHuntPitch(profile: BusinessProfile, previewUrl: string, upsells: PitchUpsell[] = []): string {
   return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
@@ -363,6 +365,79 @@ Rather than just tell you that, I built you a new one:
 ${previewUrl}${automationUpsellParagraph(upsells)}
 
 If you like it, publishing it takes a day. No obligation either way.`;
+}
+
+// ---------------------------------------------------------------------------
+// The HTML pitch — SHOW the site (a real screenshot), don't just link it
+// ---------------------------------------------------------------------------
+
+/** Escape text for safe interpolation into the email HTML. Pure (no DOM) so it is Deno-safe and
+ *  runs identically in the standing-worker edge function and the browser. Covers the five metachars
+ *  that matter in element bodies AND double-quoted attributes, so the same helper is used for both. */
+export function escHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** The grounded automation offer as an HTML list — the HTML twin of automationUpsellParagraph. Same
+ *  honesty rule: every line is anchored to an observed signal (u.evidence); zero upsells → '' (the
+ *  email simply omits the block, never shows an empty heading). */
+export function automationUpsellHtml(upsells: PitchUpsell[]): string {
+  const picks = upsells.filter((u) => u.title && u.evidence).slice(0, 2);   // 2 max — an email, not a catalog
+  if (!picks.length) return '';
+  const items = picks.map((u) =>
+    `<li style="margin:0 0 8px">${escHtml(u.evidence)} <strong>${escHtml(u.pitch)}</strong> <span style="color:#8a8a8f">(from ${escHtml(u.monthlyPrice)})</span></li>`,
+  ).join('');
+  return `<p style="margin:20px 0 6px;font-size:15px;color:#1c1c1e">While I was looking, I noticed a couple of things the new site could handle on autopilot:</p>
+<ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>`;
+}
+
+/** The website-in-the-email pitch as an HTML body — the SCREENSHOT of the actual generated site is
+ *  the hero (a clickable image, so a prospect SEES the new site in the inbox instead of trusting a
+ *  bare link), the same honest copy as buildHuntPitch, and the grounded automation offer underneath.
+ *  Pure string-building (Deno-safe, no DOM); the send path appends the CAN-SPAM footer as HTML.
+ *
+ *  Honesty rails: `screenshotUrl` is a REAL hosted shot of the real preview (never a mockup) — the
+ *  worker only calls this when it actually produced one, and falls back to the text pitch otherwise,
+ *  so there is never a broken or invented image. `beforeShotUrl`, when present, adds the honest
+ *  before/after of their CURRENT live site. The automation line offers only lead_followup — the one
+ *  GA capability (registry) — never SMS/missed-call text, which does not exist yet. Email-safe HTML:
+ *  inline styles only (clients strip <style>), table-wrapped image, width attr + max-width. */
+export function buildHuntPitchEmailHtml(
+  profile: BusinessProfile,
+  previewUrl: string,
+  screenshotUrl: string,
+  upsells: PitchUpsell[] = [],
+  beforeShotUrl?: string | null,
+): string {
+  const name = escHtml(profile.business_name);
+  const greetName = profile.business_name ? ` ${name} team` : '';
+  const industry = escHtml(profile.industry.toLowerCase());
+  const where = profile.location ? ` in ${escHtml(profile.location)}` : '';
+  const concern = profile.current_website_score != null
+    ? ' and noticed your current website may be costing you leads'
+    : '';
+  const url = escHtml(previewUrl);
+
+  const before = beforeShotUrl
+    ? `<p style="margin:22px 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#8a8a8f">For comparison — your site today</p>
+<img src="${escHtml(beforeShotUrl)}" width="360" alt="${name} — current website" style="display:block;width:100%;max-width:360px;border:1px solid #e0e0e4;border-radius:8px"/>`
+    : '';
+
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,system-ui,sans-serif;font-size:15px;line-height:1.55;color:#1c1c1e;max-width:600px;margin:0 auto">
+<p style="margin:0 0 12px">Hi${greetName},</p>
+<p style="margin:0 0 16px">I came across ${name} while researching ${industry} businesses${where}${concern}. Rather than just tell you that, I built you a new one this week — here it is:</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate"><tr><td style="padding:0">
+<a href="${url}" style="display:block;border:1px solid #dcdce0;border-radius:10px;overflow:hidden;text-decoration:none">
+<img src="${escHtml(screenshotUrl)}" width="600" alt="${name} — new website preview" style="display:block;width:100%;max-width:600px;border:0"/>
+</a></td></tr></table>
+<p style="margin:16px 0 8px;text-align:center">
+<a href="${url}" style="display:inline-block;background:#c8501e;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 26px;border-radius:10px">See the full site (mobile too) &rarr;</a>
+</p>
+${before}
+${automationUpsellHtml(upsells)}
+<p style="margin:18px 0 12px">If you like it, publishing it takes a day. I can also set it up to <strong>acknowledge every new enquiry and follow up the quiet ones automatically</strong> — reply and tell me how you run things and I&#39;ll show you exactly what I&#39;d automate.</p>
+<p style="margin:0 0 4px">No obligation either way.</p>
+</div>`;
 }
 
 /** The honest one-line record of a day's run for the order's history + the owner's digest.

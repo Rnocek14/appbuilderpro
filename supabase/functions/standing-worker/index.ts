@@ -33,7 +33,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES, DRY_RUNS_BEFORE_ROTATE, QUERY_VARIANTS } from '../../../src/lib/garvis/opportunityHunt.ts';
 import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
-import { buildHuntProfileRaw, buildHuntPitch, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { buildHuntProfileRaw, buildHuntPitch, buildHuntPitchEmailHtml, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
 import {
@@ -1737,9 +1737,27 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   // path that would email as a broken link. The demo stays built; the pitch waits for real config.
   if (!/^https?:\/\//.test(previewUrl)) return 'built';
 
+  // SHOW them the site: screenshot the generated preview (its animation-free email-shot render) so
+  // the pitch lands the new site AS AN IMAGE in the inbox, not a bare link they must trust. When the
+  // prospect's current site is reachable, add the honest before/after. A captured shot becomes the
+  // hero of an HTML email; a failed/unconfigured shot (genPreviewShot → null) falls back to the
+  // text+link pitch — never a broken or invented image. The new-site shot is persisted so the
+  // operator UI and any re-send can reuse it. previewUrl is absolute here, so env.appOrigin is set.
+  const siteId = (site as { id: string }).id;
+  let bodyHtml: string | undefined;
+  const shotUrl = await genPreviewShot(admin, order.owner_id,
+    `${env.appOrigin}/preview-site/${encodeURIComponent(slug)}/email-shot`, slug);
+  if (shotUrl) {
+    await admin.from('preview_sites').update({ screenshot_url: shotUrl }).eq('id', siteId);
+    const beforeUrl = (audit.reachable && /^https?:\/\//.test(finalUrl))
+      ? await genPreviewShot(admin, order.owner_id, finalUrl, `before-${slug}`)
+      : null;
+    bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl);
+  }
+
   const ok = await queueHuntPitch(admin, order.owner_id, {
-    previewSiteId: (site as { id: string }).id, businessProfileId: (profileRow as { id: string }).id,
-    businessName: profile.business_name, pitch, previewUrl, toEmail: email,
+    previewSiteId: siteId, businessProfileId: (profileRow as { id: string }).id,
+    businessName: profile.business_name, pitch, previewUrl, toEmail: email, bodyHtml,
   });
   return ok ? 'queued' : 'built';
 }
@@ -1772,12 +1790,46 @@ async function genHuntImage(admin: any, ownerId: string, prompt: string, size: '
   }
 }
 
+/** ScreenshotOne → project-assets bucket → public URL, metered per owner (kind 'screenshot', the same
+ *  $0.03 the shot-worker charges). `target` is a fully-formed URL — our email-shot render for the new
+ *  site, or the prospect's live site for the before/after. Returns null on ANY failure (missing key,
+ *  API error, empty/oversized shot) so the screenshot NEVER blocks the pitch: the caller then sends
+ *  the honest text+link email instead. Inlined here (not an invoke of shot-worker) exactly like
+ *  genHuntImage inlines image generation — the cron worker holds no user JWT for that interactive fn. */
+// deno-lint-ignore no-explicit-any
+async function genPreviewShot(admin: any, ownerId: string, target: string, label: string, mobile = false): Promise<string | null> {
+  try {
+    const apiKey = Deno.env.get('SCREENSHOT_API_KEY');
+    if (!apiKey) return null;
+    const apiUrl = Deno.env.get('SCREENSHOT_API_URL') ?? 'https://api.screenshotone.com/take';
+    const params = new URLSearchParams({
+      access_key: apiKey, url: target, format: 'png',
+      viewport_width: mobile ? '390' : '1280', viewport_height: mobile ? '844' : '800',
+      device_scale_factor: '2', block_cookie_banners: 'true', delay: '3', // let fonts/reveals settle
+    });
+    const res = await fetch(`${apiUrl}?${params}`);
+    if (!res.ok) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > 10 * 1024 * 1024) return null;
+    const name = `${Date.now()}-${label.replace(/[^a-zA-Z0-9-]/g, '_').slice(0, 60)}${mobile ? '-mobile' : ''}.png`;
+    const path = `${ownerId}/shots/${name}`;
+    const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'image/png', upsert: false });
+    if (up.error) return null;
+    await spendCredits(admin, ownerId, { costUsd: 0.03, kind: 'screenshot', provider: 'screenshotone' });
+    return admin.storage.from('project-assets').getPublicUrl(path).data.publicUrl as string;
+  } catch {
+    return null;
+  }
+}
+
 /** Server-side twin of queuePitch: contact → campaign → message(draft) → PENDING approval. Nothing
  *  sends — the approval lands in the owner's queue. Suppression is sacred: a known unsubscribed/
- *  bounced/complained contact is never re-queued, and an existing contact's status is never reset. */
+ *  bounced/complained contact is never re-queued, and an existing contact's status is never reset.
+ *  `bodyHtml` (present only when a real screenshot was captured) rides onto the message as the HTML
+ *  body the send path prefers; without it the message is text-only exactly as before. */
 // deno-lint-ignore no-explicit-any
 async function queueHuntPitch(admin: any, uid: string, input: {
-  previewSiteId: string; businessProfileId: string; businessName: string; pitch: string; previewUrl: string; toEmail: string;
+  previewSiteId: string; businessProfileId: string; businessName: string; pitch: string; previewUrl: string; toEmail: string; bodyHtml?: string;
 }): Promise<boolean> {
   const to = input.toEmail.toLowerCase().trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return false;
@@ -1811,7 +1863,7 @@ async function queueHuntPitch(admin: any, uid: string, input: {
   const body = `${input.pitch.trim()}\n\nTake a look: ${input.previewUrl}`;
   const { data: msg } = await admin.from('outreach_messages').insert({
     owner_id: uid, campaign_id: (camp as { id: string }).id, contact_id: contactId, preview_site_id: input.previewSiteId,
-    sequence_step: 0, subject, body_text: body, to_address: to, status: 'draft',
+    sequence_step: 0, subject, body_text: body, body_html: input.bodyHtml ?? null, to_address: to, status: 'draft',
   }).select('id').single();
   if (!msg) return false;
 
@@ -1820,10 +1872,13 @@ async function queueHuntPitch(admin: any, uid: string, input: {
   // request; status defaults to 'pending', so the OWNER still approves each send.
   const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id };
   const payload_hash = await hashPayload(payload);
+  // When an HTML screenshot pitch rides along, tell the operator so the plain-text preview isn't
+  // mistaken for the whole email — the recipient sees the site rendered as the hero image.
+  const shotNote = input.bodyHtml ? '\n\n[Sends as an HTML email showing a screenshot of the new site as the hero image.]' : '';
   const { error: apErr } = await admin.from('approvals').insert({
     owner_id: uid, kind: 'send_email',
     title: `Pitch "${input.businessName}" → ${to}`,
-    preview: `${subject}\n\n${body}`,
+    preview: `${subject}\n\n${body}${shotNote}`,
     payload, payload_hash, requested_by: 'garvis-auto',
   });
   return !apErr;
