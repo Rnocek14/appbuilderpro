@@ -61,7 +61,8 @@ import { composeBatchRecipients } from '../_shared/batchCore.ts';
 // AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
-import { dueFires, renderTemplate, fireKey, type CustomerRec } from '../../../src/lib/garvis/automation/triggers.ts';
+import { dueFires, renderTemplate, fireKey, type CustomerRec, type TriggerChannel } from '../../../src/lib/garvis/automation/triggers.ts';
+import { toE164 } from '../../../src/lib/garvis/sms.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
@@ -395,9 +396,10 @@ Deno.serve(async (req) => {
         id: string; owner_id: string; list_id: string; label: string;
         anchor_field: 'last_service_at' | 'last_visit_at' | 'purchase_at' | 'next_due_at';
         offset_days: number; window_days: number; template_subject: string; template_body: string;
+        channel: TriggerChannel | null;
       }
       interface AutoCustRow {
-        id: string; email: string | null; name: string | null; consent_basis: string | null;
+        id: string; email: string | null; phone: string | null; name: string | null; consent_basis: string | null;
         last_service_at: string | null; last_visit_at: string | null;
         purchase_at: string | null; next_due_at: string | null;
       }
@@ -406,7 +408,7 @@ Deno.serve(async (req) => {
       // silently NEVER checked. Ordered by id, capped at 500 — the fireBudget below still bounds
       // per-tick work, and a backlog beyond the budget drains across subsequent ticks.
       const { data: trigData } = await admin.from('automation_triggers')
-        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body')
+        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body, channel')
         .eq('status', 'active').order('id', { ascending: true }).limit(500);
 
       const custCache = new Map<string, CustomerRec[]>();
@@ -422,14 +424,14 @@ Deno.serve(async (req) => {
         let customers = custCache.get(cacheKey);
         if (!customers) {
           const { data: custData } = await admin.from('customers')
-            .select('id, email, name, consent_basis, last_service_at, last_visit_at, purchase_at, next_due_at')
+            .select('id, email, phone, name, consent_basis, last_service_at, last_visit_at, purchase_at, next_due_at')
             .eq('owner_id', t.owner_id).eq('list_id', t.list_id).limit(2000);
           customers = ((custData ?? []) as AutoCustRow[])
             // Consent gate (the column existed but was never checked): automations are warm/
             // transactional by design — a cold-prospecting row never rides a recall trigger.
             .filter((c) => (c.consent_basis ?? 'warm_transactional') === 'warm_transactional')
             .map((c) => ({
-              id: c.id, email: c.email, name: c.name,
+              id: c.id, email: c.email, phone: c.phone, name: c.name,
               anchors: {
                 last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
                 purchase_at: c.purchase_at, next_due_at: c.next_due_at,
@@ -444,20 +446,36 @@ Deno.serve(async (req) => {
           .map((f) => fireKey(f.customer_id, f.fired_for));
 
         const plan = dueFires(
-          { id: t.id, anchorField: t.anchor_field, offsetDays: t.offset_days, windowDays: t.window_days, status: 'active' },
+          { id: t.id, anchorField: t.anchor_field, offsetDays: t.offset_days, windowDays: t.window_days, status: 'active', channel: t.channel ?? 'email' },
           customers, firedKeys, nowIso,
         );
         let queuedForTrigger = 0;
         for (const fire of plan) {
           if (fireBudget <= 0) break;
 
-          // Suppression pre-check BEFORE claiming (queueHuntPitch's honesty): a known
-          // unsubscribed/bounced/complained address is never re-queued — and never claimed, so
-          // the window guard naturally retires it instead of a claim-release loop.
-          const { data: existing } = await admin.from('contacts')
-            .select('id, email_status').eq('owner_id', t.owner_id).eq('email', fire.email.toLowerCase()).maybeSingle();
-          const st = (existing as { email_status?: string } | null)?.email_status;
-          if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') continue;
+          const isSms = fire.channel === 'sms';
+          // SMS: normalize the phone BEFORE any DB work — an un-textable number is skipped, never
+          // claimed or enqueued as a doomed approval (the window guard retires it).
+          const e164 = isSms ? toE164(fire.to) : null;
+          if (isSms && !e164) continue;
+
+          // Suppression pre-check BEFORE claiming (queueHuntPitch's honesty): a known unsubscribed/
+          // bounced/complained email — or an SMS opt-out (STOP → phone_status='unsubscribed') — is
+          // never re-queued, and never claimed, so the window guard retires it (no claim-release loop).
+          let contactId: string | null = null;
+          if (isSms) {
+            const { data: found } = await admin.from('contacts')
+              .select('id, phone_status').eq('owner_id', t.owner_id).eq('phone_e164', e164!).limit(1);
+            const row = found && found.length ? (found[0] as { id: string; phone_status?: string }) : null;
+            if (row?.phone_status === 'unsubscribed') continue;
+            contactId = row?.id ?? null;
+          } else {
+            const { data: existing } = await admin.from('contacts')
+              .select('id, email_status').eq('owner_id', t.owner_id).eq('email', fire.to.toLowerCase()).maybeSingle();
+            const st = (existing as { email_status?: string } | null)?.email_status;
+            if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') continue;
+            contactId = existing ? (existing as { id: string }).id : null;
+          }
 
           // CLAIM-FIRST: the unique index rejects a duplicate/concurrent fire (23505 = skip).
           const { data: claim, error: claimErr } = await admin.from('trigger_fires')
@@ -471,18 +489,32 @@ Deno.serve(async (req) => {
             const cust = customers.find((c) => c.id === fire.customerId)!;
             const subject = renderTemplate(t.template_subject, cust).trim() || t.label;
             const bodyText = renderTemplate(t.template_body, cust);
-            const to = fire.email.toLowerCase().trim();
+            const to = isSms ? e164! : fire.to.toLowerCase().trim();
 
-            let contactId: string | null = existing ? (existing as { id: string }).id : null;
+            // Create the contact if the pre-check found none. Email keys on email; SMS keys on
+            // phone_e164 and carries warm_transactional consent (the client's own warm customer, texted
+            // about their own service) — send-sms still re-checks consent and fails closed.
             if (!contactId) {
-              const { data: c } = await admin.from('contacts')
-                .insert({ owner_id: t.owner_id, email: to, email_status: 'unknown', is_primary: true })
-                .select('id').maybeSingle();
-              if (c) contactId = (c as { id: string }).id;
-              else {
-                const { data: again } = await admin.from('contacts')
-                  .select('id').eq('owner_id', t.owner_id).eq('email', to).maybeSingle();
-                contactId = again ? (again as { id: string }).id : null;
+              if (isSms) {
+                const { data: c } = await admin.from('contacts')
+                  .insert({ owner_id: t.owner_id, phone: e164, phone_e164: e164, phone_status: 'unknown', sms_consent: 'warm_transactional', sms_consent_at: nowIso, is_primary: true })
+                  .select('id').maybeSingle();
+                if (c) contactId = (c as { id: string }).id;
+                else {
+                  const { data: again } = await admin.from('contacts')
+                    .select('id').eq('owner_id', t.owner_id).eq('phone_e164', e164!).limit(1);
+                  contactId = again && again.length ? (again[0] as { id: string }).id : null;
+                }
+              } else {
+                const { data: c } = await admin.from('contacts')
+                  .insert({ owner_id: t.owner_id, email: to, email_status: 'unknown', is_primary: true })
+                  .select('id').maybeSingle();
+                if (c) contactId = (c as { id: string }).id;
+                else {
+                  const { data: again } = await admin.from('contacts')
+                    .select('id').eq('owner_id', t.owner_id).eq('email', to).maybeSingle();
+                  contactId = again ? (again as { id: string }).id : null;
+                }
               }
             }
 
@@ -494,16 +526,18 @@ Deno.serve(async (req) => {
 
             const { data: msg } = await admin.from('outreach_messages').insert({
               owner_id: t.owner_id, campaign_id: campaignId, contact_id: contactId, sequence_step: 0,
-              subject, body_text: bodyText, to_address: to, status: 'draft',
+              channel: isSms ? 'sms' : 'email', subject: isSms ? t.label : subject, body_text: bodyText, to_address: to, status: 'draft',
             }).select('id').single();
             if (!msg) throw new Error('message insert failed');
 
-            const payload = { message_id: (msg as { id: string }).id, campaign_id: campaignId };
+            const payload = isSms
+              ? { message_id: (msg as { id: string }).id, campaign_id: campaignId, sms_kind: 'transactional' }
+              : { message_id: (msg as { id: string }).id, campaign_id: campaignId };
             const payload_hash = await hashPayload(payload);
             const { data: ap, error: apErr } = await admin.from('approvals').insert({
-              owner_id: t.owner_id, kind: 'send_email',
+              owner_id: t.owner_id, kind: isSms ? 'send_sms' : 'send_email',
               title: `${t.label} → ${to}`,
-              preview: `${subject}\n\n${bodyText}`,
+              preview: isSms ? bodyText : `${subject}\n\n${bodyText}`,
               payload, payload_hash, requested_by: 'garvis-auto',
             }).select('id').single();
             if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');

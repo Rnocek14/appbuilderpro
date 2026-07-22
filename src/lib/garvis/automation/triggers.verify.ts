@@ -1,7 +1,8 @@
 // src/lib/garvis/automation/triggers.verify.ts — run: npx tsx src/lib/garvis/automation/triggers.verify.ts
 // Proves the two must-be-right properties of the trigger engine: the WINDOW GUARD (turning a trigger on
 // never blasts everyone who became due long ago) and ONCE-ONLY (a due date fires at most once), plus the
-// honest guards (needs an active trigger, an email, and a real anchor) and determinism.
+// honest guards (needs an active trigger, a reachable address for its channel, and a real anchor),
+// channel-awareness (email triggers gate on email, sms triggers gate on phone), and determinism.
 
 import { dueFires, isCustomerDue, dueDateFor, fireKey, renderTemplate, parseCustomerCsv, type TriggerDef, type CustomerRec } from './triggers';
 
@@ -53,15 +54,37 @@ ok('template: {name} substitutes full name', renderTemplate('Dear {name}', dueTo
 const nameless: CustomerRec = { id: 'c_nameless', email: 'f@x.com', anchors: {} };
 ok('template: missing name renders empty, not a placeholder', renderTemplate('Hi {first_name}!', nameless) === 'Hi !');
 
-// ---- CSV import parsing: tolerant, email-required, only-present-columns ----
+// ---- CSV import parsing: tolerant, reachable-by-some-channel, only-present-columns ----
 const csv = parseCustomerCsv('name,email,last_visit_at\nAda Lovelace,ada@x.com,2026-01-16\nBad Row,not-an-email,2026-01-01\nBo,bo@x.com,');
-ok('csv: parses the valid rows, skips the bad email', csv.length === 2 && csv[0].email === 'ada@x.com');
+ok('csv: parses the valid rows, skips the bad email (no phone)', csv.length === 2 && csv[0].email === 'ada@x.com');
 ok('csv: maps the present column', csv[0].last_visit_at === '2026-01-16');
 ok('csv: an empty cell becomes null, not ""', csv[1].last_visit_at === null);
-ok('csv: absent columns are null', csv[0].purchase_at === null);
+ok('csv: absent columns are null', csv[0].purchase_at === null && csv[0].phone === null);
 ok('csv: header-only or empty input yields nothing', parseCustomerCsv('name,email').length === 0 && parseCustomerCsv('').length === 0);
 const csvBadDate = parseCustomerCsv('email,last_visit_at\nx@y.com,not-a-date\nz@y.com,2026-13-45');
 ok('csv: invalid date cell → null, row still kept (no batch-killing bad date)', csvBadDate.length === 2 && csvBadDate[0].last_visit_at === null && csvBadDate[1].last_visit_at === null);
+// SMS import: a phone column is captured, and a phone-only row (no email) is kept for texting.
+const csvPhone = parseCustomerCsv('name,email,phone,last_visit_at\nTex,,555-123-4567,2026-01-10\nMae,mae@x.com,+15551230000,2026-01-11\nGhost,not-an-email,,2026-01-12');
+ok('csv: phone column captured', csvPhone.find((r) => r.name === 'Mae')?.phone === '+15551230000');
+ok('csv: phone-only row (no valid email) is kept with email=null', csvPhone.some((r) => r.name === 'Tex' && r.email === null && r.phone === '555-123-4567'));
+ok('csv: a row with neither a valid email nor a phone is still skipped', !csvPhone.some((r) => r.name === 'Ghost'));
+
+// ---- DueFire shape: channel + destination ----
+ok('email fire carries channel=email and to=email', plan.every((f) => f.channel === 'email') && plan.find((f) => f.customerId === 'c_today')?.to === 'a@x.com');
+
+// ---- SMS-channel triggers: gate on PHONE, not email ----
+const smsRecall: TriggerDef = { ...recall, channel: 'sms' };
+const smsHasPhone: CustomerRec = { id: 'c_sms', email: null, phone: '555-123-4567', name: 'Tex', anchors: { last_visit_at: daysBefore(180) } };
+const smsNoPhone: CustomerRec = { id: 'c_nophone', email: 'has@mail.com', phone: null, name: 'No Phone', anchors: { last_visit_at: daysBefore(180) } };
+const smsPlan = dueFires(smsRecall, [smsHasPhone, smsNoPhone, dueToday], [], NOW);
+const smsIds = new Set(smsPlan.map((f) => f.customerId));
+ok('SMS trigger fires a due customer WITH a phone', smsIds.has('c_sms'));
+ok('SMS trigger does NOT fire a due customer with no phone', !smsIds.has('c_nophone'));
+ok('SMS trigger does NOT fire an email-only customer (dueToday has no phone)', !smsIds.has('c_today'));
+ok('SMS fire carries channel=sms and to=phone', smsPlan.find((f) => f.customerId === 'c_sms')?.channel === 'sms' && smsPlan.find((f) => f.customerId === 'c_sms')?.to === '555-123-4567');
+ok('SMS trigger: isCustomerDue false for a phone-less due customer', !isCustomerDue(smsRecall, smsNoPhone, new Set(), NOW).due);
+// An EMAIL trigger must ignore the phone — a phone-only customer is NOT reachable by email.
+ok('email trigger does NOT fire a phone-only customer', !new Set(dueFires(recall, [smsHasPhone], [], NOW).map((f) => f.customerId)).has('c_sms'));
 
 // ---- determinism ----
 ok('deterministic: identical plan for identical inputs', JSON.stringify(dueFires(recall, all, [], NOW)) === JSON.stringify(dueFires(recall, all, [], NOW)));

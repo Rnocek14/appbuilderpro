@@ -7,14 +7,15 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
-import { Zap, Loader2, Plus, Play, Pause, Trash2, Upload, Users, CalendarClock, ArrowRight, Info } from 'lucide-react';
+import { Zap, Loader2, Plus, Play, Pause, Trash2, Upload, Users, CalendarClock, ArrowRight, Info, Mail, MessageSquare } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { Button, EmptyState, LoadError } from '../components/ui';
 import { cn } from '../lib/utils';
+import { supabase } from '../lib/supabase';
 import {
   listCustomerLists, createCustomerList, listCustomers, addCustomers, parseCustomerCsv,
-  listTriggers, createTriggerFromCapability, setTriggerStatus, deleteTrigger, CAPABILITIES,
+  listTriggers, createTriggerFromCapability, setTriggerStatus, setTriggerChannel, deleteTrigger, CAPABILITIES,
   type CustomerListRow, type CustomerRow, type TriggerRow,
 } from '../lib/garvis/automation/triggersStore';
 import { loadAutomationMonth, automationMonthLine, type AutomationMonth } from '../lib/garvis/automation/report';
@@ -47,6 +48,18 @@ export default function Automations() {
   const [month, setMonth] = useState<AutomationMonth | null>(null);
   useEffect(() => { void loadAutomationMonth().then(setMonth); }, []);
 
+  // Whether the operator has opted into SMS (kill switch on). Only then does the channel toggle appear —
+  // no dead "Text" option dangling before Twilio is wired. Best-effort; defaults to off.
+  const [smsEnabled, setSmsEnabled] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { data } = await supabase.from('outreach_settings').select('sms_enabled').maybeSingle();
+        setSmsEnabled(!!(data as { sms_enabled?: boolean } | null)?.sms_enabled);
+      } catch { /* best-effort — defaults to off (no SMS toggle shown) */ }
+    })();
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true); setLoadFailed(false);
     try {
@@ -76,7 +89,7 @@ export default function Automations() {
   const importCsv = async () => {
     if (!listId) return;
     const parsed = parseCustomerCsv(csv);
-    if (parsed.length === 0) { toast('error', 'No valid rows found. Header needs at least email; dates as YYYY-MM-DD.'); return; }
+    if (parsed.length === 0) { toast('error', 'No valid rows found. Header needs email or phone; dates as YYYY-MM-DD.'); return; }
     try {
       const n = await addCustomers(listId, parsed);
       setCsv(''); setCsvOpen(false);
@@ -98,6 +111,17 @@ export default function Automations() {
     const next = t.status === 'active' ? 'paused' : 'active';
     setTriggers((ts) => ts.map((x) => (x.id === t.id ? { ...x, status: next } : x)));
     try { await setTriggerStatus(t.id, next); } catch (e) { toast('error', emsg(e)); void refresh(); }
+  };
+
+  const switchChannel = async (t: TriggerRow) => {
+    const next = t.channel === 'sms' ? 'email' : 'sms';
+    setTriggers((ts) => ts.map((x) => (x.id === t.id ? { ...x, channel: next } : x)));
+    try {
+      await setTriggerChannel(t.id, next);
+      toast('info', next === 'sms'
+        ? 'Now sending by text. Customers need a phone on file; each text is still approved before it sends.'
+        : 'Back to email.');
+    } catch (e) { toast('error', emsg(e)); void refresh(); }
   };
 
   const remove = async (t: TriggerRow) => {
@@ -193,9 +217,9 @@ export default function Automations() {
 
             {csvOpen && (
               <div className="mb-4 rounded-xl border border-forge-border bg-forge-panel/40 p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Paste CSV — header row with <code className="text-forge-ink">email</code> (required), plus any of <code className="text-forge-ink">name, last_service_at, last_visit_at, purchase_at, next_due_at</code> (dates YYYY-MM-DD).</p>
+                <p className="mb-2 flex items-center gap-1.5 text-[11px] text-forge-dim"><Info size={12} /> Paste CSV — header row with <code className="text-forge-ink">email</code> or <code className="text-forge-ink">phone</code> (at least one), plus any of <code className="text-forge-ink">name, last_service_at, last_visit_at, purchase_at, next_due_at</code> (dates YYYY-MM-DD). A phone is needed for text automations.</p>
                 <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={5}
-                  placeholder={'name,email,last_visit_at\nAda Lovelace,ada@example.com,2026-01-16'}
+                  placeholder={'name,email,phone,last_visit_at\nAda Lovelace,ada@example.com,555-123-4567,2026-01-16'}
                   className="w-full rounded-lg border border-forge-border bg-forge-bg px-3 py-2 font-mono text-xs text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />
                 <div className="mt-2 flex justify-end"><Button variant="primary" size="sm" onClick={() => void importCsv()}><Upload size={13} /> Import</Button></div>
               </div>
@@ -214,8 +238,22 @@ export default function Automations() {
                     <span className={cn('grid h-8 w-8 shrink-0 place-items-center rounded-lg', t.status === 'active' ? 'bg-forge-ok/15 text-forge-ok' : 'bg-forge-raised text-forge-dim')}><CalendarClock size={15} /></span>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-forge-ink">{t.label}</div>
-                      <div className="text-[11px] text-forge-dim">{t.offset_days} days after {ANCHOR_LABEL[t.anchor_field] ?? t.anchor_field} · {t.status}</div>
+                      <div className="flex items-center gap-1 text-[11px] text-forge-dim">
+                        {t.channel === 'sms'
+                          ? <MessageSquare size={11} className="text-forge-ember" />
+                          : <Mail size={11} />}
+                        {t.offset_days} days after {ANCHOR_LABEL[t.anchor_field] ?? t.anchor_field} · {t.status}
+                      </div>
                     </div>
+                    {/* Channel toggle — only once SMS is opted into (kill switch on). A text trigger still
+                        needs per-customer phones + consent; the runner skips anyone unreachable. */}
+                    {smsEnabled && (
+                      <button onClick={() => void switchChannel(t)} title={t.channel === 'sms' ? 'Switch to email' : 'Switch to text'}
+                        className={cn('inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px]',
+                          t.channel === 'sms' ? 'border-forge-ember/50 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink')}>
+                        {t.channel === 'sms' ? <><MessageSquare size={12} /> Text</> : <><Mail size={12} /> Email</>}
+                      </button>
+                    )}
                     <button onClick={() => void toggle(t)} title={t.status === 'active' ? 'Pause' : 'Resume'}
                       className="rounded-lg border border-forge-border p-1.5 text-forge-dim hover:text-forge-ink">
                       {t.status === 'active' ? <Pause size={13} /> : <Play size={13} />}

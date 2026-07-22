@@ -15,28 +15,42 @@
 
 export type AnchorField = 'last_service_at' | 'last_visit_at' | 'purchase_at' | 'next_due_at';
 
+/** The delivery channel of a trigger. Defaults to 'email' everywhere so existing triggers are
+ *  unchanged; 'sms' routes the fire through the send-sms path instead (phone + TCPA consent). */
+export type TriggerChannel = 'email' | 'sms';
+
 export interface TriggerDef {
   id: string;
   anchorField: AnchorField;
   offsetDays: number;        // fire this many days after the anchor date
   windowDays: number;        // only fire if it became due within this many days (no backlog blasting)
   status: 'active' | 'paused';
+  channel?: TriggerChannel;  // default 'email'
 }
 
 export interface CustomerRec {
   id: string;
   email: string | null;
+  phone?: string | null;     // used only by sms-channel triggers (the runner normalizes to E.164)
   name?: string | null;
   anchors: Partial<Record<AnchorField, string | null>>;  // ISO dates (date-only or full ISO)
 }
 
 export interface DueFire {
   customerId: string;
-  email: string;
+  channel: TriggerChannel;   // which send path this fire takes
+  to: string;                // the destination for that channel: email address, or raw phone for sms
   firedFor: string;          // the due date (yyyy-mm-dd) this fire satisfies — the ledger key
 }
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/** The raw destination for a trigger's channel on a customer, or '' when it's missing. Email needs an
+ *  email; SMS needs a phone (the runner normalizes/validates the number before it ever texts). */
+function destinationFor(channel: TriggerChannel, c: CustomerRec): string {
+  const raw = channel === 'sms' ? c.phone : c.email;
+  return (raw ?? '').trim();
+}
 
 /** Parse a date-only ('2026-01-15') or full ISO string to epoch ms at UTC midnight, or null. */
 function parseDay(iso: string | null | undefined): number | null {
@@ -68,7 +82,7 @@ export function isCustomerDue(
   t: TriggerDef, c: CustomerRec, alreadyFired: Set<string>, nowIso: string,
 ): { due: boolean; firedFor?: string } {
   if (t.status !== 'active') return { due: false };
-  if (!c.email) return { due: false };
+  if (!destinationFor(t.channel ?? 'email', c)) return { due: false };  // no reachable address for this channel
   const dueIso = dueDateFor(t, c);
   if (!dueIso) return { due: false };
   const now = Date.parse(nowIso);
@@ -85,11 +99,13 @@ export function isCustomerDue(
 export function dueFires(
   t: TriggerDef, customers: CustomerRec[], firedKeys: string[], nowIso: string,
 ): DueFire[] {
+  const channel = t.channel ?? 'email';
   const fired = new Set(firedKeys);
   const out: DueFire[] = [];
   for (const c of customers) {
     const r = isCustomerDue(t, c, fired, nowIso);
-    if (r.due && r.firedFor && c.email) out.push({ customerId: c.id, email: c.email, firedFor: r.firedFor });
+    const to = destinationFor(channel, c);
+    if (r.due && r.firedFor && to) out.push({ customerId: c.id, channel, to, firedFor: r.firedFor });
   }
   return out;
 }
@@ -104,19 +120,20 @@ export function renderTemplate(tpl: string, c: CustomerRec): string {
 }
 
 export interface ParsedCustomer {
-  email: string; name: string | null;
+  email: string | null; phone: string | null; name: string | null;
   last_service_at: string | null; last_visit_at: string | null;
   purchase_at: string | null; next_due_at: string | null;
 }
 
-/** Parse a pasted CSV (header: name,email,last_service_at,last_visit_at,purchase_at,next_due_at).
- *  Tolerant — only the columns present are used; a row needs a valid email or it's skipped. Pure. */
+/** Parse a pasted CSV (header: name,email,phone,last_service_at,last_visit_at,purchase_at,next_due_at).
+ *  Tolerant — only the columns present are used. A row is kept if it's reachable by SOME channel: a
+ *  valid email OR a phone (so an SMS-only list of phone numbers imports too). Pure. */
 export function parseCustomerCsv(text: string): ParsedCustomer[] {
   const lines = (text ?? '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
   const head = lines[0].split(',').map((h) => h.trim().toLowerCase());
   const idx = (k: string) => head.indexOf(k);
-  const iEmail = idx('email'), iName = idx('name');
+  const iEmail = idx('email'), iPhone = idx('phone'), iName = idx('name');
   const iLs = idx('last_service_at'), iLv = idx('last_visit_at'), iPu = idx('purchase_at'), iNd = idx('next_due_at');
   const cell = (c: string[], i: number) => (i >= 0 ? (c[i] ?? '').trim() || null : null);
   // A date cell is kept only when it's a real YYYY-MM-DD; anything else (blank, "n/a", "last week",
@@ -129,10 +146,14 @@ export function parseCustomerCsv(text: string): ParsedCustomer[] {
   const out: ParsedCustomer[] = [];
   for (const line of lines.slice(1)) {
     const c = line.split(',').map((x) => x.trim());
-    const email = iEmail >= 0 ? (c[iEmail] ?? '') : '';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) continue;
+    const rawEmail = iEmail >= 0 ? (c[iEmail] ?? '').trim() : '';
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(rawEmail);
+    const phone = cell(c, iPhone);
+    // Reachable-by-some-channel gate: a bad email with no phone is still skipped (unchanged); a
+    // phone-only row is now kept for SMS automations.
+    if (!emailOk && !phone) continue;
     out.push({
-      email, name: cell(c, iName),
+      email: emailOk ? rawEmail : null, phone, name: cell(c, iName),
       last_service_at: isoDate(cell(c, iLs)), last_visit_at: isoDate(cell(c, iLv)),
       purchase_at: isoDate(cell(c, iPu)), next_due_at: isoDate(cell(c, iNd)),
     });
