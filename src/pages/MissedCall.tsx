@@ -127,6 +127,7 @@ export default function MissedCall() {
                 <li>In Twilio, open the phone number and set its <span className="text-forge-ink">Voice &amp; Fax → A Call Comes In</span> webhook (HTTP POST) to the URL below.</li>
                 <li>Add the number here with the business’s real line to ring, then switch it on.</li>
               </ol>
+              <p className="mb-3 text-[11px] text-forge-dim">Full walkthrough (incl. A2P 10DLC for texting): <code className="text-forge-ink">docs/twilio-setup.md</code>.</p>
               <div className="flex items-center gap-2 rounded-lg border border-forge-border bg-forge-bg px-3 py-2">
                 <code className="flex-1 truncate text-[11px] text-forge-ink">{WEBHOOK_URL}</code>
                 <button onClick={() => void copyWebhook()} className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:text-forge-ink">
