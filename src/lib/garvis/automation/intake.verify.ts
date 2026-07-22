@@ -33,12 +33,15 @@ const ids = (desc: string) => deriveOperatorSignals(desc).map((s) => s.id);
 
 // --- proposals: ONLY deliverable automations, grounded, gap for the rest -----------------------
 {
-  // Phone-only booking + null vertical → lead_followup (GA, any). online_booking + missed-call-text
-  // are 'not_built' and must NEVER be proposed (the covered signal yields no gap either).
+  // Phone-only booking + null vertical → lead_followup (GA, any). online_booking is 'not_built' and must
+  // NEVER be proposed. missed_call_text_back is now beta (deliverable) but vertical-gated
+  // (home_services/health/services), so a NULL vertical still won't propose it — verified positively below.
   const r = intakeAutomations('Customers just call us to book, all by phone.', null);
   check('a grounded description matches at least one automation', r.matched && r.proposals.length >= 1);
   check('lead_followup (a GA capability) is proposed', r.proposals.some((p) => p.capabilityId === 'lead_followup'));
-  check('NOT-built automations are never proposed', !r.proposals.some((p) => p.capabilityId === 'online_booking' || p.capabilityId === 'missed_call_text_back'));
+  check('a not_built automation (online_booking) is never proposed', !r.proposals.some((p) => p.capabilityId === 'online_booking'));
+  check('vertical-gated missed_call_text_back is not proposed for a null vertical', !r.proposals.some((p) => p.capabilityId === 'missed_call_text_back'));
+  check('but missed_call_text_back (beta) IS proposed for a home-services phone-only operator', intakeAutomations('Customers just call us to book, all by phone.', 'home_services').proposals.some((p) => p.capabilityId === 'missed_call_text_back'));
   check('every proposal is deliverable (ga/beta only)', r.proposals.every((p) => p.status === 'ga' || p.status === 'beta'));
 
   // Invoice chasing is vertical-gated (not 'any') — matches for home_services, not for a null vertical.

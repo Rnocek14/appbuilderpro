@@ -12,7 +12,7 @@ import type { Vertical } from '../verticals';
 
 export type Rail =
   | 'send-email' | 'outreach-followups' | 'outreach-reactivate' | 'invoice-chase'
-  | 'social-publish' | 'docusign-send' | 'standing-worker';
+  | 'social-publish' | 'docusign-send' | 'standing-worker' | 'voice-inbound';
 
 export type ConsentBasis = 'warm_transactional' | 'cold_prospecting';
 export type CapabilityStatus = 'ga' | 'beta' | 'not_built';
@@ -151,15 +151,15 @@ export const CAPABILITIES: Capability[] = [
   {
     id: 'missed_call_text_back',
     title: 'Missed-call text-back',
-    pitch: 'Text callers you miss so the lead doesn’t evaporate.',
-    rail: 'send-email',            // the real channel is SMS, which does not exist in this codebase yet
+    pitch: 'Auto-text anyone whose call you miss, in seconds, so the lead doesn’t evaporate.',
+    rail: 'voice-inbound',
     triggerKinds: ['event'],
     consentBasis: 'warm_transactional',
     matchesSignals: ['manual_process:phone_only_booking'],
     verticals: ['home_services', 'health', 'services'],
     monthlyPrice: '$200–400/mo',
-    complianceNote: 'SMS requires TCPA consent + a sending stack that does not exist yet.',
-    status: 'not_built',
+    complianceNote: 'The inbound call is the consent; a single transactional auto-reply, STOP honored. Needs a Twilio number ringing the business line.',
+    status: 'beta',
   },
 ];
 
