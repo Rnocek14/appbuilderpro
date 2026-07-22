@@ -20,6 +20,7 @@ import {
 import { detectVertical } from '../lib/garvis/verticals';
 import { supabaseUrl } from '../lib/supabase';
 import { menuForVertical } from '../lib/garvis/automation/registry';
+import { offerStatsFor, leadProofLine } from '../lib/garvis/automationStats';
 
 const STATUS_CLS: Record<string, string> = {
   active: 'text-forge-ok', pending: 'text-forge-warn', canceled: 'text-forge-dim',
@@ -198,8 +199,13 @@ export default function ClientBilling() {
                         : [];
                       const copyMenuPitch = async () => {
                         const lines = menu.map((c) => `• ${c.title} — ${c.pitch} (${c.monthlyPrice})`);
+                        // The strongest industry stat for what we're offering — honest ROI proof the
+                        // operator can paste straight into the pitch (labeled as industry data, never a
+                        // fabricated per-client number).
+                        const proof = leadProofLine(menu.map((c) => c.id));
+                        const proofBlock = proof ? `\n\nWhy it pays for itself — ${proof.line} (${proof.source}).` : '';
                         await navigator.clipboard.writeText(
-                          `Custom automations we can run for ${s.business_name}:\n${lines.join('\n')}\n\nEvery message is approved before it sends — nothing goes out without a yes.`,
+                          `Custom automations we can run for ${s.business_name}:\n${lines.join('\n')}${proofBlock}\n\nEvery message is approved before it sends — nothing goes out without a yes.`,
                         );
                         toast('success', 'Automation pitch copied — paste it into your email or text.');
                       };
@@ -254,6 +260,25 @@ export default function ClientBilling() {
                                     </li>
                                   ))}
                                 </ul>
+                                {/* ROI PROOF at the point of sale — industry stats for exactly the
+                                    automations offered (deliverable by construction), so the operator can
+                                    justify the price. Honest: labeled industry data, unknowns dropped. */}
+                                {(() => {
+                                  const proof = offerStatsFor(menu.map((c) => c.id)).slice(0, 3);
+                                  return proof.length > 0 ? (
+                                    <div className="mt-2.5">
+                                      <div className="grid gap-2 sm:grid-cols-3">
+                                        {proof.map((b, i) => (
+                                          <div key={i} className="rounded-lg border border-forge-border bg-forge-bg/60 px-2.5 py-2">
+                                            <div className="text-[13px] font-semibold tabular-nums text-forge-heat">{b.points[0].stat}</div>
+                                            <div className="mt-0.5 text-[10px] leading-snug text-forge-dim">{b.points[0].note}</div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <p className="mt-1 text-[9.5px] text-forge-dim/70">Industry data — home-services, 2026.</p>
+                                    </div>
+                                  ) : null;
+                                })()}
                                 <p className="mt-1.5 text-[10.5px] text-forge-dim/80">
                                   Set these up under Automations once they say yes — every send stays approval-gated.
                                 </p>

@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { Wand2, ArrowRight, Check } from 'lucide-react';
 import type { SiteSpec } from '../../lib/preview/spec';
 import { submitAutomationIntake, type IntakeProposal } from '../../lib/preview/engine';
+import { offerStatsFor } from '../../lib/garvis/automationStats';
 
 export function AutomationIntake({ previewSiteId, businessName, theme }: {
   previewSiteId: string; businessName: string; theme: SiteSpec['theme'];
@@ -53,6 +54,24 @@ export function AutomationIntake({ previewSiteId, businessName, theme }: {
           Tell me how you operate day to day — how bookings come in, how you handle enquiries,
           invoices, follow-ups — and I&rsquo;ll show you exactly what I&rsquo;d automate for {businessName}.
         </p>
+
+        {/* ROI PROOF — industry stats that justify the automation spend, shown at the offer. These are
+            INDUSTRY figures (labeled + sourced), never a fabricated per-prospect number — see the honesty
+            rule in automationStats.ts. Only DELIVERABLE, always-applicable automations appear here
+            (review requests, win-back, lead follow-up — all GA, any vertical); we never advertise a stat
+            for a capability we can't yet run (e.g. missed-call text-back is not_built). */}
+        <div className="mt-5 grid gap-2.5 sm:grid-cols-3">
+          {offerStatsFor(['review_request', 'reactivation', 'lead_followup']).map((b, i) => {
+            const p = b.points[0];
+            return (
+              <div key={i} className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-3.5">
+                <p className="text-lg font-bold text-[hsl(var(--p))]">{p.stat}</p>
+                <p className="mt-0.5 text-xs leading-snug text-[hsl(var(--mut))]">{p.note}</p>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-2 text-[10px] text-[hsl(var(--mut))]">Industry data — home-services, 2026.</p>
 
         {result ? (
           <div className="mt-6 rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-5">
