@@ -9,6 +9,7 @@ export interface BillingSettings { website_payment_link: string | null; automati
 export interface ClientSubRow {
   id: string; business_name: string; email: string | null; tier: TierId; cadence: Cadence;
   price_cents: number; status: 'pending' | 'active' | 'canceled'; notes: string | null;
+  twilio_number: string | null; twilio_subaccount_sid: string | null;
   created_at: string; activated_at: string | null;
 }
 
@@ -70,5 +71,17 @@ export async function setClientStatus(id: string, status: 'pending' | 'active' |
 export async function deleteClientSub(id: string): Promise<void> {
   const u = await uid(); if (!u) throw new Error('Not signed in.');
   const { error } = await supabase.from('client_subscriptions').delete().eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/** Record a client's dedicated Twilio identity (their own number + optional subaccount SID). Attribution
+ *  today; the hook for per-client send routing later. Blank strings clear the field. */
+export async function setClientTwilio(id: string, twilio: { twilio_number?: string | null; twilio_subaccount_sid?: string | null }): Promise<void> {
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const patch: Record<string, unknown> = {};
+  if (twilio.twilio_number !== undefined) patch.twilio_number = twilio.twilio_number?.trim() || null;
+  if (twilio.twilio_subaccount_sid !== undefined) patch.twilio_subaccount_sid = twilio.twilio_subaccount_sid?.trim() || null;
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await supabase.from('client_subscriptions').update(patch).eq('owner_id', u).eq('id', id);
   if (error) throw new Error(error.message);
 }

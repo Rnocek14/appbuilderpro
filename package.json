@@ -75,6 +75,7 @@
     "verify:triggers": "tsx src/lib/garvis/automation/triggers.verify.ts",
     "test:e2e": "playwright test",
     "verify:clienttiers": "tsx src/lib/garvis/billing/clientTiers.verify.ts",
+    "verify:clientconsole": "tsx src/lib/garvis/billing/clientConsole.verify.ts",
     "verify:automationstats": "tsx src/lib/garvis/automationStats.verify.ts",
     "verify:missedcall": "tsx src/lib/garvis/missedCall.verify.ts",
     "verify:adswatch": "tsx src/lib/garvis/adsWatch.verify.ts",

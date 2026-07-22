@@ -14,13 +14,16 @@ import { Button, StatCard, EmptyState, LoadError } from '../components/ui';
 import { cn } from '../lib/utils';
 import { CLIENT_TIERS, tierById, formatUsd, monthlyRevenueCents, oneTimeRevenueCents, type TierId } from '../lib/garvis/billing/clientTiers';
 import {
-  getBillingSettings, saveBillingSettings, listClientSubs, createClientSub, setClientStatus, deleteClientSub,
+  getBillingSettings, saveBillingSettings, listClientSubs, createClientSub, setClientStatus, setClientTwilio, deleteClientSub,
   type BillingSettings, type ClientSubRow,
 } from '../lib/garvis/billing/clientBilling';
+import { loadClientConsole } from '../lib/garvis/billing/clientConsoleRun';
+import type { ClientConsoleRow } from '../lib/garvis/billing/clientConsole';
 import { detectVertical } from '../lib/garvis/verticals';
 import { supabaseUrl } from '../lib/supabase';
 import { menuForVertical } from '../lib/garvis/automation/registry';
 import { offerStatsFor, leadProofLine } from '../lib/garvis/automationStats';
+import { PhoneMissed, Radio } from 'lucide-react';
 
 const STATUS_CLS: Record<string, string> = {
   active: 'text-forge-ok', pending: 'text-forge-warn', canceled: 'text-forge-dim',
@@ -37,6 +40,9 @@ export default function ClientBilling() {
   const [copied, setCopied] = useState<string | null>(null);
   // Upsell ladder rung 3: per-client custom-automation menu (industry-fitted, honest inventory).
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Per-client automation rollup (Slice 4): what's actually attached + running for each client.
+  const [console_, setConsole] = useState<Record<string, ClientConsoleRow>>({});
+  const [twilioEdit, setTwilioEdit] = useState<Record<string, string>>({});
 
   // record-a-sale form
   const [bizName, setBizName] = useState('');
@@ -60,8 +66,11 @@ export default function ClientBilling() {
   const refresh = useCallback(async () => {
     setLoading(true); setLoadFailed(false);
     try {
-      const [s, list] = await Promise.all([getBillingSettings(), listClientSubs()]);
+      const [s, list, cons] = await Promise.all([getBillingSettings(), listClientSubs(), loadClientConsole()]);
       setSettings(s); setSubs(list);
+      const byId: Record<string, ClientConsoleRow> = {};
+      for (const r of cons.rows) if (r.clientId) byId[r.clientId] = r;
+      setConsole(byId);
     } catch (e) { setLoadFailed(true); toast('error', emsg(e)); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -215,6 +224,18 @@ export default function ClientBilling() {
                         <td className="px-3 py-2">
                           <div className="font-medium text-forge-ink">{s.business_name}</div>
                           {s.email && <div className="text-[11px] text-forge-dim">{s.email}</div>}
+                          {/* What's actually attached + running for this client (Slice 4 rollup). */}
+                          {(() => {
+                            const c = console_[s.id];
+                            if (!c || (c.triggers + c.missedCall + c.lists) === 0) return null;
+                            return (
+                              <div className="mt-0.5 inline-flex items-center gap-1 text-[10.5px] text-forge-dim">
+                                <Radio size={10} className={c.liveTotal > 0 ? 'text-forge-ok' : 'text-forge-dim'} />
+                                {c.liveTotal > 0 ? <span className="text-forge-ok">{c.liveTotal} live</span> : <span>nothing live</span>}
+                                <span>· {c.triggers} automation{c.triggers === 1 ? '' : 's'}{c.missedCall > 0 ? ` · ${c.missedCall} number${c.missedCall === 1 ? '' : 's'}` : ''}</span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-2 text-forge-dim">{tierById(s.tier)?.name ?? s.tier}</td>
                         <td className="px-3 py-2 tabular-nums text-forge-ink">{formatUsd(s.price_cents)}{s.cadence === 'monthly' ? '/mo' : ''}</td>
@@ -241,6 +262,26 @@ export default function ClientBilling() {
                       {menuFor === s.id && (
                         <tr className="border-t border-forge-border/40 bg-forge-panel/30">
                           <td colSpan={5} className="px-3 py-3">
+                            {/* This client's dedicated Twilio number (Slice 4) — attribution now, the hook
+                                for per-client send routing later. Attach automations/numbers to this
+                                client on the Automations + Missed-call pages. */}
+                            <div className="mb-3 flex flex-col gap-1.5 sm:flex-row sm:items-center">
+                              <label className="flex items-center gap-1 text-[11px] text-forge-dim"><PhoneMissed size={12} /> Their Twilio number</label>
+                              <input
+                                value={twilioEdit[s.id] ?? s.twilio_number ?? ''}
+                                onChange={(e) => setTwilioEdit((m) => ({ ...m, [s.id]: e.target.value }))}
+                                placeholder="+15551234567"
+                                className="w-48 rounded-lg border border-forge-border bg-forge-bg px-3 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/50 focus:border-forge-ember/60 focus:outline-none" />
+                              <Button variant="outline" size="sm" onClick={() => {
+                                void (async () => {
+                                  try {
+                                    await setClientTwilio(s.id, { twilio_number: twilioEdit[s.id] ?? s.twilio_number ?? '' });
+                                    setSubs((list) => list.map((x) => (x.id === s.id ? { ...x, twilio_number: (twilioEdit[s.id] ?? '').trim() || null } : x)));
+                                    toast('success', 'Saved their number.');
+                                  } catch (e) { toast('error', emsg(e)); }
+                                })();
+                              }}>Save</Button>
+                            </div>
                             {/* The custom-automation menu (upsell rung 3): honest inventory only —
                                 'not_built' capabilities never appear here or anywhere. */}
                             {menu.length === 0 ? (

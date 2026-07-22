@@ -15,9 +15,10 @@ import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import {
   listCustomerLists, createCustomerList, listCustomers, addCustomers, parseCustomerCsv,
-  listTriggers, createTriggerFromCapability, setTriggerStatus, setTriggerChannel, deleteTrigger, CAPABILITIES,
+  listTriggers, createTriggerFromCapability, setTriggerStatus, setTriggerChannel, setTriggerClient, deleteTrigger, CAPABILITIES,
   type CustomerListRow, type CustomerRow, type TriggerRow,
 } from '../lib/garvis/automation/triggersStore';
+import { listClientSubs, type ClientSubRow } from '../lib/garvis/billing/clientBilling';
 import { loadAutomationMonth, automationMonthLine, type AutomationMonth } from '../lib/garvis/automation/report';
 import { runTriggersForOwner, type TriggerRunSummary } from '../lib/garvis/automation/triggersRun';
 import { ClockStatus } from '../components/garvis/ClockStatus';
@@ -59,6 +60,15 @@ export default function Automations() {
       } catch { /* best-effort — defaults to off (no SMS toggle shown) */ }
     })();
   }, []);
+
+  // Paying clients, so each automation can be attributed to the one it runs for (per-client rollups
+  // live on the Client revenue page). Best-effort; an empty list simply hides the attach control.
+  const [clients, setClients] = useState<ClientSubRow[]>([]);
+  useEffect(() => { void listClientSubs().then(setClients).catch(() => setClients([])); }, []);
+  const attachClient = async (t: TriggerRow, clientId: string | null) => {
+    setTriggers((ts) => ts.map((x) => (x.id === t.id ? { ...x, client_subscription_id: clientId } : x)));
+    try { await setTriggerClient(t.id, clientId); } catch (e) { toast('error', emsg(e)); void refresh(); }
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true); setLoadFailed(false);
@@ -244,6 +254,14 @@ export default function Automations() {
                           : <Mail size={11} />}
                         {t.offset_days} days after {ANCHOR_LABEL[t.anchor_field] ?? t.anchor_field} · {t.status}
                       </div>
+                      {clients.length > 0 && (
+                        <select value={t.client_subscription_id ?? ''} onChange={(e) => void attachClient(t, e.target.value || null)}
+                          title="Attribute this automation to a paying client"
+                          className="mt-1 rounded border border-forge-border bg-forge-bg px-1.5 py-0.5 text-[10.5px] text-forge-dim focus:border-forge-ember/60 focus:outline-none">
+                          <option value="">Unassigned</option>
+                          {clients.map((c) => <option key={c.id} value={c.id}>{c.business_name}</option>)}
+                        </select>
+                      )}
                     </div>
                     {/* Channel toggle — only once SMS is opted into (kill switch on). A text trigger still
                         needs per-customer phones + consent; the runner skips anyone unreachable. */}
