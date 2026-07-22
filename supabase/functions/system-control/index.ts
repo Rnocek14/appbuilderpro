@@ -55,7 +55,35 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const body = await req.json().catch(() => ({}));
-    const action = body?.action === 'arm' ? 'arm' : 'status';
+    const action = body?.action === 'arm' ? 'arm'
+      : body?.action === 'probe_places' ? 'probe_places'
+      : 'status';
+
+    // PROBE the Google Places key with a real (tiny) call — presence booleans can't tell a VALID key
+    // from an invalid/over-quota one, which fails every hunt while the readiness light reads green.
+    if (action === 'probe_places') {
+      const key = Deno.env.get('GOOGLE_PLACES_API_KEY');
+      if (!key) return json({ ok: false, reason: 'GOOGLE_PLACES_API_KEY is not set — add it in Supabase secrets.' });
+      try {
+        const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': key, 'X-Goog-FieldMask': 'places.id' },
+          body: JSON.stringify({ textQuery: 'coffee shop', maxResultCount: 1, regionCode: 'US' }),
+        });
+        if (res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { places?: unknown[] };
+          return json({ ok: true, reason: `Key works — Places answered a test query (${j.places?.length ?? 0} result).` });
+        }
+        const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 200);
+        const hint = res.status === 403 ? ' — key invalid, Places API (New) not enabled, or key API-restrictions block it'
+          : res.status === 429 ? ' — over quota / rate-limited'
+          : res.status === 400 ? ' — request rejected (check billing is enabled on the project)'
+          : '';
+        return json({ ok: false, status: res.status, reason: `Places rejected the key (${res.status}${hint}). ${snippet}` });
+      } catch (e) {
+        return json({ ok: false, reason: `Could not reach Places: ${e instanceof Error ? e.message : String(e)}` });
+      }
+    }
 
     if (action === 'arm') {
       const base = String(body?.functionsBase ?? '').trim();
