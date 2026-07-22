@@ -75,6 +75,7 @@
     "verify:triggers": "tsx src/lib/garvis/automation/triggers.verify.ts",
     "test:e2e": "playwright test",
     "verify:clienttiers": "tsx src/lib/garvis/billing/clientTiers.verify.ts",
+    "verify:automationstats": "tsx src/lib/garvis/automationStats.verify.ts",
     "verify:adswatch": "tsx src/lib/garvis/adsWatch.verify.ts",
     "verify:assist": "tsx src/lib/garvis/assist.verify.ts",
     "verify:automationreport": "tsx src/lib/garvis/automation/report.verify.ts",
