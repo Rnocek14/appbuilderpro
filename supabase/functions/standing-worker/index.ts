@@ -51,6 +51,7 @@ import {
   type PlaceRaw, type DiscoveredBiz,
 } from '../../../src/lib/garvis/placesDiscovery.ts';
 import { parseBusinessProfile, assembleFallbackSpec, normalizeSpec, navFor, pickRecipe, previewSlug, restraintFor, type SiteSpec } from '../_shared/previewSpec.ts';
+import { BESPOKE_SYSTEM, buildBespokePrompt, bespokeHonest, looksLikeHtmlDoc } from '../../../src/lib/preview/bespokeSite.ts';
 import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 // CONTENT WEEK (app_0088): the same editor rubric the boards use (fail-CLOSED here — an unjudged
 // draft never auto-queues) + the pure week machinery from standingCore.
@@ -1710,6 +1711,29 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
           buildLog.stage = 'refined';
         }
       } catch { /* keep the un-refined AI draft */ }
+      // BESPOKE (opt-in via BESPOKE_DEMOS): on top of the honest spec — which stays as the fallback —
+      // let the premium model custom-DESIGN a full HTML page. This is the uncapped ceiling: a bespoke
+      // agency-quality layout instead of the section renderer's (very good) template. Honesty is a
+      // GATE, not a hope — HTML asserting any claim not grounded in the profile (licensed/insured/
+      // ratings/tenure/warranties) is DISCARDED and the honest spec stands. A truncated/non-doc reply
+      // is discarded too. Metered through the same aiCost accounting; a bad reply never blocks.
+      if (Deno.env.get('BESPOKE_DEMOS') && specSource === 'ai') {
+        try {
+          const rb = await complete([
+            { role: 'system', content: BESPOKE_SYSTEM },
+            { role: 'user', content: buildBespokePrompt(profile) },
+          ], { provider: m.provider, model: m.model, maxTokens: 16000 });
+          track(rb);
+          const html = rb.text.trim();
+          if (!looksLikeHtmlDoc(html)) {
+            buildLog.bespoke = 'discarded: not a complete HTML document';
+          } else {
+            const gate = bespokeHonest(html, profile);
+            if (gate.ok) { spec = { ...spec, html }; buildLog.stage = 'bespoke'; buildLog.bespoke = 'ok'; }
+            else { buildLog.bespoke = `discarded: ${gate.violations.slice(0, 3).join('; ')}`; }
+          }
+        } catch (e) { buildLog.bespoke_error = String((e as Error)?.message ?? e).slice(0, 200); }
+      }
     } catch (e) {
       // The deterministic recipe spec stands — and the log says WHY it's a template.
       buildLog.chain_error = String((e as Error)?.message ?? e).slice(0, 200);

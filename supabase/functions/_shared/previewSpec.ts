@@ -293,6 +293,12 @@ export interface SiteSpec {
   footer: { line: string };
   /** Any photo in the spec is AI-generated concept imagery → the footer discloses it. */
   aiImagery?: boolean;
+  /** BESPOKE mode: a complete standalone HTML document Claude custom-designed for this business.
+   *  When present the renderer/publisher use it verbatim instead of drawing sections. This is set
+   *  ONLY by the honesty-gated bespoke path (src/lib/preview/bespokeSite.ts) — never by normalizeSpec,
+   *  so unvetted model HTML can never reach a page. The rest of the spec (seo/nav/footer) stays
+   *  populated as an honest fallback if the HTML ever needs to be dropped. */
+  html?: string;
 }
 
 const HSL_RE = /^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$/;

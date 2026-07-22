@@ -40,6 +40,7 @@
     "verify:qa": "tsx src/lib/qaCheck.verify.ts",
     "verify:preview": "tsx src/lib/preview/spec.verify.ts",
     "verify:publishcore": "tsx src/lib/preview/publishCore.verify.ts",
+    "verify:bespokesite": "tsx src/lib/preview/bespokeSite.verify.ts",
     "verify:domaincore": "tsx src/lib/preview/domainCore.verify.ts",
     "verify:bigcities": "tsx src/lib/garvis/bigCities.verify.ts",
     "verify:claudescout": "tsx src/lib/garvis/claudeScout.verify.ts",
