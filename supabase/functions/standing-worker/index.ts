@@ -33,7 +33,7 @@ import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, typ
 import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES, DRY_RUNS_BEFORE_ROTATE, QUERY_VARIANTS } from '../../../src/lib/garvis/opportunityHunt.ts';
 import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
-import { buildHuntProfileRaw, buildHuntPitch, buildHuntPitchEmailHtml, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts, premiumProspect } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { buildHuntProfileRaw, buildHuntPitch, buildHuntPitchEmailHtml, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
 import {
@@ -1601,17 +1601,18 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   const buildLog: Record<string, unknown> = { stage: 'start', imagery: 0 };
   {
     let aiCost = 0, aiIn = 0, aiOut = 0;
-    // Standard plan model for everyone; a premium model ONLY for high-LTV verticals, ONLY on a
-    // paying plan, and ONLY when the operator opts in via AI_PREMIUM_MODEL. A model id that
-    // can't run on the configured provider is ignored (one bad env var must not silently
-    // template every premium lead), and cost discipline stays the default.
+    // Standard plan model for everyone; the premium model for EVERY demo on a paying plan when the
+    // operator opts in via AI_PREMIUM_MODEL. The demo is the sales asset — worth the best brain on
+    // every lead, not just high-LTV verticals. A model id that can't run on the configured provider
+    // is ignored (one bad env var must not silently template every lead), and free-plan cost
+    // discipline stays the default.
     const plan = await getUserPlan(admin, order.owner_id);
     const mPlan = modelForPlan(plan);
     const premiumRaw = Deno.env.get('AI_PREMIUM_MODEL');
     const premiumCompatible = !!premiumRaw &&
       (mPlan.provider === 'anthropic' ? /^claude/i.test(premiumRaw) : !/^claude/i.test(premiumRaw));
     if (premiumRaw && !premiumCompatible) console.warn(`AI_PREMIUM_MODEL ${premiumRaw} incompatible with provider ${mPlan.provider} — ignored`);
-    const m = premiumRaw && premiumCompatible && plan !== 'free' && premiumProspect(profile.industry)
+    const m = premiumRaw && premiumCompatible && plan !== 'free'
       ? { provider: mPlan.provider, model: premiumRaw }
       : mPlan;
     buildLog.model = m.model;
