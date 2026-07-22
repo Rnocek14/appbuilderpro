@@ -240,7 +240,7 @@ jobs:
 
       - name: Deploy worker functions (--no-verify-jwt)
         run: |
-          for fn in inbox-draft standing-worker resend-webhook resend-inbound social-sync garvis-scorecard; do
+          for fn in inbox-draft standing-worker resend-webhook resend-inbound social-sync garvis-scorecard voice-inbound; do
             echo "── deploying $fn ──"
             supabase functions deploy "$fn" --project-ref "$PROJECT_REF" --no-verify-jwt
           done
