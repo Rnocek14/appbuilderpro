@@ -11,14 +11,15 @@ export { parseCustomerCsv };
 
 export interface CustomerListRow { id: string; name: string; source: string; created_at: string }
 export interface CustomerRow {
-  id: string; list_id: string; email: string | null; name: string | null;
+  id: string; list_id: string; email: string | null; phone: string | null; name: string | null;
   last_service_at: string | null; last_visit_at: string | null;
   purchase_at: string | null; next_due_at: string | null; created_at: string;
 }
 export interface TriggerRow {
   id: string; list_id: string; capability_id: string; label: string;
   anchor_field: AnchorField; offset_days: number; window_days: number;
-  template_subject: string; template_body: string; status: 'active' | 'paused'; created_at: string;
+  template_subject: string; template_body: string; status: 'active' | 'paused';
+  channel: 'email' | 'sms'; created_at: string;
 }
 export interface FireRow { id: string; trigger_id: string; customer_id: string; fired_for: string; approval_id: string | null; created_at: string }
 
@@ -51,14 +52,15 @@ export async function listCustomers(listId: string): Promise<CustomerRow[]> {
   return (data ?? []) as CustomerRow[];
 }
 export interface NewCustomer {
-  email: string | null; name?: string | null;
+  email: string | null; phone?: string | null; name?: string | null;
   last_service_at?: string | null; last_visit_at?: string | null;
   purchase_at?: string | null; next_due_at?: string | null;
 }
 export async function addCustomers(listId: string, rows: NewCustomer[]): Promise<number> {
   const u = await uid(); if (!u || rows.length === 0) return 0;
   const payload = rows.map((r) => ({
-    owner_id: u, list_id: listId, email: r.email?.trim() || null, name: r.name?.trim() || null,
+    owner_id: u, list_id: listId, email: r.email?.trim() || null, phone: r.phone?.trim() || null,
+    name: r.name?.trim() || null,
     last_service_at: r.last_service_at || null, last_visit_at: r.last_visit_at || null,
     purchase_at: r.purchase_at || null, next_due_at: r.next_due_at || null,
     consent_basis: 'warm_transactional', consent_at: new Date().toISOString(),
@@ -98,6 +100,14 @@ export async function createTriggerFromCapability(listId: string, capabilityId: 
 export async function setTriggerStatus(id: string, status: 'active' | 'paused'): Promise<void> {
   const u = await uid(); if (!u) throw new Error('Not signed in.');
   const { error } = await supabase.from('automation_triggers').update({ status, updated_at: new Date().toISOString() })
+    .eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+/** Switch a trigger's delivery channel (email ⇄ sms). The runner routes each fire accordingly; SMS
+ *  still needs the SMS kill switch on + Twilio configured + per-customer phone/consent to actually send. */
+export async function setTriggerChannel(id: string, channel: 'email' | 'sms'): Promise<void> {
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { error } = await supabase.from('automation_triggers').update({ channel, updated_at: new Date().toISOString() })
     .eq('owner_id', u).eq('id', id);
   if (error) throw new Error(error.message);
 }

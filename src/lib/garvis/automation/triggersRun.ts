@@ -17,7 +17,8 @@
 
 import { supabase } from '../../supabase';
 import { enqueueApproval } from '../execution';
-import { dueFires, renderTemplate, fireKey, type TriggerDef, type CustomerRec, type AnchorField } from './triggers';
+import { dueFires, renderTemplate, fireKey, type TriggerDef, type CustomerRec, type AnchorField, type TriggerChannel } from './triggers';
+import { toE164 } from '../sms';
 
 export interface TriggerRunSummary {
   triggers: number;   // active triggers considered
@@ -31,9 +32,10 @@ interface TriggerRow {
   id: string; list_id: string; label: string; capability_id: string;
   anchor_field: AnchorField; offset_days: number; window_days: number;
   status: 'active' | 'paused'; template_subject: string; template_body: string;
+  channel: TriggerChannel | null;
 }
 interface CustomerRow {
-  id: string; email: string | null; name: string | null;
+  id: string; email: string | null; phone: string | null; name: string | null;
   last_service_at: string | null; last_visit_at: string | null;
   purchase_at: string | null; next_due_at: string | null;
 }
@@ -67,7 +69,7 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
     const { data: custData } = await supabase.from('customers')
       .select('*').eq('owner_id', uid).eq('list_id', listId);
     const mapped: CustomerRec[] = ((custData ?? []) as CustomerRow[]).map((c) => ({
-      id: c.id, email: c.email, name: c.name,
+      id: c.id, email: c.email, phone: c.phone, name: c.name,
       anchors: {
         last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,
         purchase_at: c.purchase_at, next_due_at: c.next_due_at,
@@ -80,7 +82,7 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
   for (const t of triggers) {
     const def: TriggerDef = {
       id: t.id, anchorField: t.anchor_field, offsetDays: t.offset_days,
-      windowDays: t.window_days, status: t.status,
+      windowDays: t.window_days, status: t.status, channel: t.channel ?? 'email',
     };
 
     const customers = await customersFor(t.list_id);
@@ -94,6 +96,14 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
     summary.due += plan.length;
 
     for (const fire of plan) {
+      // SMS: normalize the phone BEFORE claiming — an un-textable number is skipped, never enqueued as a
+      // doomed approval (the window guard retires it). Email needs no pre-check; send-email gates.
+      let e164: string | null = null;
+      if (fire.channel === 'sms') {
+        e164 = toE164(fire.to);
+        if (!e164) { summary.skipped++; continue; }
+      }
+
       // CLAIM-FIRST: reserve the fire in the ledger; a duplicate/concurrent fire hits the unique index.
       const { data: claim, error: claimErr } = await supabase.from('trigger_fires')
         .insert({ owner_id: uid, trigger_id: t.id, customer_id: fire.customerId, fired_for: fire.firedFor })
@@ -109,25 +119,11 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
         const subject = renderTemplate(t.template_subject, cust).trim() || t.label;
         const body = renderTemplate(t.template_body, cust);
 
-        // Contact: SELECT-FIRST — never reset an existing contact's email_status (suppression sacred).
-        let contactId: string | null = null;
-        const { data: existing } = await supabase.from('contacts')
-          .select('id').eq('owner_id', uid).eq('email', fire.email).maybeSingle();
-        if (existing) {
-          contactId = (existing as { id: string }).id;
-        } else {
-          const { data: c } = await supabase.from('contacts')
-            .insert({ owner_id: uid, email: fire.email, email_status: 'unknown', is_primary: true })
-            .select('id').maybeSingle();
-          if (c) {
-            contactId = (c as { id: string }).id;
-          } else {
-            // A concurrent insert won the race — re-select rather than orphan the message's contact link.
-            const { data: again } = await supabase.from('contacts')
-              .select('id').eq('owner_id', uid).eq('email', fire.email).maybeSingle();
-            contactId = again ? (again as { id: string }).id : null;
-          }
-        }
+        // Contact: SELECT-FIRST per channel — never reset an existing contact's status/consent
+        // (suppression sacred: a prior email unsubscribe or SMS STOP must stick).
+        const contactId = fire.channel === 'sms'
+          ? await resolveSmsContact(uid, e164!)
+          : await resolveEmailContact(uid, fire.to);
 
         const { data: camp, error: campErr } = await supabase.from('outreach_campaigns')
           .insert({ owner_id: uid, contact_id: contactId, kind: 'automation', state: 'pending_approval' })
@@ -135,20 +131,38 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
         if (campErr || !camp) throw new Error(campErr?.message ?? 'campaign insert failed');
         const campaignId = (camp as { id: string }).id;
 
-        const { data: msg, error: msgErr } = await supabase.from('outreach_messages')
-          .insert({
-            owner_id: uid, campaign_id: campaignId, contact_id: contactId, sequence_step: 0,
-            subject, body_text: body, to_address: fire.email, status: 'draft',
-          }).select('id').single();
-        if (msgErr || !msg) throw new Error(msgErr?.message ?? 'message insert failed');
-        const messageId = (msg as { id: string }).id;
-
-        const approvalId = await enqueueApproval({
-          kind: 'send_email',
-          title: `${t.label} → ${fire.email}`,
-          preview: `${subject}\n\n${body}`,
-          payload: { message_id: messageId, campaign_id: campaignId },
-        });
+        // One message row + one approval, routed to the trigger's channel. The send path (send-email /
+        // send-sms) re-checks every gate at send time; nothing leaves without the owner's approval.
+        const approvalId = fire.channel === 'sms'
+          ? await (async () => {
+              const { data: msg, error: msgErr } = await supabase.from('outreach_messages')
+                .insert({
+                  owner_id: uid, campaign_id: campaignId, contact_id: contactId, sequence_step: 0,
+                  channel: 'sms', subject: t.label, body_text: body, to_address: e164!, status: 'draft',
+                }).select('id').single();
+              if (msgErr || !msg) throw new Error(msgErr?.message ?? 'message insert failed');
+              return enqueueApproval({
+                kind: 'send_sms',
+                title: `${t.label} → ${e164}`,
+                preview: body,
+                // Texting the client's OWN warm customer about their service → transactional consent basis.
+                payload: { message_id: (msg as { id: string }).id, campaign_id: campaignId, sms_kind: 'transactional' },
+              });
+            })()
+          : await (async () => {
+              const { data: msg, error: msgErr } = await supabase.from('outreach_messages')
+                .insert({
+                  owner_id: uid, campaign_id: campaignId, contact_id: contactId, sequence_step: 0,
+                  subject, body_text: body, to_address: fire.to, status: 'draft',
+                }).select('id').single();
+              if (msgErr || !msg) throw new Error(msgErr?.message ?? 'message insert failed');
+              return enqueueApproval({
+                kind: 'send_email',
+                title: `${t.label} → ${fire.to}`,
+                preview: `${subject}\n\n${body}`,
+                payload: { message_id: (msg as { id: string }).id, campaign_id: campaignId },
+              });
+            })();
 
         await supabase.from('trigger_fires').update({ approval_id: approvalId }).eq('id', fireId);
         summary.queued++;
@@ -160,4 +174,41 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
     }
   }
   return summary;
+}
+
+/** Resolve (find or create) the email contact for an automation send. SELECT-FIRST so an existing
+ *  contact's email_status is never reset — suppression is sacred. Race-safe: a concurrent insert that
+ *  wins the (owner, email) unique index is re-selected rather than orphaning the message's contact. */
+async function resolveEmailContact(uid: string, email: string): Promise<string | null> {
+  const { data: existing } = await supabase.from('contacts')
+    .select('id').eq('owner_id', uid).eq('email', email).maybeSingle();
+  if (existing) return (existing as { id: string }).id;
+  const { data: c } = await supabase.from('contacts')
+    .insert({ owner_id: uid, email, email_status: 'unknown', is_primary: true })
+    .select('id').maybeSingle();
+  if (c) return (c as { id: string }).id;
+  const { data: again } = await supabase.from('contacts')
+    .select('id').eq('owner_id', uid).eq('email', email).maybeSingle();
+  return again ? (again as { id: string }).id : null;
+}
+
+/** Resolve (find or create) the SMS contact for an automation text, keyed on the E.164 phone. Reusing
+ *  an existing contact preserves its phone_status + sms_consent (a prior STOP must stick) — we NEVER
+ *  re-grant consent on a match. A NEW contact is for a warm customer of the client's own list, texted
+ *  about their own service, so it carries warm_transactional consent; send-sms still re-checks it and
+ *  fails closed. No unique index on phone_e164, so we take the first match (limit 1), never .single(). */
+async function resolveSmsContact(uid: string, e164: string): Promise<string | null> {
+  const { data: existing } = await supabase.from('contacts')
+    .select('id').eq('owner_id', uid).eq('phone_e164', e164).limit(1);
+  if (existing && existing.length) return (existing[0] as { id: string }).id;
+  const { data: c } = await supabase.from('contacts')
+    .insert({
+      owner_id: uid, phone: e164, phone_e164: e164, phone_status: 'unknown',
+      sms_consent: 'warm_transactional', sms_consent_at: new Date().toISOString(), is_primary: true,
+    })
+    .select('id').maybeSingle();
+  if (c) return (c as { id: string }).id;
+  const { data: again } = await supabase.from('contacts')
+    .select('id').eq('owner_id', uid).eq('phone_e164', e164).limit(1);
+  return again && again.length ? (again[0] as { id: string }).id : null;
 }
