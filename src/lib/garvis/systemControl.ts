@@ -40,6 +40,20 @@ export async function armHeartbeat(functionsBase: string, workerSecret: string):
   return String(data?.result ?? 'armed');
 }
 
+export interface PlacesProbe { ok: boolean; status?: number; reason: string }
+
+/** Live-test the Google Places key with a real (tiny) call — catches an invalid/over-quota key that
+ *  presence-only checks read as green. */
+export async function probePlacesKey(): Promise<PlacesProbe> {
+  try {
+    const { data, error } = await supabase.functions.invoke('system-control', { body: { action: 'probe_places' } });
+    if (error || !data) return { ok: false, reason: 'Could not run the probe — is system-control deployed?' };
+    return data as PlacesProbe;
+  } catch {
+    return { ok: false, reason: 'Could not run the probe — is system-control deployed?' };
+  }
+}
+
 /** Default functions base for this project — prefills the arm form. */
 export function defaultFunctionsBase(): string {
   const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? '';

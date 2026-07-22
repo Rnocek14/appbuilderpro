@@ -1354,6 +1354,7 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
 
   // --- DISCOVER: run up to searchesPerDay next-best queries, persist the real businesses ----------
   let discovered = 0;
+  let discoveryError: string | null = null;
   const { data: queries } = await admin.from('discovery_queries')
     .select('id, query_text, keyword, last_run_at, exhausted, total_inserted, run_count, consecutive_zero_runs')
     .eq('owner_id', order.owner_id).eq('exhausted', false)
@@ -1361,7 +1362,10 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
     .limit(cfg.searchesPerDay);
   for (const q of (queries ?? []) as QueryRowDB[]) {
     if (Date.now() - startedMs > DISCOVER_BUDGET_MS) break;   // leave time for the build phase
-    discovered += await runDiscoveryQuery(admin, order.owner_id, q, env);
+    const r = await runDiscoveryQuery(admin, order.owner_id, q, env);
+    discovered += r.inserted;
+    // A rejected key fails EVERY query — stop hammering Places and surface the reason (below).
+    if (r.apiError) { discoveryError = r.apiError; break; }
   }
 
   // --- BUILD: up to demoQuota fresh leads → demo + pitch, NO-WEBSITE prospects first --------------
@@ -1394,6 +1398,14 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
     } catch { /* one lead failing never sinks the day — the stale sweep reclaims it next run */ }
   }
 
+  // A Places API error is the loud, actionable outcome — the operator needs to fix the key, not
+  // wonder why the pool stopped growing. It never exhausted the queue (see runDiscoveryQuery), so
+  // discovery resumes the moment the key works. The build phase still ran on existing leads.
+  if (discoveryError) {
+    const built_note = built > 0 ? ` Still built ${built} demo${built === 1 ? '' : 's'} from existing leads.` : '';
+    return { discovered, built, queued,
+      line: `${order.label}: ⚠️ Google Places rejected the request (${discoveryError.slice(0, 120)}) — check GOOGLE_PLACES_API_KEY in Supabase secrets: billing on, Places API (New) enabled, quota, and key API-restrictions.${built_note} No new businesses found; nothing sent on its own.` };
+  }
   return { discovered, built, queued, line: huntRunLine(order.label, discovered, built, queued) };
 }
 
@@ -1413,12 +1425,18 @@ async function ensureDiscoveryQueue(admin: any, ownerId: string, cfg: HuntConfig
 }
 
 /** Run ONE discovery query: Places search (paginated) → parse → dedupe-insert into the lead pool.
- *  Always records the attempt (counters + exhaustion) even if it threw, so the queue keeps rolling. */
+ *  Returns the count inserted AND any Places apiError. On an API error we DO NOT advance exhaustion —
+ *  a rejected key is not an empty market, and counting it as a zero-run would (after 2 runs) mark
+ *  every query exhausted and permanently kill discovery. On a genuine result (or genuine zero) the
+ *  exhaustion counters advance as before. */
 // deno-lint-ignore no-explicit-any
-async function runDiscoveryQuery(admin: any, ownerId: string, q: QueryRowDB, env: HuntEnv): Promise<number> {
+async function runDiscoveryQuery(admin: any, ownerId: string, q: QueryRowDB, env: HuntEnv): Promise<{ inserted: number; apiError: string | null }> {
   let inserted = 0;
+  let apiError: string | null = null;
   try {
-    for (const raw of await fetchPlaces(env.placesKey, q.query_text, PLACES_PAGES)) {
+    const { places, apiError: err } = await fetchPlaces(env.placesKey, q.query_text, PLACES_PAGES);
+    apiError = err;
+    for (const raw of places) {
       const biz = parsePlace(raw, q.keyword);
       if (!biz) continue;
       if (biz.place_id && (biz.rating != null || biz.rating_count != null)) {
@@ -1427,17 +1445,25 @@ async function runDiscoveryQuery(admin: any, ownerId: string, q: QueryRowDB, env
       if (await insertLead(admin, ownerId, biz, q.id)) inserted++;
     }
   } catch { /* one query failing never sinks the run — still record the attempt below */ }
+  if (apiError) {
+    // Only stamp last_run_at (so ordering rotates) — never touch the exhaustion counters on an API
+    // error. The caller halts discovery and surfaces the reason; the query is retried once fixed.
+    await admin.from('discovery_queries').update({ last_run_at: new Date().toISOString() }).eq('id', q.id);
+    return { inserted, apiError };
+  }
   const upd = exhaustionUpdate(q, inserted);
   await admin.from('discovery_queries').update({
     last_run_at: new Date().toISOString(),
     last_inserted: upd.last_inserted, total_inserted: upd.total_inserted,
     run_count: upd.run_count, consecutive_zero_runs: upd.consecutive_zero_runs, exhausted: upd.exhausted,
   }).eq('id', q.id);
-  return inserted;
+  return { inserted, apiError: null };
 }
 
-/** Google Places textSearch, paginated. Returns structured business records — never invented. */
-async function fetchPlaces(apiKey: string, textQuery: string, pages: number): Promise<PlaceRaw[]> {
+/** Google Places textSearch, paginated. Returns the businesses AND an apiError when Places rejects the
+ *  request (bad key / quota / restriction). Surfacing the error — instead of returning [] as if the
+ *  market were empty — is what stops a broken key from silently exhausting the whole discovery queue. */
+async function fetchPlaces(apiKey: string, textQuery: string, pages: number): Promise<{ places: PlaceRaw[]; apiError: string | null }> {
   const all: PlaceRaw[] = [];
   let pageToken: string | undefined;
   for (let i = 0; i < pages; i++) {
@@ -1448,14 +1474,17 @@ async function fetchPlaces(apiKey: string, textQuery: string, pages: number): Pr
       headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': PLACES_FIELD_MASK },
       body: JSON.stringify(body),
     });
-    if (!res.ok) break;
+    if (!res.ok) {
+      const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 160);
+      return { places: all, apiError: `${res.status}${snippet ? ` ${snippet}` : ''}` };
+    }
     const json = (await res.json()) as { places?: PlaceRaw[]; nextPageToken?: string };
     if (json.places?.length) all.push(...json.places);
     if (!json.nextPageToken) break;
     pageToken = json.nextPageToken;
     await new Promise((r) => setTimeout(r, 2000));  // Places needs a short delay before a pageToken is valid
   }
-  return all;
+  return { places: all, apiError: null };
 }
 
 /** Insert a discovered business, deduped per owner by place_id then normalized website. Returns true

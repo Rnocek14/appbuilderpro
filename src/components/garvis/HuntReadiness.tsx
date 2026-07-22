@@ -5,10 +5,11 @@
 // send, and the daily auto-hunt. Read-only; it never changes anything.
 
 import { useEffect, useState } from 'react';
-import { Radar, Check, X, Loader2 } from 'lucide-react';
+import { Radar, Check, X, Loader2, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { fetchHuntReadiness } from '../../lib/garvis/huntReadinessRun';
 import { readinessLine, type Readiness, type ReadinessNeed } from '../../lib/garvis/huntReadiness';
+import { probePlacesKey, type PlacesProbe } from '../../lib/garvis/systemControl';
 
 const GATE_LABEL: Record<ReadinessNeed, string> = {
   hunt: 'Find businesses + build pitchable demos',
@@ -19,6 +20,9 @@ const GATE_LABEL: Record<ReadinessNeed, string> = {
 export function HuntReadiness() {
   const [r, setR] = useState<Readiness | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [probe, setProbe] = useState<PlacesProbe | null>(null);
+  const [probing, setProbing] = useState(false);
+  const runProbe = async () => { setProbing(true); setProbe(await probePlacesKey()); setProbing(false); };
 
   useEffect(() => {
     let live = true;
@@ -62,6 +66,21 @@ export function HuntReadiness() {
             <span className="text-forge-ink">{GATE_LABEL[g.need]}</span>
           </div>
         ))}
+      </div>
+
+      {/* Live Places-key test — the presence checks above can't tell a VALID key from an
+          invalid/over-quota one that silently fails every hunt. This actually calls Places. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-forge-border pt-2">
+        <button onClick={() => void runProbe()} disabled={probing}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-[11px] font-medium text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink disabled:opacity-50">
+          {probing ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />} Test Places key
+        </button>
+        {probe && (
+          <span className={cn('inline-flex items-start gap-1 text-[11px]', probe.ok ? 'text-forge-ok' : 'text-forge-ember')}>
+            {probe.ok ? <Check size={12} className="mt-0.5 shrink-0" /> : <X size={12} className="mt-0.5 shrink-0" />}
+            <span>{probe.reason}</span>
+          </span>
+        )}
       </div>
 
       {/* Only the UNMET prerequisites, each with its exact fix */}
