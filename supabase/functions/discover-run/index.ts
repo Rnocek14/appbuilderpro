@@ -1,26 +1,36 @@
 // supabase/functions/discover-run/index.ts
-// SCRAPE EVERYTHING → a growing pool of real businesses (the swift-prep-pros model, ported).
-// One call runs a BATCH of the (every-local-business-type × every-major-metro) grid, and — the thing
-// that was missing — PERSISTS every business it finds into discovered_businesses (deduped). The UI
-// loops this and watches the pool fill: "+12 found · 1,240 in pool". Owner-driven, so the operator
-// can fill the pool to thousands in one sitting instead of waiting on the 40/day cron.
+// SCRAPE EVERYTHING → a growing pool of real businesses. Two engines, one grid:
+//
+//  • source:'claude' (default) — "Claude runs the scraping." No Google Places, no Cloud project, no
+//    billing. Claude uses the web_search tool to find real local businesses AND judge each one's site
+//    (bad / missing / decent) in a single pass. Grounded: a business is persisted ONLY if it's tied
+//    to a real citation URL Anthropic actually returned (see claudeScout.ts) — never an invented one.
+//  • source:'places' — the Google Places engine (structured firehose) for when the operator has a
+//    working Places key and wants raw volume.
+//
+// Either way one call runs a BATCH of the (every-local-business-type × every-major-metro) grid and
+// PERSISTS every business it finds into discovered_businesses (deduped). The UI loops this and watches
+// the pool fill: "+12 found · 1,240 in pool · 380 need a website".
 //
 // Owner-auth (the operator, signed in). Reuses the pure discovery core + the big metro grid.
 // Deploy: npx supabase functions deploy discover-run
-// Secrets: GOOGLE_PLACES_API_KEY.
+// Secrets: ANTHROPIC_API_KEY (claude mode) and/or GOOGLE_PLACES_API_KEY (places mode).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { completeWithWebSearch } from '../_shared/ai.ts';
 import { LOCAL_NICHES } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { bigMetroCities } from '../../../src/lib/garvis/bigCities.ts';
 import { parsePlace, buildDiscoveryQueries, exhaustionUpdate, PLACES_FIELD_MASK, type PlaceRaw } from '../../../src/lib/garvis/placesDiscovery.ts';
+import { SCOUT_SYSTEM, buildScoutPrompt, groundScoutLeads, type ScoutLead } from '../../../src/lib/garvis/claudeScout.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
-const PLACES_PAGES = 3;   // 3 pages/query (~60 results) — swift's depth, up from the cron's 2.
+const PLACES_PAGES = 3;                 // 3 pages/query (~60 results) — swift's depth.
+const SCOUT_MODEL = 'claude-sonnet-4-6'; // house model; supports the web_search tool (as in research).
 
-interface QRow { id: string; query_text: string; keyword: string; last_run_at: string | null; total_inserted: number; run_count: number; consecutive_zero_runs: number }
+interface QRow { id: string; query_text: string; keyword: string; city: string | null; state: string | null; last_run_at: string | null; total_inserted: number; run_count: number; consecutive_zero_runs: number }
 
 /** Google Places textSearch (paginated). Returns businesses + an apiError (never swallowed). */
 async function fetchPlaces(apiKey: string, textQuery: string): Promise<{ places: PlaceRaw[]; apiError: string | null }> {
@@ -47,8 +57,22 @@ async function fetchPlaces(apiKey: string, textQuery: string): Promise<{ places:
   return { places: all, apiError: null };
 }
 
+/** Claude web-search scout for one (type × city) combo. Returns grounded leads + an apiError. */
+async function scout(keyword: string, city: string, state: string): Promise<{ leads: ScoutLead[]; apiError: string | null }> {
+  try {
+    const r = await completeWithWebSearch(
+      [{ role: 'system', content: SCOUT_SYSTEM }, { role: 'user', content: buildScoutPrompt(keyword, city, state) }],
+      { model: SCOUT_MODEL, maxUses: 6, maxTokens: 6000 },
+    );
+    const { leads } = groundScoutLeads(r.text, r.sources, keyword, city, state);
+    return { leads, apiError: null };
+  } catch (e) {
+    return { leads: [], apiError: (e instanceof Error ? e.message : String(e)).slice(0, 200) };
+  }
+}
+
 // deno-lint-ignore no-explicit-any
-async function insertLead(admin: any, ownerId: string, raw: PlaceRaw, keyword: string, queryId: string): Promise<boolean> {
+async function insertPlace(admin: any, ownerId: string, raw: PlaceRaw, keyword: string, queryId: string): Promise<boolean> {
   const biz = parsePlace(raw, keyword);
   if (!biz) return false;
   if (biz.place_id) {
@@ -68,6 +92,28 @@ async function insertLead(admin: any, ownerId: string, raw: PlaceRaw, keyword: s
   return !error;
 }
 
+// deno-lint-ignore no-explicit-any
+async function insertScout(admin: any, ownerId: string, lead: ScoutLead, queryId: string): Promise<boolean> {
+  // Dedupe: by normalized website when there is one; otherwise by (name, city) so a no-website shop
+  // found on a later run doesn't pile up. (place_id is null for open-web finds.)
+  if (lead.website_normalized) {
+    const { data } = await admin.from('discovered_businesses').select('id').eq('owner_id', ownerId).eq('website_normalized', lead.website_normalized).limit(1);
+    if (data && data.length) return false;
+  } else {
+    let q = admin.from('discovered_businesses').select('id').eq('owner_id', ownerId).eq('company_name', lead.company_name);
+    q = lead.city ? q.eq('city', lead.city) : q.is('city', null);
+    const { data } = await q.limit(1);
+    if (data && data.length) return false;
+  }
+  const { error } = await admin.from('discovered_businesses').insert({
+    owner_id: ownerId, place_id: null, company_name: lead.company_name, keyword: lead.keyword,
+    website: lead.website, website_normalized: lead.website_normalized, phone: lead.phone, address: lead.address,
+    city: lead.city, state: lead.state, category: lead.category, lat: null, lng: null,
+    has_website: lead.has_website, status: 'new', source_query_id: queryId,
+  });
+  return !error;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   const json = (b: unknown, status = 200) =>
@@ -81,11 +127,18 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: 'Unauthorized' }, 401);
     const ownerId = user.id;
 
-    const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
-    if (!apiKey) return json({ error: 'GOOGLE_PLACES_API_KEY is not set — add it in Supabase secrets.' }, 400);
+    const { batch: rawBatch, source: rawSource } = (await req.json().catch(() => ({}))) as { batch?: number; source?: string };
+    const source: 'claude' | 'places' = rawSource === 'places' ? 'places' : 'claude';
 
-    const { batch: rawBatch } = (await req.json().catch(() => ({}))) as { batch?: number };
-    const batch = Math.max(1, Math.min(Math.floor(rawBatch ?? 4), 10));
+    // Each engine needs its own key. Claude web-search only needs the Anthropic key the app already
+    // uses — no Google Cloud setup.
+    const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+    if (source === 'places' && !placesKey) return json({ error: 'GOOGLE_PLACES_API_KEY is not set — add it in Supabase secrets.' }, 400);
+    if (source === 'claude' && !Deno.env.get('ANTHROPIC_API_KEY')) return json({ error: 'ANTHROPIC_API_KEY is not set — add it in Supabase secrets.' }, 400);
+
+    // Claude calls are metered per combo, so batches stay small; Places is a cheap firehose.
+    const maxBatch = source === 'claude' ? 3 : 10;
+    const batch = Math.max(1, Math.min(Math.floor(rawBatch ?? (source === 'claude' ? 2 : 4)), maxBatch));
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
@@ -101,17 +154,24 @@ Deno.serve(async (req) => {
 
     // Next-best combos: never-run first, then least-recently-run.
     const { data: queries } = await admin.from('discovery_queries')
-      .select('id, query_text, keyword, last_run_at, total_inserted, run_count, consecutive_zero_runs')
+      .select('id, query_text, keyword, city, state, last_run_at, total_inserted, run_count, consecutive_zero_runs')
       .eq('owner_id', ownerId).eq('exhausted', false)
       .order('last_run_at', { ascending: true, nullsFirst: true }).limit(batch);
 
     let combosRun = 0; let newLeads = 0; let dupes = 0; let apiError: string | null = null;
     for (const q of (queries ?? []) as QRow[]) {
-      const { places, apiError: err } = await fetchPlaces(apiKey, q.query_text);
-      if (err) { apiError = err; break; }   // a rejected key fails every combo — stop + surface (never exhaust)
-      combosRun++;
       let inserted = 0;
-      for (const raw of places) { if (await insertLead(admin, ownerId, raw, q.keyword, q.id)) { inserted++; } else { dupes++; } }
+      if (source === 'claude') {
+        const { leads, apiError: err } = await scout(q.keyword, q.city ?? '', q.state ?? '');
+        if (err) { apiError = err; break; }   // a rejected key/model fails every combo — stop + surface
+        combosRun++;
+        for (const lead of leads) { if (await insertScout(admin, ownerId, lead, q.id)) { inserted++; } else { dupes++; } }
+      } else {
+        const { places, apiError: err } = await fetchPlaces(placesKey!, q.query_text);
+        if (err) { apiError = err; break; }
+        combosRun++;
+        for (const raw of places) { if (await insertPlace(admin, ownerId, raw, q.keyword, q.id)) { inserted++; } else { dupes++; } }
+      }
       newLeads += inserted;
       const upd = exhaustionUpdate(q, inserted);
       await admin.from('discovery_queries').update({
@@ -128,7 +188,7 @@ Deno.serve(async (req) => {
     ]);
 
     return json({
-      ok: true, combosRun, newLeads, dupes, apiError,
+      ok: true, source, combosRun, newLeads, dupes, apiError,
       poolTotal: pool.count ?? 0, noWebsite: noSite.count ?? 0, freshCombosLeft: remaining.count ?? 0,
     });
   } catch (e) {

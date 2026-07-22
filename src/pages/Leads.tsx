@@ -43,22 +43,25 @@ export default function Leads() {
   }, []);
   useEffect(() => { void load(); }, [load]);
 
-  // SCRAPE EVERYTHING: loop the discover-run engine (every business type × every metro), persisting
-  // each batch into the pool, until the fresh grid is drained, the operator stops, or the key is
-  // rejected. Live progress each batch.
+  // SCRAPE EVERYTHING: loop the Claude web-search engine (every business type × every metro). Claude
+  // finds real businesses AND judges their site quality, persisting each grounded find into the pool —
+  // no Google Places, no Cloud setup. Each combo is a metered Claude call, so batches stay small and
+  // the loop pauses after a bounded run (press again to keep filling). Live progress each batch.
+  const MAX_ITERS = 60;   // ~120 combos/press — bounds unattended spend; resume by pressing again.
   const scrape = async () => {
-    setScraping(true); stopRef.current = false; setScrapeMsg('Starting…');
-    let added = 0;
+    setScraping(true); stopRef.current = false; setScrapeMsg('Searching the web…');
+    let added = 0; let combos = 0; let i = 0;
     try {
-      for (let i = 0; i < 400 && !stopRef.current; i++) {   // hard safety bound on the loop
-        const { data, error } = await supabase.functions.invoke('discover-run', { body: { batch: 6 } });
-        const d = data as { ok?: boolean; newLeads?: number; poolTotal?: number; noWebsite?: number; freshCombosLeft?: number; apiError?: string; error?: string } | null;
-        if (error || !d?.ok) { setScrapeMsg(d?.error ?? 'Discovery call failed — check the Places key on the Health page.'); break; }
-        if (d.apiError) { setScrapeMsg(`Google Places rejected the request (${d.apiError.slice(0, 90)}) — fix the key in Google Cloud, then resume.`); break; }
-        added += d.newLeads ?? 0;
-        setScrapeMsg(`+${added} new · ${d.poolTotal ?? 0} in pool · ${d.noWebsite ?? 0} need a website`);
+      for (; i < MAX_ITERS && !stopRef.current; i++) {
+        const { data, error } = await supabase.functions.invoke('discover-run', { body: { batch: 2, source: 'claude' } });
+        const d = data as { ok?: boolean; combosRun?: number; newLeads?: number; poolTotal?: number; noWebsite?: number; freshCombosLeft?: number; apiError?: string; error?: string } | null;
+        if (error || !d?.ok) { setScrapeMsg(d?.error ?? 'Discovery call failed — check ANTHROPIC_API_KEY in Supabase secrets.'); break; }
+        if (d.apiError) { setScrapeMsg(`Search rejected (${d.apiError.slice(0, 90)}) — check ANTHROPIC_API_KEY, then resume.`); break; }
+        added += d.newLeads ?? 0; combos += d.combosRun ?? 0;
+        setScrapeMsg(`+${added} new · ${d.poolTotal ?? 0} in pool · ${d.noWebsite ?? 0} need a website · ${combos} areas searched`);
         if ((d.freshCombosLeft ?? 0) === 0 && (d.newLeads ?? 0) === 0) { setScrapeMsg(`Swept the whole grid — ${d.poolTotal ?? 0} in pool, ${d.noWebsite ?? 0} need a website.`); break; }
       }
+      if (i >= MAX_ITERS && !stopRef.current) setScrapeMsg(`Paused after ${combos} areas (+${added} new). Press “Scrape everything” to keep filling.`);
     } catch (e) { setScrapeMsg(e instanceof Error ? e.message : 'Discovery failed.'); }
     setScraping(false);
     await load();
@@ -103,7 +106,7 @@ export default function Leads() {
           )}
           <span className="min-w-0 flex-1 text-xs text-forge-dim">
             {scraping && <Loader2 size={12} className="mr-1.5 inline animate-spin" />}
-            {scrapeMsg ?? 'Runs every business type across every major US metro and keeps every result. Leave it running — it fills the pool.'}
+            {scrapeMsg ?? 'Claude searches the web for real businesses across every major US metro and judges each one’s website — no Google setup. Leave it running; it fills the pool.'}
           </span>
         </div>
 
@@ -130,7 +133,7 @@ export default function Leads() {
           <div className="rounded-2xl border border-forge-border bg-forge-panel/40 p-8 text-center">
             <p className="text-sm font-medium text-forge-ink">{all.length === 0 ? 'No prospects yet' : `Nothing ${tab}`}</p>
             <p className="mt-1 text-xs text-forge-dim">{all.length === 0
-              ? 'Start the daily hunt on Win clients — as it runs, real businesses accumulate here. If it’s configured but empty, check the Places key on the Health page.'
+              ? 'Press “Scrape everything” above — Claude searches the web for real businesses and fills this pool, no Google setup needed.'
               : 'Try another tab.'}</p>
           </div>
         ) : (
