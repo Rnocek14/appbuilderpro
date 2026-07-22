@@ -53,6 +53,9 @@ export interface ExportOpts {
 
 /** Build the complete, self-contained HTML document for a SiteSpec. */
 export async function buildStaticSiteHtml(spec: SiteSpec, opts: ExportOpts = {}): Promise<string> {
+  // BESPOKE mode: Claude already wrote a complete, self-contained document (honesty-gated upstream) —
+  // ship it verbatim. It carries its own head/SEO/styles; the section renderer is bypassed entirely.
+  if (spec.html && /<!doctype html>/i.test(spec.html.slice(0, 200))) return spec.html;
   const body = renderToStaticMarkup(createElement(PreviewSiteRenderer, { spec }));
   const css = await collectCss();
   const fams = [...new Set([spec.theme.displayFont, spec.theme.bodyFont])]
