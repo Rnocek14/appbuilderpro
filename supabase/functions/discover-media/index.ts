@@ -89,7 +89,17 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({ textQuery: String(q ?? ''), maxResultCount: 20, regionCode: 'US' }),
       });
-      if (!res.ok) return json({ error: `Places ${res.status}` }, 502);
+      if (!res.ok) {
+        // Surface Google's ACTUAL reason — a bare "Places 403" hid the real cause (API not enabled /
+        // key restriction / billing) and made every key rotation look like it did nothing.
+        const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 260);
+        const hint = res.status === 403
+          ? ' — enable “Places API (New)” for this project, set the key’s Application restriction to None or IP addresses (NOT HTTP referrers — server calls send no referrer), and confirm billing is on'
+          : res.status === 429 ? ' — over quota / rate-limited'
+          : res.status === 400 ? ' — request rejected (usually billing not enabled on the project)'
+          : '';
+        return json({ error: `Places rejected the request (${res.status}${hint}). ${snippet}` }, 502);
+      }
       const data = await res.json();
       await spendCredits(admin, user.id, { costUsd: PLACES_COST, kind: 'discover', provider: 'places', model: 'searchText' });
       return json({ available: true, data });
