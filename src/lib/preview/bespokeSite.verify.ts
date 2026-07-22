@@ -15,6 +15,9 @@ const base: BusinessProfile = {
 // ── prompt + contract ──────────────────────────────────────────────────────
 check('system prompt carries the honesty contract (no invented licensing)', /licensed|insured|bonded/i.test(BESPOKE_SYSTEM) && /NEVER/i.test(BESPOKE_SYSTEM));
 check('system prompt demands a complete self-contained HTML doc', /<!doctype html>/i.test(BESPOKE_SYSTEM) && /inline/i.test(BESPOKE_SYSTEM));
+check('system prompt directs motion via inline IntersectionObserver', /motion/i.test(BESPOKE_SYSTEM) && /IntersectionObserver/.test(BESPOKE_SYSTEM));
+check('motion is screenshot-safe + reduced-motion aware', /screenshot-safe/i.test(BESPOKE_SYSTEM) && /prefers-reduced-motion/.test(BESPOKE_SYSTEM));
+check('system prompt sets a bespoke (non-templated) design bar', /design bar/i.test(BESPOKE_SYSTEM) && /bespoke/i.test(BESPOKE_SYSTEM));
 const prompt = buildBespokePrompt(base);
 check('prompt includes the real business facts', prompt.includes('Copperline Plumbing') && prompt.includes('(555) 018-2470') && prompt.includes('Fair Oaks'));
 check('prompt only exposes publishable photos (none here)', prompt.includes('"publishable_photo_urls": []'));
