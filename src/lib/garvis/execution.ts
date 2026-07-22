@@ -10,7 +10,7 @@ import { markProjectAppLaunched } from './productLifecycle';
 import { hashPayload } from './payloadHash';
 
 export type ApprovalKind =
-  | 'send_email' | 'publish_post' | 'deploy_site' | 'deploy_backend'
+  | 'send_email' | 'send_sms' | 'publish_post' | 'deploy_site' | 'deploy_backend'
   | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature'
   | 'content_week';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
@@ -116,6 +116,16 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     const res = data as { ok?: boolean; error?: string };
     // send-email releases its per-approval claim on a soft failure, so a failed send is retryable —
     // return the row to pending instead of stranding it "approved" in History (deep scan P1).
+    if (!res?.ok) await revertToPending(a.id);
+    return { ok: !!res?.ok, error: res?.error, result: res };
+  }
+
+  if (a.kind === 'send_sms') {
+    const { data, error } = await supabase.functions.invoke('send-sms', { body: { approval_id: a.id } });
+    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    const res = data as { ok?: boolean; error?: string };
+    // send-sms releases its per-approval claim on a soft failure, exactly like send-email — a failed
+    // text stays retryable rather than stranded 'approved'.
     if (!res?.ok) await revertToPending(a.id);
     return { ok: !!res?.ok, error: res?.error, result: res };
   }

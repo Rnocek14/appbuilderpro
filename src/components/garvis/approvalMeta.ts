@@ -3,11 +3,12 @@
 // the same decision the same way (flow audit: the lane showed raw snake_case while the ledger had
 // icons + labels).
 
-import { Mail, Users, Globe, Rocket, CreditCard, Database, FileSignature, CalendarDays } from 'lucide-react';
+import { Mail, MessageSquare, Users, Globe, Rocket, CreditCard, Database, FileSignature, CalendarDays } from 'lucide-react';
 import type { ApprovalKind } from '../../lib/garvis/execution';
 
 export const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string }> = {
   send_email: { icon: Mail, label: 'Send email' },
+  send_sms: { icon: MessageSquare, label: 'Send text' },
   publish_post: { icon: Users, label: 'Publish post' },
   deploy_site: { icon: Globe, label: 'Deploy site' },
   deploy_backend: { icon: Rocket, label: 'Deploy backend' },
