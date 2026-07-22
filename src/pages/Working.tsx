@@ -163,6 +163,10 @@ export default function Working() {
               )}
             </Section>
 
+            <Section icon={<Film size={15} />} title="Scene Studio" linkTo="/garvis/scenes" linkLabel="Open Scene Studio">
+              <p className={dim}>Generate photoreal scroll clips with Veo — one per trade, reused across every demo. Needs a Google AI (Veo) key in secrets.</p>
+            </Section>
+
             <Section icon={<Bot size={15} />} title="App builds" linkTo="/autopilot" linkLabel="Autopilot">
               {!jobs || 'missing' in jobs ? (
                 <p className={dim}>The build system isn’t provisioned on this install.</p>
