@@ -15,9 +15,10 @@ import { cn } from '../lib/utils';
 import { supabaseUrl } from '../lib/supabase';
 import {
   listMissedCallConfigs, createMissedCallConfig, updateMissedCallConfig, deleteMissedCallConfig,
-  listMissedCallEvents, DEFAULT_MISSED_CALL_TEMPLATE,
+  setMissedCallClient, listMissedCallEvents, DEFAULT_MISSED_CALL_TEMPLATE,
   type MissedCallConfig, type MissedCallEvent,
 } from '../lib/garvis/missedCallStore';
+import { listClientSubs, type ClientSubRow } from '../lib/garvis/billing/clientBilling';
 
 const WEBHOOK_URL = `${supabaseUrl}/functions/v1/voice-inbound`;
 
@@ -40,16 +41,23 @@ export default function MissedCall() {
   const [template, setTemplate] = useState(DEFAULT_MISSED_CALL_TEMPLATE);
   const [ringSeconds, setRingSeconds] = useState('20');
 
+  const [clients, setClients] = useState<ClientSubRow[]>([]);
+
   const refresh = useCallback(async () => {
     setLoading(true); setLoadFailed(false);
     try {
-      const [cs, evs] = await Promise.all([listMissedCallConfigs(), listMissedCallEvents()]);
-      setConfigs(cs); setEvents(evs);
+      const [cs, evs, cl] = await Promise.all([listMissedCallConfigs(), listMissedCallEvents(), listClientSubs()]);
+      setConfigs(cs); setEvents(evs); setClients(cl);
     } catch (e) { setLoadFailed(true); toast('error', emsg(e)); }
     finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+
+  const attachClient = async (c: MissedCallConfig, clientId: string | null) => {
+    setConfigs((cs) => cs.map((x) => (x.id === c.id ? { ...x, client_subscription_id: clientId } : x)));
+    try { await setMissedCallClient(c.id, clientId); } catch (e) { toast('error', emsg(e)); void refresh(); }
+  };
 
   const copyWebhook = async () => {
     try { await navigator.clipboard.writeText(WEBHOOK_URL); setCopied(true); setTimeout(() => setCopied(false), 1500); }
@@ -171,6 +179,14 @@ export default function MissedCall() {
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-forge-ink">{c.label || c.twilio_number}</div>
                         <div className="text-[11px] text-forge-dim">{c.twilio_number} → rings {c.forward_to} for {c.ring_seconds}s · {c.enabled ? 'live' : 'off'}</div>
+                        {clients.length > 0 && (
+                          <select value={c.client_subscription_id ?? ''} onChange={(e) => void attachClient(c, e.target.value || null)}
+                            title="Attribute this number to a paying client"
+                            className="mt-1 rounded border border-forge-border bg-forge-bg px-1.5 py-0.5 text-[10.5px] text-forge-dim focus:border-forge-ember/60 focus:outline-none">
+                            <option value="">Unassigned</option>
+                            {clients.map((cl) => <option key={cl.id} value={cl.id}>{cl.business_name}</option>)}
+                          </select>
+                        )}
                       </div>
                       <button onClick={() => void toggle(c)} title={c.enabled ? 'Switch off' : 'Switch on'}
                         className={cn('inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px]',

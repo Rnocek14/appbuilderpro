@@ -11,7 +11,8 @@ export { DEFAULT_MISSED_CALL_TEMPLATE };
 
 export interface MissedCallConfig {
   id: string; label: string | null; twilio_number: string; forward_to: string;
-  template: string; business_name: string | null; ring_seconds: number; enabled: boolean; created_at: string;
+  template: string; business_name: string | null; ring_seconds: number; enabled: boolean;
+  client_subscription_id: string | null; created_at: string;
 }
 export interface MissedCallEvent {
   id: string; from_number: string | null; to_number: string | null; dial_status: string | null;
@@ -26,7 +27,7 @@ async function uid(): Promise<string | null> {
 export async function listMissedCallConfigs(): Promise<MissedCallConfig[]> {
   const u = await uid(); if (!u) return [];
   const { data } = await supabase.from('missed_call_configs')
-    .select('id,label,twilio_number,forward_to,template,business_name,ring_seconds,enabled,created_at')
+    .select('id,label,twilio_number,forward_to,template,business_name,ring_seconds,enabled,client_subscription_id,created_at')
     .eq('owner_id', u).order('created_at', { ascending: false });
   return (data ?? []) as MissedCallConfig[];
 }
@@ -47,7 +48,7 @@ export async function createMissedCallConfig(input: NewMissedCallConfig): Promis
     business_name: input.business_name?.trim() || null,
     ring_seconds: input.ring_seconds ?? 20,
     enabled: input.enabled ?? false,
-  }).select('id,label,twilio_number,forward_to,template,business_name,ring_seconds,enabled,created_at').single();
+  }).select('id,label,twilio_number,forward_to,template,business_name,ring_seconds,enabled,client_subscription_id,created_at').single();
   if (error) {
     // The Twilio number is globally unique — a clear message beats a raw 23505.
     if ((error as { code?: string }).code === '23505') throw new Error('That Twilio number is already configured (here or on another account).');
@@ -73,6 +74,15 @@ export async function updateMissedCallConfig(id: string, patch: Partial<NewMisse
 export async function deleteMissedCallConfig(id: string): Promise<void> {
   const u = await uid(); if (!u) throw new Error('Not signed in.');
   const { error } = await supabase.from('missed_call_configs').delete().eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+/** Attach (or detach with null) a missed-call number to a paying client — for attribution/rollups. */
+export async function setMissedCallClient(id: string, clientSubscriptionId: string | null): Promise<void> {
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { error } = await supabase.from('missed_call_configs')
+    .update({ client_subscription_id: clientSubscriptionId, updated_at: new Date().toISOString() })
+    .eq('owner_id', u).eq('id', id);
   if (error) throw new Error(error.message);
 }
 

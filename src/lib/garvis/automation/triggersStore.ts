@@ -9,7 +9,7 @@ import { parseCustomerCsv, type AnchorField } from './triggers';
 
 export { parseCustomerCsv };
 
-export interface CustomerListRow { id: string; name: string; source: string; created_at: string }
+export interface CustomerListRow { id: string; name: string; source: string; client_subscription_id: string | null; created_at: string }
 export interface CustomerRow {
   id: string; list_id: string; email: string | null; phone: string | null; name: string | null;
   last_service_at: string | null; last_visit_at: string | null;
@@ -19,7 +19,7 @@ export interface TriggerRow {
   id: string; list_id: string; capability_id: string; label: string;
   anchor_field: AnchorField; offset_days: number; window_days: number;
   template_subject: string; template_body: string; status: 'active' | 'paused';
-  channel: 'email' | 'sms'; created_at: string;
+  channel: 'email' | 'sms'; client_subscription_id: string | null; created_at: string;
 }
 export interface FireRow { id: string; trigger_id: string; customer_id: string; fired_for: string; approval_id: string | null; created_at: string }
 
@@ -31,7 +31,7 @@ async function uid(): Promise<string | null> {
 // ---- customer lists ----
 export async function listCustomerLists(): Promise<CustomerListRow[]> {
   const u = await uid(); if (!u) return [];
-  const { data } = await supabase.from('customer_lists').select('id,name,source,created_at')
+  const { data } = await supabase.from('customer_lists').select('id,name,source,client_subscription_id,created_at')
     .eq('owner_id', u).order('created_at', { ascending: false });
   return (data ?? []) as CustomerListRow[];
 }
@@ -39,9 +39,16 @@ export async function createCustomerList(name: string): Promise<CustomerListRow>
   const u = await uid(); if (!u) throw new Error('Not signed in.');
   const { data, error } = await supabase.from('customer_lists')
     .insert({ owner_id: u, name: name.trim() || 'My customers', source: 'manual' })
-    .select('id,name,source,created_at').single();
+    .select('id,name,source,client_subscription_id,created_at').single();
   if (error) throw new Error(error.message);
   return data as CustomerListRow;
+}
+/** Attach (or detach with null) a customer list to a paying client. */
+export async function setListClient(listId: string, clientSubscriptionId: string | null): Promise<void> {
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { error } = await supabase.from('customer_lists')
+    .update({ client_subscription_id: clientSubscriptionId }).eq('owner_id', u).eq('id', listId);
+  if (error) throw new Error(error.message);
 }
 
 // ---- customers ----
@@ -108,6 +115,15 @@ export async function setTriggerStatus(id: string, status: 'active' | 'paused'):
 export async function setTriggerChannel(id: string, channel: 'email' | 'sms'): Promise<void> {
   const u = await uid(); if (!u) throw new Error('Not signed in.');
   const { error } = await supabase.from('automation_triggers').update({ channel, updated_at: new Date().toISOString() })
+    .eq('owner_id', u).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+/** Attach (or detach with null) a trigger to a paying client — purely for attribution/rollups; it does
+ *  not change how the trigger fires. */
+export async function setTriggerClient(id: string, clientSubscriptionId: string | null): Promise<void> {
+  const u = await uid(); if (!u) throw new Error('Not signed in.');
+  const { error } = await supabase.from('automation_triggers')
+    .update({ client_subscription_id: clientSubscriptionId, updated_at: new Date().toISOString() })
     .eq('owner_id', u).eq('id', id);
   if (error) throw new Error(error.message);
 }
