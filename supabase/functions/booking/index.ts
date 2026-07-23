@@ -16,6 +16,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { availableSlots, validateBooking, type HoursRule, type Interval } from '../../../src/lib/garvis/booking/schedule.ts';
+import { sendBookingNotice } from '../_shared/bookingNotify.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -25,7 +26,7 @@ const cors = {
 interface PageRow {
   id: string; owner_id: string; client_subscription_id: string | null; business_name: string;
   utc_offset_min: number; hours: HoursRule[]; slot_min: number; min_notice_min: number;
-  max_advance_days: number; enabled: boolean;
+  max_advance_days: number; confirm_channel: 'email' | 'sms' | 'both'; enabled: boolean;
 }
 interface ServiceRow { id: string; name: string; duration_min: number; buffer_min: number; price_cents: number | null }
 
@@ -43,7 +44,7 @@ Deno.serve(async (req) => {
     if (!slug) return json({ error: 'A booking link is required.' }, 400);
 
     const { data: page } = await admin.from('booking_pages')
-      .select('id, owner_id, client_subscription_id, business_name, utc_offset_min, hours, slot_min, min_notice_min, max_advance_days, enabled')
+      .select('id, owner_id, client_subscription_id, business_name, utc_offset_min, hours, slot_min, min_notice_min, max_advance_days, confirm_channel, enabled')
       .eq('slug', slug).maybeSingle();
     if (!page || !(page as PageRow).enabled) return json({ error: 'This booking page isn’t available.' }, 404);
     const pg = page as PageRow;
@@ -123,6 +124,16 @@ Deno.serve(async (req) => {
         const code = (insErr as { code?: string } | null)?.code;
         if (code === '23P01') return json({ error: 'That time was just booked — pick another.', reason: 'taken' }, 409);
         return json({ error: 'Couldn’t complete the booking — please try again.' }, 500);
+      }
+
+      // Confirm to the CUSTOMER (transactional, they just booked) over the page's channel — best-effort.
+      const notice = await sendBookingNotice(admin, pg.owner_id, null, {
+        businessName: pg.business_name, serviceName: svc.name, startsAt: new Date(startMs).toISOString(),
+        utcOffsetMin: pg.utc_offset_min, toEmail: email, toPhone: phone, channel: pg.confirm_channel, kind: 'confirmation',
+      }).catch(() => ({ email: false, sms: false }));
+      if (notice.email || notice.sms) {
+        await admin.from('appointments').update({ confirm_sent: true, updated_at: new Date().toISOString() })
+          .eq('id', (appt as { id: string }).id).then(() => {}, () => {});
       }
 
       // Alert the operator (best-effort, never blocks the booking): a note in their feed + a webhook ping.

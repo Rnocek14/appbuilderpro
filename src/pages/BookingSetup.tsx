@@ -219,6 +219,20 @@ export default function BookingSetup() {
               )}
             </section>
 
+            {/* Confirmations + reminders channel */}
+            <section className="rounded-xl border border-forge-border bg-forge-panel/40 p-4">
+              <p className="mb-1 text-sm font-semibold text-forge-ink">Confirmations &amp; reminders</p>
+              <p className="mb-3 text-xs text-forge-dim">Customers get a confirmation the moment they book and a reminder ~a day before. Texting needs Twilio connected; email needs your outreach sender set.</p>
+              <div className="flex flex-wrap gap-2">
+                {(['email', 'sms', 'both'] as const).map((c) => (
+                  <button key={c} onClick={() => setPage((p) => ({ ...p, confirm_channel: c }))}
+                    className={`rounded-lg border px-3.5 py-1.5 text-sm font-medium capitalize transition-colors ${page.confirm_channel === c ? 'border-forge-ember bg-forge-ember/10 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink'}`}>
+                    {c === 'both' ? 'Email + Text' : c === 'sms' ? 'Text' : 'Email'}
+                  </button>
+                ))}
+              </div>
+            </section>
+
             {/* Go live + save */}
             <section className="rounded-xl border border-forge-border bg-forge-panel/40 p-4">
               <label className="flex items-center gap-2.5 text-sm font-medium text-forge-ink">
