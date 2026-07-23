@@ -1745,13 +1745,16 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
           buildLog.stage = 'refined';
         }
       } catch { /* keep the un-refined AI draft */ }
-      // BESPOKE (opt-in via BESPOKE_DEMOS): on top of the honest spec — which stays as the fallback —
-      // let the premium model custom-DESIGN a full HTML page. This is the uncapped ceiling: a bespoke
-      // agency-quality layout instead of the section renderer's (very good) template. Honesty is a
-      // GATE, not a hope — HTML asserting any claim not grounded in the profile (licensed/insured/
-      // ratings/tenure/warranties) is DISCARDED and the honest spec stands. A truncated/non-doc reply
-      // is discarded too. Metered through the same aiCost accounting; a bad reply never blocks.
-      if (Deno.env.get('BESPOKE_DEMOS') && specSource === 'ai') {
+      // BESPOKE — the DEFAULT when the AI spec succeeded (opt OUT with BESPOKE_DEMOS=0). On top of the
+      // honest spec — which stays as the fallback — the active model custom-DESIGNS a full HTML page:
+      // the uncapped ceiling, a bespoke agency-quality layout instead of the section renderer's (very
+      // good) template. The demo is the sales asset, so this is worth one extra model call per lead
+      // (metered through the same aiCost accounting); set AI_PREMIUM_MODEL for the best design.
+      // Honesty is a GATE, not a hope — HTML asserting any claim not grounded in the profile
+      // (licensed/insured/ratings/tenure/warranties) is DISCARDED and the honest spec stands. A
+      // truncated/non-doc reply is discarded too. A bad reply never blocks; set BESPOKE_DEMOS=0 to
+      // fall back to the pure template path (cheaper, one fewer model call).
+      if (Deno.env.get('BESPOKE_DEMOS') !== '0' && specSource === 'ai') {
         try {
           const rb = await complete([
             { role: 'system', content: BESPOKE_SYSTEM },
