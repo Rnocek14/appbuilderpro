@@ -93,6 +93,8 @@ Deno.serve(async (req) => {
     const to = toE164(msg.to_address as string | null);
     if (!to) return block('Recipient phone is missing or not a valid number.');
     if (!validSmsBody(msg.body_text as string | null)) return block('SMS body is empty or too long.');
+    // PLACEHOLDER GATE (fail-closed): never text a real person a literal "[YOU FILL …]" / "[EDIT …]" hole.
+    if (/\[(?:YOU FILL|EDIT)\b/i.test((msg.body_text as string | null) ?? '')) return block('SMS still has an unfilled [YOU FILL]/[EDIT] placeholder — refusing to send.');
 
     // TCPA consent — fails CLOSED. Load the contact this text is going to.
     if (!msg.contact_id) return block('No consented contact on the message — refusing to text.');

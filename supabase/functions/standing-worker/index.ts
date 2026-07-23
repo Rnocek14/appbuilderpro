@@ -1992,14 +1992,17 @@ async function drainBookingReminders(admin: any): Promise<void> {
   const loIso = new Date(now + 3 * 3_600_000).toISOString();
   const hiIso = new Date(now + 24 * 3_600_000).toISOString();
   const { data } = await admin.from('appointments')
-    .select('id, owner_id, service_name, starts_at, customer_email, customer_phone, page:booking_pages(business_name, utc_offset_min, confirm_channel)')
+    .select('id, owner_id, service_name, starts_at, created_at, customer_email, customer_phone, page:booking_pages(business_name, utc_offset_min, confirm_channel)')
     .eq('status', 'confirmed').eq('reminder_sent', false)
     .gt('starts_at', loIso).lte('starts_at', hiIso).limit(50);
   for (const a of (data ?? []) as Record<string, unknown>[]) {
     const rawPage = a.page as unknown;
     const pg = (Array.isArray(rawPage) ? rawPage[0] : rawPage) as
       { business_name: string; utc_offset_min: number; confirm_channel: 'email' | 'sms' | 'both' } | null;
-    if (pg) {
+    // Skip the reminder for a booking made LESS than 24h before its start — the confirmation it just
+    // got IS the reminder, so a second message minutes later is noise. Still retire it (reminder_sent).
+    const nearTerm = !!a.created_at && Date.parse(a.created_at as string) > Date.parse(a.starts_at as string) - 24 * 3_600_000;
+    if (pg && !nearTerm) {
       await sendBookingNotice(admin, a.owner_id as string, null, {
         businessName: pg.business_name, serviceName: (a.service_name as string) ?? 'your appointment',
         startsAt: a.starts_at as string, utcOffsetMin: pg.utc_offset_min,
