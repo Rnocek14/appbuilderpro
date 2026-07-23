@@ -3,7 +3,7 @@
 // FableForge chrome: just their website. `/preview-site/:slug/email-shot` renders the stripped,
 // animation-free variant used for email screenshots. Previews are kept out of search indexes.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getPreviewSite, recordPreviewEvent, type PreviewSiteRow } from '../lib/preview/engine';
 import { PreviewSiteRenderer } from '../components/preview/PreviewSiteRenderer';
@@ -11,16 +11,49 @@ import { ClaimBar } from '../components/preview/ClaimBar';
 import { AutomationIntake } from '../components/preview/AutomationIntake';
 import { supabaseUrl } from '../lib/supabase';
 
+// A tiny reporter injected into the bespoke document so the (deliberately cross-origin) frame can
+// tell the parent how tall it is — we can't read that from here without allow-same-origin, which we
+// refuse to grant. It posts the content height on load/resize/mutation; the parent sizes the iframe
+// to match, so the whole page joins the PARENT's scroll instead of trapping scroll in a 100vh box.
+const HEIGHT_REPORTER =
+  '<script>(function(){function p(){var b=document.body,d=document.documentElement;' +
+  'var h=Math.max(b?b.scrollHeight:0,d?d.scrollHeight:0,b?b.offsetHeight:0);' +
+  "parent.postMessage({__ffHeight:h},'*');}" +
+  "window.addEventListener('load',p);window.addEventListener('resize',p);" +
+  'try{new ResizeObserver(p).observe(document.documentElement);}catch(e){}' +
+  'setTimeout(p,300);setTimeout(p,1500);setTimeout(p,3500);}());</scr' + 'ipt>';
+
 /** Renders a bespoke, Claude-authored HTML document in a sandboxed iframe. No allow-same-origin, so
- *  the generated page is isolated from the app (and can't reach the parent); allow-forms/popups/
- *  top-navigation keep its quote form and tel:/mailto CTAs working. Fills the viewport and scrolls
- *  internally — the ClaimBar overlays it via fixed positioning. */
+ *  the generated page stays isolated from the app (its LLM-authored script can't reach our origin,
+ *  session, or storage); allow-forms/popups/top-navigation keep its quote form and tel:/mailto CTAs
+ *  working. We inject HEIGHT_REPORTER and size the frame to the reported content height, so it flows
+ *  in the parent document — the AutomationIntake + ClaimBar below it are reachable (a fixed 100vh
+ *  frame used to eat every swipe on mobile and strand them). scrolling="no": the parent owns scroll. */
 function BespokeFrame({ html, title }: { html: string; title: string }) {
+  const ref = useRef<HTMLIFrameElement | null>(null);
+  const [height, setHeight] = useState(0);
+  const srcDoc = useMemo(() => {
+    if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${HEIGHT_REPORTER}</body>`);
+    if (/<\/html>/i.test(html)) return html.replace(/<\/html>/i, `${HEIGHT_REPORTER}</html>`);
+    return html + HEIGHT_REPORTER;
+  }, [html]);
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (!ref.current || e.source !== ref.current.contentWindow) return;
+      const h = (e.data as { __ffHeight?: unknown })?.__ffHeight;
+      if (typeof h === 'number' && h > 0) setHeight(Math.min(h, 40000)); // clamp a runaway report
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
   return (
     <iframe
+      ref={ref}
       title={`${title} — website preview`}
-      srcDoc={html}
-      className="block h-screen w-full border-0"
+      srcDoc={srcDoc}
+      scrolling="no"
+      className="block w-full border-0"
+      style={{ height: height ? `${height}px` : '100vh' }}
       sandbox="allow-scripts allow-forms allow-popups allow-top-navigation-by-user-activation"
     />
   );
@@ -65,8 +98,8 @@ export default function PreviewSite({ shot = false }: { shot?: boolean }) {
     );
   }
   // BESPOKE mode: Claude wrote a complete, custom HTML document. A full document can't be injected
-  // into a div, and its CSS must not leak into the app — so it renders in a sandboxed, same-origin
-  // iframe that auto-sizes to its content (letting the ClaimBar/AutomationIntake flow below).
+  // into a div, and its CSS must not leak into the app — so it renders in a sandboxed iframe that
+  // reports its height back and is sized to fit, letting the AutomationIntake/ClaimBar flow below it.
   if (row.spec.html) {
     return (
       <>
