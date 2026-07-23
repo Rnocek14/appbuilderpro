@@ -18,7 +18,7 @@
 import { supabase } from '../../supabase';
 import { enqueueApproval } from '../execution';
 import { dueFires, renderTemplate, fireKey, type TriggerDef, type CustomerRec, type AnchorField, type TriggerChannel } from './triggers';
-import { toE164 } from '../sms';
+import { toE164, resolveSmsFrom } from '../sms';
 
 export interface TriggerRunSummary {
   triggers: number;   // active triggers considered
@@ -33,6 +33,7 @@ interface TriggerRow {
   anchor_field: AnchorField; offset_days: number; window_days: number;
   status: 'active' | 'paused'; template_subject: string; template_body: string;
   channel: TriggerChannel | null;
+  client_subscription_id: string | null;   // attribution → per-client SMS FROM routing
 }
 interface CustomerRow {
   id: string; email: string | null; phone: string | null; name: string | null;
@@ -61,6 +62,15 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
     .select('*').eq('owner_id', uid).eq('status', 'active');
   const triggers = (trigData ?? []) as TriggerRow[];
   summary.triggers = triggers.length;
+
+  // Per-client SMS FROM routing: a trigger attributed to a client texts from THAT client's own number
+  // (when they've connected one). Load the owner's client numbers once; send-sms falls back to the
+  // operator's global number when a trigger isn't attributed or the client hasn't connected a number.
+  const clientNumbers = new Map<string, string | null>();
+  if (triggers.some((t) => t.client_subscription_id)) {
+    const { data: subs } = await supabase.from('client_subscriptions').select('id, twilio_number').eq('owner_id', uid);
+    for (const s of (subs ?? []) as { id: string; twilio_number: string | null }[]) clientNumbers.set(s.id, s.twilio_number);
+  }
 
   // Customers are shared across triggers on the same list — fetch each list once, not per trigger.
   const customersByList = new Map<string, CustomerRec[]>();
@@ -147,12 +157,15 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
                   channel: 'sms', subject: t.label, body_text: body, to_address: e164!, status: 'draft',
                 }).select('id').single();
               if (msgErr || !msg) throw new Error(msgErr?.message ?? 'message insert failed');
+              // Route the text from the client's own number when this trigger is theirs and they've
+              // connected one; otherwise send-sms falls back to the operator's shared number.
+              const fromNumber = t.client_subscription_id ? resolveSmsFrom(clientNumbers.get(t.client_subscription_id), null) : null;
               return enqueueApproval({
                 kind: 'send_sms',
                 title: `${t.label} → ${e164}`,
                 preview: body,
                 // Texting the client's OWN warm customer about their service → transactional consent basis.
-                payload: { message_id: (msg as { id: string }).id, campaign_id: campaignId, sms_kind: 'transactional' },
+                payload: { message_id: (msg as { id: string }).id, campaign_id: campaignId, sms_kind: 'transactional', ...(fromNumber ? { from_number: fromNumber } : {}) },
               });
             })()
           : await (async () => {

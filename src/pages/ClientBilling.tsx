@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { NavLink, useSearchParams } from 'react-router-dom';
-import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, Rocket, Zap } from 'lucide-react';
+import { Receipt, Loader2, Copy, Check, Trash2, CircleDollarSign, Link as LinkIcon, Info, Rocket } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { Button, StatCard, EmptyState, LoadError } from '../components/ui';
@@ -23,7 +23,8 @@ import { detectVertical } from '../lib/garvis/verticals';
 import { supabaseUrl } from '../lib/supabase';
 import { menuForVertical } from '../lib/garvis/automation/registry';
 import { offerStatsFor, leadProofLine } from '../lib/garvis/automationStats';
-import { PhoneMissed, Radio } from 'lucide-react';
+import { PhoneMissed, Radio, Settings2 } from 'lucide-react';
+import { ClientConnections } from '../components/clients/ClientConnections';
 
 const STATUS_CLS: Record<string, string> = {
   active: 'text-forge-ok', pending: 'text-forge-warn', canceled: 'text-forge-dim',
@@ -43,6 +44,8 @@ export default function ClientBilling() {
   // Per-client automation rollup (Slice 4): what's actually attached + running for each client.
   const [console_, setConsole] = useState<Record<string, ClientConsoleRow>>({});
   const [twilioEdit, setTwilioEdit] = useState<Record<string, string>>({});
+  // Bumped after a per-client change (e.g. saving their Twilio number) to re-check the connections checklist.
+  const [connKey, setConnKey] = useState<Record<string, number>>({});
 
   // record-a-sale form
   const [bizName, setBizName] = useState('');
@@ -247,10 +250,10 @@ export default function ClientBilling() {
                               {copied === s.id ? <Check size={11} className="text-forge-ok" /> : <Copy size={11} />} Link
                             </button>
                             <button onClick={() => setMenuFor((m) => (m === s.id ? null : s.id))}
-                              title="Industry-fitted automations to pitch this client"
+                              title="Hook up their accounts + see what to pitch"
                               className={cn('inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px]',
                                 menuFor === s.id ? 'border-forge-ember/50 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink')}>
-                              <Zap size={11} /> Automations
+                              <Settings2 size={11} /> Set up
                             </button>
                             {s.status !== 'active'
                               ? <button onClick={() => void mark(s, 'active')} className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-ok hover:bg-forge-ok/10">Mark paid</button>
@@ -262,9 +265,13 @@ export default function ClientBilling() {
                       {menuFor === s.id && (
                         <tr className="border-t border-forge-border/40 bg-forge-panel/30">
                           <td colSpan={5} className="px-3 py-3">
-                            {/* This client's dedicated Twilio number (Slice 4) — attribution now, the hook
-                                for per-client send routing later. Attach automations/numbers to this
-                                client on the Automations + Missed-call pages. */}
+                            {/* The connections checklist — hook up this client's accounts. Seeds + refreshes
+                                against the real connector tables; each line deep-links to where it's set up. */}
+                            <div className="mb-3">
+                              <ClientConnections clientSubId={s.id} tier={s.tier} refreshKey={connKey[s.id] ?? 0} />
+                            </div>
+                            {/* This client's dedicated Twilio number — the sms_number connection. Saving it
+                                flips the "Text number" line to connected and routes their reminders from it. */}
                             <div className="mb-3 flex flex-col gap-1.5 sm:flex-row sm:items-center">
                               <label className="flex items-center gap-1 text-[11px] text-forge-dim"><PhoneMissed size={12} /> Their Twilio number</label>
                               <input
@@ -277,6 +284,7 @@ export default function ClientBilling() {
                                   try {
                                     await setClientTwilio(s.id, { twilio_number: twilioEdit[s.id] ?? s.twilio_number ?? '' });
                                     setSubs((list) => list.map((x) => (x.id === s.id ? { ...x, twilio_number: (twilioEdit[s.id] ?? '').trim() || null } : x)));
+                                    setConnKey((m) => ({ ...m, [s.id]: (m[s.id] ?? 0) + 1 }));   // re-check the sms_number line
                                     toast('success', 'Saved their number.');
                                   } catch (e) { toast('error', emsg(e)); }
                                 })();

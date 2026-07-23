@@ -21,6 +21,17 @@ export function toE164(raw: string | null | undefined): string | null {
   return null;
 }
 
+/** Choose the FROM number for an automation text: the client's OWN number when they've connected one
+ *  (normalized to E.164), otherwise the operator's shared number. A client value that doesn't normalize
+ *  is ignored — we never hand Twilio a malformed sender; the global number carries the send instead.
+ *  Returns null only when neither is usable (the caller then refuses the send rather than guess). */
+export function resolveSmsFrom(clientNumber: string | null | undefined, globalNumber: string | null | undefined): string | null {
+  const client = toE164(clientNumber);
+  if (client) return client;
+  const global = (globalNumber ?? '').trim();
+  return global || null;
+}
+
 /** GSM-7 vs UCS-2 segment count (each segment is billed). Any non-ASCII char forces 70/67-char
  *  UCS-2 segments; plain text gets 160/153. Used to warn on cost before a blast. */
 export function smsSegments(body: string | null | undefined): number {
