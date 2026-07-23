@@ -24,7 +24,7 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
-import { complete, modelForPlan } from '../_shared/ai.ts';
+import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, getUserPlan } from '../_shared/credits.ts';
 import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, type BatchRecipient } from '../_shared/batchCore.ts';
 // DAILY AUTOMATIC CLIENT HUNT (client_hunt kind) — the discovery brain + the pure builders are
@@ -1665,6 +1665,15 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   }).select('id').single();
   if (pErr || !profileRow) return 'skipped';
 
+  // GROUND THE REDESIGN — capture the prospect's CURRENT site ONCE, up front. Those bytes do double
+  // duty: they're handed to the bespoke designer (vision) so it designs a clearly-better replacement
+  // of THEIR actual page instead of a generic one, AND they become the "before" in the email
+  // before/after (reused, not re-captured). Only for a reachable real site; no key/unreachable → null
+  // and the build proceeds exactly as before. Fail-soft; a screenshot never blocks a demo.
+  const currentShot = (audit.reachable && /^https?:\/\//.test(finalUrl))
+    ? await captureShot(finalUrl)
+    : null;
+
   // THE INTELLIGENCE CHAIN, server-side — the same strategist → art-director → owner-critique →
   // refine pass the manual preview engine runs (src/lib/preview/engine.ts), so a hunted prospect
   // gets the crafted, strategy-driven site. Every stage fails soft: the deterministic recipe spec
@@ -1797,12 +1806,28 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       // fall back to the pure template path (cheaper, one fewer model call).
       if (Deno.env.get('BESPOKE_DEMOS') !== '0' && specSource === 'ai') {
         try {
-          const rb = await complete([
-            { role: 'system', content: BESPOKE_SYSTEM },
-            { role: 'user', content: buildBespokePrompt(profile) },
-          ], { provider: m.provider, model: m.model, maxTokens: 16000 });
-          track(rb);
-          const html = rb.text.trim();
+          // VISION-GROUNDED when we captured their current site: the designer SEES the page it's
+          // replacing (their real photos, brand, and every flaw) and beats it — a redesign OF this
+          // business, not a generic one. No shot (no-website lead / no key) → text-only bespoke.
+          // Vision failing (oversized image, non-vision model) falls through to text-only, so a
+          // bespoke page still ships; only both failing drops to the honest template floor.
+          let rbText: string | null = null;
+          if (currentShot) {
+            try {
+              const rv = await completeVision(BESPOKE_SYSTEM, buildBespokePrompt(profile),
+                [{ mediaType: 'image/png', base64: bytesToBase64(currentShot) }],
+                { provider: m.provider, model: m.model, maxTokens: 16000 });
+              track(rv); rbText = rv.text; buildLog.bespoke_grounded = true;
+            } catch (e) { buildLog.bespoke_vision_error = String((e as Error)?.message ?? e).slice(0, 160); }
+          }
+          if (rbText == null) {
+            const rb = await complete([
+              { role: 'system', content: BESPOKE_SYSTEM },
+              { role: 'user', content: buildBespokePrompt(profile) },
+            ], { provider: m.provider, model: m.model, maxTokens: 16000 });
+            track(rb); rbText = rb.text;
+          }
+          const html = rbText.trim();
           if (!looksLikeHtmlDoc(html)) {
             buildLog.bespoke = 'discarded: not a complete HTML document';
           } else {
@@ -1881,9 +1906,13 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     `${env.appOrigin}/preview-site/${encodeURIComponent(slug)}/email-shot`, slug);
   if (shotUrl) {
     await admin.from('preview_sites').update({ screenshot_url: shotUrl }).eq('id', siteId);
-    const beforeUrl = (audit.reachable && /^https?:\/\//.test(finalUrl))
-      ? await genPreviewShot(admin, order.owner_id, finalUrl, `before-${slug}`)
-      : null;
+    // Reuse the current-site shot we already captured to ground the redesign — the email "before"
+    // costs no second screenshot. (Fall back to a fresh capture only in the rare case it's missing.)
+    const beforeUrl = currentShot
+      ? await storeShot(admin, order.owner_id, currentShot, `before-${slug}`)
+      : ((audit.reachable && /^https?:\/\//.test(finalUrl))
+        ? await genPreviewShot(admin, order.owner_id, finalUrl, `before-${slug}`)
+        : null);
     bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl);
   }
 
@@ -1942,14 +1971,20 @@ async function genHuntImage(admin: any, ownerId: string, prompt: string, size: '
   }
 }
 
-/** ScreenshotOne → project-assets bucket → public URL, metered per owner (kind 'screenshot', the same
- *  $0.03 the shot-worker charges). `target` is a fully-formed URL — our email-shot render for the new
- *  site, or the prospect's live site for the before/after. Returns null on ANY failure (missing key,
- *  API error, empty/oversized shot) so the screenshot NEVER blocks the pitch: the caller then sends
- *  the honest text+link email instead. Inlined here (not an invoke of shot-worker) exactly like
- *  genHuntImage inlines image generation — the cron worker holds no user JWT for that interactive fn. */
-// deno-lint-ignore no-explicit-any
-async function genPreviewShot(admin: any, ownerId: string, target: string, label: string, mobile = false): Promise<string | null> {
+/** Base64-encode bytes for a vision API payload. Chunked so a large screenshot never overflows the
+ *  call stack (String.fromCharCode(...bigArray) does). Deterministic; Deno's btoa handles the rest. */
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  return btoa(bin);
+}
+
+/** CAPTURE ONLY — ScreenshotOne → raw PNG bytes, no upload, no metering. The seam that lets ONE
+ *  screenshot of the prospect's current site serve two masters: grounding the bespoke redesign
+ *  (vision) AND the email before/after. Returns null on ANY failure (missing key, API error,
+ *  empty/oversized) so a screenshot never blocks the pitch. */
+async function captureShot(target: string, mobile = false): Promise<Uint8Array | null> {
   try {
     const apiKey = Deno.env.get('SCREENSHOT_API_KEY');
     if (!apiKey) return null;
@@ -1963,6 +1998,18 @@ async function genPreviewShot(admin: any, ownerId: string, target: string, label
     if (!res.ok) return null;
     const bytes = new Uint8Array(await res.arrayBuffer());
     if (bytes.byteLength === 0 || bytes.byteLength > 10 * 1024 * 1024) return null;
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+/** STORE — upload already-captured shot bytes to project-assets, metered per owner (kind 'screenshot',
+ *  the same $0.03 the shot-worker charges) → public URL. Split from captureShot so a shot captured once
+ *  (to ground the redesign) can be reused as the email "before" without paying for a second capture. */
+// deno-lint-ignore no-explicit-any
+async function storeShot(admin: any, ownerId: string, bytes: Uint8Array, label: string, mobile = false): Promise<string | null> {
+  try {
     const name = `${Date.now()}-${label.replace(/[^a-zA-Z0-9-]/g, '_').slice(0, 60)}${mobile ? '-mobile' : ''}.png`;
     const path = `${ownerId}/shots/${name}`;
     const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'image/png', upsert: false });
@@ -1972,6 +2019,14 @@ async function genPreviewShot(admin: any, ownerId: string, target: string, label
   } catch {
     return null;
   }
+}
+
+/** Capture + store in one step (the original genPreviewShot contract) — used for the NEW-site email
+ *  shot, where there's nothing to reuse. `target` is a fully-formed URL. Null on any failure. */
+// deno-lint-ignore no-explicit-any
+async function genPreviewShot(admin: any, ownerId: string, target: string, label: string, mobile = false): Promise<string | null> {
+  const bytes = await captureShot(target, mobile);
+  return bytes ? storeShot(admin, ownerId, bytes, label, mobile) : null;
 }
 
 /** Server-side twin of queuePitch: contact → campaign → message(draft) → PENDING approval. Nothing
