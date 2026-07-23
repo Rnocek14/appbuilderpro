@@ -82,6 +82,13 @@ console.log('publishCore.verify');
   check('rewrite replaces a mapped URL', rewritten.includes('/img/deadbeef.jpg') && !rewritten.includes('joesroofing-old.com/roof.jpg'));
   check('rewrite leaves an unmapped/failed image on its original URL (fail-soft)', rewritten.includes('joesroofing-old.com/crew.png'));
 
+  // Longest-key-first: a short URL that is a PREFIX of a longer one must not corrupt the longer one.
+  const collide = rewriteImageUrls(
+    `<img src="https://old.com/hero.jpg"><div style="background:url(https://old.com/hero.jpg?w=1200)"></div>`,
+    { 'https://old.com/hero.jpg': 'https://cdn/self/base.jpg', 'https://old.com/hero.jpg?w=1200': 'https://cdn/self/wide.jpg' },
+  );
+  check('a prefix URL does not corrupt the longer variant', collide.includes('https://cdn/self/wide.jpg') && collide.includes('https://cdn/self/base.jpg') && !collide.includes('base.jpg?w=1200'));
+
   check('imageExtFor prefers content-type, falls back to the URL', imageExtFor('image/jpeg', 'x') === 'jpg' && imageExtFor(null, 'https://x.com/a.PNG?v=2') === 'png' && imageExtFor('image/svg+xml', 'x') === 'svg' && imageExtFor(null, 'https://x.com/no-ext') === 'img');
   check('rehostedImagePath is owner+preview scoped', rehostedImagePath('o1', 'p1', 'ab12', 'jpg') === 'o1/published/p1/img/ab12.jpg');
 }
