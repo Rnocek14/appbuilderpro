@@ -25,7 +25,7 @@ export interface ConnectorMeta {
 // never block an automation the client actually bought (they map to nothing required today).
 export const CONNECTORS: ConnectorMeta[] = [
   { id: 'domain',          title: 'Domain',            what: 'their web address points at the live site',            built: true,  setupRoute: '/garvis/setup',        setupLabel: 'Set up domain' },
-  { id: 'email_sender',    title: 'Email sender',      what: 'sends from their brand address, not a shared one',      built: true,  setupRoute: '/garvis/setup',        setupLabel: 'Set up sender' },
+  { id: 'email_sender',    title: 'Email sender',      what: 'sends from their verified domain, not a shared one',     built: true,  setupRoute: '/garvis/email-domains', setupLabel: 'Verify domain' },
   { id: 'sms_number',      title: 'Text number',       what: 'reminders + replies come from their own number',       built: true,  setupRoute: null,                   setupLabel: 'Add their number' },
   { id: 'voice_number',    title: 'Missed-call line',  what: 'a missed call auto-texts the caller back',             built: true,  setupRoute: '/garvis/missed-call',  setupLabel: 'Set up line' },
   { id: 'booking',         title: 'Online booking',    what: 'customers self-book from the site',                    built: true,  setupRoute: '/garvis/booking',      setupLabel: 'Set up booking' },

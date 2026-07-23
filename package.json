@@ -79,6 +79,7 @@
     "verify:clientconsole": "tsx src/lib/garvis/billing/clientConsole.verify.ts",
     "verify:clientconnections": "tsx src/lib/garvis/clients/connections.verify.ts",
     "verify:prospectstage": "tsx src/lib/garvis/prospects/stage.verify.ts",
+    "verify:senderdomain": "tsx src/lib/garvis/email/senderDomain.verify.ts",
     "verify:automationstats": "tsx src/lib/garvis/automationStats.verify.ts",
     "verify:missedcall": "tsx src/lib/garvis/missedCall.verify.ts",
     "verify:adswatch": "tsx src/lib/garvis/adsWatch.verify.ts",

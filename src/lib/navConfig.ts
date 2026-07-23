@@ -9,7 +9,7 @@ import {
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
   CreditCard, Settings, Activity, Wand2, Crosshair, BookUser,
-  Hammer, PhoneMissed, Target, Film, HeartPulse, CalendarClock,
+  Hammer, PhoneMissed, Target, Film, HeartPulse, CalendarClock, MailCheck,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -68,6 +68,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/automations', label: 'Automations', icon: Zap },
       { to: '/garvis/booking', label: 'Online booking', icon: CalendarClock },
       { to: '/garvis/missed-call', label: 'Missed-call text-back', icon: PhoneMissed },
+      { to: '/garvis/email-domains', label: 'Sending domains', icon: MailCheck },
       { to: '/garvis/working', label: 'Working for you', icon: Activity },
       { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
       { to: '/garvis/health', label: 'Health', icon: HeartPulse },
