@@ -82,9 +82,10 @@ Deno.serve(async (req) => {
       const slots = availableSlots({ ...paramsFor(svc, busy), limit: 240 });
       return json({
         business_name: pg.business_name,
+        utc_offset_min: pg.utc_offset_min,   // the page renders slots in the BUSINESS's local time, not the visitor's
         service_id: svc.id,
         services: services.map((s) => ({ id: s.id, name: s.name, duration_min: s.duration_min, price_cents: s.price_cents })),
-        slots,   // epoch ms; the page renders them in the viewer's locale
+        slots,   // epoch ms
       });
     }
 
@@ -155,9 +156,10 @@ Deno.serve(async (req) => {
 
       return json({
         ok: true,
+        sent: notice.email || notice.sms,   // did a confirmation actually go out?
         appointment: {
           business_name: pg.business_name, service_name: (appt as { service_name: string }).service_name,
-          starts_at: (appt as { starts_at: string }).starts_at,
+          starts_at: (appt as { starts_at: string }).starts_at, utc_offset_min: pg.utc_offset_min,
         },
       });
     }

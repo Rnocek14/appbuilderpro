@@ -9,12 +9,18 @@ import { Loader2, Check, Clock, CalendarDays } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface Service { id: string; name: string; duration_min: number; price_cents: number | null }
-interface Avail { business_name: string; service_id: string; services: Service[]; slots: number[] }
-interface Booked { business_name: string; service_name: string; starts_at: string }
+interface Avail { business_name: string; utc_offset_min: number; service_id: string; services: Service[]; slots: number[] }
+interface Booked { business_name: string; service_name: string; starts_at: string; utc_offset_min: number }
 
 const money = (c: number | null) => (c == null ? null : `$${(c / 100).toFixed(c % 100 ? 2 : 0)}`);
-const dayKey = (ms: number) => new Date(ms).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
-const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+// Render in the BUSINESS's local time (fixed offset), NOT the visitor's browser tz — otherwise the page
+// would show a different time than the confirmation email/SMS (which uses the same offset). Shift the
+// epoch by the offset so UTC getters read the business's wall-clock.
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const localAt = (ms: number, offMin: number) => new Date(ms + offMin * 60_000);
+const dayKey = (ms: number, offMin: number) => { const d = localAt(ms, offMin); return `${DAYS[d.getUTCDay()]}, ${MONS[d.getUTCMonth()]} ${d.getUTCDate()}`; };
+const clock = (ms: number, offMin: number) => { const d = localAt(ms, offMin); let h = d.getUTCHours(); const ap = h < 12 ? 'AM' : 'PM'; h = h % 12 || 12; return `${h}:${d.getUTCMinutes().toString().padStart(2, '0')} ${ap}`; };
 
 export default function BookingPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -26,7 +32,7 @@ export default function BookingPage() {
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [done, setDone] = useState<Booked | null>(null);
+  const [done, setDone] = useState<(Booked & { sent: boolean }) | null>(null);
 
   useEffect(() => {
     const meta = document.createElement('meta');
@@ -57,20 +63,20 @@ export default function BookingPage() {
     const { data, error: err } = await supabase.functions.invoke('booking', {
       body: { action: 'book', slug, service_id: serviceId, start: slot, name: name.trim(), email: email.trim(), phone: phone.trim() },
     });
-    const d = data as { ok?: boolean; appointment?: Booked; error?: string } | null;
+    const d = data as { ok?: boolean; sent?: boolean; appointment?: Booked; error?: string } | null;
     setBusy(false);
     if (err || !d?.ok || !d.appointment) {
       setError(d?.error ?? 'Couldn’t complete the booking — please try again.');
       if (d?.error) void load(serviceId ?? undefined);   // refresh slots if a time was taken
       return;
     }
-    setDone(d.appointment);
+    setDone({ ...d.appointment, sent: !!d.sent });
   };
 
   const grouped = useMemo(() => {
     if (!avail || avail === 'loading' || avail === 'error') return [];
     const by = new Map<string, number[]>();
-    for (const ms of avail.slots) { const k = dayKey(ms); (by.get(k) ?? by.set(k, []).get(k)!).push(ms); }
+    for (const ms of avail.slots) { const k = dayKey(ms, avail.utc_offset_min); (by.get(k) ?? by.set(k, []).get(k)!).push(ms); }
     return [...by].slice(0, 14);
   }, [avail]);
 
@@ -93,8 +99,10 @@ export default function BookingPage() {
       <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><Check size={24} /></span>
       <p className="text-xl font-semibold">You’re booked</p>
       <p className="mt-2 text-neutral-600">{done.service_name} with {done.business_name}</p>
-      <p className="mt-1 font-medium">{dayKey(Date.parse(done.starts_at))} · {clock(Date.parse(done.starts_at))}</p>
-      <p className="mt-4 text-xs text-neutral-400">A confirmation is on its way. Need to change it? Just reply to that message.</p>
+      <p className="mt-1 font-medium">{dayKey(Date.parse(done.starts_at), done.utc_offset_min)} · {clock(Date.parse(done.starts_at), done.utc_offset_min)}</p>
+      <p className="mt-4 text-xs text-neutral-400">{done.sent
+        ? 'A confirmation is on its way. Need to change it? Just reply to that message.'
+        : 'You’re all set. Save these details — the business will follow up if anything changes.'}</p>
     </div>,
   );
 
@@ -141,7 +149,7 @@ export default function BookingPage() {
                   {times.map((ms) => (
                     <button key={ms} onClick={() => { setSlot(ms); setError(''); }}
                       className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${slot === ms ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-200 bg-white hover:border-neutral-400'}`}>
-                      {clock(ms)}
+                      {clock(ms, a.utc_offset_min)}
                     </button>
                   ))}
                 </div>
@@ -167,9 +175,9 @@ export default function BookingPage() {
           <button onClick={() => void book()} disabled={busy || !name.trim() || (!email.trim() && !phone.trim())}
             className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-neutral-900 px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50">
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
-            Book {clock(slot)} · {dayKey(slot)}
+            Book {clock(slot, a.utc_offset_min)} · {dayKey(slot, a.utc_offset_min)}
           </button>
-          <p className="mt-2 text-center text-xs text-neutral-400">No charge to book. You’ll get a confirmation.</p>
+          <p className="mt-2 text-center text-xs text-neutral-400">Times shown in {a.business_name}’s local time. No charge to book.</p>
         </div>
       )}
     </>,

@@ -98,6 +98,15 @@ Deno.serve(async (req) => {
     if (!msg || msg.owner_id !== uid) return json({ error: 'Message not found' }, 404);
     if (msg.sent_at || msg.status === 'sent') return json({ error: 'Message already sent.' }, 409);
 
+    // PLACEHOLDER GATE (fail-closed) — the reply/pitch drafters deliberately leave visible holes like
+    // "[YOU FILL: your price]" / "[EDIT …]" for facts they can't know. A literal placeholder must never
+    // reach a real person. This one gate protects EVERY caller: earned-autonomy auto-send, one-click
+    // Build & send, the batch/content-week drains, and a human who approved a draft without filling it.
+    const composed = `${msg.subject ?? ''}\n${msg.body_text ?? ''}\n${msg.body_html ?? ''}`;
+    if (/\[(?:YOU FILL|EDIT)\b/i.test(composed)) {
+      return json({ error: 'Message still has an unfilled [YOU FILL]/[EDIT] placeholder — refusing to send.' }, 422);
+    }
+
     const priorResult = (approval.result as Record<string, unknown> | null) ?? {};
 
     // Atomic claim (double-send guard): stamp send_claimed_at on the approval ONLY where it is
