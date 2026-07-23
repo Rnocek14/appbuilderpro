@@ -43,6 +43,7 @@ const SceneStudio = lazy(() => import('./pages/SceneStudio'));
 const ClientBook = lazy(() => import('./pages/ClientBook'));
 const ClientBilling = lazy(() => import('./pages/ClientBilling'));
 const MissedCall = lazy(() => import('./pages/MissedCall'));
+const EmailDomains = lazy(() => import('./pages/EmailDomains'));
 const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
 const Working = lazy(() => import('./pages/Working'));
@@ -122,6 +123,7 @@ function AppRoutes() {
           <Route path="/garvis/clients" element={<Protected><WinClients /></Protected>} />
           <Route path="/garvis/automations" element={<Protected><Automations /></Protected>} />
           <Route path="/garvis/missed-call" element={<Protected><MissedCall /></Protected>} />
+          <Route path="/garvis/email-domains" element={<Protected><EmailDomains /></Protected>} />
           <Route path="/garvis/booking" element={<Protected><BookingSetup /></Protected>} />
           <Route path="/garvis/orchestrate" element={<Protected><Orchestrate /></Protected>} />
           <Route path="/garvis/opportunity-feed" element={<Protected><OpportunityFeed /></Protected>} />
