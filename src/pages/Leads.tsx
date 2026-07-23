@@ -6,8 +6,7 @@
 // strongest "build you a site" prospects and are flagged as such.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Users, ExternalLink, Loader2, MapPin, Globe, RefreshCw, Search, Square } from 'lucide-react';
+import { Users, ExternalLink, Loader2, MapPin, Globe, RefreshCw, Search, Square, Send, Check } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Badge } from '../components/ui';
 import { cn, timeAgo } from '../lib/utils';
@@ -17,6 +16,9 @@ interface Lead {
   id: string; company_name: string; city: string | null; state: string | null;
   website: string | null; has_website: boolean; keyword: string | null; status: string; created_at: string;
 }
+
+// Per-row send state: idle → sending (~30-60s) → sent (green) | error (honest message).
+type SendState = { phase: 'sending' } | { phase: 'sent'; note?: string } | { phase: 'error'; msg: string };
 
 const TABS = ['all', 'new', 'built', 'skipped'] as const;
 type Tab = typeof TABS[number];
@@ -29,6 +31,7 @@ export default function Leads() {
   const [noSiteOnly, setNoSiteOnly] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [scrapeMsg, setScrapeMsg] = useState<string | null>(null);
+  const [sends, setSends] = useState<Record<string, SendState>>({});
   const stopRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -67,6 +70,28 @@ export default function Leads() {
     await load();
   };
 
+  // ONE CLICK = a real site + a real pitch, out the door. The button hands the prospect to the
+  // standing-worker, which scrapes their site, builds the demo, and — because we asked to send —
+  // approves and fires the email now (send-email still enforces every safety gate). ~30-60s.
+  const buildAndSend = async (id: string) => {
+    setSends((s) => ({ ...s, [id]: { phase: 'sending' } }));
+    try {
+      const { data, error } = await supabase.functions.invoke('standing-worker', { body: { pitch_lead_id: id } });
+      const d = data as { ok?: boolean; sent?: boolean; error?: string } | null;
+      if (error || !d?.ok) {
+        setSends((s) => ({ ...s, [id]: { phase: 'error', msg: d?.error ?? 'Build failed — try again.' } }));
+      } else if (d.sent === false) {
+        // Demo built, but no public email to send to — honest, not a fake success.
+        setSends((s) => ({ ...s, [id]: { phase: 'sent', note: d.error ?? 'Demo built — no email found to send to.' } }));
+      } else {
+        setSends((s) => ({ ...s, [id]: { phase: 'sent' } }));
+      }
+    } catch (e) {
+      setSends((s) => ({ ...s, [id]: { phase: 'error', msg: e instanceof Error ? e.message : 'Build failed.' } }));
+    }
+    await load();
+  };
+
   const all = rows === null || rows === 'error' ? [] : rows;
   const counts = { all: all.length, new: 0, built: 0, skipped: 0 } as Record<Tab, number>;
   for (const r of all) if (r.status in counts) counts[r.status as Tab]++;
@@ -82,8 +107,8 @@ export default function Leads() {
             <Users size={20} className="text-forge-ember" />
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-semibold text-forge-ink">Prospect pool</h1>
-            <p className="text-sm text-forge-dim">Every local business, scraped and kept — deduped, never purged. The ones with <span className="font-medium text-forge-ember">no website</span> are your best sell targets and sort first.</p>
+            <h1 className="text-xl font-semibold text-forge-ink">Prospects</h1>
+            <p className="text-sm text-forge-dim">Real local businesses, scraped and kept. Hit <span className="font-medium text-forge-ember">Build&nbsp;&amp;&nbsp;send</span> on any one — we build the demo site and email the pitch in one click. The ones with <span className="font-medium text-forge-ember">no website</span> sort first.</p>
           </div>
           <button onClick={() => void load()} disabled={busy} title="Refresh"
             className="rounded-lg border border-forge-border p-2 text-forge-dim transition-colors hover:text-forge-ink disabled:opacity-50">
@@ -101,12 +126,12 @@ export default function Leads() {
           ) : (
             <button onClick={() => void scrape()}
               className="inline-flex items-center gap-2 rounded-lg bg-forge-ember px-3.5 py-2 text-sm font-semibold text-forge-bg shadow transition-transform hover:-translate-y-0.5">
-              <Search size={14} /> Scrape everything
+              <Search size={14} /> Scrape the web (Claude)
             </button>
           )}
           <span className="min-w-0 flex-1 text-xs text-forge-dim">
             {scraping && <Loader2 size={12} className="mr-1.5 inline animate-spin" />}
-            {scrapeMsg ?? 'Claude searches the web for real businesses across every major US metro and judges each one’s website — no Google setup. Leave it running; it fills the pool.'}
+            {scrapeMsg ?? 'Claude searches the web for real businesses across every major US metro and judges each one’s website — no Google setup. Leave it running; it fills the list below.'}
           </span>
         </div>
 
@@ -138,7 +163,9 @@ export default function Leads() {
           </div>
         ) : (
           <ul className="space-y-2">
-            {visible.map((r) => (
+            {visible.map((r) => {
+              const send = sends[r.id];
+              return (
               <li key={r.id} className="flex items-center gap-3 rounded-xl border border-forge-border bg-forge-panel/40 p-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -156,9 +183,26 @@ export default function Leads() {
                     )}
                     <span className="text-forge-dim/60">found {timeAgo(r.created_at)}</span>
                   </div>
+                  {send?.phase === 'error' && <p className="mt-1 text-[11px] text-forge-err">{send.msg}</p>}
+                  {send?.phase === 'sent' && send.note && <p className="mt-1 text-[11px] text-forge-dim">{send.note}</p>}
                 </div>
+                {/* ONE CLICK: build the demo + send the pitch. Sent rows show a green confirm. */}
+                {send?.phase === 'sent' && !send.note ? (
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-forge-ok/40 px-3 py-2 text-xs font-semibold text-forge-ok">
+                    <Check size={14} /> Sent
+                  </span>
+                ) : (
+                  <button onClick={() => void buildAndSend(r.id)} disabled={send?.phase === 'sending'}
+                    title="Build a demo site and email the pitch now"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-forge-ember px-3 py-2 text-xs font-semibold text-forge-bg shadow transition-transform hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-60">
+                    {send?.phase === 'sending'
+                      ? <><Loader2 size={14} className="animate-spin" /> Building…</>
+                      : <><Send size={14} /> {send?.phase === 'sent' ? 'Send again' : 'Build & send'}</>}
+                  </button>
+                )}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
