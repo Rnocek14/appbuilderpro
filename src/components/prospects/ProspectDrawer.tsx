@@ -11,8 +11,9 @@ import {
   X, MapPin, Globe, Phone, ExternalLink, Send, Loader2, Check, Mail, Trophy, Archive, RotateCcw,
   LayoutTemplate, Eye, Hammer, Trash2,
 } from 'lucide-react';
+import { MessageSquareReply } from 'lucide-react';
 import { STAGE_META, nextAction, canBuildAndSend, signalChips } from '../../lib/garvis/prospects/stage';
-import { loadProspectContacts, type Prospect, type ProspectContact } from '../../lib/garvis/prospects/prospectsRun';
+import { loadProspectContacts, loadProspectReply, type Prospect, type ProspectContact, type ProspectReply } from '../../lib/garvis/prospects/prospectsRun';
 import { buildDemoForReview, loadPendingPitch, sendPitch, discardPitch, type PendingPitch } from '../../lib/garvis/prospects/reviewSend';
 import { useToast } from '../../context/ToastContext';
 
@@ -24,6 +25,7 @@ export function ProspectDrawer({ prospect, onRefresh, onSkipToggle, onClose }: {
 }) {
   const { toast } = useToast();
   const [contacts, setContacts] = useState<ProspectContact[] | null>(null);
+  const [reply, setReply] = useState<ProspectReply | null>(null);
   const [pending, setPending] = useState<PendingPitch | null | 'loading'>('loading');
   const [building, setBuilding] = useState(false);
   const [sendPhase, setSendPhase] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
@@ -35,6 +37,14 @@ export function ProspectDrawer({ prospect, onRefresh, onSkipToggle, onClose }: {
     void loadProspectContacts(prospect.profileId).then((c) => { if (live) setContacts(c); });
     return () => { live = false; };
   }, [prospect.profileId]);
+
+  // Load the actual reply text when the prospect wrote back — so you read it here, not just in the Queue.
+  useEffect(() => {
+    let live = true;
+    setReply(null);
+    if (prospect.replied) void loadProspectReply(prospect.preview_site_id).then((r) => { if (live) setReply(r); });
+    return () => { live = false; };
+  }, [prospect.replied, prospect.preview_site_id]);
 
   // Load the pending pitch (if any) for this demo, so we can show the email to review.
   const reloadPitch = useCallback(async () => {
@@ -113,6 +123,33 @@ export function ProspectDrawer({ prospect, onRefresh, onSkipToggle, onClose }: {
                 <span key={i} className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${c.tone === 'ok' ? 'bg-forge-ok/10 text-forge-ok' : 'bg-forge-heat/10 text-forge-heat'}`}>{c.label}</span>
               ))}
             </div>
+          )}
+
+          {/* THEY REPLIED — the strongest signal, up top. Read it here; jump to the Queue to answer. */}
+          {prospect.replied && (
+            <section className="rounded-xl border border-forge-ok/40 bg-forge-ok/[0.06] p-3">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <MessageSquareReply size={13} className="text-forge-ok" />
+                <span className="text-[11px] font-medium uppercase tracking-wide text-forge-ok">They replied</span>
+                {reply && reply.classification !== 'unclassified' && (
+                  <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                    reply.classification === 'positive' ? 'bg-forge-ok/15 text-forge-ok'
+                    : reply.classification === 'negative' ? 'bg-forge-err/15 text-forge-err'
+                    : 'bg-forge-border/40 text-forge-dim'}`}>{reply.classification}</span>
+                )}
+              </div>
+              {reply ? (
+                <>
+                  {reply.subject && <div className="mb-1 truncate text-[12px] font-medium text-forge-ink">{reply.subject}</div>}
+                  <p className="max-h-40 overflow-auto whitespace-pre-wrap text-[12px] text-forge-dim">{reply.body_text || '(no text)'}</p>
+                </>
+              ) : (
+                <p className="flex items-center gap-1.5 text-[11px] text-forge-dim"><Loader2 size={11} className="animate-spin" /> Loading their reply…</p>
+              )}
+              <NavLink to="/garvis/queue" className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-forge-ember hover:underline">
+                Answer in the Queue <ExternalLink size={10} />
+              </NavLink>
+            </section>
           )}
 
           {/* Identity */}

@@ -24,6 +24,7 @@ export default function Leads() {
   const [filter, setFilter] = useState<Filter>('all');
   const [busy, setBusy] = useState(false);
   const [noSiteOnly, setNoSiteOnly] = useState(false);
+  const [repliedOnly, setRepliedOnly] = useState(false);
   const [scraping, setScraping] = useState(false);
   const [scrapeMsg, setScrapeMsg] = useState<string | null>(null);
   const [sends, setSends] = useState<Record<string, SendState>>({});
@@ -88,9 +89,11 @@ export default function Leads() {
   const all = rows === null || rows === 'error' ? [] : rows;
   const roll = stageRollup(all.map((r) => r.stage));
   const noSiteCount = all.filter((r) => !r.has_website).length;
+  const repliedCount = all.filter((r) => r.replied).length;
 
   let visible = filter === 'all' ? all : all.filter((r) => r.stage === filter);
   if (noSiteOnly) visible = visible.filter((r) => !r.has_website);
+  if (repliedOnly) visible = visible.filter((r) => r.replied);
 
   const selected = selectedId && rows !== null && rows !== 'error' ? all.find((r) => r.id === selectedId) ?? null : null;
 
@@ -147,8 +150,16 @@ export default function Leads() {
               {c.label}<span className="text-[10px] text-forge-dim">({c.count})</span>
             </button>
           ))}
+          {repliedCount > 0 && (
+            <button onClick={() => setRepliedOnly((v) => !v)}
+              className={cn('ml-auto rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
+                repliedOnly ? 'bg-forge-ok/15 text-forge-ok' : 'text-forge-ok/80 hover:bg-forge-raised')}>
+              Replied<span className="ml-1 text-[10px]">({repliedCount})</span>
+            </button>
+          )}
           <button onClick={() => setNoSiteOnly((v) => !v)}
-            className={cn('ml-auto rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
+            className={cn('rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
+              repliedCount > 0 ? '' : 'ml-auto',
               noSiteOnly ? 'bg-forge-warn/15 text-forge-warn' : 'text-forge-dim hover:bg-forge-raised hover:text-forge-ink')}>
             No website only<span className="ml-1 text-[10px]">({noSiteCount})</span>
           </button>

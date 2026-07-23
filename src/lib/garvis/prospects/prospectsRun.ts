@@ -134,6 +134,35 @@ export async function setProspectStatus(id: string, status: 'new' | 'skipped'): 
   if (error) throw new Error(error.message);
 }
 
+export interface ProspectReply {
+  from_address: string | null;
+  subject: string | null;
+  body_text: string | null;
+  classification: string;   // positive | negative | neutral | auto | unclassified
+  received_at: string;
+}
+
+/** The latest reply a prospect sent back, for the drawer. Correlated through the demo's pitch messages
+ *  (by campaign, then message). Null until they actually write back. */
+export async function loadProspectReply(previewSiteId: string | null): Promise<ProspectReply | null> {
+  if (!previewSiteId) return null;
+  const u = await uid(); if (!u) return null;
+  const { data: msgs } = await supabase.from('outreach_messages')
+    .select('id, campaign_id').eq('owner_id', u).eq('preview_site_id', previewSiteId);
+  const rows = (msgs ?? []) as { id: string; campaign_id: string | null }[];
+  const campaignIds = [...new Set(rows.map((r) => r.campaign_id).filter((x): x is string => !!x))];
+  const messageIds = rows.map((r) => r.id);
+
+  const pick = async (col: 'campaign_id' | 'message_id', ids: string[]): Promise<ProspectReply | null> => {
+    if (!ids.length) return null;
+    const { data } = await supabase.from('replies')
+      .select('from_address, subject, body_text, classification, received_at')
+      .eq('owner_id', u).in(col, ids).order('received_at', { ascending: false }).limit(1).maybeSingle();
+    return (data as ProspectReply | null) ?? null;
+  };
+  return (await pick('campaign_id', campaignIds)) ?? (await pick('message_id', messageIds));
+}
+
 /** The scraped contacts for a prospect's demo (drawer). Keyed by the demo's business_profile_id; empty
  *  until the demo is built (that's when emails/photos are scraped). Primary contact first. */
 export async function loadProspectContacts(profileId: string | null): Promise<ProspectContact[]> {
