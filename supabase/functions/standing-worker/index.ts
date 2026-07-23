@@ -1949,7 +1949,13 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       body: JSON.stringify({ approval_id: ok }),
     });
     const sjson = await sres.json().catch(() => ({})) as { ok?: boolean; error?: string };
-    if (!sres.ok || !sjson.ok) throw new Error(sjson.error ?? `send failed (${sres.status})`);
+    if (!sres.ok || !sjson.ok) {
+      // Send failed — don't leave the approval dangling as 'approved' (it would read as sent). Revert it
+      // to 'pending' so it honestly sits in the queue for the operator to retry, then surface the error.
+      // The lead is already 'built' (set above), so the stale sweep won't rebuild + re-pitch it.
+      await admin.from('approvals').update({ status: 'pending', decided_at: null, decided_via: null }).eq('id', ok).then(() => {}, () => {});
+      throw new Error(sjson.error ?? `send failed (${sres.status})`);
+    }
   }
   return ok ? 'queued' : 'built';
 }

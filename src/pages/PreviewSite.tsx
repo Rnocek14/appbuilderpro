@@ -21,7 +21,15 @@ const HEIGHT_REPORTER =
   "parent.postMessage({__ffHeight:h},'*');}" +
   "window.addEventListener('load',p);window.addEventListener('resize',p);" +
   'try{new ResizeObserver(p).observe(document.documentElement);}catch(e){}' +
-  'setTimeout(p,300);setTimeout(p,1500);setTimeout(p,3500);}());</scr' + 'ipt>';
+  'setTimeout(p,300);setTimeout(p,1500);setTimeout(p,3500);' +
+  // In-page anchor CTAs ("Get a quote" → #quote): the frame can't scroll itself (sized to content,
+  // scrolling=no) and can't reach the parent (cross-origin), so its own nav/CTAs would be dead. Catch
+  // the click, find the target, and post its offset — the parent scrolls the whole page to it.
+  "document.addEventListener('click',function(ev){var a=ev.target&&ev.target.closest?ev.target.closest('a'):null;" +
+  "if(!a)return;var href=a.getAttribute('href')||'';if(href.charAt(0)!=='#'||href.length<2)return;" +
+  'var t=document.getElementById(href.slice(1));if(!t)return;ev.preventDefault();var r=t.getBoundingClientRect();' +
+  "parent.postMessage({__ffAnchor:r.top+(window.scrollY||0)},'*');},true);" +
+  '}());</scr' + 'ipt>';
 
 /** Renders a bespoke, Claude-authored HTML document in a sandboxed iframe. No allow-same-origin, so
  *  the generated page stays isolated from the app (its LLM-authored script can't reach our origin,
@@ -40,8 +48,13 @@ function BespokeFrame({ html, title }: { html: string; title: string }) {
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (!ref.current || e.source !== ref.current.contentWindow) return;
-      const h = (e.data as { __ffHeight?: unknown })?.__ffHeight;
-      if (typeof h === 'number' && h > 0) setHeight(Math.min(h, 40000)); // clamp a runaway report
+      const data = e.data as { __ffHeight?: unknown; __ffAnchor?: unknown };
+      if (typeof data?.__ffHeight === 'number' && data.__ffHeight > 0) setHeight(Math.min(data.__ffHeight, 40000)); // clamp a runaway report
+      // An in-page anchor was clicked inside the frame — scroll the PARENT to it (frame top + offset).
+      if (typeof data?.__ffAnchor === 'number' && data.__ffAnchor >= 0) {
+        const top = ref.current.getBoundingClientRect().top + window.scrollY + data.__ffAnchor - 12;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
@@ -105,6 +118,9 @@ export default function PreviewSite({ shot = false }: { shot?: boolean }) {
       <>
         <BespokeFrame html={row.spec.html} title={row.business_name} />
         {!shot && <AutomationIntake previewSiteId={row.id} businessName={row.business_name} theme={row.spec.theme} />}
+        {/* Clearance so the fixed ClaimBar can't occlude AutomationIntake's CTA on narrow phones — the
+            template path gets this from its footer; the bespoke path has none, so add it explicitly. */}
+        {!shot && <div aria-hidden className="h-28 md:h-16" />}
         {!shot && <ClaimBar previewSiteId={row.id} businessName={row.business_name} slug={row.slug} />}
       </>
     );

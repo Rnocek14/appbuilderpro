@@ -88,7 +88,10 @@ export function extractRehostableImages(html: string, selfHost: string, maxN = 2
  *  target is empty/unchanged is skipped (fail-soft: an image we couldn't pull keeps its original URL). */
 export function rewriteImageUrls(html: string, map: Record<string, string>): string {
   let out = html;
-  for (const [oldRaw, next] of Object.entries(map)) {
+  // Longest key first: a shorter URL that is a prefix of a longer one (e.g. ".../hero.jpg" vs
+  // ".../hero.jpg?w=1200") must not rewrite the longer one's prefix and corrupt it. Replacing the
+  // longest match first means each remaining key still matches only its own exact occurrences.
+  for (const [oldRaw, next] of Object.entries(map).sort((a, b) => b[0].length - a[0].length)) {
     if (!next || next === oldRaw) continue;
     out = out.split(oldRaw).join(next);
   }

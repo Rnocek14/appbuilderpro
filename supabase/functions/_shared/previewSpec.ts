@@ -595,15 +595,28 @@ function readableInk(fg: string, bg: string, target: number): string {
   }
   return goDark ? '0 0% 8%' : '0 0% 98%';
 }
-/** Guarantee readable body text (ink on bg) and a readable CTA (primaryInk on primary) at AA (4.5),
- *  and not-invisible secondary text (muted on bg) at a gentler floor so it stays secondary without
- *  vanishing. Only text colors move; the brand + backgrounds are preserved. */
+/** Keep `card` on the SAME luminance side as `bg`. The renderer paints ink/muted on both bg (main
+ *  sections) AND card (alt bands, service cards, the trust bar); if the model returns a near-black card
+ *  under a near-white bg, the ink floored for bg renders unreadable on the card. When the sides differ
+ *  (pathological), pull the card to bg's side — keeping its hue/sat — so one ink is legible on both. */
+function harmonizeCard(card: string, bg: string): string {
+  const bgLight = hslLuminance(bg) > 0.5;
+  if (bgLight === (hslLuminance(card) > 0.5)) return card;   // same side already — leave the design alone
+  const [h, s] = parseHslTriplet(card);
+  return `${Math.round(h)} ${Math.round(s)}% ${bgLight ? 94 : 10}%`;
+}
+/** Guarantee readable body text (ink) and a readable CTA (primaryInk on primary) at AA (4.5), and
+ *  not-invisible secondary text (muted) at a gentler floor. ink/muted are floored against BOTH the bg
+ *  AND the card surface (both of which the renderer paints them on), after harmonizing the card to bg's
+ *  luminance side. Only text colors + a pathological card move; the brand + backgrounds are preserved. */
 export function ensureReadableTheme(theme: ThemeSpec): ThemeSpec {
+  const card = harmonizeCard(theme.card, theme.bg);
   return {
     ...theme,
-    ink: readableInk(theme.ink, theme.bg, 4.5),
+    card,
+    ink: readableInk(readableInk(theme.ink, theme.bg, 4.5), card, 4.5),
     primaryInk: readableInk(theme.primaryInk, theme.primary, 4.5),
-    muted: readableInk(theme.muted, theme.bg, 3),
+    muted: readableInk(readableInk(theme.muted, theme.bg, 3), card, 3),
   };
 }
 
@@ -725,6 +738,11 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     }
     if (s.type === 'gallery' || s.type === 'showcase') {
       s.props.photos = contentPhotos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
+      // Honesty: don't let a model-written "Recent work"/"Gallery" heading sit over AI CONCEPT art (not
+      // the business's real portfolio) — mirror assembleFallbackSpec's aiOnlyPhotos guard on this path.
+      if (contentPhotos.length > 0 && contentPhotos.every((p) => p.source_type === 'ai_generated')) {
+        s.props.heading = 'The look and feel';
+      }
     }
     if (s.type === 'reviews') {
       s.props.reviews = reviews.map((x) => ({ author: x.author ?? 'Verified customer', rating: x.rating ?? 5, text: x.text }));

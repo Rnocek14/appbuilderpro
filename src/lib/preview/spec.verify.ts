@@ -480,6 +480,18 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   };
   const fixed = ensureReadableTheme(good);
   check('a good theme passes through untouched', fixed.ink === good.ink && fixed.primaryInk === good.primaryInk && fixed.muted === good.muted);
+  check('a same-side card is left unchanged', fixed.card === good.card);
+
+  // A CARD that diverges from bg (near-black card under a near-white bg): the renderer paints text on
+  // card surfaces (service cards, alt bands, trust bar), so ink must be readable there too — and the
+  // pathological card is pulled to bg's luminance side so one ink is legible on both.
+  const divergent = ensureReadableTheme({
+    primary: '221 83% 45%', primaryInk: '0 0% 100%', bg: '40 25% 97%', ink: '0 0% 20%',
+    muted: '0 0% 45%', card: '220 40% 12%', border: '0 0% 90%', radius: 12,
+    displayFont: 'Inter', bodyFont: 'Inter', tone: 't', flair: [], motion: 'lively',
+  });
+  check('a near-black card under a light bg is pulled to the light side', hslLuminance(divergent.card) > 0.5);
+  check('ink is readable on the (harmonized) card surface, not just the bg', contrastRatio(divergent.ink, divergent.card) >= 4.5);
 
   // normalizeSpec must apply the gate: a model theme with an unreadable CTA comes out readable.
   const prof = parseBusinessProfile({ business_name: 'Contrast Co', industry: 'Roofing', services: ['Roof repair'] }).profile!;

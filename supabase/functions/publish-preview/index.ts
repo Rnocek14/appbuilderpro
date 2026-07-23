@@ -110,7 +110,11 @@ Deno.serve(async (req) => {
       const durable = await rehostImages(admin, html, ownerId, previewSiteId);
       bytes = new TextEncoder().encode(durable);
       // Only the operator path reaches here with html; stash it (upsert) for later webhook re-publish.
-      await admin.storage.from('project-assets').upload(htmlPath, bytes, { contentType: 'text/html; charset=utf-8', upsert: true });
+      // FAIL-SOFT: the stash is only needed for a LATER webhook re-publish, so a transient storage error
+      // must not abort this live publish (the Netlify deploy below can still succeed).
+      try {
+        await admin.storage.from('project-assets').upload(htmlPath, bytes, { contentType: 'text/html; charset=utf-8', upsert: true });
+      } catch { /* stash best-effort — never fail Go Live over it */ }
     } else {
       const dl = await admin.storage.from('project-assets').download(htmlPath);
       if (dl.error || !dl.data) return json({ error: 'No rendered site is stored yet — the operator needs to Go Live once.' }, 422);
@@ -131,6 +135,10 @@ Deno.serve(async (req) => {
       const t = await r.text();
       if (!r.ok) return json({ error: `Netlify create-site ${r.status}: ${t.slice(0, 300)}` }, 502);
       siteId = (JSON.parse(t) as { id: string }).id;
+      // Persist the binding IMMEDIATELY — before the deploy — so a transient deploy/upload failure below
+      // can't strand this live-but-unbound Netlify site and make a retry mint yet ANOTHER one (billable
+      // orphans). The final patch still records live_url/status; this just pins the site id up front.
+      await admin.from('preview_sites').update({ netlify_site_id: siteId }).eq('id', previewSiteId).then(() => {}, () => {});
     }
 
     // 2) Create a deploy declaring the single file's sha1; 3) upload it if Netlify still needs it.
@@ -149,10 +157,12 @@ Deno.serve(async (req) => {
     }
 
     // 4) Poll until live — HONEST state: 'building' if it isn't ready when the window closes. The
-    // WEBHOOK path (byWorker) must NOT poll: a paid sale re-publishes an EXISTING site (its ssl_url is
-    // already known), and awaiting a 60s poll would blow past Stripe's ~20s webhook timeout and make
-    // deliveries look flaky. It returns immediately as 'building'; Netlify finishes in seconds.
-    const pollTries = byWorker ? 0 : 30;
+    // WEBHOOK path (byWorker) polls only BRIEFLY (a few tries, well within Stripe's ~20s timeout): a
+    // paid sale can be a brand-new site, so we must at least catch a Netlify 'error' state before the
+    // webhook announces "auto-published → url" — otherwise a client's paid site is reported live at a
+    // URL that 404s. Not-ready-yet after the brief poll stays honest 'building'; Netlify finishes in
+    // seconds. (The operator path still polls up to 30 for a confirmed live URL.)
+    const pollTries = byWorker ? 4 : 30;
     let url = deploy.ssl_url ?? deploy.url ?? '';
     let state: 'ready' | 'building' = 'building';
     for (let i = 0; i < pollTries; i++) {
