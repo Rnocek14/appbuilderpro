@@ -1,33 +1,48 @@
 // src/components/prospects/ProspectDrawer.tsx
 // The prospect DETAIL drawer — a right-side slide-over opened from a row in the Prospects pipeline. It
-// gathers everything known about one prospect (identity, the demo we built, the emails we scraped, the
-// stage + next action) and puts the whole "what do I do with this one" decision in one place: build &
-// send, view the demo, mark it won (deep-links to the billing book pre-filled), or skip/reopen.
+// is the deliberate half of the loop (the row keeps the fast one-click "Build & send"): build the demo,
+// then REVIEW the actual email — subject + the rendered HTML, which already contains the before/after of
+// their current site vs the new one — and only then Send. Plus: view the demo, mark it won (deep-links to
+// the billing book pre-filled), or skip/reopen. Everything known about one prospect, in one place.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  X, MapPin, Globe, Phone, ExternalLink, Send, Loader2, Check, Mail, Trophy, Archive, RotateCcw, LayoutTemplate,
+  X, MapPin, Globe, Phone, ExternalLink, Send, Loader2, Check, Mail, Trophy, Archive, RotateCcw,
+  LayoutTemplate, Eye, Hammer, Trash2,
 } from 'lucide-react';
 import { STAGE_META, nextAction, canBuildAndSend, signalChips } from '../../lib/garvis/prospects/stage';
 import { loadProspectContacts, type Prospect, type ProspectContact } from '../../lib/garvis/prospects/prospectsRun';
+import { buildDemoForReview, loadPendingPitch, sendPitch, discardPitch, type PendingPitch } from '../../lib/garvis/prospects/reviewSend';
+import { useToast } from '../../context/ToastContext';
 
-type SendState = { phase: 'sending' } | { phase: 'sent'; note?: string } | { phase: 'error'; msg: string };
-
-export function ProspectDrawer({ prospect, send, onBuildSend, onSkipToggle, onClose }: {
+export function ProspectDrawer({ prospect, onRefresh, onSkipToggle, onClose }: {
   prospect: Prospect;
-  send: SendState | undefined;
-  onBuildSend: (id: string) => void;
+  onRefresh: () => void | Promise<void>;
   onSkipToggle: (p: Prospect) => void;
   onClose: () => void;
 }) {
+  const { toast } = useToast();
   const [contacts, setContacts] = useState<ProspectContact[] | null>(null);
+  const [pending, setPending] = useState<PendingPitch | null | 'loading'>('loading');
+  const [building, setBuilding] = useState(false);
+  const [sendPhase, setSendPhase] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [err, setErr] = useState<string | null>(null);
+
   useEffect(() => {
     let live = true;
     setContacts(null);
     void loadProspectContacts(prospect.profileId).then((c) => { if (live) setContacts(c); });
     return () => { live = false; };
   }, [prospect.profileId]);
+
+  // Load the pending pitch (if any) for this demo, so we can show the email to review.
+  const reloadPitch = useCallback(async () => {
+    setPending('loading');
+    const p = await loadPendingPitch(prospect.preview_site_id);
+    setPending(p);
+  }, [prospect.preview_site_id]);
+  useEffect(() => { void reloadPitch(); }, [reloadPitch]);
 
   // Close on Escape — a drawer you can't dismiss with the keyboard feels trapped.
   useEffect(() => {
@@ -39,14 +54,45 @@ export function ProspectDrawer({ prospect, send, onBuildSend, onSkipToggle, onCl
   const meta = STAGE_META[prospect.stage];
   const wonEmail = contacts?.find((c) => c.email)?.email ?? '';
   const wonHref = `/garvis/client-billing?business=${encodeURIComponent(prospect.company_name)}${wonEmail ? `&email=${encodeURIComponent(wonEmail)}` : ''}&tier=website_automation`;
-  const canBuild = canBuildAndSend(prospect.stage);
+  const hasDemo = !!prospect.previewSlug;
+  const alreadyPitched = prospect.stage === 'pitched' || prospect.stage === 'won';
+  const chips = signalChips(prospect);
+
+  const buildReview = async () => {
+    setBuilding(true); setErr(null);
+    try {
+      const r = await buildDemoForReview(prospect.id);
+      if (!r.ok) { setErr(r.error ?? 'Build failed.'); }
+      else if (r.built && r.error) { toast('info', r.error); } // built, but no email to pitch
+      await onRefresh();
+      await reloadPitch();
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Build failed.'); }
+    finally { setBuilding(false); }
+  };
+
+  const doSend = async () => {
+    if (pending === null || pending === 'loading') return;
+    setSendPhase('sending'); setErr(null);
+    try {
+      const r = await sendPitch(pending.approval);
+      if (r.ok) { setSendPhase('sent'); setPending(null); await onRefresh(); }
+      else { setSendPhase('error'); setErr(r.error ?? 'Send failed.'); }
+    } catch (e) { setSendPhase('error'); setErr(e instanceof Error ? e.message : 'Send failed.'); }
+  };
+
+  const doDiscard = async () => {
+    if (pending === null || pending === 'loading') return;
+    if (!window.confirm('Discard this pitch? The demo stays; only the queued email is dropped.')) return;
+    try { await discardPitch(pending.approval.id); setPending(null); await onRefresh(); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Could not discard.'); }
+  };
+
+  const pitch = pending && pending !== 'loading' ? pending : null;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      {/* backdrop */}
       <button aria-label="Close" onClick={onClose} className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" />
-      {/* panel */}
-      <div className="relative flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-forge-border bg-forge-bg shadow-2xl">
+      <div className="relative flex h-full w-full max-w-lg flex-col overflow-y-auto border-l border-forge-border bg-forge-bg shadow-2xl">
         <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-forge-border bg-forge-bg/95 px-4 py-3 backdrop-blur">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -61,17 +107,13 @@ export function ProspectDrawer({ prospect, send, onBuildSend, onSkipToggle, onCl
         </div>
 
         <div className="flex-1 space-y-4 px-4 py-4">
-          {/* Post-send signals — the buy signals, up top so they're the first thing you see. */}
-          {(() => {
-            const chips = signalChips(prospect);
-            return chips.length ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {chips.map((c, i) => (
-                  <span key={i} className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${c.tone === 'ok' ? 'bg-forge-ok/10 text-forge-ok' : 'bg-forge-heat/10 text-forge-heat'}`}>{c.label}</span>
-                ))}
-              </div>
-            ) : null;
-          })()}
+          {chips.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {chips.map((c, i) => (
+                <span key={i} className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${c.tone === 'ok' ? 'bg-forge-ok/10 text-forge-ok' : 'bg-forge-heat/10 text-forge-heat'}`}>{c.label}</span>
+              ))}
+            </div>
+          )}
 
           {/* Identity */}
           <section className="space-y-1.5 text-[12px] text-forge-dim">
@@ -89,21 +131,41 @@ export function ProspectDrawer({ prospect, send, onBuildSend, onSkipToggle, onCl
             )}
           </section>
 
-          {/* The demo */}
+          {/* Compare: their site vs the demo */}
           <section className="rounded-xl border border-forge-border bg-forge-panel/40 p-3">
-            <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-forge-dim"><LayoutTemplate size={12} /> Their demo</div>
-            {prospect.previewSlug ? (
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[12px] text-forge-ink">Built{prospect.previewStatus ? ` · ${prospect.previewStatus}` : ''}</span>
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-forge-dim"><LayoutTemplate size={12} /> Their site vs the new demo</div>
+            {hasDemo ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {prospect.website && (
+                  <a href={prospect.website} target="_blank" rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim hover:text-forge-ink">
+                    Their site today <ExternalLink size={10} />
+                  </a>
+                )}
                 <a href={`/preview-site/${prospect.previewSlug}`} target="_blank" rel="noreferrer noopener"
-                  className="inline-flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim hover:text-forge-ember">
-                  View <ExternalLink size={10} />
+                  className="inline-flex items-center gap-1 rounded-lg border border-forge-ember/40 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10">
+                  Open the new demo <ExternalLink size={10} />
                 </a>
+                {prospect.previewStatus && <span className="text-[10.5px] text-forge-dim">demo: {prospect.previewStatus}</span>}
               </div>
             ) : (
-              <p className="text-[12px] text-forge-dim">No demo yet — Build &amp; send scrapes their site + photos and builds one.</p>
+              <p className="text-[12px] text-forge-dim">No demo yet — build one to review the email and the before/after.</p>
             )}
           </section>
+
+          {/* THE EMAIL — read it before it sends. The HTML already includes the before/after. */}
+          {pitch && (
+            <section className="rounded-xl border border-forge-border bg-forge-panel/40 p-3">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-forge-dim"><Mail size={12} /> The email {pitch.toEmail ? <span className="ml-auto normal-case text-forge-dim">to {pitch.toEmail}</span> : null}</div>
+              <div className="mb-2 text-[12px]"><span className="text-forge-dim">Subject: </span><span className="font-medium text-forge-ink">{pitch.subject}</span></div>
+              {pitch.bodyHtml ? (
+                <iframe title="Email preview" srcDoc={pitch.bodyHtml} sandbox=""
+                  className="h-96 w-full rounded-lg border border-forge-border bg-white" />
+              ) : (
+                <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-lg border border-forge-border bg-forge-bg p-2 text-[11.5px] text-forge-ink">{pitch.bodyText}</pre>
+              )}
+            </section>
+          )}
 
           {/* Scraped contacts */}
           <section>
@@ -111,7 +173,7 @@ export function ProspectDrawer({ prospect, send, onBuildSend, onSkipToggle, onCl
             {contacts === null ? (
               <p className="flex items-center gap-1.5 text-[11px] text-forge-dim"><Loader2 size={11} className="animate-spin" /> Loading…</p>
             ) : contacts.length === 0 ? (
-              <p className="text-[11px] text-forge-dim">None scraped yet{prospect.previewSlug ? '' : ' — build the demo to find their email'}.</p>
+              <p className="text-[11px] text-forge-dim">None scraped yet{hasDemo ? '' : ' — build the demo to find their email'}.</p>
             ) : (
               <ul className="space-y-1">
                 {contacts.map((c) => (
@@ -126,22 +188,35 @@ export function ProspectDrawer({ prospect, send, onBuildSend, onSkipToggle, onCl
             )}
           </section>
 
-          {send?.phase === 'error' && <p className="text-[12px] text-forge-err">{send.msg}</p>}
-          {send?.phase === 'sent' && send.note && <p className="text-[12px] text-forge-dim">{send.note}</p>}
+          {err && <p className="text-[12px] text-forge-err">{err}</p>}
         </div>
 
         {/* Action bar */}
         <div className="sticky bottom-0 space-y-2 border-t border-forge-border bg-forge-bg/95 px-4 py-3 backdrop-blur">
-          {canBuild && (
-            send?.phase === 'sent' && !send.note ? (
-              <div className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-forge-ok/40 py-2.5 text-sm font-semibold text-forge-ok"><Check size={15} /> Sent</div>
-            ) : (
-              <button onClick={() => onBuildSend(prospect.id)} disabled={send?.phase === 'sending'}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-forge-ember py-2.5 text-sm font-semibold text-forge-bg shadow transition-transform hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-60">
-                {send?.phase === 'sending' ? <><Loader2 size={15} className="animate-spin" /> Building…</> : <><Send size={15} /> {prospect.previewSlug ? 'Send again' : 'Build & send'}</>}
+          {sendPhase === 'sent' ? (
+            <div className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-forge-ok/40 py-2.5 text-sm font-semibold text-forge-ok"><Check size={15} /> Sent</div>
+          ) : pitch ? (
+            <div className="flex items-center gap-2">
+              <button onClick={() => void doSend()} disabled={sendPhase === 'sending'}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-forge-ember py-2.5 text-sm font-semibold text-forge-bg shadow transition-transform hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-60">
+                {sendPhase === 'sending' ? <><Loader2 size={15} className="animate-spin" /> Sending…</> : <><Send size={15} /> Send this pitch</>}
               </button>
-            )
-          )}
+              <button onClick={() => void doDiscard()} disabled={sendPhase === 'sending'} title="Drop the queued email (keep the demo)"
+                className="flex items-center justify-center gap-1.5 rounded-lg border border-forge-border px-3 py-2 text-[13px] text-forge-dim hover:text-forge-err"><Trash2 size={14} /></button>
+            </div>
+          ) : !hasDemo && canBuildAndSend(prospect.stage) ? (
+            <button onClick={() => void buildReview()} disabled={building}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-forge-ember py-2.5 text-sm font-semibold text-forge-bg shadow transition-transform hover:-translate-y-0.5 disabled:translate-y-0 disabled:opacity-60">
+              {building ? <><Loader2 size={15} className="animate-spin" /> Building the demo…</> : <><Hammer size={15} /> Build demo to review</>}
+            </button>
+          ) : hasDemo && !alreadyPitched && pending !== 'loading' ? (
+            <p className="text-center text-[12px] text-forge-dim">Demo built — no public email was found, so there’s nothing to send.</p>
+          ) : alreadyPitched ? (
+            <div className="flex items-center justify-center gap-1.5 text-[12px] text-forge-heat"><Eye size={13} /> Pitched — waiting on a reply</div>
+          ) : pending === 'loading' ? (
+            <div className="flex items-center justify-center gap-1.5 py-1 text-[12px] text-forge-dim"><Loader2 size={13} className="animate-spin" /> Loading the pitch…</div>
+          ) : null}
+
           <div className="flex items-center gap-2">
             <NavLink to={wonHref}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-forge-ok/40 py-2 text-[13px] font-medium text-forge-ok hover:bg-forge-ok/10">

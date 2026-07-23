@@ -231,8 +231,7 @@ export default function Leads() {
       {selected && (
         <ProspectDrawer
           prospect={selected}
-          send={sends[selected.id]}
-          onBuildSend={(id) => void buildAndSend(id)}
+          onRefresh={load}
           onSkipToggle={(p) => void skipToggle(p)}
           onClose={() => setSelectedId(null)}
         />
