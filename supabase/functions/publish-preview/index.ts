@@ -15,7 +15,11 @@
 // Secrets: NETLIFY_AUTH_TOKEN (the operator's Netlify personal access token), WORKER_SECRET.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { netlifySiteName, publishStatusAfter, publishedHtmlPath, normalizeCustomDomain } from '../../../src/lib/preview/publishCore.ts';
+import {
+  netlifySiteName, publishStatusAfter, publishedHtmlPath, normalizeCustomDomain,
+  extractRehostableImages, rewriteImageUrls, imageExtFor, rehostedImagePath,
+} from '../../../src/lib/preview/publishCore.ts';
+import { safeFetch } from '../_shared/safeFetch.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -27,6 +31,39 @@ const cors = {
 async function sha1Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const d = await crypto.subtle.digest('SHA-1', bytes);
   return Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** DURABILITY — a demo hotlinks the prospect's scraped photos off their old site; a SOLD, published
+ *  site must not (those URLs break when the old site dies or their domain migrates to us, and they were
+ *  never ours to serve). Pull each external image onto our own project-assets storage (SSRF-safe via
+ *  safeFetch; image-only; size + count + time bounded) and rewrite the HTML to the durable copies.
+ *  Fail-soft everywhere: an image we can't fetch keeps its original URL — a publish never fails over a
+ *  photo. Runs only here (at publish), so demos stay cheap hotlinks and we only pay for sites that sell. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function rehostImages(admin: any, html: string, ownerId: string, previewSiteId: string): Promise<string> {
+  let selfHost = '';
+  try { selfHost = new URL(Deno.env.get('SUPABASE_URL')!).hostname; } catch { /* keep '' */ }
+  const candidates = extractRehostableImages(html, selfHost, 24);
+  if (candidates.length === 0) return html;
+
+  const map: Record<string, string> = {};
+  const deadline = Date.now() + 22000;   // whole re-host pass is time-bounded; leftovers stay hotlinked
+  for (const c of candidates) {
+    if (Date.now() > deadline) break;
+    try {
+      const res = await safeFetch(c.url, { signal: AbortSignal.timeout(8000) });
+      const ct = (res.headers.get('content-type') ?? '').toLowerCase();
+      if (!res.ok || !ct.startsWith('image/')) { await res.body?.cancel().catch(() => {}); continue; }
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.byteLength === 0 || buf.byteLength > 5_000_000) continue;   // skip empties + >5MB
+      const key = (await sha1Hex(buf)).slice(0, 16);                       // content hash → identical photos de-dupe
+      const path = rehostedImagePath(ownerId, previewSiteId, key, imageExtFor(ct, c.url));
+      await admin.storage.from('project-assets').upload(path, buf, { contentType: ct.split(';')[0], upsert: true });
+      const pub = admin.storage.from('project-assets').getPublicUrl(path).data.publicUrl as string;
+      if (pub) map[c.raw] = pub;
+    } catch { /* fail-soft — leave this image on its original URL */ }
+  }
+  return rewriteImageUrls(html, map);
 }
 
 Deno.serve(async (req) => {
@@ -68,7 +105,10 @@ Deno.serve(async (req) => {
     // Uint8Array<ArrayBuffer> (concrete backing) so it satisfies BufferSource/BodyInit under Deno.
     let bytes: Uint8Array<ArrayBuffer>;
     if (typeof html === 'string' && html.trim().length > 200) {
-      bytes = new TextEncoder().encode(html);
+      // Re-host the prospect's scraped photos onto our storage BEFORE stashing, so both the live site
+      // and any later webhook re-publish serve durable, self-owned images (not fragile hotlinks).
+      const durable = await rehostImages(admin, html, ownerId, previewSiteId);
+      bytes = new TextEncoder().encode(durable);
       // Only the operator path reaches here with html; stash it (upsert) for later webhook re-publish.
       await admin.storage.from('project-assets').upload(htmlPath, bytes, { contentType: 'text/html; charset=utf-8', upsert: true });
     } else {
