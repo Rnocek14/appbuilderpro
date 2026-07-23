@@ -98,8 +98,49 @@ Deno.serve(async (req) => {
     ownerScope = u.user.id;
   }
 
-  const body = (await req.json().catch(() => ({}))) as { order_id?: string };
+  const body = (await req.json().catch(() => ({}))) as { order_id?: string; pitch_lead_id?: string };
   const nowIso = new Date().toISOString();
+
+  // ---- ON-DEMAND: "Build & send" one prospect (operator, one click) ---------------------------
+  // The Prospects screen sends { pitch_lead_id }. We build THIS lead's demo now and — because the
+  // operator asked to send — approve + fire the pitch through send-email in the same call. This is
+  // the single-lead, foreground twin of the nightly hunt loop: same claim → build → queue path,
+  // plus an immediate send. All send-safety gates still apply inside send-email.
+  if (ownerScope && body.pitch_lead_id) {
+    const appOrigin = Deno.env.get('APP_ORIGIN');
+    if (!appOrigin) return json({ error: 'Sending isn’t configured — set APP_ORIGIN on the server.' }, 400);
+    const { data: leadRow } = await admin.from('discovered_businesses')
+      .select('id, place_id, company_name, keyword, website, phone, city, state, status')
+      .eq('id', body.pitch_lead_id).eq('owner_id', ownerScope).maybeSingle();
+    if (!leadRow) return json({ error: 'Prospect not found.' }, 404);
+    // CLAIM so a second click (or the nightly worker) can't build the same lead twice. Allow both a
+    // fresh 'new' lead and re-sending a 'built'/'skipped' one — but never one already 'building'.
+    const { data: claimRows } = await admin.from('discovered_businesses')
+      .update({ status: 'building', updated_at: new Date().toISOString() })
+      .eq('id', body.pitch_lead_id).eq('owner_id', ownerScope).neq('status', 'building').select('id');
+    if (!claimRows?.length) return json({ error: 'This prospect is already being built — give it a moment.' }, 409);
+    const env: HuntEnv = {
+      supabaseUrl: Deno.env.get('SUPABASE_URL')!,
+      workerSecret: workerSecret ?? '',
+      serviceKey,
+      appOrigin,
+      placesKey: Deno.env.get('GOOGLE_PLACES_API_KEY') ?? '',
+      nowYear: new Date(nowIso).getUTCFullYear(),
+      runRatings: new Map(),
+    };
+    const order = { owner_id: ownerScope } as unknown as OrderRow;
+    try {
+      const outcome = await buildDemoForLead(admin, order, leadRow as unknown as LeadRow, env, true);
+      if (outcome === 'queued') return json({ ok: true, sent: true });
+      // Built a demo but no public email was found — honest: we can't cold-email without an address.
+      if (outcome === 'built') return json({ ok: true, sent: false, error: 'Demo built, but no public email was found on their site — nothing was sent.' });
+      await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: new Date().toISOString() }).eq('id', body.pitch_lead_id);
+      return json({ ok: false, error: 'Couldn’t build a demo for this prospect (not enough real content to work from).' }, 422);
+    } catch (e) {
+      // Leave status='building'; the stale sweep reclaims it. Surface the real error, don't fake success.
+      return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 500);
+    }
+  }
 
   // Liveness: only a WORKER-authenticated hit is the cron clock (a signed-in "Run now" proves the
   // function is deployed, not that the heartbeat is armed).
@@ -1570,7 +1611,7 @@ async function scrapePage(url: string, mode: 'text' | 'images' | 'contact', env:
  *  → pitch → (if a public email exists) a PENDING approval. Mirrors ingest-profile's save path and
  *  queuePitch's queue path. Also marks the lead built + links the demo. */
 // deno-lint-ignore no-explicit-any
-async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env: HuntEnv):
+async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env: HuntEnv, autoSend = false):
   Promise<'queued' | 'built' | 'skipped'> {
   const location = [lead.city, lead.state].filter(Boolean).join(', ') || null;
   let images: string[] = [];
@@ -1850,6 +1891,26 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     previewSiteId: siteId, businessProfileId: (profileRow as { id: string }).id,
     businessName: profile.business_name, pitch, previewUrl, toEmail: email, bodyHtml,
   });
+  // ONE-CLICK SEND — the operator pressed "Build & send", so we approve the just-queued pitch and
+  // fire it through send-email now (the same approval-gated path the operator would click through).
+  // send-email still enforces every safety gate (kill switch, suppression/unsubscribe, CAN-SPAM
+  // footer, daily cap), so "sends now" never means "sends unconditionally". A send failure THROWS so
+  // the caller reports it honestly instead of claiming a pitch went out that didn't.
+  if (ok && autoSend) {
+    await admin.from('approvals')
+      .update({ status: 'approved', decided_at: new Date().toISOString(), decided_via: 'ui' })
+      .eq('id', ok).eq('status', 'pending');
+    const sres = await fetch(`${env.supabaseUrl}/functions/v1/send-email`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json', 'x-worker-secret': env.workerSecret,
+        authorization: `Bearer ${env.serviceKey}`, apikey: env.serviceKey,
+      },
+      body: JSON.stringify({ approval_id: ok }),
+    });
+    const sjson = await sres.json().catch(() => ({})) as { ok?: boolean; error?: string };
+    if (!sres.ok || !sjson.ok) throw new Error(sjson.error ?? `send failed (${sres.status})`);
+  }
   return ok ? 'queued' : 'built';
 }
 
@@ -1921,16 +1982,16 @@ async function genPreviewShot(admin: any, ownerId: string, target: string, label
 // deno-lint-ignore no-explicit-any
 async function queueHuntPitch(admin: any, uid: string, input: {
   previewSiteId: string; businessProfileId: string; businessName: string; pitch: string; previewUrl: string; toEmail: string; bodyHtml?: string;
-}): Promise<boolean> {
+}): Promise<string | null> {   // returns the pending approval's id (for one-click auto-send), or null
   const to = input.toEmail.toLowerCase().trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return false;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return null;
 
   let contactId: string;
   const { data: existing } = await admin.from('contacts')
     .select('id, email_status').eq('owner_id', uid).eq('email', to).maybeSingle();
   if (existing) {
     const st = (existing as { email_status?: string }).email_status;
-    if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') return false;  // never re-contact
+    if (st === 'unsubscribed' || st === 'bounced' || st === 'complained') return null;  // never re-contact
     contactId = (existing as { id: string }).id;
   } else {
     const { data: c } = await admin.from('contacts').insert({
@@ -1939,7 +2000,7 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     if (c) contactId = (c as { id: string }).id;
     else {
       const { data: again } = await admin.from('contacts').select('id').eq('owner_id', uid).eq('email', to).maybeSingle();
-      if (!again) return false;
+      if (!again) return null;
       contactId = (again as { id: string }).id;
     }
   }
@@ -1948,7 +2009,7 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     owner_id: uid, business_profile_id: input.businessProfileId, contact_id: contactId,
     preview_site_id: input.previewSiteId, kind: 'cold_site_pitch', state: 'pending_approval',
   }).select('id').single();
-  if (!camp) return false;
+  if (!camp) return null;
 
   const subject = `A new website for ${input.businessName}`;
   const body = `${input.pitch.trim()}\n\nTake a look: ${input.previewUrl}`;
@@ -1956,23 +2017,24 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     owner_id: uid, campaign_id: (camp as { id: string }).id, contact_id: contactId, preview_site_id: input.previewSiteId,
     sequence_step: 0, subject, body_text: body, body_html: input.bodyHtml ?? null, to_address: to, status: 'draft',
   }).select('id').single();
-  if (!msg) return false;
+  if (!msg) return null;
 
   // The approval is payload-hash bound exactly like enqueueApproval — the send executor refuses if
   // the payload changes after this decision. requested_by 'garvis-auto' marks a machine-queued
-  // request; status defaults to 'pending', so the OWNER still approves each send.
+  // request; status defaults to 'pending', so the OWNER still approves each send (unless the
+  // Prospects screen's one-click path approves + sends it immediately — see buildDemoForLead autoSend).
   const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id };
   const payload_hash = await hashPayload(payload);
   // When an HTML screenshot pitch rides along, tell the operator so the plain-text preview isn't
   // mistaken for the whole email — the recipient sees the site rendered as the hero image.
   const shotNote = input.bodyHtml ? '\n\n[Sends as an HTML email showing a screenshot of the new site as the hero image.]' : '';
-  const { error: apErr } = await admin.from('approvals').insert({
+  const { data: ap, error: apErr } = await admin.from('approvals').insert({
     owner_id: uid, kind: 'send_email',
     title: `Pitch "${input.businessName}" → ${to}`,
     preview: `${subject}\n\n${body}${shotNote}`,
     payload, payload_hash, requested_by: 'garvis-auto',
-  });
-  return !apErr;
+  }).select('id').single();
+  return apErr || !ap ? null : (ap as { id: string }).id;
 }
 
 // ============================================================================
