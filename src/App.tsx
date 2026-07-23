@@ -55,6 +55,8 @@ const Universe3D = lazy(() => import('./pages/Universe3D'));
 const PreviewEngine = lazy(() => import('./pages/PreviewEngine'));
 const PreviewSite = lazy(() => import('./pages/PreviewSite'));
 const PreviewReport = lazy(() => import('./pages/PreviewReport'));
+const BookingSetup = lazy(() => import('./pages/BookingSetup'));
+const BookingPage = lazy(() => import('./pages/BookingPage'));
 const ProfileHome = lazy(() => import('./pages/ProfileHome'));
 const CanvasPreview = lazy(() => import('./pages/dev/CanvasPreview'));
 const ProfileHomePreview = lazy(() => import('./pages/dev/ProfileHomePreview'));
@@ -120,6 +122,7 @@ function AppRoutes() {
           <Route path="/garvis/clients" element={<Protected><WinClients /></Protected>} />
           <Route path="/garvis/automations" element={<Protected><Automations /></Protected>} />
           <Route path="/garvis/missed-call" element={<Protected><MissedCall /></Protected>} />
+          <Route path="/garvis/booking" element={<Protected><BookingSetup /></Protected>} />
           <Route path="/garvis/orchestrate" element={<Protected><Orchestrate /></Protected>} />
           <Route path="/garvis/opportunity-feed" element={<Protected><OpportunityFeed /></Protected>} />
           <Route path="/garvis/leads" element={<Protected><Leads /></Protected>} />
@@ -164,6 +167,8 @@ function AppRoutes() {
           {import.meta.env.DEV && <Route path="/dev/studios" element={<StudiosPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/board" element={<BoardPreview />} />}
           {import.meta.env.DEV && <Route path="/dev/workshops" element={<WorkshopsPreview />} />}
+          {/* PUBLIC — the link a business's CUSTOMER opens to book a job (no login). */}
+          <Route path="/book/:slug" element={<BookingPage />} />
           {/* PUBLIC — the link business owners open from the outreach email (no login). */}
           <Route path="/preview-site/:slug" element={<PreviewSite />} />
           <Route path="/preview-site/:slug/email-shot" element={<PreviewSite shot />} />
