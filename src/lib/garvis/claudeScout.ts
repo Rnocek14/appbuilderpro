@@ -17,7 +17,7 @@
 // Value import uses the .ts extension because this module is pulled into a Deno edge function
 // (same discipline as billing/clientSale.ts → clientTiers.ts).
 
-import { normalizeHost } from './placesDiscovery.ts';
+import { normalizeHost, isDirectoryOrSocialUrl } from './placesDiscovery.ts';
 
 export const SCOUT_SYSTEM = `You are a local-business prospector for a web-design agency. Your job is to
 find REAL small businesses of a given type in a given city and judge the state of each one's website.
@@ -135,22 +135,27 @@ export function groundScoutLeads(
     const sourceHost = normalizeHost(source);
 
     // GROUNDING: the business's own site is a cited host, OR the page it was found on is. No citation
-    // match ⇒ we have no proof this business is real ⇒ drop it.
+    // match ⇒ we have no proof this business is real ⇒ drop it. A Facebook citation still counts —
+    // it proves the business exists — so grounding uses the ORIGINAL url before we reclassify below.
     const grounded = (website_normalized !== null && hosts.has(website_normalized)) ||
       (sourceHost !== null && hosts.has(sourceHost));
     if (!grounded) { dropped++; continue; }
 
+    // A social/directory URL isn't THEIR website: null it so this is a clean has_website:false
+    // prospect (the best rebuild target) and the scraper never hits a social login wall.
+    const social = isDirectoryOrSocialUrl(website);
+
     leads.push({
       company_name: name,
       keyword: keyword.trim(),
-      website,
-      website_normalized,
+      website: social ? null : website,
+      website_normalized: social ? null : website_normalized,
       phone: str(o.phone),
       address: str(o.address),
       city: str(o.city) ?? (fallbackCity.trim() || null),
       state: str(o.state) ?? (fallbackState.trim() || null),
       category: (str(o.site_verdict) ?? str(o.verdict) ?? str(o.site_quality))?.slice(0, 80) ?? null,
-      has_website: website_normalized !== null,
+      has_website: !social && website_normalized !== null,
       source_url: source ?? (website && website_normalized && hosts.has(website_normalized) ? website : null),
     });
   }
