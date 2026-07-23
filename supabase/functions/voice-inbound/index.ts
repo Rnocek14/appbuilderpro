@@ -118,6 +118,21 @@ Deno.serve(async (req) => {
     }
 
     if (!accountSid) { await logEvent({ texted_back: false, note: 'twilio not configured' }); return twiml(buildHangupTwiml()); }
+
+    // IDEMPOTENCY on call_sid: Twilio retries a dial-action callback whose 200 it didn't receive in time
+    // (a slow response, a network blip) — always sequentially, after a timeout. Without a guard each retry
+    // re-sends the text, so the caller gets the same "sorry we missed you" two or three times. Before
+    // sending, refuse if we've already texted back for THIS call (call_sid is globally unique per Twilio
+    // call). Skip the check only when Twilio sent no CallSid — then we have nothing to dedupe on.
+    if (callSid) {
+      const { data: prior } = await admin.from('missed_call_events')
+        .select('id').eq('call_sid', callSid).eq('texted_back', true).limit(1);
+      if (prior && prior.length) {
+        await logEvent({ texted_back: false, note: 'already texted back for this call (duplicate callback)' });
+        return twiml(buildHangupTwiml());
+      }
+    }
+
     const body = renderMissedCallSms(cfg.template as string, { business: cfg.business_name as string | null });
     // Text FROM the number they called (same number → recognizable), TO the caller.
     const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
