@@ -11,7 +11,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { cn, timeAgo } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import { loadProspects, setProspectStatus, type Prospect } from '../lib/garvis/prospects/prospectsRun';
-import { STAGE_LADDER, STAGE_META, stageRollup, canBuildAndSend, type ProspectStage } from '../lib/garvis/prospects/stage';
+import { STAGE_LADDER, STAGE_META, stageRollup, canBuildAndSend, signalChips, type ProspectStage } from '../lib/garvis/prospects/stage';
 import { ProspectDrawer } from '../components/prospects/ProspectDrawer';
 
 // Per-row send state: idle → sending (~30-60s) → sent (green) | error (honest message).
@@ -192,6 +192,18 @@ export default function Leads() {
                     )}
                     <span className="text-forge-dim/60">found {timeAgo(r.created_at)}</span>
                   </div>
+                  {/* Post-send signals — what happened after the pitch went out. Quiet until there's activity. */}
+                  {(() => {
+                    const chips = signalChips(r);
+                    return chips.length ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {chips.map((c, i) => (
+                          <span key={i} className={cn('rounded px-1.5 py-0.5 text-[10px] font-medium',
+                            c.tone === 'ok' ? 'bg-forge-ok/10 text-forge-ok' : 'bg-forge-heat/10 text-forge-heat')}>{c.label}</span>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
                   {send?.phase === 'error' && <p className="mt-1 text-[11px] text-forge-err">{send.msg}</p>}
                   {send?.phase === 'sent' && send.note && <p className="mt-1 text-[11px] text-forge-dim">{send.note}</p>}
                 </div>

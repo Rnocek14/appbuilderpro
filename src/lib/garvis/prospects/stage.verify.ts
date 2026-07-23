@@ -1,6 +1,6 @@
 // src/lib/garvis/prospects/stage.verify.ts — the Prospects pipeline stage brain (npm run verify:prospectstage).
 
-import { deriveStage, nextAction, stageRollup, canBuildAndSend, STAGE_LADDER, STAGE_META } from './stage';
+import { deriveStage, nextAction, stageRollup, canBuildAndSend, signalChips, STAGE_LADDER, STAGE_META } from './stage';
 
 let passed = 0; let failed = 0;
 function check(name: string, cond: boolean) {
@@ -35,6 +35,16 @@ check('Build & send applies to New and Built only', canBuildAndSend('new') && ca
 const roll = stageRollup(['new', 'new', 'built', 'pitched', 'won', 'won', 'skipped']);
 check('rollup counts each stage', roll.new === 2 && roll.built === 1 && roll.pitched === 1 && roll.won === 2 && roll.skipped === 1);
 check('rollup shows an empty stage as 0, never missing', stageRollup(['new']).won === 0);
+
+// ── signal chips ─────────────────────────────────────────────────────────
+const none = signalChips({ opened: false, openCount: 0, demoViews: 0, engaged: false, replied: false });
+check('no activity → no chips (strip stays quiet)', none.length === 0);
+const hot = signalChips({ opened: true, openCount: 3, demoViews: 2, engaged: true, replied: true });
+check('replied is first + green', hot[0].label === 'replied' && hot[0].tone === 'ok');
+check('opened shows the count when >1', hot.some((c) => c.label === 'opened 3×' && c.tone === 'heat'));
+check('viewed shows the count when >1', hot.some((c) => c.label === 'viewed 2×'));
+check('a single open drops the count', signalChips({ opened: true, openCount: 1, demoViews: 1, engaged: false, replied: false }).some((c) => c.label === 'opened') );
+check('a single demo view reads "viewed demo"', signalChips({ opened: false, openCount: 0, demoViews: 1, engaged: false, replied: false })[0].label === 'viewed demo');
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} prospect-stage check(s) failed`);

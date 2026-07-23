@@ -290,6 +290,15 @@ Deno.serve(async (req) => {
       status: 'sent', sent_at: sentAt, provider_message_id: resendId, from_address: fromEmail,
     }).eq('id', messageId);
 
+    // Advance the linked demo to 'emailed' so the prospect moves to the "Pitched" stage on the board.
+    // ONLY from 'preview' (guarded in the .eq) — never downgrade a sold ('purchased') or live
+    // ('published') site. Cold pitches carry a preview_site_id; warm automations don't, so this is a
+    // no-op for them. Best-effort: a failure here never fails an otherwise-sent email.
+    if (msg.preview_site_id) {
+      await admin.from('preview_sites').update({ status: 'emailed' })
+        .eq('id', msg.preview_site_id).eq('status', 'preview').then(() => {}, () => {});
+    }
+
     if (msg.campaign_id) {
       await admin.from('outreach_campaigns').update({
         state: 'sent', last_send_at: sentAt, next_followup_at: addBusinessDaysIso(sentAt, 3),

@@ -9,7 +9,7 @@ import { NavLink } from 'react-router-dom';
 import {
   X, MapPin, Globe, Phone, ExternalLink, Send, Loader2, Check, Mail, Trophy, Archive, RotateCcw, LayoutTemplate,
 } from 'lucide-react';
-import { STAGE_META, nextAction, canBuildAndSend } from '../../lib/garvis/prospects/stage';
+import { STAGE_META, nextAction, canBuildAndSend, signalChips } from '../../lib/garvis/prospects/stage';
 import { loadProspectContacts, type Prospect, type ProspectContact } from '../../lib/garvis/prospects/prospectsRun';
 
 type SendState = { phase: 'sending' } | { phase: 'sent'; note?: string } | { phase: 'error'; msg: string };
@@ -61,6 +61,18 @@ export function ProspectDrawer({ prospect, send, onBuildSend, onSkipToggle, onCl
         </div>
 
         <div className="flex-1 space-y-4 px-4 py-4">
+          {/* Post-send signals — the buy signals, up top so they're the first thing you see. */}
+          {(() => {
+            const chips = signalChips(prospect);
+            return chips.length ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {chips.map((c, i) => (
+                  <span key={i} className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${c.tone === 'ok' ? 'bg-forge-ok/10 text-forge-ok' : 'bg-forge-heat/10 text-forge-heat'}`}>{c.label}</span>
+                ))}
+              </div>
+            ) : null;
+          })()}
+
           {/* Identity */}
           <section className="space-y-1.5 text-[12px] text-forge-dim">
             {prospect.category && <div className="text-forge-ink">{prospect.category}{prospect.keyword && prospect.keyword !== prospect.category ? <span className="text-forge-dim"> · {prospect.keyword}</span> : null}</div>}
