@@ -1,5 +1,8 @@
 // Run: npx tsx src/lib/preview/publishCore.verify.ts
-import { netlifySiteName, normalizeCustomDomain, publishStatusAfter, isPublishableSpec, publishedHtmlPath } from './publishCore';
+import {
+  netlifySiteName, normalizeCustomDomain, publishStatusAfter, isPublishableSpec, publishedHtmlPath,
+  extractRehostableImages, rewriteImageUrls, imageExtFor, rehostedImagePath,
+} from './publishCore';
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -46,6 +49,41 @@ console.log('publishCore.verify');
 // --- publishedHtmlPath: owner-scoped, stable ---------------------------------------------------
 {
   check('path is owner + preview scoped', publishedHtmlPath('owner-1', 'prev-9') === 'owner-1/published/prev-9.html');
+}
+
+// --- image re-hosting: what to pull off the prospect's site onto our storage --------------------
+{
+  const SELF = 'abc.supabase.co';
+  const html = `
+    <img src="https://joesroofing-old.com/roof.jpg" alt="">
+    <img src="https://joesroofing-old.com/crew.png" srcset="https://joesroofing-old.com/crew@2x.png 2x">
+    <div style="background-image:url('https://joesroofing-old.com/hero.webp')"></div>
+    <img src="https://abc.supabase.co/storage/v1/object/public/ai.png" alt="ours">
+    <link href="https://fonts.googleapis.com/css2?family=Inter">
+    <img src="data:image/png;base64,AAAA">
+    <img src="/local/relative.jpg">`;
+  const c = extractRehostableImages(html, SELF);
+  const urls = c.map((x) => x.url);
+  check('pulls the scraped external images (src, srcset, css url)', urls.includes('https://joesroofing-old.com/roof.jpg') && urls.includes('https://joesroofing-old.com/crew.png') && urls.includes('https://joesroofing-old.com/crew@2x.png') && urls.includes('https://joesroofing-old.com/hero.webp'));
+  check('never re-hosts our OWN storage (AI images/screenshot already durable)', !urls.some((u) => u.includes('abc.supabase.co')));
+  check('leaves the font CDN alone', !urls.some((u) => u.includes('fonts.googleapis.com')));
+  check('ignores data: URIs and relative paths', !urls.some((u) => u.startsWith('data:') || u.startsWith('/local')));
+  check('dedupes + honors the cap', extractRehostableImages(html, SELF, 2).length === 2);
+
+  // srcset/entity decoding: the fetch URL has entities decoded, the raw keeps the HTML form.
+  const ent = extractRehostableImages(`<img src="https://x.com/a.jpg?w=1&amp;h=2">`, SELF);
+  check('raw keeps HTML form, url is entity-decoded for fetching', ent[0].raw.includes('&amp;') && ent[0].url === 'https://x.com/a.jpg?w=1&h=2');
+
+  // rewrite swaps each original for its re-hosted copy; unmapped/empty is left as-is.
+  const rewritten = rewriteImageUrls(html, {
+    'https://joesroofing-old.com/roof.jpg': 'https://abc.supabase.co/storage/v1/object/public/project-assets/o/published/p/img/deadbeef.jpg',
+    'https://joesroofing-old.com/crew.png': '',
+  });
+  check('rewrite replaces a mapped URL', rewritten.includes('/img/deadbeef.jpg') && !rewritten.includes('joesroofing-old.com/roof.jpg'));
+  check('rewrite leaves an unmapped/failed image on its original URL (fail-soft)', rewritten.includes('joesroofing-old.com/crew.png'));
+
+  check('imageExtFor prefers content-type, falls back to the URL', imageExtFor('image/jpeg', 'x') === 'jpg' && imageExtFor(null, 'https://x.com/a.PNG?v=2') === 'png' && imageExtFor('image/svg+xml', 'x') === 'svg' && imageExtFor(null, 'https://x.com/no-ext') === 'img');
+  check('rehostedImagePath is owner+preview scoped', rehostedImagePath('o1', 'p1', 'ab12', 'jpg') === 'o1/published/p1/img/ab12.jpg');
 }
 
 console.log(`\npublishCore.verify: ${passed} passed, ${failed} failed`);
