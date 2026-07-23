@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/sms.verify.ts
-import { toE164, smsSegments, renderSms, smsConsentOk, validSmsBody, optOutKeyword } from './sms';
+import { toE164, smsSegments, renderSms, smsConsentOk, validSmsBody, optOutKeyword, resolveSmsFrom } from './sms';
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -38,6 +38,12 @@ check('empty / over-limit invalid', validSmsBody('') === false && validSmsBody('
 check('STOP variants detected', optOutKeyword('STOP') === 'stop' && optOutKeyword('unsubscribe please') === 'stop' && optOutKeyword('Cancel') === 'stop');
 check('START/YES detected', optOutKeyword('start') === 'start' && optOutKeyword('YES') === 'start');
 check('normal reply → null', optOutKeyword('sounds good, thanks') === null && optOutKeyword('') === null);
+
+// ── per-client FROM routing ───────────────────────────────────────────────
+check('client number wins when set', resolveSmsFrom('(916) 555-0142', '+18005550000') === '+19165550142');
+check('falls back to the global number when no client number', resolveSmsFrom(null, '+18005550000') === '+18005550000');
+check('a malformed client number is ignored, global carries it', resolveSmsFrom('123', '+18005550000') === '+18005550000');
+check('null when neither is usable', resolveSmsFrom(null, null) === null && resolveSmsFrom('  ', '') === null);
 
 console.log(`\nsms.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} sms check(s) failed`);

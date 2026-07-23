@@ -63,7 +63,7 @@ import { composeBatchRecipients } from '../_shared/batchCore.ts';
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
 import { dueFires, renderTemplate, fireKey, type CustomerRec, type TriggerChannel } from '../../../src/lib/garvis/automation/triggers.ts';
-import { toE164 } from '../../../src/lib/garvis/sms.ts';
+import { toE164, resolveSmsFrom } from '../../../src/lib/garvis/sms.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
@@ -445,6 +445,7 @@ Deno.serve(async (req) => {
         anchor_field: 'last_service_at' | 'last_visit_at' | 'purchase_at' | 'next_due_at';
         offset_days: number; window_days: number; template_subject: string; template_body: string;
         channel: TriggerChannel | null;
+        client_subscription_id: string | null;   // attribution → per-client SMS FROM routing
       }
       interface AutoCustRow {
         id: string; email: string | null; phone: string | null; name: string | null; consent_basis: string | null;
@@ -456,10 +457,21 @@ Deno.serve(async (req) => {
       // silently NEVER checked. Ordered by id, capped at 500 — the fireBudget below still bounds
       // per-tick work, and a backlog beyond the budget drains across subsequent ticks.
       const { data: trigData } = await admin.from('automation_triggers')
-        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body, channel')
+        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body, channel, client_subscription_id')
         .eq('status', 'active').order('id', { ascending: true }).limit(500);
 
       const custCache = new Map<string, CustomerRec[]>();
+      // Per-client SMS FROM routing: resolve (and cache) each attributed client's own number so an
+      // automation text comes from THEIR line; null when the client hasn't connected one (send-sms then
+      // falls back to the global number). Keyed by client_subscription_id, fetched on first miss.
+      const clientNumCache = new Map<string, string | null>();
+      const clientNumberFor = async (subId: string): Promise<string | null> => {
+        if (clientNumCache.has(subId)) return clientNumCache.get(subId)!;
+        const { data: cs } = await admin.from('client_subscriptions').select('twilio_number').eq('id', subId).maybeSingle();
+        const num = (cs as { twilio_number?: string | null } | null)?.twilio_number ?? null;
+        clientNumCache.set(subId, num);
+        return num;
+      };
       let fireBudget = 40; // bound tick time — a backlog drains over ticks, never in one stampede
       for (const t of (trigData ?? []) as AutoTrigRow[]) {
         if (fireBudget <= 0) break;
@@ -578,8 +590,11 @@ Deno.serve(async (req) => {
             }).select('id').single();
             if (!msg) throw new Error('message insert failed');
 
+            // Route the text from the client's own number when this trigger is theirs and they've
+            // connected one; otherwise send-sms falls back to the operator's shared number.
+            const smsFrom = isSms && t.client_subscription_id ? resolveSmsFrom(await clientNumberFor(t.client_subscription_id), null) : null;
             const payload = isSms
-              ? { message_id: (msg as { id: string }).id, campaign_id: campaignId, sms_kind: 'transactional' }
+              ? { message_id: (msg as { id: string }).id, campaign_id: campaignId, sms_kind: 'transactional', ...(smsFrom ? { from_number: smsFrom } : {}) }
               : { message_id: (msg as { id: string }).id, campaign_id: campaignId };
             const payload_hash = await hashPayload(payload);
             const { data: ap, error: apErr } = await admin.from('approvals').insert({
