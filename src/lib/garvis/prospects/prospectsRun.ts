@@ -26,6 +26,12 @@ export interface Prospect {
   profileId: string | null;          // preview_sites.profile_id → contacts / business_profiles
   won: boolean;
   stage: ProspectStage;
+  // Post-send signals (from the demo + the pitch email) — what actually happened after "Build & send".
+  opened: boolean;                   // the pitch email was opened
+  openCount: number;
+  demoViews: number;                 // the demo was viewed (preview_events 'view')
+  engaged: boolean;                  // …and dwelled 45s+ ('engaged')
+  replied: boolean;                  // the prospect wrote back
 }
 
 export interface ProspectContact {
@@ -61,6 +67,31 @@ export async function loadProspects(): Promise<Prospect[]> {
     }
   }
 
+  // Post-send signals, keyed by preview_site_id. Opens/replies come off the pitch message; demo views
+  // off preview_events. Both batch-loaded once for the whole pool.
+  const openByPreview = new Map<string, { opened: boolean; openCount: number; replied: boolean }>();
+  const viewByPreview = new Map<string, { views: number; engaged: boolean }>();
+  if (previewIds.length) {
+    const { data: msgs } = await supabase.from('outreach_messages')
+      .select('preview_site_id, opened_at, open_count, status').eq('owner_id', u).in('preview_site_id', previewIds);
+    for (const m of (msgs ?? []) as { preview_site_id: string | null; opened_at: string | null; open_count: number | null; status: string | null }[]) {
+      if (!m.preview_site_id) continue;
+      const cur = openByPreview.get(m.preview_site_id) ?? { opened: false, openCount: 0, replied: false };
+      cur.opened = cur.opened || !!m.opened_at;
+      cur.openCount = Math.max(cur.openCount, m.open_count ?? 0);
+      cur.replied = cur.replied || m.status === 'replied';
+      openByPreview.set(m.preview_site_id, cur);
+    }
+    const { data: evs } = await supabase.from('preview_events')
+      .select('preview_site_id, event').in('preview_site_id', previewIds);
+    for (const e of (evs ?? []) as { preview_site_id: string; event: string }[]) {
+      const cur = viewByPreview.get(e.preview_site_id) ?? { views: 0, engaged: false };
+      if (e.event === 'view') cur.views++;
+      if (e.event === 'engaged') cur.engaged = true;
+      viewByPreview.set(e.preview_site_id, cur);
+    }
+  }
+
   // Sales: a demo (or its profile) with a non-canceled client_subscription is WON.
   const wonPreviewIds = new Set<string>();
   const wonProfileIds = new Set<string>();
@@ -76,6 +107,8 @@ export async function loadProspects(): Promise<Prospect[]> {
     const profileId = demo?.profile_id ?? null;
     const won = (r.preview_site_id ? wonPreviewIds.has(r.preview_site_id) : false) || (profileId ? wonProfileIds.has(profileId) : false);
     const previewStatus = demo?.status ?? null;
+    const opens = r.preview_site_id ? openByPreview.get(r.preview_site_id) : undefined;
+    const views = r.preview_site_id ? viewByPreview.get(r.preview_site_id) : undefined;
     return {
       ...r,
       previewSlug: demo?.slug ?? null,
@@ -83,6 +116,11 @@ export async function loadProspects(): Promise<Prospect[]> {
       profileId,
       won,
       stage: deriveStage({ status: r.status, previewStatus, won }),
+      opened: opens?.opened ?? false,
+      openCount: opens?.openCount ?? 0,
+      demoViews: views?.views ?? 0,
+      engaged: views?.engaged ?? false,
+      replied: opens?.replied ?? false,
     };
   });
 }

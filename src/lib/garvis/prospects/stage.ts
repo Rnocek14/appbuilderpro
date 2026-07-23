@@ -61,3 +61,18 @@ export function stageRollup(stages: ProspectStage[]): Record<ProspectStage, numb
 export function canBuildAndSend(stage: ProspectStage): boolean {
   return stage === 'new' || stage === 'built';
 }
+
+// ── post-send engagement signals ────────────────────────────────────────────
+export interface SignalFlags { opened: boolean; openCount: number; demoViews: number; engaged: boolean; replied: boolean }
+export interface SignalChip { label: string; tone: 'ok' | 'heat' }
+
+/** Turn a prospect's post-send signals into the badges shown on the row/drawer, most important first:
+ *  a reply is the strongest buy signal (green), then opens + demo views (hot). Nothing shows when there's
+ *  no activity yet, so the strip stays quiet until something actually happens. Pure + deterministic. */
+export function signalChips(s: SignalFlags): SignalChip[] {
+  const chips: SignalChip[] = [];
+  if (s.replied) chips.push({ label: 'replied', tone: 'ok' });
+  if (s.opened) chips.push({ label: s.openCount > 1 ? `opened ${s.openCount}×` : 'opened', tone: 'heat' });
+  if (s.demoViews > 0) chips.push({ label: s.demoViews > 1 ? `viewed ${s.demoViews}×` : 'viewed demo', tone: 'heat' });
+  return chips;
+}
