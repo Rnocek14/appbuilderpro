@@ -552,6 +552,61 @@ export function seededVariant(businessName: string, type: SectionType, recipe: R
  * defaults, usage-flagged photos/reviews are re-filtered from the PROFILE (the model may not be
  * trusted to honor flags), a hero is guaranteed first and a conversion CTA guaranteed present.
  */
+// --- Contrast safety net -----------------------------------------------------------------------
+// The model picks HSL colors freely; a weak choice (a pale primaryInk on a pale primary, dark ink on a
+// dark bg) ships an unreadable headline or CTA and reads as amateur instantly — and nothing checked it.
+// These pure helpers measure WCAG contrast and, when a TEXT color fails on its background, push only
+// that text color to a legible lightness (keeping its hue + saturation) — the brand/background color is
+// never changed. A well-chosen theme passes untouched.
+function parseHslTriplet(v: string): [number, number, number] {
+  const [h, s, l] = v.trim().split(/\s+/).map(parseFloat);
+  return [h || 0, s || 0, l || 0];
+}
+/** WCAG relative luminance of an "H S% L%" color. */
+export function hslLuminance(v: string): number {
+  const [h, s, l] = parseHslTriplet(v);
+  const sN = s / 100, lN = l / 100;
+  const c = (1 - Math.abs(2 * lN - 1)) * sN;
+  const hp = ((((h % 360) + 360) % 360)) / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (hp < 1) { r = c; g = x; } else if (hp < 2) { r = x; g = c; }
+  else if (hp < 3) { g = c; b = x; } else if (hp < 4) { g = x; b = c; }
+  else if (hp < 5) { r = x; b = c; } else { r = c; b = x; }
+  const m = lN - c / 2;
+  const lin = (u: number) => { const v2 = u + m; return v2 <= 0.03928 ? v2 / 12.92 : Math.pow((v2 + 0.055) / 1.055, 2.4); };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+/** WCAG contrast ratio (1–21) between two "H S% L%" colors. */
+export function contrastRatio(a: string, b: string): number {
+  const la = hslLuminance(a), lb = hslLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+/** A legible version of `fg` on `bg`: unchanged if it already meets `target`; else keep fg's hue +
+ *  saturation but drive lightness dark (on a light bg) or light (on a dark bg) until it passes, falling
+ *  back to near-black / near-white. */
+function readableInk(fg: string, bg: string, target: number): string {
+  if (contrastRatio(fg, bg) >= target) return fg;
+  const [h, s] = parseHslTriplet(fg);
+  const goDark = hslLuminance(bg) > 0.5;
+  for (const l of goDark ? [16, 10, 4] : [90, 95, 99]) {
+    const cand = `${Math.round(h)} ${Math.round(s)}% ${l}%`;
+    if (contrastRatio(cand, bg) >= target) return cand;
+  }
+  return goDark ? '0 0% 8%' : '0 0% 98%';
+}
+/** Guarantee readable body text (ink on bg) and a readable CTA (primaryInk on primary) at AA (4.5),
+ *  and not-invisible secondary text (muted on bg) at a gentler floor so it stays secondary without
+ *  vanishing. Only text colors move; the brand + backgrounds are preserved. */
+export function ensureReadableTheme(theme: ThemeSpec): ThemeSpec {
+  return {
+    ...theme,
+    ink: readableInk(theme.ink, theme.bg, 4.5),
+    primaryInk: readableInk(theme.primaryInk, theme.primary, 4.5),
+    muted: readableInk(theme.muted, theme.bg, 3),
+  };
+}
+
 export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec {
   const recipe = pickRecipe(profile);
   const fallback = assembleFallbackSpec(profile);
@@ -581,7 +636,9 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     ? (t.flair as unknown[]).filter((f): f is FlairDevice => FLAIR_DEVICES.includes(f as FlairDevice)).slice(0, 3)
     : null;
   const rawFlair = flairFiltered?.length ? flairFiltered : null;
-  const theme: ThemeSpec = {
+  // Built from the model's choices (recipe defaults for anything invalid), then passed through the
+  // contrast safety net so a bad color pick can never ship unreadable text/CTAs.
+  const theme: ThemeSpec = ensureReadableTheme({
     primary: hsl(t.primary, recipe.theme.primary),
     primaryInk: hsl(t.primaryInk, recipe.theme.primaryInk),
     bg: hsl(t.bg, recipe.theme.bg),
@@ -595,7 +652,7 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     tone: str(t.tone, recipe.theme.tone),
     flair: rawFlair ?? recipe.theme.flair ?? [],
     motion: MOTION_TIERS.includes(t.motion as MotionTier) ? (t.motion as MotionTier) : (recipe.theme.motion ?? 'lively'),
-  };
+  });
 
   // sections: keep known types only, in given order; re-inject photo/review data from the
   // PROFILE with usage flags applied (never trust the model to have honored them).
@@ -850,6 +907,34 @@ function voiceFor(industry: string, name: string, city: string | null): Voice {
   };
 }
 
+// Honest, generic-TRUE service blurbs — behavioral/aspirational only (same bar as the rest of the
+// fallback: never a credential, rating, tenure, or guarantee). Varied by a hash of the business +
+// service so a fallback page doesn't repeat one identical line down every service (the old tell was
+// "done on time, done right" on all eight). Deterministic.
+const capFirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+function serviceBlurb(service: string, seed: string): string {
+  const s = service.toLowerCase();
+  const pool = [
+    `${capFirst(s)} handled properly, from the first call to the final clean-up.`,
+    `Straightforward ${s} with clear pricing and no surprises.`,
+    `${capFirst(s)} done right the first time — and done when we say.`,
+    `Reliable ${s} from a team that shows up when it says it will.`,
+    `Careful ${s}, tidy work, and a fair quote up front.`,
+    `${capFirst(s)} without the runaround — book it with one call.`,
+  ];
+  return pool[nameHash(seed) % pool.length];
+}
+// A couple of honest sub-headline variants for the services block, so the section header isn't
+// identical across every fallback site either.
+function servicesSub(name: string, loc: string | null): string {
+  const pool = [
+    `Every job backed by ${name}'s reputation.`,
+    `Done properly, and cleaned up after — every time.`,
+    loc ? `Trusted by ${loc.split(',')[0]} and the surrounding area.` : `Trusted work you can book with one call.`,
+  ];
+  return pool[nameHash(`${name}:services-sub`) % pool.length];
+}
+
 export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const recipe = pickRecipe(profile);
   // Dignified categories never show generated imagery (same rule as the normalizer).
@@ -898,8 +983,8 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
       case 'services':
         sections.push({ type, props: {
           heading: 'What we do',
-          sub: `Every job backed by ${name}'s reputation.`,
-          services: profile.services.slice(0, 8).map((s) => ({ name: s, blurb: `Professional ${s.toLowerCase()} — done on time, done right.` })),
+          sub: servicesSub(name, loc),
+          services: profile.services.slice(0, 8).map((s, i) => ({ name: s, blurb: serviceBlurb(s, `${name}:${s}:${i}`) })),
           cta,
         } });
         break;

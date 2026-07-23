@@ -6,6 +6,7 @@ import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
   seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats, universalChapter,
+  contrastRatio, ensureReadableTheme, hslLuminance,
   type BusinessProfile,
 } from './spec';
 import { huntImagePrompts, huntArtPrompts, paletteHueName } from '../garvis/clientHuntBuild';
@@ -451,6 +452,57 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   const gal = fbAi.sections.find((s) => s.type === 'showcase' || s.type === 'gallery');
   check('honesty: an all-AI gallery is never titled "Recent work"',
     !gal || !/recent work|our work/i.test(String(gal.props.heading)));
+}
+
+// --- contrast safety net: unreadable color picks are fixed, good ones are left alone --------------
+{
+  // Known luminances: black ~0, white ~1.
+  check('hslLuminance: black is dark, white is light', hslLuminance('0 0% 0%') < 0.05 && hslLuminance('0 0% 100%') > 0.95);
+  check('contrastRatio: black-on-white is ~21', Math.round(contrastRatio('0 0% 0%', '0 0% 100%')) === 21);
+  check('contrastRatio is symmetric', Math.abs(contrastRatio('210 40% 30%', '0 0% 98%') - contrastRatio('0 0% 98%', '210 40% 30%')) < 1e-9);
+
+  // A deliberately unreadable theme: pale grey ink on white, pale primaryInk on a pale primary.
+  const bad = ensureReadableTheme({
+    primary: '48 90% 88%', primaryInk: '48 30% 82%', bg: '0 0% 100%', ink: '0 0% 82%',
+    muted: '0 0% 90%', card: '0 0% 100%', border: '0 0% 90%', radius: 12,
+    displayFont: 'Inter', bodyFont: 'Inter', tone: 't', flair: [], motion: 'lively',
+  });
+  check('unreadable body ink is fixed to AA on its bg', contrastRatio(bad.ink, bad.bg) >= 4.5);
+  check('unreadable CTA text is fixed to AA on the brand color', contrastRatio(bad.primaryInk, bad.primary) >= 4.5);
+  check('the contrast fix never touches the brand/background color', bad.primary === '48 90% 88%' && bad.bg === '0 0% 100%');
+  check('muted text is nudged above the invisible floor', contrastRatio(bad.muted, bad.bg) >= 3);
+
+  // A good theme (dark ink on light bg, white on a saturated brand) is returned unchanged.
+  const good = {
+    primary: '221 83% 45%', primaryInk: '0 0% 100%', bg: '0 0% 100%', ink: '222 30% 12%',
+    muted: '222 12% 40%', card: '0 0% 100%', border: '222 12% 90%', radius: 12,
+    displayFont: 'Inter', bodyFont: 'Inter', tone: 't', flair: [] as never[], motion: 'lively' as const,
+  };
+  const fixed = ensureReadableTheme(good);
+  check('a good theme passes through untouched', fixed.ink === good.ink && fixed.primaryInk === good.primaryInk && fixed.muted === good.muted);
+
+  // normalizeSpec must apply the gate: a model theme with an unreadable CTA comes out readable.
+  const prof = parseBusinessProfile({ business_name: 'Contrast Co', industry: 'Roofing', services: ['Roof repair'] }).profile!;
+  const nspec = normalizeSpec({ theme: { primary: '50 95% 85%', primaryInk: '50 40% 80%', bg: '0 0% 100%', ink: '0 0% 85%' } }, prof);
+  check('normalizeSpec ships a readable CTA even from a bad model palette', contrastRatio(nspec.theme.primaryInk, nspec.theme.primary) >= 4.5);
+  check('normalizeSpec ships readable body text even from a bad model palette', contrastRatio(nspec.theme.ink, nspec.theme.bg) >= 4.5);
+}
+
+// --- de-generic fallback copy: service blurbs vary, and stay honest -------------------------------
+{
+  const prof = parseBusinessProfile({
+    business_name: 'Summit Roofing', industry: 'Roofing',
+    services: ['Roof repair', 'Roof replacement', 'Storm damage', 'Gutter installation', 'Inspections'],
+  }).profile!;
+  const svc = assembleFallbackSpec(prof).sections.find((s) => s.type === 'services');
+  const blurbs = ((svc?.props.services ?? []) as { blurb: string }[]).map((x) => x.blurb);
+  check('a fallback lists its services', blurbs.length >= 4);
+  check('service blurbs are NOT all the identical line', new Set(blurbs).size >= 3);
+  check('no fallback blurb repeats the old "done on time, done right" boilerplate on every service', !blurbs.every((b) => b === blurbs[0]));
+  // Honesty: the varied blurbs never fabricate a credential / rating / guarantee.
+  const joined = blurbs.join(' ').toLowerCase();
+  check('service blurbs invent no credential/rating/guarantee', !/licen|insur|certif|guarantee|\d+\s*(?:years|yrs|stars?)|\d+★/.test(joined));
+  check('blurbs are deterministic for the same business', JSON.stringify(assembleFallbackSpec(prof).sections.find((s) => s.type === 'services')?.props.services) === JSON.stringify(svc?.props.services));
 }
 
 console.log(`\npreview-spec.verify: ${passed} passed, ${failed} failed`);
