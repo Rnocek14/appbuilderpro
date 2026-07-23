@@ -358,9 +358,17 @@ export async function startClientCheckout(args: { previewSiteId: string; tier: '
   Promise<{ ok: boolean; url?: string; error?: string }> {
   try {
     const { data, error } = await supabase.functions.invoke('client-checkout', { body: args });
-    const d = data as { ok?: boolean; url?: string } | null;
+    const d = data as { ok?: boolean; url?: string; error?: string } | null;
     if (!error && d?.ok && d.url) return { ok: true, url: d.url };
-    return { ok: false, error: 'Checkout isn’t available yet — the owner has been notified and will be in touch.' };
+    // Surface the server's REAL reason when there is one (rate-limited, invalid plan) — the blanket
+    // "owner has been notified" line isn't true for every failure and misleads the prospect. On a
+    // non-2xx the body rides on error.context (a Response in supabase-js); read it best-effort.
+    let msg = d?.error;
+    const ctx = (error as { context?: unknown } | null)?.context;
+    if (!msg && ctx instanceof Response) {
+      try { msg = ((await ctx.clone().json()) as { error?: string })?.error; } catch { /* not JSON — ignore */ }
+    }
+    return { ok: false, error: msg ?? 'Checkout isn’t available yet — the owner has been notified and will be in touch.' };
   } catch {
     return { ok: false, error: 'Checkout isn’t available right now — please try again shortly.' };
   }

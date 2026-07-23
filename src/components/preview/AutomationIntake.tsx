@@ -8,10 +8,18 @@
 // site even though it renders as a sibling of the themed .pv-site tree.
 
 import { useState } from 'react';
-import { Wand2, ArrowRight, Check } from 'lucide-react';
+import { Wand2, ArrowRight, Check, Rocket, Loader2 } from 'lucide-react';
 import type { SiteSpec } from '../../lib/preview/spec';
-import { submitAutomationIntake, type IntakeProposal } from '../../lib/preview/engine';
+import { submitAutomationIntake, startClientCheckout, type IntakeProposal } from '../../lib/preview/engine';
 import { offerStatsFor } from '../../lib/garvis/automationStats';
+import { tierById } from '../../lib/garvis/billing/clientTiers';
+
+// The automation tier's public price, from the single source of truth (clientTiers) — matches the
+// ClaimBar so the "yes" here and the "yes" there never quote different numbers.
+const AUTOMATION_PRICE = (tierById('website_automation')?.priceHint ?? 'from $500/mo').replace(/^from\s+/, '');
+// A stat earns the big-number slot only if it actually reads as a figure; otherwise the block's
+// punchy phrase would masquerade as a statistic. Falls back to the first point.
+const NUMERIC = /[0-9%×$]/;
 
 export function AutomationIntake({ previewSiteId, businessName, theme }: {
   previewSiteId: string; businessName: string; theme: SiteSpec['theme'];
@@ -19,8 +27,20 @@ export function AutomationIntake({ previewSiteId, businessName, theme }: {
   const [description, setDescription] = useState('');
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
+  const [buying, setBuying] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<{ matched: boolean; proposals: IntakeProposal[] } | null>(null);
+
+  // The most-engaged automation prospect just read tailored proposals WITH prices — capture the
+  // intent while it's hot instead of dead-ending on "I'll follow up." Straight to Stripe (same
+  // path + honesty as the ClaimBar); if checkout isn't configured, we tell them, no dead button.
+  const buyAutomation = async () => {
+    setBuying(true); setError('');
+    const res = await startClientCheckout({ previewSiteId, tier: 'website_automation', email: email.trim() || undefined });
+    if (res.ok && res.url) { window.location.href = res.url; return; }
+    setBuying(false);
+    setError(res.error ?? 'Checkout isn’t available right now.');
+  };
 
   // The same theme vars PreviewSiteRenderer applies on .pv-site — re-applied here so this section is
   // themed correctly whether or not it sits inside that tree.
@@ -62,16 +82,18 @@ export function AutomationIntake({ previewSiteId, businessName, theme }: {
             for a capability we can't yet run (e.g. missed-call text-back is not_built). */}
         <div className="mt-5 grid gap-2.5 sm:grid-cols-3">
           {offerStatsFor(['review_request', 'reactivation', 'lead_followup']).map((b, i) => {
-            const p = b.points[0];
+            const p = b.points.find((pt) => NUMERIC.test(pt.stat)) ?? b.points[0];
             return (
-              <div key={i} className="rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-3.5">
+              <div key={i} className="flex flex-col rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-3.5">
                 <p className="text-lg font-bold text-[hsl(var(--p))]">{p.stat}</p>
-                <p className="mt-0.5 text-xs leading-snug text-[hsl(var(--mut))]">{p.note}</p>
+                <p className="mt-0.5 flex-1 text-xs leading-snug text-[hsl(var(--mut))]">{p.note}</p>
+                {/* Each tile carries its OWN source — the three blocks cite different benchmarks, so a
+                    single blanket caption would mis-attribute two of them. */}
+                <p className="mt-2 text-[10px] text-[hsl(var(--mut))]/80">{b.source}</p>
               </div>
             );
           })}
         </div>
-        <p className="mt-2 text-[10px] text-[hsl(var(--mut))]">Industry data — home-services, 2026.</p>
 
         {result ? (
           <div className="mt-6 rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] p-5">
@@ -90,7 +112,14 @@ export function AutomationIntake({ previewSiteId, businessName, theme }: {
                     </li>
                   ))}
                 </ul>
-                <p className="mt-4 text-xs text-[hsl(var(--mut))]">Nothing runs until you approve it. No obligation.</p>
+                {/* The "yes" — turn the hottest automation intent into a sale now, not a follow-up. */}
+                <button type="button" onClick={() => void buyAutomation()} disabled={buying}
+                  className="mt-4 inline-flex items-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] px-5 py-3 text-sm font-semibold text-[hsl(var(--pi))] shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-60">
+                  {buying ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} />}
+                  Set this up — site + automation, {AUTOMATION_PRICE}
+                </button>
+                {error && <p className="mt-2 text-xs font-medium text-red-600">{error}</p>}
+                <p className="mt-3 text-xs text-[hsl(var(--mut))]">Secure checkout by Stripe. Nothing runs until you approve it — no obligation.</p>
               </>
             ) : (
               <p className="mt-4 text-sm text-[hsl(var(--mut))]">

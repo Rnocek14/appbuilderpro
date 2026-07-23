@@ -61,7 +61,9 @@ export function ClaimBar({ previewSiteId, businessName, slug, price = WEBSITE_PR
           <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
             <p className="min-w-0 flex-1 text-sm text-[hsl(var(--ink))]">
               <span className="font-semibold">This website was built for {businessName}.</span>{' '}
-              <span className="text-[hsl(var(--mut))]">Like it? It can be live on your domain within a day.</span>
+              <span className="text-[hsl(var(--mut))]">
+                {price} once, or {AUTOMATION_PRICE} with automation — live on your domain within a day.
+              </span>
             </p>
             <a href={`/preview-site/${slug}/report`}
               className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--mut))] underline-offset-2 hover:underline">
