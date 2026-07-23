@@ -25,6 +25,7 @@ import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
+import { sendBookingNotice } from '../_shared/bookingNotify.ts';
 import { checkCredits, spendCredits, getUserPlan } from '../_shared/credits.ts';
 import { pickNextPending, mergeTemplate, batchProgress, staleSendingIndices, type BatchRecipient } from '../_shared/batchCore.ts';
 // DAILY AUTOMATIC CLIENT HUNT (client_hunt kind) — the discovery brain + the pure builders are
@@ -164,6 +165,12 @@ Deno.serve(async (req) => {
         await admin.from('reminders').update({ notified_at: nowIso }).eq('id', r.id);
       }
     } catch { /* reminder firing must never wedge the order tick */ }
+
+    // ---- BOOKING REMINDERS (app_0109) --------------------------------------------------------
+    // Text/email a customer ~a day before their appointment. Fires once per appointment as it enters
+    // the (now+3h, now+24h] window; reminder_sent is set regardless of send result, so a bad number
+    // can never spam. Transactional (they booked) → sends direct via bookingNotify, not the marketing path.
+    try { await drainBookingReminders(admin); } catch { /* a reminder never wedges the tick */ }
 
     // ---- ARC WAKE SWEEP (app_0095) -----------------------------------------------------------
     // Waiting arcs carry a machine-checkable blocker (waiting_on). When the blocker has cleared —
@@ -1972,6 +1979,35 @@ async function genHuntImage(admin: any, ownerId: string, prompt: string, size: '
     return admin.storage.from('project-assets').getPublicUrl(path).data.publicUrl as string;
   } catch {
     return null;
+  }
+}
+
+/** BOOKING REMINDERS — text/email each confirmed appointment ~a day out, exactly once. Window is
+ *  (now+3h, now+24h] so same-hour bookings aren't double-messaged (the confirmation covered those) and
+ *  everything else gets one nudge the day before. reminder_sent is set even if the send fails, so a
+ *  dead number can't spam. Transactional → bookingNotify sends direct (no marketing gates). */
+// deno-lint-ignore no-explicit-any
+async function drainBookingReminders(admin: any): Promise<void> {
+  const now = Date.now();
+  const loIso = new Date(now + 3 * 3_600_000).toISOString();
+  const hiIso = new Date(now + 24 * 3_600_000).toISOString();
+  const { data } = await admin.from('appointments')
+    .select('id, owner_id, service_name, starts_at, customer_email, customer_phone, page:booking_pages(business_name, utc_offset_min, confirm_channel)')
+    .eq('status', 'confirmed').eq('reminder_sent', false)
+    .gt('starts_at', loIso).lte('starts_at', hiIso).limit(50);
+  for (const a of (data ?? []) as Record<string, unknown>[]) {
+    const rawPage = a.page as unknown;
+    const pg = (Array.isArray(rawPage) ? rawPage[0] : rawPage) as
+      { business_name: string; utc_offset_min: number; confirm_channel: 'email' | 'sms' | 'both' } | null;
+    if (pg) {
+      await sendBookingNotice(admin, a.owner_id as string, null, {
+        businessName: pg.business_name, serviceName: (a.service_name as string) ?? 'your appointment',
+        startsAt: a.starts_at as string, utcOffsetMin: pg.utc_offset_min,
+        toEmail: (a.customer_email as string) ?? null, toPhone: (a.customer_phone as string) ?? null,
+        channel: pg.confirm_channel, kind: 'reminder',
+      }).catch(() => ({ email: false, sms: false }));
+    }
+    await admin.from('appointments').update({ reminder_sent: true, updated_at: new Date().toISOString() }).eq('id', a.id as string);
   }
 }
 
