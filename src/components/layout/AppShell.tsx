@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import {
   Flame, LayoutGrid, Plus, Settings, CreditCard, ShieldCheck, FolderDown, Bot, Inbox as InboxIcon,
-  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign, KeyRound, Zap, Receipt } from 'lucide-react';
+  LogOut, Command as CommandIcon, Sun, Moon, Menu, X, PanelLeftClose, PanelLeftOpen, Boxes, Megaphone, Rocket, Sparkles, Lightbulb, Activity, FlaskConical, Globe, Brain, BrainCircuit, Waypoints, Telescope, Compass, MessageSquare, Users, CircleDollarSign, KeyRound, Zap, Receipt, ChevronDown } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { supabase } from '../../lib/supabase';
@@ -32,6 +32,9 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
   const navigate = useNavigate();
   const { pendingCount } = useInbox();
   const { newCount: claimCount } = usePreviewClaims();
+  // Everything past the Core loop lives behind "More" — the sidebar opens showing just the daily
+  // job. (In the icon-collapsed rail we show every icon; there's no room for a disclosure there.)
+  const [moreOpen, setMoreOpen] = useState(false);
   // A lead must never arrive invisibly (UX audit): the ops inbox gets the same badge treatment —
   // new leads + pending approvals, counted from real rows on mount and window focus.
   const [opsCount, setOpsCount] = useState(0);
@@ -141,55 +144,77 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
       </button>
 
       <nav className={cn('flex-1 space-y-3 overflow-y-auto panel-scroll', collapsed ? 'px-2' : 'px-3')} aria-label="Main">
-        {[...navSections, ...(profile?.role === 'admin' ? [labsSection] : [])].map((section, si) => (
-          <div key={section.title} className="space-y-0.5">
-            {collapsed
-              ? si > 0 && <div className="mx-2 mb-2 border-t border-forge-border" />
-              : <p className="px-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-forge-dim/70">{section.title}</p>}
-            {section.items.map(({ to, label, icon: Icon, ...rest }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={'end' in rest ? (rest as { end?: boolean }).end : undefined}
-                onClick={() => setMobileOpen(false)}
-                title={collapsed ? label : undefined}
-                className={navLinkClass(collapsed)}
-              >
-                <Icon size={16} className="shrink-0" />
-                {!collapsed && label}
-                {to === '/garvis/queue' && opsCount + pendingCount > 0 && (
-                  collapsed ? (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${opsCount + pendingCount} waiting`} />
-                  ) : (
-                    <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="Approvals + leads + replies + build questions waiting">
-                      {opsCount + pendingCount}
-                    </span>
-                  )
-                )}
-                {to === '/business-preview-engine' && claimCount > 0 && (
-                  collapsed ? (
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ok" aria-label={`${claimCount} new claims`} />
-                  ) : (
-                    <span className="ml-auto rounded-full bg-forge-ok px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="New claim requests">
-                      {claimCount}
-                    </span>
-                  )
-                )}
-              </NavLink>
-            ))}
-            {section.title === 'Account' && profile?.role === 'admin' && (
-              <NavLink
-                to="/admin"
-                onClick={() => setMobileOpen(false)}
-                title={collapsed ? 'Admin' : undefined}
-                className={navLinkClass(collapsed)}
-              >
-                <ShieldCheck size={16} className="shrink-0" />
-                {!collapsed && 'Admin'}
-              </NavLink>
-            )}
-          </div>
-        ))}
+        {(() => {
+          const allSections = [...navSections, ...(profile?.role === 'admin' ? [labsSection] : [])];
+          const [core, ...rest] = allSections;
+          // Rail (icon-collapsed): show everything, no disclosure. Expanded: Core always, rest under More.
+          const shown = collapsed || moreOpen ? allSections : [core];
+          const renderSection = (section: typeof allSections[number], si: number) => (
+            <div key={section.title} className="space-y-0.5">
+              {collapsed
+                ? si > 0 && <div className="mx-2 mb-2 border-t border-forge-border" />
+                : <p className="px-3 pb-1 text-[10px] font-medium uppercase tracking-wide text-forge-dim/70">{section.title}</p>}
+              {section.items.map(({ to, label, icon: Icon, ...rest2 }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={'end' in rest2 ? (rest2 as { end?: boolean }).end : undefined}
+                  onClick={() => setMobileOpen(false)}
+                  title={collapsed ? label : undefined}
+                  className={navLinkClass(collapsed)}
+                >
+                  <Icon size={16} className="shrink-0" />
+                  {!collapsed && label}
+                  {to === '/garvis/queue' && opsCount + pendingCount > 0 && (
+                    collapsed ? (
+                      <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ember" aria-label={`${opsCount + pendingCount} waiting`} />
+                    ) : (
+                      <span className="ml-auto rounded-full bg-forge-ember px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="Approvals + leads + replies + build questions waiting">
+                        {opsCount + pendingCount}
+                      </span>
+                    )
+                  )}
+                  {to === '/business-preview-engine' && claimCount > 0 && (
+                    collapsed ? (
+                      <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-forge-ok" aria-label={`${claimCount} new claims`} />
+                    ) : (
+                      <span className="ml-auto rounded-full bg-forge-ok px-1.5 py-0.5 text-[10px] font-semibold text-forge-bg" title="New claim requests">
+                        {claimCount}
+                      </span>
+                    )
+                  )}
+                </NavLink>
+              ))}
+              {section.title === 'Account' && profile?.role === 'admin' && (
+                <NavLink
+                  to="/admin"
+                  onClick={() => setMobileOpen(false)}
+                  title={collapsed ? 'Admin' : undefined}
+                  className={navLinkClass(collapsed)}
+                >
+                  <ShieldCheck size={16} className="shrink-0" />
+                  {!collapsed && 'Admin'}
+                </NavLink>
+              )}
+            </div>
+          );
+          return (
+            <>
+              {shown.map((section, si) => renderSection(section, si))}
+              {/* The disclosure: only in the expanded sidebar, and only if there's a rest to reveal. */}
+              {!collapsed && rest.length > 0 && (
+                <button
+                  onClick={() => setMoreOpen((v) => !v)}
+                  className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-forge-dim/70 transition-colors hover:text-forge-ink"
+                  aria-expanded={moreOpen}
+                >
+                  <ChevronDown size={12} className={cn('transition-transform', moreOpen && 'rotate-180')} />
+                  {moreOpen ? 'Less' : 'More'}
+                </button>
+              )}
+            </>
+          );
+        })()}
       </nav>
 
       <div className={cn('border-t border-forge-border p-3', collapsed && 'px-2')}>
