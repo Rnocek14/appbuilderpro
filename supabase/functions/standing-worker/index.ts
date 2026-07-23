@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     ownerScope = u.user.id;
   }
 
-  const body = (await req.json().catch(() => ({}))) as { order_id?: string; pitch_lead_id?: string };
+  const body = (await req.json().catch(() => ({}))) as { order_id?: string; pitch_lead_id?: string; review?: boolean };
   const nowIso = new Date().toISOString();
 
   // ---- ON-DEMAND: "Build & send" one prospect (operator, one click) ---------------------------
@@ -131,10 +131,14 @@ Deno.serve(async (req) => {
     };
     const order = { owner_id: ownerScope } as unknown as OrderRow;
     try {
-      const outcome = await buildDemoForLead(admin, order, leadRow as unknown as LeadRow, env, true);
-      if (outcome === 'queued') return json({ ok: true, sent: true });
+      // review:true builds the demo + QUEUES the pitch as a pending approval, but does NOT send — the
+      // operator reviews the email (and the before/after) in the drawer, then presses Send. The default
+      // (one-click "Build & send") still auto-sends.
+      const autoSend = body.review !== true;
+      const outcome = await buildDemoForLead(admin, order, leadRow as unknown as LeadRow, env, autoSend);
+      if (outcome === 'queued') return json({ ok: true, built: true, sent: autoSend, queued: !autoSend });
       // Built a demo but no public email was found — honest: we can't cold-email without an address.
-      if (outcome === 'built') return json({ ok: true, sent: false, error: 'Demo built, but no public email was found on their site — nothing was sent.' });
+      if (outcome === 'built') return json({ ok: true, built: true, sent: false, error: 'Demo built, but no public email was found on their site — nothing was sent.' });
       await admin.from('discovered_businesses').update({ status: 'skipped', updated_at: new Date().toISOString() }).eq('id', body.pitch_lead_id);
       return json({ ok: false, error: 'Couldn’t build a demo for this prospect (not enough real content to work from).' }, 422);
     } catch (e) {
