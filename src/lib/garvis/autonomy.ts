@@ -19,6 +19,10 @@ export const AUTONOMY_CLASSES: { id: AutonomyClass; title: string; what: string 
 /** Map an approval row to its autonomy class from its payload markers — never from free text. */
 export function classifyApproval(kind: string, payload: Record<string, unknown> | null | undefined): AutonomyClass | null {
   if (kind !== 'send_email' || !payload) return null;
+  // A COLD pitch carries {campaign_id, message_id} exactly like a follow-up — but it must NEVER be
+  // classifiable (cold pitches stay manual forever, and must not pollute the followup streak). A cold
+  // minter stamps payload.kind='cold_site_pitch'; refuse to classify it.
+  if (payload.kind === 'cold_site_pitch') return null;
   if (typeof payload.chase_stage === 'number') return 'invoice_chase';
   if (payload.sweep === 'reactivation') return 'reactivation';
   if (payload.reply_id) return 'inbox_reply';

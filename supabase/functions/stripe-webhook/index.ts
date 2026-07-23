@@ -102,10 +102,16 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
 // deno-lint-ignore no-explicit-any
 async function handleClientSubscriptionChange(admin: any, sub: Stripe.Subscription, deleted: boolean): Promise<boolean> {
   const { data: row, error } = await admin.from('client_subscriptions')
-    .select('id, owner_id, business_name').eq('stripe_subscription_id', sub.id).maybeSingle();
+    .select('id, owner_id, business_name, status').eq('stripe_subscription_id', sub.id).maybeSingle();
   if (error) throw new Error(`client sub lookup failed: ${error.message}`);
   if (!row) return false;   // not one of ours → let syncSubscription handle it
   const canceled = deleted || ['canceled', 'unpaid', 'incomplete_expired'].includes(sub.status);
+  // NO RESURRECTION: once a sale is booked canceled it stays canceled. Stripe events can arrive out of
+  // order — a stale 'updated' (emitted while the sub was still active) can land AFTER the 'deleted' that
+  // churned it. Without this guard that late event flips status back to 'active' and re-inflates MRR with
+  // a sale that's already dead. A genuine win-back is a deliberate new sale (setClientStatus), not a
+  // webhook side effect. Already-canceled + not-a-cancel → leave it, but still report it as ours (handled).
+  if ((row as { status?: string }).status === 'canceled' && !canceled) return true;
   await admin.from('client_subscriptions').update({ status: canceled ? 'canceled' : 'active' }).eq('id', row.id);
   if (canceled) {
     await admin.from('mind_events').insert({
@@ -114,6 +120,24 @@ async function handleClientSubscriptionChange(admin: any, sub: Stripe.Subscripti
       payload: { kind: 'client_sale_canceled', client_subscription_id: row.id },
     }).then(() => {}, () => {});
   }
+  return true;
+}
+
+/** A client's recurring invoice failed to charge. Drop an operator note so they can chase or cancel.
+ *  Returns true when the subscription is one of ours (so the caller skips the operator-plan sync).
+ *  Best-effort: an alert that fails to write must never 500 the webhook. */
+// deno-lint-ignore no-explicit-any
+async function alertClientPaymentFailed(admin: any, stripeSubId: string): Promise<boolean> {
+  const { data: row } = await admin.from('client_subscriptions')
+    .select('id, owner_id, business_name, status').eq('stripe_subscription_id', stripeSubId).maybeSingle();
+  if (!row) return false;   // not one of ours → operator's own plan, let syncSubscription handle it
+  // A sale we already booked canceled won't recover — no point nagging the operator about it.
+  if ((row as { status?: string }).status === 'canceled') return true;
+  await admin.from('mind_events').insert({
+    owner_id: row.owner_id, source: 'execution', event_type: 'note',
+    subject: `Payment failed — ${row.business_name}. Chase the client or cancel the plan.`,
+    payload: { kind: 'client_payment_failed', client_subscription_id: row.id },
+  }).then(() => {}, () => {});
   return true;
 }
 
@@ -191,6 +215,15 @@ Deno.serve(async (req) => {
       }
       case 'invoice.payment_failed': {
         const invoice = event.data.object as Stripe.Invoice;
+        // A CLIENT's recurring payment failed. Alert the operator so they can chase it or cancel — the
+        // sale still counts as active MRR through Stripe's retry window (the payment may recover), so
+        // without this the operator would never learn a paying client silently stopped paying until the
+        // sub finally lapsed to 'unpaid' weeks later. Fires on each real failed attempt (~3–4 over the
+        // retry window), which doubles as a persistent nudge. Not one of ours → operator's own plan.
+        // stripe@18: the subscription ref lives under invoice.parent.subscription_details (no top-level field).
+        const subRef = invoice.parent?.subscription_details?.subscription ?? null;
+        const subId = typeof subRef === 'string' ? subRef : subRef?.id ?? null;
+        if (subId && await alertClientPaymentFailed(admin, subId)) break;
         if (typeof invoice.customer === 'string') await syncSubscription(stripe, admin, invoice.customer);
         break;
       }

@@ -38,6 +38,7 @@ interface CustomerRow {
   id: string; email: string | null; phone: string | null; name: string | null;
   last_service_at: string | null; last_visit_at: string | null;
   purchase_at: string | null; next_due_at: string | null;
+  consent_basis: string | null;
 }
 
 /** Run every active trigger for the signed-in owner. Best-effort per fire; one failure never sinks the
@@ -68,7 +69,12 @@ export async function runTriggersForOwner(nowIso?: string): Promise<TriggerRunSu
     if (cached) return cached;
     const { data: custData } = await supabase.from('customers')
       .select('*').eq('owner_id', uid).eq('list_id', listId);
-    const mapped: CustomerRec[] = ((custData ?? []) as CustomerRow[]).map((c) => ({
+    // CONSENT PARITY with the autonomous drain (standing-worker): a cold-prospecting row must never
+    // ride a warm recall/reminder trigger. Default missing/unset to warm_transactional (the schema
+    // default), so only an explicitly cold row is filtered out.
+    const mapped: CustomerRec[] = ((custData ?? []) as CustomerRow[])
+      .filter((c) => (c.consent_basis ?? 'warm_transactional') === 'warm_transactional')
+      .map((c) => ({
       id: c.id, email: c.email, phone: c.phone, name: c.name,
       anchors: {
         last_service_at: c.last_service_at, last_visit_at: c.last_visit_at,

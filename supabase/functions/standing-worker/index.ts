@@ -2127,7 +2127,10 @@ async function queueHuntPitch(admin: any, uid: string, input: {
   // the payload changes after this decision. requested_by 'garvis-auto' marks a machine-queued
   // request; status defaults to 'pending', so the OWNER still approves each send (unless the
   // Prospects screen's one-click path approves + sends it immediately — see buildDemoForLead autoSend).
-  const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id };
+  // kind:'cold_site_pitch' is the DISCRIMINATOR classifyApproval keys on: a cold pitch carries
+  // {campaign_id, message_id} identical to a warm follow-up, so without this marker it would earn an
+  // autonomy streak and could go auto-approved. Stamping it keeps cold pitches manual forever.
+  const payload = { message_id: (msg as { id: string }).id, campaign_id: (camp as { id: string }).id, kind: 'cold_site_pitch' };
   const payload_hash = await hashPayload(payload);
   // When an HTML screenshot pitch rides along, tell the operator so the plain-text preview isn't
   // mistaken for the whole email — the recipient sees the site rendered as the hero image.

@@ -13,6 +13,7 @@ check('chase_stage marks an invoice chase', classifyApproval('send_email', { cha
 check('sweep marks a reactivation', classifyApproval('send_email', { sweep: 'reactivation', message_id: 'm' }) === 'reactivation');
 check('reply_id marks an inbox reply', classifyApproval('send_email', { reply_id: 'r', message_id: 'm', campaign_id: 'c' }) === 'inbox_reply');
 check('campaign+message alone marks a followup', classifyApproval('send_email', { campaign_id: 'c', message_id: 'm' }) === 'followup');
+check('a COLD pitch (kind marker) never classifies — stays manual forever, no followup streak', classifyApproval('send_email', { campaign_id: 'c', message_id: 'm', kind: 'cold_site_pitch' }) === null);
 check('a batch recipient is NOT a followup (one batch approval is its authority)', classifyApproval('send_email', { campaign_id: 'c', message_id: 'm', batch_id: 'b' }) === null);
 check('speed-to-lead stays out (its own pre-authorized rule)', classifyApproval('send_email', { standing_rule: 'auto_first_touch', message_id: 'm', campaign_id: 'c' }) === null);
 check('non-email kinds never classify', classifyApproval('publish_post', { campaign_id: 'c', message_id: 'm' }) === null);
