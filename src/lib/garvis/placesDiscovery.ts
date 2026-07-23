@@ -62,6 +62,20 @@ export function normalizeHost(url?: string | null): string | null {
   }
 }
 
+/** A social/directory URL is NOT "their own website" — a business whose only web presence is a
+ *  Facebook page is the STRONGEST "let me build you a real site" prospect, not one to skip. Google
+ *  Places and Claude both hand back such URLs as `websiteUri`; treating them as a real site both
+ *  mis-counts the prospect and (worse) sends the scraper at facebook.com's login wall. Detect them
+ *  so the caller can null the website and flag has_website:false. normalizeHost has already stripped
+ *  the path, so we match on host alone. A real (if weak) builder site — business.site, a *.wixsite,
+ *  a godaddysites page — is a genuine website and deliberately NOT matched here. Exported + tested. */
+export function isDirectoryOrSocialUrl(url?: string | null): boolean {
+  const h = normalizeHost(url);
+  if (!h) return false;
+  if (/^(linktr\.ee|bit\.ly|t\.co|goo\.gl)$/i.test(h)) return true;
+  return /(^|\.)(facebook|fb|instagram|twitter|tiktok|linkedin|yelp|yellowpages|bbb|mapquest|tripadvisor|angi|angieslist|thumbtack|houzz|nextdoor|foursquare|wikipedia|amazon|reddit|google|bing)\.[a-z.]+$/i.test(h);
+}
+
 /** City + state from a Places result: prefer the structured addressComponents, fall back to parsing
  *  the formatted address ("…, Austin, TX 78701, USA"). Unknown → null, never guessed. */
 export function extractCityState(
@@ -91,7 +105,11 @@ export function extractCityState(
 export function parsePlace(raw: PlaceRaw, keyword: string): DiscoveredBiz | null {
   const name = raw.displayName?.text?.trim();
   if (!name) return null;
-  const website = raw.websiteUri?.trim() || null;
+  const rawWebsite = raw.websiteUri?.trim() || null;
+  // A Facebook/Yelp/Maps URL is not their site — null it so this becomes a clean "build you a site"
+  // prospect (has_website:false) and we never point the scraper at a social login wall.
+  const social = isDirectoryOrSocialUrl(rawWebsite);
+  const website = social ? null : rawWebsite;
   const website_normalized = normalizeHost(website);
   const { city, state } = extractCityState(raw.formattedAddress, raw.addressComponents);
   return {

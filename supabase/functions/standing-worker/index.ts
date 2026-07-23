@@ -1634,17 +1634,21 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       pageTech = (text.tech as Record<string, unknown> | undefined) ?? null;
       finalUrl = (typeof text.url === 'string' && text.url) || lead.website;
       page = { title: (text.title as string) ?? null, description: (text.description as string) ?? null };
-      const imgResp = await scrapePage(lead.website, 'images', env);
-      images = Array.isArray(imgResp?.images)
-        ? (imgResp!.images as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u).slice(0, 12)
-        : [];
-      const contactResp = await scrapePage(lead.website, 'contact', env);
-      email = Array.isArray(contactResp?.emails) ? ((contactResp!.emails as string[])[0] ?? null) : null;
       audit = auditSite({
         url: finalUrl, reachable: true, title: page.title, description: page.description,
         text: (text.text as string) ?? '', hasViewport: !!checks.viewport, hasForm: !!checks.form, emailFound: !!checks.email,
       }, env.nowYear);
     }
+    // Photos + email do NOT depend on the text PARSE succeeding — a WAF quirk or an odd homepage
+    // shouldn't cost us their real gallery or their published address. Attempt both whenever a site
+    // exists; each is independent and fail-soft (empty on any failure), and the images mode follows
+    // the gallery/portfolio crawl, so we get their work photos even when the homepage is thin.
+    const imgResp = await scrapePage(lead.website, 'images', env);
+    images = Array.isArray(imgResp?.images)
+      ? (imgResp!.images as { url?: string }[]).map((i) => i.url).filter((u): u is string => !!u).slice(0, 12)
+      : [];
+    const contactResp = await scrapePage(lead.website, 'contact', env);
+    email = Array.isArray(contactResp?.emails) ? ((contactResp!.emails as string[])[0] ?? null) : null;
   }
 
   const raw = buildHuntProfileRaw({

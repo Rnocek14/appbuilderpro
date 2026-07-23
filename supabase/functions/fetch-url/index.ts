@@ -23,6 +23,16 @@ const cors = {
 const MAX_TEXT = 12_000;      // chars of extracted text returned per page
 const MAX_BODY = 1_500_000;   // chars of raw HTML we'll process
 
+// A real browser fingerprint. Small-business sites sit behind Cloudflare/WAFs that 403 a bot-ish
+// User-Agent — which silently downgraded a real, readable site to a "no website" prospect. We only
+// ever READ public pages here (SSRF-guarded, GET-only), so presenting as a browser is the honest
+// way to see what a human visitor sees. Accept-Language avoids geo/consent interstitials.
+const BROWSER_HEADERS: Record<string, string> = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
 // SSRF guard: the shared hardened path (_shared/safeFetch.ts) — static checks + DNS resolution
 // with every-record-public required, and MANUAL redirects re-validated per hop. The old local
 // guard checked only the initial hostname string and then followed redirects blindly.
@@ -88,7 +98,11 @@ function extractImages(html: string, base: string): { url: string; alt: string }
     const alt = decodeEntities(/\balt=["']([^"']*)["']/i.exec(tag)?.[1] ?? '');
     add(/\bsrcset=["']([^"']+)["']/i.exec(tag)?.[1], alt);
     add(/\bsrc=["']([^"']+)["']/i.exec(tag)?.[1], alt);
-    add(/\bdata-src=["']([^"']+)["']/i.exec(tag)?.[1], alt); // lazy-load libraries
+    // Lazy-load libraries (WordPress plugins, Wix/Squarespace responsive) hide the real URL behind
+    // data-* until scroll — without these a whole gallery scrapes to zero images.
+    for (const a of ['data-src', 'data-lazy-src', 'data-original', 'data-srcset', 'data-lazy', 'data-bg', 'data-image']) {
+      add(new RegExp(`\\b${a}=["']([^"']+)["']`, 'i').exec(tag)?.[1], alt);
+    }
   }
   for (const m of html.matchAll(/<source\b[^>]*srcset=["']([^"']+)["']/gi)) add(m[1]);
   for (const m of html.matchAll(/background(?:-image)?\s*:\s*url\((['"]?)([^'")]+)\1\)/gi)) add(m[2]);
@@ -112,6 +126,19 @@ function assetFileName(u: URL): string {
 
 const EMAIL_JUNK = /noreply|no-?reply|donotreply|do-?not-?reply|example\.|yourdomain|yourema|sentry|wixpress|schema\.org|\.(png|jpe?g|gif|webp|svg|css|js)$/i;
 
+/** Decode a Cloudflare-obfuscated email ("Email Protection"): the first hex byte is an XOR key,
+ *  each following byte is a character XOR'd with it. Cloudflare renders the real address as the
+ *  literal "[email protected]" in visible text, so without this a very common small-business setup
+ *  yields ZERO emails — and a real, emailable prospect gets no pitch. Returns null on any malformed
+ *  input (the caller just moves on). */
+function decodeCfEmail(hex: string): string | null {
+  if (!/^[0-9a-fA-F]+$/.test(hex) || hex.length < 4 || hex.length % 2 !== 0) return null;
+  const key = parseInt(hex.slice(0, 2), 16);
+  let out = '';
+  for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+  return out;
+}
+
 function extractEmails(html: string): string[] {
   const found = new Set<string>();
   const add = (raw: string) => {
@@ -121,6 +148,9 @@ function extractEmails(html: string): string[] {
     found.add(e);
   };
   for (const m of html.matchAll(/mailto:([^"'\s<>?]+)/gi)) add(m[1]);
+  // Cloudflare Email Protection: data-cfemail="<hex>" on a span, and /cdn-cgi/l/email-protection#<hex>.
+  for (const m of html.matchAll(/data-cfemail=["']([0-9a-fA-F]+)["']/gi)) { const d = decodeCfEmail(m[1]); if (d) add(d); }
+  for (const m of html.matchAll(/\/cdn-cgi\/l\/email-protection#([0-9a-fA-F]+)/gi)) { const d = decodeCfEmail(m[1]); if (d) add(d); }
   const text = html.replace(/<[^>]+>/g, ' ');
   for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g)) add(m[0]);
   // Light de-obfuscation: "name [at] domain [dot] com" style listings.
@@ -217,7 +247,7 @@ Deno.serve(async (req) => {
       const t0 = setTimeout(() => ac0.abort(), 20_000);
       let img: Response;
       try {
-        img = await safeFetch(url.href, { signal: ac0.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+        img = await safeFetch(url.href, { signal: ac0.signal, headers: BROWSER_HEADERS });
       } finally { clearTimeout(t0); }
       if (!img.ok) return json({ error: `The image returned ${img.status}.` }, 200);
       const ctype = img.headers.get('content-type') ?? '';
@@ -241,13 +271,7 @@ Deno.serve(async (req) => {
     const t = setTimeout(() => ac.abort(), 15_000);
     let res: Response;
     try {
-      res = await safeFetch(url.href, {
-        signal: ac.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0; +https://fableforge.app)',
-          'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5',
-        },
-      });
+      res = await safeFetch(url.href, { signal: ac.signal, headers: BROWSER_HEADERS });
     } finally { clearTimeout(t); }
     if (!res.ok) return json({ error: `The page returned ${res.status}.`, status: res.status }, 200);
 
@@ -257,7 +281,30 @@ Deno.serve(async (req) => {
     // ---- mode 'images': list the page's likely-content images for the harvest picker ----
     if (mode === 'images') {
       if (!/html/.test(type)) return json({ images: [], url: res.url || url.href });
-      return json({ images: extractImages(bodyRaw, res.url || url.href), url: res.url || url.href });
+      const finalUrl0 = res.url || url.href;
+      const seen = new Map<string, string>();
+      for (const im of extractImages(bodyRaw, finalUrl0)) if (!seen.has(im.url)) seen.set(im.url, im.alt);
+      // A local business's real WORK photos usually live on /gallery or /portfolio, not the homepage
+      // hero. Follow up to two of those pages and merge their images, so a thin homepage doesn't
+      // leave the rebuild with no real photography. Bounded + fail-soft; never sinks the scrape.
+      const galleryLinks = findSectionLinks(bodyRaw, finalUrl0)
+        .filter((l) => /gallery|portfolio|our-work|projects?|photos?/i.test(l)).slice(0, 2);
+      for (const link of galleryLinks) {
+        if (seen.size >= MAX_IMAGES) break;
+        try {
+          const acG = new AbortController();
+          const tG = setTimeout(() => acG.abort(), 10_000);
+          let rG: Response;
+          try { rG = await safeFetch(link, { signal: acG.signal, headers: BROWSER_HEADERS }); }
+          finally { clearTimeout(tG); }
+          if (rG.ok && /html/.test(rG.headers.get('content-type') ?? '')) {
+            const g = (await rG.text()).slice(0, MAX_BODY);
+            for (const im of extractImages(g, rG.url || link)) if (!seen.has(im.url)) seen.set(im.url, im.alt);
+          } else { await rG.body?.cancel().catch(() => {}); }
+        } catch { /* one gallery page failing never sinks the harvest */ }
+      }
+      const images = [...seen].slice(0, MAX_IMAGES).map(([url, alt]) => ({ url, alt }));
+      return json({ images, url: finalUrl0 });
     }
 
     // ---- mode 'contact': publicly listed emails from the page (falls back to its contact page) ----
@@ -271,7 +318,7 @@ Deno.serve(async (req) => {
           const t2 = setTimeout(() => ac2.abort(), 12_000);
           let r2: Response;
           try {
-            r2 = await safeFetch(contactPage, { signal: ac2.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+            r2 = await safeFetch(contactPage, { signal: ac2.signal, headers: BROWSER_HEADERS });
           } finally { clearTimeout(t2); }
           if (r2.ok && /html/.test(r2.headers.get('content-type') ?? '')) {
             emails = extractEmails((await r2.text()).slice(0, MAX_BODY));
@@ -312,7 +359,7 @@ Deno.serve(async (req) => {
         const tX = setTimeout(() => acX.abort(), 10_000);
         let rX: Response;
         try {
-          rX = await safeFetch(link, { signal: acX.signal, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FableForge/1.0)' } });
+          rX = await safeFetch(link, { signal: acX.signal, headers: BROWSER_HEADERS });
         } finally { clearTimeout(tX); }
         if (!rX.ok || !/html/.test(rX.headers.get('content-type') ?? '')) continue;
         const sub = extractText((await rX.text()).slice(0, MAX_BODY)).text.slice(0, extraBudget);

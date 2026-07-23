@@ -1,6 +1,6 @@
 // Run: npx tsx src/lib/garvis/placesDiscovery.verify.ts
 import {
-  normalizeHost, extractCityState, parsePlace, placesQueryText, buildDiscoveryQueries,
+  normalizeHost, isDirectoryOrSocialUrl, extractCityState, parsePlace, placesQueryText, buildDiscoveryQueries,
   pickNextQuery, exhaustionUpdate, PLACES_FIELD_MASK, type PlaceRaw, type QueryRow,
 } from './placesDiscovery';
 
@@ -47,6 +47,25 @@ check('field mask requests phone + website + geo (structured records)', /nationa
   check('a business with NO website is a valid lead (strongest prospect)', b.has_website === false && b.website === null && b.company_name === 'Acme Plumbing');
 
   check('no name → unusable → null', parsePlace({ id: 'x' }, 'roofers') === null);
+
+  // A Facebook-only business is the STRONGEST rebuild prospect — reclassified to no-website so it's
+  // never scraped as if the social page were their site.
+  const social: PlaceRaw = { id: 'places/FB', displayName: { text: 'Nadia Nails' }, websiteUri: 'https://www.facebook.com/nadianails', nationalPhoneNumber: '555' };
+  const s = parsePlace(social, 'nail salons')!;
+  check('a Facebook-only business → has_website:false, website nulled', s.has_website === false && s.website === null && s.website_normalized === null);
+}
+
+// --- isDirectoryOrSocialUrl: a social/directory page is NOT their own website -----------------
+{
+  check('facebook is social', isDirectoryOrSocialUrl('https://facebook.com/biz') === true);
+  check('instagram is social', isDirectoryOrSocialUrl('https://www.instagram.com/biz') === true);
+  check('yelp is a directory', isDirectoryOrSocialUrl('https://www.yelp.com/biz/joes') === true);
+  check('google maps is a directory', isDirectoryOrSocialUrl('https://google.com/maps/place/x') === true);
+  check('linktr.ee is a link-in-bio, not a site', isDirectoryOrSocialUrl('https://linktr.ee/biz') === true);
+  check('a real business domain is NOT social', isDirectoryOrSocialUrl('https://www.joesroofing.com') === false);
+  check('a weak builder site (business.site) is still a real site', isDirectoryOrSocialUrl('https://joes-roofing.business.site') === false);
+  check('null/empty → false', isDirectoryOrSocialUrl(null) === false && isDirectoryOrSocialUrl('') === false);
+  check('a domain merely CONTAINING a brand token is not social', isDirectoryOrSocialUrl('https://facebookmarketingpros.com') === false);
 }
 
 // --- placesQueryText + buildDiscoveryQueries: the seed grid ---------------------------------
