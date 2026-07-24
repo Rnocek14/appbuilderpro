@@ -1,8 +1,10 @@
 # 01 — Product Vision: What This Actually Is
 
 *Part of the system-reconstruction series. Reconstructed July 2026 from the repository, its 35+
-planning documents, 233 commits, and the code itself. This document answers: what product is this,
-what problem does it solve, who is it for, and what philosophy drives it.*
+planning documents, 477 commits (the clone shipped shallow at 233; the full history was recovered
+via `git fetch --unshallow` and reaches back to the June 17, 2026 root), and the code itself. This
+document answers: what product is this, what problem does it solve, who is it for, and what
+philosophy drives it.*
 
 > **Status of this document:** synthesized primarily from the author's own reconciliation documents
 > (`docs/os-blueprint.md`, `docs/holy-grail.md`, `docs/where-we-stand.md`,
@@ -113,8 +115,18 @@ These appear across nearly every planning document and are enforced in code:
 ## 6. What the product has evolved through (short form; full story in 08-project-history.md)
 
 The code "tells eight competing stories" (the author's phrase): app builder · chief of staff ·
-marketing team · agency-in-a-box · real-estate lead tool · company genesis · second brain. The
-rough arc:
+marketing team · agency-in-a-box · real-estate lead tool · company genesis · second brain.
+
+Hard chronology (full 477-commit history; see 08-project-history.md for the complete narrative):
+the repo's entire visible life is **37 days** (June 17 – July 24, 2026), overwhelmingly an
+agent-driven build campaign (457 of 477 commits in the final 23 days; commit co-author trailers
+show Claude models did most of the writing under the operator's direction). The root commit is
+already a *finished* FableForge. Garvis is born June 22 as a small "portfolio control plane" over
+FableForge's apps. **The single biggest pivot is commit `c81717c` (July 14, 2026): "Rebrand to
+Garvis, demote (keep) the app builder"** — recording the operator's decision verbatim ("Riley:
+one clear identity"). From that day the product inverted: FableForge became a capability inside
+Garvis, the business-running AI OS. "Mom's real estate" is the traceable client zero. The rough
+arc:
 
 1. **FableForge era** — a Lovable competitor: generation pipeline, workspace, billing, admin,
    deployments. The "legendary roadmap" (docs/legendary-roadmap.md) is about beating Lovable.
