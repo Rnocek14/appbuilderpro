@@ -5,9 +5,10 @@ the man himself.*
 
 # Reality Check 01 — The Simplicity Attack
 
-**Target:** `docs/experience-architecture/` — `_constitution.md`, `15-master-experience-
-blueprint.md`, `02-global-shell.md`, `09-creation-and-genesis.md`, `03-world-experience.md`,
-`10-key-user-journeys.md` (skimmed). Product context: `docs/operating-model/operating-model.md` §0.
+**Target:** `docs/experience-architecture/` — `_constitution.md`,
+`15-master-experience-blueprint.md`, `02-global-shell.md`, `09-creation-and-genesis.md`,
+`03-world-experience.md`, `10-key-user-journeys.md` (skimmed). Product context:
+`docs/operating-model/operating-model.md` §0.
 
 **The standard applied:** not "is this coherent?" — it is fanatically coherent — but "would a person
 who has never seen it, and will never read one of these seventeen documents, fall in love in five
