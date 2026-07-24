@@ -230,6 +230,7 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 /* review cards */
 .review { margin-top: 6px; overflow: hidden; }
 .ucard {
+  scroll-margin: 90px 0 150px;
   margin-top: 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -481,15 +482,19 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 .hud {
   position: fixed;
   left: 22px;
-  bottom: 24px;
+  bottom: 20px;
   z-index: 40;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  max-width: 250px;
   font-family: var(--chrome);
   font-size: 11px;
+  line-height: 1.45;
   color: var(--faint);
 }
+.hud .hud-row { display: flex; align-items: center; gap: 8px; }
 .hud button { color: var(--faint); font-size: 12px; padding: 2px 5px; border-radius: 4px; }
 .hud button:hover { color: var(--dim); }
 .hud .elapsed { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -595,9 +600,11 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 <!-- HUD -->
 <div class="hud">
   <span>P4 · The morning at ten clients — staged data, real timing</span>
-  <button id="hudRestart" aria-label="Restart the prototype" title="restart">⟲</button>
-  <button id="hudHelp" aria-label="What to feel for" title="what to feel for">?</button>
-  <span class="elapsed" id="elapsed">your morning so far · 0:00</span>
+  <div class="hud-row">
+    <button id="hudRestart" aria-label="Restart the prototype" title="restart">⟲</button>
+    <button id="hudHelp" aria-label="What to feel for" title="what to feel for">?</button>
+    <span class="elapsed" id="elapsed">your morning so far · 0:00</span>
+  </div>
 </div>
 
 <!-- feel-for card -->
@@ -728,7 +735,7 @@ function humanElapsed(ms){
 const D = STAGED_DATA, O = D.overnight;
 const visitsSum = O.demoVisits.reduce((a,v) => a + v.n, 0);
 const EV = {
-  visits:  O.demoVisits.map(v => `${v.world.toLowerCase().replace(" chiropractic","")} ${v.n}`).join(" · ")
+  visits:  O.demoVisits.map(v => `${v.world.toLowerCase().split(" ").slice(0, -1).join(" ")} ${v.n}`).join(" · ")
            + ` — <span class="ev-accent">${visitsSum} visits</span> · ${O.visitWindow}`,
   replies: O.replies.map(r => `${r.who} ${r.at} — ${r.tone === "warm" ? '<span class="ev-accent">warm</span>' : r.tone}`).join(" · "),
   invoice: `invoice <span class="ev-accent">${O.invoice.id}</span> · paid ${O.invoice.paidAt} · <span class="ev-accent">${O.invoice.amount}</span> — ${O.invoice.world.toLowerCase()}`,
@@ -942,6 +949,7 @@ function decide(id, act){
     EV.rework = reworkEntries.join("<br>");
     const chip = $("reworkChip");
     chip.hidden = false;
+    chip.classList.add("claim");
     chip.innerHTML = `needs rework · <b>${reworkEntries.length}</b>`;
     chip.dataset.ev = "rework";
   }
@@ -952,7 +960,9 @@ function decide(id, act){
     if (c) c.textContent = sendCount();
     if (p) p.textContent = n ? ` — ${numword(n)} unusual still wait below` : "";
   } else renderSlateRest();
-  focusCard(cardIdx);
+  if (pendingIds().length) focusCard(cardIdx);
+  else if (!state.slateApproved) { const b = $("btnApprove"); if (b) b.focus(); }
+  else { const c = $("undoChip"); if (c) c.focus(); }
   updatePulse(); checkMorning();
 }
 
@@ -986,16 +996,19 @@ function renderDrawer(){
 }
 function actQueue(which){
   if (which === "reply" && state.reply === "pending") {
-    state.reply = "done"; renderDrawer(); updatePulse(); checkMorning();
+    state.reply = "done";
     showToast("reply to Jane queued — sends in 10 min", () => {
       state.reply = "pending"; renderDrawer(); unshowMorning(); updatePulse(); focusDrawerItem(0);
     });
   } else if (which === "bounce" && state.bounce === "pending") {   // reversible → act now, undo after (D4)
-    state.bounce = "done"; renderDrawer(); updatePulse(); checkMorning();
+    state.bounce = "done";
     showToast(`paused sends to ${O.bounce.domain}`, () => {
       state.bounce = "pending"; renderDrawer(); unshowMorning(); updatePulse(); focusDrawerItem(0);
     });
-  }
+  } else return;
+  renderDrawer(); updatePulse(); checkMorning();
+  drawerIdx = 0;
+  if (drawerOpenNow() && pendingQ().length) focusDrawerItem(0);
 }
 let drawerIdx = 0;
 function pendingQ(){ return [ state.reply === "pending" ? "reply" : null, state.bounce === "pending" ? "bounce" : null ].filter(Boolean); }
@@ -1013,9 +1026,9 @@ function openDrawer(){
   setTimeout(() => focusDrawerItem(0), 120);
 }
 function closeDrawer(){
+  $("pulse").focus();
   $("drawer").classList.remove("open");
   $("drawer").setAttribute("aria-hidden", "true");
-  $("pulse").focus();
 }
 $("pulse").addEventListener("click", () => drawerOpenNow() ? closeDrawer() : openDrawer());
 
@@ -1040,6 +1053,8 @@ function checkMorning(){
   line.textContent = `That's the morning. ${humanElapsed(elapsedMs())}.`;
   line.hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => line.classList.add("shown")));
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
 }
 function unshowMorning(){
   if (!state.morningShown) return;
