@@ -17,7 +17,8 @@ named point · 🔌 works only when armed/keyed (the heartbeat + secrets gate �
 
 Nearly every "runs while you sleep" workflow below depends on two switches:
 
-1. **The heartbeat must be armed.** `garvis_arm_heartbeat()` (SQL) schedules ~11–12 pg_cron jobs
+1. **The heartbeat must be armed.** `garvis_arm_heartbeat()` (SQL, final definition
+   app_0096) schedules exactly 12 pg_cron jobs
    that invoke worker edge functions (`garvis-pulse`, `garvis-worker`, `standing-worker`,
    `outreach-followups`, `outreach-reactivate`, `inbox-draft`, `invoice-chase`, `ads-watch`,
    `garvis-consolidate`, `garvis-scorecard`, `garvis-canary`, `social-sync`…). The author's

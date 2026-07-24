@@ -28,7 +28,7 @@ LEADS … the app builder is a real, still-reachable capability ('edit apps') de
 | `src/data/` | 4 static seed/sample files (`capabilitySeed`, `clusterSamples`, `portfolioSeed`, `templates`). |
 | `src/types/` | `index.ts` — ~60 exported interfaces/types shared across both halves. |
 | `src/lib/` | ~370 files of non-React logic: `aiClient`/`aiConfig` (provider abstraction), `agent/` (agentic edit loop), `preview/` (Business Website Preview Engine), `flagship/`, and the huge `garvis/` domain layer (~320 files; roughly half are `*.verify.ts` node-run self-tests wired to `npm run verify:*` scripts). |
-| `supabase/` | Backend: `schema.sql` + `schema_v2_autopilot.sql` + `schema_repair.sql`, **125 migrations**, `seed.sql`, and **70 edge functions** under `functions/` (generate-app, chat-edit, garvis-worker, send-email, booking, voice-inbound, stripe-webhook, …). |
+| `supabase/` | Backend: `schema.sql` + `schema_v2_autopilot.sql` + `schema_repair.sql`, **125 migrations**, `seed.sql`, and **67 edge functions** (+ `_shared`) under `functions/` (generate-app, chat-edit, garvis-worker, send-email, booking, voice-inbound, stripe-webhook, …). |
 | `docs/` | ~35 design/architecture markdown docs (RUNBOOK.md, garvis-* blueprints, go-live-checklist, holy-grail.md…), `mockups/` (2 HTML UI concepts), and `system-reconstruction/` (this doc set). |
 | `e2e/` | Playwright suites: `smoke.spec.ts`, `routes.spec.ts` (full backendless route sweep — public routes must render, protected must redirect to `/auth`), `authed-mock.spec.ts`, `flows.authed.spec.ts`. |
 | `scripts/` | Operational/dev scripts: `go-live.sh`, `migrations.verify.ts`, seeders (`seed-einstein.ts`), probes (`idea-board-probe.mjs`), `design-e2e.ts`, `make-schema-repair.py`, etc. |
@@ -673,5 +673,5 @@ carries intent in long doctrine comments; the honest gaps are flagged with words
 - Nav destinations: 30 in navConfig (Core 4 · Prospecting 3 · Build 5 · Money 2 · Automation & status 7 · Knowledge 3 · Apps 4 · Account 2) + 2 admin-only (Admin, Labs) + 16 ⌘K aliases.
 - Components: 11 root + chat 3 + clients 1 + editor 8 + garvis 72 (incl. canvas 17) + layout 1 + preview 6 + prospects 1 + ui 2 = **105 files**.
 - Hooks: **21**. Contexts: **2**. Data seeds: **4**. Shared types: ~60 exports.
-- Supabase edge functions: **70**. Migrations: **125**. E2E suites: **4**.
+- Supabase edge functions: **67** (+ `_shared`). Migrations: **125**. E2E suites: **4**.
 - TODO/FIXME/HACK/XXX markers in `src/`: **0**.

@@ -19,7 +19,7 @@ A new team cannot read the code or the planning docs without this. Terms marked 
 - **The Spine** ⚙ — the approval system: `approvals` table (one queue for everything outbound) +
   `execution_runs` (immutable ledger of what actually happened). "The one interruption Garvis is
   allowed."
-- **The Clock / Heartbeat** ⚙ — `standing_orders` + `system_heartbeat` tables + ~12 pg_cron jobs +
+- **The Clock / Heartbeat** ⚙ — `standing_orders` + `system_heartbeat` tables + 12 pg_cron jobs +
   worker edge functions (`garvis-pulse`, `garvis-worker`, `standing-worker`, …), armed by the SQL
   function `garvis_arm_heartbeat()`. Famously never invoked automatically — "the whole machine
   ships switched OFF."
@@ -75,12 +75,14 @@ A new team cannot read the code or the planning docs without this. Terms marked 
 - **Mission** ⚙ — `garvis_missions` (+ `garvis_tasks`): a bounded campaign/intention with stakes.
   In the first-principles vision, THE only noun. In code, currently "an overloaded run-log with
   two incompatible writers" (`useMissions.planMission` vs `workwebRun.runPlay`).
-- **Arc** 📐 — a durable, resumable project (plans + waiting states + auto-resume). The
-  holy-grail doc's gap #2; not yet a table.
+- **Arc** ⚙ — a durable, resumable project: an `orchestrator_plans` row (app_0091) that parks
+  `waiting` at approval seams and self-resumes via the ARC WAKE LOOP (app_0095). Was holy-grail
+  gap #2 (planning-only); BUILT during the July 20–21 hardening campaign.
 - **Work Web / WorkWeb** ⚙ — the per-world web-of-work view (`WorkWeb.tsx`, `workweb.ts`,
   app_0024): the mission/areas graph for a venture. Vision says the term disappears from UI.
-- **Standing Order** ⚙ — `standing_orders` row: a durable scheduled job/watcher (5 kinds) run by
-  `standing-worker` on the heartbeat.
+- **Standing Order** ⚙ — `standing_orders` row: a durable scheduled job/watcher run by
+  `standing-worker` on the heartbeat. Six kinds in the final code: watch_url, client_hunt,
+  opportunity_hunt, idea_stream, content_week, cadence_digest (earlier docs say 5 — strata).
 - **Run(s)** ⚙ — the `*Run.ts` pattern (`clientHuntRun`, `genesisRun`, `gardenerRun`, …): the
   execution wrapper for a subsystem's unattended work (see 05-ai-system.md).
 - **Next Move** ⚙ — `nextMove.ts`: the engine that stages "the one thing to do next" per world.

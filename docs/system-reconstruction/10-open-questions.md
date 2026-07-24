@@ -72,10 +72,14 @@ team knows it is unanswered rather than answered somewhere they haven't looked.*
     exactly as os-blueprint claimed (its Phase 0 lists the one-line fix). The SMS verify suites
     (#63–#66) test pure cores and never touch a live enum, which is how it shipped.
 
-11. **Cron-job count drift.** RUNBOOK says 9 · go-live checklist says 12 · SQL truth is 11 ·
-    os-blueprint says 12 · full-system-scan says "10 armed (should be 11)". The count changed
-    era by era and the docs were not all updated. `verify:migrations` pins the SQL truth; treat
-    11 as current.
+11. **Cron-job count drift — RESOLVED.** RUNBOOK says 9 · full-system-scan says "10 (should be
+    11)" · some audits say 11 · go-live checklist and os-blueprint say 12. The count grew as
+    each era's migration redefined `garvis_arm_heartbeat()` (nine redefinitions total). The
+    FINAL definition (`app_0096_canary_tick.sql`) schedules exactly **12 jobs** (verified by
+    counting `cron.schedule` calls: worker-tick, standing-tick, pulse-hourly, ads-watch-daily,
+    inbox-draft-daily, followups-daily, invoice-chase-daily, canary-nightly, social-sync,
+    scorecard-weekly, consolidate-weekly, reactivate-monthly). Treat 12 as current; earlier
+    numbers are historical strata.
 
 12. **Numbers drift across audit docs generally.** 43 vs 40 vs ~50 pages; 55 vs 56 vs 67–70 edge
     functions; 90 vs 94 vs 96 vs 116 verify suites; 29-table vs 97-table vs ~124-table data
@@ -103,29 +107,37 @@ team knows it is unanswered rather than answered somewhere they haven't looked.*
     archaeology must `git fetch --unshallow` first.
 19. **Secrets-at-rest for builder projects** remain in localStorage ("interim",
     `useProjectSecrets.ts:6–9`) despite legendary-roadmap Phase 8a (Vault) being specced.
+20. **Two functions missing from every deploy list.** `booking` and `sender-domain` appear in
+    neither `functions:deploy` nor `functions:deploy:webhooks` (package.json) — a fresh
+    environment silently lacks the booking flow and sending-domain verification (the same class
+    as fixed defect B3/render-design). The edge-function survey (13-edge-functions.md §13)
+    found this; nothing in the author's docs mentions it.
+21. **Anticipated media providers priced but unbuilt**: the credits ledger prices ElevenLabs
+    "voiceover" and Sora/Runway/Luma "video_clip" — no function implements either (matches the
+    dead reels schema).
 
 ## D. Genuinely unanswerable from the repository (questions for the operator)
 
-20. **Who/what is "Stoke"?** Named once as an example venture ("build Stoke") — no world, code,
+22. **Who/what is "Stoke"?** Named once as an example venture ("build Stoke") — no world, code,
     or doc defines it.
-21. **Is "mom's real estate" a real running deployment?** The vertical (MLS, real-estate
+23. **Is "mom's real estate" a real running deployment?** The vertical (MLS, real-estate
     toolbelt, "her real accounts" for social) is coded as if for a real person (client zero),
     but no production data is in the repo (correctly). Which pillars are actually armed and
     live-keyed in the real deployment — the single fact that most changes what "done" means —
     is unknowable from code.
-22. **Original conversations.** The brief for this reconstruction asks that "project
+24. **Original conversations.** The brief for this reconstruction asks that "project
     conversations" be treated as first-class sources. **No conversation exports exist in the
     repository.** The 37 docs in /docs are clearly distillations of such conversations (several
     quote the operator: "Riley: one clear identity"; "the user's own correction of the
     five-mode proposal"), and commit bodies occasionally embed decision records. Those are the
     only conversational traces available; anything discussed but never distilled into docs,
     code, or commit messages is lost to this reconstruction.
-23. **Multi-operator future?** Everything assumes one operator; client_engagements model client
+25. **Multi-operator future?** Everything assumes one operator; client_engagements model client
     *relationships*, not logins. Whether clients ever get accounts (portal beyond
     booking/claim/checkout pages) is undecided in the record.
-24. **Which model keys were live in production** (Anthropic vs OpenAI vs local; Veo, Shotstack,
+26. **Which model keys were live in production** (Anthropic vs OpenAI vs local; Veo, Shotstack,
     Ayrshare tiers) — .env.example documents slots, not choices.
-25. **"Crews"** — if the operator's surrounding conversations used a crews/multi-agent-team
+27. **"Crews"** — if the operator's surrounding conversations used a crews/multi-agent-team
     concept, it never reached this repository under that name (verified by grep). The nearest
     constructs are mission workers (5 kinds) and the producers registry.
 

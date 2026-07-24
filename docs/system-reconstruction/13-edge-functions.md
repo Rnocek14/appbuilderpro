@@ -1054,4 +1054,361 @@ Cross-cutting conventions used by nearly every function:
 - **AI**: owner-plan model via `modelForPlan` (`fast` forces cheap tier); no system prompt of its own.
 - **Status**: fully implemented. **Called by**: generated apps deployed by deploy-backend.
 
-*Sections 10–13 follow.*
+## 10. `_shared` — the shared substrate (30 files)
+
+A recurring **canonical-copy pattern**: `scaffold.ts`, `prompts.ts`, and `previewSpec.ts` are the source of
+truth that the browser client re-exports (`src/lib/scaffold.ts`, `src/lib/prompts.ts`,
+`src/lib/preview/spec.ts` do `export *` from them), so build/edit/preview logic is byte-identical in both
+runtimes; they deliberately avoid Deno/browser-only APIs. Similarly, several pure "cores"
+(`adsWatchCore`, `standingCore`, `batchCore`, `socialCore`, `esignCore`, `copyJudge`, `techFingerprint`)
+follow "ONE implementation, verified by a `*.verify.ts` script, executed in the edge worker, re-exported to
+the client."
+
+### 10.1 ai.ts — the provider-agnostic AI client (363 lines)
+- Providers: `anthropic | openai | openrouter | local` (`AI_PROVIDER`, default anthropic; `local` = any
+  OpenAI-compatible endpoint, default `http://localhost:11434/v1` via `LOCAL_AI_BASE_URL`).
+- Default model `claude-sonnet-4-6` (`AI_MODEL`). `modelForPlan(plan)`: `pro`/`starter` → configured model;
+  free tier → cheapest capable per provider (`claude-haiku-4-5-20251001` / `gpt-4o-mini` /
+  `anthropic/claude-3.5-haiku`), overridable via `AI_FREE_MODEL`.
+- `PRICING` ($/1M in→out) enumerates the recognized model universe: `claude-fable-5` (10/50),
+  `claude-opus-4-8` (5/25), `claude-sonnet-4-6` (3/15), `claude-haiku-4-5-20251001` (0.8/4), `gpt-4o`
+  (2.5/10), `gpt-4o-mini` (0.15/0.6).
+- API surface: `complete`, `completeStream` (SSE), `completeVision` (Anthropic content blocks / OpenAI
+  image_url), `completeWithWebSearch` (Anthropic-only, tool `web_search_20250305`, citations returned),
+  `parseJson`, `estimateCost`, `corsHeaders`. Anthropic endpoint `api.anthropic.com/v1/messages`
+  (`anthropic-version: 2023-06-01`).
+- Discipline: `withRetry` (3 attempts, exponential backoff, no retry on 400/401) and a **hard 300s
+  wall-clock timeout on every provider fetch** — comment cites "scan B15: zero fetch timeouts across the
+  fleet meant one hung provider stalled a whole cron tick." Retry is same-provider (no cross-provider
+  failover).
+- Imported by ~35 functions (all reasoning functions use `complete*`; many others import only `corsHeaders`).
+
+### 10.2 credits.ts — the one credit chokepoint
+- `checkCredits(admin, user, kind)` (RPC `refresh_credits`, pre-call estimate; `InsufficientCreditsError` →
+  402) and `spendCredits(...)` (RPC `spend_credits`, logs `usage_events` with real cost);
+  `getUserPlan` reads `profiles.plan`. Kind estimates include `garvis`, `agent`, `explore`, `plan`,
+  `short_script`, `discover:8`, `board_copy`, `image:10`, `screenshot`, `render:25`, `research:20`,
+  `ads_sync:2`, `app_ai:2`, `video_clip:200` ("Sora/Runway/Luma" — anticipated, unimplemented),
+  `voiceover` ("one ElevenLabs narration" — anticipated, unimplemented).
+
+### 10.3 cronGate.ts — clock auth
+- `cronAuthorized(req)`: `x-cron-secret == CRON_SECRET` OR `x-worker-secret == WORKER_SECRET`,
+  constant-time (`timingSafeEqual` exported). Note: garvis-pulse and garvis-consolidate still do a raw
+  `x-worker-secret` check instead of this gate (drift noted in §13).
+
+### 10.4 heartbeat.ts — liveness stamps
+- `stampHeartbeat(admin, job)` upserts `system_heartbeat(job, last_tick_at)`; fire-and-forget by contract —
+  "an unarmed heartbeat kills every scheduled feature SILENTLY."
+
+### 10.5 autonomyGate.ts — earned autonomy
+- `autonomyAllowed(admin, ownerId, actionClass)`: reads `autonomy_grants` (`mode`, `daily_cap`,
+  `action_class`); counts today's auto-approved `approvals` for the class; true only when `mode='auto'`
+  and under cap; fail-closed. `executeSendNow(approvalId)` POSTs
+  `${SUPABASE_URL}/functions/v1/send-email` with `x-worker-secret` — the one way a drafter's auto-approved
+  send actually goes out.
+
+### 10.6 payloadHash.ts — approval tamper evidence
+- `stableStringify` (key-sorted recursive JSON) + `hashPayload` (SHA-256 hex, `crypto.subtle`) +
+  `payloadMatches(payload, storedHash)` — null/empty stored hash returns true (grandfathered), so hashing
+  only ever ADDS refusal. Shared by enqueue (client) and every executor (send-email, send-sms,
+  social-publish, docusign-send, deploy-site, deploy-backend, standing-worker drains).
+
+### 10.7 notify.ts — operator webhook push
+- `notifyText(url, text)` / `notify(url, JobEvent)`; auto-formats for Discord (`{content}`, 1900-char cap)
+  and Slack (`{text}`), generic JSON otherwise; **always via `safeFetch`** (the one user-controlled-URL
+  path); fail-soft.
+
+### 10.8 bookingNotify.ts — transactional booking notices
+- `sendBookingNotice(...)` sends confirmations/reminders **directly** via Resend + Twilio, deliberately
+  bypassing outreach suppression/consent/kill-switch gates ("the customer just booked and gave contact
+  details for exactly this"). Reads `outreach_settings` for the from-identity. Env: `RESEND_API_KEY`,
+  `TWILIO_ACCOUNT_SID/AUTH_TOKEN/FROM_NUMBER`.
+
+### 10.9 icsCore.ts — the calendar sense
+- Pure ICS reader for the morning brief: `parseIcsEvents` (all-day + UTC forms; floating times treated as
+  UTC; **recurring events NOT expanded — stated v1 limitation**), `calendarLine`. Consumer: garvis-pulse.
+
+### 10.10 standingCore.ts — standing-order math (252 lines)
+- "The missing capability the classification stress test ranked #1: nothing in Garvis had a sense of time."
+  Pure (no clock — caller supplies `now`): `OrderKind` = `watch_url | cadence_digest | client_hunt |
+  idea_stream | content_week | opportunity_hunt`; `nextRunAfter`, `isDue`, `normalizeContent`,
+  `contentHash`, `changeExcerpt`, `decideWatch` (UNREACHABLE ≠ "no change"; first sight = baseline; markup
+  noise ignored; excerpt of what changed carried), `watchArtifact`, `orderStatusLine`,
+  `parseContentWeekConfig`, `weekSlots`, `contentWeekLine`. Verified by `src/lib/garvis/standing.verify.ts`.
+
+### 10.11 batchCore.ts — bulk-send batch core (142 lines)
+- "A batch is ONE human approval over a SNAPSHOTTED recipient list; the clock drains it by pushing every
+  recipient through THE ONE SEND PATH." Pure compose/track (never sends): `composeBatchRecipients`
+  (pre-excludes certainly-blocked contacts with named reasons — the owner approves the honest reachable
+  count; dedupes by address), `TEMPLATE_TOKENS`/`unknownTokens` (unresolvable merge tokens are a compose-time
+  refusal), `mergeTemplate`, `batchProgress`, `pickNextPending`, `staleSendingIndices` (crash-claim sweep),
+  `computeBatchStats`, `batchStatsLine`. The `sending` state is a **persisted claim written before the
+  irreversible send call** so a worker crash never double-sends. Verified by `outreachBatch.verify.ts`.
+
+### 10.12 scaffold.ts — deterministic project scaffold (1,881 lines)
+- Injects a fixed, deployable **Vite + React 18 + TS** skeleton so the model only authors app code:
+  `BASE` (package.json, vite.config, tsconfig, index.html, main.tsx — model never writes these; always
+  authoritative), default token stylesheet, and `KIT` — a bespoke accessible UI library
+  (Button/Input/Select/Card/Badge/Spinner/Modal/EmptyState/ThemeToggle/Tabs/Dropdown/Popover/Tooltip/
+  Combobox/Alert/FormField/Pagination/Table/Reveal/Motion/SmoothScroll/ScrollSequence/ScrollScenes/
+  ErrorBoundary + theme/scroll/interaction hooks). Deps pinned: react-router 6, lucide, recharts,
+  supabase-js, date-fns, clsx + the advanced-motion kit (framer-motion, gsap, lenis, three,
+  react-three-fiber/drei). Tailwind via CDN with shadcn-style semantic tokens on CSS variables; HashRouter;
+  pre-paint theme script; ErrorBoundary posts `{__ff:true, type:'error'}` to the parent frame so the
+  platform's auto-fix can engage. Exports `withScaffold`, `SCAFFOLD_FILES`, `SCAFFOLD_PATHS`,
+  `THEME_FOUNDATION`. Used by generate-app; re-exported to the client.
+
+### 10.13 prompts.ts — the canonical prompt module (1,536 lines)
+The single source of truth for build/edit/advisory prompts (client re-exports it). Composed from private
+building blocks that carry the product's design philosophy:
+- `DESIGN_GUIDE`: "*make it look professionally designed (Linear/Stripe/Vercel-tier), never
+  'AI-generated'… the indigo/purple-gradient-everywhere look is the #1 'AI slop' signature.*"
+- `FEATURE_COMPLETENESS`: "*never half a feature, never a stub… A nav item that goes nowhere, or a route
+  with no link, is a BUG.*"
+- `INTEGRATIONS_GUIDE`: capabilities that can't run in the browser go in a Supabase edge function; every
+  integration call routes through one `invokeFunction` helper returning a realistic MOCK in preview, with
+  **MOCK HONESTY** rules: "*A mock must be IMPOSSIBLE to mistake for real output… Fake success is the worst
+  bug an app can have.*"
+- `AUTOMATION_GUIDE`: generated apps get exactly ONE runner (`/supabase/functions/automation-runner`) and
+  "FableForge automatically wires a pg_cron tick to it every minute at deploy" (the deploy-backend seam).
+- `COMPLIANCE_GUIDE` (privacy/terms with visible `[placeholder]` facts), `PLATFORM_GUIDE`, `VOICE_GUIDE`
+  ("*Never open with flattery or agreement theater ('Great idea!', 'You're absolutely right!')*").
+Exported systems: `DIRECTIONS_SYSTEM` (8 named design archetypes: Editorial Broadsheet, Luxury Boutique,
+Neobrutalist Playground, Midnight Pro Tool, Organic Calm, Enterprise Clarity, Playful Pop, Swiss Archive),
+`GENERATE_SYSTEM`, `GENERATE_FILES_STREAM`, `AGENT_BUILD_SYSTEM` ("*think, act with a tool, observe the
+real result, and continue until the task is DONE and VERIFIED*"), `EDIT_SYSTEM` / `EDIT_SYSTEM_STREAM`,
+`PREFERENCE_DISTILL_SYSTEM`, `GENERATE_PLAN_SYSTEM`, `RESEARCH_SYSTEM`, `PROJECT_MAP_SYSTEM`
+("*a MAP of the project as it ACTUALLY is — not aspirational*"), `ROADMAP_SYSTEM`, `IDEATION_SYSTEM`,
+`AUTOPILOT_DECIDE_SYSTEM` ("*Autonomous building is ONLY for small, reversible, scoped changes*"),
+`DOC_ANALYZE_SYSTEM`, `SCHEMA_SYSTEM`, `MISSING_FILE_SYSTEM` — plus the builder functions
+(`blueprintPrompt`, `filesPromptStream`, `filesPromptChunk`, `schemaPrompt`, `editPrompt`,
+`missingFilePrompt`, …). Model ids inside the integration catalog are guidance for *generated* apps
+(`claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `claude-opus-4-8`, "gpt-5.2 tier", `gpt-4o-mini` —
+"NEVER reference retired models"), with the default server-side AI being "FableForge AI" via
+`FABLEFORGE_AI_URL`/`FABLEFORGE_AI_KEY` (= ai-gateway).
+
+### 10.14 copyJudge.ts — the shared editor's rubric
+- Pure prompt/parse helpers so every writer obeys one honesty contract: `FIELDS` (per-channel JSON
+  contracts), `CRAFT` (per-channel craft rules), `honestySystemPrompt(channel)` — "*HONESTY IS ABSOLUTE:
+  Use ONLY facts present in the materials JSON. NEVER invent an address, price, name, statistic, market
+  claim, testimonial, or availability. If the idea needs a fact you do not have, put a visible hole in its
+  place, formatted exactly like: [EDIT: what goes here]*" — `judgeSystemPrompt(channel)` — "*You are a
+  ruthless marketing editor… HONESTY (hard fail → score <= 3): any fact, stat, market/scarcity claim, or
+  testimonial NOT present in MATERIALS… Score 9-10 = a working professional would post this as-is*" —
+  `judgeUserPrompt`, `parseJudgeVerdict`. Consumers: board-copy (judge fail-open) and standing-worker's
+  content_week (fail-closed).
+
+### 10.15 safeFetch.ts — hardened outbound fetch (SSRF defense)
+- The one fetch path for user-supplied URLs. The audit finding it fixes: "*the old guard checked only the
+  INITIAL hostname string and then followed redirects blindly — so a public page could 302 to cloud metadata
+  (169.254.169.254) or an internal service.*" Layered, fail-closed: (1) scheme + literal-host blocklist
+  (localhost/.local/.internal/.lan/metadata.google.internal); (2) IP-literal validation rejecting all
+  private/link-local/CGNAT/reserved v4+v6 ranges, IPv4-mapped v6, and decimal/hex single-number IP forms;
+  (3) DNS resolution requiring **every** A/AAAA record to be public (rebinding defense; nothing resolved →
+  fail closed); (4) manual redirect following (cap 5) re-running all checks **on every hop**. Exports
+  `isPublicIp, urlStaticOk, urlAllowed, safeFetch`. Users: fetch-url, shot-worker, garvis-canary,
+  garvis-pulse, publish-preview, mls-sync, standing-worker, notify.
+
+### 10.16 techFingerprint.ts (+ techFingerprint.verify.ts)
+- Pure, dependency-free fingerprinter reading **the tech a business runs from its own HTML** — "the single
+  best qualifier for both a rebuild and an automation pitch." Detects: `builder` + `diyBuilder` flag
+  (wix/squarespace/godaddy/weebly = DIY; webflow/shopify/wordpress = real platforms, not DIY) via CDN/markup
+  signatures; `booking` widget (calendly, acuity, jobber, housecall, square, setmore, mindbody, opentable,
+  resy, booksy); `analytics` (ga, gtm, meta_pixel); `chat` (intercom, drift, tawk, podium, tidio, crisp);
+  `ecommerce` (shopify, woocommerce, bigcommerce, squarespace_commerce). Honesty principle: "*every field
+  traces to a real signature really present in the markup. A signature we don't find is null / [] (unknown),
+  never a guess.*" `techFingerprint.verify.ts` is a dependency-free assertion script (run via
+  `npm run verify:techfingerprint`) proving: Wix+Calendly+pixel detection, WordPress-not-DIY, Shopify
+  ecommerce, no over-claiming on a hand-built page, all-null honesty on empty input, and byte-identical
+  determinism. Consumer: fetch-url (fingerprints the raw bytes before stripping to text).
+
+### 10.17 previewSpec.ts — the Business Website Preview Engine core (1,125 lines)
+- The pure core of the scraper → builder pipeline ("*500 sites/day consistent, cheap, and impossible to
+  break*"). Defines `BusinessProfile` (the scraper handoff contract, with per-photo/review provenance +
+  usage flags), and `SiteSpec` v1 — a website described ONLY through a fixed registry: 15 `SECTION_TYPES`,
+  7 hand-built scroll-scrubbed trade `SCENE_KINDS`, 6 `FLAIR_DEVICES`, 3 `MOTION_TIERS`, a vetted
+  `FONT_LIBRARY`, and 12 industry `RECIPES` (contractor, restaurant, salon/spa, auto, dental/medical,
+  funeral/care, legal, real estate, fitness, retail, pet care, photography). "The AI chooses content and
+  parameters but never writes markup — quality guaranteed by construction" (the `html?` escape hatch is set
+  only by the honesty-gated bespoke path). Key exports: `parseBusinessProfile`, `pickRecipe`,
+  `restraintFor`/`applyRestraint` (a "dignified" guard forcing calm design for grief-adjacent industries,
+  enforced in normalizer AND fallback so a model choice can never override it), `seededVariant`
+  (name-hashed anti-sameness rotation), `ensureReadableTheme` (WCAG contrast net), `normalizeSpec` (the
+  safety net between model output and renderer — re-injects photos/reviews/phone/hours from the trusted
+  profile, never trusting the model to honor usage flags), `assembleFallbackSpec` (a complete decent site
+  with ZERO model calls — the free/instant tier and the floor the normalizer patches holes with),
+  `previewSlug`. Consumers: ingest-profile, standing-worker, and the client preview stack.
+
+### 10.18 designSpec.ts + themePresets.ts + qa.ts + streamparse.ts + context.ts
+- **designSpec.ts**: pure satori node-tree builders for render-design (`brandCardDesign`, `DESIGN_SIZES`,
+  `mixHex` — a satori-safe `color-mix()` stand-in). Note: despite the name, the `DesignSpec` *type* lives in
+  themePresets.ts.
+- **themePresets.ts**: 8 curated theme presets + the full `DesignSpec` identity contract
+  (`parseDesignSpec`, `buildIndexCssForDesign` — accent hue/sat, heading/body fonts with a
+  single-weight-font guard, mode light/paper/tinted/dark, radius/borders/shadows) + `PERSONALITY_CSS`
+  signature devices. A theme is just CSS-variable values — applying one recolors a generated app with no
+  model call. Used by generate-app.
+- **qa.ts**: static self-QA over generated files — unresolved imports, Node built-ins, disallowed packages,
+  cross-file missing-export detection, dead navigation (`<Link>` with no `<Route>`), in-page anchors that
+  break HashRouter, missing catch-all route, brace-balance truncation, and an **RLS lint** (create table
+  without RLS = error; RLS without policy = warning). Exports `validateProject`, `looksTruncated`,
+  `missingLocalModules`, `issuesToFixRequest`. Used by generate-app + chat-edit.
+- **streamparse.ts**: one-shot parser for the `§`-protocol (`parseProtocol` — §ACTION/§EXPLANATION/§FILE/
+  §DELETE/§QUESTION/…; infers `edit` when §FILE appears without §ACTION). Used by generate-app.
+- **context.ts**: context-budget file selection (`selectContext`/`contextPayload`, ~160k-char budget,
+  always-include set + relevance scoring, error-file boost). Used by chat-edit + job-worker.
+
+### 10.19 stripe.ts, oauth.ts, connections.ts, socialCore.ts, esignCore.ts, adsWatchCore.ts, embeddings.ts
+- **stripe.ts**: `stripeClient()` (apiVersion `2026-03-25.dahlia`, fetch HTTP client), `PRO_PRICE_ID()`,
+  `ensureCustomer()` (persists `profiles.stripe_customer_id`), `syncSubscription()` — the ONE canonical
+  sync: re-fetch subscriptions, compute tier (`pro` if active/trialing else `free`), upsert
+  `stripe_subscriptions` + `profiles.plan`.
+- **oauth.ts**: `OAUTH_PROVIDERS` (supabase w/ PKCE, github, docusign-sandbox-by-default), `makePkce`
+  (S256), `randomState`, `exchangeCode`, `refreshToken`, `freshProviderToken` (auto-refresh near expiry),
+  `projectSupabaseToken` (platform token for managed apps, else user OAuth token, else
+  `SB_MANAGEMENT_TOKEN`).
+- **connections.ts**: `getConnection`/`upsertConnection` on `provider_connections`; `probeProvider` makes
+  real validation calls (GitHub /user, Netlify /user, Supabase /organizations, DocuSign /oauth/userinfo,
+  Ayrshare /api/user).
+- **socialCore.ts**: platform registry (9 platforms), per-platform length limits, `MEDIA_REQUIRED` set,
+  `checkDraft` refusal gate (no platform / unsupported / text-only where media required / stale schedule),
+  `providerPayload` (Ayrshare body), `mapProviderResult` (unknown shape → `failed`, never false `posted`).
+- **esignCore.ts**: pure e-sign core — merge NEVER invents a value (unresolved `{{token}}` →
+  `[needs your input: token]` + listed gap); `decideSendable` refuses docs with holes/no signers/invalid
+  emails; `chunkedBase64`; `docHtml` (white-rendered anchor strings `/sig1/`, `/date1/` for tab placement);
+  `envelopeRequest` (includeHMAC); status maps return null for unknown states.
+- **adsWatchCore.ts**: pure anomaly detector — yesterday vs prior-7-day baseline per campaign; MIN-sample
+  gates (≥4 baseline days, impression/click floors); kinds `spend_spike` (≥2.5× and ≥$10),
+  `spend_stopped` ($0 with a real row after ≥$5/day), `ctr_collapse` (<40% of baseline), `cpc_spike`
+  (≥2× and ≥$0.50); today never judged; every finding carries its arithmetic in `evidence`.
+- **embeddings.ts**: OpenAI-compatible embeddings — `text-embedding-3-small`, 1536-dim (must match the
+  pgvector column); `embedTexts` returns **null** on unconfigured/failure (callers degrade to lexical,
+  never break); `toVectorLiteral`, `cosine`.
+
+## 11. Cross-function call graph
+
+Runtime HTTP edges (all internal calls carry `x-worker-secret` + a service-role bearer to clear the JWT
+gateway):
+
+```
+pg_cron (garvis_arm_heartbeat, 12 jobs)
+ ├─► garvis-worker ──────► garvis-worker            (self-chain while agent_runs remain)
+ │                └──────► api.github.com           (get_repo_state tool)
+ ├─► standing-worker ────► send-email               (bulk-send drain, automation triggers, hunt pitches)
+ │                 ├─────► social-publish           (social drain + content-week pieces)
+ │                 └─────► fetch-url                (client_hunt site scraping)
+ ├─► ads-watch ──────────► ads-sync                 (per-owner metric refresh)
+ ├─► garvis-canary ──────► send-email               (negative probe — MUST be refused)
+ ├─► inbox-draft ────────► send-email               (only via executeSendNow under autonomy grant)
+ ├─► outreach-followups ─► send-email               (same)
+ ├─► outreach-reactivate ► send-email               (same)
+ ├─► invoice-chase ──────► send-email               (same)
+ ├─► garvis-pulse / garvis-scorecard / garvis-consolidate / social-sync   (leaf jobs)
+site-events ─────────────► send-email               (instant first-touch standing rule)
+stripe-webhook ──────────► publish-preview          (auto-publish a sold demo)
+job-worker ──────────────► job-worker               (self-chain, EdgeRuntime.waitUntil)
+generated apps (external) ► ai-gateway              (per-app FABLEFORGE_AI_KEY, provisioned by deploy-backend)
+send-email ─(URL embed)──► unsubscribe              (RFC 8058 List-Unsubscribe)
+docusign-send ─(registers)► docusign-webhook        (DocuSign Connect callback URL)
+voice-inbound ─(callback)─► voice-inbound           (Twilio dial-action status stage)
+deploy-backend ─(deploys)─► child project's automation-runner + child pg_cron tick
+```
+
+Everything else is a leaf: it talks only to its external provider and the database. The **fan-in hub is
+send-email** (7 internal callers), which is exactly the intended architecture: one send path, many drafters.
+Data-flow (not HTTP) couplings: draft-plan → generate-app (`planContext`); standing-worker enqueues
+`outreach_batches`/`social_posts`/`content_weeks`/`approvals` that its own later ticks drain;
+ingest-document shares embed-worker's embeddings module in-process.
+
+Frontend invocation (from `supabase.functions.invoke` usage in `src/`): heaviest callers are fetch-url (8
+call sites), cluster-chat (7), discover-media (5), ingest-document (4); the UI also manually pokes
+standing-worker, garvis-worker, job-worker, social-sync, social-publish and ads-sync ("Run now" buttons on
+the worker panels).
+
+## 12. Env var / secret inventory
+
+| Secret | Used by | Purpose |
+|---|---|---|
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | all 67 | admin client + internal function URLs |
+| `SUPABASE_ANON_KEY` | ~44 fns | JWT-resolving auth client |
+| `WORKER_SECRET` | all cron/worker fns, send paths, cronGate, autonomyGate | the heartbeat/internal-call shared secret (`x-worker-secret`) |
+| `CRON_SECRET` | cronGate | alternate cron header (`x-cron-secret`); arm flow sets it equal to WORKER_SECRET |
+| `AI_PROVIDER` / `AI_MODEL` / `AI_FREE_MODEL` | _shared/ai | provider seam + plan-tier model split |
+| `AI_PREMIUM_MODEL` | standing-worker | premium model override for the demo intelligence chain |
+| `ANTHROPIC_API_KEY` | _shared/ai, agent-turn, discover-run | Claude completions + web_search |
+| `OPENAI_API_KEY` | _shared/ai, _shared/embeddings, generate-image, standing-worker, outreach-followups, resend-inbound | GPT completions, gpt-image-1, embeddings fallback, classifiers |
+| `OPENROUTER_API_KEY` / `LOCAL_AI_BASE_URL` | _shared/ai | alternate providers |
+| `LOVABLE_API_KEY` | outreach-followups, resend-inbound | Lovable AI gateway (`google/gemini-2.5-flash`) fallback classifier/drafter |
+| `EMBEDDINGS_API_KEY` / `EMBEDDINGS_BASE_URL` / `EMBEDDINGS_MODEL` / `OPENAI_BASE_URL` | _shared/embeddings | embeddings endpoint (default `text-embedding-3-small`) |
+| `GEMINI_API_KEY` / `GEMINI_BASE` / `VEO_MODEL` / `VEO_MODEL_FAST` / `VEO_COST_PER_SEC` | generate-video | Google Veo 3.1 scene generation |
+| `PERPLEXITY_API_KEY` | discover-media | Perplexity `sonar` |
+| `SERPER_API_KEY` | discover-media, standing-worker | Serper search + rendered scrape |
+| `GOOGLE_PLACES_API_KEY` | discover-run, discover-media, standing-worker, system-control | Places searchText discovery |
+| `RESEND_API_KEY` | send-email, sender-domain, _shared/bookingNotify, _shared/prompts | email sending + domain registration |
+| `RESEND_WEBHOOK_SECRET` | resend-webhook | Svix signature verification |
+| `INBOUND_SECRET` | resend-inbound | inbound-mail shared secret |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` | send-sms, voice-inbound, _shared/bookingNotify | SMS + voice webhook validation |
+| `VOICE_WEBHOOK_URL` | voice-inbound | canonical URL for Twilio signature recomputation |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRO_PRICE_ID` / `STRIPE_CREDITS_PRICE_ID` / `STRIPE_CREDITS_AMOUNT` | create-checkout, customer-portal, stripe-webhook, _shared/stripe | operator billing |
+| `NETLIFY_AUTH_TOKEN` | deploy-site, publish-preview, connect-domain | hosting + custom domains |
+| `GITHUB_TOKEN` | github-export | fallback export token |
+| `SB_MANAGEMENT_TOKEN` | provision-supabase, _shared/oauth | Supabase Management API PAT fallback |
+| `SB_OAUTH_CLIENT_ID/_SECRET`, `GITHUB_OAUTH_CLIENT_ID/_SECRET`, `DOCUSIGN_OAUTH_CLIENT_ID/_SECRET` | oauth, _shared/oauth | provider OAuth apps |
+| `DOCUSIGN_AUTH_BASE` / `DOCUSIGN_WEBHOOK_SECRET` | docusign-send, docusign-webhook, _shared/oauth | e-sign environment (sandbox default) + Connect HMAC |
+| `META_ADS_ACCESS_TOKEN` | ads-sync | Meta Graph insights (System User token) |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REFRESH_TOKEN` / `_LOGIN_CUSTOMER_ID` | ads-sync | Google Ads GAQL reporting |
+| `SHOTSTACK_API_KEY` / `SHOTSTACK_ENV` | render-video | cloud video render (stage/v1) |
+| `SCREENSHOT_API_KEY` / `SCREENSHOT_API_URL` | shot-worker, standing-worker | ScreenshotOne-compatible captures |
+| `FF_PLATFORM_MANAGEMENT_TOKEN` / `FF_PLATFORM_ORG_ID` / `FF_FREE_MANAGED_LIMIT` / `FF_PRO_MANAGED_LIMIT` | provision-supabase, _shared/oauth | FableForge Cloud managed-DB provisioning + caps |
+| `FF_AI_GATEWAY_MARGIN` | ai-gateway | managed-AI markup (default 1.25×) |
+| `FABLEFORGE_AI_URL` / `FABLEFORGE_AI_KEY` | _shared/prompts (emitted into generated apps); set by deploy-backend | generated apps → ai-gateway |
+| `APP_ORIGIN` | ingest-profile, standing-worker, shot-worker, automation-intake | public app origin for preview/report URLs |
+| `BESPOKE_DEMOS` | standing-worker | toggle for the bespoke-HTML demo tier |
+| `AYRSHARE_API_KEY` | (presence-checked by system-control only) | the actual Ayrshare key is per-user, sealed in `provider_connections` |
+| Vault: `ff_heartbeat_base` / `ff_heartbeat_secret` | pg_cron jobs (DB-side) | heartbeat target + secret, set by `garvis_arm_heartbeat` |
+
+`system-control`'s SECRETS presence map is the platform's own authoritative integration inventory (it
+checks ~20 of the above and reports set/unset booleans to the operator panel).
+
+## 13. Status assessment & notable findings
+
+1. **Nothing is meaningfully stubbed.** Across all 67 functions and 30 shared modules there are no
+   "not implemented" returns, mock data paths, or TODO-driven placeholders. Every external integration
+   (Stripe, Resend, Twilio, DocuSign, Netlify, GitHub, Supabase Management, Ayrshare, Meta, Google Ads,
+   RESO/MLS, Veo, Shotstack, ScreenshotOne, Perplexity, Serper, Places, OpenAI images) makes real API
+   calls. The recurring pattern instead is **honest degradation**: missing keys yield
+   `{available:false, setup:[...]}` or explicit skip records, never fake success. All
+   "placeholder/mock" grep hits are either (a) the `[YOU FILL]`/`[EDIT]` honesty holes (which
+   send-email/send-sms refuse to send) or (b) instructions telling *generated* apps how to build honest
+   preview mocks.
+2. **The approval spine is structural, not procedural** — send-email, send-sms, social-publish,
+   docusign-send, deploy-site, deploy-backend all require an owned approved `approvals` row, payload-hash
+   verified, atomically claimed. Autonomy is an explicit, capped, per-action-class grant. garvis-canary
+   *nightly tests that the send gate refuses* an unauthorized send.
+3. **Scheduling is in-database**, not in config.toml (none exists): `garvis_arm_heartbeat` +
+   pg_cron + pg_net + Vault, 12 jobs, armed from the deploy workflow or the in-app system-control panel;
+   liveness proven via `system_heartbeat` stamps.
+4. **Deploy-list gap**: `booking` and `sender-domain` are in neither npm deploy list nor the workflow's
+   curated lists — they require manual deployment and could silently be missing from a fresh environment.
+5. **Auth-gate drift**: garvis-pulse and garvis-consolidate check `x-worker-secret` directly instead of
+   the shared `cronGate` (which also accepts `CRON_SECRET`); the arm function papers over this by sending
+   the one secret under both headers.
+6. **Anticipated-but-unbuilt providers**: the credits ledger prices `voiceover` ("one ElevenLabs
+   narration") and `video_clip` ("Sora/Runway/Luma"), but no function calls those providers — video is
+   Veo 3.1 (generation) + Shotstack (render).
+7. **Two AI stacks coexist**: the provider-agnostic `_shared/ai.ts` seam (default `claude-sonnet-4-6`,
+   free tier `claude-haiku-4-5-20251001`) used by ~17 reasoning functions, and a small legacy direct-fetch
+   path in outreach-followups/resend-inbound using `gpt-4o-mini` or Lovable-gateway
+   `google/gemini-2.5-flash`. agent-turn is deliberately Anthropic-only (raw response pass-through).
+8. **The platform recursively provisions its customers' infrastructure**: deploy-backend deploys generated
+   edge functions into the *user's own* Supabase project, injects an `ai_gateway_key`, and wires a
+   per-minute pg_cron tick to the child's `automation-runner` — generated apps then bill AI usage back
+   through ai-gateway against the owner's FableForge credits (margin `FF_AI_GATEWAY_MARGIN`).
+9. **icsCore v1 limitation**: recurring calendar events are not expanded (stated in-code); the morning
+   brief simply misses recurrences.
+10. **standing-worker is the de-facto second application** (2,375 lines): six order kinds plus eight
+    drain/sweep subsystems, the demo intelligence chain (strategist → art director → simulated owner →
+    refine → honesty-gated bespoke HTML), and the entire outward-execution machinery. Any reconstruction
+    effort should treat it, `_shared/prompts.ts`, and `_shared/previewSpec.ts` as the three highest-value
+    files in the fleet.
+

@@ -56,7 +56,7 @@ addendum, garvis-master-audit, where-we-stand, os-blueprint); agent surveys in d
 | Approval spine (`approvals` one queue + `execution_runs` immutable ledger, payload SHA-256, CAS claims) | OPERATIONAL | the system's central invariant; "structurally impossible" to send outside it (integrations #2) |
 | One Queue page (merged from 3 rooms; badges from real rows; undo for reversibles) | OPERATIONAL | frontend survey #9; d0cca2f |
 | Earned autonomy (trust dial per action class; content weeks: 3 clean approvals → auto_mode, revocable) | PARTIAL | real for content weeks + pre-authorized speed-to-lead; generalized ledger = app_0097 + Queue panel; scan called it partial |
-| Heartbeat/clock (11 pg_cron jobs via `garvis_arm_heartbeat()`, Vault secrets, dual-header auth) | OPERATIONAL 🔌 but **never self-arms** | os-blueprint §1; Master Switch + Health board exist; CI self-arm defaults off; doc drift: RUNBOOK says 9, checklist 12, SQL truth 11 |
+| Heartbeat/clock (12 pg_cron jobs via `garvis_arm_heartbeat()`, Vault secrets, dual-header auth) | OPERATIONAL 🔌 but **never self-arms** | final arm = app_0096 (12 jobs verified); os-blueprint §1; Master Switch + Health board exist; CI self-arm defaults off; historical doc counts 9/10/11 are strata (10-open-questions #11) |
 | Standing orders (6 kinds + 5 drains, per-tick budgets) | OPERATIONAL 🔌 | scan §2.4; no concurrency claim on orders (double-run risk noted) |
 | Commander (one call → one typed decision; command_messages transcript; mind_events routing log) | OPERATIONAL | scan DONE-verified; page-local, not global (Line vision PLANNED) |
 | Orchestrator (14 actions, parse gauntlet, topo ordering, 35-intent/49-check coverage contract) | OPERATIONAL | 3 verify suites incl. 400-input fuzz |
