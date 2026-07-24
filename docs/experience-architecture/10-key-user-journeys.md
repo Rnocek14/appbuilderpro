@@ -17,7 +17,10 @@ the approval surface is "the Queue"; the flight recorder is "Activity." Interpre
 quotes use the Bar's chip syntax from doc 02 (`→ scope · reading`).
 
 **The cast, held constant across all seven journeys** (one operator, one portfolio — the
-journeys interleave in real life and the document keeps them interleavable):
+journeys interleave in real life and the document keeps them interleavable). Every world in the
+cast instantiates the worked dressings of doc 03 §7 verbatim — areas, benches, vitals, stances —
+and **Appendix A** holds the whole cast in one table, the canonical reference for prototypes,
+demo data, and wireframes:
 
 | # | Journey | Worlds involved | Named exception exercised | Mastery loop exercised |
 |---|---|---|---|---|
@@ -25,7 +28,7 @@ journeys interleave in real life and the document keeps them interleavable):
 | 2 | Real-estate agents at n=2, 10, 50 | Mom's Real Estate; Dave Kowalski; 48 more | **isolation near-miss** | criteria-in-critique (fair housing); pattern promotion with provenance |
 | 3 | The mural business | Marco's Murals | **wrong-genome guess** | outcome-annotated proposals → Playbook; criteria edited to the artist |
 | 4 | The clothing brand | Inkfall; grant from Marco's Murals | **isolation near-miss** (grant boundary) | scored critique with rubric transfer; post-launch outcome annotation |
-| 5 | Inbox outreach automation | Podcast Outreach | automation silence (**silence is loud**) | variant outcomes → Playbook; predicted-vs-actual reply rate |
+| 5 | The inbox automations — outbound (5a) + "automate this inbox" (5b) | Podcast Outreach; Support Inbox | automation silence (**silence is loud**) | variant outcomes → Playbook; predicted-vs-actual reply rate; recipe repair through the gate |
 | 6 | Rabbit hole → "make this real" | Coffee-cart curiosity → Cart Kit | **blocked mission** (intake) | calibration: predictions closed, hit-rate shown |
 | 7 | The builder | Cart Kit's Build Studio | **blocked mission** (grant + failing check) | product criteria in critique; conversion prediction closed |
 

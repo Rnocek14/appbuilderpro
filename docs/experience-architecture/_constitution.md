@@ -50,7 +50,7 @@ Canonical (spec) names never need to be user-visible. Genomes carry a **terminol
 | Situation | rendered as **Home** (the Brief + the Field) | word never shown |
 | Memory / knowledge | "Memory" is fine user-facing; approved lessons = "Playbook" (per world) | |
 | Counterparty | "the client" / "the agent" / by name | |
-| Thread | "conversation" | |
+| Thread | "conversation" | two kinds, never conflated (§8): the counterparty conversation vs the Counsel transcript |
 | Agent runs / plan internals | "Activity" (the flight recorder) | |
 
 ## 3. Shell geometry — what is always visible
@@ -168,9 +168,10 @@ relevant capabilities + a starter criteria pack + palette wiring); repeated use 
 distilled definition can enter the Catalog/genome (a *learned workshop*), through the gate.
 
 **Distinctions (binding):** Area = the persistent place; Workshop = the craft environment it
-opens into; Capability = the verbs available inside; Artifact = what is committed out; Thread =
-the Counsel's transcript (part of the Ledger); the Builder = the deepest Workshop
-(`code+preview` bench), same grammar, uncompromised depth.
+opens into; Capability = the verbs available inside; Artifact = what is committed out; Thread,
+*in the workshop sense*, = the Counsel's transcript (part of the Ledger) — one of two thread
+kinds: the **counterparty conversation** is the other, and is never a workshop object (§8); the
+Builder = the deepest Workshop (`code+preview` bench), same grammar, uncompromised depth.
 
 ## 7. Explore — the posture and its surface
 
@@ -225,6 +226,19 @@ Batch-by-class exists; bulk actions stage per-item approvals (no gate bypass). *
 autonomy appears here**: after clean streaks the Queue itself offers the dial ("5 clean
 approvals of client follow-ups — auto-approve this class? Instantly revocable"), and every
 auto-approved action remains in the ledger view.
+
+**Threads and conversations (binding).** "Thread" names two objects, never conflated: the
+**counterparty conversation** — the exchange with a client, prospect, or counterparty — and the
+**Counsel transcript**, which is part of a Workshop's Ledger (§6) and never a counterparty
+surface. The conversation is a first-class, world-scoped surface (`/w/:world/t/:thread`):
+messages are artifacts (§9) on the thread's trace; the staged reply draft sits at its foot when
+a response is owed; automated sends carry their heartbeat chips in place; every thread bears
+its counterparty and world stamp (§13). One conversation per counterparty relationship — email
+and SMS land in the same thread, each message stamped with its channel. Resume is the shell
+rule: the last exchange plus a one-line *since then*. Document 03 owns the conversation
+surface's full anatomy (including the phase brief's "Threads and conversation" questions,
+answered directly); document 12 owes it a frame. Both obligations are tracked in
+`14-open-decisions.md` until landed.
 
 Cross-world work views ("what's running everywhere") are **Lenses** (§10), not places.
 
@@ -334,10 +348,16 @@ generic-and-empty, never identical-everywhere.
 ## 16. Document plan and diagram assignments
 
 01 principles · 02 shell (diagram: global shell & context hierarchy) · 03 world grammar
-(diagram: world composition) · 04 explore (diagrams: explore/rabbit-hole lifecycle;
-exploration→project evolution) · 05 capabilities (diagram: drive modes) · 06 work (diagram:
-mission & standing-order lifecycle) · 07 artifacts & builders · 08 multi-world (diagram:
-portfolio vs world navigation) · 09 creation (diagram: intent→world) · 10 journeys (all seven
-scenarios) · 11 information architecture (only after 01–10) · 12 wireframes · 13 acceptance
-tests · 14 open decisions · 15 master blueprint · 16 workshop system (foundational) ·
-17 mastery & learning loops (foundational).
+(diagram: world composition; owns threads & the conversation surface — §8) · 04 explore
+(diagrams: explore/rabbit-hole lifecycle; exploration→project evolution) · 05 capabilities
+(diagram: drive modes) · 06 work (diagram: mission & standing-order lifecycle) · 07 artifacts &
+builders · 08 multi-world (diagram: portfolio vs world navigation) · 09 creation (diagram:
+intent→world) · 10 journeys (all seven scenarios) · 11 information architecture (only after
+01–10) · 12 wireframes (incl. the conversation view) · 13 acceptance tests · 14 open
+decisions · 15 master blueprint · 16 workshop system (foundational) · 17 mastery & learning
+loops (foundational).
+
+**Status of 14 and 15:** `14-open-decisions.md` exists and is the sole channel for
+inter-document disputes and threshold revisions (per the preamble rule and 13 §0).
+`15-master-blueprint.md` is written last, once 01–13 are stable; until it lands, every binding
+on it in 13 (AT-01, the global bindings) is held open in `14-open-decisions.md`, not waived.

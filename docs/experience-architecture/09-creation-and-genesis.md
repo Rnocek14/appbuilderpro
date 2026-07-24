@@ -194,7 +194,8 @@ line · autonomy posture.**
 
 Rules: every automation is born **propose-only** — autonomy is earned later through the Queue
 (constitution §8), never granted at charter. Each row is removable inline. **No world ever
-starts recurring work that wasn't listed, with cadence and cost, on its Proposal** (06 §14).
+starts recurring work that wasn't listed, with cadence and cost, on its Proposal** (06 §4,
+mechanism 14).
 Costs are honest and specific; "~" marks estimates and the cap is the commitment.
 
 ### 4.5 Seed artifacts
