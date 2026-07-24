@@ -190,3 +190,166 @@ button{font:inherit; color:inherit; background:none; border:none; cursor:pointer
 }
 </style>
 </head>
+<body>
+<div class="face"><span class="dot"></span><b>Thread &amp; Stone</b><span>· apparel client · steady</span></div>
+<div class="tabs">
+  <button class="tab on" id="tabCol">Collection</button>
+  <button class="tab" id="tabCamp">Campaign</button>
+</div>
+<div class="pulse" id="pulse"></div>
+
+<div id="benchWrap">
+  <div id="benchHead">
+    <div class="hints" id="hints">drag to arrange · <b>K</b> keep · <b>X</b> kill · <b>Z</b> undo · <span id="cmpHint">select two → <b>C</b> compare</span></div>
+    <div class="gear" id="gear"><span>working alongside:</span><span id="gearWord">off</span><span class="switch"></span></div>
+  </div>
+  <div id="bench"></div>
+</div>
+
+<div id="campWrap">
+  <div id="chain"><svg id="wires"></svg></div>
+  <div class="tray">
+    <div class="tl">alternative headlines — drag one onto the headline node</div>
+    <div id="chips"></div>
+  </div>
+  <div class="hints" style="margin-top:6px">drop a chip on <b>headline</b> — downstream re-scores · hover a delta for its why · drag nodes to arrange · <b>Z</b> undo</div>
+</div>
+
+<div class="commitRail" id="rail"></div>
+<div class="toasts" id="toasts"></div>
+<div class="bar"><span class="scopechip">Thread &amp; Stone</span><input id="bar" placeholder="say it — or keep your hands on the bench…" autocomplete="off" spellcheck="false"></div>
+<div class="hud">
+  <span>P3 · The bench with hands — staged data, real timing</span>
+  <button id="restart" title="restart the prototype">⟲</button>
+  <button id="feel" title="what to feel for">?</button>
+  <span class="instrument" id="typed">sentences typed: 0</span>
+</div>
+<div class="scrim" id="scrim" hidden><div class="momentCard" id="moment"></div></div>
+<div class="cmp" id="cmp"><div class="cmpStage" id="cmpStage"></div><div class="cmpTag" id="cmpTag"></div></div>
+<div class="tip" id="tip"></div>
+
+<script>
+'use strict';
+/* ============ single source of truth — every number on screen traces here ============ */
+const STAGED = {
+  world: 'Thread & Stone',
+  palettes: {
+    bone:     { shirt:'#E4DFD2', seam:'#c6bfae', art:'#161A22', ember:false },
+    inkshirt: { shirt:'#1A2030', seam:'#2C3448', art:'#E8E4DA', ember:false },
+    emberacc: { shirt:'#1A2030', seam:'#2C3448', art:'#E8E4DA', ember:true  }
+  },
+  variants: [
+    { id:'v1', name:'01 · quiet grid',   seed:11, pal:'bone',     placement:'chest', scale:1.0,  weight:1.0 },
+    { id:'v2', name:'02 · full shout',   seed:23, pal:'inkshirt', placement:'full',  scale:1.1,  weight:1.1 },
+    { id:'v3', name:'03 · ember thread', seed:37, pal:'emberacc', placement:'chest', scale:0.95, weight:1.0 },
+    { id:'v4', name:'04 · back mark',    seed:41, pal:'bone',     placement:'back',  scale:1.0,  weight:0.9 },
+    { id:'v5', name:'05 · dense walk',   seed:53, pal:'inkshirt', placement:'chest', scale:1.25, weight:1.45 },
+    { id:'v6', name:'06 · thin air',     seed:67, pal:'bone',     placement:'full',  scale:0.8,  weight:0.65 }
+  ],
+  remarks: {
+    v1: [ { when:{placement:'chest'}, text:'the collar crop fights the artwork’s flow — full-bleed lets it breathe',
+            try:{prop:'placement', val:'full'} },
+          { text:'now the walk owns the torso. hold it here — 01 reads calm at ten feet.' } ],
+    v2: [ { when:{scaleBelow:1.3}, text:'02 is already shouting — push the scale until the strokes crop; a cropped line commits harder',
+            try:{prop:'scale', val:1.45} },
+          { text:'cropped strokes read intentional now. this is the loud one of the drop.' } ],
+    v3: [ { when:{placement:'chest'}, text:'the ember ticks vanish at chest size — full-bleed gives them room to matter',
+            try:{prop:'placement', val:'full'} },
+          { text:'the ember carries at this size. one accent piece per drop is right.' } ],
+    v4: [ { when:{scaleAbove:0.75}, text:'a back-yoke mark wants restraint — drop the scale a notch and it reads like a signature',
+            try:{prop:'scale', val:0.7} },
+          { text:'signature-small. this one pairs with whichever piece leads the drop.' } ],
+    v5: [ { when:{placement:'chest'}, text:'dense linework muddies at chest scale — the walk needs the whole front, or half the ink',
+            try:{prop:'placement', val:'full'} },
+          { text:'the density resolves at full bleed. strongest print integrity on the bench.' } ],
+    v6: [ { when:{scaleBelow:1.0}, text:'thin strokes this small disappear into fabric — scale up, or let it go',
+            try:{prop:'scale', val:1.2} },
+          { text:'the thin line holds now. quiet, but it holds.' } ]
+  },
+  aiRemark: 'offered, not placed — K makes it material, X with a reason and I learn.',
+  killReasons: ['drifts athletic', 'artwork too timid', 'collar fights art'],
+  campaign: {
+    base: [
+      { k:'headline', label:'Headline',    v:'Made by hand. Worn loud.' },
+      { k:'audience', label:'Audience',    v:'30–45 · buys few, keeps long', s:7.2 },
+      { k:'emotion',  label:'Emotion',     v:'quiet confidence',            s:7.8 },
+      { k:'offer',    label:'Offer',       v:'2 tees · numbered run of 50', s:7.5 },
+      { k:'landing',  label:'Landing page',v:'hero: full-bleed art · one CTA', s:7.0 }
+    ],
+    alts: [
+      { t:'Your brother draws. You wear it.',
+        d:{audience:0.6, emotion:0.9, offer:0.2, landing:-0.3},
+        why:{ audience:'a named person reads warmer to the 30–45 buyer than “hand”',
+              emotion:'kinship beats confidence for a first-drop story',
+              offer:'a numbered run gains meaning with a named artist',
+              landing:'the hero now wants a portrait block the page doesn’t have yet' },
+        sets:{emotion:'familial pride'} },
+      { t:'Six lines. No noise.',
+        d:{audience:0.2, emotion:-0.4, offer:0.4, landing:0.5},
+        why:{ audience:'a minimal claim fits the keeps-long buyer — mildly',
+              emotion:'restraint cools the story; less to feel',
+              offer:'scarcity and restraint agree with each other',
+              landing:'copy this short lets the artwork carry the hero alone' },
+        sets:{emotion:'restraint'} },
+      { t:'Ink that walks.',
+        d:{audience:-0.3, emotion:0.3, offer:0, landing:0.2},
+        why:{ audience:'poetic reads younger than the 30–45 core',
+              emotion:'motion adds a little heat',
+              offer:'no effect either way — an honest zero',
+              landing:'pairs fine with the walking linework in the hero' },
+        sets:{emotion:'curiosity'} }
+    ]
+  },
+  feelFor: [
+    'Did you work for minutes without typing a sentence?',
+    'Did the AI’s additions ever get in your way?',
+    'Does undo make you brave?'
+  ]
+};
+
+/* ============ seeded PRNG + generative brother's-artwork ============ */
+function rng(seed){ let a = seed >>> 0; return function(){
+  a |= 0; a = a + 0x6D2B79F5 | 0;
+  let t = Math.imul(a ^ a >>> 15, 1 | a);
+  t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+  return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+const ART_CACHE = {};
+function makeArt(key, seed, palName, weight){
+  const ck = key + '|' + palName + '|' + weight;
+  if (ART_CACHE[ck]) return ART_CACHE[ck];
+  const pal = STAGED.palettes[palName];
+  const c = document.createElement('canvas'); c.width = 240; c.height = 240;
+  const x = c.getContext('2d');
+  x.lineJoin = 'miter'; x.lineCap = 'butt';
+  const r = rng(seed);
+  const weights = [2.2 * weight, 3.8 * weight, 6.2 * weight];
+  const lines = 6 + Math.floor(r() * 3);
+  for (let i = 0; i < lines; i++){
+    let px = 26 + r() * 188, py = 26 + r() * 188;
+    let ang = Math.floor(r() * 8) * Math.PI / 4;
+    const steps = 5 + Math.floor(r() * 8);
+    x.strokeStyle = (pal.ember && i % 4 === 2) ? '#E8833A' : pal.art;
+    x.lineWidth = weights[Math.floor(r() * 3)];
+    x.beginPath(); x.moveTo(px, py);
+    for (let s = 0; s < steps; s++){
+      ang += (Math.floor(r() * 3) - 1) * Math.PI / 4;
+      if (r() < 0.14) ang += Math.PI / 2 * (r() < 0.5 ? -1 : 1);
+      const len = 14 + r() * 26;
+      px += Math.cos(ang) * len; py += Math.sin(ang) * len;
+      if (px < 12 || px > 228){ ang = Math.PI - ang; px = Math.max(12, Math.min(228, px)); }
+      if (py < 12 || py > 228){ ang = -ang; py = Math.max(12, Math.min(228, py)); }
+      x.lineTo(px, py);
+    }
+    x.stroke();
+  }
+  for (let t = 0; t < 4; t++){                       /* short angular ticks */
+    const tx = 30 + r() * 180, ty = 30 + r() * 180;
+    const ta = Math.floor(r() * 4) * Math.PI / 4 + Math.PI / 8;
+    x.strokeStyle = (pal.ember && t === 1) ? '#E8833A' : pal.art;
+    x.lineWidth = weights[0] * 0.8;
+    x.beginPath(); x.moveTo(tx, ty);
+    x.lineTo(tx + Math.cos(ta) * 11, ty + Math.sin(ta) * 11); x.stroke();
+  }
+  return (ART_CACHE[ck] = c.toDataURL('image/png'));
+}

@@ -800,7 +800,303 @@ $("quietBand").innerHTML =
   `${D.quiet.count} quiet — ${claim("all stamped alive", "alive")} · rotation: ` +
   `${D.quiet.rotation.name} ${claim("resurfaces today", "rotation")} (${D.quiet.rotation.daysQuiet} days quiet)`;
 
-/*§4*/
+/* ================= state — everything the screen claims, derivable from here ================= */
+const state = {
+  slateApproved: false, approvedAt: 0,
+  decisions: { u1: null, u2: null, u3: null },   // 'ok' | 'no'
+  reviewOpen: false,
+  reply: "pending", bounce: "pending",
+  replyDraft: O.replies[0].draftReply,
+  morningShown: false
+};
+const reworkEntries = [];
+let undoTimer = null, toastTimer = null;
+
+const approvedCount  = () => Object.values(state.decisions).filter(d => d === "ok").length;
+const allDecided     = () => Object.values(state.decisions).every(d => d !== null);
+const pendingIds     = () => D.unusual.filter(u => state.decisions[u.id] === null).map(u => u.id);
+const sendCount      = () => O.followups.matchPattern + approvedCount();
+const outreachOpen   = () => !(state.slateApproved && allDecided());
+const pulseCount     = () => (outreachOpen() ? 1 : 0) + (state.reply === "pending" ? 1 : 0)
+                           + (state.bounce === "pending" ? 1 : 0);
+
+/* ================= the pulse — real counts only ================= */
+function updatePulse(){
+  const n = pulseCount();
+  $("pulseCount").textContent = n || "";
+  $("pulse").classList.toggle("calm", n === 0);
+  $("pulse").setAttribute("aria-label",
+    n ? `The Pulse — ${n} need${n === 1 ? "s" : ""} you · open the queue` : "The Pulse — nothing needs you");
+}
+
+/* ================= the slate (D3 — approve the day, not the item) ================= */
+function renderSlateRest(){
+  $("slateBody").innerHTML =
+    `<p class="slate-ask">Today's outreach — ${O.followups.drafted} follow-ups drafted. ` +
+    `${O.followups.matchPattern} match the ${claim("pattern you approved yesterday", "pattern")}. ` +
+    `${O.followups.unusual} are unusual.</p>` +
+    `<div class="slate-actions">` +
+      `<button class="btn primary" id="btnApprove">${allDecided()
+        ? `approve the slate — ${sendCount()}` : `approve the ${O.followups.matchPattern}`}</button>` +
+      (state.reviewOpen ? "" : `<button class="btn" id="btnReview">review the ${O.followups.unusual}</button>`) +
+      `<span class="keyhint" ${state.reviewOpen && pendingIds().length ? "" : "hidden"}>j/k move · A approve · X reject</span>` +
+    `</div>`;
+  $("btnApprove").addEventListener("click", approveSlate);
+  const r = $("btnReview"); if (r) r.addEventListener("click", openReview);
+}
+function renderSlateSettled(){
+  const pending = pendingIds().length;
+  $("slateBody").innerHTML =
+    `<p class="settle-line"><span id="settleCount">${sendCount()}</span> sending through the day` +
+    `<span id="settlePending">${pending ? ` — ${numword(pending)} unusual still wait below` : ""}</span>.</p>` +
+    `<div class="settle-sub">` +
+      `<button class="chip-undo" id="undoChip" aria-label="Undo the slate approval">undo · ${mmss(D.undoWindowMs)}</button>` +
+      `<span>undo window 10 min · logged as one decision</span>` +
+    `</div>`;
+  $("undoChip").addEventListener("click", undoSlate);
+}
+function swapSlate(renderFn, settled){
+  const body = $("slateBody");
+  body.classList.add("out");
+  setTimeout(() => {
+    renderFn();
+    body.classList.remove("out");
+    $("slate").classList.toggle("settled", settled);
+  }, 180);
+}
+function approveSlate(){                                     // the one orchestrated move
+  if (state.slateApproved) return;
+  state.slateApproved = true;
+  state.approvedAt = Date.now();
+  swapSlate(renderSlateSettled, true);
+  startUndoCountdown();
+  if (!allDecided() && !state.reviewOpen) openReview(false);
+  updatePulse(); checkMorning();
+}
+function undoSlate(){
+  if (!state.slateApproved) return;
+  state.slateApproved = false;
+  clearInterval(undoTimer); undoTimer = null;
+  swapSlate(renderSlateRest, false);
+  unshowMorning(); updatePulse();
+}
+function startUndoCountdown(){
+  clearInterval(undoTimer);
+  undoTimer = setInterval(() => {
+    const chip = $("undoChip"); if (!chip) return;
+    const left = D.undoWindowMs - (Date.now() - state.approvedAt);
+    if (left > 0) { chip.textContent = `undo · ${mmss(left)}`; return; }
+    clearInterval(undoTimer); undoTimer = null;
+    chip.textContent = "undo window closed"; chip.disabled = true;
+    setTimeout(() => { chip.style.opacity = "0"; }, 2000);
+  }, 250);
+}
+
+/* ---- review the 3 (outlier detection surfacing the exceptions) ---- */
+function cardHTML(u){
+  const d = state.decisions[u.id];
+  if (d) {
+    return `<div class="ucard decided in" data-card="${u.id}"><div class="verdict">` + (d === "ok"
+      ? `<span class="ok">✓ approved</span> — ${u.prospect} joins the day's send`
+      : `<span class="no">✕ filed</span> — ${u.prospect} → needs rework, won't send`) + `</div></div>`;
+  }
+  return `<div class="ucard" data-card="${u.id}" tabindex="-1" aria-label="Unusual draft: ${u.prospect}">` +
+    `<div class="ucard-stamp"><span>${u.prospect} · follow-up</span><span class="t">drafted ${u.draftedAt}</span></div>` +
+    `<div class="ucard-draft">“${u.draft}”</div>` +
+    `<div class="ucard-flag${u.bad ? " bad" : ""}">${u.flag}</div>` +
+    `<div class="ucard-actions">` +
+      `<button class="btn" data-act="ok" data-id="${u.id}">approve</button>` +
+      `<button class="btn" data-act="no" data-id="${u.id}">reject</button>` +
+      `<span class="keyhint">A · X</span>` +
+    `</div></div>`;
+}
+function renderReview(){
+  $("review").innerHTML = D.unusual.map(cardHTML).join("");
+  $("review").querySelectorAll("[data-act]").forEach(b =>
+    b.addEventListener("click", () => decide(b.dataset.id, b.dataset.act)));
+}
+function openReview(focus = true){
+  if (state.reviewOpen) { if (focus) focusCard(0); return; }
+  state.reviewOpen = true;
+  $("review").hidden = false;
+  renderReview();
+  if (!state.slateApproved) renderSlateRest();
+  const cards = $("review").querySelectorAll(".ucard:not(.decided)");
+  cards.forEach((c, i) => setTimeout(() => c.classList.add("in"), 40 + i * 70));
+  if (focus) setTimeout(() => focusCard(0), 120);
+}
+let cardIdx = 0;
+function focusCard(i){
+  const ids = pendingIds(); if (!ids.length) return;
+  cardIdx = Math.max(0, Math.min(i, ids.length - 1));
+  $("review").querySelectorAll(".ucard").forEach(c => c.classList.remove("focused"));
+  const el = $("review").querySelector(`[data-card="${ids[cardIdx]}"]`);
+  if (el) { el.classList.add("focused"); el.focus({ preventScroll: false }); }
+}
+function decide(id, act){
+  if (state.decisions[id] !== null) return;
+  state.decisions[id] = act;
+  const u = D.unusual.find(x => x.id === id);
+  if (act === "no") {
+    reworkEntries.push(`${u.prospect.toLowerCase()} · rejected ${stagedClock()} · ${u.bad ? "cites a number I can't source" : "operator call"}`);
+    EV.rework = reworkEntries.join("<br>");
+    const chip = $("reworkChip");
+    chip.hidden = false;
+    chip.innerHTML = `needs rework · <b>${reworkEntries.length}</b>`;
+    chip.dataset.ev = "rework";
+  }
+  const old = $("review").querySelector(`[data-card="${id}"]`);
+  if (old) old.outerHTML = cardHTML(u);
+  if (state.slateApproved) {
+    const c = $("settleCount"), p = $("settlePending"), n = pendingIds().length;
+    if (c) c.textContent = sendCount();
+    if (p) p.textContent = n ? ` — ${numword(n)} unusual still wait below` : "";
+  } else renderSlateRest();
+  focusCard(cardIdx);
+  updatePulse(); checkMorning();
+}
+
+/* ================= the queue drawer ================= */
+const drawerOpenNow = () => $("drawer").classList.contains("open");
+function renderDrawer(){
+  const jane = O.replies[0], b = O.bounce;
+  const items = [];
+  items.push(state.reply === "pending"
+    ? `<div class="qitem" data-q="reply" tabindex="-1">` +
+      `<div class="qstamp"><span>${jane.world} · reply</span><span class="t">${jane.at}</span></div>` +
+      `<div class="qbody msg">“${jane.text}”</div>` +
+      `<textarea id="replyText" aria-label="Your reply">${state.replyDraft}</textarea>` +
+      `<div class="qactions"><button class="btn primary" data-qact="reply">send reply</button><span class="keyhint">A</span></div></div>`
+    : `<div class="qitem done" data-q="reply"><div class="qstamp"><span>${jane.world} · reply</span><span class="t">${jane.at}</span></div>` +
+      `<div class="qdone"><span class="ok">✓</span> queued — sends ${stagedClock(D.undoWindowMs)} · undo window 10 min</div></div>`);
+  items.push(state.bounce === "pending"
+    ? `<div class="qitem" data-q="bounce" tabindex="-1">` +
+      `<div class="qstamp"><span>${b.world} · bounced ×${b.times.length}</span><span class="t">${b.times[0]}</span></div>` +
+      `<div class="qmono warned">${b.domain} · ${b.code} · ${b.cause}</div>` +
+      `<div class="qbody">${cap(numword(b.times.length))} follow-ups bounced; sends here will keep failing until the DNS is fixed.</div>` +
+      `<div class="qactions"><button class="btn primary" data-qact="bounce">pause sends to this domain</button><span class="keyhint">A</span></div></div>`
+    : `<div class="qitem done" data-q="bounce"><div class="qstamp"><span>${b.world} · bounced ×${b.times.length}</span><span class="t">${b.times[0]}</span></div>` +
+      `<div class="qdone"><span class="ok">✓</span> paused — nothing sends to ${b.domain} · resume any time</div></div>`);
+  $("drawerItems").innerHTML = items.join("");
+  $("drawerEmpty").hidden = !(state.reply !== "pending" && state.bounce !== "pending");
+  const t = $("replyText");
+  if (t) t.addEventListener("input", () => { state.replyDraft = t.value; });
+  $("drawerItems").querySelectorAll("[data-qact]").forEach(btn =>
+    btn.addEventListener("click", () => actQueue(btn.dataset.qact)));
+}
+function actQueue(which){
+  if (which === "reply" && state.reply === "pending") {
+    state.reply = "done"; renderDrawer(); updatePulse(); checkMorning();
+    showToast("reply to Jane queued — sends in 10 min", () => {
+      state.reply = "pending"; renderDrawer(); unshowMorning(); updatePulse(); focusDrawerItem(0);
+    });
+  } else if (which === "bounce" && state.bounce === "pending") {   // reversible → act now, undo after (D4)
+    state.bounce = "done"; renderDrawer(); updatePulse(); checkMorning();
+    showToast(`paused sends to ${O.bounce.domain}`, () => {
+      state.bounce = "pending"; renderDrawer(); unshowMorning(); updatePulse(); focusDrawerItem(0);
+    });
+  }
+}
+let drawerIdx = 0;
+function pendingQ(){ return [ state.reply === "pending" ? "reply" : null, state.bounce === "pending" ? "bounce" : null ].filter(Boolean); }
+function focusDrawerItem(i){
+  const q = pendingQ(); if (!q.length) return;
+  drawerIdx = Math.max(0, Math.min(i, q.length - 1));
+  $("drawerItems").querySelectorAll(".qitem").forEach(c => c.classList.remove("focused"));
+  const el = $("drawerItems").querySelector(`[data-q="${q[drawerIdx]}"]`);
+  if (el) { el.classList.add("focused"); el.focus({ preventScroll: false }); }
+}
+function openDrawer(){
+  renderDrawer();
+  $("drawer").classList.add("open");
+  $("drawer").setAttribute("aria-hidden", "false");
+  setTimeout(() => focusDrawerItem(0), 120);
+}
+function closeDrawer(){
+  $("drawer").classList.remove("open");
+  $("drawer").setAttribute("aria-hidden", "true");
+  $("pulse").focus();
+}
+$("pulse").addEventListener("click", () => drawerOpenNow() ? closeDrawer() : openDrawer());
+
+/* ================= toast (D4 — act with undo) ================= */
+function showToast(text, onUndo, ms){
+  clearTimeout(toastTimer);
+  $("toastText").textContent = text;
+  const u = $("toastUndo");
+  u.hidden = !onUndo;
+  u.onclick = onUndo ? () => { onUndo(); hideToast(); } : null;
+  $("toast").classList.add("on");
+  toastTimer = setTimeout(hideToast, ms || (onUndo ? D.undoToastMs : 3000));
+}
+function hideToast(){ $("toast").classList.remove("on"); }
+
+/* ================= the instrument — real timing ================= */
+function checkMorning(){
+  if (state.morningShown) return;
+  if (outreachOpen() || state.reply === "pending" || state.bounce === "pending") return;
+  state.morningShown = true;
+  const line = $("closingLine");
+  line.textContent = `That's the morning. ${humanElapsed(elapsedMs())}.`;
+  line.hidden = false;
+  requestAnimationFrame(() => requestAnimationFrame(() => line.classList.add("shown")));
+}
+function unshowMorning(){
+  if (!state.morningShown) return;
+  state.morningShown = false;
+  const line = $("closingLine");
+  line.classList.remove("shown"); line.hidden = true;
+}
+setInterval(() => {
+  $("elapsed").textContent = `your morning so far · ${mmss(elapsedMs())}`;
+  $("masthead").textContent = `${D.date} · ${stagedClock()}`;
+}, 1000);
+
+/* ================= HUD ================= */
+$("hudRestart").addEventListener("click", () => location.reload());
+$("hudHelp").addEventListener("click", () => $("feelfor").classList.add("open"));
+$("feelfor").addEventListener("click", e => { if (e.target === $("feelfor")) $("feelfor").classList.remove("open"); });
+
+/* ================= the Bar ================= */
+$("bar").addEventListener("keydown", e => {
+  if (e.key === "Enter" && $("bar").value.trim()) {
+    showToast("the Bar routes in the full build — this morning only needs the slate", null, 3000);
+    $("bar").value = "";
+  }
+});
+
+/* ================= keyboard model — the whole morning without a pointer ================= */
+document.addEventListener("keydown", e => {
+  const el = document.activeElement;
+  const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+  if (e.key === "Escape") {
+    if ($("feelfor").classList.contains("open")) { $("feelfor").classList.remove("open"); return; }
+    if (typing) { el.blur(); return; }
+    if (drawerOpenNow()) { closeDrawer(); return; }
+    hideEvidence(); return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === ".") { e.preventDefault(); drawerOpenNow() ? closeDrawer() : openDrawer(); return; }
+  if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (drawerOpenNow()) {                       // the drawer is an overlay — it owns the vocabulary
+    if (k === "j") { e.preventDefault(); focusDrawerItem(drawerIdx + 1); }
+    else if (k === "k") { e.preventDefault(); focusDrawerItem(drawerIdx - 1); }
+    else if (k === "a") { e.preventDefault(); const q = pendingQ(); if (q.length) actQueue(q[drawerIdx] || q[0]); }
+    return;
+  }
+  if (state.reviewOpen && pendingIds().length) {
+    if (k === "j") { e.preventDefault(); focusCard(cardIdx + 1); return; }
+    if (k === "k") { e.preventDefault(); focusCard(cardIdx - 1); return; }
+    if (k === "a") { e.preventDefault(); decide(pendingIds()[cardIdx], "ok"); return; }
+    if (k === "x") { e.preventDefault(); decide(pendingIds()[cardIdx], "no"); return; }
+  }
+  if (e.key.length === 1) $("bar").focus();    // any printable key focuses the Bar
+});
+
+/* ================= boot ================= */
+renderSlateRest();
+updatePulse();
+$("elapsed").textContent = "your morning so far · 0:00";
 </script>
 </body>
 </html>
