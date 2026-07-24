@@ -129,7 +129,10 @@ The Field on day zero shows the machine's own work-in-progress, not honest empti
 anti-generic invariant must bind day zero hardest, not exempt it. *(Heals W1; preserves rung-0
 and the spine.)*
 
-**D2 — Initiative inward, gates outward.** The AI may always *prepare* unasked — speculative
+**D2 — Initiative inward. Permission outward.** *(The operator's own restatement — adopted as
+the canonical phrasing.)* The AI is always free to think, notice, connect, prepare, draft,
+simulate, compare, and discover without asking; it can never email, publish, deploy, delete,
+purchase, or modify external systems without permission. The AI may always *prepare* unasked — speculative
 variants appended to the bench overnight, a noticed connection, a pre-drafted reply — as inert,
 killable offers under append-only physics. It may never *send* unasked; the Queue is untouched.
 One budgeted unasked observation per surface per day (the budget protects calm; the permission
