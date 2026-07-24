@@ -379,4 +379,679 @@ Cross-cutting conventions used by nearly every function:
 - **Env**: `SB_OAUTH_CLIENT_ID/_SECRET`, `GITHUB_OAUTH_CLIENT_ID/_SECRET`, `DOCUSIGN_OAUTH_CLIENT_ID/_SECRET`,
   `DOCUSIGN_AUTH_BASE`. No AI. **Status**: fully implemented. **Calls**: none.
 
-*Sections 6–13 follow.*
+## 6. Garvis core & heartbeat workers
+
+### 6.1 garvis-brain
+- **Purpose**: the Garvis "reasoning seam" — one **stateless** decision step inside the client runtime's
+  execution loop (`src/lib/garvis/runtime.ts`). No state, no tool execution, no DB beyond auth+credits: given
+  `mode` (`observe`/`plan`/`act`), `task`, `history`, and the already mode-gated tool list, it returns the
+  single next move.
+- **Trigger**: FE JWT. Input `{ mode, task, history, tools, context }` → one of `{kind:'tools',calls[]}` /
+  `{kind:'finish',output,recommendation}` / `{kind:'await_approval',question,options}` + `costUsd`.
+  Unparseable model output fails soft to a `finish` with the raw text.
+- **Tables**: `profiles` (plan) + credit RPCs (`garvis` kind).
+- **AI**: `modelForPlan`, 1500 tokens. SYSTEM prompt (product intent, verbatim): "*You are Garvis — the
+  reasoning core of a personal AI operating system that manages a solo founder's PRODUCTS (apps + their
+  metrics) AND their BUSINESS WORLDS… You are not a chatbot; you are one decision step inside an execution
+  loop. The loop owns control flow, safety, and budget… THE GATE IS ABSOLUTE: you may ONLY call tools present
+  in the AVAILABLE TOOLS list… Never invent apps, revenue, or metrics.*"
+- **Status**: fully implemented (thin by design). **Calls**: none.
+
+### 6.2 garvis-worker
+- **Purpose**: the **unattended** server-side Garvis runner — the counterpart of the client chassis, so queued
+  `agent_runs` execute with every laptop closed. Claims runnable runs across all owners (cron) or one exact
+  owner-scoped run (signed-in nudge); steps the same observe/plan/act loop with mode-gated tools re-applied
+  each step, per-step checkpoints, per-owner credit metering, hard budget cap (default $0.50), transient-error
+  retry with exponential backoff (`MAX_RETRIES=3`), `MAX_STEPS=12`, 2 runs per invocation.
+- **Trigger**: CRON every 5 min (`garvis-worker-tick`) / worker-secret POST / FE JWT nudge (`{run_id}`).
+  `--no-verify-jwt`; auth via `cronAuthorized` or user JWT (owner-scoped claim RPC).
+- **Tables**: RPCs `claim_next_agent_run_service` / `claim_agent_run` / `claim_next_agent_run`; `agent_runs`
+  (status/phase/checkpoint/spend/lease/retry), `mind_events`, `profiles`; tool executor touches `apps`,
+  `app_metrics`, `garvis_app_profiles`, `garvis_knowledge`, `garvis_goals`, `garvis_capabilities`.
+  Heartbeat stamp `garvis-worker-tick` on real cron ticks.
+- **AI**: `modelForPlan`, 1500 tokens; SYSTEM prompt **byte-aligned with garvis-brain** (brain = foreground,
+  worker = background). Server tool registry: `list_apps, get_app, query_metrics, recent_runs,
+  get_repo_state` (public GitHub API), `get_app_profile, recall_knowledge, log_decision, record_outcome,
+  generate_short_script` (inline compressed scriptwriter prompt), `list_goals, list_capabilities,
+  propose_goal, register_capability, propose_recommendation, update_app, enqueue_run`. All proposals insert
+  `status:'proposed'` (human approval).
+- **Status**: fully implemented. **Calls**: **garvis-worker → garvis-worker** (self-chain while queue
+  non-empty); external: `api.github.com`.
+
+### 6.3 standing-worker — "THE CLOCK'S HANDS" (2,375 lines; the system's largest function)
+- **Purpose**: executes due `standing_orders` on the 15-minute heartbeat and on demand ("Run now"), **and**
+  runs the outward-execution drains that turn *approved* records into real sends/posts. Honesty rule: orders
+  only READ and RECORD; anything outward goes through approvals.
+- **Trigger**: CRON `*/15` (`garvis-standing-tick`) / worker-secret or service-role POST (all owners) / FE
+  JWT (own orders only). On-demand bodies: `{order_id}` (force-run one), `{pitch_lead_id, review?}`
+  (foreground build-&-send for one prospect). Output `{ ok, ran, changed, failed }`.
+- **Order kinds** (dispatch on `standing_orders.kind`):
+  - `watch_url` — SSRF-safe fetch + verified `_shared/standingCore.ts` `decideWatch` (a failed fetch is
+    UNREACHABLE never "no change"; first sight is a baseline never a fake "change"; markup noise ignored);
+    real change → deduped `mind_events` + webhook, new `last_hash`/`last_text` baseline.
+  - `opportunity_hunt` — scheduled Serper sweeps → SSRF-safe page fetches (Serper rendered-scrape fallback) →
+    ONE batched model extraction bound to a fetched-URL allowlist → dedupe-insert `opportunities`;
+    self-tuning query-variant rotation after repeated dry runs.
+  - `client_hunt` — self-contained daily prospecting: Google Places discovery into `discovered_businesses`
+    (market-exhaustion tracking in `discovery_queries`), then up to `demoQuota` demo builds
+    (scrape via fetch-url → AI intelligence chain → `preview_sites`) and a PENDING cold-pitch approval
+    (no-website prospects first).
+  - `idea_stream` — N grounded ideas appended as tiles to a world's Idea Board
+    (`knowledge_clusters.working_state.boards.idea`); existing titles are a do-not-repeat list.
+  - `content_week` — draft N social posts + 1 email grounded only in the business's facts, judge each with
+    the shared editor rubric (**fail-closed**), persist `content_weeks`, stage ONE `content_week` approval
+    hash-bound to the exact pieces+scores.
+  - `cadence_digest` — deterministic weekly "what actually happened" digest per world (row counts, no model
+    call; a quiet week honestly says quiet).
+- **Worker-tick drains/sweeps** (before the order loop, worker auth only): timed `reminders` firing;
+  booking reminders (day-before, via transactional `bookingNotify`); **arc wake sweep** (flip
+  `orchestrator_plans` `waiting`→`ready` when machine-checkable blockers clear, app_0095); **arc advance**
+  (execute purely mechanical arc steps server-side — SERVER_ACTIONS registry: `hunt_opportunities,
+  watch_page, cadence_digest, start_idea_stream, start_client_hunt, start_content_week, record_thesis,
+  add_reminder, add_contact, create_invoice, mount_room, check_master_switch` — stopping at the first
+  creative step); **bulk send drain** (approved `outreach_batches` a slice per tick through **send-email**,
+  per-recipient gates re-checked, claim-first + stale-claim sweep); **social post drain** (approved
+  `social_posts` through **social-publish**); **client automation triggers** (`automation_triggers` →
+  `trigger_fires` ledger → PENDING send_email/send_sms approvals; consent-gated `warm_transactional`);
+  **content-week drain** (double hash check, social pieces → `social_posts` + pre-authorized `publish_post`
+  approvals, email piece → `outreach_batches`).
+- **Tables** (exhaustive): `standing_orders, mind_events, profiles, reminders, appointments, booking_pages,
+  outreach_settings, orchestrator_plans, knowledge_worlds, knowledge_clusters, knowledge_artifacts,
+  outreach_batches, outreach_messages, outreach_campaigns, approvals, social_posts, automation_triggers,
+  customer_lists, customers, trigger_fires, contacts, client_subscriptions, content_weeks, brand_kits,
+  opportunities, discovery_queries, discovered_businesses, business_profiles, preview_sites, invoices,
+  world_rooms, garvis_knowledge` + storage bucket `project-assets` + heartbeat stamp `standing-worker`.
+- **External/env**: Google Places (`GOOGLE_PLACES_API_KEY`), Serper (`SERPER_API_KEY`), OpenAI images
+  `gpt-image-1` (`OPENAI_API_KEY`; concept art labeled `ai_generated, can_publish:false`), ScreenshotOne
+  (`SCREENSHOT_API_KEY`/`SCREENSHOT_API_URL`), Resend/Twilio via bookingNotify, `APP_ORIGIN`,
+  `AI_PREMIUM_MODEL`, `BESPOKE_DEMOS`, `WORKER_SECRET`. Budgets: ≤20 orders/tick, per-path time budgets
+  (55–100s).
+- **AI prompts** (the intelligence chain encodes the product):
+  - hunt extraction `EXTRACT_SYSTEM`: "*You extract real, currently-open OPPORTUNITIES… source_url must be
+    one of the given PAGE urls, verbatim. Never construct or guess a deeper link.*"
+  - idea_stream: "*HONESTY IS ABSOLUTE… If the idea would fit any business, it is wrong.*"
+  - content_week writer/judge from `_shared/copyJudge.ts` (see §10.14) + one-shot revision prompt.
+  - demo build chain (strategist → art director → simulated owner → refine): `STRATEGY_SYSTEM` ("*senior
+    marketing strategist at an elite local-business agency… never invent facts, awards, or claims*"),
+    `SPEC_SYSTEM` ("*art director and conversion copywriter… produce a WEBSITE SPEC as JSON… You never write
+    HTML/CSS/code… Never invent reviews, ratings, years in business*"), `CRITIQUE_SYSTEM` ("*You ARE the
+    owner of this business — busy, skeptical… Would you pay $299 to publish it?*"), `BESPOKE_SYSTEM`
+    ("*senior web designer at a boutique studio… a single, bespoke, conversion-focused landing page… NOT a
+    template*", output gated by `bespokeHonest` which discards HTML asserting ungrounded claims).
+- **Status**: fully implemented; every missing key degrades to an explicit `last_result` line, and a failed
+  chain falls back to the deterministic template spec with a `build_log` explaining why.
+- **Calls**: **standing-worker → send-email**, **→ social-publish**, **→ fetch-url** (all with
+  `x-worker-secret` + service-role bearer).
+
+### 6.4 garvis-pulse
+- **Purpose**: THE MORNING BRIEF — hourly cron; for each owner with a notification webhook, if it's 7–9am in
+  **their** timezone and they weren't briefed today and something real happened, push a digest: new leads,
+  instantly-answered leads, replies, pending approvals, due reminders, arcs parked `waiting` >1 day, and
+  today's calendar events read from the operator's own ICS feed (`_shared/icsCore.ts`). "A quiet night sends
+  NOTHING… This function never acts outward — it only tells the OWNER what's waiting."
+- **Trigger**: CRON hourly (:07). `--no-verify-jwt`; raw `x-worker-secret` check (not cronGate).
+- **Tables**: `profiles` (webhook_url, last_pulse_at, calendar_ics_url), `outreach_settings` (timezone),
+  `leads`, `replies`, `approvals`, `reminders`, `orchestrator_plans`; writes `profiles.last_pulse_at`,
+  `mind_events` (source `pulse`); heartbeat `garvis-pulse`.
+- **External/env**: `notifyText` webhook (Discord/Slack aware), `safeFetch` of the ICS URL; `WORKER_SECRET`.
+  No AI. **Status**: fully implemented. **Calls**: none.
+
+### 6.5 garvis-scorecard
+- **Purpose**: THE SUNDAY SCORECARD — EOS-style weekly review over two fixed 7-day windows (this week vs
+  last): revenue collected, overdue invoices, leads, instant touches, site visits, replies, emails sent, new
+  contacts, ad spend, pending approvals; per-business breakdown when ≥2 worlds had activity. Arrows on real
+  arithmetic only; an empty fortnight sends nothing.
+- **Trigger**: CRON weekly (Sun 22:00 UTC). `--no-verify-jwt`; `cronAuthorized`.
+- **Tables**: `profiles, leads, site_events, replies, outreach_messages, contacts, approvals, invoices,
+  ad_metrics, knowledge_worlds`; writes `mind_events` (source `scorecard`); heartbeat
+  `garvis-scorecard-weekly`. `notifyText` webhook. No AI.
+- **Status**: fully implemented. **Calls**: none.
+
+### 6.6 garvis-consolidate
+- **Purpose**: THE CONSOLIDATION LOOP — "the missing edge that turns memory into judgment." Weekly, per
+  owner: reads recent `mind_events` (≥15 required, ≤120 used), asks the model for ≤3 candidate **LESSONS
+  grounded only in what actually happened** (each must cite 2+ verbatim event subjects), files them as
+  **PROPOSED** `garvis_knowledge` (human approval gate); approved lessons already flow into agent runs and
+  builder edits via the knowledge digest.
+- **Trigger**: CRON weekly (Mon 08:00). `--no-verify-jwt`; raw `x-worker-secret` check.
+- **Tables**: `mind_events` (read + consolidation marker), `garvis_knowledge` (dedupe vs existing titles;
+  insert `status:'proposed'`, source `consolidation`); heartbeat `garvis-consolidate`.
+- **AI**: `complete()` default model, 1200 tokens. SYSTEM: "*You distill a personal operating system's event
+  log into durable LESSONS for its one operator… every lesson MUST cite 2+ verbatim event subjects as
+  evidence. Never invent numbers, causes, or events. If nothing actually recurs or teaches anything, return
+  [].*"
+- **Status**: fully implemented. **Calls**: none.
+
+### 6.7 garvis-canary
+- **Purpose**: THE NIGHTLY CANARY — proves the **deployed** system's live wiring on the clock (vs. the 96 CI
+  verify suites that test logic): (1) catalog + `parsePlan` gauntlet behave in-runtime; (2) outbound
+  networking via `safeFetch` → example.com; (3) DB round-trip (insert/select/delete on `mind_events`);
+  (4) **the send gate REFUSES** a fabricated approval id ("a 2xx here would be the worst possible news");
+  (5) heartbeat stamps fresh (>26h = stale). Silent when green; failures → one `mind_events` line per owner +
+  webhook nudge.
+- **Trigger**: CRON nightly (08:30). `--no-verify-jwt`; `cronAuthorized`.
+- **Tables**: `profiles`, `mind_events`, `system_heartbeat` (read + stamp `garvis-canary`). No AI.
+- **Status**: fully implemented. **Calls**: **garvis-canary → send-email** (negative probe, expects non-2xx).
+
+### 6.8 garvis-short-script
+- **Purpose**: pure-LLM Garvis capability: draft a short-form video **script** (text only, marked
+  `fidelity:'script_only'`, `required_approval:true`) — explicitly does NOT render/publish; "when real
+  rendering/assets/social accounts are involved, THAT capability will live in Traction Engine."
+- **Trigger**: FE JWT. `{ topic, audience?, goal?, source_material?, tone?, platform?, length? }` →
+  `{ hook, script, caption, cta, visual_beats[], confidence, fidelity, required_approval, costUsd }`.
+- **Tables**: `profiles` + credit RPCs (`short_script`).
+- **AI**: `modelForPlan`, 1800 tokens. SYSTEM: "*You are a senior short-form video scriptwriter. You produce
+  a SCRIPT ONLY — you do NOT render video, generate audio, or publish anything, and you must never imply that
+  you did… earns attention in the first 2 seconds.*"
+- **Status**: fully implemented (deliberately scoped). **Calls**: none.
+
+### 6.9 system-control
+- **Purpose**: THE MASTER SWITCH PANEL — "is the brain actually on?" `status` → which edge secrets are SET
+  (presence booleans only, values never leave the server), which garvis cron jobs are scheduled (RPC
+  `garvis_cron_status()`), latest `system_heartbeat` stamps. `arm` → RPC
+  `garvis_arm_heartbeat(functions_base, worker_secret)`. `probe_places` → live Google Places key check.
+  Its SECRETS presence map is the authoritative integration inventory (see §12).
+- **Trigger**: FE JWT (single-operator platform: any authed user is the operator).
+- **Tables/RPCs**: `garvis_arm_heartbeat`, `garvis_cron_status`, `system_heartbeat`. No AI.
+- **Status**: fully implemented. **Calls**: none.
+
+### 6.10 cluster-chat
+- **Purpose**: the Cluster Studio chat's reasoning seam (docs/garvis-studios-blueprint.md §11) — mirrors
+  garvis-brain: **no state, no tool execution; it only DECIDES**. Client compiles studio context, sends it
+  with the message, and executes the returned decision through owner-scoped paths. "Structural safety: the
+  only outward-facing verb this can emit is a PROPOSAL into the approval queue — it cannot send."
+- **Trigger**: FE JWT. `{ system, context?, history?, message, format?:'decision'|'raw' }` →
+  `{ text, costUsd }` (client parses via `parseStudioDecision`). Caps: system/context 12k chars, message 4k.
+- **Tables**: `profiles` + credit RPCs (`explore`). **AI**: `modelForPlan`, 2500 tokens; system prompt
+  supplied by the client (`STUDIO_SYSTEM` lives client-side with the pure core).
+- **Status**: fully implemented. **Calls**: none.
+
+### 6.11 explorer-turn
+- **Purpose**: the metered chokepoint for **every** Explorer / Knowledge-Universe model call (overview,
+  currents, think-out-loud, mind, bridge, investigate) — replaces the old browser-direct user-pasted-key
+  pattern; meters each turn as the `explore` credit kind.
+- **Trigger**: FE JWT. `{ messages, maxTokens?≤4000, stream?, fast? }` → `{ text, inputTokens, outputTokens,
+  costUsd }` or SSE stream. No built-in system prompt (caller supplies).
+- **Tables**: `profiles` + credit RPCs. **AI**: `modelForPlan` (`fast` → free tier).
+- **Status**: fully implemented. **Calls**: none.
+
+## 7. Outreach, comms & CRM
+
+### 7.1 send-email — THE ONE SEND PATH
+- **Purpose**: the sole email egress. Takes an approved `approvals` row (`kind='send_email'`) whose payload
+  references an `outreach_messages` row, **re-checks every safety gate at send time**, sends via Resend,
+  writes `execution_runs` + `mind_events`. "Sending outside an approval is impossible."
+- **Trigger**: dual-caller, JWT-verified deploy: owner FE JWT, or worker `x-worker-secret` allowed **only**
+  for approvals stamped `requested_by='garvis-auto'` (owner derived from the approval row). Payload-hash
+  tamper check (null hash grandfathered).
+- **Gates**: atomic double-send claim (CAS on `result->>send_claimed_at`); **placeholder gate** (422 on
+  literal `[YOU FILL]`/`[EDIT]`); suppression list (fail-closed — blocks on lookup error); per-brand sender
+  identity (`world_sender_identities`); warmup ramp + timezone-aware daily cap (`outreach_settings`);
+  CAN-SPAM footer; RFC 8058 one-click `List-Unsubscribe` headers pointing at **unsubscribe**.
+- **I/O**: `{ approval_id }` → `{ ok, resend_id, sent_at }` / 422 gate block / 502 provider error.
+- **Tables**: reads `approvals, outreach_messages, outreach_settings, outreach_batches, contacts,
+  world_sender_identities, suppression, outreach_campaigns`; writes `approvals, outreach_messages,
+  execution_runs, preview_sites` (preview→emailed), `outreach_campaigns`, `mind_events`.
+- **External/env**: Resend (`api.resend.com/emails`); `RESEND_API_KEY`, `WORKER_SECRET`. No AI.
+- **Status**: fully implemented. **Called by**: standing-worker, site-events, autonomyGate (all four cron
+  drafters), garvis-canary (negative probe).
+
+### 7.2 send-sms — the SMS twin
+- **Purpose/trigger**: same approval spine (`kind='send_sms'`, channel `sms`), dual-caller; sends via Twilio.
+- **Gates**: SMS kill switch (`outreach_settings.sms_enabled`, **off by default**), valid E.164, non-empty
+  body, placeholder gate, **TCPA consent fails CLOSED**, not-unsubscribed, SMS daily cap; per-client FROM
+  routing (`resolveSmsFrom`).
+- **Tables**: `approvals, outreach_messages, outreach_settings, contacts, execution_runs`.
+- **External/env**: Twilio Messages API; `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`,
+  `WORKER_SECRET`. No AI. **Status**: fully implemented. **Called by**: standing-worker (automation triggers
+  stage approvals executed through it).
+
+### 7.3 sender-domain
+- **Purpose**: per-brand sending domains via Resend — register a client domain, return exact SPF/DKIM/DMARC
+  records, trigger verification, report status; makes a from-address deliverable (sends nothing itself).
+- **Trigger**: FE JWT, owner-checked rows. Actions `connect`/`refresh`/`verify`/`remove`.
+- **Tables**: `sender_domains`. **External/env**: Resend `/domains` API, `RESEND_API_KEY`. No AI.
+- **Status**: fully implemented — but **absent from both npm deploy lists** (manual deploy per header).
+
+### 7.4 unsubscribe
+- **Purpose**: working RFC 8058 one-click opt-out. `?m=<outreach_messages.id>` — an unguessable per-send
+  UUID — **is the capability**; the endpoint can only suppress that message's actual recipient (no
+  third-party griefing surface despite running unauthenticated). POST (mailbox provider) → suppress + 200;
+  GET (human click) → suppress + small confirmation page. Never leaks id validity.
+- **Trigger**: PUB (`--no-verify-jwt`).
+- **Tables**: `outreach_messages` (read), `suppression`, `contacts`, `outreach_campaigns`, `execution_runs`,
+  `mind_events`. No AI. **Status**: fully implemented. **Referenced by**: send-email (List-Unsubscribe URL).
+
+### 7.5 resend-webhook
+- **Purpose**: Resend delivery-status webhook (**Svix-signed**: HMAC-SHA256 of `id.ts.body`, ±300s replay
+  window, constant-time compare). Correlates by `provider_message_id`; advances message/campaign status,
+  records delivered/opened/clicked engagement, adds bounces/complaints to the suppression list and marks the
+  contact "so a bad address can never be emailed again."
+- **Trigger**: WH (`--no-verify-jwt`). Event map: `email.sent/delivered/opened/clicked/bounced/complained/
+  delivery_delayed/failed`.
+- **Tables**: `outreach_messages, outreach_events, outreach_campaigns, suppression, contacts,
+  execution_runs`. **Env**: `RESEND_WEBHOOK_SECRET`. No AI. **Status**: fully implemented. **Calls**: none.
+
+### 7.6 resend-inbound
+- **Purpose**: inbound reply handler — records the reply, **AI-classifies sentiment**
+  (positive/negative/neutral), stops the sequence, flips the campaign to replied/won/lost; also a
+  forward-in mailbox (mail to an owner's `in-xxxxxx@` alias lands in `inbound_mail`). Correlates by
+  in-reply-to/references headers or from-address.
+- **Trigger**: WH (`--no-verify-jwt`); auth = `x-inbound-secret` header == `INBOUND_SECRET`
+  (constant-time).
+- **Tables**: `outreach_messages, profiles, inbound_mail, mind_events, replies, outreach_events,
+  suppression, contacts, execution_runs, outreach_campaigns`.
+- **AI**: `gpt-4o-mini` (OpenAI) or `google/gemini-2.5-flash` (via the Lovable AI gateway,
+  `LOVABLE_API_KEY`), temperature 0, max_tokens 4. Prompt: "*Classify the reply to a cold outreach email as
+  exactly one word: positive, negative, or neutral…*" Falls back to a regex heuristic with no key.
+- **Status**: fully implemented (graceful degradation). **Calls**: none.
+
+### 7.7 inbox-draft
+- **Purpose**: OVERNIGHT REPLY DRAFTS — "the 'drafted-but-never-sent' pattern (the one form of email
+  autonomy the market actually adopted)." Nightly, for every positive reply not yet answered (14-day
+  window, ≤25): draft the response and stage it as a PENDING approval; auto-send only under an
+  `inbox_reply` autonomy grant. Drafts answer **only from the thread**; unknowns become `[YOU FILL: …]`
+  holes.
+- **Trigger**: CRON daily (12:45). `--no-verify-jwt`; `cronAuthorized`; heartbeat `garvis-inbox-draft-daily`.
+- **Tables**: `replies, outreach_messages, contacts, outreach_settings, draft_verdicts, profiles`;
+  writes `outreach_messages` (draft), `approvals`.
+- **AI**: `modelForPlan`, 700 tokens: "*You draft a reply to a warm prospect who wrote back. Warm, direct,
+  under 120 words… For anything you cannot know (prices, dates, availability, specifics), insert a visible
+  placeholder like [YOU FILL: your price] instead of inventing.*" Injects a measured track-record block
+  (from `draft_verdicts`) plus a real approved email as a voice rail.
+- **Status**: fully implemented; no key → `{available:false}`. **Calls**: → **send-email** via
+  `executeSendNow` when autonomy granted.
+
+### 7.8 outreach-followups
+- **Purpose**: the follow-up cadence cron, two passes: (A) campaigns sent and due (default 3 business days,
+  max 2 bumps) → short follow-up draft → approval; (B) app_0081 high-signal pass: "opened 3+ times but
+  silent" → engagement bump. Cold outreach only; any reply/unsub/bounce stops the sequence; never sends on
+  its own (auto only under `followup` autonomy).
+- **Trigger**: CRON daily (13:00). `--no-verify-jwt`; `cronAuthorized`; heartbeat `garvis-followups-daily`.
+- **Tables**: `outreach_campaigns, replies, outreach_messages, contacts`; writes drafts + `approvals`.
+- **AI**: direct fetch (not the ai.ts seam): `gpt-4o-mini` or `google/gemini-2.5-flash`, JSON mode, temp 0.4.
+  Cadence prompt: "*Under 50 words. Plain text. No 'just following up'/'checking in'. One question.*"
+  Engaged-bump prompt: "*…the recipient has read several times without replying — they are interested but
+  stuck. Under 45 words… NEVER mention opens, reads, or tracking in any form.*"
+- **Status**: fully implemented. **Calls**: → **send-email** via `executeSendNow` when autonomy granted.
+
+### 7.9 outreach-reactivate
+- **Purpose**: THE REACTIVATION SWEEP — monthly; contacts once in a real conversation (≥1 sent message) that
+  went quiet 60–365 days ago get a short, human check-in staged as DRAFT + PENDING approval (hard cap
+  10/owner/sweep). **Deterministic templates — no AI invention.** Suppression check fails closed.
+- **Trigger**: CRON monthly (1st, 14:00). `--no-verify-jwt`; `cronAuthorized`; heartbeat
+  `garvis-reactivate-monthly`.
+- **Tables**: `outreach_settings, outreach_messages, replies, outreach_campaigns` (kind `re_nurture`),
+  `contacts, suppression, approvals, mind_events`. No AI.
+- **Status**: fully implemented. **Calls**: → **send-email** via `executeSendNow` when autonomy granted.
+
+### 7.10 invoice-chase
+- **Purpose**: THE CHASER — "the heartbeat asks about money so the owner doesn't have to (60% of owners
+  avoid confronting late payers; the median SMB sits on $17.5K unpaid)." Daily: every sent, unpaid, dated
+  invoice on a 4-stage ladder (upcoming→due→firm→final, mirroring `src/lib/garvis/money.ts`); each rung
+  fires ONCE as a PENDING approval. Deterministic, polite copy — "never fake collections."
+- **Trigger**: CRON daily (13:30). `--no-verify-jwt`; `cronAuthorized`; heartbeat `garvis-invoice-chase-daily`.
+- **Tables**: `invoices` (`last_chase_stage`), `outreach_settings, world_sender_identities,
+  outreach_campaigns` (kind `invoice_chase`), `outreach_messages, approvals`. No AI.
+- **Status**: fully implemented. **Calls**: → **send-email** via `executeSendNow` when autonomy granted.
+
+### 7.11 voice-inbound
+- **Purpose**: MISSED-CALL TEXT-BACK — the Twilio Voice webhook, two stages: `inbound` returns TwiML ringing
+  the business's real line with a dial-action callback to itself; `status` texts the caller back within
+  seconds on a missed call (no-answer/busy/failed/canceled) and logs either way. The `missed_call_configs`
+  row IS the pre-authorization (fixed transactional template); honors prior STOP; idempotent on `call_sid`.
+- **Trigger**: WH (Twilio, `--no-verify-jwt`); **X-Twilio-Signature** HMAC-SHA1 validation, fail-closed.
+  Always answers with TwiML XML (never crashes a live call).
+- **Tables**: `missed_call_configs, contacts, missed_call_events`.
+- **External/env**: Twilio (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `VOICE_WEBHOOK_URL`). No AI.
+- **Status**: fully implemented. **Calls**: Twilio directly (transactional; deliberately not via send-sms).
+
+### 7.12 booking
+- **Purpose**: PUBLIC booking API — the public page never touches the DB; this uses the service role keyed
+  by an enabled `booking_pages.slug` and only exposes that page's services + open slots.
+  `availability` → services/slots; `book` → race-proof confirmed appointment (**DB gist exclusion
+  constraint** catches double-booking, code `23P01`), customer confirmation via transactional
+  Resend/Twilio (`_shared/bookingNotify.ts`), operator webhook alert.
+- **Trigger**: PUB (anon key; slug is the capability). **Not in any deploy list** (manual deploy).
+- **Tables**: `booking_pages, booking_services, appointments, mind_events, profiles`. No AI.
+- **Status**: fully implemented. **Calls**: none (transactional notices bypass the outreach gates by design —
+  "the customer just booked and gave contact details for exactly this").
+
+### 7.13 site-events
+- **Purpose**: G5 INSTRUMENTATION INGEST — the endpoint **generated websites** report to (visit / lead /
+  click / qr). Security model: the site **channel token** (unguessable UUID embedded in the built site) is
+  write-only and maps server-side to `(owner_id, world_id)`; revoked tokens 403; size caps; one event per
+  request. A valid lead creates-or-links a contact (never modifies an existing one — "suppression sacred"),
+  drops a `mind_events`, and can fire the **instant first touch** standing rule: a deterministic templated
+  first-touch email staged as a `garvis-auto` approval (`decided_via='standing_rule'`) and sent immediately
+  through send-email — "no AI invention at 11pm."
+- **Trigger**: PUB (visitors' browsers; `--no-verify-jwt`). Rate limits: 60 events + 10 leads /min/channel.
+- **Tables**: `site_channels, site_events, contacts, leads, mind_events, profiles, outreach_settings,
+  outreach_messages, outreach_campaigns` (kind `auto_first_touch`), `approvals`.
+- **Status**: fully implemented. **Calls**: **site-events → send-email** (`x-worker-secret`).
+
+### 7.14 automation-intake
+- **Purpose**: THE CUSTOM-AUTOMATION INTAKE — public demo form: a prospect describes how they run their
+  business; a **deterministic** engine (`intakeAutomations` — "deliverable-only, gaps not promises") detects
+  which real automations fit, lands the hottest inbound lead as an `opportunities` row
+  (kind `inbound_automation_request`), notifies the operator in-app + webhook. Owner resolved server-side
+  from `preview_sites.user_id`. Prospect sees only deliverable proposals `{title, pitch, monthlyPrice}` —
+  never gaps.
+- **Trigger**: PUB (anon; burst cap 5/preview/min). **Tables**: `preview_sites, opportunities, profiles,
+  mind_events`. `APP_ORIGIN`. No AI. **Status**: fully implemented. **Calls**: none.
+
+### 7.15 claim-submit
+- **Purpose**: THE CLAIM BELL — the public preview's "Claim this website" form (anon; business owners aren't
+  logged in). Inserts `publish_requests` server-side AND immediately rings the agency owner's webhook —
+  "a raised hand is the conversion event and must never land silently."
+- **Trigger**: PUB (anon; burst cap 5/preview/min). **Tables**: `preview_sites, publish_requests, profiles`.
+  No AI. **Status**: fully implemented. **Calls**: none.
+
+## 8. Prospecting, media & knowledge
+
+### 8.1 discover-run
+- **Purpose**: "SCRAPE EVERYTHING → a growing pool of real businesses." Two engines over one
+  (business-type × metro) grid: `source:'claude'` (default) — **Claude runs the scraping** with the
+  `web_search` tool, finding real local businesses AND judging each site (bad/missing/decent) in one pass,
+  persisting a business **only** if tied to a real citation URL Anthropic returned (`groundScoutLeads`);
+  `source:'places'` — the Google Places structured firehose (3 pages/combo). Seeds the whole grid
+  (`discovery_queries`) on first run; tracks exhaustion.
+- **Trigger**: FE JWT (operator). `{ batch?, source? }` → `{ ok, source, combosRun, newLeads, dupes,
+  apiError, poolTotal, noWebsite, freshCombosLeft }`.
+- **Tables**: `discovery_queries`, `discovered_businesses` (deduped).
+- **External/env**: Anthropic web search (`ANTHROPIC_API_KEY`) and/or Google Places
+  (`GOOGLE_PLACES_API_KEY`).
+- **AI**: `SCOUT_MODEL = 'claude-sonnet-4-6'` + `web_search` (maxUses 6). `SCOUT_SYSTEM` (from
+  `claudeScout.ts`): "*You are a local-business prospector for a web-design agency… NEVER invent a business,
+  a phone number, or a website. If you are unsure a business is real, leave it out.*"
+- **Status**: fully implemented (both engines real). **Calls**: none.
+
+### 8.2 discover-media
+- **Purpose**: server-side media/answer discovery proxy for Explorer/spike mode — holds the Perplexity,
+  Serper, and Places keys server-side (never in the browser bundle), meters each call, returns the
+  provider's raw JSON (client keeps its parsing/scoring).
+- **Trigger**: FE JWT; credit kind `discover`. `{ provider:'perplexity'|'serper'|'places', topic?/path?/q? }`
+  → `{ available, data }`.
+- **External/env**: Perplexity `sonar` ($0.006/call) — prompt: "*Explain the topic to a curious mind: a
+  vivid, specific, genuinely interesting 3-5 sentence understanding — the version a brilliant friend would
+  tell you*"; Serper ($0.002); Google Places New ($0.003). `PERPLEXITY_API_KEY`, `SERPER_API_KEY`,
+  `GOOGLE_PLACES_API_KEY`.
+- **Status**: fully implemented (per-provider honest degrade). **Calls**: none.
+
+### 8.3 ingest-profile
+- **Purpose**: THE FUNNEL'S FRONT DOOR — the external scraper/lead engine POSTs `BusinessProfile` JSON with
+  an **ingest token** (Settings → API tokens; no browser session) and gets back a live public preview URL +
+  report URL. v1 generates the deterministic recipe-based spec (`assembleFallbackSpec` — instant, free,
+  always valid, `spec_source:'fallback'`); the AI intelligence chain runs later on the admin's Regenerate
+  (a deliberate deferral, honestly labeled — not a stub). Slug carries a random nonce so pitches aren't
+  enumerable.
+- **Trigger**: PUB server-to-server; auth = `x-ingest-token` against `ingest_tokens` (revocable,
+  `last_used_at` stamped).
+- **Tables**: `ingest_tokens, business_profiles, preview_sites`. **Env**: `APP_ORIGIN`. No AI in v1.
+- **Status**: fully implemented for scope. **Calls**: none.
+
+### 8.4 fetch-url
+- **Purpose**: the **one hardened fetch path** — reads a page server-side for chat context (title,
+  description, readable text + shallow same-host crawl of service/about/gallery pages) and serves as the
+  asset-harvest endpoint. Modes: `text` (default; also emits a site-audit `checks` object —
+  viewport/form/email/https — and the **tech fingerprint**, §10.16), `images` (extract content image URLs
+  incl. lazy-load), `save` (download one image into the user's storage + `project_assets` manifest),
+  `contact` (mine publicly listed emails, incl. Cloudflare email-protection decode and `[at]/[dot]`
+  de-obfuscation). Real-browser User-Agent (small-business sites 403 bots). Caps: 12k text, 1.5MB body,
+  60 images, 8MB/image.
+- **Trigger**: FE JWT; **plus** worker path (`x-worker-secret`) for read-only modes used by
+  standing-worker's client_hunt (`save` still requires a real user). All fetching via `safeFetch` (§10.15).
+- **Tables/storage**: `projects`, `project_assets`; bucket `project-assets`. No AI.
+- **Status**: fully implemented. **Called by**: standing-worker.
+
+### 8.5 shot-worker
+- **Purpose**: server-side screenshots — the before/after piece of the outreach loop: (a) the email-shot
+  view of a preview site, (b) the business's current site; PNGs stored in `project-assets`, public URLs
+  returned.
+- **Trigger**: FE JWT; credit kind `screenshot` ($0.03); 10MB cap; SSRF-validated targets (`urlAllowed`).
+- **External/env**: ScreenshotOne-compatible HTTP API (`SCREENSHOT_API_KEY`, `SCREENSHOT_API_URL`,
+  `APP_ORIGIN` for slug shots). Returns 501 with a clear message when unconfigured (config-gated, not
+  stubbed). No AI.
+- **Status**: fully implemented. **Calls**: none (standing-worker reimplements capture inline rather than
+  calling this).
+
+### 8.6 ingest-document
+- **Purpose**: the document intake pipeline for the "second brain" (app_0021): (1) summarize + extract
+  concepts (or **vision-catalog** an image), (2) persist the document, (3) embed it (head chunk +
+  overlapping windows, ≤11 chunks), (4) classify by cosine proximity to everything already in the brain
+  (RPC `match_embeddings`) and **propose** a home world + "Garvis noticed…" connections
+  (`meta.suggested_world_id`) — "Nothing is auto-filed, matching the vision's approval-first stance."
+- **Trigger**: FE JWT; enrichment credit-gated (`discover`), best-effort (out of credits keeps the raw doc).
+- **Tables**: `documents` (status uploaded→extracted→classified), `knowledge_worlds`, `knowledge_clusters`,
+  `embeddings`, `insights`, `world_intelligence`.
+- **AI**: `modelForPlan`; `SUMMARY_SYSTEM`: "*You classify a document for a personal AI 'second brain'…
+  Never invent facts not in the text*"; `VISION_SYSTEM`: "*cataloguing an image for a business's living
+  asset library… Describe ONLY what is visible. Never invent an artist, title, price, or location.*"
+  Embeddings via `_shared/embeddings.ts` (`text-embedding-3-small`).
+- **Status**: fully implemented. **Calls**: none (shares embed-worker's helper module, not an HTTP call).
+
+### 8.7 embed-worker
+- **Purpose**: write-side of the persistent brain — embeds text for subjects
+  (`document|artifact|cluster|knowledge|business|app`) and persists vectors to `public.embeddings`
+  (service-write only per app_0021 RLS), or returns vectors without persisting.
+- **Trigger**: FE JWT. `{ subjects[] ≤128 }` → `{ embedded, skipped }`; `{ texts[] ≤256 }` → `{ vectors }`.
+  Degrades to `{embedded:0}`/`{vectors:null}` when unconfigured — never a hard error.
+- **External/env**: OpenAI-compatible embeddings endpoint; `EMBEDDINGS_API_KEY` (falls back
+  `OPENAI_API_KEY`), `EMBEDDINGS_BASE_URL`, `EMBEDDINGS_MODEL` (default `text-embedding-3-small`,
+  1536-dim to match the pgvector column).
+- **Status**: fully implemented. **Calls**: none.
+
+### 8.8 board-copy
+- **Purpose**: "the one LLM call behind every creative board's words" — replaces the era when "the boards'
+  prompt boxes were placebos: generate() returned canned templates and a 'rendition' was a regex." Turns a
+  typed idea or a rendition instruction into real copy under absolute honesty rules (facts only from
+  `materials`; unknowns stay visible `[EDIT: …]` holes; merge fields preserved), then runs an
+  **editor-in-the-loop**: a judge scores 1–10, score <8 triggers one revision (judge fail-open), the better
+  draft ships with `quality:{score,notes}`.
+- **Trigger**: FE JWT; credit kind `board_copy`. Channels: postcard/social/email/idea
+  (`_shared/copyJudge.ts` FIELDS contracts). No provider key → `{available:false}` (client falls back to
+  deterministic templates).
+- **AI**: `modelForPlan`; writer = `honestySystemPrompt(channel)`, judge = `judgeSystemPrompt(channel)`
+  (quotes in §10.14).
+- **Status**: fully implemented. **Calls**: none.
+
+### 8.9 render-design
+- **Purpose**: "DESIGNS BECOME REAL PIXELS" — renders the no-photo **brand card** server-side
+  (satori → SVG → resvg-wasm → PNG), stores it in `project-assets`, returns a URL the publisher can attach.
+  "A rendered brand design is the business's OWN graphic — not AI imagery — so it carries no AI disclosure."
+- **Trigger**: FE JWT; credit kind `design_render` (flat $0.002, `provider:'satori'`). Sizes from
+  `DESIGN_SIZES` (IG square/portrait, FB/LinkedIn/X landscape).
+- **Tables/storage**: `knowledge_clusters` (ownership), `cluster_files` (vault row); bucket
+  `project-assets`. Fetches WASM + Inter fonts from unpkg (cached per instance). **No LLM.**
+- **Status**: fully implemented. **Calls**: none.
+
+### 8.10 generate-image
+- **Purpose**: the image-generation seam — prompt → real image via OpenAI **`gpt-image-1`**
+  (quality medium), stored in `project-assets`; with a `clusterId`, records a `cluster_files` image row so it
+  flows into postcards/social like an uploaded photo. The AI-vs-real-property honesty rule is enforced
+  upstream (`src/lib/garvis/imagegen.ts`).
+- **Trigger**: FE JWT; credit kind `image` ($0.04–0.07 by size). No `OPENAI_API_KEY` →
+  `{available:false, setup:[...]}`; provider content-policy refusals surfaced honestly.
+- **Status**: fully implemented. **Calls**: none.
+
+### 8.11 generate-video
+- **Purpose**: **Veo 3.1** scene generation — builds the curated per-trade library of photoreal scroll
+  clips. Long-running: `start` → `poll` → (download + store ≤200MB into `project-assets` at
+  `{owner}/scenes/{id}.mp4`) → `approve`; also `list`. DB row `scroll_scenes`; cost recorded at poll
+  completion (`VEO_COST_PER_SEC`, default $0.75 × 8s).
+- **Trigger**: FE JWT (operator).
+- **External/env**: Google Gemini API `:predictLongRunning` + operation poll (`GEMINI_API_KEY`,
+  `GEMINI_BASE`); models `veo-3.1-generate-preview` / `veo-3.1-fast-generate-preview` (`VEO_MODEL`,
+  `VEO_MODEL_FAST`); scene prompts from `src/lib/garvis/videoScenes.ts` `SCENE_PROMPTS`.
+- **Status**: fully implemented. **Calls**: none.
+
+### 8.12 render-video
+- **Purpose**: the video render seam — storyboard edit JSON → real mp4 via **Shotstack** (JSON timeline →
+  mp4, no local render infra). `render` → provider render id (credit kind `render`, $0.25); `status` → poll
+  (free). Browser preview works with none of this configured.
+- **Trigger**: FE JWT. **External/env**: `api.shotstack.io/edit/{SHOTSTACK_ENV}` (`stage` sandbox default |
+  `v1` production); `SHOTSTACK_API_KEY`. No AI (render provider).
+- **Status**: fully implemented. Note: the credits ledger names "Sora/Runway/Luma" for `video_clip` and
+  ElevenLabs for `voiceover`, but **no function implements those providers** — anticipated, not built.
+- **Calls**: none.
+
+### 8.13 research
+- **Purpose**: deep research — analyzes the project's full source (digest capped 140k chars), then
+  researches market/competition with **live Anthropic web search**, returning a grounded, cited comparison
+  (+ Sources list); persists the exchange to `ai_messages`.
+- **Trigger**: FE JWT + project ownership; requires `AI_PROVIDER=anthropic` (400 otherwise); credit kind
+  `research`.
+- **AI**: `completeWithWebSearch` (8000 tokens, maxUses 10), `modelForPlan`. `RESEARCH_SYSTEM`: "*You are
+  FableForge's senior product and market analyst… Ground every app claim in the actual code; ground every
+  market claim in a cited source. Never invent competitors, features, prices, or numbers, and never present
+  a guess as a measurement.*"
+- **Status**: fully implemented. **Calls**: none.
+
+## 9. Billing, e-sign, social, ads, MLS & the managed AI gateway
+
+### 9.1 stripe-webhook
+- **Purpose**: Stripe receiver for BOTH the operator's own FableForge subscription/credit purchases AND
+  **client sales** (a prospect paying the operator for a website via a Payment Link): `handleClientSale`
+  activates the `client_subscriptions` row on payment and **auto-publishes the sold demo** when stashed HTML
+  exists; `handleClientSubscriptionChange` handles client churn (with a "no resurrection" guard against
+  out-of-order events); `alertClientPaymentFailed` notifies the operator. Operator-side: `grant_credits`
+  RPC on top-ups, `syncSubscription` on subscription events ("webhooks are triggers only — state re-fetched").
+- **Trigger**: WH (Stripe, `--no-verify-jwt`). Raw body before parsing; `constructEventAsync` with
+  `createSubtleCryptoProvider` (sync version fails in edge runtime); **event-id idempotency** via
+  `stripe_events` insert (23505 → already processed; marker deleted on failure so Stripe retries).
+  Events: `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+  `customer.subscription.created/updated/deleted`, `invoice.paid`, `invoice.payment_failed`.
+- **Tables/storage**: `client_subscriptions, preview_sites, mind_events, profiles, stripe_events,
+  usage_events, stripe_subscriptions` (via `syncSubscription`); bucket `project-assets`
+  (`{owner}/published/{previewId}.html` stash detection).
+- **External/env**: Stripe (npm:stripe@18); `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, `WORKER_SECRET`.
+  No AI.
+- **Status**: fully implemented. **Calls**: **stripe-webhook → publish-preview** (`x-worker-secret`).
+
+### 9.2 create-checkout
+- **Purpose**: starts a Stripe Checkout session for the operator: `subscription` (Pro) or one-time
+  `credits` top-up; open-redirect guard on `returnUrl` (same-origin only).
+- **Trigger**: FE JWT. **Tables**: `profiles` (via `ensureCustomer`). **Env**: `STRIPE_SECRET_KEY`,
+  `STRIPE_PRO_PRICE_ID`, `STRIPE_CREDITS_PRICE_ID`, `STRIPE_CREDITS_AMOUNT` (default 1000). No AI.
+- **Status**: fully implemented. **Calls**: none.
+
+### 9.3 client-checkout
+- **Purpose**: "MAKE IT MINE" — public: a prospect on their demo picks a tier; creates a PENDING
+  `client_subscriptions` row and returns the **operator's Stripe Payment Link** with the sale id as
+  `client_reference_id` (so stripe-webhook can find the row) + email prefilled. Nothing charges here.
+  Honest 503 + operator notify when no payment link is configured (no dead buttons).
+- **Trigger**: PUB (anon; burst cap 5 pending sales/preview/min). **Tables**: `preview_sites,
+  agency_billing_settings, client_subscriptions, mind_events`. No AI/Stripe SDK.
+- **Status**: fully implemented. **Calls**: none.
+
+### 9.4 customer-portal
+- **Purpose**: opens the Stripe customer portal (manage/cancel, payment method, invoices); requires a portal
+  configuration saved in the Stripe Dashboard. Same-origin `returnUrl` guard.
+- **Trigger**: FE JWT. **Tables**: `profiles`. **Env**: `STRIPE_SECRET_KEY`. **Status**: fully implemented.
+
+### 9.5 docusign-send
+- **Purpose**: THE ONE E-SIGNATURE SEND PATH — clones send-email's approval spine (`send_for_signature`
+  approval, payload-hash check, atomic double-send claim — "an envelope POST is not idempotent; a retry
+  without the claim would email the signer twice"). Also `action:'status'`: owner-scoped poll updating the
+  envelope from DocuSign — "the honest fallback when the webhook isn't configured." Environment is CONFIG:
+  `DOCUSIGN_AUTH_BASE` defaults to the developer sandbox (signatures there not legally binding).
+- **Trigger**: FE JWT only (**no worker path** — "a human approves every envelope"). Server re-runs
+  `decideSendable` (`_shared/esignCore.ts`) before sending.
+- **Tables**: `esign_envelopes, approvals, execution_runs, outreach_settings, mind_events,
+  provider_connections`.
+- **External/env**: DocuSign REST v2.1 (account/base_uri from `/oauth/userinfo`; token refresh via
+  `DOCUSIGN_OAUTH_CLIENT_ID/_SECRET`); registers the Connect `eventNotification` (HMAC) only when
+  `DOCUSIGN_WEBHOOK_SECRET` is set. No AI.
+- **Status**: fully implemented. **Calls**: registers **docusign-webhook** as the callback URL.
+
+### 9.6 docusign-webhook
+- **Purpose**: DocuSign Connect receiver — envelope status updates; on completion downloads the combined
+  signed PDF (with the owner's own token) and files it to storage. "The lakegen source accepted unsigned
+  payloads — anyone could forge a 'completed' status; this never does."
+- **Trigger**: WH (`--no-verify-jwt`); **fails closed**: no configured secret → 401 for everything;
+  HMAC-SHA256 (`x-docusign-signature-1`) constant-time verified. Monotonic status RANK guard (stale events
+  can't drag a terminal envelope backward); unknown provider states map to null — "never guessed."
+- **Tables/storage**: `esign_envelopes` (`signed_pdf_path`), `mind_events`; bucket `project-assets`
+  (`{owner}/esign/{envelopeId}.pdf`). **Env**: `DOCUSIGN_WEBHOOK_SECRET`, `DOCUSIGN_AUTH_BASE`. No AI.
+- **Status**: fully implemented. **Calls**: none.
+
+### 9.7 mls-sync
+- **Purpose**: THE MLS DATA RAIL — a **RESO Web API (OData)** client "rebuilt in house style from the
+  lakegen harvest (its client was real; nothing ever called it)." Actions (owner JWT; feed token SEALED
+  server-side): `save` (probe with one `$top=1` query, store in `provider_connections` as `mls_reso`),
+  `sync` (pull listings changed since the newest `ModificationTimestamp` held — `$filter` paging, 200/page,
+  ≤5 pages/call with an honest "run again" flag), `status` (connection + row counts, no secrets).
+- **Trigger**: FE JWT; world-scoped syncs verify `knowledge_worlds` ownership.
+- **Tables**: `provider_connections, mls_listings` (upsert `owner_id,listing_key`), `knowledge_worlds,
+  mind_events`. Feed fetched via `safeFetch` (SSRF-guarded). Per-user credentials — no global secrets.
+  No AI.
+- **Status**: fully implemented — **real** OData calls (not simulated); RESO standard field names, status
+  text stored as-is ("never normalized guesses"). **Calls**: none.
+
+### 9.8 social-publish
+- **Purpose**: THE SOCIAL PUBLISH PATH — approval spine (`publish_post`, payload-hash bound, atomic
+  double-post claim); posts through **Ayrshare** to whatever accounts are linked on the sealed key;
+  per-world/brand Ayrshare Profile-Key resolution (fail-closed once multiple destinations exist);
+  server-side re-run of the `checkDraft` refusal gate (§10.19); schedule grace — a `scheduleAt` ≤1h past
+  posts now, staler is refused.
+- **Trigger**: dual-caller (owner FE JWT / standing-worker `x-worker-secret`).
+- **Tables**: `approvals, social_posts, execution_runs, world_social_profiles, mind_events,
+  provider_connections` (ayrshare).
+- **External/env**: Ayrshare `app.ayrshare.com/api/post` (30s timeout); `WORKER_SECRET`. No AI.
+- **Status**: fully implemented (real provider call, real per-platform failure mapping). **Called by**:
+  standing-worker.
+
+### 9.9 social-sync
+- **Purpose**: THE READ-BACK — "Garvis posted to social and never looked at the results; this closes that
+  loop." Pulls per-post analytics from Ayrshare into `social_post_metrics` (every metric nullable —
+  absent = NULL, never fake 0; raw provider object kept verbatim); reconciles `scheduled` posts the provider
+  has since posted (only on evidence). Honest plan-gate degrade (Ayrshare 402/403 → `available:false`,
+  stamps `last_synced_at` to stop hammering).
+- **Trigger**: CRON every 6h (`--no-verify-jwt`, `x-worker-secret` fan-out across owners with an Ayrshare
+  key) **or** owner FE JWT (`{owner_id?}`). ≤20 posts/owner, 6h staleness, 30d window; heartbeat stamped.
+- **Tables**: `social_posts, social_post_metrics` (upsert `post_id,platform`), `world_social_profiles,
+  provider_connections, system_heartbeat`. No AI.
+- **Status**: fully implemented. **Calls**: none.
+
+### 9.10 ads-sync
+- **Purpose**: the ad-platform sync seam — **READ-ONLY by design** ("reporting access first; the review bar
+  for read is far lower than write, and Garvis never mutates campaigns from here"). `status` → which
+  providers are server-configured; `sync` → last-30-days daily campaign metrics into `ad_metrics`
+  (idempotent upserts). Tokens are operator-level edge secrets; per-user non-secret config (ad account /
+  customer id) lives in `connections`.
+- **Trigger**: dual-caller: owner FE JWT (credit kind `ads_sync`, $0.02) or the watchdog via
+  `x-worker-secret` + `owner_id`.
+- **Tables**: `connections` (config/status/last_error/last_synced_at), `ad_metrics` (upsert
+  `owner_id,provider,date,campaign_name`).
+- **External/env**: **Meta** Graph `v21.0/{act_id}/insights` (`META_ADS_ACCESS_TOKEN` — a System User
+  token); **Google Ads** GAQL `searchStream` v21 with real OAuth refresh (`GOOGLE_ADS_DEVELOPER_TOKEN`,
+  `GOOGLE_ADS_CLIENT_ID/_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`, `GOOGLE_ADS_LOGIN_CUSTOMER_ID` for MCC).
+  No AI.
+- **Status**: fully implemented — **real** Meta + Google Ads calls (cost_micros ÷1e6); missing env →
+  `{available:false}` with exact setup steps. **Called by**: ads-watch.
+
+### 9.11 ads-watch
+- **Purpose**: THE 2AM AD WATCHDOG — daily: per owner with a connected ad account, (1) refresh metrics
+  through ads-sync (the one sync path — metering intact), (2) judge YESTERDAY against a 7-day baseline with
+  the verified core (`_shared/adsWatchCore.ts`, §10.20 — MIN-sample gated, today never judged, a missing
+  report never treated as zero), (3) push real findings to the owner webhook + `mind_events`.
+  **Detection only — never mutates a campaign.** Anomaly dedupe within 3 days; ≤5 alerts/owner; quiet
+  accounts stay quiet.
+- **Trigger**: CRON daily (10:15, `--no-verify-jwt`, `cronAuthorized`); heartbeat `garvis-ads-watch-daily`.
+- **Tables**: `connections, ad_metrics, mind_events, profiles`. No AI (deterministic detection).
+- **Status**: fully implemented. **Calls**: **ads-watch → ads-sync** (`x-worker-secret`).
+
+### 9.12 ai-gateway
+- **Purpose**: **FableForge AI** — the managed AI gateway for *generated* apps. A generated app's edge
+  functions call this with a per-app key (`FABLEFORGE_AI_KEY`, issued at backend deploy); the completion
+  runs on the OPERATOR's provider key and the real cost × margin is metered against the app owner's credit
+  balance — "No app-owner API keys, no setup."
+- **Trigger**: PUB (`--no-verify-jwt` — external apps have no FableForge JWT); auth = per-app gateway key
+  (Bearer or `x-fableforge-key`, ≥24 chars) looked up against `projects.ai_gateway_key`.
+- **I/O**: `{ messages ≤24×8k chars, system?, maxTokens?≤4096, quality?:'fast'|'best' }` →
+  `{ text, usage }`; 402 `out_of_credits`.
+- **Tables**: `projects`; credit RPCs. **Env**: `FF_AI_GATEWAY_MARGIN` (default 1.25) + ai.ts provider keys.
+- **AI**: owner-plan model via `modelForPlan` (`fast` forces cheap tier); no system prompt of its own.
+- **Status**: fully implemented. **Called by**: generated apps deployed by deploy-backend.
+
+*Sections 10–13 follow.*

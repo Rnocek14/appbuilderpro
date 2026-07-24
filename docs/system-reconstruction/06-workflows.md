@@ -328,6 +328,10 @@ draft → red-team → refine) → designed world (areas chartered, seed artifac
 ## 15. Break-point index (the honest list, deduplicated)
 
 **Architecturally severed (code cannot complete the loop):**
+0. **SMS approvals fail at the DB** — `approval_kind` enum never gains `'send_sms'` (created
+   app_0022; later alters add only send_batch/send_for_signature/content_week) while
+   `send-sms/index.ts:36` and `execution.ts:13` require it. CONFIRMED by this reconstruction;
+   the whole approval-gated SMS rail is latent-dead until a one-line enum migration lands.
 1. Canvas social ArtifactSheet → publishing (no bridge to queueSocialPost; re-verified by grep —
    no `queueSocialPost`/`social_post` reference under `src/components/garvis/canvas`). —
    os-blueprint §1

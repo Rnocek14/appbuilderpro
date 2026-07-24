@@ -86,8 +86,17 @@ A new team cannot read the code or the planning docs without this. Terms marked 
 - **Next Move** ⚙ — `nextMove.ts`: the engine that stages "the one thing to do next" per world.
 - **Commander** ⚙ — `commander.ts` + Command page: one call → one typed decision router
   (reply | mission | rabbit hole | build | …), transcript in `command_messages`.
-- **Orchestrator** ⚙ — the intent → reviewable plan → execution compiler (14 actions, 35 pinned
-  intents, 49-check coverage contract). See docs/orchestrator.md and 05-ai-system.md.
+- **Orchestrator** ⚙ — the intent → reviewable plan → execution compiler. 14 actions at
+  holy-grail time, **21 in the final catalog** (`actionCatalog.ts`), 35 pinned intents, 49-check
+  coverage contract; a parse gauntlet drops unknown actions, demotes missing params to
+  questions, and surfaces uncoverable asks as amber "holes." See docs/orchestrator.md and
+  05-ai-system.md.
+- **Modes (observe → plan → act)** ⚙ — the structural gate on the Garvis turn: `toolsFor(mode)`
+  recomputed every step and re-checked in `executeTool`, so the model cannot write until it is
+  in act mode. (Distinct from the *planned* UI Postures.)
+- **WaitingError** ⚙ — the mechanism that turns a blocked arc step into a parked `waiting` state
+  with a machine-checkable blocker; the standing-worker wake sweep re-checks it ("the system
+  notices instead of the operator remembering").
 - **Depth Engine** ⚙ — `depth.ts`: multi-pass plan deepening (research → draft → red-team →
   refine).
 - **Gauntlet / Fuzz** ⚙ — `gauntletFuzz.verify.ts`: adversarial fuzz of the orchestrator's parsing.
@@ -212,8 +221,15 @@ A new team cannot read the code or the planning docs without this. Terms marked 
 
 ## Meta / process vocabulary
 
-- **Verify suite** ⚙ — the ~90 `verify:*` tsx scripts: pure-core self-tests of each subsystem, run
-  in CI. The house testing style (no Jest; hand-rolled `check()` assertions).
+- **Verify suite** ⚙ — the `verify:*` tsx scripts: pure-core self-tests of each subsystem, run
+  in CI. The house testing style (no Jest; hand-rolled `check()` assertions). Count grew from
+  ~90 (holy-grail era) to ~120 on disk with 116 wired into CI at snapshot; ~6 remain unwired
+  (including `workerParity.verify.ts`).
+- **Pure-core / impure-runner split** ⚙ — the universal Garvis file convention: `foo.ts` holds
+  prompts, parsers, invariants (no DB/network/clock; verified by `foo.verify.ts`);
+  `fooRun.ts` is the only half touching Supabase/edge functions.
+- **SEED_SOURCE ('garvis-seed')** ⚙ — load-bearing honesty constant: born-with seed artifacts
+  are excluded wherever momentum/recency is counted, so a newborn world can't fake activity.
 - **Coverage contract** ⚙ — the 49-check suite pinning the orchestrator's 35 intents; the pattern
   "every new surface ships WITH its action."
 - **Honesty holes** ⚙ — explicit refusal paths where the system says "I don't know / can't"

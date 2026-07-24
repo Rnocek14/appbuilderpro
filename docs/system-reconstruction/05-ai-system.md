@@ -201,7 +201,7 @@ Three files, one religion:
 Specs (pure — what the compiler prompt sees) and executors (impure) are zipped by id at module
 load; *"a spec without an executor (or vice versa) throws at startup — the two halves cannot
 drift silently."* The catalog's growth rule: *"if a human can click it, the brain can propose it —
-and nothing else."* The 22 actions as of July 2026 (id · risk · what it produces):
+and nothing else."* The 21 actions as of July 2026 (id · risk · what it produces):
 
 | Action | Category | Risk | Produces |
 |---|---|---|---|
@@ -253,7 +253,7 @@ Executor discipline (in `actionRegistry.ts`): `resolveWorld` never fuzzy-guesses
 
 ## 5. The chat-tool system (what Garvis can call inside a run)
 
-`tools.ts` defines 24 tools; the per-mode gate is the single source of truth. Full list with modes:
+`tools.ts` defines 25 tools; the per-mode gate is the single source of truth. Full list with modes:
 
 **All modes (observe/plan/act):** `list_apps`, `get_app`, `query_metrics`, `recent_runs`,
 `get_repo_state` (live read-only GitHub state), `get_app_profile`, `recall_knowledge` (returns
@@ -783,7 +783,307 @@ unreachable heartbeat reads unknown, not dead.
   strategically important just because it looks operationally idle. That mistake — killing the
   foundation because it isn't shipping today — is exactly what you exist to prevent."*
 
-<!-- SECTIONS 9.17+ (hunt/clients/automation) FROM AGENT C -->
+### 9.17 Opportunities and the opportunity hunt
+
+- **`opportunities.ts`** — cross-portfolio opportunity DETECTION: *"You are Garvis, a solo
+  founder's chief of staff, doing PROACTIVE portfolio analysis. The founder did not ask a
+  question — your job is to NOTICE things worth their attention by reasoning over the whole
+  portfolio as a SYSTEM"* (kinds: synergy/expansion/consolidation/risk/quick_win/positioning).
+- **`opportunityHunt.ts`** — the scheduled jobs/RFPs/grants/commissions feed: `buildQueries`
+  (angle-diverse, self-rotating after `DRY_RUNS_BEFORE_ROTATE=3` dry runs), `EXTRACT_SYSTEM`
+  (*"source_url must be one of the given PAGE urls, verbatim… Unknown location/budget/deadline
+  stay null — never invent"*), and `parseOpportunities` — a URL-allowlist gauntlet that drops
+  hallucinated links (fuzz-verified). Caps: 4 queries, 12 found per run.
+
+### 9.18 Client hunt and the acquisition machine
+
+The "fully-automatic client acquisition machine" spans nine modules:
+
+- **`clientHuntSchedule.ts`** (pure) — the daily auto-hunt brain: `LOCAL_NICHES` (~42
+  local-business types), config caps (≤40 searches/day, ≤25 demos/day), and `plannedHuntToday`
+  rolling a cursor city-major over the type×city grid forever. **`bigCities.ts`** supplies ~200
+  real US metros. **`placesDiscovery.ts`** (pure Deno leaf) parses Google Places results — a
+  Facebook-only business becomes the strongest `has_website:false` prospect — with a
+  self-exhausting query queue (a market is "drained" after 2 zero-insert runs).
+- **`siteAudit.ts`** (pure) — the honest "does this business need a new website?" engine: no
+  faked Lighthouse; every signal traced to an observed fact (HTTPS, viewport, contact path, thin
+  content, stale copyright year), score 10–100, verdict `weak|dated|solid|unknown`.
+- **`clientHuntRun.ts`** (impure) — interactive hunting: discovery via `discover-media`
+  (`provider:'places'`), audits via `fetch-url`, national fan-out (`nationalSweepCore.ts` dedupes
+  by domain so a shop in two cities is one prospect), persistence to `prospect_audits` — with
+  `automation/detect.ts` proposals stored at write time.
+- **`clientHuntBuild.ts`** (pure, Deno-safe — imported by the standing-worker) — demo builders:
+  deterministic `extractSiteFacts`, object-only image prompts ("no people/text/logos"), and the
+  pitch builders (`buildHuntPitchTeaser` is reply-gated — no link in email #1;
+  `premiumProspect()` routes law/medical to `AI_PREMIUM_MODEL`). Every pitch queues as a PENDING
+  approval.
+- **`claudeScout.ts`** — the alternative discovery path: Claude with server-side `web_search`
+  finds real local businesses AND judges site quality; `groundScoutLeads` keeps a lead ONLY if
+  tied to a real citation host ("anti-hallucination floor"). *"NEVER invent a business, a phone
+  number, or a website."* Metered call in the `discover-run` edge function
+  (`SCOUT_MODEL='claude-sonnet-4-6'`).
+- **`huntReadiness.ts` / `huntReadinessRun.ts`** — the pure "ready to hunt & send" contract:
+  gates `canHunt`/`canSend`/`canAutoHunt` over APP_ORIGIN, `GOOGLE_PLACES_API_KEY`,
+  `RESEND_API_KEY`, from-address, physical address (CAN-SPAM), the `outbound_enabled` kill
+  switch, and the armed clock. Fail-soft probes read conservative ("not set").
+- **`prospects/`** — `stage.ts` derives one honest pipeline stage per prospect
+  (`new|built|pitched|won|skipped`, won = sale booked / preview purchased);
+  `prospectsRun.ts` joins `discovered_businesses` → `preview_sites` → `client_subscriptions` +
+  post-send signals; `reviewSend.ts` is the review-before-send door (build demo with
+  `review:true`, load the draft pitch + its pending approval, send through
+  `approveAndExecute` — gates still run inside `send-email`).
+
+### 9.19 Clustering and the Knowledge Universe cartographer
+
+`clustering.ts` (62 KB, pure) is the original spike "proving a conversation → a stable cluster
+graph": the `Cluster`/`Artifact`/`ClusterGraph` model with an `Epistemic` honesty layer
+(`established…hypothesis`) and ~17 system prompts (CLUSTER/EXTEND/EXPAND/LEAD(S)/OVERVIEW/
+REFRAME/THINK/MIND/SCENE/BRIDGE/DECOMPOSE/ANGLE/SYNTHESIZE/THEME/IMAGE_CONCEPT) plus
+deterministic rails (`canonicalizeAgainstPrev`, `mergeGraphs`, `stabilityReport`).
+`CLUSTER_SYSTEM`: *"You are the CARTOGRAPHER of a Knowledge Universe… Your job is NOT to
+summarize the chat in order. Your job is to recover the SHAPE of their thinking as a map of
+connected clusters they could navigate back to later."* `clusteringRun.ts` (38 KB) executes via
+`explorerAI` (metered `explorer-turn`). `clusterState.ts` gives merge-safe access to
+`knowledge_clusters.working_state` (read→merge→write so a write never drops keys; creative
+boards live under `working_state.boards`).
+
+### 9.20 Producers
+
+`producersCore.ts` (pure prompts + parsers) / `producers.ts` (impure): the per-area content
+factories, each gathering the world's real materials (DNA, brand voice, vault photos, prior
+research, goals), auto-loading prior concepts to diverge from, and failing soft to deterministic
+drafts. The nine producers: **produceResearch** (cited `[n]`-sourced market brief — unknowns say
+"STILL UNKNOWN"), **produceSocial**, **produceVideo**, **produceReel**, **produceAngle**,
+**produceAds**, **produceIdeas**, **produceFeatureSpec**, **produceBusinessPlan** (which runs the
+`depth.ts` red-team/refine loop — §8.5). Model calls via `exploreComplete`, not cluster-chat.
+
+### 9.21 Intake, inquiry, ask/assist, lab, market intel, data
+
+- **`intake.ts`** — G2 photo/document intake normalizer (approval-first filing); suggested uses
+  `website|social|video|print`.
+- **`inquiry.ts` / `inquiryRun.ts`** — the Decision Laboratory: COMPARE and THEORY SCAFFOLD
+  instruments. `THEORY_SYSTEM`: *"You help a curious person turn a hunch into a STRUCTURED
+  THEORY — as a collaborator AND a critic. You are not here to agree; agreement from an AI is not
+  evidence"* — a scaffold with no FALSIFIERS is rejected by name. Results land as artifacts +
+  typed map edges and spawn up to 3 `experiment` child sparks.
+- **`ask.ts` / `askCore.ts`** — Ask Garvis: hybrid retrieval (semantic `match_embeddings` RPC +
+  lexical, merged by `mergeHits` with both-ways boost) over the world's artifacts/documents;
+  `ASK_SYSTEM`: *"answer… using ONLY the retrieved material below… If they don't contain the
+  answer, say plainly what you DON'T have on record… never invent facts, numbers, names, or
+  specifics."* This backs the `ask_worlds` chat tool.
+- **`assistRun.ts`** — the answering-desk: retrieves the world's KB for an incoming message and
+  drafts a grounded reply; **skips the model call entirely when the KB has no match** ("a 'we
+  have nothing' costs nothing").
+- **`lab.ts`** — the Lab Bench: v1 ships ONLY deterministic simulations (time-dilation,
+  gravity-well, compound-growth, rollout-model, reach-odds), each carrying
+  basis/assumptions/what-it-does-NOT-model. No prompts — deterministic by construction.
+- **`marketIntel.ts` / `marketIntelRun.ts`** — G4 category scans: deterministic
+  `researchPlanFor` from World DNA, Serper via `discover-media`, `FIT_SYSTEM` (*"when the snippet
+  is too thin to judge, fit is 'weak'"*), rows into `prospects`. Read-only by construction;
+  capped 2 queries / 8 prospects per scan.
+- **`data.ts` / `dataRun.ts`** — the data workspace: a real CSV parser, typed tables, and
+  summary statistics — EVERY NUMBER computed in pure code; the model only narrates.
+  `DATA_SYSTEM`: *"Use ONLY the numbers in the FACT SHEET. NEVER state a figure that isn't
+  there, and NEVER compute a new number yourself."* A hallucinated figure structurally cannot
+  reach a chart.
+
+### 9.22 Contacts, deliverables, e-sign, booking, billing, client connections
+
+- **`contactsRun.ts` / `contactsCore.ts`** — the CRM over `contacts`/`contact_notes` (stages
+  `new|contacted|qualified|customer|lost`); `suppressContact` writes the sacred per-address
+  `suppression` row (never a whole domain); `mergeTimeline` unions sent messages/replies/leads/
+  notes newest-first (only SENT messages count).
+- **`deliverable.ts` / `deliverableRun.ts`** — the document studio: `DOC_TYPES`
+  (proposal/report/one_pager/brief/letter/summary); `DELIVER_SYSTEM`: *"Do NOT invent prices,
+  dates, names, terms, numbers… mark it inline EXACTLY as '[needs your input: <what>]'."* Builds
+  real `.docx` via JSZip; grounding in the KB is optional but preferred.
+- **`esignRun.ts`** — paperwork templates (`paperwork_templates`), contact merge, and envelopes
+  queued behind ONE `send_for_signature` approval. Nothing here touches DocuSign — that's the
+  `docusign-send` edge function behind the approval spine.
+- **`booking/schedule.ts`** — pure booking math (`availableSlots`, `validateBooking`; refusal
+  reasons `too_soon|too_far|closed|taken`); the DB gist exclusion constraint is the real
+  double-booking guard — this is the friendly pre-check. v1 uses a fixed UTC offset (no DST).
+- **`billing/`** — `clientTiers.ts`: the two offers — **New Website** (one-time, "from $1,500")
+  and **Website + Automation** (monthly, "from $500/mo") — plus pure revenue math (only
+  active+monthly counts as MRR). `clientSale.ts` (Deno-safe, shared with
+  `client-checkout`/`stripe-webhook`): default cents (website 150000, automation 50000) and
+  payment-link plumbing. `clientConsole.ts`/`clientConsoleRun.ts`: per-client automation rollups
+  with an honest Unassigned bucket. `clientBilling.ts`: `agency_billing_settings` +
+  `client_subscriptions` access.
+- **`clients/connections.ts` / `connectionsStore.ts`** — the per-client connections checklist:
+  `CONNECTORS` catalog (domain, email_sender, sms_number, voice_number, booking, payments all
+  `built:true`; google_business, calendar, esign `built:false` → shown honestly as "Coming
+  soon"). The DB row is a thin index refreshed by reading each connector's own table.
+- **`clientEngagement.ts` / `clientEngagementRun.ts`** — "I operate this business FOR someone":
+  the engagement row is created first/unconditionally, THEN the client's world drafts through the
+  normal genesis ceremony — "a failed draft never loses the client record." The intake checklist
+  is DETERMINISTIC from scope keywords, not a model call.
+
+### 9.23 Automation (detect / triggers / registry / intake / report)
+
+The `automation/` subdir implements "open detection, bounded execution" (its README is the best
+single statement of the philosophy):
+
+- **`registry.ts`** — the capability registry, the honesty backbone: `lead_followup`,
+  `review_request`, `invoice_chase`, `reactivation` (all `ga`), `seasonal_maintenance`,
+  `hygiene_recall` (HIPAA-aware), `missed_call_text_back` (`beta`), and `online_booking`
+  (**`not_built`**). *"A `not_built` capability is NEVER proposed — it surfaces as a gap
+  instead."*
+- **`detect.ts`** — pure, deterministic, **no model call**: derives
+  `manual_process:*`/`platform:*`/`stack:*` signals from observed facts (site-audit signals,
+  scraped text, the tech fingerprint from `supabase/functions/_shared/techFingerprint.ts`) and
+  resolves them against the registry: deliverable → proposals (each carrying its
+  `matchedSignal`), unmet need → gaps ("the bespoke → graduation learning loop": recurring gaps
+  tell you which capability to build next).
+- **`intake.ts`** — the free-text twin: regex patterns recognize manual-process signals in a
+  prospect's own words; the matched phrase IS the evidence; absence signals are negation-gated.
+- **`triggers.ts` / `triggersRun.ts` / `triggersStore.ts`** — the trigger engine: pure
+  per-customer scheduling ("fire once, N days after an event") owning the **window guard**
+  (turning a trigger on never blasts everyone due long ago) and **once-only** ((customer, due
+  date) fires at most once); the runner enqueues one approval-gated send per due customer with
+  claim-first idempotency.
+- **`report.ts` / `reportCore.ts`** — the monthly automation report: numbers counted from ledger
+  rows; a quiet month says "Quiet month so far."
+
+### 9.24 Email, outreach, SMS, inbox, missed-call, reminders
+
+- **`email/senderDomain.ts` + `senderDomainsRun.ts`** — per-brand sending domains (Resend);
+  DNS-record summaries; the `sender-domain` edge function holds the key.
+- **`mailer.ts` / `mailerRun.ts`** — the pure direct-mail compiler: print-ready 6×9 postcards
+  from real materials + brand kit + vault photos, USPS sizing encoded, unknowns as visible
+  EDIT-ME prompts. "Sending mail is the operator's physical act; Garvis only records what went
+  out."
+- **`outreach.ts`** — the preview-engine → send-path seam: `queuePitch` creates
+  contact→campaign→message→`send_email` approval; SELECT-FIRST on contacts so suppression
+  (`unsubscribed`/`bounced`/`complained`) is never reset.
+- **`outreachBatchRun.ts`** — bulk sends: snapshot a segment into `outreach_batches`, ONE
+  `send_batch` approval, drained by the worker through the one send path with per-recipient
+  re-checks; unsupported merge tokens refuse loudly at compose time.
+- **`sms.ts`** — pure SMS core: `toE164`, `resolveSmsFrom` (client's own Twilio number else the
+  operator's shared one), GSM-7 vs UCS-2 segment billing, TCPA consent/opt-out gating; the
+  `send-sms` edge function does the metered Twilio call.
+- **`inboxRun.ts`** — the OPS INBOX: `replies` + new `leads` + `inbound_mail` merged
+  newest-first; answering routes through the same approval spine.
+- **`missedCall.ts` / `missedCallStore.ts`** — missed-call text-back: pure TwiML building
+  (`<Dial answerOnBridge>`), the config row IS the pre-authorization (caller-initiated single
+  transactional reply); only the service-role webhook (`voice-inbound`) writes events.
+- **`remindersRun.ts`** — the human's own reminders (`reminders` table) — distinct from tasks
+  and next-moves; due reminders surface in the waking moment and ping the webhook on the
+  heartbeat.
+
+### 9.25 explorerAI — the one road to a model for the Universe
+
+`explorerAI.ts`: every Knowledge-Universe model call funnels through `exploreComplete` /
+`exploreStream` → the **`explorer-turn`** edge function (operator key server-side,
+credit-metered, real cost returned). Falls back to the user's own browser key ONLY when the edge
+is unreachable AND a local key exists; a session circuit-breaker (`edgeBlockedReason`) stops
+re-hammering a dead edge (auth failures deliberately do NOT trip it). `fast:true` routes to the
+haiku-class tier. Consumers: `clusteringRun`, `producers`, `assistRun`, `deliverableRun`,
+`inquiryRun`, `dataRun`, `briefDocRun`, `visualRun`. (`discover.ts` is the one exception that
+hits the Anthropic API directly for YouTube discovery with server-side web search.)
+
+### 9.26 Money, plays, channels, verdicts, timelines, readiness
+
+- **`money.ts` / `moneyRun.ts`** — invoices: pure arithmetic + the CHASE LADDER (stages 0
+  none → 1 upcoming → 2 due → 3 firm → 4 final; only sent/unpaid/dated invoices chase, each
+  stage fires once). "PAID is a fact only the operator confirms (Garvis never guesses money)."
+- **`plays.ts`** — campaign playbooks as data: ordered productions across a web's clusters
+  (research→angle→creative→sequence→landing→social→video), each with a deterministic producer +
+  optional AI enrichment; slug-stable artifacts (re-runs upsert). The first play is Mom's Lake
+  Geneva lakefront-seller campaign.
+- **`channels.ts`** — publish channels for approve-to-publish: `buildShareUrl` opens a
+  prefilled composer — "honest about 'can't auto-post.'"
+- **`verdicts.ts` / `verdictsRun.ts`** — the kept-vs-rewritten measurement: `rewriteRate`
+  returns null under any signal ("never fake 0%"); <5 verdicts shows counts without a rate.
+- **`timelines.ts` / `timelinesRun.ts`** — transaction timelines (listing/purchase) with
+  anchor+offset steps; "offsets are conventions, not law — adjust to your contract"; dated steps
+  can mint firing reminders.
+- **`readiness.ts`** — the Operator Console checklist: per-step status
+  (`done|todo|needs_account|optional_todo|optional_done`) with the exact next action; nothing
+  invented.
+
+### 9.27 System views, control, observability, and support seams
+
+- **`systemView.ts` / `systemViewRun.ts`** — the orbital "System altitude" over one world:
+  star=world, planets=chartered clusters, comets=Next Moves, nebulae=unclaimed archetypes.
+  "No-theater geometry": a planet's position is a function of its identity (ring=archetype,
+  angle=hash(id)) so other clusters never move it.
+- **`systemControl.ts`** — client for the `system-control` edge function (the master-switch
+  panel): secret presence, the 12 expected cron jobs, heartbeat stamps, and the one-time ARM
+  call.
+- **`observability.ts`** — Mission Control rollups aggregating `agent_runs`/missions/tasks/
+  opportunities/goals — no new table.
+- **`github.ts`** — read-only GitHub awareness (browser-direct; PAT optional): compact
+  `RepoState` snapshots "so the brain reasons over truth." Stateless.
+- **`artifacts.ts`** — the studio-shell seam: artifact versions (a DB trigger snapshots the
+  prior version on every revise), `cluster_files`, brand kits, studio transcripts; persists
+  embeddings on write.
+- **`embeddings.ts`** — key-safe embeddings via the `embed-worker` edge function (DIRECT-mode
+  fallback with a local key); returns null when unavailable so every caller falls back to
+  lexical search.
+- **`payloadHash.ts`** — re-export of the shared approval-payload hash
+  (`stableStringify`/`hashPayload`/`payloadMatches`) used by send-email/docusign-send for
+  tamper-evidence.
+- **`agentRunQuestions.ts`** — the clarification inbox: `await_approval` runs surface their
+  pending question; answering calls the `resume_agent_run` RPC and nudges `garvis-worker`.
+- **`productLifecycle.ts`** — joins a Builder project to its portfolio `apps` row (race-safe);
+  `markProjectAppLaunched` on live deploys.
+- **`webLayout.ts`**, **`mlsStats.ts`** (market stats computed purely from synced `mls_listings`
+  rows — "the model narrates, never computes"), **`ics.ts`** (calendar parsing shared with
+  `garvis-pulse`).
+- **`buildBrief.ts` / `buildBridge.ts` / `websiteBrief.ts` / `briefDocRun.ts`** — the
+  Universe→builder bridges: an exploration or a world compiles into one structured build brief
+  (real uploaded photos only, unknown facts omitted, "lead form stores (never sends)"); the
+  created project binds back to the world (`projects.world_id`, assets copied, an `app` artifact
+  recorded). `briefDocRun` map/reduces a stored document into a brief via `exploreComplete`.
+- **`closeWonRun.ts`** — closing a deal: campaign→won (CAS-guarded), contact→customer, a
+  `client_subscriptions` row + the Stripe payment link, a draft invoice for one-time deals.
+- **`resultsRun.ts`** — honest per-channel results: every number a COUNT OF ROWS; uninstrumented
+  channels say so ("never a zero pretending to be knowledge").
+- **`workingRun.ts` / `workingStateRun.ts`** — the "Working for you" page loaders
+  (distinguishing rows / table-missing / load-FAILED so "couldn't load" never renders as
+  "nothing running") and the durable cross-device `working_state` row (localStorage demoted to a
+  same-device cache with a per-account guard).
+- **`searchRun.ts`** — the ⌘K universal search over one `garvis_search` RPC (artifacts, areas,
+  worlds, contacts, invoices, documents, beliefs, missions); fail-soft.
+- **`roomsRun.ts`** — custom rooms: deployed apps mounted inside a business; https-only URL gate
+  + sandboxed iframe "is the whole v1 trust story."
+- **`standingRun.ts` / `autonomyRun.ts` / `adaptiveRun.ts`** — the impure halves of standing
+  orders (CRUD + "run now" poke), earned autonomy (streaks counted from HUMAN decisions only —
+  "auto-approved rows prove nothing"), and adaptive operation (assembles channel rows + logged
+  ad spends, runs pure `adapt()`; a measured 'act' recommendation becomes the world's standing
+  recommendation labeled "From your numbers").
+
+---
+
+## 10. The `*Run.ts` pattern — what "runs" are
+
+There are ~50 `*Run.ts` files in the garvis tree. A "run" module is not a job type — it is the
+**impure half of a capability**, by convention:
+
+1. **The pure core** (`foo.ts`) holds types, prompts, parsers, scheduling/scoring math, and
+   honesty invariants. It imports neither Supabase nor the DOM, never reads the clock
+   (`now` is injected), and is executable under `tsx` by `foo.verify.ts` — and, when marked
+   Deno-safe ("leaf"), imported directly by edge functions so client and worker run identical
+   logic.
+2. **The runner** (`fooRun.ts`) is the only half that touches the world: Supabase reads/writes
+   (owner-scoped by RLS), edge-function invokes (`cluster-chat`, `explorer-turn`,
+   `generate-image`, …), `enqueueApproval` for anything outward, and `recordMindEvent` for the
+   record. Runners are written fail-soft: a broken probe yields an empty slice, a missing
+   migration reads as an honest empty state, and model failures degrade to deterministic
+   drafts.
+3. Examples of the split: `genesis.ts`/`genesisRun.ts`, `gardener.ts`/`gardenerRun.ts`,
+   `nextMove.ts`/`nextMoveRun.ts`, `worldIntel.ts`/`worldIntelRun.ts`,
+   `orchestrator.ts`/`orchestratorRun.ts`, `standing.ts` (re-export of the shared core)/
+   `standingRun.ts`, `autonomy.ts`/`autonomyRun.ts`, `adaptive.ts`/`adaptiveRun.ts`,
+   `marketing.ts`/`marketingRun.ts`, `mailer.ts`/`mailerRun.ts`.
+4. Some runners have no pure sibling because they are pure data-access seams
+   (`inboxRun.ts`, `remindersRun.ts`, `roomsRun.ts`, `searchRun.ts`) — the "Run" suffix still
+   signals "this file touches Supabase."
+
+This split is the load-bearing design decision of the whole tree: it is what makes ~120
+self-tests possible without a DB, lets edge workers share exact client logic, and keeps every
+prompt and every parser under deterministic test.
 
 ---
 
@@ -832,7 +1132,207 @@ and `e2e-smoke` (Playwright against a Vite server with a harmless localhost Supa
 deployed reality is separately tested nightly by the `garvis-canary` edge function (§7.3), whose
 header counts "96 verify suites" at its writing — the suite has since grown to 116.
 
-<!-- SECTIONS 12-15 (generation pipeline, preview engine, safeedit, providers) FROM AGENT D -->
+## 12. FableForge: the agent loop and the 11-stage generation pipeline
+
+### 12.1 The agent loop (`src/lib/agent/`)
+
+- **`loop.ts`** — the client-side agentic loop: model call → execute tool calls in the browser →
+  feed results back → repeat (`maxSteps` default 16, `maxTokens` 12,000). The model call routes
+  two ways: **DIRECT** (browser → `api.anthropic.com/v1/messages` with
+  `anthropic-dangerous-direct-browser-access: true`, prompt caching via `cache_control:
+  ephemeral` on the system block + conversation prefix) or **edge** (`agent-turn` proxy; key
+  stays server-side). Anthropic's server-side `web_search_20250305` tool (max 6 uses) is appended
+  unless disabled. **Fable/Mythos fallback:** models matching `/^claude-(fable|mythos)/` add
+  `anthropic-beta: server-side-fallback-2026-06-01` with `fallbacks: [{model:
+  'claude-opus-4-8'}]` — a safety-classifier decline is transparently re-served by Opus 4.8.
+  **Truncation guard:** a `max_tokens` stop with pending tool_uses does NOT execute them ("would
+  write half a file") — the model is told to re-issue smaller. The loop is Anthropic-only for now
+  (`agentAvailable()`).
+- **`tools.ts`** — 7 tools in Anthropic tool-use format, executed client-side against an injected
+  `AgentToolContext`: `list_files`, `read_file` (suggests near-matches on miss), `write_file`,
+  `edit_file` (**exact-match, must-be-unique** surgical replace), `grep` (capped 80 matches),
+  `delete_file`, `run_typecheck` (real tsc + static checks).
+- **`edit.ts`** — wires a live project in: `verifyProject()` (static QA always; real `tsc` via
+  the WebContainer, incl. headless `deepTypecheck` so fresh generations are compiler-verified
+  with the preview closed); `generationCompileGate()`; `agenticVerifyAndFix()` (up to 3
+  "RELENTLESS" repair rounds while progress continues); `agenticEdit()` (the agentic edit turn:
+  preamble of project brain/map/roadmap/prefs + Garvis knowledge digest + mind digest + live
+  preview context + file TREE — contents pulled lazily via `read_file`; supports feature-branch
+  copy-on-write overlays; records per-file before/after diffs and usage).
+
+### 12.2 The 11-stage generation pipeline
+
+Lives in `src/lib/aiClient.ts::chunkedGenerate()` (started by `startGeneration()`), with a
+server mirror in `supabase/functions/generate-app` ported to the identical contract. Stage
+progress is written to `project_generations.stages`. The stages, in order:
+
+1. **interpret** — intake (marked done immediately).
+2. **blueprint** — `GENERATE_SYSTEM` + `blueprintPrompt` → JSON blueprint (repair-parsed),
+   sanitized, saved to `app_blueprints`. The blueprint carries a rich `design` bundle (archetype,
+   accent HSL, fonts — "Inter as headingFont is BANNED (the #1 generic tell)", mode, radius,
+   signatures, vibe) and structured `integrations`.
+3. **schema** — concurrent: `generateBackend()` produces the Postgres migration
+   (`SCHEMA_SYSTEM`).
+4. **file_tree** — the heart: (a) one bounded **SHELL/contracts** streaming call emits
+   `/src/lib` types/db/api + `App.tsx` + layout + edge functions (NOT pages) using the
+   `§FILE <path>` / `§END` streaming protocol; (b) the **page list** is derived from App.tsx's
+   own `./pages` imports; (c) **pages generate in a sliding parallel pool** (6 in flight direct /
+   4 cloud, 9,000 tok/page) each compiling against the verbatim contracts context (≤60k chars);
+   (d) a **manifest diff** retries each missing page once. `looksTruncated` drops any
+   max_tokens-cut tail file.
+5.–8. **frontend, backend, auth_logic, styling** — marked done together once file_tree + schema
+   join.
+9. **validate** — `runQA` → `createMissingModules()` heal (a dedicated `MISSING_FILE_SYSTEM`
+   call per missing file, in parallel) → `generationCompileGate()` real tsc count.
+10. **fix** — `agenticVerifyAndFix()` when the agent is available, else the classic `qaFixPass`
+    (2 attempts).
+11. **summarize** — assistant chat summary, usage tagging, `usage_events` + a `mind_events`
+    completion record; project status `ready`.
+
+**Prompts** live canonically in `supabase/functions/_shared/prompts.ts` (~119 KB);
+`src/lib/prompts.ts` is a bare re-export — "kills client/edge drift" (same pattern for
+`scaffold.ts`, `qaCheck.ts` → `_shared/qa.ts`, `preview/spec.ts` → `_shared/previewSpec.ts`).
+Key excerpts of `GENERATE_CORE`:
+
+> *"You are FableForge's code generation engine. You generate complete, runnable,
+> production-quality React apps as real Vite + TypeScript projects…"*
+> *"STYLE WITH TOKENS, NEVER HARDCODED COLORS: bg-background / bg-card … NEVER write bg-white…
+> those break dark mode."*
+> *"This kit is NOT shadcn/ui — shadcn prop names (variant=\"destructive\", asChild…) WILL NOT
+> type-check."*
+> *"CONTRACT-FIRST — imports must match exports EXACTLY (the #1 source of broken builds)."*
+
+Plus a motion-component catalog (ScrollScene, Parallax, CountUp, Marquee, TextReveal, TiltCard,
+Aurora, Spotlight, …) and DESIGN/ENGINEERING/INTEGRATIONS/AUTOMATION/COMPLIANCE/
+FEATURE_COMPLETENESS sub-guides.
+
+**Verification/repair:** `qaCheck.ts` → `_shared/qa.ts` checks cross-file export resolution
+(barrels, aliases, namespaces, re-exports), an RLS lint (table without RLS = error), HashRouter
+anchor pitfalls, missing catch-all routes, `React.lazy` resolution, and truncated/unbalanced
+files. `importSafety.ts` redacts `.env` secret VALUES on project import (keeps keys/comments).
+
+### 12.3 Flagship
+
+`src/lib/flagship/projectApp.txt` (~12.8 KB, imported `?raw`) is a complete, self-contained
+scroll-story artist portfolio ("C. Scharpf — Paintings & Works in Motion": title → gallery tunnel
+→ deep zoom → depth drift → works → inquire), reduced-motion aware. `flagshipProject.ts` packages
+it as a REAL project in importer shape (`saveFlagshipAsProject()`), so it appears in the
+dashboard and rides the normal edit/deploy pipeline — a showcase of the ceiling the engine aims
+for.
+
+## 13. The preview / publish / domain / bespoke-site engine (`src/lib/preview/`)
+
+The client-hunt demo-site machine. The **intelligence chain** in `engine.ts::
+ingestBusinessProfile` ("THE SCRAPER HANDOFF") is a five-persona pipeline, each stage failing
+soft to deterministic floors: **strategist** (`STRATEGY_SYSTEM`) → **art director/spec**
+(`SPEC_SYSTEM`) → **simulated owner critique** (`CRITIQUE_SYSTEM` — *"You ARE the owner of this
+business — busy, skeptical … Would you pay $299 to publish it?"*) → optional **refine** →
+**auditor** (`AUDIT_SYSTEM`, concurrent) → **pitch** (cold-email body).
+
+`specPrompts.ts` extracts the prompts pure so browser and standing-worker run an IDENTICAL brief:
+
+> *"You are the art director and conversion copywriter of an elite local-business web agency. You
+> produce a WEBSITE SPEC as JSON… You never write HTML/CSS/code."*
+> *"Ground EVERY claim in the provided business profile. Never invent reviews, ratings, years in
+> business, certifications, or services that aren't in the profile."*
+> *"NEVER claim licensed / insured / bonded / certified — not even hedged … a false one on a
+> pitched demo is a liability for the owner."*
+> *"DIGNITY — grief-adjacent businesses (funeral, cremation, memorial…) get NO spectacle … and
+> NEVER sales verbs."*
+
+Other parts:
+
+- **`spec.ts`** re-exports `_shared/previewSpec.ts` — the pure honesty engine
+  (`parseBusinessProfile`, `assembleFallbackSpec`, recipes, `usablePhotos`/`usableReviews`).
+- **`strategy.ts`** — pure normalizers + deterministic fallbacks for the three intelligence
+  artifacts; `critiqueWarrantsRefine` = won't-buy OR feels_like_my_business ≤ 6 OR ≥ 4 issues.
+- **`bespokeSite.ts`** — the second generation path: Claude writes a bespoke complete HTML
+  document (uncapped ceiling). `bespokeHonest()` is a deterministic GATE inspecting the output
+  HTML for unverified credentials/license numbers/tenure/ratings/warranties — any violation
+  rejects the doc and the caller falls back to the honest spec renderer.
+- **`publishCore.ts`** (pure, Deno-safe) — Netlify site naming, publish status algebra ("a
+  'purchased' site never downgrades"), and **image re-hosting** at publish (a sold site's
+  hotlinked scraped photos are pulled onto own storage).
+- **`domainCore.ts`** (pure) — DNS math: `NETLIFY_APEX_IP='75.2.60.5'`, apex vs subdomain
+  classification (two-part-TLD aware), exact records (`A@` + `www` CNAME, or single CNAME; never
+  MX).
+- **`exportStatic.ts`** — THE DELIVERABLE: renders the same React `PreviewSiteRenderer` via
+  `renderToStaticMarkup`, inlines CSS, adds OG/schema.org LocalBusiness JSON-LD, forces motion
+  elements to final visible states, injects real lead-capture JS POSTing to `claim-submit`.
+- **`scrapeProfile*.ts`** — profile extraction from scraped text (`EXTRACT_SYSTEM`: "NEVER
+  invent"); photos default `can_publish:false`.
+- **`demoProfiles.ts`** — three demo profiles (roofing / trattoria / med spa), one per launch
+  recipe.
+- **Edge functions:** `publish-preview` (re-hosts images through SSRF-safe fetch, deploys a
+  single `index.html` to Netlify, stashes HTML so the Stripe webhook can re-publish a sold site
+  with no browser), `connect-domain` (PATCHes Netlify custom_domain, resolves live DNS via
+  `Deno.resolveDns` to report `dnsVerified`/`sslActive`), `ingest-profile` (the funnel's front
+  door for the external scraper, token-authed; v1 saves the deterministic fallback spec — the AI
+  chain runs later on operator Regenerate), `claim-submit`, `automation-intake`,
+  `client-checkout` (Stripe).
+
+## 14. Safe-edit, pending-edit, branches, merge
+
+- **Safe-edit** is two mechanisms, not one file: (1) `contextBudget.ts::applyEditGuardrail`
+  (classic path, tested by `safeedit.verify.ts`) — refuses writes/deletes to EXISTING files the
+  model could not see (trimmed out of a large project by the 160k-char context budget); new
+  files always allowed; small projects never blocked. (2) The agentic path's `edit_file`
+  exact-match/must-be-unique semantics.
+- **`pendingEdit.ts`** — pure types for review-before-write: `buildPendingFiles` pairs each
+  proposed change with current content for diff rendering; `sendEdit` returns
+  `action:'review'` + a pending set in review mode (direct-mode only for now).
+- **`branchCore.ts` / `branches.ts`** — feature branches as a **copy-on-write overlay** stored
+  as `project_files` rows under `/.fableforge/branches/<id>/{files,base}/… + branch.json`.
+  `classifyBranch` performs the three-way diff (base vs Main-now vs branch) →
+  `take-branch`/`noop`/`conflict`/`delete`/`delete-skipped`; `buildCandidate` builds the
+  post-merge set (throws only the typed unresolved-conflict error — fuzz-verified).
+- **`mergeBranch.ts`** — readiness-gated merge "so Main is NEVER left broken": diff → model-
+  resolve each conflict (using the branch's chat history as intent) → verify the in-memory
+  candidate (static QA + real/headless tsc) → repair in memory (≤2 rounds, no DB writes) →
+  commit only a green candidate in ONE batched upsert. If it can't be made green, the merge
+  aborts and Main is untouched.
+
+## 15. Provider and model usage
+
+Three call paths exist, selected by configuration:
+
+1. **DIRECT mode** (`VITE_AI_DIRECT=true` + a user key in localStorage): the browser calls the
+   provider itself. `aiClient.ts::rawComplete` speaks the Anthropic Messages API natively
+   (system as a cached block; Fable/Mythos → Opus 4.8 server-side fallback) and an
+   OpenAI-compatible `/chat/completions` for everything else. Provider catalog (`aiConfig.ts`):
+   **anthropic** (`claude-fable-5`, `claude-opus-4-8`, `claude-sonnet-4-6`,
+   `claude-haiku-4-5-20251001` — default sonnet, fast-lane haiku), **openai** (`gpt-4o`,
+   `gpt-4o-mini`, `gpt-4.1`, `o3`, `o4-mini`), **xai** (`grok-4`, `grok-3`, …), **gemini**
+   (`gemini-2.5-pro/flash`, …), **openrouter**, **local** (Ollama/LM Studio at
+   `VITE_LOCAL_AI_BASE_URL`). Client-side spend ledger in `usage.ts` (cache-aware pricing:
+   creation ×1.25, read ×0.1).
+2. **Edge mode** (no browser key): every model call relays through an edge function —
+   `agent-turn` (agentic loop proxy, credit-gated), `chat-edit` (streaming edits),
+   `generate-app` (server generation), `garvis-brain` (Garvis decisions), `cluster-chat` (the
+   generic reasoning chokepoint for studio chat, orchestrator compiles, genesis, reflection),
+   `board-copy`, `garvis-short-script`, `explorer-turn`, etc. All ride
+   `supabase/functions/_shared/ai.ts` — provider-agnostic
+   (`anthropic | openai | openrouter | local`) via `AI_PROVIDER`/`AI_MODEL` env (defaults
+   anthropic / `claude-sonnet-4-6`), 300 s hard fetch timeout, retry. **`modelForPlan`**: free
+   tier gets the cheapest capable model (`claude-haiku-4-5-20251001` / `gpt-4o-mini` /
+   `anthropic/claude-3.5-haiku`), paid tiers get the operator's configured model
+   (`AI_FREE_MODEL` overrides). This is the "Garvis survives while models get replaced" promise
+   in `garvis-brain`'s header.
+3. **`ai-gateway`** — the managed AI gateway for GENERATED apps: an app's own edge functions
+   call it with a per-app key (`FABLEFORGE_AI_KEY`, issued at backend deploy); completions run on
+   the OPERATOR's key and the real cost is metered against the APP OWNER's credit balance
+   (margin ×1.25, cap 4,096 tokens/call).
+
+Specialized model usage: `generate-image` and the boards use OpenAI **`gpt-image-1`**;
+`generate-video` uses Google **Veo 3.1** (`veo-3.1-generate-preview` /
+`veo-3.1-fast-generate-preview`, `GEMINI_API_KEY`); `discover-run` pins
+`SCOUT_MODEL='claude-sonnet-4-6'` with Anthropic server-side web search
+(`completeWithWebSearch`); `outreach-followups`/`resend-inbound`/`inbox-draft` use `gpt-4o-mini`
+or `google/gemini-2.5-flash` depending on which key is configured. Edge pricing table
+(`_shared/ai.ts`): fable-5 $10/$50 per MTok, opus-4-8 $5/$25, sonnet-4-6 $3/$15, haiku-4-5
+$0.8/$4, gpt-4o $2.5/$10, gpt-4o-mini $0.15/$0.6 — mirrored client-side in
+`directBrain.ts::estimateCostUsd`.
+
 
 ---
 
