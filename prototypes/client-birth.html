@@ -1,0 +1,888 @@
+<!doctype html>
+<!--
+  P5 · Client birth from close-won
+  Settles: W1 (day zero / the spawn moment) · validates D1 (deferred ceremony) + D6 (proposal diet)
+  Inevitable when: "I signed another client" → a complete, correct client environment in under
+  sixty seconds, zero questions asked — and the one properly-weighted ask arrives exactly when
+  the operator finally needs it to (first outbound).
+  Self-contained. Staged data, real timing. No external requests. No libraries.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P5 · Client birth</title>
+<style>
+:root {
+  --ground: #0B0E14;
+  --surface: #131822;
+  --surface-2: #1B2230;
+  --line: #232B3B;
+  --ink: #E8E4DA;
+  --dim: #8A8FA3;
+  --faint: #565C6E;
+  --ember: #E8833A;
+  --ember-soft: rgba(232,131,58,.14);
+  --ok: #6FBF8B; --warn: #D9A441; --blocked: #C25E5E;
+  --judgment: #9B8CC9;
+  --serif: Charter, Georgia, "Times New Roman", serif;
+  --chrome: -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --forge: cubic-bezier(0.22, 1, 0.36, 1);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--chrome);
+  font-size: 14px;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+button:focus-visible, [tabindex]:focus-visible, [contenteditable]:focus-visible {
+  outline: 2px solid var(--ember); outline-offset: 2px; border-radius: 4px;
+}
+.mono { font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
+.micro {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim);
+}
+
+/* ---------- fixed chrome ---------- */
+#ctx-header {
+  position: fixed; top: 16px; left: 20px; z-index: 40;
+  display: flex; align-items: center; gap: 10px;
+  opacity: 0; transform: translateY(-4px);
+  transition: opacity .6s var(--forge), transform .6s var(--forge);
+  pointer-events: none;
+}
+#ctx-header.on { opacity: 1; transform: none; pointer-events: auto; }
+.face-chip {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink);
+}
+.face-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.face-chip .sep { color: var(--faint); }
+.edge-chip {
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px;
+  background: var(--surface);
+}
+#pulse {
+  position: fixed; top: 16px; right: 20px; z-index: 40;
+  display: flex; align-items: center; gap: 7px;
+  font-family: var(--mono); font-size: 12px; color: var(--dim);
+}
+#pulse .p-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ember);
+  box-shadow: 0 0 8px rgba(232,131,58,.5); }
+#pulse .p-dot.calm { background: var(--faint); box-shadow: none; }
+
+/* the Bar */
+#bar {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  width: min(640px, calc(100vw - 48px)); z-index: 40;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  padding: 11px 20px; display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.35);
+}
+#bar .scope {
+  display: none; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ember); background: var(--ember-soft); border-radius: 999px;
+  padding: 3px 9px; white-space: nowrap;
+}
+#bar.scoped .scope { display: inline-block; }
+#bar .placeholder {
+  font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--faint);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+
+/* HUD */
+#hud {
+  position: fixed; left: 20px; bottom: 24px; z-index: 41;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; color: var(--faint);
+}
+#hud button {
+  color: var(--faint); font-size: 12px; padding: 2px 6px; border-radius: 4px;
+  border: 1px solid transparent;
+}
+#hud button:hover { color: var(--dim); border-color: var(--line); }
+#stopwatch {
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  border: 1px solid var(--line); border-radius: 999px; padding: 3px 9px;
+  background: var(--surface); display: none;
+}
+#stopwatch.on { display: inline-block; }
+#stopwatch.done { color: var(--dim); }
+#feelfor {
+  position: fixed; left: 20px; bottom: 60px; z-index: 42;
+  width: 340px; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 10px; padding: 16px 18px; display: none;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+}
+#feelfor.on { display: block; }
+#feelfor h3 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--dim); font-weight: 500; margin-bottom: 10px; }
+#feelfor p { font-family: var(--serif); font-size: 14.5px; line-height: 1.5;
+  color: var(--ink); margin-bottom: 8px; }
+
+/* ---------- act 1 · the drawer ---------- */
+#drawer-wrap {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  transition: opacity .5s var(--forge);
+}
+#drawer-wrap.gone { opacity: 0; pointer-events: none; }
+#drawer {
+  width: min(520px, calc(100vw - 48px));
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 26px 28px 24px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  transform: translateY(0); transition: transform .5s var(--forge), opacity .5s var(--forge);
+}
+#drawer .kicker { display:flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+#drawer h1 { font-family: var(--serif); font-weight: 500; font-size: 22px; text-wrap: balance; }
+#drawer .sub { color: var(--dim); font-size: 13px; margin-top: 3px; }
+.reply-quote {
+  margin: 18px 0 20px; padding: 14px 16px;
+  border-left: 2px solid var(--line);
+  font-family: var(--serif); font-size: 17px; line-height: 1.55; color: var(--ink);
+  background: rgba(255,255,255,.015); border-radius: 0 8px 8px 0;
+}
+.reply-quote .from { font-family: var(--mono); font-size: 11px; color: var(--faint);
+  margin-bottom: 8px; font-style: normal; }
+.reply-quote .sig { color: var(--dim); font-size: 15px; margin-top: 8px; }
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--ember-soft); color: var(--ember);
+  border: 1px solid rgba(232,131,58,.35); border-radius: 999px;
+  padding: 9px 20px; font-size: 14px;
+  transition: background .18s var(--forge), transform .18s var(--forge);
+}
+.btn-primary:hover { background: rgba(232,131,58,.22); }
+.btn-primary:active { transform: scale(.98); }
+.keyhint { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+/* ---------- act 2 · the desk ---------- */
+#desk {
+  position: absolute; inset: 0; padding: 64px 24px 96px;
+  display: none; grid-template-columns: 300px 1fr; gap: 22px;
+  max-width: 1280px; margin: 0 auto;
+}
+#desk.on { display: grid; }
+@media (max-width: 900px) { #desk { grid-template-columns: 1fr; overflow-y: auto; } }
+
+/* log column */
+#logcol { display: flex; flex-direction: column; min-height: 0; }
+#logcol .col-title { margin-bottom: 12px; }
+#loglines { flex: 1; overflow: hidden; }
+.logline {
+  font-family: var(--mono); font-size: 12px; line-height: 1.5;
+  color: var(--dim); padding: 5px 0; display: flex; gap: 10px; align-items: baseline;
+  opacity: 0; transform: translateX(-6px);
+  transition: opacity .45s var(--forge), transform .45s var(--forge);
+}
+.logline.on { opacity: 1; transform: none; }
+.logline .t { color: var(--faint); flex: 0 0 52px; font-variant-numeric: tabular-nums; }
+.logline .what { color: var(--ink); }
+.logline .prov { color: var(--faint); }
+#qcounter {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12px; color: var(--faint);
+}
+#voice-line {
+  margin-top: 18px; font-family: var(--serif); font-size: 17px; line-height: 1.55;
+  color: var(--ink); max-width: 30ch; min-height: 1em;
+  opacity: 0; transition: opacity .5s var(--forge);
+}
+#voice-line.on { opacity: 1; }
+
+/* panels grid */
+#panels {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  align-content: start; overflow-y: auto; padding-bottom: 8px;
+}
+@media (max-width: 1100px) { #panels { grid-template-columns: repeat(2, 1fr); } }
+.panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 16px 13px; min-height: 118px;
+  opacity: 0; transform: translateY(14px) scale(.985);
+  transition: opacity .6s var(--forge), transform .6s var(--forge);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.panel.docked { opacity: 1; transform: none; }
+.panel h2 { font-size: 13.5px; font-weight: 500; color: var(--ink); display: flex;
+  align-items: center; justify-content: space-between; gap: 8px; }
+.panel .status { font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
+.panel .status.ok { color: var(--ok); }
+.panel .status.warn { color: var(--warn); }
+.panel .body { font-size: 13px; color: var(--dim); line-height: 1.45; flex: 1; }
+.panel .prov-stamp {
+  font-family: var(--mono); font-size: 11px; color: var(--faint);
+  border-top: 1px solid var(--line); padding-top: 8px; line-height: 1.45;
+}
+.panel.wide { grid-column: span 2; }
+@media (max-width: 1100px) { .panel.wide { grid-column: span 2; } }
+
+.site-thumb { width: 100%; border-radius: 6px; border: 1px solid var(--line); display: block; }
+.ev {
+  border-bottom: 1px dotted var(--faint); cursor: help; position: relative;
+}
+.ev:hover .ev-pop, .ev:focus .ev-pop { display: block; }
+.ev-pop {
+  display: none; position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 30;
+  width: 300px; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.6; color: var(--dim);
+  box-shadow: 0 10px 30px rgba(0,0,0,.5); white-space: normal; cursor: default;
+}
+.ev-pop .row { display: flex; gap: 8px; }
+.ev-pop .row .ts { color: var(--faint); flex: 0 0 58px; }
+
+/* staged next move */
+#next-move {
+  grid-column: 1 / -1; display: flex; justify-content: center; padding: 10px 0 4px;
+}
+#next-move .inner {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  visibility: hidden; pointer-events: none;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .6s var(--forge), transform .6s var(--forge), visibility .6s;
+}
+#next-move.on .inner { visibility: visible; pointer-events: auto; opacity: 1; transform: none; }
+</style>
+<style>
+/* ---------- act 4 · the ceremony (one compact screen, never a wizard) ---------- */
+#ceremony-wrap {
+  position: fixed; inset: 0; z-index: 50; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(11,14,20,.72); backdrop-filter: blur(3px);
+  visibility: hidden; pointer-events: none; opacity: 0;
+  transition: opacity .35s var(--forge), visibility .35s;
+}
+#ceremony-wrap.on { visibility: visible; pointer-events: auto; opacity: 1; }
+#ceremony {
+  width: min(560px, calc(100vw - 40px));
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 26px 28px 22px; box-shadow: 0 24px 70px rgba(0,0,0,.55);
+  opacity: 0; transform: translateY(12px);
+  transition: opacity .5s var(--forge), transform .5s var(--forge);
+}
+#ceremony-wrap.on #ceremony { opacity: 1; transform: none; }
+#ceremony h2 { font-family: var(--serif); font-weight: 500; font-size: 20px;
+  text-wrap: balance; margin-bottom: 4px; }
+#ceremony .whisper { font-size: 13px; color: var(--dim); margin-bottom: 18px; }
+.cer-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+  padding: 11px 0; border-top: 1px solid var(--line);
+}
+.cer-row .label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--dim); flex: 0 0 92px; }
+.cer-row .val { flex: 1; font-size: 13.5px; color: var(--ink); line-height: 1.5; }
+.chip-verified {
+  font-family: var(--mono); font-size: 11px; color: var(--ok);
+  border: 1px solid rgba(111,191,139,.35); border-radius: 999px; padding: 2px 8px;
+  margin-left: 8px; white-space: nowrap;
+}
+.inv-line { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.inv-line .amt {
+  font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums;
+  color: var(--ink); padding: 1px 5px; border-radius: 4px;
+  border: 1px dashed transparent; min-width: 64px; text-align: right;
+}
+.inv-line .amt:hover { border-color: var(--line); }
+.inv-line .amt:focus { border-color: var(--ember); outline: none; background: var(--surface-2); }
+.cer-sends { font-family: var(--mono); font-size: 12px; line-height: 1.7; color: var(--dim); }
+.cer-sends .arrow { color: var(--faint); }
+.isolation {
+  font-family: var(--serif); font-size: 15px; font-style: italic; color: var(--dim);
+}
+#ceremony .foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line);
+}
+
+/* undo toast */
+#toast {
+  position: fixed; left: 0; right: 0; margin: 0 auto; width: max-content;
+  max-width: calc(100vw - 40px); bottom: 84px; transform: translateY(8px);
+  z-index: 55; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 10px 18px;
+  display: flex; align-items: center; gap: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  visibility: hidden; pointer-events: none;
+  opacity: 0; transition: opacity .4s var(--forge), transform .4s var(--forge),
+    visibility .4s;
+}
+#toast.on { visibility: visible; pointer-events: auto; opacity: 1; transform: none; }
+#toast .msg { font-size: 13.5px; color: var(--ink); }
+#toast .count { font-family: var(--mono); font-size: 12px; color: var(--warn);
+  font-variant-numeric: tabular-nums; }
+#toast button { color: var(--ember); font-size: 13px; padding: 2px 6px; }
+#toast button:hover { text-decoration: underline; }
+
+#sent-copy {
+  position: fixed; left: 0; right: 0; margin: 0 auto; bottom: 132px;
+  z-index: 54; font-family: var(--serif); font-size: 14.5px; font-style: italic;
+  color: var(--dim); text-align: center; width: min(480px, 90vw);
+  opacity: 0; transition: opacity .8s var(--forge); pointer-events: none;
+}
+#sent-copy.on { opacity: 1; }
+
+/* ---------- act 5 · the epilogue (unasked, judgment-marked, inert) ---------- */
+#epilogue { grid-column: 1 / -1; }
+#epilogue .card {
+  max-width: 560px; margin: 6px auto 0;
+  background: rgba(155,140,201,.06); border: 1px solid rgba(155,140,201,.28);
+  border-radius: 12px; padding: 16px 18px 14px;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .8s var(--forge), transform .8s var(--forge);
+}
+#epilogue .card.in { opacity: 1; transform: none; }
+#epilogue .tag {
+  font-family: var(--mono); font-size: 11px; color: var(--judgment); margin-bottom: 8px;
+}
+#epilogue .card p {
+  font-family: var(--serif); font-size: 16px; line-height: 1.55; color: var(--ink);
+  max-width: 58ch;
+}
+#epilogue .chips { display: flex; gap: 10px; margin-top: 12px; }
+.chip-quiet {
+  font-size: 13px; color: var(--dim); border: 1px solid var(--line);
+  border-radius: 999px; padding: 6px 14px;
+  transition: color .18s var(--forge), border-color .18s var(--forge);
+}
+.chip-quiet:hover { color: var(--ink); border-color: var(--faint); }
+#epi-ack { font-family: var(--mono); font-size: 11px; color: var(--faint);
+  margin-top: 10px; display: none; }
+#epi-ack.on { display: block; }
+
+/* ---------- reduced motion: opacity only ---------- */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: .01ms !important; }
+  .panel, .logline, #next-move .inner, #epilogue .card, #ceremony, #drawer,
+  #ctx-header, #toast, #voice-line, #sent-copy {
+    transform: none !important;
+    transition-property: opacity !important; transition-duration: .3s !important;
+  }
+}
+</style>
+</head>
+<body>
+<!-- fixed chrome -->
+<div id="ctx-header" aria-live="polite">
+  <span class="face-chip"><span class="dot"></span><span id="face-name"></span>
+    <span class="sep">·</span><span id="face-kind" style="color:var(--dim)"></span>
+    <span class="sep">·</span><span id="face-state" style="color:var(--dim)"></span></span>
+  <span class="edge-chip" id="edge-chip"></span>
+</div>
+<div id="pulse" title="the Pulse — real counts only">
+  <span class="p-dot calm" id="pulse-dot"></span><span id="pulse-count"></span>
+</div>
+
+<!-- act 1 · prospect drawer -->
+<div id="drawer-wrap">
+  <div id="drawer" role="dialog" aria-label="Prospect drawer">
+    <div class="kicker">
+      <span class="micro">Pipeline · Prospects</span>
+      <span class="mono" id="drawer-age"></span>
+    </div>
+    <h1 id="drawer-name"></h1>
+    <div class="sub" id="drawer-sub"></div>
+    <blockquote class="reply-quote">
+      <div class="from" id="reply-from"></div>
+      <div id="reply-body"></div>
+      <div class="sig" id="reply-sig"></div>
+    </blockquote>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <button class="btn-primary" id="btn-won">( mark won )</button>
+      <span class="keyhint">↵ won</span>
+    </div>
+  </div>
+</div>
+
+<!-- act 2/3 · the desk -->
+<main id="desk" aria-label="Client world desk">
+  <aside id="logcol">
+    <div class="micro col-title">Arriving — from the prospect record</div>
+    <div id="loglines" aria-live="polite"></div>
+    <div id="qcounter"></div>
+    <p id="voice-line"></p>
+  </aside>
+  <section id="panels">
+    <!-- panels injected from STAGED_DATA -->
+    <div id="next-move">
+      <div class="inner">
+        <span class="micro">Next move · staged</span>
+        <button class="btn-primary" id="btn-send-move">( send welcome + invoice )</button>
+        <span class="keyhint">↵ open · nothing sends yet</span>
+      </div>
+    </div>
+    <div id="epilogue"></div>
+  </section>
+</main>
+
+<!-- act 4 · the ceremony -->
+<div id="ceremony-wrap" role="dialog" aria-modal="true" aria-label="First outbound">
+  <div id="ceremony">
+    <h2>First outbound — welcome + invoice</h2>
+    <div class="whisper">One screen. Everything below is already drafted — correct it, then say yes once.</div>
+
+    <div class="cer-row">
+      <span class="label">Sending as</span>
+      <span class="val"><span class="mono" id="cer-identity"></span>
+        <span class="chip-verified" id="cer-domain"></span></span>
+    </div>
+    <div class="cer-row">
+      <span class="label">Invoice</span>
+      <span class="val" id="cer-invoice"></span>
+    </div>
+    <div class="cer-row">
+      <span class="label">On send</span>
+      <span class="val cer-sends" id="cer-sends"></span>
+    </div>
+    <div class="cer-row">
+      <span class="label">Isolation</span>
+      <span class="val isolation" id="cer-isolation"></span>
+    </div>
+
+    <div class="foot">
+      <span class="keyhint">↵ send · esc back</span>
+      <button class="btn-primary" id="btn-send-confirm">( send it )</button>
+    </div>
+  </div>
+</div>
+
+<!-- undo toast + sent copy -->
+<div id="sent-copy"></div>
+<div id="toast" role="status">
+  <span class="msg" id="toast-msg"></span>
+  <span class="count" id="toast-count"></span>
+  <button id="btn-undo">undo</button>
+  <span class="keyhint">Z</span>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <span>P5 · Client birth — staged data, real timing</span>
+  <button id="btn-restart" title="restart" aria-label="Restart prototype">⟲</button>
+  <button id="btn-feelfor" title="what to feel for" aria-label="What to feel for">?</button>
+  <span id="stopwatch" title="mark won → Desk settled"></span>
+</div>
+<div id="feelfor" role="dialog" aria-label="What to feel for">
+  <h3>What to feel for</h3>
+  <p>Sixty seconds, zero questions — did anything feel missing or presumptuous?</p>
+  <p>Did the ask arrive exactly when you finally wanted it?</p>
+  <p>Would you trust this with a real client?</p>
+</div>
+
+<!-- the Bar -->
+<div id="bar" aria-hidden="true">
+  <span class="scope" id="bar-scope"></span>
+  <span class="placeholder" id="bar-placeholder">Say anything — it lands here.</span>
+</div>
+<script>
+"use strict";
+/* ================= STAGED_DATA — single source of truth. Every number on
+   screen traces here (the No-Theater rule). ================= */
+const STAGED_DATA = {
+  prospect: {
+    name: "Riverside Dental",
+    stage: "Pitched",
+    daysAgo: 3,
+    sub: "Prospect · pitched 3 days ago · demo site sent",
+    reply: {
+      from: "dr.patel@riversidedental.com · today 9:12 AM",
+      body: "ok let’s do it. what’s next?",
+      sig: "— Dr. Patel"
+    }
+  },
+  world: { kind: "Client", state: "won today", edge: "Agency ← serves" },
+  questionsAsked: 0,
+  panels: [
+    { id: "site-new", title: "Rebuilt site", status: "live preview", statusClass: "ok",
+      body: "svg-thumb",
+      prov: "the demo they saw · now theirs",
+      log: "rebuilt site", logProv: "from the pitch · now theirs" },
+    { id: "site-old", title: "Their current site", status: "11 pages", statusClass: "",
+      body: "Full crawl kept for reference — copy, images, structure. Nothing discarded.",
+      prov: "scraped May 12 · 11 pages",
+      log: "current site", logProv: "scraped May 12 · 11 pages" },
+    { id: "thread", title: "Conversation", status: "7 messages", statusClass: "",
+      body: "The whole courtship — first cold email to this morning’s “ok let’s do it.” Continues here.",
+      prov: "7 messages · full thread · re-scoped, not copied",
+      log: "conversation", logProv: "7 messages · full thread" },
+    { id: "booking", title: "Booking", status: "off", statusClass: "warn",
+      body: "Page built and ready. Stays off until their calendar connects — a later ask, not a blocker.",
+      prov: "ready · off until their calendar connects",
+      log: "booking", logProv: "ready · off · waits on their calendar" },
+    { id: "autom", title: "Automations", status: "2 proposed · off", statusClass: "warn",
+      body: "Appointment reminders · missed-call text-back. Both from the pitch. Neither runs until you say so.",
+      prov: "2 proposed · from the pitch · off",
+      log: "automations", logProv: "2 proposed · off" },
+    { id: "invoice", title: "Invoice draft", status: "not sent", statusClass: "warn",
+      body: "inv-body",
+      prov: "terms from the pitch · not sent",
+      log: "invoice draft", logProv: "$1,500 + $500⁄mo · not sent" },
+    { id: "noticed", title: "What I noticed", status: "unbilled", statusClass: "",
+      body: "noticed-body",
+      prov: "from their reviews · read May 12 · nothing acted on",
+      log: "3 opportunities", logProv: "from their reviews · inert" }
+  ],
+  noticed: {
+    countLabel: "3 opportunities",
+    text: " in their own reviews — phone-tag complaints, no online booking, no reminder texts. Held quietly; nothing acted on.",
+    evidence: [
+      { ts: "Apr 02", row: "“tried calling twice, phone tag for days” — G. review ★★2" },
+      { ts: "Apr 19", row: "“wish I could just book online” — G. review ★★★★4" },
+      { ts: "May 06", row: "“forgot my appt, no reminder” — G. review ★★★3" }
+    ]
+  },
+  invoice: { build: 1500, monthly: 500 },
+  ceremony: {
+    identity: "you@agency.com",
+    domain: "verified domain ✓",
+    sends: [
+      "→ one email, from you@agency.com, to dr.patel@riversidedental.com",
+      "→ Stripe payment link for the amounts above",
+      "→ nothing else — no automations arm, nothing recurs"
+    ],
+    isolation: "Their data stays theirs — scoped to this client.",
+    undoMinutes: 10
+  },
+  sentCopy: "First outbound — this was the moment that needed your yes.",
+  voiceLine: "Everything you built while they were deciding is already here. Nothing sent, nothing charged.",
+  epilogue: {
+    tag: "unasked · 1 of 1 today",
+    beforeEv: "Dr. Patel’s reviews mention phone-tag three times. When you’re ready, missed-call text-back is drafted — it would have caught ",
+    evLabel: "11 calls last month",
+    afterEv: ".",
+    evidence: [
+      { ts: "Jun 01–30", row: "missed during open hours: 11 calls — their call log, shared in the pitch" },
+      { ts: "Apr–May", row: "“phone tag” ×3 — their public reviews" }
+    ]
+  },
+  timing: { panelGapMs: 1950, firstPanelMs: 900 } // ~15s assembly
+};
+
+/* ================= tiny helpers ================= */
+const $ = (id) => document.getElementById(id);
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const timers = [];
+function later(fn, ms) { timers.push(setTimeout(fn, ms)); }
+function money(n) { return "$" + n.toLocaleString("en-US"); }
+function evSpan(label, rows) {
+  const pop = rows.map(r =>
+    `<span class="row"><span class="ts">${r.ts}</span><span>${r.row}</span></span>`
+  ).join("");
+  return `<span class="ev" tabindex="0">${label}<span class="ev-pop">${pop}</span></span>`;
+}
+
+/* ================= static fill from STAGED_DATA ================= */
+const P = STAGED_DATA.prospect;
+$("drawer-name").textContent = P.name;
+$("drawer-age").textContent = P.stage + " · " + P.daysAgo + "d ago";
+$("drawer-sub").textContent = P.sub;
+$("reply-from").textContent = P.reply.from;
+$("reply-body").textContent = "“" + P.reply.body + "”";
+$("reply-sig").textContent = P.reply.sig;
+$("face-name").textContent = P.name;
+$("face-kind").textContent = STAGED_DATA.world.kind;
+$("face-state").textContent = STAGED_DATA.world.state;
+$("edge-chip").textContent = STAGED_DATA.world.edge;
+$("bar-scope").textContent = P.name;
+$("qcounter").textContent = STAGED_DATA.questionsAsked + " questions asked";
+$("pulse-count").textContent = "1 waiting"; // the reply, needing you
+
+/* SVG site thumbnail — drawn, not loaded */
+function siteThumbSVG() {
+  return `<svg class="site-thumb" viewBox="0 0 220 120" role="img" aria-label="Rebuilt site preview">
+    <rect width="220" height="120" fill="#0E1420"/>
+    <rect width="220" height="16" fill="#131B2A"/>
+    <circle cx="12" cy="8" r="3.4" fill="#2C8C7A"/>
+    <rect x="22" y="5.5" width="42" height="5" rx="2.5" fill="#3A465C"/>
+    <rect x="150" y="5" width="24" height="6" rx="3" fill="#2C8C7A"/>
+    <rect x="180" y="5" width="28" height="6" rx="3" fill="#26304A"/>
+    <rect x="14" y="30" width="96" height="9" rx="3" fill="#5A6A85"/>
+    <rect x="14" y="45" width="126" height="5" rx="2.5" fill="#333F55"/>
+    <rect x="14" y="54" width="108" height="5" rx="2.5" fill="#333F55"/>
+    <rect x="14" y="68" width="52" height="12" rx="6" fill="#2C8C7A"/>
+    <rect x="152" y="30" width="54" height="50" rx="4" fill="#1A2436"/>
+    <path d="M158 68 l12 -14 9 8 10 -12 13 18 z" fill="#26304A"/>
+    <circle cx="166" cy="42" r="5" fill="#2C8C7A" opacity=".7"/>
+    <rect x="14" y="94" width="58" height="16" rx="3" fill="#141C2C"/>
+    <rect x="80" y="94" width="58" height="16" rx="3" fill="#141C2C"/>
+    <rect x="146" y="94" width="58" height="16" rx="3" fill="#141C2C"/>
+  </svg>`;
+}
+
+/* build panel DOM (all hidden; docking reveals) */
+const panelsEl = $("panels");
+const nextMoveEl = $("next-move");
+STAGED_DATA.panels.forEach(pd => {
+  const el = document.createElement("article");
+  el.className = "panel" + (pd.id === "site-new" || pd.id === "noticed" ? " wide" : "");
+  el.id = "panel-" + pd.id;
+  let body;
+  if (pd.body === "svg-thumb") body = siteThumbSVG();
+  else if (pd.body === "inv-body")
+    body = `<span class="mono" style="font-size:12.5px;color:var(--ink)">${money(STAGED_DATA.invoice.build)} build + ${money(STAGED_DATA.invoice.monthly)}/mo</span><br>Drafted from the agreed terms. Sits here until the first outbound.`;
+  else if (pd.body === "noticed-body")
+    body = evSpan(STAGED_DATA.noticed.countLabel, STAGED_DATA.noticed.evidence) + STAGED_DATA.noticed.text;
+  else body = pd.body;
+  el.innerHTML =
+    `<h2>${pd.title}<span class="status ${pd.statusClass}" id="status-${pd.id}">${pd.status}</span></h2>
+     <div class="body">${body}</div>
+     <div class="prov-stamp">${pd.prov}</div>`;
+  panelsEl.insertBefore(el, nextMoveEl);
+});
+
+/* ================= stopwatch ================= */
+let swStart = 0, swRAF = 0;
+function swTick() {
+  $("stopwatch").textContent = "won → desk " + ((performance.now() - swStart) / 1000).toFixed(1) + "s";
+  swRAF = requestAnimationFrame(swTick);
+}
+function swStop() {
+  cancelAnimationFrame(swRAF);
+  const s = ((performance.now() - swStart) / 1000).toFixed(1);
+  $("stopwatch").textContent = "won → desk settled · " + s + "s";
+  $("stopwatch").classList.add("done");
+}
+
+/* ================= act 2 · the birth orchestration ================= */
+function logLine(elapsedMs, what, prov) {
+  const li = document.createElement("div");
+  li.className = "logline";
+  const t = (elapsedMs / 1000).toFixed(1).padStart(4, "0");
+  li.innerHTML = `<span class="t">0:${t}</span><span class="what">${what}</span><span class="prov">· ${prov}</span>`;
+  $("loglines").appendChild(li);
+  requestAnimationFrame(() => requestAnimationFrame(() => li.classList.add("on")));
+}
+
+/* serif voice line streams AFTER motion settles; skippable */
+let streamAbort = false;
+function streamText(el, text, done) {
+  el.classList.add("on");
+  if (REDUCED) { el.textContent = text; if (done) done(); return; }
+  let i = 0;
+  const step = () => {
+    if (streamAbort) { el.textContent = text; if (done) done(); return; }
+    if (i >= text.length) { if (done) done(); return; }
+    el.textContent = text.slice(0, ++i);
+    const ch = text[i - 1];
+    later(step, /[.,—]/.test(ch) ? 180 : 16);
+  };
+  step();
+  el.addEventListener("click", () => { streamAbort = true; }, { once: true });
+}
+
+function beginBirth() {
+  $("btn-won").disabled = true;
+  $("drawer-wrap").classList.add("gone");
+  $("stopwatch").classList.add("on");
+  swStart = performance.now(); swTick();
+  $("pulse-dot").classList.remove("calm");
+  $("bar").classList.add("scoped");
+  $("bar-placeholder").textContent = "Say anything — it lands in their world.";
+
+  later(() => {
+    $("desk").classList.add("on");
+    const { firstPanelMs, panelGapMs } = STAGED_DATA.timing;
+    STAGED_DATA.panels.forEach((pd, i) => {
+      const at = firstPanelMs + i * panelGapMs;
+      later(() => {
+        logLine(performance.now() - swStart, pd.log, pd.logProv);
+        $("panel-" + pd.id).classList.add("docked");
+      }, at);
+    });
+    const settleAt = firstPanelMs + STAGED_DATA.panels.length * panelGapMs + 400;
+    later(settle, settleAt);
+  }, 480);
+}
+
+function settle() {
+  swStop();
+  $("ctx-header").classList.add("on");          // act 3 · the Face
+  $("pulse-dot").classList.add("calm");
+  $("pulse-count").textContent = "1 staged";    // the next move, waiting on you
+  logLine(performance.now() - swStart, "desk settled",
+    STAGED_DATA.questionsAsked + " questions asked");
+  later(() => {                                  // voice lands after motion settles
+    streamText($("voice-line"), STAGED_DATA.voiceLine, () => {
+      $("next-move").classList.add("on");
+      $("btn-send-move").focus({ preventScroll: true });
+    });
+  }, 650);
+}
+
+$("btn-won").addEventListener("click", beginBirth);
+</script>
+<script>
+"use strict";
+/* ================= act 4 · the deferred ceremony ================= */
+const CER = STAGED_DATA.ceremony;
+const inv = { build: STAGED_DATA.invoice.build, monthly: STAGED_DATA.invoice.monthly };
+
+$("cer-identity").textContent = CER.identity;
+$("cer-domain").textContent = CER.domain;
+$("cer-sends").innerHTML = CER.sends.map(s =>
+  `<span class="arrow">${s.slice(0, 1)}</span>${s.slice(1)}<br>`).join("");
+$("cer-isolation").textContent = CER.isolation;
+$("cer-invoice").innerHTML =
+  `<span class="inv-line"><span>Website build — one-time</span>
+     <span class="amt" id="amt-build" contenteditable="true" role="textbox"
+       aria-label="Build amount, editable">${money(inv.build)}</span></span>
+   <span class="inv-line"><span>Care plan — monthly</span>
+     <span class="amt" id="amt-monthly" contenteditable="true" role="textbox"
+       aria-label="Monthly amount, editable">${money(inv.monthly)}/mo</span></span>`;
+
+function parseAmt(el, fallback) {
+  const n = parseInt(String(el.textContent).replace(/[^0-9]/g, ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+["amt-build", "amt-monthly"].forEach(id => {
+  $(id).addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
+  });
+});
+$("amt-build").addEventListener("blur", e => {
+  inv.build = parseAmt(e.target, inv.build); e.target.textContent = money(inv.build);
+});
+$("amt-monthly").addEventListener("blur", e => {
+  inv.monthly = parseAmt(e.target, inv.monthly); e.target.textContent = money(inv.monthly) + "/mo";
+});
+
+function openCeremony() {
+  $("ceremony-wrap").classList.add("on");
+  later(() => $("btn-send-confirm").focus(), 120);
+}
+function closeCeremony() {
+  $("ceremony-wrap").classList.remove("on");
+  if (!sent) $("btn-send-move").focus({ preventScroll: true });
+}
+$("btn-send-move").addEventListener("click", openCeremony);
+$("ceremony-wrap").addEventListener("click", e => {
+  if (e.target === $("ceremony-wrap")) closeCeremony();
+});
+
+/* send · undo · countdown */
+let sent = false, undoLeft = 0, undoInt = 0, epiTimer = 0;
+function fmtCount(s) { return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+
+function doSend() {
+  if (sent) return;
+  sent = true;
+  closeCeremony();
+  const st = $("status-invoice");
+  st.textContent = "sent · awaiting payment"; st.className = "status ok";
+  const body = document.querySelector("#panel-invoice .body");
+  body.innerHTML = `<span class="mono" style="font-size:12.5px;color:var(--ink)">${money(inv.build)} build + ${money(inv.monthly)}/mo</span><br>Welcome email + Stripe link in their inbox. Paid flips this green line the moment it lands.`;
+  $("next-move").classList.remove("on");
+  $("pulse-count").textContent = "0 waiting";
+
+  $("toast-msg").textContent = "Sent.";
+  undoLeft = CER.undoMinutes * 60;
+  $("toast-count").textContent = "undo " + fmtCount(undoLeft);
+  $("btn-undo").style.display = "";
+  $("toast").classList.add("on");
+  $("sent-copy").textContent = STAGED_DATA.sentCopy;
+  $("sent-copy").classList.add("on");
+  clearInterval(undoInt);
+  undoInt = setInterval(() => {
+    undoLeft--;
+    if (undoLeft <= 0) { clearInterval(undoInt); hideToast(); return; }
+    $("toast-count").textContent = "undo " + fmtCount(undoLeft);
+  }, 1000);
+  clearTimeout(epiTimer);
+  epiTimer = setTimeout(showEpilogue, 5000);   // act 5, quiet, later
+}
+function hideToast() {
+  $("toast").classList.remove("on");
+  $("sent-copy").classList.remove("on");
+}
+function doUndo() {
+  if (!sent) return;
+  sent = false;
+  clearInterval(undoInt); clearTimeout(epiTimer);
+  const st = $("status-invoice");
+  st.textContent = "not sent"; st.className = "status warn";
+  document.querySelector("#panel-invoice .body").innerHTML =
+    `<span class="mono" style="font-size:12.5px;color:var(--ink)">${money(inv.build)} build + ${money(inv.monthly)}/mo</span><br>Drafted from the agreed terms. Sits here until the first outbound.`;
+  $("next-move").classList.add("on");
+  $("pulse-count").textContent = "1 staged";
+  $("toast-msg").textContent = "Undone — nothing left the building.";
+  $("toast-count").textContent = "";
+  $("btn-undo").style.display = "none";
+  $("sent-copy").classList.remove("on");
+  $("btn-send-move").focus({ preventScroll: true });
+  later(() => { $("toast").classList.remove("on"); $("btn-undo").style.display = ""; }, 3500);
+}
+$("btn-send-confirm").addEventListener("click", doSend);
+$("btn-undo").addEventListener("click", doUndo);
+
+/* ================= act 5 · the epilogue (unasked · inert) ================= */
+function showEpilogue() {
+  const E = STAGED_DATA.epilogue;
+  const ep = $("epilogue");
+  ep.innerHTML =
+    `<div class="card">
+       <div class="tag">${E.tag}</div>
+       <p>${E.beforeEv}${evSpan(E.evLabel, E.evidence)}${E.afterEv} When you’re ready — it stays off until then.</p>
+       <div class="chips">
+         <button class="chip-quiet" id="btn-queue">( queue it )</button>
+         <button class="chip-quiet" id="btn-notnow">( not now )</button>
+       </div>
+       <div id="epi-ack"></div>
+     </div>`;
+  const card = ep.querySelector(".card");
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    card.classList.add("in");
+    card.scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "nearest" });
+  }));
+  $("btn-queue").addEventListener("click", () => {
+    const a = $("epi-ack");
+    a.textContent = "queued · tomorrow’s Queue · still off until you approve it there";
+    a.classList.add("on");
+    $("btn-queue").disabled = true; $("btn-queue").style.opacity = ".45";
+  });
+  $("btn-notnow").addEventListener("click", () => {
+    card.classList.remove("in");
+    later(() => { ep.innerHTML = ""; }, 850);
+  });
+}
+
+/* ================= HUD + keyboard ================= */
+$("btn-restart").addEventListener("click", () => location.reload());
+$("btn-feelfor").addEventListener("click", () => $("feelfor").classList.toggle("on"));
+document.addEventListener("click", e => {
+  if ($("feelfor").classList.contains("on") &&
+      !$("feelfor").contains(e.target) && e.target !== $("btn-feelfor"))
+    $("feelfor").classList.remove("on");
+});
+document.addEventListener("keydown", e => {
+  const tag = document.activeElement && document.activeElement.tagName;
+  const editing = document.activeElement && document.activeElement.isContentEditable;
+  if (e.key === "Escape") {
+    if ($("ceremony-wrap").classList.contains("on")) { closeCeremony(); return; }
+    $("feelfor").classList.remove("on"); return;
+  }
+  if (editing || tag === "INPUT" || tag === "TEXTAREA") return;
+  if (e.key === "Enter") {
+    if ($("ceremony-wrap").classList.contains("on")) {
+      e.preventDefault(); doSend(); return;
+    }
+    if (!$("drawer-wrap").classList.contains("gone")) {
+      e.preventDefault(); beginBirth(); return;
+    }
+    if ($("next-move").classList.contains("on") && !sent) {
+      e.preventDefault(); openCeremony();
+    }
+    return;
+  }
+  if ((e.key === "z" || e.key === "Z") && $("toast").classList.contains("on") && sent) {
+    e.preventDefault(); doUndo();
+  }
+});
+</script>
+</body>
+</html>

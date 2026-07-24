@@ -1,0 +1,1087 @@
+<!--
+  P2 — Explore that surprises → "Make it real"
+  Settles: W7 (the trust architecture is the magic ceiling) · validates D2 (Initiative inward,
+  permission outward) · demonstrates the map→world re-dress (magic audit §7, bet 1) and D8's
+  third defining transition.
+  Inevitable when: a user reports being genuinely surprised by a thought they didn't ask for,
+  and promotion is described as growth, not migration.
+  Staged data, real timing. One self-contained file, zero external requests.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P2 · Explore → Make it real</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E;
+  --judgment:#9B8CC9;
+  --forge:cubic-bezier(.22,1,.36,1);
+  --serif:Charter,Georgia,"Times New Roman",serif;
+  --chrome:-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --thread-w:56%; --map-w:100%;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--ground);color:var(--ink);
+  font:400 14px/1.45 var(--chrome);
+  overflow:hidden;-webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ember);outline-offset:3px;border-radius:3px}
+.micro{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* ── chrome ───────────────────────────────────────────────────────────── */
+#app{height:100vh;display:flex;flex-direction:column}
+.chrome-top{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;padding:15px 26px 4px;gap:20px}
+.ctx{min-width:0}
+.facechip{display:inline-flex;align-items:baseline;gap:9px;font-size:13px;color:var(--ink);position:relative}
+.facechip .kind{color:var(--dim);font-size:12px}
+.facechip .swap{transition:opacity 320ms var(--forge)}
+.momentum{margin-top:4px;font-size:11.5px;color:var(--faint);font-family:var(--mono);font-variant-numeric:tabular-nums}
+.top-right{display:flex;align-items:center;gap:14px;flex:0 0 auto}
+.makechip{
+  border:1px solid var(--line);border-radius:14px;padding:5px 13px;font-size:12.5px;color:var(--dim);
+  background:transparent;transition:color 180ms var(--forge),border-color 180ms var(--forge),background 180ms var(--forge),opacity 260ms var(--forge),transform 260ms var(--forge);
+}
+.makechip:hover,.makechip:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.45);background:var(--ember-soft)}
+body.grown .makechip{opacity:0;transform:translateY(-6px) scale(.96);pointer-events:none}
+.pulse{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.02em;cursor:default}
+.pulse .ok{color:var(--ok);opacity:.75}
+
+/* ── stage ────────────────────────────────────────────────────────────── */
+.stage{flex:1 1 auto;display:flex;gap:30px;padding:6px 26px 122px;min-height:0}
+.thread-col{width:var(--thread-w);min-width:0;display:flex;flex-direction:column;transition:width 800ms var(--forge)}
+.thread-scroll{flex:1 1 auto;overflow-y:auto;overflow-x:hidden;padding:8px 16px 8px 2px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.thread-scroll::-webkit-scrollbar{width:7px}
+.thread-scroll::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+.thread{max-width:62ch}
+.world-col{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:12px}
+
+/* ── conversation ─────────────────────────────────────────────────────── */
+.msg{margin:0 0 22px;position:relative}
+.msg .who{margin-bottom:5px}
+.msg .body{font-family:var(--serif);font-size:18px;line-height:1.55;color:var(--ink)}
+.msg.you .body{color:rgba(232,228,218,.80)}
+.msg .body .sent{transition:background 260ms var(--forge),box-shadow 260ms var(--forge);border-radius:2px;padding:1px 0}
+.msg .body .sent.lit{background:var(--ember-soft);box-shadow:-6px 0 0 var(--ember-soft),6px 0 0 var(--ember-soft)}
+.hold{
+  display:inline-flex;align-items:center;gap:7px;margin-top:9px;font-size:12.5px;color:var(--faint);
+  border:1px solid transparent;border-radius:13px;padding:3px 10px;opacity:0;
+  transition:opacity 180ms var(--forge),color 180ms var(--forge),border-color 180ms var(--forge);
+}
+.msg:hover .hold,.msg:focus-within .hold{opacity:1}
+.hold:hover,.hold:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.4);opacity:1}
+.hold[disabled]{opacity:1;color:var(--ember);cursor:default;border-color:transparent}
+.hold .flag{color:var(--ember)}
+.delta{
+  display:inline-flex;align-items:center;gap:9px;margin-top:2px;font-family:var(--mono);font-size:11px;
+  color:var(--faint);border:1px solid var(--line);border-radius:4px;padding:4px 9px;background:var(--surface);
+  animation:fadeUp 420ms var(--forge) both;cursor:pointer;
+}
+.delta:hover{color:var(--dim);border-color:#2c3547}
+.delta .show{color:var(--ember);opacity:.8;white-space:nowrap;flex:0 0 auto}
+
+/* the volunteered thought — D2 */
+.unasked{
+  margin:4px 0 24px;padding:13px 16px 14px;border-left:2px solid var(--judgment);
+  background:linear-gradient(90deg,rgba(155,140,201,.075),rgba(155,140,201,0) 72%);
+  animation:volunteer 900ms cubic-bezier(.16,.9,.28,1) both;
+}
+.unasked .tag{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--judgment);opacity:.85;margin-bottom:7px}
+.unasked .body{font-family:var(--serif);font-size:17.5px;line-height:1.55;color:rgba(232,228,218,.94)}
+.unasked .acts{margin-top:12px;display:flex;gap:9px}
+.qbtn{border:1px solid var(--line);border-radius:13px;padding:4px 12px;font-size:12.5px;color:var(--dim);transition:all 170ms var(--forge)}
+.qbtn:hover,.qbtn:focus-visible{color:var(--ink);border-color:var(--dim);background:var(--surface)}
+.unasked .resolved{margin-top:11px;font-size:13px;color:var(--dim);font-family:var(--serif);font-style:italic}
+.unasked.set-aside{border-left-color:var(--line);background:none;opacity:.5}
+.reopen{border-left:2px solid var(--ember);padding-left:14px;margin-left:-16px}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes volunteer{from{opacity:0;transform:translateY(9px)}60%{opacity:.85}to{opacity:1;transform:none}}
+
+/* ── map ──────────────────────────────────────────────────────────────── */
+.mapstage{position:relative;flex:1 1 auto;min-height:0}
+.mapwrap{position:absolute;left:0;top:0;bottom:0;width:var(--map-w);transition:width 800ms var(--forge)}
+svg#map{width:100%;height:100%;display:block;overflow:visible}
+#graph{
+  transform-box:view-box;transform-origin:204px 262px;
+  transition:transform 800ms var(--forge);animation:breathe 7.5s ease-in-out infinite;
+}
+body.grown #graph{transform:translate(-22px,0) scale(.9)}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.98}}
+.mapempty{
+  position:absolute;left:0;right:0;top:44%;text-align:center;font-family:var(--serif);font-style:italic;
+  font-size:14px;color:var(--faint);transition:opacity 500ms var(--forge);pointer-events:none;
+}
+.node{cursor:pointer}
+.node .hit{fill:transparent}
+.node .dot{fill:rgba(232,228,218,.10);stroke:var(--dim);stroke-width:1;stroke-opacity:.55}
+.node .lbl{fill:var(--dim);font-family:var(--chrome);font-size:10.5px;dominant-baseline:middle}
+.node.n-question .dot{fill:none;stroke-dasharray:2.4 2.4;stroke-opacity:.7}
+.node.n-question .lbl{font-style:italic;fill:var(--faint)}
+.node.n-source .chip{fill:var(--surface-2);stroke:var(--line);stroke-width:1}
+.node.n-source .lbl{font-family:var(--mono);font-size:9.5px;fill:var(--dim);text-anchor:middle}
+.node.n-source .dot{r:3;fill:var(--dim);fill-opacity:.5;stroke:none}
+.node.n-beacon .dot{fill:none;stroke:var(--ember);stroke-width:1.3;stroke-opacity:.9}
+.node.n-beacon .lbl{fill:var(--ember);fill-opacity:.75}
+.node.n-beacon .ring{fill:none;stroke:var(--ember);stroke-width:1;transform-box:fill-box;transform-origin:center;animation:ring 2.8s ease-out infinite}
+.node.n-beacon.resolved .dot{fill:var(--ember);fill-opacity:.35;stroke-opacity:1}
+.node.n-beacon.resolved .ring{display:none}
+.node.n-ghost .dot{fill:none;stroke:var(--judgment);stroke-opacity:.55;stroke-dasharray:2 3}
+.node.n-ghost .lbl{fill:var(--judgment);fill-opacity:.55;font-size:9.5px}
+.node:hover .dot,.node:focus-visible .dot{stroke-opacity:1}
+.node:hover .lbl,.node:focus-visible .lbl{fill:var(--ink)}
+.node.flash .dot{stroke:var(--ember);stroke-opacity:1}
+.node.flash .lbl{fill:var(--ember)}
+@keyframes ring{0%{transform:scale(1);opacity:.5}70%{opacity:0}100%{transform:scale(2.3);opacity:0}}
+.edge{stroke:var(--line);stroke-width:1;fill:none}
+.edge.cross{stroke:var(--judgment);stroke-opacity:.45;stroke-dasharray:3 4}
+.edge.toBeacon{stroke:var(--ember);stroke-opacity:.26}
+/* bloom: opacity on the group, scale on the marks themselves (each around its own centre) */
+.bloom{opacity:0;transition:opacity 520ms var(--forge)}
+.bloom.on{opacity:1}
+.bloom .dot,.bloom .chip{transform:scale(.35);transform-box:fill-box;transform-origin:center;
+  transition:transform 560ms var(--forge)}
+.bloom.on .dot,.bloom.on .chip{transform:none}
+.bloom .lbl{opacity:0;transition:opacity 420ms var(--forge) 160ms}
+.bloom.on .lbl{opacity:1}
+.maptip{
+  position:absolute;pointer-events:none;font-family:var(--mono);font-size:10.5px;color:var(--dim);
+  background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:5px 8px;max-width:250px;
+  opacity:0;transition:opacity 160ms var(--forge);z-index:4;line-height:1.4;white-space:pre-line;
+}
+
+/* ── the world that grows (post-promotion) ────────────────────────────── */
+.face{
+  opacity:0;max-height:0;overflow:hidden;pointer-events:none;
+  transition:opacity 560ms var(--forge) 180ms,max-height 800ms var(--forge);
+  border-left:1px solid var(--line);padding-left:13px;
+}
+body.grown .face{opacity:1;max-height:132px;pointer-events:auto}
+.face .name{font-family:var(--serif);font-size:20px;line-height:1.25}
+.face .sub{font-size:12px;color:var(--dim);margin-top:2px}
+.face .born{
+  font-family:var(--serif);font-size:16.5px;color:rgba(232,228,218,.88);margin-top:9px;opacity:0;
+  transition:opacity 520ms var(--forge) 520ms;
+}
+body.grown .face .born{opacity:1}
+.orb{
+  position:absolute;width:74px;height:74px;border-radius:50%;border:1px solid var(--line);
+  background:radial-gradient(circle at 42% 36%,rgba(232,228,218,.045),rgba(232,228,218,.012) 70%);
+  display:flex;align-items:center;justify-content:center;text-align:center;
+  font-size:11px;color:var(--dim);opacity:0;transform:translate(10px,4px) scale(.9);
+  transition:opacity 620ms var(--forge),transform 620ms var(--forge);
+}
+body.grown .orb{opacity:1;transform:none}
+.orb::before{
+  content:"";position:absolute;right:100%;top:50%;width:82px;height:1px;
+  background:linear-gradient(to left,var(--line),rgba(35,43,59,0));
+  transform-origin:right center;transform:rotate(var(--rot,0deg));
+}
+.orb:hover{border-color:#2c3547;color:var(--ink)}
+.orbnote{
+  position:absolute;left:50%;top:104%;transform:translateX(-50%);white-space:nowrap;font-family:var(--mono);
+  font-size:9.5px;color:var(--faint);opacity:0;transition:opacity 180ms var(--forge);pointer-events:none;
+}
+.orb:hover .orbnote,.orb:focus-visible .orbnote{opacity:1}
+
+.worldfoot{flex:0 0 auto;display:flex;gap:20px;align-items:flex-start}
+.rail{flex:1 1 auto;min-width:0;border-top:1px solid var(--line);padding-top:9px;max-height:172px;overflow-y:auto;scrollbar-width:thin}
+.rail h4{margin:0 0 8px;font-weight:400}
+.brow{display:flex;align-items:baseline;gap:9px;width:100%;text-align:left;padding:5px 6px 5px 2px;border-radius:4px;transition:background 160ms var(--forge)}
+.brow:hover,.brow:focus-visible{background:var(--surface)}
+.brow .bdot{width:7px;height:7px;border-radius:50%;border:1px solid var(--ember);flex:0 0 auto;transform:translateY(-1px)}
+.brow.resolved .bdot{background:var(--ember-soft);border-color:var(--ember)}
+.brow.cross .bdot{border-color:var(--judgment);border-style:dashed}
+.brow .btxt{font-size:12.5px;color:var(--dim);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brow:hover .btxt{color:var(--ink)}
+.brow .bage{font-family:var(--mono);font-size:10.5px;color:var(--faint);flex:0 0 auto}
+.brow.pulseme{animation:pulseRow 1.4s var(--forge) 2}
+@keyframes pulseRow{0%,100%{background:transparent}40%{background:var(--ember-soft)}}
+.railnote{margin-top:7px;font-size:11px;color:var(--faint);font-family:var(--mono)}
+.railempty{font-size:12.5px;color:var(--faint);font-family:var(--serif);font-style:italic}
+.nextmove{
+  display:none;width:46%;flex:0 0 auto;border-top:1px solid var(--line);padding-top:9px;
+  opacity:0;transition:opacity 520ms var(--forge);
+}
+body.grown .nextmove{display:block}
+body.grown .nextmove.in{opacity:1}
+.nextmove .ask{font-family:var(--serif);font-size:15.5px;line-height:1.45;margin:6px 0 3px}
+.nextmove .why{font-size:12px;color:var(--faint);font-style:italic;font-family:var(--serif)}
+.nextmove .acts{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+.nextmove .settled{margin-top:9px;font-size:12.5px;color:var(--dim);font-family:var(--serif);font-style:italic}
+
+/* ── the Bar ──────────────────────────────────────────────────────────── */
+.bar{
+  position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+  width:min(640px,calc(100vw - 56px));background:var(--surface);border:1px solid var(--line);
+  border-radius:26px;padding:11px 20px;display:flex;align-items:center;gap:11px;z-index:20;
+}
+.bar:focus-within{border-color:rgba(232,131,58,.5);box-shadow:0 0 0 3px var(--ember-soft)}
+.scopechip{
+  opacity:0;max-width:0;overflow:hidden;white-space:nowrap;font-size:12px;color:var(--dim);
+  border:1px solid var(--line);border-radius:12px;background:var(--surface-2);padding:0;
+  transition:opacity 460ms var(--forge) 340ms,max-width 620ms var(--forge) 340ms,padding 460ms var(--forge) 340ms;
+}
+body.grown .scopechip{opacity:1;max-width:240px;padding:3px 10px}
+.bar .ph{font-family:var(--serif);font-style:italic;font-size:16px;color:var(--faint);flex:1 1 auto}
+.barnote{
+  position:absolute;left:0;right:0;bottom:calc(100% + 9px);text-align:center;font-family:var(--mono);
+  font-size:10.5px;color:var(--faint);opacity:0;transition:opacity 220ms var(--forge);
+}
+.barnote.on{opacity:1}
+
+/* ── HUD ──────────────────────────────────────────────────────────────── */
+.hud{position:fixed;left:20px;bottom:18px;display:flex;align-items:center;gap:12px;font-size:11px;color:var(--faint);z-index:21}
+.hud button{color:var(--faint);font-size:12px;transition:color 160ms var(--forge)}
+.hud button:hover{color:var(--ember)}
+.keys{position:fixed;right:20px;bottom:18px;font-family:var(--mono);font-size:10px;color:#3d4354;z-index:21}
+.feel{
+  position:fixed;left:20px;bottom:52px;width:330px;background:var(--surface);border:1px solid var(--line);
+  border-radius:8px;padding:15px 17px;z-index:22;display:none;
+}
+.feel.on{display:block;animation:fadeUp 260ms var(--forge) both}
+.feel h5{margin:0 0 10px;font-weight:400}
+.feel ol{margin:0;padding-left:17px}
+.feel li{font-family:var(--serif);font-size:14.5px;line-height:1.5;color:rgba(232,228,218,.9);margin-bottom:7px}
+.feel .foot{margin-top:9px;font-size:11px;color:var(--faint);font-family:var(--mono)}
+
+@media (max-width:900px){
+  .stage{flex-direction:column;gap:16px}
+  .thread-col{width:100%!important;max-height:42%}
+  .mapstage{min-height:260px}
+  .nextmove{width:100%}
+  .worldfoot{flex-direction:column}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none!important}
+  .thread-col,.mapwrap,#graph,.face,.orb,.scopechip,.nextmove{transition:opacity 380ms linear!important}
+  .bloom .dot,.bloom .chip{transform:none!important}
+}
+body.reduced *{animation:none!important}
+body.reduced .thread-col,body.reduced .mapwrap,body.reduced #graph,
+body.reduced .face,body.reduced .orb,body.reduced .scopechip,body.reduced .nextmove{transition:opacity 380ms linear!important}
+body.reduced .bloom .dot,body.reduced .bloom .chip{transform:none!important}
+</style>
+
+<div id="app">
+  <header class="chrome-top">
+    <div class="ctx">
+      <div class="facechip">
+        <span class="swap" id="ctxName">why do bee hives work?</span>
+        <span class="swap kind" id="ctxKind">Exploration</span>
+      </div>
+      <div class="momentum" id="momentum">the map grows as you talk</div>
+    </div>
+    <div class="top-right">
+      <button class="makechip" id="makeChip" title="grow this exploration into a world — nothing moves">make this real</button>
+      <div class="pulse" id="pulse"></div>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <section class="thread-col" id="threadCol">
+      <div class="thread-scroll" id="threadScroll" title="click to skip the streaming">
+        <div class="thread" id="thread"></div>
+      </div>
+    </section>
+
+    <section class="world-col">
+      <div class="face" id="face">
+        <div class="name" id="faceName">Hive Goods</div>
+        <div class="sub" id="faceSub">Business · born from your bee exploration</div>
+        <div class="born">Nothing moved. Your map is the middle of it now.</div>
+      </div>
+
+      <div class="mapstage" id="mapStage">
+        <div class="mapwrap" id="mapWrap">
+          <svg id="map" viewBox="18 34 372 456" preserveAspectRatio="xMidYMid meet" aria-label="the live map of this exploration">
+            <g id="graph">
+              <g id="edges"></g>
+              <g id="nodes"></g>
+            </g>
+          </svg>
+          <div class="mapempty" id="mapEmpty">the map grows as you talk</div>
+        </div>
+        <div class="maptip" id="mapTip"></div>
+      </div>
+
+      <div class="worldfoot">
+        <div class="rail">
+          <h4 class="micro" id="railHead">beacons</h4>
+          <div id="railRows"><div class="railempty">nothing held yet — “hold that thought” parks a question here.</div></div>
+          <div class="railnote" id="railNote"></div>
+        </div>
+        <div class="nextmove" id="nextMove">
+          <div class="micro">next move · staged</div>
+          <div class="ask" id="askText"></div>
+          <div class="why" id="askWhy"></div>
+          <div class="acts" id="askActs"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="bar">
+    <div class="barnote" id="barNote"></div>
+    <span class="scopechip" id="scopeChip"></span>
+    <span class="ph">ask, wonder, branch…</span>
+  </div>
+
+  <div class="feel" id="feelCard">
+    <h5 class="micro">what to feel for</h5>
+    <ol id="feelList"></ol>
+    <div class="foot">say it in your own words before you rationalise it.</div>
+  </div>
+
+  <div class="hud">
+    <span id="hudLabel">P2 · Explore → Make it real — staged data, real timing</span>
+    <button id="restartBtn" title="restart (R)">⟲</button>
+    <button id="feelBtn" title="what to feel for (?)">?</button>
+  </div>
+  <div class="keys">H hold · M make it real · R restart · ? feel-for · click to skip</div>
+</div>
+
+<script>
+"use strict";
+
+/* ══════════════════════════════════════════════════════════════════════════
+   STAGED_DATA — the single source of truth. Every number, label, count and
+   sentence on screen traces to this object. Nothing decorative.
+   ══════════════════════════════════════════════════════════════════════════ */
+const STAGED = {
+  world: {
+    question: "why do bee hives work?",
+    kind: "Exploration",
+    grownName: "Hive Goods",
+    grownKind: "Business",
+    grownSub: "Business · born from your bee exploration",
+    bornLine: "Nothing moved. Your map is the middle of it now.",
+    scopeChip: "Hive Goods · Business"
+  },
+
+  pulse: { waiting: 0, running: 0, note: "nothing waiting · nothing running · a curiosity world runs no clock" },
+
+  /* the conversation — sentences are addressable; map nodes cite them */
+  turns: [
+    { who: "you", id: "t0", sents: [ { id: "s0", text: "why do bee hives work?" } ] },
+
+    { who: "counsel", id: "t1",
+      sents: [
+        { id: "s1a", text: "Depends which “work” you mean — the comb, or the colony." },
+        { id: "s1b", text: "The comb first: a hexagon is the only regular shape that tiles a plane with the least perimeter per unit area — proven, not a metaphor, and Hales closed the proof in 1999.", nodes: ["hex", "hales"] },
+        { id: "s1c", text: "Which raises the better question: why not circles, cheaper still per cell?", nodes: ["circles"] }
+      ],
+      delta: "+1 concept · 1 source · 1 question",
+      beacon: {
+        id: "b1", label: "the circle question · held",
+        gap: "why not circles, if a circle is cheaper per cell?",
+        guess: "because circles cannot share walls",
+        since: "You have since put shared walls on the map — which is the answer, if it holds.",
+        x: 36, y: 212, near: "circles", src: "s1c"
+      } },
+
+    { who: "you", id: "t2", sents: [ { id: "s2a", text: "because circles leave gaps?" } ] },
+
+    { who: "counsel", id: "t3",
+      sents: [
+        { id: "s3a", text: "Gaps, yes — and the gaps are the whole economy of the thing." },
+        { id: "s3b", text: "Wax is the colony’s most expensive material: roughly eight grams of honey burned per gram of wax secreted.", nodes: ["wax", "whit"] },
+        { id: "s3c", text: "In a hex grid every wall is shared by two cells, so the comb pays for each wall once and gets two rooms — the gaps were never gaps, they were unpaid walls.", nodes: ["walls"] }
+      ],
+      delta: "+2 concepts · 1 source · new edge: shared walls → wax economics",
+      beacon: {
+        id: "b3", label: "the wax question · held",
+        gap: "is the comb optimising wax, or strength?",
+        guess: "wax — strength is a side effect",
+        since: "The map has since added heat economics, which argues the same way: everything here is cheapness, not toughness.",
+        x: 52, y: 300, near: "wax", src: "s3c"
+      } },
+
+    { who: "you", id: "t4", sents: [ { id: "s4a", text: "does the shape help them stay warm too?" } ] },
+
+    { who: "counsel", id: "t5",
+      sents: [
+        { id: "s5a", text: "That is the second kind of work, and it runs on the same arithmetic." },
+        { id: "s5b", text: "A winter cluster holds the brood nest near 34.5 °C while the air outside is below freezing; less surface per unit of volume means less heat leaked per bee.", nodes: ["heat", "south"] },
+        { id: "s5c", text: "So packing efficiency is not one advantage — it is the same advantage counted twice, in wax and in joules.", nodes: ["eff"] }
+      ],
+      delta: "+2 concepts · 1 source · new edge: heat economics → efficiency under scarcity",
+      beacon: {
+        id: "b5", label: "the warmth question · held",
+        gap: "does the 34.5 °C setpoint hold in tropical colonies?",
+        guess: "yes — the setpoint belongs to the brood, not the climate",
+        since: "Nothing has touched this one yet. It is minutes old and honestly still open.",
+        x: 44, y: 444, near: "heat", src: "s5b"
+      } }
+  ],
+
+  /* the volunteered thought — D2: initiative inward, budgeted, inert, dismissible */
+  interjection: {
+    tag: "unasked · 1 of 1 today",
+    body: "Your mural-pricing question from last month has the same shape — efficient structures winning under scarcity. Six hexes cover a wall with 18% less edge than squares. Want me to hold them side by side?",
+    holdLabel: "hold it",
+    dismissLabel: "not now",
+    held: "Held. The two sit adjacent now — open either one and the other comes with it.",
+    setAside: "Set aside. It stays on the map’s margin, and I will not raise it again today.",
+    railLabel: "mural pricing · cross-link · held",
+    ghost: { id: "mural", label: "mural pricing · from another exploration", x: 352, y: 470, anchor: "left" },
+    ghostFrom: "eff"
+  },
+
+  /* the map */
+  nodes: [
+    { id: "hex",     type: "concept",  label: "hexagonal packing",      x: 152, y: 100, anchor: "right", src: "s1b" },
+    { id: "hales",   type: "source",   label: "Hales · 1999",           x: 330, y: 62,  anchor: "left",  src: "s1b",
+      evidence: "Hales, T. C. (1999) — “The Honeycomb Conjecture” · read in this session" },
+    { id: "circles", type: "question", label: "why not circles?",       x: 66,  y: 170, anchor: "right", src: "s1c" },
+    { id: "walls",   type: "concept",  label: "shared walls",           x: 298, y: 148, anchor: "left",  src: "s3c" },
+    { id: "wax",     type: "concept",  label: "wax economics",          x: 138, y: 244, anchor: "right", src: "s3b" },
+    { id: "whit",    type: "source",   label: "8 g honey : 1 g wax",    x: 330, y: 212, anchor: "left",  src: "s3b",
+      evidence: "Whitcomb, W. (1946) — wax:honey conversion, 8:1 by mass" },
+    { id: "eff",     type: "concept",  label: "efficiency under scarcity", x: 200, y: 322, anchor: "right", src: "s5c" },
+    { id: "heat",    type: "concept",  label: "heat economics",         x: 98,  y: 388, anchor: "right", src: "s5b" },
+    { id: "south",   type: "source",   label: "Southwick · 1985",       x: 300, y: 434, anchor: "left",  src: "s5b",
+      evidence: "Southwick, E. E. (1985) — allometry of the honey-bee cluster, 34.5 °C brood nest" }
+  ],
+  edges: [
+    ["hex","hales"], ["hex","circles"], ["hex","walls"], ["walls","wax"],
+    ["wax","whit"], ["wax","eff"], ["heat","eff"], ["heat","south"]
+  ],
+
+  /* what grows around the map on "make this real" — the areas partition the map, 9 of 9 nodes */
+  areas: [
+    { id: "product",   label: "Product",   from: "from the shared-walls branch · 3 nodes",             top: "6%",  left: "51%", rot: "20deg" },
+    { id: "brand",     label: "Brand",     from: "from the efficiency-under-scarcity branch · 4 nodes", top: "41%", left: "63%", rot: "0deg" },
+    { id: "suppliers", label: "Suppliers", from: "from the wax-economics branch · 2 nodes",            top: "73%", left: "51%", rot: "-19deg" }
+  ],
+
+  deskAsk: {
+    text: "When you’re ready: selling honey, or selling hive kits?",
+    why: "(this changes what I prepare)",
+    options: ["honey", "hive kits"],
+    answered: "Noted — hive kits. I will prepare against that, and nothing is committed until you say so."
+  },
+
+  reopen: {
+    lead: "Still your guess?",
+    keepLabel: "still my guess",
+    changeLabel: "changed my mind",
+    kept: "Held. Recorded as your call — right or wrong, it lands in your calibration record.",
+    changed: "Changed. The old guess stays in the record; that is the point of holding one."
+  },
+
+  feelFor: [
+    "Did the unasked connection land as magic, or as noise?",
+    "After “make this real” — did you lose anything?",
+    "Does the map feel like a place, or like a diagram?"
+  ]
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   plumbing
+   ══════════════════════════════════════════════════════════════════════════ */
+const $ = (id) => document.getElementById(id);
+const SVGNS = "http://www.w3.org/2000/svg";
+const REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (REDUCED) document.body.classList.add("reduced");
+
+/* seeded random — the map's organic offsets are the same every run */
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+let RUN = 0;                    // invalidates in-flight scripts on restart
+let SKIP = false;               // click-to-advance
+const TIMERS = new Set();
+function wait(ms){
+  return new Promise((res) => { const t = setTimeout(() => { TIMERS.delete(t); res(); }, ms); TIMERS.add(t); });
+}
+function clearTimers(){ TIMERS.forEach(clearTimeout); TIMERS.clear(); }
+
+const state = {
+  nodes: {},        // id -> {el, data}
+  edgesDrawn: {},
+  beacons: [],      // {id,label,gap,guess,since,born,resolved,kind}
+  heldTurns: {},
+  promoted: false,
+  interjectionDone: false,
+  lastCounselTurn: null
+};
+
+/* ── the map ─────────────────────────────────────────────────────────────── */
+const rnd = { fn: mulberry32(20260724) };
+function jitter(){ return (rnd.fn() * 10 - 5); }        // ±5 user units
+function delayJitter(){ return 60 + rnd.fn() * 220; }   // organic bloom stagger
+
+function nodeCenter(id){
+  const n = state.nodes[id];
+  return n ? { x: n.x, y: n.y } : null;
+}
+
+function makeNode(data, type){
+  /* outer g carries position (attribute, never touched by CSS) — inner g carries the bloom */
+  const g = document.createElementNS(SVGNS, "g");
+  const x = data.x + jitter(), y = data.y + jitter();
+  g.setAttribute("class", "node n-" + type);
+  g.setAttribute("transform", "translate(" + x.toFixed(1) + "," + y.toFixed(1) + ")");
+  g.setAttribute("tabindex", "0");
+  g.setAttribute("role", "button");
+  g.setAttribute("aria-label", data.label
+    ? (type + ": " + data.label + " — opens the sentence it came from")
+    : ("beacon · " + (data.gap || "") + " — opens where you parked it"));
+
+  const hit = document.createElementNS(SVGNS, "circle");
+  hit.setAttribute("class", "hit"); hit.setAttribute("r", "17");
+  g.appendChild(hit);
+
+  const b = document.createElementNS(SVGNS, "g");
+  b.setAttribute("class", "bloom");
+  g.appendChild(b);
+
+  if (type === "beacon"){
+    const ring = document.createElementNS(SVGNS, "circle");
+    ring.setAttribute("class", "ring"); ring.setAttribute("r", "5.5");
+    b.appendChild(ring);
+  }
+
+  const dot = document.createElementNS(SVGNS, "circle");
+  dot.setAttribute("class", "dot");
+  dot.setAttribute("r", type === "source" ? "3" : (type === "beacon" ? "5.5" : "6"));
+  b.appendChild(dot);
+
+  const right = data.anchor !== "left";
+  if (type === "source"){
+    const w = data.label.length * 6.0 + 14;
+    const rect = document.createElementNS(SVGNS, "rect");
+    rect.setAttribute("class", "chip");
+    rect.setAttribute("x", right ? 10 : -(10 + w));
+    rect.setAttribute("y", -8.5); rect.setAttribute("width", w); rect.setAttribute("height", 17);
+    rect.setAttribute("rx", "4");
+    b.appendChild(rect);
+    const t = document.createElementNS(SVGNS, "text");
+    t.setAttribute("class", "lbl");
+    t.setAttribute("x", right ? 10 + w / 2 : -(10 + w / 2));
+    t.setAttribute("y", 0.5); t.setAttribute("dominant-baseline", "middle");
+    t.textContent = data.label;
+    b.appendChild(t);
+  } else if (data.label){
+    const t = document.createElementNS(SVGNS, "text");
+    t.setAttribute("class", "lbl");
+    t.setAttribute("x", right ? 13 : -13);
+    t.setAttribute("y", 0.5);
+    t.setAttribute("text-anchor", right ? "start" : "end");
+    t.textContent = data.label;
+    b.appendChild(t);
+  }
+
+  const go = () => { highlightSentence(data.src); if (type === "beacon") pulseRail(data.id); };
+  g.addEventListener("click", go);
+  g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); go(); } });
+  g.addEventListener("mouseenter", () => showTip(g, data, type));
+  g.addEventListener("focus", () => showTip(g, data, type));
+  g.addEventListener("mouseleave", hideTip);
+  g.addEventListener("blur", hideTip);
+
+  $("nodes").appendChild(g);
+  state.nodes[data.id] = { el: g, bloom: b, x: x, y: y, data: data, type: type };
+  const d = REDUCED ? 0 : delayJitter();
+  setTimeout(() => b.classList.add("on"), d);
+  $("mapEmpty").style.opacity = "0";
+  drawReadyEdges();
+  updateMomentum();
+  return g;
+}
+
+function drawEdge(a, b, cls){
+  const key = a + ">" + b;
+  if (state.edgesDrawn[key]) return;
+  const pa = nodeCenter(a), pb = nodeCenter(b);
+  if (!pa || !pb) return;
+  state.edgesDrawn[key] = true;
+  const line = document.createElementNS(SVGNS, "line");
+  line.setAttribute("class", "edge" + (cls ? " " + cls : ""));
+  line.setAttribute("x1", pa.x); line.setAttribute("y1", pa.y);
+  line.setAttribute("x2", pb.x); line.setAttribute("y2", pb.y);
+  $("edges").appendChild(line);
+  const len = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+  if (REDUCED){ line.style.opacity = "0"; requestAnimationFrame(() => { line.style.transition = "opacity 420ms linear"; line.style.opacity = "1"; }); return; }
+  line.style.strokeDasharray = len;
+  line.style.strokeDashoffset = len;
+  requestAnimationFrame(() => {
+    line.style.transition = "stroke-dashoffset 660ms cubic-bezier(.22,1,.36,1) 240ms";
+    line.style.strokeDashoffset = "0";
+  });
+  /* hand the stroke back to CSS once it has drawn itself (so dashed cross-links stay dashed) */
+  setTimeout(() => { line.style.strokeDasharray = ""; line.style.strokeDashoffset = ""; line.style.transition = ""; }, 1000);
+}
+
+function drawReadyEdges(){
+  STAGED.edges.forEach((e) => { if (state.nodes[e[0]] && state.nodes[e[1]]) drawEdge(e[0], e[1]); });
+}
+
+function showTip(g, data, type){
+  const tip = $("mapTip"), stage = $("mapStage");
+  const r = g.getBoundingClientRect(), s = stage.getBoundingClientRect();
+  let txt = type === "source" ? (data.evidence || data.label)
+          : type === "beacon" ? ("beacon · " + data.gap + "\nyour guess: " + data.guess)
+          : type === "question" ? ("open question · at the frontier")
+          : type === "ghost" ? ("cross-link · patterns travel, data does not")
+          : ("concept · click to read where it came from");
+  tip.textContent = txt;
+  tip.style.opacity = "1";
+  const left = Math.min(Math.max(r.left - s.left + r.width / 2 - 110, 4), Math.max(4, s.width - 258));
+  tip.style.left = left + "px";
+  tip.style.top = Math.max(2, r.top - s.top - 44) + "px";
+}
+function hideTip(){ $("mapTip").style.opacity = "0"; }
+
+function flashNodes(ids){
+  ids.forEach((id) => {
+    const n = state.nodes[id];
+    if (!n) return;
+    n.el.classList.add("flash");
+    setTimeout(() => n.el.classList.remove("flash"), 950);
+  });
+}
+
+/* ── the conversation ────────────────────────────────────────────────────── */
+function nearBottom(){
+  const el = $("threadScroll");
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+}
+function stickBottom(force){
+  const el = $("threadScroll");
+  if (force || nearBottom()) el.scrollTop = el.scrollHeight;
+}
+
+async function typeInto(el, text, run){
+  if (REDUCED || SKIP){ el.textContent = text; return; }
+  for (let i = 0; i < text.length; i++){
+    if (run !== RUN) return;
+    if (SKIP){ el.textContent = text; return; }
+    const ch = text[i];
+    el.textContent += ch;
+    let d = 12 + Math.random() * 10;
+    if (",;:".indexOf(ch) >= 0) d += 90;
+    if (".?!—".indexOf(ch) >= 0) d += 170;
+    if (i % 4 === 0) stickBottom();
+    await wait(d);
+  }
+}
+
+function turnEl(turn){
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + (turn.who === "you" ? "you" : "counsel");
+  wrap.dataset.turn = turn.id;
+  const who = document.createElement("div");
+  who.className = "who micro";
+  who.textContent = turn.who;
+  const body = document.createElement("div");
+  body.className = "body";
+  wrap.appendChild(who); wrap.appendChild(body);
+  $("thread").appendChild(wrap);
+  return { wrap: wrap, body: body };
+}
+
+async function playTurn(turn, run){
+  SKIP = false;
+  const { wrap, body } = turnEl(turn);
+  stickBottom(true);
+
+  for (let i = 0; i < turn.sents.length; i++){
+    if (run !== RUN) return;
+    const s = turn.sents[i];
+    const span = document.createElement("span");
+    span.className = "sent";
+    span.dataset.sent = s.id;
+    body.appendChild(span);
+    if (i < turn.sents.length - 1) body.appendChild(document.createTextNode(" "));
+    await typeInto(span, s.text, run);
+    if (run !== RUN) return;
+    if (s.nodes){
+      s.nodes.forEach((nid) => {
+        const nd = STAGED.nodes.find((n) => n.id === nid);
+        if (nd) makeNode(nd, nd.type);
+      });
+    }
+    if (!SKIP) await wait(160);
+  }
+  if (run !== RUN) return;
+
+  if (turn.who === "counsel"){
+    state.lastCounselTurn = turn;
+    /* the hold affordance — appears on hover / keyboard focus */
+    const btn = document.createElement("button");
+    btn.className = "hold";
+    btn.textContent = "( hold that thought )";
+    btn.setAttribute("aria-label", "hold that thought — park this as a beacon");
+    btn.addEventListener("click", () => holdThought(turn, btn));
+    wrap.appendChild(btn);
+
+    if (turn.delta){
+      document.querySelectorAll(".delta").forEach((d) => d.remove());
+      const chip = document.createElement("div");
+      chip.className = "delta";
+      const ids = [];
+      turn.sents.forEach((s) => { if (s.nodes) s.nodes.forEach((n) => ids.push(n)); });
+      chip.innerHTML = "";
+      const t = document.createElement("span"); t.textContent = turn.delta;
+      const sh = document.createElement("span"); sh.className = "show"; sh.textContent = "▸ show on map";
+      chip.appendChild(t); chip.appendChild(sh);
+      chip.title = "audit the extraction — never a dialog";
+      chip.addEventListener("click", () => flashNodes(ids));
+      wrap.appendChild(chip);
+    }
+  }
+  stickBottom();
+}
+
+function highlightSentence(sentId){
+  if (!sentId) return;
+  const el = document.querySelector('[data-sent="' + sentId + '"]');
+  if (!el) return;
+  document.querySelectorAll(".sent.lit").forEach((s) => s.classList.remove("lit"));
+  el.classList.add("lit");
+  const scroller = $("threadScroll");
+  const r = el.getBoundingClientRect(), s = scroller.getBoundingClientRect();
+  const target = scroller.scrollTop + (r.top - s.top) - scroller.clientHeight / 2 + r.height / 2;
+  scroller.scrollTo({ top: Math.max(0, target), behavior: REDUCED ? "auto" : "smooth" });
+  setTimeout(() => el.classList.remove("lit"), 1900);
+}
+
+/* ── beacons ─────────────────────────────────────────────────────────────── */
+function holdThought(turn, btn){
+  if (!turn || !turn.beacon || state.heldTurns[turn.id]) return;
+  state.heldTurns[turn.id] = true;
+  const b = turn.beacon;
+  const rec = { id: b.id, label: b.label, gap: b.gap, guess: b.guess, since: b.since,
+                src: b.src, born: Date.now(), resolved: null, kind: "beacon" };
+  state.beacons.push(rec);
+  /* on the map a beacon is a dot, not a caption — the words live in the rail (D8) */
+  makeNode({ id: b.id, label: "", x: b.x, y: b.y, anchor: "right",
+             src: b.src, gap: b.gap, guess: b.guess }, "beacon");
+  if (b.near) drawEdge(b.near, b.id, "toBeacon");
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="flag">⚑</span> held'; }
+  renderRail();
+  updateMomentum();
+}
+
+function ageOf(rec){
+  const m = Math.floor((Date.now() - rec.born) / 60000);
+  return m < 1 ? "just now" : m + "m";
+}
+
+function renderRail(){
+  const rows = $("railRows");
+  rows.innerHTML = "";
+  if (!state.beacons.length){
+    const e = document.createElement("div");
+    e.className = "railempty";
+    e.textContent = "nothing held yet — “hold that thought” parks a question here.";
+    rows.appendChild(e);
+  }
+  state.beacons.forEach((rec) => {
+    const row = document.createElement("button");
+    row.className = "brow" + (rec.resolved ? " resolved" : "") + (rec.kind === "cross" ? " cross" : "");
+    row.dataset.beacon = rec.id;
+    const dot = document.createElement("span"); dot.className = "bdot";
+    const txt = document.createElement("span"); txt.className = "btxt";
+    txt.textContent = rec.resolved
+      ? rec.label.replace("· held", "· answered") + " · guess " + (rec.resolved === "right" ? "held ✓" : "changed")
+      : rec.label;
+    const age = document.createElement("span"); age.className = "bage"; age.textContent = ageOf(rec);
+    row.appendChild(dot); row.appendChild(txt); row.appendChild(age);
+    row.title = rec.kind === "cross" ? "a cross-link held from an unasked connection"
+              : (rec.resolved ? "resolved — kept in the record" : "re-open this fork · “still your guess?”");
+    row.addEventListener("click", () => {
+      if (rec.kind === "cross"){ highlightSentence("unasked"); flashNodes([STAGED.interjection.ghost.id]); return; }
+      if (rec.resolved){ highlightSentence(rec.src); return; }
+      reopenBeacon(rec);
+    });
+    rows.appendChild(row);
+  });
+  const held = state.beacons.filter((b) => !b.resolved && b.kind === "beacon").length;
+  const answered = state.beacons.filter((b) => b.resolved).length;
+  const parts = [];
+  if (held) parts.push(held + " held");
+  if (answered) parts.push(answered + " answered · calibration recorded");
+  $("railNote").textContent = parts.join(" · ");
+  $("railHead").textContent = state.promoted ? "beacons · carried into the world" : "beacons";
+}
+
+function pulseRail(id){
+  const row = document.querySelector('[data-beacon="' + id + '"]');
+  if (!row) return;
+  row.classList.remove("pulseme");
+  void row.offsetWidth;
+  row.classList.add("pulseme");
+}
+
+function reopenBeacon(rec){
+  if (document.querySelector('[data-reopen="' + rec.id + '"]')) return;
+  const wrap = document.createElement("div");
+  wrap.className = "msg counsel reopen";
+  wrap.dataset.reopen = rec.id;
+  const who = document.createElement("div");
+  who.className = "who micro";
+  who.textContent = "counsel · beacon re-opened · " + ageOf(rec);
+  const body = document.createElement("div");
+  body.className = "body";
+  const R = STAGED.reopen;
+  body.textContent = R.lead + " You held: “" + rec.guess + "”. " + rec.since;
+  const acts = document.createElement("div");
+  acts.className = "acts";
+  acts.style.cssText = "margin-top:11px;display:flex;gap:9px";
+  [[R.keepLabel, "right"], [R.changeLabel, "changed"]].forEach((pair) => {
+    const b = document.createElement("button");
+    b.className = "qbtn";
+    b.textContent = "( " + pair[0] + " )";
+    b.addEventListener("click", () => resolveBeacon(rec, pair[1], acts, pair[1] === "right" ? R.kept : R.changed));
+    acts.appendChild(b);
+  });
+  wrap.appendChild(who); wrap.appendChild(body); wrap.appendChild(acts);
+  $("thread").appendChild(wrap);
+  stickBottom(true);
+  const first = acts.querySelector("button");
+  if (first) first.focus();
+}
+
+function resolveBeacon(rec, verdict, actsEl, line){
+  rec.resolved = verdict;
+  const n = state.nodes[rec.id];
+  if (n) n.el.classList.add("resolved");
+  actsEl.innerHTML = "";
+  const p = document.createElement("div");
+  p.style.cssText = "font-family:var(--serif);font-style:italic;font-size:14px;color:var(--dim)";
+  p.textContent = line;
+  actsEl.appendChild(p);
+  renderRail();
+  updateMomentum();
+  stickBottom();
+}
+
+/* ── the unasked connection (D2) ─────────────────────────────────────────── */
+function playInterjection(){
+  if (state.interjectionDone) return;
+  state.interjectionDone = true;
+  const I = STAGED.interjection;
+  const box = document.createElement("div");
+  box.className = "unasked";
+  box.setAttribute("role", "note");
+  const tag = document.createElement("div"); tag.className = "tag"; tag.textContent = I.tag;
+  const body = document.createElement("div"); body.className = "body";
+  const span = document.createElement("span");
+  span.className = "sent"; span.dataset.sent = "unasked"; span.textContent = I.body;
+  body.appendChild(span);
+  const acts = document.createElement("div"); acts.className = "acts";
+
+  const holdBtn = document.createElement("button");
+  holdBtn.className = "qbtn"; holdBtn.textContent = "( " + I.holdLabel + " )";
+  const noBtn = document.createElement("button");
+  noBtn.className = "qbtn"; noBtn.textContent = "( " + I.dismissLabel + " )";
+
+  const settle = (text, aside) => {
+    acts.remove();
+    const r = document.createElement("div");
+    r.className = "resolved";
+    r.textContent = text;
+    box.appendChild(r);
+    if (aside) box.classList.add("set-aside");
+    stickBottom();
+  };
+
+  holdBtn.addEventListener("click", () => {
+    settle(I.held, false);
+    const g = I.ghost;
+    makeNode({ id: g.id, label: g.label, x: g.x, y: g.y, anchor: g.anchor, src: "unasked" }, "ghost");
+    drawEdge(I.ghostFrom, g.id, "cross");
+    state.beacons.push({ id: "x-mural", label: I.railLabel, born: Date.now(), resolved: null,
+                         kind: "cross", src: "unasked", guess: "", since: "" });
+    renderRail();
+    updateMomentum();
+  });
+  noBtn.addEventListener("click", () => settle(I.setAside, true));
+
+  acts.appendChild(holdBtn); acts.appendChild(noBtn);
+  box.appendChild(tag); box.appendChild(body); box.appendChild(acts);
+  $("thread").appendChild(box);
+  stickBottom();
+}
+
+/* ── "make this real" — the one orchestrated move (800ms) ────────────────── */
+function makeReal(){
+  if (state.promoted) return;
+  state.promoted = true;
+  const W = STAGED.world;
+  document.body.classList.add("grown");
+
+  /* the map does not re-layout. only the camera and the frame move. */
+  document.documentElement.style.setProperty("--thread-w", "30%");
+  document.documentElement.style.setProperty("--map-w", "54%");
+
+  /* the Face crossfades in the context header, in place — same identity */
+  const nm = $("ctxName"), kd = $("ctxKind");
+  nm.style.opacity = "0"; kd.style.opacity = "0";
+  setTimeout(() => {
+    nm.textContent = W.grownName; kd.textContent = W.grownKind;
+    nm.style.opacity = "1"; kd.style.opacity = "1";
+  }, 300);
+
+  $("faceName").textContent = W.grownName;
+  $("faceSub").textContent = W.grownSub;
+  $("scopeChip").textContent = W.scopeChip;
+
+  /* the areas dock around the map */
+  STAGED.areas.forEach((a, i) => {
+    const orb = document.createElement("div");
+    orb.className = "orb";
+    orb.style.top = a.top; orb.style.left = a.left;
+    orb.style.setProperty("--rot", a.rot);
+    orb.style.transitionDelay = (140 + i * 130) + "ms";
+    orb.tabIndex = 0;
+    orb.setAttribute("aria-label", a.label + " area — " + a.from);
+    const lbl = document.createElement("span"); lbl.textContent = a.label;
+    const note = document.createElement("span"); note.className = "orbnote"; note.textContent = a.from;
+    orb.appendChild(lbl); orb.appendChild(note);
+    $("mapStage").appendChild(orb);
+  });
+
+  /* the Desk stages exactly one ask — a card, never a modal */
+  const D = STAGED.deskAsk;
+  $("askText").textContent = D.text;
+  $("askWhy").textContent = D.why;
+  const acts = $("askActs");
+  acts.innerHTML = "";
+  D.options.forEach((opt) => {
+    const b = document.createElement("button");
+    b.className = "qbtn"; b.textContent = "( " + opt + " )";
+    b.addEventListener("click", () => {
+      acts.innerHTML = "";
+      const s = document.createElement("div");
+      s.className = "settled";
+      s.textContent = opt === "hive kits" ? D.answered
+        : "Noted — honey. I will prepare against that, and nothing is committed until you say so.";
+      acts.appendChild(s);
+    });
+    acts.appendChild(b);
+  });
+  setTimeout(() => $("nextMove").classList.add("in"), 620);
+
+  updateMomentum();
+  renderRail();
+  $("hudLabel").textContent = "P2 · Explore → Make it real — promoted · staged data, real timing";
+}
+
+/* ── honest counters ─────────────────────────────────────────────────────── */
+function updateMomentum(){
+  const mapNodes = Object.keys(state.nodes).filter((k) => {
+    const t = state.nodes[k].type;
+    return t === "concept" || t === "source" || t === "question";
+  }).length;
+  const held = state.beacons.filter((b) => !b.resolved && b.kind === "beacon").length;
+  const asks = state.promoted ? 1 : 0;
+  if (state.promoted){
+    $("momentum").textContent = mapNodes + " map nodes · " + STAGED.areas.length + " areas · "
+      + asks + " ask staged · 0 copies";
+  } else {
+    $("momentum").textContent = mapNodes
+      ? (mapNodes + " nodes · " + held + " beacon" + (held === 1 ? "" : "s") + " held")
+      : "born just now · no save button — nothing here is unsaved";
+  }
+  const P = STAGED.pulse;
+  $("pulse").textContent = P.waiting + " waiting · " + P.running + " running · ✓";
+  $("pulse").title = P.note;
+}
+
+/* ── the script ──────────────────────────────────────────────────────────── */
+async function runScript(run){
+  await wait(500);
+  for (let i = 0; i < STAGED.turns.length; i++){
+    if (run !== RUN) return;
+    const turn = STAGED.turns[i];
+    await playTurn(turn, run);
+    if (run !== RUN) return;
+    /* conversational rhythm: ~900ms between exchanges */
+    await wait(turn.who === "you" ? 480 : 980);
+  }
+  if (run !== RUN) return;
+  /* off-beat: the conversation has already gone quiet when this arrives */
+  await wait(2500);
+  if (run !== RUN) return;
+  playInterjection();
+}
+
+/* ── boot / restart ──────────────────────────────────────────────────────── */
+function reset(){
+  RUN++;
+  clearTimers();
+  SKIP = false;
+  state.nodes = {}; state.edgesDrawn = {}; state.beacons = []; state.heldTurns = {};
+  state.promoted = false; state.interjectionDone = false; state.lastCounselTurn = null;
+  rnd.fn = mulberry32(20260724);
+  $("thread").innerHTML = "";
+  $("nodes").innerHTML = "";
+  $("edges").innerHTML = "";
+  $("mapEmpty").style.opacity = "1";
+  document.querySelectorAll(".orb").forEach((o) => o.remove());
+  document.body.classList.remove("grown");
+  $("nextMove").classList.remove("in");
+  document.documentElement.style.setProperty("--thread-w", "56%");
+  document.documentElement.style.setProperty("--map-w", "100%");
+  $("ctxName").textContent = STAGED.world.question;
+  $("ctxKind").textContent = STAGED.world.kind;
+  $("ctxName").style.opacity = "1"; $("ctxKind").style.opacity = "1";
+  $("hudLabel").textContent = "P2 · Explore → Make it real — staged data, real timing";
+  renderRail();
+  updateMomentum();
+  runScript(RUN);
+}
+
+/* feel-for card */
+(function buildFeel(){
+  const ol = $("feelList");
+  STAGED.feelFor.forEach((q) => { const li = document.createElement("li"); li.textContent = q; ol.appendChild(li); });
+})();
+
+$("makeChip").addEventListener("click", makeReal);
+$("restartBtn").addEventListener("click", reset);
+$("feelBtn").addEventListener("click", () => $("feelCard").classList.toggle("on"));
+$("threadScroll").addEventListener("click", (e) => {
+  if (e.target.closest("button")) return;
+  SKIP = true;
+});
+document.querySelector(".bar").addEventListener("click", () => {
+  const n = $("barNote");
+  n.textContent = "staged: this prototype runs one scripted exploration — the Bar is chrome here";
+  n.classList.add("on");
+  setTimeout(() => n.classList.remove("on"), 2600);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "m"){ makeReal(); }
+  else if (k === "r"){ reset(); }
+  else if (k === "h"){
+    const t = state.lastCounselTurn;
+    if (t && !state.heldTurns[t.id]){
+      const btn = document.querySelector('[data-turn="' + t.id + '"] .hold');
+      holdThought(t, btn);
+    }
+  }
+  else if (e.key === "?"){ $("feelCard").classList.toggle("on"); }
+  else if (e.key === "Escape"){ $("feelCard").classList.remove("on"); }
+  else return;
+  e.preventDefault();
+});
+
+/* ages tick honestly */
+setInterval(() => { if (state.beacons.length) renderRail(); }, 30000);
+
+reset();
+</script>
