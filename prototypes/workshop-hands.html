@@ -1,0 +1,192 @@
+<!-- P3 · workshop-hands — The bench with hands.
+     Settles W3 (the workshops have no hands) via amendment D5 (give the benches hands);
+     exercises D2 (the middle gear: AI appends alongside, marked, inert, killable) and
+     D8 (the hand-off rendered as a moment, not an ellipsis).
+     Inevitable when: a designer works ten minutes hands-first and the Figma critic's
+     "vending machine" verdict flips to "instrument." Staged data, real timing. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P3 · The bench with hands</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --serif:Charter, Georgia, "Times New Roman", serif;
+  --chrome:-apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono:ui-monospace, "SF Mono", Menlo, monospace;
+  --forge:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%}
+body{background:var(--ground); color:var(--ink); font:14px var(--chrome); overflow:hidden}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+::selection{background:var(--ember-soft)}
+
+/* ---------- fixed chrome ---------- */
+.face{position:fixed; top:15px; left:20px; display:flex; gap:9px; align-items:center;
+  font-size:13px; color:var(--dim); z-index:46}
+.face .dot{width:7px; height:7px; border-radius:50%; background:var(--ok)}
+.face b{color:var(--ink); font-weight:500}
+.tabs{position:fixed; top:11px; left:50%; transform:translateX(-50%); display:flex; gap:6px; z-index:46}
+.tab{font-size:13px; color:var(--dim); border:1px solid transparent; border-radius:999px; padding:4px 14px}
+.tab.on{color:var(--ink); background:var(--surface); border-color:var(--line)}
+.tab:hover{color:var(--ink)}
+.pulse{position:fixed; top:17px; right:22px; font:12px var(--mono); font-variant-numeric:tabular-nums;
+  color:var(--dim); z-index:46}
+
+/* ---------- bench ---------- */
+#benchWrap{position:relative; margin:0 auto; max-width:1180px; height:calc(100vh - 60px);
+  margin-top:52px; overflow-y:auto; overflow-x:hidden; padding:0 24px 240px}
+#benchWrap::-webkit-scrollbar{width:8px}
+#benchWrap::-webkit-scrollbar-thumb{background:var(--line); border-radius:4px}
+#benchHead{display:flex; justify-content:space-between; align-items:center; padding:6px 2px 14px}
+.hints{font-size:11px; color:var(--faint); letter-spacing:.03em}
+.hints b{color:var(--dim); font-weight:500}
+.hints .live{color:var(--ink)}
+.gear{display:flex; gap:8px; align-items:center; font-size:12px; color:var(--dim); cursor:pointer; user-select:none}
+.gear:hover{color:var(--ink)}
+.switch{width:30px; height:16px; border-radius:8px; border:1px solid var(--line); position:relative;
+  background:var(--surface-2); transition:background .2s, border-color .2s}
+.switch::after{content:''; position:absolute; width:12px; height:12px; border-radius:50%; top:1px; left:1px;
+  background:var(--dim); transition:transform .2s var(--forge), background .2s}
+.gear.on .switch{background:var(--ember-soft); border-color:var(--ember)}
+.gear.on .switch::after{transform:translateX(14px); background:var(--ember)}
+#bench{position:relative; margin:0 auto}
+
+/* ---------- cards ---------- */
+.card{position:absolute; width:192px; border-radius:10px; background:var(--surface);
+  border:1px solid var(--line); cursor:grab; user-select:none; touch-action:none;
+  will-change:transform; transition:transform .3s var(--forge), opacity .35s, border-color .15s, box-shadow .15s}
+.card.drag{transition:opacity .35s; cursor:grabbing; z-index:30;
+  box-shadow:0 18px 44px rgba(0,0,0,.55), 0 4px 12px rgba(0,0,0,.4)}
+.card.sel{border-color:var(--ember); box-shadow:0 0 0 1px var(--ember)}
+.card:focus-visible{outline:none; border-color:var(--ember); box-shadow:0 0 0 3px var(--ember-soft), 0 0 0 1px var(--ember)}
+.card.ghosted{border-color:#3E3A5A; background:linear-gradient(180deg, var(--surface), #151827)}
+.card.killed{opacity:.24; filter:grayscale(.65)}
+.card.appear{opacity:0}
+.card .art{display:block; margin:8px auto 0; pointer-events:none}
+.card .foot{display:flex; align-items:center; gap:7px; padding:5px 10px 8px;
+  font:12px var(--mono); color:var(--dim); white-space:nowrap}
+.card .foot .nm{overflow:hidden; text-overflow:ellipsis}
+.badge{font:11px var(--mono)}
+.badge.keep{color:var(--ember)}
+.badge.commit{color:var(--ok)}
+.badge.dead{color:var(--faint)}
+.whytag{font:11px var(--mono); color:var(--judgment); padding:0 10px 8px; line-height:1.4}
+.reasonRow{position:absolute; left:6px; right:6px; bottom:40px; display:flex; gap:4px; flex-wrap:wrap; z-index:5}
+.reasonChip{font:10px var(--mono); color:var(--dim); border:1px solid var(--line); border-radius:8px;
+  padding:2px 7px; cursor:pointer; background:var(--surface-2)}
+.reasonChip:hover{color:var(--ink); border-color:var(--dim)}
+
+/* ---------- counsel at selection + scrub ---------- */
+.counsel{position:absolute; width:252px; z-index:22; background:var(--surface); border:1px solid var(--line);
+  border-left:2px solid var(--judgment); border-radius:9px; padding:11px 13px;
+  font:17px/1.45 var(--serif); color:var(--ink); transition:opacity .2s; box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.counsel .who{font:10px var(--chrome); text-transform:uppercase; letter-spacing:.08em;
+  color:var(--judgment); margin-bottom:5px}
+.counsel .try{color:var(--ember); cursor:pointer; font:13px var(--chrome); margin-left:7px; white-space:nowrap}
+.counsel .try:hover{text-decoration:underline}
+.scrub{position:absolute; z-index:21; width:192px; background:var(--surface-2); border:1px solid var(--line);
+  border-radius:9px; padding:9px 11px 8px; box-shadow:0 10px 26px rgba(0,0,0,.35)}
+.scrub .sl{font:10px var(--chrome); text-transform:uppercase; letter-spacing:.08em; color:var(--dim)}
+.scrub input[type=range]{width:100%; accent-color:var(--ember); height:20px; cursor:ew-resize; margin:2px 0 6px}
+.cycle{font:12px var(--chrome); color:var(--ink); border:1px solid var(--line); border-radius:8px;
+  padding:3px 9px; width:100%; text-align:left}
+.cycle:hover{border-color:var(--ember)}
+.scrub .keys{font:10px var(--mono); color:var(--faint); margin-top:6px}
+
+/* ---------- commit rail / bar / hud / toasts ---------- */
+.commitRail{position:fixed; right:22px; bottom:26px; z-index:50; background:var(--surface);
+  border:1px solid var(--line); border-radius:10px; padding:10px 14px; min-width:216px}
+.commitRail .count{font:12px var(--mono); font-variant-numeric:tabular-nums; color:var(--dim); margin-bottom:6px}
+.commitRail .action{display:block; font-size:13px; color:var(--dim); padding:3px 0; cursor:pointer}
+.commitRail .action:hover{color:var(--ink)}
+.commitRail .action.hot:hover{color:var(--ember)}
+.commitRail .action.off{opacity:.35; pointer-events:none}
+.bar{position:fixed; left:50%; transform:translateX(-50%); bottom:22px; width:min(640px,56vw); z-index:48;
+  display:flex; align-items:center; gap:9px; background:var(--surface); border:1px solid var(--line);
+  border-radius:999px; padding:8px 15px; transition:border-color .15s, box-shadow .15s}
+.bar:focus-within{border-color:var(--ember); box-shadow:0 0 0 3px var(--ember-soft)}
+.scopechip{font:10px var(--chrome); text-transform:uppercase; letter-spacing:.08em; color:var(--dim);
+  border:1px solid var(--line); border-radius:999px; padding:2px 9px; white-space:nowrap}
+.bar input{flex:1; background:none; border:none; outline:none; color:var(--ink); font:15px var(--serif); min-width:0}
+.bar input::placeholder{font-style:italic; color:var(--faint)}
+.hud{position:fixed; left:18px; bottom:23px; z-index:47; font-size:11px; color:var(--faint);
+  display:flex; gap:11px; align-items:center}
+.hud button{color:var(--faint); font-size:13px; padding:0 2px}
+.hud button:hover{color:var(--ink)}
+.hud .instrument{font:11px var(--mono); font-variant-numeric:tabular-nums}
+.toasts{position:fixed; bottom:76px; left:50%; transform:translateX(-50%); z-index:70;
+  display:flex; flex-direction:column; gap:6px; align-items:center; pointer-events:none}
+.toast{background:var(--surface-2); border:1px solid var(--line); border-radius:9px; padding:6px 13px;
+  font:12px var(--mono); color:var(--dim); opacity:0; transition:opacity .25s; pointer-events:auto; max-width:70vw}
+.toast.on{opacity:1}
+.toast.voice{font:15px var(--serif); color:var(--ink)}
+.toast .u{color:var(--ember); cursor:pointer; margin-left:9px; font-family:var(--chrome)}
+.toast .u:hover{text-decoration:underline}
+
+/* ---------- overlays: moment card, feel-for, compare ---------- */
+.scrim{position:fixed; inset:0; background:rgba(6,8,12,.62); z-index:80; display:flex;
+  align-items:center; justify-content:center; opacity:0; transition:opacity .3s}
+.scrim.show{opacity:1}
+.momentCard{width:min(470px,88vw); background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:26px 28px; transform:translateY(16px); opacity:0; transition:transform .62s var(--forge), opacity .62s}
+.scrim.show .momentCard{transform:none; opacity:1}
+.momentCard .who{font:10px var(--chrome); text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin-bottom:10px}
+.momentCard .voice{font:18px/1.55 var(--serif); color:var(--ink); text-wrap:balance}
+.momentCard .ev{font:11px var(--mono); color:var(--faint); margin-top:13px; line-height:1.6}
+.momentCard .acts{margin-top:20px; display:flex; gap:12px}
+.momentCard li{font:16px/1.55 var(--serif); margin:7px 0 0 18px; color:var(--ink)}
+.btn{font-size:13px; border:1px solid var(--line); color:var(--dim); border-radius:999px; padding:6px 16px}
+.btn:hover{color:var(--ink); border-color:var(--dim)}
+.btn.go{color:var(--ember); border-color:var(--ember)}
+.btn.go:hover{background:var(--ember-soft); color:var(--ember)}
+.cmp{position:fixed; inset:0; z-index:82; background:rgba(6,8,12,.74); display:none;
+  align-items:center; justify-content:center; flex-direction:column}
+.cmp.show{display:flex}
+.cmpStage{width:min(430px,80vw); height:min(452px,60vh); position:relative; cursor:pointer}
+.cmpStage svg{position:absolute; inset:0; width:100%; height:100%}
+.cmpTag{font:12px var(--mono); color:var(--dim); margin-top:14px}
+.cmpTag b{color:var(--ink); font-weight:500}
+
+/* ---------- campaign tab ---------- */
+#campWrap{display:none; position:relative; margin:76px auto 0; max-width:1040px; padding:0 24px;
+  height:calc(100vh - 100px); overflow:auto}
+#campWrap.on{display:block}
+#chain{position:relative; height:330px}
+#wires{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
+#wires path{stroke:var(--line); stroke-width:1.5; fill:none}
+.node{position:absolute; width:184px; background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  padding:10px 12px; cursor:grab; will-change:transform; user-select:none; touch-action:none}
+.node.dragging{cursor:grabbing; z-index:10; box-shadow:0 14px 34px rgba(0,0,0,.5)}
+.node .nl{font:10px var(--chrome); text-transform:uppercase; letter-spacing:.08em; color:var(--dim)}
+.node .nv{font:15px/1.35 var(--serif); color:var(--ink); margin-top:4px; min-height:20px}
+.node .ns{font:12px var(--mono); font-variant-numeric:tabular-nums; margin-top:7px; color:var(--dim)}
+.node .delta{cursor:help; border-bottom:1px dotted var(--faint); margin-left:6px}
+.node .delta.up{color:var(--ok)}
+.node .delta.down{color:var(--blocked)}
+.node .delta.zero{color:var(--faint)}
+.node.drop{border-color:var(--ember); box-shadow:0 0 0 3px var(--ember-soft)}
+.node .ns.flash{animation:flash .5s var(--forge)}
+@keyframes flash{from{opacity:.05}to{opacity:1}}
+.tray{margin-top:16px}
+.tray .tl{font:10px var(--chrome); text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin-bottom:9px}
+.chip{display:inline-block; font:14px var(--serif); color:var(--ink); background:var(--surface);
+  border:1px solid var(--line); border-radius:999px; padding:6px 15px; margin:0 8px 8px 0;
+  cursor:grab; user-select:none; touch-action:none}
+.chip:hover{border-color:var(--dim)}
+.chip.drag{position:fixed; z-index:90; margin:0; pointer-events:none; border-color:var(--ember);
+  box-shadow:0 14px 32px rgba(0,0,0,.5); cursor:grabbing}
+.tip{position:fixed; z-index:95; font:11px/1.5 var(--mono); color:var(--ink); background:var(--surface-2);
+  border:1px solid var(--line); border-radius:7px; padding:6px 9px; max-width:270px; display:none; pointer-events:none}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition-duration:.01ms !important; animation:none !important}
+}
+</style>
+</head>

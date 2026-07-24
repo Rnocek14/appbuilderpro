@@ -140,7 +140,7 @@ body.grown #graph{transform:translate(-22px,0) scale(.9)}
 .node.flash .dot{stroke:var(--ember);stroke-opacity:1}
 .node.flash .lbl{fill:var(--ember)}
 @keyframes ring{0%{transform:scale(1);opacity:.5}70%{opacity:0}100%{transform:scale(2.3);opacity:0}}
-.edge{stroke:var(--line);stroke-width:1;fill:none}
+.edge{stroke:#2F3A4E;stroke-width:1;fill:none}
 .edge.cross{stroke:var(--judgment);stroke-opacity:.45;stroke-dasharray:3 4}
 .edge.toBeacon{stroke:var(--ember);stroke-opacity:.26}
 /* bloom: opacity on the group, scale on the marks themselves (each around its own centre) */
@@ -355,7 +355,7 @@ body.reduced .bloom .dot,body.reduced .bloom .chip{transform:none!important}
    STAGED_DATA — the single source of truth. Every number, label, count and
    sentence on screen traces to this object. Nothing decorative.
    ══════════════════════════════════════════════════════════════════════════ */
-const STAGED = {
+const STAGED_DATA = {
   world: {
     question: "why do bee hives work?",
     kind: "Exploration",
@@ -483,6 +483,7 @@ const STAGED = {
     "Does the map feel like a place, or like a diagram?"
   ]
 };
+const STAGED = STAGED_DATA;   // short alias used below — one object, one truth
 
 /* ══════════════════════════════════════════════════════════════════════════
    plumbing

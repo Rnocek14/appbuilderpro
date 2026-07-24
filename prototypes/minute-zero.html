@@ -626,7 +626,7 @@ function chipAct(i, btn){
   if (i===1){
     moody = !moody;
     $('real').classList.toggle('moody', moody);
-    btn.textContent = moody ? STAGED_DATA.chipWarm : STAGED_DATA.chips[1];
+    if (btn) btn.textContent = moody ? STAGED_DATA.chipWarm : STAGED_DATA.chips[1];
     note(moody ? STAGED_DATA.moodyNote : STAGED_DATA.warmNote);
     return;
   }
@@ -647,9 +647,11 @@ function hideConfirm(){
   if (done && !published) $('chips').classList.add('in');
 }
 $('pubno').addEventListener('click', hideConfirm);
+const setCtx = state => { $('ctx').innerHTML=''; const b=document.createElement('b'); b.textContent="marco's barbershop";
+  $('ctx').appendChild(b); $('ctx').appendChild(document.createTextNode(' · site · '+state)); };
 $('pubgo').addEventListener('click', ()=>{
   $('confirm').classList.remove('in');
-  published = true;
+  published = true; setCtx('live');
   $('burl').textContent = STAGED_DATA.publish.where; $('burl').classList.add('live');
   $('toasttx').textContent = STAGED_DATA.liveLine;
   $('undo').hidden = false;
@@ -657,7 +659,7 @@ $('pubgo').addEventListener('click', ()=>{
   $('undo').focus();
 });
 $('undo').addEventListener('click', ()=>{
-  published = false;
+  published = false; setCtx('draft');
   $('burl').textContent = 'preview · draft — not published'; $('burl').classList.remove('live');
   $('toasttx').textContent = STAGED_DATA.undoneLine; $('undo').hidden = true;
   setTimeout(()=>{ $('toast').classList.remove('in'); $('chips').classList.add('in'); }, 1800);
