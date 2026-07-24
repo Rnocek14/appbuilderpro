@@ -27,18 +27,28 @@ from the seven canonical scenarios where the principle is visible in use).
 
 ### The seven scenarios, as shorthand
 
-These are the scenarios the constitution's examples are drawn from and that document 10 renders
-as full journeys. Abbreviations used throughout:
+These are the scenarios the constitution's examples are drawn from. The S-numbers below are
+this document's binding shorthand — cited by 03 §7.4, 05, and 10 — and are deliberately kept
+stable. Document 10 walks the same ground as seven *journeys* under its own numbering (J1–J7),
+and the two lists do not map 1:1; the last column states exactly where each scenario is
+rendered there. When citing document 10, use J-numbers; an unprefixed "Scenario n" always means
+this table.
 
-| # | Scenario | The moment it tests |
-|---|---|---|
-| S1 | **The clothing brand** — launching an apparel line; the brother's artwork; variant tournaments on the apparel bench | creative craft, cross-world grants |
-| S2 | **The website client** — Jane's client world: site, follow-ups, money, service health | counterparty work, the commit path |
-| S3 | **The agency at scale** — ten website clients, a prospect pipeline, close-won spawning new client worlds | portfolio operation, isolation at scale |
-| S4 | **Mom's real estate** — the family business; listings, direct mail; "add another agent based on Mom's setup" | learned setups, repetition |
-| S5 | **The inbox automation** — "automate this inbox"; a background capability on a trigger | recurring work, delegation trust |
-| S6 | **The consciousness rabbit hole** — "why do bee hives work?"; free curiosity that later gets serious | zero-ceremony wonder, promotion |
-| S7 | **The return** — arriving in the morning, or after thirty days away; "the campaign underperformed — why?" | resumption, honesty, the Learn beat |
+| # | Scenario | The moment it tests | Rendered in 10 as |
+|---|---|---|---|
+| S1 | **The clothing brand** — launching an apparel line; the brother's artwork; variant tournaments on the apparel bench | creative craft, cross-world grants | Journey 4 |
+| S2 | **The website client** — Jane's client world: site, follow-ups, money, service health | counterparty work, the commit path | inside Journey 1 — each client world of the agency; no standalone journey |
+| S3 | **The agency at scale** — ten website clients, a prospect pipeline, close-won spawning new client worlds | portfolio operation, isolation at scale | Journey 1 |
+| S4 | **Mom's real estate** — the family business; listings, direct mail; "add another agent based on Mom's setup" | learned setups, repetition | Journey 2 |
+| S5 | **The inbox automation** — "automate this inbox"; a background capability on a trigger | recurring work, delegation trust | Journey 5b (5a is its outbound sibling; the identity split is OD-05 in doc 14) |
+| S6 | **The consciousness rabbit hole** — "why do bee hives work?"; free curiosity that later gets serious | zero-ceremony wonder, promotion | Journey 6 (10 renders the same arc with a coffee-cart subject; bee hives is the doc set's running example, per AT-09) |
+| S7 | **The return** — arriving in the morning, or after thirty days away; "the campaign underperformed — why?" | resumption, honesty, the Learn beat | no single journey — every journey's day-30 and resumption beats render it; as a test it is owned by AT-09 (doc 13) |
+
+Document 10 also renders two journeys with no S-number: **Journey 3, the mural business**
+(Marco's Murals) — refer to it by name, never as "Scenario 3", which here means the agency —
+and **Journey 7, the builder** (the deep build session inside the world S6's promotion
+created). The full S↔J reconciliation across documents, including the stale by-number cites in
+other documents, is tracked as OD-03 in `14-open-decisions.md`.
 
 ---
 
@@ -516,5 +526,5 @@ reason we can name — which is the entire point of having principles.
 
 *Cross-references: `_constitution.md` (the binding decisions these principles generate);
 `docs/operating-model/operating-model.md` (the object model these principles are derived from);
-document 10 (the seven scenarios as full journeys); document 13 (acceptance tests, which
-operationalize the principle test above).*
+document 10 (the journeys, J-numbered — see the S↔J mapping in "The seven scenarios, as
+shorthand"); document 13 (acceptance tests, which operationalize the principle test above).*

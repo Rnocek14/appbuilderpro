@@ -277,8 +277,8 @@ Four mechanisms make this honest rather than merely tidy:
    §9.3: an **inbound-only watch** — sends nothing, touches no counterparty, spends within its
    stated cap — sleeps with its world. Its arrivals accumulate silently for the return visit
    (04 §12), and the watch itself never disappears: it remains a row in the Running lens with
-   its heartbeat trace and went-quiet mechanics intact (06 §4), and a watch *failure* invokes
-   the uncompressible rule like any other broken routine. Dormant worlds cost zero attention
+   its heartbeat trace and went-quiet mechanics intact (06 §4), and a watch *failure* files to
+   the Queue and invokes the uncompressible rule like any other broken routine. Dormant worlds cost zero attention
    and zero pixels, and lose nothing: memory, artifacts, Ledgers, and Playbooks remain whole,
    and a wake is one tap or one utterance away.
 4. **The "everything" view and semantic retrieval** — inventory exists, as a choice (P3). The

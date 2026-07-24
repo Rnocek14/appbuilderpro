@@ -82,7 +82,7 @@ flowchart TB
         THR["conversations · /w/:world/t/:thread"]
         PB["Playbook · /w/:world/playbook"]
     end
-    EXT["EXTERNAL — /shared/:token<br/>review links · claim · booking · checkout<br/>(no shell, no chrome, revocable)"]
+    EXT["EXTERNAL — /shared/:token<br/>review links · claim · booking · checkout · connect<br/>(no shell, no chrome, revocable)"]
     FIELD -->|"orb: cold entry"| DESK
     CONT -->|"resume: surface address"| SESS
     LENS -->|"the drop (08 §2.5)"| DESK
@@ -92,6 +92,7 @@ flowchart TB
     SESS -->|"commit rail"| ART
     ART -->|"'open the studio'"| SESS
     ART -->|"Share (gated)"| EXT
+    DESK -->|"connect ask (gated send)"| EXT
 ```
 
 ## 3. Hierarchy — the depth budget
@@ -182,7 +183,7 @@ any proposed sixteenth kind of surface must argue against operating model accept
 | Thread / conversation | world-local | Conversations areas, Brief sentences, Queue items; `/w/:world/t/:thread` (02 §8) |
 | Playbook (+ calibration view) | world-local view | Observe/Think staging, the Bar ("show the playbook"); `/w/:world/playbook` (17 §6, §4.4) |
 | Staged moves, intake asks, report cards, ending verdicts | world-local Desk items | on the Desk; each opens its working surface inline (03 §3.1, 05 §6.3, 06 §2.7, 09 §7) |
-| Share/review links, claim, booking, checkout pages | **external** | minted only through the Queue; `/shared/:token`; no shell, no chrome (07 §2.5; §8 below) |
+| Share/review links, claim, booking, checkout, connect pages | **external** | minted only through the Queue; `/shared/:token`; no shell, no chrome (07 §2.5; 09 §7; §8 below) |
 
 Note what has **no row**: a capabilities directory (05 §2.5), a Missions page (06 §0), a Memory
 room (P7), an automations app (P7), a builder front door (07 §8.0), a template gallery (09 §11).
@@ -228,7 +229,7 @@ refusals become checkable.
 | `/w/:world/t/:thread` | the conversation at its last exchange | 02 §8 |
 | `/w/:world/auto/:routine` | the automation's run history; each run expands to Activity; recipe opens its workshop session | 06 §3.1 |
 | `/w/:world/playbook` | the world's Playbook; lessons anchor as `#l:id`; the calibration view anchors as `#calibration` | 17 §6, §4.4 |
-| `/shared/:token` | an external, revocable, shell-less page: review link, claim, booking, checkout | 07 §2.5; §8 below |
+| `/shared/:token` | an external, revocable, shell-less page: review link, claim, booking, checkout, connect | 07 §2.5; 09 §7; §8 below |
 
 **There is no `/builder` root.** Builder sessions are session addresses under the Site/App
 area, and the deep artifact's frame is the door (07 §8.1). Giving the deepest workshop its own
@@ -279,12 +280,18 @@ addressable via their owning run and session anchors, which is what evidence lin
 ## 7. The switcher
 
 One overlay, summoned from anywhere: `Cmd+O` on desktop; **tapping the Bar's scope chip** on
-any device (the scope chip *is* the "where am I / where else" affordance — 02 §3.3 and §7
-unified). Contents, in order (02 §7.1): row zero Home; recents with resume — Face chip, honest
-one-line state, where-you-left-off, Enter resumes that exact surface address; pinned (≤7);
-semantic search over everything including dormant and archived ("the bee thing" finds it,
-08 §4). Every row offers dual entry — resume (surface address) or Desk (world address) — with
-the default following 02 §7.2: recents default to resume, cold finds default to Desk.
+any device (the scope chip *is* the "where am I / where else" affordance — a deliberate
+amendment of 02 §3.3's chip-as-scope-picker, reconciled in §10.9). Contents, in order (02
+§7.1): row zero Home; recents with resume — Face chip, honest one-line state,
+where-you-left-off, Enter resumes that exact surface address; pinned (≤7); semantic search
+over everything including dormant and archived ("the bee thing" finds it, 08 §4). Every row
+offers dual entry — resume (surface address) or Desk (world address) — with the default
+following 02 §7.2: recents default to resume, cold finds default to Desk. And every row
+offers a third, scope-only action: **"address, don't go"** (hover reveal on desktop,
+long-press on touch) sets the Bar's standing scope to that world and dismisses the switcher
+without navigating — 02 §3.3's explicit standing override, preserved inside the switcher
+rather than lost with the old chip behavior. Scope set this way changes the scope chip and
+nothing else: no place change, no history entry.
 
 The switcher is not addressable and holds no state: it is a retrieval gesture over the same
 Situation every other surface renders, which is why it can never disagree with the Field or
@@ -319,13 +326,27 @@ resolves to a sign-in for the owner and to nothing for anyone who is not. This i
 Giving a real other side sight of something is the **Share** action on a frame — an outbound
 exit that stages through the Queue like any send (07 §2.5). What it mints is a separate,
 revocable token address with no shell, no chrome, no Bar: the artifact's body rendered for
-review, a claim page, a booking flow, a checkout — the counterparty-facing pages the platform
-has always kept outside the OS (system reconstruction 01: counterparties "interact with
-published artifacts, never with the OS itself"). Binding rules: a token shows exactly what the
-gated Share named, and nothing else; visits annotate the artifact as evidence (07 §2.5);
-revocation kills the token, not the artifact; and **the Ledger never travels** — critique,
-scores, kills, and deliberation are world-internal, always (16 §11). Patterns travel, data
-doesn't — and neither does deliberation.
+review, a claim page, a booking flow, a checkout, a **connect page** — the counterparty-facing
+pages the platform has always kept outside the OS (system reconstruction 01: counterparties
+"interact with published artifacts, never with the OS itself"). Binding rules: a token shows
+exactly what the gated Share named, and nothing else; visits annotate the artifact as evidence
+(07 §2.5); revocation kills the token, not the artifact; and **the Ledger never travels** —
+critique, scores, kills, and deliberation are world-internal, always (16 §11). Patterns
+travel, data doesn't — and neither does deliberation.
+
+**The connect page** is the one `/shared` kind that flows *inward*: it exists because some
+grants only the counterparty can supply — the agent's listing-feed (MLS) credentials, his
+sending-domain verification (10 §2.1) — and grants never batch; each world's connections are
+its own (09 §10). It closes the loop 09 §7 stages: a counterparty-owned grant becomes an
+intake ask on the Desk → the operator sends the connect link (a gated send, staged through the
+Queue like any Share) → the counterparty supplies the credential or completes the verification
+on the shell-less page → the grant flips fulfilled on the Face's grant list, and any
+automation waiting on it wakes (06 §2.3). Binding rules, same spine as Share: the page states
+exactly the one grant sentence it was minted for and collects nothing else; the credential
+lands in that world's grant — scoped, listed, revocable on its Face (const. §13) — never in
+any shared store; revocation kills the token, while the grant itself lives and dies on the
+Face; and the counterparty sees no shell, no chrome, and nothing of the world beyond the
+sentence asking. At n=50 this is fifty tokens, fifty grants, one page kind — rows, never map.
 
 ### 8.4 Link permanence through evolution
 
@@ -386,8 +407,9 @@ phone's judgments left it.
 
 ## 10. Reconciliations — where prior documents pulled apart
 
-Each conflict is stated, then resolved. None required overruling the constitution; each
-required choosing one reading of it.
+Each conflict is stated, then resolved. None required overruling the constitution; the first
+eight required only choosing one reading of a prior document. The ninth amends one outright,
+and is flagged in `14-open-decisions.md` per the constitution's preamble rule.
 
 1. **The Queue: "never a place" (02 §1, §4.2) vs push deep links to "the exact Queue item"
    (02 §9).** An address usually implies a destination. Resolution: **overlay addresses**
@@ -423,6 +445,16 @@ required choosing one reading of it.
    route.** Resolution: scope is view state — `/find?q=&scope=` — defaulting from the place
    beneath, toggleable on the overlay. One route, honest scoping, no leakage (rows render only
    within their own world's scope either way).
+9. **The scope chip: a stay-put scope picker (02 §3.3, rule 3: "click the chip and pick") vs
+   the switcher's summons (§7 here; 12 W1 ships it).** Two contradictory bindings on one
+   gesture. Resolution: the chip opens the switcher — one gesture answers "where am I / where
+   else" on every device, including phones where `Cmd+O` doesn't exist (§9.1) — and the
+   switcher's per-row **"address, don't go"** action (§7) preserves the one thing 02's picker
+   uniquely offered: an explicit standing-scope override with no navigation. 02 §3.3's deeper
+   rule is untouched — nothing but an explicit act (this action, or switching place) ever
+   changes standing scope; no inference, no drift. Unlike items 1–8, this is an amendment of a
+   prior document, not a reading of it: 02 §3.3 rule 3 must be rewritten to match, and until
+   02 lands that change the conflict stays open in `14-open-decisions.md`.
 
 ## 11. Acceptance checks for this document
 
@@ -438,8 +470,8 @@ required choosing one reading of it.
 5. **The resume check.** Every row of §6.3 behaves as promised from a cold start on a new
    device — the surface, not the location; the story, not a blank canvas.
 6. **The leakage check.** No operator address is resolvable by a non-owner; no `/shared` token
-   renders anything beyond what its gated Share named; no Ledger content ever appears under
-   `/shared`.
+   renders anything beyond what its gated mint named (a Share, or a connect ask's one grant
+   sentence); no Ledger content ever appears under `/shared`.
 7. **The mobile-parity check.** Every address renders on a phone in the posture §9.2 assigns;
    nothing exists at a mobile-only address; every approval and critique rep listed as "full"
    completes end-to-end on the phone with the same records as desktop.

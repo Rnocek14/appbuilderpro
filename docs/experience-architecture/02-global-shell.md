@@ -123,15 +123,22 @@ Enter will do:
 
 > `→ Jane's Client · draft follow-up email`
 > `→ Mom's Real Estate · pause automation "Invoice chase"`
-> `→ new curiosity · "why do bee hives work?"` *(silent world birth — ceremony ladder, const. §11)*
-> `↗ crossing scopes → Spring Apparel · use artwork from Theo's Studio (grant required)`
+> `→ new Exploration · "why do bee hives work?"` *(silent world birth — ceremony ladder, const. §11)*
+> `↗ crossing scopes → Thread & Stone · use artwork from Marco's Murals (grant required)`
 
-Anatomy: **scope glyph + world name · verb · object**, plus a cost note when the action would
-mint outbound work ("will queue 1 email for approval"). The chip is the routing truth — routing
-is never a mystery, and never a leap of faith:
+Anatomy: **scope glyph + world name · posture dot · verb · object**, plus a cost note when the
+action would mint outbound work ("will queue 1 email for approval"). The posture dot is the
+destination dial's glyph for the facing the router inferred (03 §5.2) — Think · Create ·
+Execute · Observe on hover, the word "posture" never rendered — so the chip previews the full
+routing tuple (`world · posture · verb · object`, §12.1), not just the destination. A creation
+reading names the world-to-be by its display name from the terminology table (constitution §2):
+`→ new Exploration`, `→ new Client · Harbor Dental` — never "new world" or "new curiosity";
+creation surfaces elsewhere (09's chips, 12's W5 labels) quote this same vocabulary. The chip is
+the routing truth — routing is never a mystery, and never a leap of faith:
 
 - **Tab / Shift+Tab** cycles up to three alternate readings; the chip re-renders per reading.
-- **Click the chip** to open a one-row correction strip: change target world, change verb.
+- **Click the chip** to open a one-row correction strip: change target world, change verb, flip
+  the inferred posture.
 - A **scope-crossing reading** (utterance targets a different world than the scope chip) renders
   in a distinct crossing treatment (`↗`) — crossing is always visible before it happens
   (constitution §13).
@@ -156,9 +163,12 @@ stamp when one exists). Rules, binding:
 
 ### 3.4 Explicit `/commands`
 
-Typing `/` opens the command strip above the Bar: recent commands first, then all, filtered as
-you type. Commands are **deterministic** — no model in the loop, instant, identical every time.
-They exist for operators who want mechanical certainty and speed; they are never required.
+Typing `/` opens the command strip above the Bar: recent commands first, then all commands
+invocable in the current scope, filtered as you type. The strip is a palette summoned in place,
+never a page you go to, and never a platform-wide capability catalog — doc 05 §2.1 owns this
+contract, and the anti-goals forbid capability-visibility "just in case" (constitution §15).
+Commands are **deterministic** — no model in the loop, instant, identical every time. They
+exist for operators who want mechanical certainty and speed; they are never required.
 
 Core set (the full registry lives with doc 05; the shell contract is the *shape*):
 `/go <world|area>` · `/find <query>` · `/queue [filter]` · `/approve` (opens Queue at first
@@ -167,7 +177,8 @@ item) · `/new <kind>` · `/note <text>` (to current scope's memory) · `/pause 
 
 Two guarantees: **(a) parity** — every command's effect is reachable by natural language, and
 every routed verb has a command form; the two registers are one catalog worn two ways. **(b) no
-secret commands** — the strip shows everything; nothing is invocable that isn't listed.
+secret commands, scope-relative** — nothing invocable in the current scope is absent from the
+strip, and nothing is invocable anywhere that its own scope's strip cannot show (05 §2.1).
 
 ### 3.5 Search and the results view
 
@@ -175,9 +186,13 @@ Search is the Bar wearing its finding face. Trigger: `/find`, or a noun-like utt
 best reading is "find" (the chip shows `→ find: "jane invoice march"`). Results open as a
 full-height overlay above the Bar:
 
-- **Grouped by kind**, in fixed order: Worlds · Artifacts · Conversations · People ·
-  Automations · Missions · Playbook lessons · Ledger moments (workshop decisions are findable —
-  mastery is searchable, not buried in sessions).
+- **Grouped by kind**, in fixed order: Worlds · Explorations · Artifacts · Conversations ·
+  People · Automations · Missions · Playbook lessons · History moments (workshop decisions are
+  findable — mastery is searchable, not buried in sessions; "History" is the Ledger's display
+  name, per 12 §0.2 — the spec word never appears on screen). **Explorations rows** are
+  sessions, beacons, discoveries, and theories — each stamped with its world, opening
+  map-forward at the cited node (04 §3.4): "what did I find about queen bees" answers with the
+  discovery, not just the world that holds it.
 - **Every row is stamped**: world chip, kind glyph, freshness, one provenance line ("committed
   from Outreach Studio session 'April drop'"). No naked results.
 - **Scope toggle** top-right of the overlay: *this world / everywhere*, defaulting to the Bar's
@@ -187,6 +202,8 @@ full-height overlay above the Bar:
   dormant curiosity world).
 - **Enter** opens the top result; arrow keys move; `Esc` dismisses back to exactly where you
   were. Opening a world-row offers the same dual entry as the switcher: resume or Desk (§7.2).
+  A find that resolves by meaning to a dormant exploration reads as *continue*, not *find* — a
+  surface address landing map-forward on the exact node you left (04 §9.2, §7.2 below).
 
 ### 3.6 Routing vs asking — the one-line rule
 
@@ -259,7 +276,8 @@ changes your place; working it never navigates you away.
    produced it ("Mission: April launch, step 3 of 7" / "Automation: invoice chase, rung 2" /
    "Outreach Studio session 'cold list B'").
 2. **The ask, one sentence.** "Send this follow-up to Jane?" "Publish v4 of the landing page?"
-   "Adopt this lesson into the Playbook?"
+   "Adopt this lesson into the Playbook?" "Your client setup improved — adopt the new booking
+   flow?"
 3. **Inline decision context — preloaded, not linked:**
    - email/SMS: the full draft, recipient, the prior thread's last exchange;
    - publish/deploy: before/after compare, live-target named;
@@ -267,6 +285,14 @@ changes your place; working it never navigates you away.
    - mission steps: the plan spine with this step lit, plus an Activity peek (what the worker
      read, did, decided) one tap deep;
    - lesson proposals (knowledge gate): the proposed Playbook entry with its evidence rows;
+   - setup adopt-proposals (inheritance, 09 §10): the layer diff, rendered against the
+     receiving world's *own* resolved version — a conflicting local override renders as a
+     conflict diff, never silently overwritten. The three answers adopt · adapt · decline map
+     onto the action rail as Approve · Edit-then-approve · Decline; an adapt edit is recorded
+     as that world's local variant, visibly kept;
+   - connection grants (09 §4.7's grammar): the grant sentence — connection · direction
+     (read/send/spend) · scope, in words — the requesting world or artifact, what work is
+     waiting on the grant, and the revocation statement ("revocable from either Face");
    - creative output: the variant(s) with critique scores *and the criteria that produced them*
      — the rubric is visible and tappable, so every approval is also a rep of judgment
      (mastery, constitution §12).
@@ -298,7 +324,7 @@ evidence, and revocation is one tap on any row, forever.
 - **Silence is loud**: an automation that misses its expected window files a "went quiet" item
   *automatically* — absence of output is itself surfaced (constitution §8's trust invariant).
 - Repeated same-class failure escalates within the Queue (pinned to top of its world's group);
-  it reaches your phone only via the three push rules (§8).
+  it reaches your phone only via the three push rules (§9).
 
 ## 5. Progressive depth of the shell
 
@@ -322,7 +348,7 @@ orientation. Inside a world, three segments, never more:
 - Segments are links: Face chip → the Desk; area → the area's top; session name → the session
   (when you've drilled into an artifact from within one).
 - A small **grants indicator** appears on the chip when cross-world grants are active in this
-  world ("1 grant: artwork ← Theo's Studio") — one tap lists them, with revoke (constitution
+  world ("1 grant: artwork ← Marco's Murals") — one tap lists them, with revoke (constitution
   §13).
 - On entry from elsewhere, the header whispers a one-line *since-you-were-here* ("2 automations
   ran · Jane replied") that fades unless tapped — the world greets you without stopping you.
@@ -356,6 +382,14 @@ Every world row (switcher, search, Field) offers **dual entry**:
   at its current step.
 - **Desk** (default on Field orbs and cold entries): land on the world's *now* — staged next
   moves, running work, waiting approvals, open asks. Zero decisions to start.
+
+**Curiosity worlds flip the cold default.** A curiosity world's *now* is its map — the map IS
+the record (constitution §7) — so for these worlds the dual entry defaults to resume even on
+cold finds: "the bee thing" at the Bar or in search, a year later, reads as *continue* and
+lands map-forward on the exact node you left (04 §9.2), never on a Desk. A Bar utterance that
+resolves by meaning to a dormant exploration is a surface address, not a find. The Desk entry
+stays one hover/long-press away, like any other row. (11 §6.3's `/w/:world` Desk default reads
+through this same rule.)
 
 The split is deliberate: the Field is how you enter a world's *situation*; Continue and recents
 are how you re-enter your *work*. Hover/long-press reveals the other entry on any row.
@@ -538,7 +572,7 @@ sections above carry the detail.*
 | What happens at 100 worlds? | The same screen: ≤9 in full presence, quiet worlds in a one-row expandable band, dormant worlds only in search. The Field's size is constant by construction (§10.2). |
 | Where do Lenses live at Home? | As chips atop the Field; tapping morphs the Field in place into the Lens's rendering. Lenses act only through per-world gates (§10.2). |
 | Where do opportunities and promotions appear? | In the Brief's "worth a look" stanza and as glow (class 4) on the Field — both traceable to rows; promotion offers are quiet, never nagging (§10.1, §10.2). |
-| How does Home treat mastery and workshops? | Continue resumes Workshop sessions first-class (Bench + Ledger); the Brief reports outcome annotations, closed predictions with hit-rate, and Playbook proposals; searchable Ledger moments make judgment findable (§8, §10.1, §3.5). |
+| How does Home treat mastery and workshops? | Continue resumes Workshop sessions first-class (Bench + Ledger); the Brief reports outcome annotations, closed predictions with hit-rate, and Playbook proposals; searchable History moments (the Ledger's decisions, display name per 12 §0.2) make judgment findable (§8, §10.1, §3.5). |
 | Is Home ever empty? | A new account's Home is the Bar plus one line: "Say anything — a question, a business, a thing to build — and I'll make it a world." The first utterance creates the first world through the ceremony ladder; Home fills only with real state (§10.4, const. §11). |
 | Does Home have settings, folders, or manual layout? | No. Pinning (switcher) and saved Lenses are the only user curation; everything else is generated and ranked. Manual arrangement would rot; attention ranking cannot (§10.4). |
 

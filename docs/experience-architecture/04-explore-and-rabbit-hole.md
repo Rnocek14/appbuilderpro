@@ -192,11 +192,14 @@ The rabbit-hole doctrine verbatim: **name the gap, hold the guess.** Saying "hol
   (the exchange it parked from); age.
 - **The beacon rail** lists every open beacon on the surface's edge, oldest glowing faintest —
   honest age, no fake urgency. Beacons also render on the map at their park point.
-- **Resurfacing:** beacons come back at three moments and only three — on return to the
-  exploration (the re-entry story leads with them, §12); when new evidence touches one by
-  meaning (an arriving source or another world's discovery lands adjacent — the beacon warms
-  and says why); and at branch joins (§4.4), where held guesses get checked against what the
-  branches found.
+- **Resurfacing:** beacons are actively resurfaced in-conversation at three moments and only
+  three — on return to the exploration (the re-entry story leads with them, §12); when new
+  evidence touches one by meaning (an arriving source, an in-world row, or a gate-promoted
+  pattern from another world lands adjacent — the beacon warms and says why); and at branch
+  joins (§4.4), where held guesses get checked against what the branches found. Distinct from
+  these are the passive standing listings — the beacon rail here, the curiosity world's Face,
+  the Desk's Think-posture staging, and the Explorations lens — which show open beacons
+  wherever the operator looks but never interject.
 - **Resolving:** answering a beacon converts it to a discovery, records whether the held guess
   was right, and — this is mastery, not bookkeeping — feeds the operator's calibration record.
   Beacons teach the discipline every strong researcher has: naming what you don't know and
@@ -293,6 +296,16 @@ state — appears in the world's artifacts, *and* lands on the map as a generate
 edged to what seeded it. The map thereby stays the one true index of the exploration: what was
 thought, what was found, and what was made, in one territory.
 
+**Metered spend in a costs-nothing world (binding).** "Costs nothing to start" is a ceremony
+rule, not a claim that sims and renders are free. Any metered move in a curiosity world — an
+inline sim (§6), a video, a build — states its cost on the move itself before running, exactly
+as hand-off briefs already do. Spend accumulates visibly: as a line in the session Ledger's
+story ("$14 on sims this session") and as a running total on the world's momentum row. The
+first metered move in a curiosity world surfaces a one-time stated cap ("explorations pause
+metered work at a stated ceiling unless you raise it"). This is a cap on the work, not a warn
+semantic on the Face: the curiosity Face still cannot warn — a paused sim renders as an offer
+to continue, never as a health problem.
+
 ## 8. Deepening into workshops
 
 When a direction needs development rather than another exchange, **"take this into a workshop"**
@@ -346,7 +359,10 @@ the system never asks "do you want to keep this?":
 - **Dormant** (default: six weeks untouched): absent from the Field entirely; findable by
   meaning forever ("the bee thing" at the Bar, a year later, lands on the exact node you left).
   Dormancy timing is part of the curiosity dressing and tunable per world; the defaults are the
-  contract.
+  contract. **These tier names (active · cooling · dormant) and these defaults (two weeks;
+  six weeks) are canonical here**: sibling documents cite this section rather than restating
+  the numbers, and any acceptance test that exercises decay must idle safely past the six-week
+  dormancy default.
 - **Never deleted.** There is no delete; there is dormancy and, on explicit request, archive —
   which changes rendering and nothing else (the ghosts doctrine).
 
@@ -355,15 +371,19 @@ the system never asks "do you want to keep this?":
 The system watches for **persistent work wearing curiosity's clothes**. Signals, each counted
 from real rows: return visits (three or more distinct sessions), artifact creation, workshop
 deepening, beacon resolution streaks, intent language in the thread ("this could be a
-business", "people would pay for this"), and requests for operating weight (recurring watches,
-outreach, money) — the last of which *requires* promotion, since the curiosity dressing runs
-no recurring work and touches no counterparty.
+business", "people would pay for this"), and requests for operating weight — outbound work,
+money, or any recurring work beyond the inbound-only watch (below) — which *require*
+promotion, since the curiosity dressing runs no recurring work beyond a watch and touches no
+counterparty.
 
-When signals accumulate, the offer is quiet and evidence-linked, in exactly two places: the
-Brief's "worth a look" stanza ("the bee-hive exploration has returned 4 times and built a
-prototype — make it real?") and a soft chip on the exploration's own surface. Never a modal,
-never mid-thought, never twice after a decline — a declined offer backs off until the signal
-threshold doubles, the same grammar as earned-autonomy offers. Explorations are allowed to
+When signals accumulate, the offer is quiet and evidence-linked, and renders only on the
+sanctioned surfaces: the Brief's "worth a look" stanza ("the bee-hive exploration has returned
+4 times and built a prototype — make it real?"), a soft chip on the exploration's own surface,
+a class-6 staged move on the exploration's Desk (03 §3.2), and the exploration's row in the
+Explorations lens (08 §3.3). All four render the same offer, linked to the same rows. The
+invariants are what bind: never a modal, never mid-thought, never twice after a decline — a
+declined offer backs off on every surface at once until the signal threshold doubles, the same
+grammar as earned-autonomy offers. Explorations are allowed to
 stay explorations forever; the offer exists so that becoming real is one utterance, not so
 that wondering acquires a sales funnel.
 
@@ -457,6 +477,44 @@ directions; dressing is what changes.
   by provenance stubs that open only via a grant. Patterns travel; data doesn't — even when a
   thought moves out.
 
+## 11.5 Attaching an exploration to an existing world — "fold in"
+
+The split has an inverse. A free rabbit hole sometimes turns out to belong to a world that
+already operates — the coffee-cart exploration should be powering the Cart Kit that is already
+selling. The gesture is **fold in**, and it is the split of §11 walked backwards:
+
+- **The utterance and the chip.** "Fold this into the Cart Kit" / "this belongs to the agency"
+  at the Bar, from either world. Territory is changing worlds, so the interpretation chip
+  renders the crossing treatment: `→ Cart Kit · fold in: Bee-hive exploration`. As with every
+  crossing, the reading is correctable before commit; nothing moves silently. (The
+  system-proposed sibling — merge on duplicate signals — remains 09 §12's machinery; fold-in
+  is the operator's own gesture and needs no duplicate signal to exist.)
+- **The proposal, scoped to what moves.** One screen previews exactly which subgraph
+  re-scopes: the map territory, beacons, theories, experiments, media, and thread that will
+  join the target world's knowledge graph — each listed, nothing implied. Editable inline:
+  hold a branch back and it stays behind as its own exploration, *informs*-linked to what
+  left.
+- **Isolation runs in reverse.** The split rules apply mirrored: when the target holds a
+  counterparty, the fold is previewed under that counterparty's isolation rules, and evidence
+  that may not enter the target's scope stays where it is, represented in the target by
+  provenance stubs that open only via a grant. Patterns travel; data doesn't — in this
+  direction too.
+- **Ceremony is priced by the target's rung.** Folding into another curiosity world is one
+  confirm. Folding into a venture is the proposal above plus one confirm. Folding into a world
+  carrying money flows or a counterparty re-opens the target's Proposal at that heavier rung —
+  isolation review included — because the territory is about to live inside those stakes.
+- **Continuity is total.** The exploration's sessions keep their Continue entries, now
+  resuming inside the target world; the map settles into the target's knowledge graph with the
+  folded territory lit (§11's toggle, seen from the other side); node identities, provenance,
+  beacon ages, and the terminology skin the operator sees are unchanged except for the world
+  stamp. Zero copies, zero exports, zero re-entry — the promotion-without-loss test applies to
+  attachment verbatim (§16.9).
+- **The lighter alternative.** When the exploration should inform the world without joining
+  it, decline the fold and mint an **informs** edge instead (the same cross-world,
+  provenance-stamped edge type from §3.2): the exploration stays its own world, and its map
+  rides into the target's workshop sessions as Palette cards with provenance. Fold-in is for
+  territory that has found its home; informs is for territory that has found an audience.
+
 ## 12. Returning after weeks
 
 Resume paths are the standard ones — Continue, the switcher's recents, or the Bar by meaning —
@@ -471,9 +529,13 @@ the Ledger's story:
 Every clause is a door to its rows. Below the story, exactly two more things when they are
 real:
 
-- **What touched this while you were away** — cross-world memory proximity, evidence-linked:
-  "your pricing work in the agency world landed two lessons adjacent to your 'swarm pricing'
-  theory." Rendered only when a real row justifies it; silence otherwise.
+- **What touched this while you were away** — cross-world adjacency, restricted to promoted
+  patterns: only lessons that have already passed the human gate and the scrub preview may
+  surface here, as pattern cards with full provenance ("pattern: value-anchored pricing — from
+  your agency pricing work, promoted in May, gate-approved — sits adjacent to your 'swarm
+  pricing' theory"). An un-promoted lesson in another world's Playbook never reaches this
+  surface, however semantically close: cross-world intelligence is exactly the set of promoted
+  patterns and nothing else. Rendered only when a real row justifies it; silence otherwise.
 - **What the watch brought in** (if one is mounted): unread source nodes at the frontier,
   counted honestly.
 
@@ -537,7 +599,7 @@ flowchart TB
     DORM -->|"'the bee thing' at the Bar"| SESS
     COOL --> SESS
 
-    SESS -->|"returns · artifacts · intent language<br/>(signals counted from rows)"| OFFER["Quiet promotion offer<br/>in the Brief · declinable, backs off"]
+    SESS -->|"returns · artifacts · intent language<br/>(signals counted from rows)"| OFFER["Quiet promotion offer on the<br/>sanctioned surfaces (§9.3) ·<br/>declinable, backs off"]
     OFFER -->|"'make this real'"| PROP["Proposal — one screen<br/>framed around the map"]
     PROP --> CHARTER["Charter — one confirm"]
     CHARTER --> GROW["The world grows around the map<br/>same identity · zero copies"]
@@ -565,7 +627,7 @@ flowchart LR
     MAP --- PROM
     MAP --- OPER
 
-    SPAWN["Split / spawn:<br/>a branch with its own identity<br/>leaves home with lineage,<br/>linked 'informs'"]
+    SPAWN["Split / spawn:<br/>a branch with its own identity<br/>leaves home with lineage,<br/>linked 'informs' —<br/>fold-in (§11.5) is the inverse"]
     DEEP -.-> SPAWN
 ```
 
@@ -593,12 +655,18 @@ flowchart LR
    one.
 8. **The walk test.** A voice-only session produces the same territory as a typed one; the map
    renders on return; no capability of Explore is voice-dependent.
+9. **The fold-in test.** Attach a free exploration to an operating world (§11.5); count copies
+   made, exports run, and questions re-asked that the map already answers — all three counts
+   are zero — and verify that rows restricted by the target's counterparty scope surface in the
+   target only as provenance stubs behind a grant.
 
 ---
 
 *Cross-references: 02 (the Bar, chip, Queue, Continue this document's entries ride on), 03 (the
-world grammar the curiosity dressing dresses), 05 (the make verbs and drive modes), 06 (watches
-as recurring work; missions staged at promotion), 07 (artifact frames and the builder as deep
-artifact), 09 (the Proposal/Charter ceremony ladder promotion reuses), 10 (S6 and S7 as full
-journeys), 16 (the Theory Workshop and the Lab in the workshop grammar), 17 (beacons,
-predictions, and calibration in the mastery loops).*
+world grammar the curiosity dressing dresses), 05 (the make verbs and drive modes; the fold-in
+verb of §11.5 registers in its catalog), 06 (watches as recurring work; missions staged at
+promotion), 07 (artifact frames and the builder as deep artifact), 09 (the Proposal/Charter
+ceremony ladder promotion and fold-in reuse; §12's system-proposed merge is the sibling of
+§11.5's operator gesture), 10 (S6 and S7 as full journeys), 16 (the Theory Workshop and the Lab
+in the workshop grammar), 17 (beacons, predictions, and calibration in the mastery loops; §7's
+gate and scrub bound what §12's re-entry story may surface cross-world).*

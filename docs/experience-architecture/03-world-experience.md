@@ -100,7 +100,9 @@ AI is acting in. Left to right:
    tappable through to the rows that justify it.
 3. **Momentum.** A small trend mark: is this world moving, and in which beat? Momentum is
    computed from real activity (sessions, commits, sends, replies, map growth) — never from
-   opens or views, which measure attention spent, not progress made.
+   opens or views, which measure attention spent, not progress made. Momentum is its own organ,
+   never a vital: the genome supplies its *definition* — which activity counts as motion here
+   (6.1.4) — but it never occupies one of the four vital slots (rule 2.5.5).
 4. **Counterparty chip.** Present only when the world wraps a real other side: "Jane", "the
    brewery". Tapping it opens the relationship: contacts, consent state, money standing, the
    isolation contract in plain words.
@@ -150,7 +152,8 @@ automation's heartbeat is clean — computed from deploy state + heartbeat trace
 routine missed a beat; blocked = site down or an automation failed), **Money** (invoices paid
 vs. outstanding; warn = overdue > 3 days; the chase automation's state rides this vital),
 **Owed to Jane** (any reply, deliverable, or approval she is waiting on; warn = older than one
-business day), **Momentum** (deliverables against the service calendar). The client genome's
+business day). Three vitals, not four: the client genome's **momentum definition** — for the
+separate trend mark, 2.1.3 — is deliverables against the service calendar. The client genome's
 definition of glowing: Jane replied positively, a deliverable shipped, a payment landed.
 
 **Real-estate agent (Mom's Real Estate).** Vitals: **Pipeline** (active listings and pending
@@ -165,7 +168,10 @@ invoices out).
 connection failure — and this vital can never be compressed away, in any posture, at any
 attention ranking: trust outranks quiet, P10), **Intervention rate** (share of drafts the
 operator edited or rejected this week — falling intervention is how earned autonomy is
-evidenced), **Latency** (oldest unhandled item). Note what is *absent*: no "volume" vanity
+evidenced), **Latency** (oldest unhandled item), **Misfires** (false positives per 17 §5.3:
+fired actions the operator marked "shouldn't have fired" — the misfire ledger rides this vital,
+every mark a row against the rule that fired; a rising rate drops earned autonomy a notch,
+visibly, with the rows cited). Note what is *absent*: no "volume" vanity
 vital on the Face. Volume handled belongs to Observe-posture reporting, not to health.
 
 **Curiosity world (why do bee hives work?).** Vitals: **none.** A curiosity world has no
@@ -185,6 +191,10 @@ curiosity must never acquire the anxiety signals of operation until the operator
    Face by default; displaced vitals remain one tap deep, and the operator may pin any vital.
 4. The Face is the same header inside every area — you are never inside a world without knowing
    how it is doing and whose context you are in.
+5. **Momentum is not a vital.** The trend mark (2.1.3) is always present, separately; a genome
+   defines what it is computed from (6.1.4) but may not spend a vital slot on it, and no vital
+   may be named bare "Momentum". The website client's momentum, for example, is deliverables
+   against the service calendar — a momentum definition, not a fourth vital (§2.4).
 
 ---
 
@@ -214,15 +224,26 @@ The order encodes the principles' precedence directly — trust beats economy be
 1. **Broken trust.** A failing, stalled, or dark automation; a mission step that errored. These
    outrank everything and can never be compressed out by any posture or ranking (P10).
 2. **Judgment owed.** Approvals whose absence blocks running work ("the mission resumes when you
-   approve the draft"), then other world-scoped approvals.
+   approve the draft"), then other world-scoped approvals. Knowledge-gate candidates are
+   approvals too: Playbook lessons, pattern promotions, and setup-adoption proposals awaiting
+   the gate stage here (their Queue class per 17 §6.2) — judgment owed to the world's learning,
+   holding in every posture like the rest of the class.
 3. **The other side moved.** Replies, claims, bookings, payments, inquiries — anything a real
-   counterparty did that now waits on the operator.
+   counterparty did that now waits on the operator. One disambiguation is binding: when the
+   staged response to such a move is already holding at a gate that pauses running work, the
+   item is class 2, not class 3 — the arrival is the occasion, but the blocking judgment is
+   what ranks it (the reply items in §7.1 and §7.2 carry class 2 for exactly this reason).
 4. **Mid-flight work.** Workshop sessions and missions the operator left mid-motion. Continuity
    beats novelty: resuming yesterday's bench outranks starting anything new.
 5. **The undertaking's forward motion.** The genome's contribution: what a competent operator of
    *this kind* of undertaking would do next — the service calendar's next deliverable, the
    collection's long pole, the farm's next drop. Every genome-staged move carries its reason and
-   its evidence ("Tuesday sends performed best — Playbook, 6 data points").
+   its evidence ("Tuesday sends performed best — Playbook, 6 data points"). **Judgment reps are
+   a named, genome-dressable member of this class** (17 §4.5): "close this prediction — the
+   data's in" · "score the overnight variants blind" · "Drop 01's outcomes are complete — review
+   what they say about the criteria?" The operator's sharpening judgment *is* the undertaking's
+   forward motion, staged and capped like every class-5 move — mastery woven into the world's
+   now, never a separate practice area.
 6. **Asks and openings.** Intake questions, detected opportunities, promotion offers.
 
 No class may flood the Desk: at most two of the three slots come from any single class. The full
@@ -267,7 +288,7 @@ the other side moved) hold their positions in every posture.
 | **Think** | open questions, parked beacons, knowledge and playbook cards, "why?" threads on recent outcomes, the world's map | operational detail, metrics | socratic — asks before it answers, surfaces what is *not* known |
 | **Create** | mid-flight sessions, benches with variants awaiting critique, fresh palette material (a granted artwork, a new photo set) | analytics, heartbeat detail | generative and critique-ready — proposes, varies, scores against the criteria pack |
 | **Execute** | waiting approvals, running plan-spines, blocked steps, send/publish states | speculation, exploration | terse and operational — checklists, gates, exact states |
-| **Observe** | outcome-annotated artifacts, heartbeat traces, calibration (predictions vs. results), playbook candidates awaiting the gate | drafts, unstarted moves | analytic and honest — numbers with their rows, "no signal" said plainly |
+| **Observe** | outcome-annotated artifacts, heartbeat traces, calibration (predictions vs. results), judgment reps (prediction closes, blind scoring); it *leads with* the class-2 gate candidates (Playbook lessons awaiting you), which hold in every posture (§3.2.2) | drafts, unstarted moves | analytic and honest — numbers with their rows, "no signal" said plainly |
 
 Worked contrast, same world, same morning (Mom's Real Estate): in **Execute**, the Desk leads
 with "postcard print run waiting on you" and the farm mission's spine; flip to **Observe** and
@@ -342,6 +363,18 @@ memory, its criteria pack, and its Playbook slice — a generic first response f
 a defect (§12.6). This is where mastery physically lives inside the world: the criteria are
 visible in critique, the Ledger records why, and outcomes ride back onto the shelf's artifacts.
 
+**Deep artifacts and their areas (binding).** An area whose center of gravity is a deep
+artifact — the client's Site, the brand's Store — is a **workshop-area**, not a view. The craft
+is making and running the artifact, and only workshop-areas own sessions: builder and strategy
+sessions live at `/w/:world/:area/s/:session`, the address that encodes their ownership
+(11 §6.2 — there is no builder root). Its shape is the Site Studio's (16 §13.3): strategy
+sessions on document/board benches and build sessions in the Builder (`code+preview`) are two
+session kinds in one workshop with one Ledger. Its **shelf leads with the framed deep artifact
+itself** — version rail, publish state, outcome ribbons readable without opening any session —
+and the builder opens *from that frame* into a session owned by this area. The artifact stays a
+made thing on the shelf and never becomes a place (4.2's seventh impostor); the area stays the
+place around it.
+
 An area can **mature across the boundary** — through a proposal, never silently. The artist's
 "Portfolio" begins as a view; when repeated sessions keep arranging and re-sequencing it, the
 system proposes charting it as a workshop (curation is a craft). The record of the old body is
@@ -351,7 +384,10 @@ preserved; nothing moves (P13, in miniature).
 
 **No world ever shows more than seven areas.** Operating genomes charter with three to five;
 "More" reveals the tail — dormant areas, retired areas, the rarely-touched. A newborn curiosity
-world may show exactly one (its map) — the band constrains operating maturity, never birth.
+world may show exactly one (its map) — the band constrains operating maturity, never birth. That
+reading narrows constitution §5's "3–7 visible" clause, so per the preamble rule it is flagged
+as 14 OD-16, not held as a quiet local deviation; the carve-out stands as recorded there until
+the entry closes.
 
 Progressive reveal, precisely:
 
@@ -516,14 +552,19 @@ in isolation, it feels purpose-built; read all six, the skeleton is unmistakable
 
 - **Presentation:** "Client · Website + Automations · since March · $500/mo" · counterparty chip
   **Jane** · edge "serves ← Agency".
-- **Vitals:** Service · Money · Owed to Jane · Momentum (spec in §2.4).
-- **Areas (5):** **Site** (view → the deep artifact; opens its builder from the frame) ·
-  **Campaigns** (workshop · board bench) · **Automations** (view · heartbeat rows, one-gesture
-  pause) · **Conversations** (view) · **Money** (view · invoices, subscription). *More:*
+- **Vitals:** Service · Money · Owed to Jane (spec in §2.4) · momentum from the service
+  calendar (the separate trend mark, never a vital slot — rule 2.5.5).
+- **Areas (5):** **Site** (workshop · the Site Studio, 16 §13.3 — strategy and build sessions,
+  one Ledger; its shelf leads with the framed site, whose builder opens from the frame per the
+  deep-artifact rule in 4.3) · **Campaigns** (workshop · board bench) · **Automations** (view ·
+  heartbeat rows, one-gesture pause) · **Conversations** (view) · **Money** (view · invoices,
+  subscription). *More:*
   Reports, Assets. *Unformed:* "could grow here: SMS · Reviews".
 - **Desk, a Tuesday:** ① "Jane replied — positive. Your response is drafted; the follow-up
-  automation paused itself pending it" *(class 3; opens the thread with the draft staged)*.
-  ② "Invoice #12 is 3 days overdue — the chase is drafted, gate waiting" *(class 2)*.
+  automation paused itself pending it" *(class 2 — Jane moved, but the paused automation makes
+  this an approval blocking running work, per §3.2.3's disambiguation; opens the thread with
+  the draft staged)*. ② "Invoice #12 is 3 days overdue — the chase is drafted, gate waiting"
+  *(class 2; within the class, ① outranks it on impact — the reply is owed to Jane herself)*.
   ③ "Monthly report is assembled from real numbers — review before Friday's send" *(class 5;
   reason: the service calendar)*.
 - **Counsel stance:** service-minded — protects the relationship and the operator's margins,
@@ -543,9 +584,12 @@ in isolation, it feels purpose-built; read all six, the skeleton is unmistakable
   gallery bench) · **Paperwork** (view · templates with visible fill-holes, e-sign states).
   *More:* Market Notes.
 - **Desk, a Tuesday:** ① "New valuation request, 14 minutes ago — reply drafted from the farm's
-  playbook" *(class 3; speed-to-lead is a vital, so age is shown in minutes)*. ② "Postcard v2
-  scored 8.4 against your criteria — approve the print run" *(class 2; the score's why is
-  attached)*. ③ "512 Elm's photos arrived — the listing page is staged" *(class 5)*.
+  playbook" *(class 2 — the first-touch routine holds this drafted reply at its gate, an
+  approval blocking running work per §3.2.3's disambiguation; speed-to-lead is a vital, so age
+  is shown in minutes)*. ② "Postcard v2 scored 8.4 against your criteria — approve the print
+  run" *(class 2; within the class, ① outranks it on impact — speed-to-lead is the business;
+  the score's why is attached)*. ③ "512 Elm's photos arrived — the listing page is staged"
+  *(class 5)*.
 - **Counsel stance:** broker-mentor — coaches on pricing and timing with the Playbook's evidence,
   names the compliance rule when one applies (never a vibe).
 - **Terminology:** "Routine" for recurring work (the family's word); listings vocabulary
@@ -557,25 +601,45 @@ in isolation, it feels purpose-built; read all six, the skeleton is unmistakable
 
 - **Presentation:** "Business · Murals & commissions" · edge "artwork → Clothing brand ·
   granted, revocable".
-- **Vitals:** **Commissions** (each job's stage: inquiry → concept → deposit → wall → final;
-  warn = a job stalled past its stage's dwell) · **Inquiries** (unanswered count and age) ·
-  **Deposits** (owed vs. received) · **Portfolio momentum** (new finished work entering the
-  portfolio).
-- **Areas (5):** **Commissions** (view · board by stage) · **Concepts** (workshop ·
-  gallery/variants bench — where wall mock-ups diverge, get critiqued against the client's
-  space, converge) · **Portfolio** (view · gallery; matures toward a curation workshop per
-  4.3) · **Inquiries** (view · each with site photos and space notes attached) · **Money**
-  (view). *Unformed:* "could grow here: Prints & products · Site".
+- **Vitals:** **Commissions** (each job's stage: inquiry → concept → deposit → wall → final —
+  stages computed from rows per 08 §2.2: the inbound thread, the committed concept, the paid
+  deposit row, the final photos entering the portfolio; **wall** alone is a declared judgment
+  stage — the piece is physically being painted, which no row can evidence — drag-on, dated and
+  stamped as operator judgment; warn = a job stalled past its stage's dwell) · **Inquiries**
+  (unanswered count and age) · **Deposits** (owed vs. received) · **Portfolio momentum** (new
+  finished work entering the portfolio).
+- **Areas (6):** **Commissions** (view · board by stage, evidence rules above) · **Concepts**
+  (workshop · gallery/variants bench — where wall mock-ups diverge, get critiqued against the
+  client's space, converge) · **Portfolio** (view · gallery; its outward job is winning walls —
+  any curated selection shares as a revocable external page whose visits annotate the pieces,
+  07 §2.5; matures toward a curation workshop per 4.3) · **Outreach** (workshop · table+map
+  bench — the opportunity-discovery pattern, 16 §14: the watch's catch as scored rows (fit ·
+  effort · evidence), a map flank clustering walls, RFPs, and calls by neighborhood and kind;
+  moves: enrich, score-rows, cluster, sample-check, promote — a promoted opportunity becomes a
+  pitch mission or a commission record; pitch drafts are critiqued against the genome's
+  mural-pitch criteria pack, and every score opens its evidence rows) · **Inquiries** (view ·
+  each with site photos and space notes attached) · **Money** (view). *Unformed:* "could grow
+  here: Prints & products · Site".
 - **Desk, a Tuesday:** ① "The brewery picked concept #3 — deposit invoice drafted" *(class 3)*.
   ② "Restaurant inquiry: their wall photos are in; two concept directions staged for you to
-  diverge from" *(class 5; opens the Concepts bench with photos in the Palette)*. ③ "School
-  mural: final photos owed for the portfolio — that's what closes the job" *(class 5)*.
+  diverge from" *(class 5; opens the Concepts bench with photos in the Palette)*. ③ "Two new
+  wall RFPs match your style — pitch drafts staged from the mural criteria pack" *(class 6 —
+  the watch's catch; opens the Outreach bench with each fit score's evidence rows one tap
+  deep)*.
 - **Counsel stance:** gallerist-producer — protects studio time, prices from evidence, describes
   only what is visible in an artwork and never invents a title or a price.
 - **Terminology:** "Studio" for every workshop; commissions vocabulary throughout ("the wall",
   "the piece", "the deposit").
-- **Automations:** inquiry acknowledgment (drafts only), deposit reminders.
-- **Birth posture:** Create. **Ceremony:** one confirm + connection grants.
+- **Automations:** inquiry acknowledgment (drafts only), deposit reminders, and the
+  **opportunity watch** — opt-in, its sources, cadence, and cost named on the Proposal at
+  charter (public-art and percent-for-art RFP feeds · new-construction and blank-wall permit
+  scans · developer and festival calls); it fills the Outreach bench and stages pitches
+  propose-only, never sends.
+- **Birth posture:** Create. **Ceremony:** proposal + connection grants — rung 2 (09 §5–6).
+  The utterance is venture-weight; the Proposal is not: the inquiry-mailbox grant, the
+  deposit-reminder sends, and the opportunity watch's rows price it live from one confirm up
+  to the proposal rung. The rung is computed from the Proposal's contents, never a hybrid
+  label.
 
 ### 7.4 Clothing brand — the apparel venture (S1)
 
@@ -587,8 +651,9 @@ in isolation, it feels purpose-built; read all six, the skeleton is unmistakable
   per 2.5.2) · **Money** (spend against plan).
 - **Areas (5):** **Collection** (workshop · gallery/variants bench — variant sets, tournaments,
   place-on-product) · **Brand** (workshop · document+gallery — voice, palette, criteria) ·
-  **Launch** (workshop · timeline/planner bench) · **Store** (view → the site as deep artifact)
-  · **Content** (workshop · board bench). *More:* Suppliers, Money.
+  **Launch** (workshop · timeline/planner bench) · **Store** (workshop · the deep-artifact
+  pattern of 4.3; shelf leads with the framed store site, builder from the frame) ·
+  **Content** (workshop · board bench). *More:* Suppliers, Money.
 - **Desk, a Tuesday:** ① "Tournament result: two hoodie variants above bar — converge, or breed
   a third round from #2" *(class 4, resuming yesterday's session at its ledger)*. ② "Your
   brother granted three new pieces — place-on-product is staged" *(class 3, provenance chips
@@ -599,15 +664,20 @@ in isolation, it feels purpose-built; read all six, the skeleton is unmistakable
 - **Terminology:** "Drops" for launches — the events; the missions running them keep the word
   "Mission" (reserved, 6.2.12); "Studio" throughout.
 - **Automations:** none at charter; content cadence proposed only after launch.
-- **Birth posture:** Create. **Ceremony:** one confirm.
+- **Birth posture:** Create. **Ceremony:** venture rung — a light Proposal, one confirm (09 §6).
+  The artwork authorization is the Proposal's one connections row, and it does not raise this
+  world's rung because the grant is decided from the artist world's side (a Queue item scoped
+  there — constitution §13, doc 10 §J4.1); rows asking for sending or money connections of its
+  own would raise it live (09 §5).
 
 ### 7.5 Inbox automation — "Support inbox"
 
 - **Presentation:** "Automation · Support inbox · running since May · last ran 6:40 this
   morning".
-- **Vitals:** Heartbeat · Intervention rate · Latency (spec in §2.4).
+- **Vitals:** Heartbeat · Intervention rate · Latency · Misfires (spec in §2.4).
 - **Areas (3):** **Activity** (view · the ledger of every draft and send, each with its
-  heartbeat chip and flight recorder) · **Recipes** (workshop · flow bench — the rules it
+  heartbeat chip, flight recorder, and a per-row "shouldn't have fired" mark — the misfire
+  ledger's entry gesture, 17 §5.3) · **Recipes** (workshop · flow bench — the rules it
   follows; this *is* the background capability's workshop, drive mode automated, same six-part
   anatomy) · **Conversations** (view). *More:* Reports.
 - **Desk, a Tuesday:** ① "One needs you: a refund request outside policy — draft attached,
@@ -626,12 +696,18 @@ in isolation, it feels purpose-built; read all six, the skeleton is unmistakable
 - **Presentation:** the question itself is the name; a quiet "Exploration" tag; nothing else —
   no money, no counterparty, no dates.
 - **Vitals:** none (§2.4). Momentum + open beacons only. This Face cannot warn.
-- **Areas (1 at birth):** **the Map** (view · map/graph — the exploration's living record,
-  document 04). Grown by territory, not by charter: **Sources** materializes when readings
-  accumulate; **Theories** (workshop · map+table bench — hypotheses, evidence edges,
-  predictions) when competing explanations appear; **Experiments** (workshop · sim/lab bench)
-  when a hypothesis wants testing. Each mounts silently or by one-line proposal — never a
-  setup step.
+- **Areas (1 at birth):** **the Map** (view — **the door to the exploration surface**, which is
+  the map's one structural home: the area's body lists and rolls up the world's explorations;
+  opening one lands map-forward at the exploration's own address (`/w/:world/x/:exploration` —
+  04 §3, 11 §6.2), and the live map *is* that surface, one widen-toggle from the world's whole
+  knowledge graph (04 §11). The map is never an area body of its own and never an artifact —
+  committed **snapshots** minted from an exploration's commit rail are the research-map
+  artifacts of 07 §5, and only the snapshot wears a frame and a rail). Grown by territory, not
+  by charter: **Sources** (view) materializes when readings accumulate; **Theories** (workshop ·
+  map+table bench — hypotheses, evidence edges, predictions) when competing explanations
+  appear; **Experiments** (workshop · sim/lab bench) when a hypothesis wants testing — areas
+  that accumulate *around* the exploration, distinct from the map's own node types (04 §3.2).
+  Each mounts silently or by one-line proposal — never a setup step.
 - **Desk, some evening:** ① "You parked: 'do hives *vote*, or converge?' — your held guess:
   quorum sensing" *(resume at that exact map node)*. ② "Your consensus notes connect to the
   scheduling idea in the Stoke world — worth a look?" *(a memory-surfaced adjacency, patterns
@@ -658,7 +734,7 @@ The six dressings, side by side, against the grammar's fixed questions:
 | **First area** | Site | Listings | Commissions | Collection | Activity | the Map |
 | **Counsel stance** | service-minded | broker-mentor | gallerist | creative director | dispatcher | socratic |
 | **Birth posture** | Execute | Execute | Create | Create | Observe | Think |
-| **Recurring work** | Automations | Routines | reminders only | none yet | is one | none |
+| **Recurring work** | Automations | Routines | reminders · the watch | none yet | is one | none |
 
 Six unmistakably different rooms. And yet every column answers the same five questions in the
 same five places with the same five gestures:
@@ -690,7 +766,12 @@ The failure modes this chapter exists to prevent, restated as its acceptance cri
 
 *Cross-references: `_constitution.md` §5 (the skeleton this document elaborates), §6 (workshop
 anatomy), §11 (creation and inheritance); 01-experience-principles.md (P3, P5, P6, P9, P10);
-02-shell.md (what surrounds a world); 04-explore.md (the Map and in-world Explore); 06-work.md
-(missions and automations flowing through the Desk); 07-artifacts.md (frames and deep
-artifacts); 16-workshop-system.md (the full workshop treatment behind workshop-areas);
-13-acceptance-tests.md (the criteria in §8 operationalized).*
+02-shell.md (what surrounds a world); 04-explore.md (the exploration surface the Map area opens,
+and in-world Explore); 06-work.md (missions and automations flowing through the Desk);
+07-artifacts.md (frames, deep artifacts, and research-map snapshots); 08-multi-world-management.md
+(the stage-evidence rules boards inherit, §2.2); 09-creation-and-genesis.md (the ceremony ladder
+§7's dressings price from); 11-information-architecture.md (the route grammar that encodes
+session ownership and the exploration address); 16-workshop-system.md (the full workshop
+treatment behind workshop-areas, incl. the Site Studio §13.3 and opportunity discovery §14);
+17-mastery-and-learning-loops.md (judgment reps §4.5, the misfire ledger §5.3, the knowledge
+gate §6.2); 13-acceptance-tests.md (the criteria in §8 operationalized).*

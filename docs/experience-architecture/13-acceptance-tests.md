@@ -33,10 +33,12 @@ or a marker-string search. Where a test needs seeded data, the seed is part of t
 threshold appears (60 seconds, one tap, two minutes), the threshold is binding until
 `14-open-decisions.md` revises it with evidence.
 
-**The cast.** Tests reuse the canonical worlds so setups stay concrete: *Jane's Bakery* (website
-client), *Rossi Plumbing* (second client), *Mom's Real Estate* (family business), *the brother's
-art world*, *the apparel venture*, *the bee-hives rabbit hole*, *the agency world* that serves
-the clients.
+**The cast.** Tests reuse the canonical worlds (10 Appendix A's cast table) so setups stay
+concrete: *Jane's Bakery* (website client), *Rossi Plumbing* (second client — this document's
+independent exemplar, per 10 Appendix A's footnote; not a journeys cast member), *Mom's Real
+Estate* (family business), *Dave Kowalski* (the agent world derived from it), *Marco's Murals*
+(the brother's art world), *Thread & Stone* (the apparel venture), *the bee-hives rabbit hole*,
+*Podcast Outreach* (the outbound automation world), *the agency world* that serves the clients.
 
 ---
 
@@ -66,8 +68,10 @@ Proposal arrives generic and ignores the operator's established pattern; the pat
 derived world without a proposal; or intake re-asks anything the funnel already produced (the
 scrape, the audit, the thread history must be in the newborn world).
 
-**Binds:** documents 09 (creation), 01 (P14), 03 (dressing/layering), 15 (blueprint). Surfaces:
-the Bar, the interpretation chip, the Proposal, the Charter, intake-as-next-moves.
+**Binds:** documents 09 (creation), 01 (P14), 03 (dressing/layering), 15 (blueprint — written
+last per constitution §16; until it lands this binding is held open in `14-open-decisions.md`
+OD-12, not waived). Surfaces: the Bar, the interpretation chip, the Proposal, the Charter,
+intake-as-next-moves.
 
 ---
 
@@ -86,7 +90,11 @@ prominent orbs stay within the attention band regardless of inventory. There is 
 Queue. World 101 appears as a row in the client lens and nowhere else new — zero new navigation
 items anywhere. Reaching any of the 100 worlds by name or meaning through the Bar or switcher
 takes the same gesture count as at 5 worlds. "How's Rossi doing?" asked from inside the apparel
-world is answered from real rows without leaving it.
+world is answered from real rows without leaving it — a read-only, evidence-linked answer in
+place, never a place or scope change. (The property stands; the answering affordance it demands
+— an in-place cross-scope answer, in the fire-and-stay spirit of 02 §3.7 — is not yet specified
+by 02 §3 or 08. Per §0 that is a defect in those documents, filed in `14-open-decisions.md`;
+anything beyond a read-only answer routes as 02 specifies.)
 
 **Fail:** Any chrome element that exists only because world count grew; a second queue, inbox,
 or notification center; Home scroll length proportional to inventory; a dormant world rendering
@@ -167,14 +175,14 @@ disposable chat."
 
 **Setup:** Grow the bee-hives rabbit hole across three weeks of sessions: a map of ~40 nodes,
 six parked beacons, two competing hypotheses with evidence edges, three artifacts (a diagram, a
-dataset, a sim run), several threads. Then: (1) abandon it untouched for a month; (2) return;
-(3) say "this could be a business — a pollination-audit service for orchards," and charter the
-promotion.
+dataset, a sim run), several threads. Then: (1) abandon it untouched for two months — safely
+past the six-week dormancy default that 04 §9.2 owns as the contract; (2) return; (3) say "this
+could be a business — a pollination-audit service for orchards," and charter the promotion.
 
 **Pass — the disposability half:** Nothing in Explore ever asked to be saved (no save control
 exists); every session's map, branches, and beacons are in the world's memory automatically.
-After the idle month the world is dormant — absent from the Field, findable by meaning — and
-returning renders the full map exactly as left, beacons still open and listed.
+After the two idle months the world is dormant — absent from the Field, findable by meaning —
+and returning renders the full map exactly as left, beacons still open and listed.
 
 **Pass — the promotion half:** Promotion is proposal → charter, experienced as the world growing
 around the map: after charter it is the *same world* (same identity, same map in place as the
@@ -257,7 +265,11 @@ worker run rows, the Queue, heartbeat trace.
 **Setup:** Two task-parity gauntlets, each a written list of tasks a competent standalone tool
 performs natively. **Builder gauntlet** (against a Lovable-class app builder): open a client
 site from its artifact frame; navigate files; make a code edit with diff; see the live preview
-update; branch, compare branches; add a dependency; deploy — through the world's gate. **Apparel
+update; branch, compare branches; add a dependency; define a schema change and apply it to the
+live backend — the migration staged as a diff-carrying Queue item (07 §8.5 row 5); connect a
+payments integration as an explicit scoped grant the artifact's frame lists (row 6); repair a
+live production error from its Queue item, Fix landing in the Builder at the failing point
+(row 8); deploy — through the world's gate. **Apparel
 gauntlet** (against a standalone design tool): generate a variant set from a brief; constrain
 ("more luxury, same palette"); run a tournament compare; score against the craft criteria;
 place-on-product; export production-ready assets via the commit rail.
@@ -270,7 +282,10 @@ from the frame; nowhere does a site or app flatten into a thumbnail card with a 
 
 **Fail:** Any gauntlet task that requires exporting to an external tool; a "preview only"
 rendering where the standalone tool would edit; a deep bench missing Ledger or commit rail
-(depth without the grammar fails too); one generic editor pretending to edit two kinds.
+(depth without the grammar fails too); a Builder bench missing any of 07 §8.5's eight depth
+rows — database configuration, integrations, and live-error repair included; removing one to
+"simplify" is a constitution §15 violation, not a cleanup (07 §9); one generic editor
+pretending to edit two kinds.
 
 **Binds:** documents 07 (artifacts and the Builder), 16 (bench archetypes), 05. Surfaces:
 artifact frame, the Builder bench, the gallery bench, the Palette, commit rail.
@@ -467,6 +482,106 @@ inheritance section, playbook cards, provenance chips, the knowledge gate.
 
 ---
 
+### AT-16 · Sibling Inheritance and Adoption
+
+**Anchors:** constitution §11 (inheritance without breakage); 09 §10; 17 §7.2 (the scrubbing
+contract); principles P11, P14.
+
+**Setup:** Mom's Real Estate is hand-built — no funnel record exists, no learned setup exists
+(this is the sibling-reference path, distinct from AT-01's funnel-born client). Seed it with
+distinctive marker strings in its contacts, listings, sold prices, and thread history. Three
+beats: (1) **n=2** — "set Dave Kowalski up like Mom"; (2) **the compound step** — approve the
+learned-setup proposal the second assembly triggers; (3) **n=50** — a year on, the setup
+adopted ×49, several derived worlds carrying local overrides of the open-house follow-up and
+one having declined a prior adopt-proposal, the operator improves the follow-up inside Dave's
+world and says "make this standard."
+
+**Pass:** The n=2 Proposal drafts from the **sibling reference** ("based on Mom's setup"),
+provenance on every row, and AT-01's count holds on this path too: zero mandatory assembly
+actions between utterance and charter (the isolation review and Dave's own grant rows are
+ceremony, not assembly). A marker search of Dave's world — seeds, Palette, intake, Counsel
+context — finds zero Mom markers: seed artifacts arrive as recipe-flagged templates with typed
+slots, their stripped elements listed on the row, and a seed whose value *is* Mom's data is
+refused with the reason stated. Propagation is gated and proposal-only in both directions: the
+Dave-earned improvement reaches the shared layer through the knowledge gate with its evidence,
+then reaches all 49 derived worlds as **adopt / adapt / decline** proposals — never mutation;
+the world with a conflicting local override sees the conflict rendered as a diff against *its
+own* version; the world that declined is remembered and not re-offered the same proposal;
+batch-adopt from the lens stages per-world approvals.
+
+**Fail:** Any Mom datum — name, contact, sold price, thread — in Dave's world's seeds or
+context; a Proposal that arrives generic instead of drafted from the sibling; any derived
+world mutated without a proposal; a conflicting override silently overwritten, or its diff
+shown only against the shared version; a declined proposal re-offered unchanged; batch-adopt
+approving as one undifferentiated blob.
+
+**Binds:** documents 09 (§10 layering and the walkthrough), 03 (dressing/layering), 08
+(adoption lenses, batch-adopt), 17 (the scrub contract). Surfaces: the Proposal's stack line
+and seed rows, scrub previews, the knowledge gate, adopt-proposal Queue items, the
+adoption-state lens column.
+
+---
+
+### AT-17 · Automation Without a Workflow-Builder
+
+**Anchors:** constitution §6 (drive-mode continuity — "never an interface switch"), §14 (the
+three layers — inspect always available, never first); 10 §5.2.
+
+**Setup:** Replay J5a's maturation: two weeks of hand, Counsel, and worker outreach sessions
+in Podcast Outreach; on the third Monday the system proposes the weekly Automation; after
+charter, the operator edits the recipe twice by sentence at the Bar ("skip hosts I've emailed
+before"; "make the follow-up 7 days, not 5") and, separately and deliberately, opens the
+Automation's own workshop to inspect.
+
+**Pass:** The promotion proposal renders the recipe **as prose plus the Ledger** — trigger,
+steps in plain language, connections, gates, budget — and the whole path from proposal through
+both sentence edits completes with the flow bench never rendered. Each sentence edit becomes a
+recipe step through the gate, and the Ledger's provenance answers "where did this step come
+from?" with the sentence (or session decision) that became it. The flow bench is reachable:
+opening the Automation's workshop shows the same recipe on it, inspectable and hand-editable —
+but it is the third layer; at no point on the create or edit path is a flow or node surface a
+prerequisite.
+
+**Fail:** Any mandatory visit to a flow or node surface to create, understand, or edit the
+automation; a recipe whose steps cannot be read as prose; a sentence edit that only applies
+via the bench; a recipe change that skips the gate; the inspect layer missing entirely —
+reachable-but-never-required is the property, so hiding the bench fails too.
+
+**Binds:** documents 05 (recipes, arming), 16 (the flow bench), 06 (Standing Orders), 10
+(J5a). Surfaces: the promotion proposal, the recipe (prose + Ledger), the Bar, the flow bench,
+the gate.
+
+---
+
+### AT-18 · Mastery Reps Are Staged
+
+**Anchors:** constitution §12.4 (calibration), §5 (the Desk's anticipation doctrine); 17 §4.5,
+§10.4 (the rep test).
+
+**Setup:** Seed the apparel world with three ready reps: an open prediction whose outcome data
+has arrived, an overnight variant batch not yet scored, and two Playbook candidates awaiting
+the gate. Then run a scripted ten-session sequence in the craft.
+
+**Pass:** Within the next three Desk renders, each seeded rep is staged as a move — "close
+this prediction — the data's in", "score the overnight variants blind", "two Playbook
+candidates await your gate" — under the three-slot discipline, alongside production and
+approvals, never in a separate practice area. Blind scoring is offered, not forced. At the end
+of the ten-session run the operator's calibration record shows at least one closed prediction,
+at least one blind-review delta, and at least one operator-authored criterion in the pack —
+17 §10.4's rep test, decided from the record — and the record is reachable from the world (the
+Observe posture stages the Calibration view).
+
+**Fail:** A seeded rep that never stages; Desk staging that is production and approvals only;
+a mastery rep forced (a mandatory blind score violates zero-decisions-to-start); reps living
+in a separate practice surface; the ten-session run ending with an empty calibration record
+while §4.5's staging classes were available.
+
+**Binds:** documents 03 (the Desk's staging classes, the three-slot discipline), 16 (session
+grammar), 17 (mastery). Surfaces: the Desk's staged moves, the Calibration view, the criteria
+pack, the knowledge gate.
+
+---
+
 ## 3. Guard checks — small invariants, run with every checkpoint
 
 Compact tests; same fields, terser. Each is still blocking.
@@ -521,10 +636,15 @@ the Bar.
 | AT-13 critique | · | · | · | · | · | ● | · | · | ● | ● |
 | AT-14 anti-generic | · | ● | · | · | · | · | · | · | ● | ● |
 | AT-15 patterns-travel | · | · | · | · | · | · | ● | ● | · | ● |
+| AT-16 sibling-adoption | · | ● | · | · | · | · | ● | ● | · | ● |
+| AT-17 no-flow-builder | · | · | · | ● | ● | · | · | · | ● | · |
+| AT-18 mastery-reps | · | ● | · | · | · | · | · | · | ● | ● |
 
 Documents 01 (principles), 10 (journeys), 11 (IA), 12 (wireframes), and 15 (blueprint) are bound
 by the whole suite: journeys must walk through passing states, wireframes must depict every pass
-condition's affordance, the IA and blueprint must leave no test structurally impossible. G-1
+condition's affordance, the IA and blueprint must leave no test structurally impossible. (15 is
+written last per constitution §16; until it lands, its bindings are held open in
+`14-open-decisions.md` OD-12, not waived.) G-1
 through G-5 bind every checkpoint of every document.
 
 A design change that would flip any cell from pass to fail is a constitutional question, and it

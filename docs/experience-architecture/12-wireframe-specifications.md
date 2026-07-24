@@ -3,8 +3,9 @@
 *Phase 3, document 12. Textual wireframes — ASCII layout blocks, annotated element lists, and
 state/interaction notes — for the ten screens and states a prototyper should build first. Every
 layout here is a rendering of decisions already made: the shell (02), the world grammar (03),
-Explore (04), work (06), the portfolio (08), creation (09), the IA and its addresses (11), and
-the workshop system (16). Nothing in this document invents behavior; where a pixel-level call had
+Explore (04), capabilities and automation (05), work (06), artifacts and the Builder (07), the
+portfolio (08), creation (09), the IA and its addresses (11), the workshop system (16), and the
+mastery loops (17). Nothing in this document invents behavior; where a pixel-level call had
 to be made (panel widths, which region docks where, what a label literally says), this document
 makes it and says so. Grounded in the constitution throughout; no anti-goal in §15 is violated by
 any frame below.*
@@ -58,6 +59,17 @@ fixes them:
 | Standing Order | **"Automation"** (or "Routine" per world skin) |
 | genome / setup stack | **"setup"**, only in creation surfaces |
 | criteria pack | **"criteria"** — always shown with its version ("your criteria v3") |
+| posture | annotation-only (03 §5.1) — the dial is four unlabeled dots (§0.1); an automation's autonomy stance renders in bare words ("drafts for your approval — never auto-sends"), never under a "posture" label |
+
+One rule about speech, since labels and utterances are different things: the Bar's router
+*understands* spec-word synonyms — an operator who says "per the ledger" routes to the
+session's History, because input is interpreted, never validated against this table. But no
+exemplar utterance quoted in these frames, or shipped as prototype copy, placeholder text, or
+teaching examples, may model spec vocabulary: the canonical hand-off renders in display words
+— *"worker: 10 more like #3 overnight, from where we left off."* The string audit (13's
+"History not Ledger" check) covers labels; this rule covers the speech the product teaches by
+example. (The spec-voiced utterances in the upstream documents are spec prose, not UI copy;
+where they are quoted *on screen*, they are translated.)
 
 ### 0.3 The chrome, on every frame
 
@@ -102,7 +114,7 @@ is forbidden to tell is a dead clock faking normalcy.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ (empty)                                                             Pulse [2·0·1·✓]    │
+│ (empty)                                                             Pulse [5·0·1·✓]    │
 │                                                                                        │
 │  «Tuesday, 8:40. A mostly quiet night.»                                                │
 │  «While you were away — the client hunt added 14 prospects ▸; 3 follow-ups queued      │
@@ -176,6 +188,10 @@ is forbidden to tell is a dead clock faking normalcy.
   worth a look), every clause a `▸` to its rows. Calibration is portfolio news: closed
   predictions render with the running hit-rate (mastery, constitution §12.4). At 100 worlds the
   Brief is *not* longer — it is attention-ranked, and quiet worlds contribute zero sentences.
+  The Pulse and the Brief count the same rows (AT-11): in §1.1 the first segment's **5**
+  approvals are the 3 follow-ups, the postcard print run, and the aging speed-to-lead draft;
+  the **1** needs-you is Kessler's site review. A frame whose Pulse and Brief disagree is
+  drawn wrong.
 - **Lens chips** — built-ins first, then saved views, tail under `More ▾`. Tapping morphs the
   Field in place (W7); scope chip stays `Home`.
 - **The Field** — six attention classes, ≤9 worlds in full presence, running-quiet compressed
@@ -264,6 +280,13 @@ Opened from the Pulse, `Cmd+.`, `/queue`, or any waiting badge anywhere. A right
 │                                                  │ ▸ [Mom's Real Estate] · print run · │
 │                                                  │   Mission: Spring farm drop, step   │
 │                                                  │   3 of 6 — approving resumes it     │
+│                                                  │ ▸ [Jane's Bakery] · lesson proposal │
+│                                                  │   ✎ outcomes · «Tuesday sends beat  │
+│                                                  │   Thursday» — 9 sends, 3 replies ▸  │
+│                                                  │   evidence rows inline · claim and  │
+│                                                  │   scope editable at the gate        │
+│                                                  │  (Approve a)(Edit claim e)(Decline  │
+│                                                  │   d — records why)                  │
 │                                                  │ ▸ [Harbor Dental · Dr. Okafor] ·    │
 │                                                  │   ▪ went quiet Sun · review-request │
 │                                                  │   routine ⟲ (Retry)(Fix ▸)(Pause)   │
@@ -291,6 +314,13 @@ Opened from the Pulse, `Cmd+.`, `/queue`, or any waiting badge anywhere. A right
   Mixed classes never batch.
 - **Earned-autonomy offer** lives on the class header, cites its evidence count, and is itself
   an approval. Declining silences it until the streak doubles.
+- **The knowledge gate is an item class, not a footnote** — the lesson-proposal row (02
+  §4.2; 17 §6.2) carries the whole decision like every other item: the proposed Playbook
+  entry's claim in plain words, its evidence rows inline (n and window), scope, and
+  provenance. `e` edits the claim or scope right at the gate — the edit is recorded; Decline
+  asks *why* and records it, so the same lesson is never re-proposed on the same evidence.
+  Approve activates it on the world's Playbook (W3a). Nothing steers behavior without having
+  passed this human.
 - **Failure citizenship** — the went-quiet item carries the Activity excerpt and remedies
   (Retry · Fix opens the exact surface · Pause). Never a toast.
 - **Approving the mission-gated item** fires a 6-second transient («Spring farm drop resumed»)
@@ -368,7 +398,11 @@ Landing for every world-level entry (`/w/janes-bakery`). Client dressing per 03 
   five states, each `▸` to its rows; no composite score, ever.
 - **NEXT** — ≤3 staged moves, each with its visible reason (`✎`/`⟲` names the evidence), each
   opening the exact working surface pre-dressed in one gesture. The Desk offers; it never
-  executes its own suggestions.
+  executes its own suggestions. As drawn, ① and ② are both class-2 judgment owed (03 §3.2):
+  each is an approval a paused routine waits on (the follow-ups pending ①, the chase at its
+  gate in ②), ranked within the class by impact and age; ③ is class-5 forward motion. A reply
+  whose staged response holds at a gate is class 2, not class 3 (03 §3.2.3's disambiguation) —
+  the drawn order implements the precedence, not an exception to it.
 - **RUNNING** — one line per mission (plan state ▸ opens W9) and per automation (heartbeat
   chip `⟲` opens W10; `⏸` is the one-gesture pause, right on the row). A paused or quiet
   routine renders loud here and cannot compress.
@@ -403,6 +437,75 @@ decides inline. Areas collapse behind one row. Craft entry points defer to deskt
 Face chip with counterparty stamp (header, always) · scope chip agreeing with it (Bar) · edge
 sentence + grants indicator · `⟲` per automation row and Brief-fed lines · `✎` provenance on
 staged-move reasons and artifact frames · outcome annotation chips on RECENT · `⏸` per row.
+
+### 3.5 W3a — the world's Playbook, with a promotion's scrub preview
+
+`/w/janes-bakery/playbook` — a **reserved world view**, not an area (11's mediation), reached
+by the Bar ("show the playbook"), from Think/Observe staging on the Desk, and from any cited
+lesson chip anywhere; lessons anchor as `#l:id`, the calibration view as `#calibration`
+(11 §6.2, 17 §6). This is the one place mastery is its own surface; everywhere else it rides
+the chrome of ordinary work (§11 check 7).
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ [Jane's Bakery · Client · Jane Alvarez] › Playbook                  Pulse [2·0·1·✓]    │
+│  8 active · 1 at the gate ▸ · 1 challenged · calibration: 7 of 9 calls right ▸         │
+│────────────────────────────────────────────────────────────────────────────────────────│
+│  AT THE GATE (1)                                                                       │
+│   «Tuesday sends beat Thursday» · candidate ✎outcomes · 9 sends, 3 replies ▸ ·         │
+│   scope: client follow-ups — decide in the Queue ▸ (the same item drawn in W2)         │
+│  ACTIVE (8)                                                                            │
+│   «Review asks convert after visits, not invoices» · 14 rows over 6 weeks ▸ ·          │
+│   scope: review requests · earned here, Feb · gate: you ✎ · cited by: review           │
+│   routine ⟲ and every session's Palette ▸                 ( edit ) ( retire )          │
+│   «Morning posts outdraw evening 2:1» · 22 rows ▸ · scope: social       + 6 more ▸     │
+│  CHALLENGED (1)                                                                        │
+│   «Postcards beat letters» ⚠ 2 conflicting rows attached ▸ — review staged on          │
+│   the Desk ▸ · says so wherever it is cited until resolved                             │
+│  AGING                                                                                 │
+│   «Discount codes lift walk-ins» · earned 14 months ago — dated when cited ▸           │
+│  ──────────────────────────────────────────────────────────────────────────────────    │
+│  CALIBRATION  7 of 9 right ▸ — each row: prediction · outcome · your one-line verdict  │
+│  ──────────────────────────────────────────────────────────────────────────────────    │
+│  PROMOTE TO YOUR CLIENT SETUP — the scrub preview                                      │
+│  «2-step review request after completed visits» — exactly as it will exist in the      │
+│  shared layer. travels: the step shape · the criteria line · the effect summary        │
+│  (n=14, 6 weeks — rows stay here; operator-only link ▸) · send window generalized      │
+│  to a range, confirm per client (was: Jane's 10:00)                                    │
+│  removed: Jane's contacts · her reply rows · her revenue lines — every one listed      │
+│  ( Promote — an approval ) ( Not now )  · a pattern that can't scrub cleanly is        │
+│  refused with the reason stated; its empty *format* may promote instead                │
+│                 ┌────────────────────────────────────────────────┐                     │
+│                 │ [Jane's Bakery · Jane ▾]  show the playbook…   │                     │
+│                 └────────────────────────────────────────────────┘                     │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Elements.** Lesson cards draw the five-part object whole (17 §6.1): claim in plain words ·
+evidence with n and window, linked · scope · provenance (where earned, when, whose gate) ·
+status (candidate / active / aging / challenged / retired); a card missing a part is
+malformed. The gate itself lives in the Queue — the at-the-gate row *is* the W2 item, and
+deciding it here opens that item with the decision inline; approving flips the card to
+active in place. Challenged and aging are loud states, not archive bins: challenged cards
+carry their conflicting rows and stage the review on the Desk; aging cards date their
+evidence wherever cited. The calibration strip's hit-rate is the same number the Brief
+cites (W1) — one count, two doors. The **scrub preview** is the promotion's whole anatomy
+(17 §7.2): the pattern exactly as it will exist in the shared layer, every stripped element
+listed, every generalized figure named with what it was; the evidence *summary* travels,
+the rows stay home behind an operator-only link. Promote is an approval like any other;
+a refusal states its reason.
+
+**States.** *Empty:* *"no lessons yet — outcomes propose them; nothing is learned behind
+your back."* *Loading:* cards render whole or not at all — a claim never renders without
+its evidence door. *Error:* a lesson whose evidence rows can't be read renders its claim
+grayed with *"can't verify — last checked …"*; it is not citable while unverifiable.
+
+**Mobile.** **Full** — reading lessons, gating candidates, and closing predictions are
+judgment reps, and judgment is the phone's job (17 §4).
+
+**Chips.** Status chip per card · `✎` on gates and provenance · `⟲` on cited-by rows ·
+outcome-annotation counts as evidence doors · scope chip and context header unchanged —
+the Playbook is a view of this world, never a place outside it.
 
 ---
 
@@ -492,7 +595,7 @@ source nodes carry `✎` to their rows; a cross-world adjacency card carries pro
 
 ---
 
-## 5. W5 — The Proposal / Charter: a client world with connection grants
+## 5. W5 — The Proposal / Charter: a client world with grants; and W5b, "make this real"
 
 One screen, reached when the interpretation chip read `→ new client world · Harbor Dental —
 will propose setup + connection grants`. Rung 3 shown (counterparty identity involved).
@@ -593,6 +696,78 @@ acknowledgment included. Grant actions render as full-width rows.
 earn-lines) · scope chip `[Harbor Dental (proposed)]` · inheritance cards name where each
 pattern was earned · no counterparty stamp yet — it mounts at charter.
 
+### 5.5 W5b — "Make this real": the promotion Proposal, drawn around the live map
+
+The same Proposal grammar at the venture rung, reached from the quiet offer in W1's Brief
+("the bee-hive exploration has returned 4 times — make it real?") or the utterance; the
+interpretation chip renders growth, not creation: `→ Bee hives · grow into: venture`
+(04 §10). The regional deltas from W5 are binding: the map is the centerpiece, not a seed
+list; areas are annotated with the branches they grow from; asks derive from beacons; a
+"what carries" region replaces "starts with"; and at this rung there is no grants section,
+no isolation acknowledgment — one confirm.
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ [why do bee hives work? · Exploration]                              Pulse [2·0·1·✓]    │
+│  GROW INTO A VENTURE — nothing moves; the world re-dresses around what you built       │
+│                                                                                        │
+│      ┌ THE MAP — the centerpiece, live, untouched ─────────────────────────────┐       │
+│      │   [waggle dance]──[swarm consensus]──[stigmergy]──[markets]             │       │
+│      │   31 nodes · 2 theories · ⚑ 2 beacons held · 9 sources                  │       │
+│      └─────────────────────────────────────────────────────────────────────────┘       │
+│                                                                                        │
+│  Hive Works — swarm-logic scheduling      (name — suggested from the map's center      │
+│                                            of gravity; edit in place)                  │
+│  SETUP  «Venture — grown from this exploration, not based on a template»               │
+│                                                                                        │
+│  WHAT MOUNTS — each area grows from a branch; the territory becomes the floor plan     │
+│   Prototype — from the "hive-inspired scheduling" branch ✎ 11 nodes      ( remove )    │
+│   Positioning — from the economics branch ✎ 6 nodes                      ( remove )    │
+│  WHAT IT WILL ASK   «who is this for?» — asked only because the map doesn't answer     │
+│   it; nothing the exploration answered is re-asked. The 2 held beacons become the      │
+│   Desk's first asks ▸                                                                  │
+│  WHAT IT WANTS TO RUN   none — ventures start quiet                                    │
+│  WHAT CARRIES   the map, in place: every node still opens its original excerpts —      │
+│   zero copies, zero exports. Theories with staked predictions become tracked calls     │
+│   in the calibration view ▸. Sources become the first knowledge cards in every         │
+│   workshop session here.                                                               │
+│  IT INHERITS   [positioning checklist — earned across 3 launches ▸]      ( decline )   │
+│  FIRST MISSION  «talk to 5 scheduling teams; test the quorum model» ✎ compiled from    │
+│   the strongest branch — editable ▸                                                    │
+│                                                                                        │
+│                       ( Make it real )        ← one confirm — venture rung             │
+│                 ┌────────────────────────────────────────────────┐                     │
+│                 │ [Bee hives (growing) ▾]  also handle…          │                     │
+│                 └────────────────────────────────────────────────┘                     │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Elements.** Everything is a drafted decision, editable inline, exactly as in W5 — remove
+an area, decline the inheritance, edit the mission. Adding money flows or a counterparty
+here recomputes the rung live (W5 §5.1's rule): the grants and isolation regions fade in
+and the ceremony heavies on screen. The map region is not an illustration — it is the live
+map, scrollable, every node a door; the Proposal is drawn *around* it because the world
+grows around it.
+
+**State — beat 4, the re-dress (binding, 04 §10).** On confirm there is no navigation, no
+new tab, no progress theater. The same place re-dresses in one continuous motion: the Face
+gains its venture presentation and health semantics (open questions + discoveries give way
+to momentum and commitments); areas fade in *around* the map; the map settles into its
+permanent place as the world's **knowledge core** — the graph view every future session
+draws on. The context header, the scope chip, the address, the world's name in every old
+thread, and its Continue-rail rows: unchanged. It was always one world. The other honesty
+states are W5's (§5.2), unchanged: the Proposal renders only when whole; empty regions say
+so ("Automations: none — ventures start quiet"); an uninferable fact becomes an inline
+question, never an error.
+
+**Mobile.** **Full**, like W5 — the map region renders as its summary strip (nodes ·
+theories · beacons, each a door) with the full map one tap away.
+
+**Chips.** `✎` on every area naming its source branch and node count · `⚑` beacons carried
+into the asks region · calibration door on carried predictions · scope chip
+`[Bee hives (growing)]` — the name, not a new identity; no counterparty stamp, no grant
+rows at this rung.
+
 ---
 
 ## 6. W6 — A Workshop in session, twice
@@ -611,7 +786,7 @@ pattern was earned · no counterparty stamp yet — it mounts at charter.
 │ This world   │  SET A — heritage (8)      scored ✓        │ [Thread & Stone ▾] ← scope │
 │  brand kit ▸ │  ┌────┐ ┌────┐ ┌────┐ ┌────┐               │                            │
 │  spring drop │  │ #1 │ │ #3 │ │ #4 │ │ #9 │  + 4 more     │ «Spring's heritage pieces  │
-│  artifacts   │  │7.9 │ │8.6✦│ │8.1 │ │6.9*│               │ outperformed. Marcus       │
+│  artifacts   │  │7.9 │ │8.6✦│ │8.1 │ │6.9*│               │ outperformed. Marco        │
 │  (✦ hoodie:  │  └────┘ └────┘ └────┘ └────┘               │ granted three new works    │
 │  61% of rev) │  * kept below bar — your reason recorded ▸ │ in June — unused.» ▸ ▸     │
 │ Knowledge    │                                            │                            │
@@ -621,12 +796,12 @@ pattern was earned · no counterparty stamp yet — it mounts at charter.
 │  ▸ evidence  │                                            │  brand fit 8 — collar      │
 │  criteria v3▸│  SET B — athletic — killed by you:         │   reads heritage           │
 │ Granted      │  "we tried athletic in spring; it died" ▸  │  distinctiveness 8         │
-│  Marcus's    │                                            │  feasibility 8             │
+│  Marco's     │                                            │  feasibility 8             │
 │  artwork ×3  │  ┌ compare ─────────────┐  TOURNAMENT      │  = 8.6  (score first, then │
 │  ✎ granted   │  │  #3   vs   #4        │  6 entries ·     │  see mine — blind toggle)  │
 │  from        │  │  [    ] | [    ]     │  round 2 of 3 ▸  │                            │
-│  Marcus's    │  │  zoom synced         │  ( pick winner ) │ ( what do you think? )     │
-│  studio ·    │  └──────────────────────┘                  │ ( score what's left )      │
+│  Marco's     │  │  zoom synced         │  ( pick winner ) │ ( what do you think? )     │
+│  Murals ·    │  └──────────────────────┘                  │ ( score what's left )      │
 │  revocable   │                                            │                            │
 │ This session │                                            │                            │
 │  worker batch│                                            │                            │
@@ -712,7 +887,7 @@ honestly. *Sample-check* is the honesty move: hand-inspect a random n, fixes rec
 merge fills fork C per row from each business's real audit rows — merge fields render as
 holes until filled with cited values. Commit stages **12 drafts at the Queue as a batch**
 (walked in W2); the third materially-identical session surfaces the quiet promotion offer,
-evidence-linked.
+evidence-linked — the proposal card it opens is drawn in W10 §10.5.
 
 **States.** *Empty flank:* *"no rows staged — this session started from the document"*.
 *Loading:* row provenance loads before row action; a row without its audit artifact shows the
@@ -731,7 +906,7 @@ History with the same driver stamps; the desktop bench opens later exactly where
 
 Context header three segments (Face › area › session) · scope chip = the world · constraints
 ribbon chips each with `✎` when sourced (playbook, a March decision) · criteria version chip
-(`v3 ▸`, editable) · `✎ granted from Marcus's studio · revocable` on every granted item and
+(`v3 ▸`, editable) · `✎ granted from Marco's Murals · revocable` on every granted item and
 every bench use of it · driver stamps on all History entries · outcome annotations on Palette
 artifacts · suppression sourced to its standing list.
 
@@ -756,7 +931,7 @@ artifacts · suppression sourced to its standing list.
 │  won Mar 12  │ ◉ Brightwell  │  awaiting YOUR │   May 2]        │                      │
 │              │  Vet          │  approval      │ ◉ Harbor Dental │                      │
 │              │  step 4 of 5 ▸│  [1 waiting]   │  ▪ went quiet ⟲ │                      │
-│              │               │ ◉ Harbor Dental│ ◉ Oak Realty ✓  │                      │
+│              │               │ ◉ Cortez Paving│ ◉ Oak Realty ✓  │                      │
 │              │               │  sign-off sent │  opened ▸ 2d    │                      │
 │              │               │  3d ago — aging│ ◉ Pinehill ✓    │                      │
 │              │               │  ▸ nudge staged│  replied ▸ 4h   │                      │
@@ -777,8 +952,10 @@ artifacts · suppression sourced to its standing list.
   stage* the move through that world's gate.
 - **Card anatomy** — Face chip (counterparty-stamped) · honest one-line state · declared
   signal fields (post-send signals: delivered/opened/clicked/replied with age; money standing)
-  · badges from real counts (`[1 waiting]`, `⟲` states). A row renders only its own world's
-  data — fifty scopes side by side, never aggregated across the counterparty line.
+  · badges from real counts (`[1 waiting]`, `⟲` states). A world is **one card in exactly
+  one stage** — competing signals render as badges on that one card, never as a second card.
+  A row renders only its own world's data — fifty scopes side by side, never aggregated
+  across the counterparty line.
 - **The drop** — tap the card → that world's Desk, pre-focused on the card's reason (Kessler
   lands with "Review the finished site" staged and the compare open). Tap a **signal cell**
   (`replied ▸`) → the exact thread, scrolled to the reply. Tap a **waiting badge** → the Queue
@@ -816,7 +993,7 @@ from the site artifact's frame ("open the studio"); there is no builder front do
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │ [Harbor Dental · Client · Dr. Okafor] › Site ›                     Pulse [2·0·1·✓]     │
-│  session "build: family-practice one-pager"                                            │
+│  session "build: family-practice one-pager"          History ▸ · Where you left off    │
 │  ┌ WORLD CONTEXT ────────────────────────────────────────────────────────────────────┐ │
 │  │ artifact: harbordental.com · v4 (draft) · publish: staged → Queue ▸ · versions ▸  │ │
 │  │ [brief ✎ "Site strategy" session ▸] [audit ✎ "no online booking; 11 broken        │ │
@@ -825,18 +1002,23 @@ from the site artifact's frame ("open the studio"); there is no builder front do
 │  └───────────────────────────────────────────────────────────────────────────────────┘ │
 │──────────────┬─────────────────────────────────┬───────────────────────────────────────│
 │ FILES        │  EDITOR                         │  PREVIEW — branch: hero-B   [⇄ A|B]   │
-│  index       │   …the working file…            │  ┌ desktop ┐ ┌ tablet ┐ ┌ phone ┐     │
-│  styles      │                                 │  │ [ hero ]│ │        │ │ book  │     │
-│  booking     │   counsel: «variant B puts      │  │ [ book ]│ │        │ │ below │     │
-│  branches:   │   booking below the fold on     │  │         │ │        │ │ fold ⚠│     │
-│   main       │   mobile — books-an-appointment │  └─────────┘ └────────┘ └───────┘     │
-│   hero-B ●   │   scores 5 there. A keeps it    │  checks: responsive ✓ · links ✓ ·     │
-│  diff vs     │   above on all widths.» ▸       │  a11y ⚠ 1 contrast ▸ · honest-claims ✓ │
-│  main ▸      │                                 │                                       │
+│  index       │   …the working file…            │  truth: fast preview (approximate —   │
+│  styles      │                                 │  labeled) · run full runtime ▸ ·      │
+│  booking     │   counsel: «variant B puts      │  terminal ▸ (full runtime only)       │
+│  data ▸      │   booking below the fold on     │  ┌ desktop ┐ ┌ tablet ┐ ┌ phone ┐     │
+│  integrations│   mobile — books-an-appointment │  │ [ hero ]│ │        │ │ book  │     │
+│   2 granted ▸│   scores 5 there. A keeps it    │  │ [ book ]│ │        │ │ below │     │
+│  branches:   │   above on all widths.» ▸       │  │         │ │        │ │ fold ⚠│     │
+│   main       │                                 │  └─────────┘ └────────┘ └───────┘     │
+│   hero-B ●   │                                 │  checks: responsive ✓ · links ✓ ·     │
+│  diff·merge ▸│                                 │  a11y ⚠ 1 contrast ▸ · honest-claims ✓ │
 │──────────────┴─────────────────────────────────┴───────────────────────────────────────│
-│  generate · edit · branch · diff · test-responsive · run-checks · deploy (→ Queue)     │
-│     each: ( do it | ask | overnight… )                                                 │
-│  Commit ▸  → version on the site's rail  → Mission step done  → Hand off               │
+│  plan · generate · edit · run checks · test widths · branch · compare branches ·       │
+│  merge · configure data · connect an integration · deploy (→ Queue) · repair           │
+│     each: ( do it | ask | overnight… ) — the full set, never a curated subset          │
+│  Commit ▸  → version on the site's rail  → Mission step done  → Automation             │
+│  → template — this build as the client-site starting point, through the gate           │
+│  → mount back — the app becomes an area + verbs in this world  → Hand off              │
 │                 ┌────────────────────────────────────────────────┐                     │
 │                 │ [Harbor Dental · Dr. Okafor ▾]  make the hero… │                     │
 │                 └────────────────────────────────────────────────┘                     │
@@ -851,13 +1033,36 @@ from the site artifact's frame ("open the studio"); there is no builder front do
   intake constraint, and the criteria pack. The strip is why a build session can never open
   generic: the anti-generic invariant made visible.
 - **Same six parts, uncompromised depth**: files/branches left, editor center, live preview
-  right with the device matrix; branch previews compare side by side (`⇄ A|B`); diffs for the
-  internals. The Counsel critiques against the same site pack the strategy session used —
-  execution does not lower the craft bar.
+  right with the device matrix; branch previews compare side by side (`⇄ A|B`); diffs and
+  readiness-gated merges for the internals (`diff·merge ▸`). The Counsel critiques against
+  the same site pack the strategy session used — execution does not lower the craft bar. The
+  session header carries the History link and *Where you left off*, like every bench (W6).
+- **Two truths, labeled** — the preview pane always names which truth you are seeing: the
+  **fast preview** is instant, approximate, and labeled as such; the **full runtime** is the
+  true compile with real behavior and the **terminal**. "Verified" is claimable only from
+  the full runtime (07 §8.2, P9), and approval compares render from it, never from the fast
+  preview (07 §4.2).
+- **The Moves rail is the full set** — plan · generate · edit · run checks · test widths ·
+  branch · compare branches · merge · configure data · connect an integration · deploy ·
+  repair (07 §8.2). All twelve are always present; situational surfacing may reorder the
+  rail (*repair* leads while a check fails; *configure data* leads inside the data panel) —
+  surfacing changes order, never membership.
+- **Data and integrations are gated depth** — `configure data` opens the schema and console
+  behind the `data ▸` rail entry; **applying a change to a live backend is an exit → the
+  Queue, the migration shown as a diff**. `connect an integration` is an explicit scoped
+  grant with proposal-weight ceremony; the artifact's frame lists its connections the way a
+  Face lists grants (07 §8.5).
 - **Checks are honest rows** — each check opens its findings; *honest-claims* is a first-class
   check (no invented testimonials, no fake numbers in copy).
 - **Deploy is an exit, therefore a gate**: `deploy` stages at the Queue with the before/after
   compare and the live target named inline. No drive mode softens it.
+- **The Commit rail carries every exit** (constitution §6; 07 §8.2): → version on the
+  artifact's rail · → Mission step done · → **Automation** (recurring work distilled from
+  this session — the proposal card of W10 §10.5, e.g. "re-run checks and re-audit links
+  weekly") · → **template** (this build recipe-flagged as the client-site starting point,
+  through the gate, with provenance) · → **mount back** (the finished app becomes an area
+  body and cataloged verbs in its world) · → Hand off (the worker continues *this* session,
+  guided by the History).
 - **Mission continuity**: when this session is a mission step, committing marks the step done
   on the plan (W9) — work breathes between spine and bench without copies.
 
@@ -881,8 +1086,9 @@ desktop's.
 
 Context header with counterparty stamp · scope chip agreeing · artifact version + publish
 state chips · `✎` on brief/audit/playbook/constraint cards (session, artifact, playbook
-earn-line, intake answer) · criteria version chip · branch marker · check rows as evidence
-doors.
+earn-line, intake answer) · criteria version chip · branch marker · the preview pane's
+**truth label** (fast preview vs full runtime — never absent) · grant chips on connected
+integrations · check rows as evidence doors.
 
 ---
 
@@ -983,9 +1189,9 @@ provenance, a Brief clause, a lens cell. An overlay; Esc returns exactly.
 │ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~    │ when an invoice passes 3 days       │
 │                                                  │ overdue · ( ⏸ pause )               │
 │                                                  │ last ran Tue 07:00 · next: Thu 07:00│
-│                                                  │ posture: drafts for your approval — │
-│                                                  │ never auto-sends · 12 clean         │
-│                                                  │ approvals toward the next offer ▸   │
+│                                                  │ drafts for your approval — never    │
+│                                                  │ auto-sends · 12 clean approvals     │
+│                                                  │ toward the next offer ▸             │
 │                                                  │ this month: 6 sent of 40 cap ·      │
 │                                                  │ $0.60 of $5                         │
 │                                                  ├─────────────────────────────────────┤
@@ -1053,6 +1259,56 @@ work one-handed. The `⟲` chip opens it from any output on any device.
 autonomy-posture line in words · budget pair · consent/refusal counts with `▸` rows · `✎` from
 every output back to the run that made it · edit-diff chip on edited-then-approved drafts.
 
+### 10.5 Sub-state: the proposal this trace was born from
+
+Every Automation begins as this card (05 §7.2) — reached from a workshop's Commit rail
+("→ Automation", W6A/W6B/W8), from the noticed-repetition offer (the third
+materially-identical session, evidence-linked — W6B), from a world Proposal at charter
+(W5), or from the Bar. One proposal screen for all four births; recurring cost always asks
+once. Shown here for the routine W6B's commit rail proposes:
+
+```
+┌── place beneath, dimmed ─────────────────────────┬─────────────────────────────────────┐
+│ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~    │ PROPOSED — not yet running          │
+│                                                  │ Rung-2 outreach, quiet roofers —    │
+│                                                  │ [The Agency]                        │
+│                                                  │ WHAT IT WILL DO — the recipe, in    │
+│                                                  │ prose; every row ✎ to the sessions  │
+│                                                  │ that taught it:                     │
+│                                                  │  · watch prospects for rung-1       │
+│                                                  │    no-replies ✎ session, Mon ▸      │
+│                                                  │  · audit each site; draft value-    │
+│                                                  │    first rung-2 ✎ fork C ▸          │
+│                                                  │  · suppress no-consent rows —       │
+│                                                  │    fail closed ✎ standing list ▸    │
+│                                                  │ WHEN  Mondays 07:00 — your three    │
+│                                                  │  sessions' own cadence ✎ ▸          │
+│                                                  │ GATES  drafts only — every send     │
+│                                                  │  waits at the Queue; below-bar      │
+│                                                  │  work (keep ≥ 8) queues, never      │
+│                                                  │  ships. Stops loudly: a missed      │
+│                                                  │  run files to the Queue.            │
+│                                                  │ BUDGET  $2/run · cap 20 drafts/mo   │
+│                                                  │ AUTONOMY  born proposing — bottom   │
+│                                                  │  of the ladder, however trusted     │
+│                                                  │  its parent hand-offs were          │
+│                                                  │ «Distilled from: 3 hand-offs, 11    │
+│                                                  │  sessions — open the History it     │
+│                                                  │  learned from ▸»                    │
+│                                                  │ ( Make it a routine ) ( Not now )   │
+└──────────────────────────────────────────────────┴─────────────────────────────────────┘
+```
+
+The anatomy is binding (05 §7.2, 06 §3.6): the recipe in prose, each row `✎` to the
+sessions that taught it — an Automation is never a black box that appeared; it is the
+operator's own proven pattern, named, with its history attached. The trigger in plain
+words; the gate statements; the budget and cap as a real pair; and the born-proposing
+posture stated on the card, regardless of how trusted its parent hand-offs were (05 §7.3).
+Everything is editable inline before the confirm. **One confirm** births it armed
+propose-only; *Not now* declines quietly, and the offer waits for more evidence. Accepting
+lands on this trace's newborn state (§10.2): *"hasn't run yet — first run: Mon 07:00. Born
+proposing; it will draft, you decide."*
+
 ---
 
 ## 11. Cross-cutting acceptance checks for these wireframes
@@ -1068,7 +1324,8 @@ every output back to the run that made it · edit-diff chip on edited-then-appro
    was drawn wrong.
 4. **No architectural words.** Scan every quoted label: no Genome, Capability, Spine,
    Situation, or Line; History not Ledger; Activity not flight recorder; Run history not
-   heartbeat trace; setup not genome.
+   heartbeat trace; setup not genome; no "posture" label — the autonomy stance in bare
+   words (§0.2).
 5. **Honesty-state completeness.** Each wireframe specifies empty, loading, and error without
    theater: empties say words, loaders show no invented numbers, errors name what can't be
    verified and since when.
@@ -1076,7 +1333,9 @@ every output back to the run that made it · edit-diff chip on edited-then-appro
    no frame contains a path that navigates away to approve.
 7. **Workshop foundation.** Criteria versions, score-with-why, driver stamps, kill-with-why,
    outcome annotations, and calibration appear on W1, W2, W6, W8, and W9 — mastery is drawn
-   into the chrome of ordinary work, not into a separate surface.
+   into the chrome of ordinary work. And where mastery *is* its own surface — the Playbook
+   (W3a) — its gate anatomy is drawn, not implied: the candidate at the gate (the W2 item),
+   status states, the calibration strip, and the promotion's scrub preview.
 8. **Recurring-work visibility.** The `⟲` chip appears on every frame where automated output
    renders (W1, W2, W3, W7, W10), and pause is drawn within one gesture of each.
 9. **Scale invariance.** W1's two variants are the same screen; W7 absorbs the hundredth
@@ -1087,8 +1346,10 @@ every output back to the run that made it · edit-diff chip on edited-then-appro
 
 ---
 
-*Cross-references: 02 (shell, Queue, Home), 03 (Face/Desk/areas/postures), 04 (Explore), 06
-(missions, automations, the sixteen visibility mechanisms), 07 (frames and the Builder's
-door), 08 (lenses and the drop), 09 (Proposal/Charter), 11 (addresses these frames render
-at), 16 (the workshop grammar W6 and W8 draw), 17 (the mastery loops threaded through W1, W2,
-W6, W9), 13 (acceptance tests these checks feed).*
+*Cross-references: 02 (shell, Queue, Home), 03 (Face/Desk/areas/postures), 04 (Explore, and
+the promotion W5b draws beat by beat), 05 (automation births — W10 §10.5), 06 (missions,
+automations, the sixteen visibility mechanisms), 07 (frames, the Builder's door, and W8's
+full Moves set and two-truths preview), 08 (lenses and the drop), 09 (Proposal/Charter), 11
+(addresses these frames render at), 16 (the workshop grammar W6 and W8 draw), 17 (the mastery
+loops threaded through W1, W2, W6, W9 — and W3a's Playbook with its scrub preview), 13
+(acceptance tests these checks feed).*

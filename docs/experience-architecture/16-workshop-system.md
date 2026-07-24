@@ -199,9 +199,16 @@ by the gather beat:
    (constitution §12.1 — courseware never; concepts *in use*), and the criteria pack itself
    (which also renders inside critique).
 3. **Granted** — cross-world material admitted through explicit grants, every item wearing
-   its provenance chip ("artwork · granted from Marcus's studio · revocable"). Nothing
+   its provenance chip ("artwork · granted from Marco's Murals · revocable"). Nothing
    crosses worlds into a Palette without a grant (constitution §13); the chip travels onto
-   the bench and into every artifact that uses the material.
+   the bench and into every artifact that uses the material. One bounded rule governs
+   *findability*, and it moves awareness only, never material: something the operator owns
+   in a sibling world may appear in Palette search as a **reference listing** — metadata
+   only (name, kind, owning world), greyed, unplaceable on the bench, its single action
+   "request a grant" (the request routes through the owning world's gate; approval admits
+   it to this group with its chip). Material bound to a counterparty — commissioned work,
+   client deliverables, records of the relationship — never lists across worlds: for it,
+   search in another world simply misses, and the Counsel may only say where to ask.
 4. **This session** — sources gathered here: research results, uploads, clippings from an
    exploration map that rode along ("take this into a workshop", doc 04), material committed
    earlier in the session.
@@ -334,8 +341,14 @@ to DEVELOP.
 
 Nine archetypes cover all crafts; a craft picks one or composes two (a **primary** owns
 the center; a **secondary** docks as a flank — the scraper's flow+table, the theory
-workshop's map+table). Composition never exceeds two: a craft that seems to need three
-benches is two crafts, and should be two workshop-areas.
+workshop's map+table). Composition never exceeds two, and the cap binds **per session
+kind**: most workshops declare exactly one session kind, and a craft that seems to need
+three benches in one session is two crafts, and should be two workshop-areas. One
+sanctioned exception to the one-session-kind norm exists: a workshop built around a
+**deep artifact** (a site or app — the Builder's home, doc 07 §8) may declare two named
+session kinds — strategy and build — each composing at most two archetypes, sharing one
+shelf and one cross-session Ledger (§13.3 exercises this). No workshop declares a third
+session kind, and no session ever composes a third bench.
 
 For each archetype: what it renders, its native Moves, its comparison mode, and two
 example crafts.
@@ -350,6 +363,16 @@ example crafts.
 - **Comparison mode:** side-by-side lightbox (2–4 up, synchronized zoom) and **tournament
   brackets** — head-to-head rounds with per-round criteria scoring, the bracket itself a
   Ledger object.
+- **place-on-product, specified.** Product templates come from three sources, all visible
+  in the Palette with provenance: the genome's domain pack ships the base sets (the
+  apparel pack: garment mockups — tee, hoodie, long-sleeve, flat-lay — each with named
+  print placements, dimensions, and colorway slots; the ads pack: slot and storefront
+  frames); supplier catalogs extend them through connection grants; operator uploads join
+  as world assets. The move renders selected material onto a template non-destructively —
+  a new mockup variant, template provenance attached. When placed work commits, the rail's
+  **→ Artifact** exit offers the **production-ready export**: per-placement print files at
+  the template's stated dimensions, the placement spec, and colorway separations — carried
+  in the artifact's frame as its production body, provenance to this session.
 - **Example crafts:** apparel/collection design (§13.1); ad creative.
 
 ### 5.2 `document` — language work
@@ -681,16 +704,16 @@ and commits. Display names are the genome's; the grammar underneath is identical
 **Gather.** The operator says "start on the fall drop" at the Bar; the interpretation chip
 reads `→ Clothing brand · Collection Studio · new session`. The room opens grounded: the
 Palette holds the brand kit (palette, type, print rules), the spring drop's four artifacts
-wearing their outcome annotations ("heavyweight hoodie: 61% of revenue"), Marcus's granted
+wearing their outcome annotations ("heavyweight hoodie: 61% of revenue"), Marco's granted
 artwork with provenance chips, and two Playbook cards ("earth tones outsold brights 3:1 —
-evidence"). The Counsel situates: "Spring's heritage pieces outperformed. Marcus granted
+evidence"). The Counsel situates: "Spring's heritage pieces outperformed. Marco granted
 three new works in June — unused. Constraint from March still in force: no all-over
 prints." The criteria pack (v3: brand fit · print integrity · production feasibility ·
 distinctiveness · keep ≥ 8) sits on the ribbon.
 
 **Diverge.** "Give me three directions off the spring winners." The vary move (*ask*)
 lands three variant sets of four — *A: heritage*, *B: athletic*, *C: utility* — each
-named by its difference. The operator drags one of Marcus's pieces onto set A: "and a
+named by its difference. The operator drags one of Marco's pieces onto set A: "and a
 version of these carrying this." Four more land, provenance chips riding.
 
 **Develop.** Set B looks wrong immediately; the operator kills it — "we tried athletic in
@@ -715,10 +738,12 @@ budget $6, report by morning); confirmed in one glance. (3) The session parks.
 
 **Morning.** The Desk carries the report card: "10 variants from #3. 4 above bar (8.1–8.9),
 staged tournament-ready. 5 killed — whys attached ('3 drifted athletic — your March
-constraint'). 1 parked: needs the flat-lay photo not yet granted from Marcus's world.
+constraint'). 1 parked: needs the flat-lay photo not yet granted from Marco's world.
 Spent $4.10 of $6. Nothing sent, nothing published." Resume lands on the story; the
-operator runs the final tournament, place-on-product across the garment set, and commits
-**→ Mission: "produce the fall drop"** — seeded with the eight winners. The mission's
+operator runs the final tournament, place-on-product across the apparel pack's garment
+templates (tee, hoodie, long-sleeve — §5.1), and commits
+**→ Mission: "produce the fall drop"** — seeded with the eight winners and their
+production-ready exports (per-placement print files, dimensions, colorway separations). The mission's
 plan spine includes a sampling step that will, weeks later, annotate these artifacts with
 production outcomes — which is how pack v4 will learn that "production feasibility"
 deserved its place.
@@ -769,9 +794,14 @@ remains editable on this bench forever.
 
 ### 13.3 Website strategy + creation — the Site Studio
 
-*World:* a client world ("Harbor Dental"). *Area:* Site. *Benches:* strategy sessions on
-`document` + `board`; build sessions in the Builder (`code+preview`) — one workshop, two
-session kinds, one Ledger. *Counsel stance:* service-minded conversion strategist.
+*World:* a client world ("Harbor Dental"). *Area:* Site (a workshop-area — the
+deep-artifact exception, §5: its shelf leads with the framed site artifact beside the
+committed strategy work, and parked sessions of both kinds; opening the builder from
+that frame lands in a build session owned by this area — session addresses hang under
+it, never under a builder root — doc 03 §4.3, doc 11 §6.2). *Benches:* two named session
+kinds, each within the two-archetype cap — strategy sessions on `document` + `board`;
+build sessions in the Builder (`code+preview`) — one workshop, one shelf, one
+cross-session Ledger. *Counsel stance:* service-minded conversion strategist.
 *Session:* **"Site strategy: what should this site do?"**
 
 **Gather.** The world was spawned close-won, so the Palette is already rich: the scrape,
@@ -852,6 +882,16 @@ workshop and its Ledger remain the knowledge core, nothing exported.
 capability's workshop; default drive: automate). *Bench:* `flow` primary +
 `table/dataset` flank. *Counsel stance:* dispatcher — terse, exception-focused.
 *Session:* **"Stop missing supplier invoices."**
+
+**Where v1 came from.** A born-automated capability has no hand sessions to distill from,
+so Automation-kind genomes ship a **starter recipe**: a versioned workflow artifact,
+stated in prose on the charter Proposal ("it will file invoices, receipts, and
+newsletters; hold anything ambiguous for review") and labeled honestly on the bench and
+the heartbeat trace — "v1 — genome starter, not yet yours." From day one it is tunable by
+sentence at the Bar ("hold anything from a new sender") and by exception-review on the
+table flank; the flow bench is the inspect layer, never an obligation — no one is made to
+build a workflow to have one (doc 05 §5.2). Versions v2 and v3 were exactly such tunings;
+the session below is what a deeper edit looks like.
 
 **Gather.** Opened from a Queue item ("routine flagged: 3 supplier invoices filed as
 newsletters this month"). The flow bench shows recipe v3 as it runs today; the table
@@ -947,8 +987,9 @@ in the frame, and the honesty machinery keeps them so.
 3. **The six-part test.** Every workshop — including composed ones, including background
    capabilities' workshops, including the Builder — renders exactly Bench, Palette,
    Counsel, Moves, Ledger, commit rail. No seventh element; none missing.
-4. **The archetype test.** Every craft maps to one primary archetype (plus at most one
-   flank) from the nine; a craft needing three is two workshops.
+4. **The archetype test.** Every session kind maps to one primary archetype (plus at
+   most one flank) from the nine; a session kind needing three is two crafts. Only a
+   deep-artifact workshop (§5) declares a second session kind; none declares a third.
 5. **The cheap-material test.** Nothing on a bench is versioned, published, or
    outbound-capable until committed; kills need no ceremony; commits always mint frames
    with provenance to the Ledger.

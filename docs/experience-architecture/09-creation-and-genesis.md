@@ -167,9 +167,15 @@ One plain-language sentence stating what kind of world this is and where that ki
 > times."**
 
 Tapping the sentence unfolds the stack as layers, each a set of plain sentences ("mounts
-Outreach, Site, Invoices · runs the invoice chase weekly · asks for brand assets at intake"),
-each carrying provenance: *built-in* ("ships with the platform"), *learned* ("distilled from
-Jane + Kessler + 7 others, May"), or *sibling reference* ("based on Mom's setup" — see §10).
+Outreach, Site, Invoices · runs the invoice chase weekly · asks for brand assets at intake ·
+scores outreach against your outreach criteria v3"), each carrying provenance: *built-in*
+("ships with the platform"), *learned* ("distilled from Jane + Kessler + 7 others, May"), or
+*sibling reference* ("based on Mom's setup" — see §10). Judgment is part of the payload and
+is named like everything else: the criteria packs a layer arms its workshops with (17 §2.1)
+appear in its sentences with the same provenance treatment as playbook items — learned
+("outreach criteria v3 — sharpened across 9 clients") or starter ("apparel criteria: starter
+pack — edit these early", 16 §12.1). A workshop the Proposal mounts never arrives with
+unseen taste.
 The stack is inspectable because trust in the ×9 claim requires being able to see the nine.
 It is **not** a settings tree: layers are swapped or removed whole (§5), never tuned
 checkbox-by-checkbox at birth.
@@ -203,7 +209,9 @@ Costs are honest and specific; "~" marks estimates and the cap is the commitment
 What the world is born already containing — listed, tappable to preview, each with
 provenance: from the triggering record ("demo site · built during the pitch"), from the setup
 ("proposal template · your standard"), from an exploration's map at promotion (04 §10). Seeds
-are real artifacts with version rails from day one, not stationery.
+are real artifacts with version rails from day one, not stationery. A seed arriving by
+*sibling reference* crosses **scrubbed, never concrete**: it lands as a slot-bearing template
+with the stripped elements listed on its row, per §10 — never as the sibling's own artifact.
 
 ### 4.6 Intake — what it will ask, and when
 
@@ -228,12 +236,21 @@ The Proposal names every external connection the world needs, each as a **grant 
 > this world only."*
 > *"Read their Google Business reviews — uses: your Google connection. Scope: read-only,
 > this world only."*
+> *"Use **Marco's artwork** — the print-licensed set, 12 pieces — from **Marco's Murals**.
+> Approved from that world's Queue; revocable from either Face."*
 
 Rules, binding (constitution §11, §13): a grant names the connection, the direction
 (read/send/spend), and the scope, in words. **Nothing is inherited silently** — not the
 operator's own accounts, not a sibling world's credentials, nothing; every connection the
 world will touch is a row here, granted by charter or added later through the same explicit
-path. Grants not yet fulfillable (the client hasn't verified their domain) don't block
+path. Cross-world **asset grants** (constitution §13's mechanism) are grant sentences too,
+and live in this region: each names the source world, the asset set, and its revocability,
+and every later use of the asset carries the provenance chip. Their ceremony is priced where
+the decision is made: the approval executes in the *granting* world's Queue, as that world's
+steward (10 §J4.1; 03 §7.4), so an asset grant between two operator-owned worlds does **not**
+raise the requesting Proposal's rung (§6) — rows asking to send, spend, or act under a
+counterparty's identity are what recompute it (§5.1). Grants not yet fulfillable (the
+client hasn't verified their domain) don't block
 charter — they become intake asks with the affected automation shown as waiting on them.
 Every grant is visible and revocable on the world's Face afterward.
 
@@ -251,6 +268,27 @@ The bottom of the screen previews the first day: the staged next moves the Desk 
 with, and — when the intent implies one — the first mission, compiled and editable ("Onboard
 Harbor Dental: confirm scope → collect assets → site live by the 15th"). The operator charters
 a world *and can already see its tomorrow.*
+
+### 4.10 The promotion variant — when the Proposal grows an existing world
+
+When the Proposal grows a living exploration rather than birthing from nothing (04 §10 —
+"promotion reuses this ceremony"), the regions above hold, but four of them re-render around
+what already exists. 04 §10 beat 2 is the experiential spec; the region deltas, precisely:
+
+- **The map is the centerpiece.** The exploration's live map replaces the seed-artifacts
+  region (§4.5) — the territory *is* the seed, shown in place rather than listed.
+- **Areas are annotated with their branches** (§4.3's rows gain one clause): each mounting
+  area names the branch it grows from ("Positioning — from the economics branch"). The map's
+  territory visibly becomes the floor plan.
+- **What carries** — a region only this variant has: beacons become the Desk's first asks;
+  staked predictions become tracked calls in the calibration view; a running watch carries
+  over unchanged, restated with its cadence and cost.
+- **Intake derives from the map's gaps.** The asked-now/asked-later lists (§4.6) are computed
+  from beacons and open questions the map doesn't already answer — nothing the exploration
+  answered is re-asked (promotion-without-loss applied to questions).
+
+Everything else — grants (§4.7), automation rows (§4.4), inheritance (§4.8), the live rung
+recompute (§5.1) — is identical. One ceremony, two entrances.
 
 ### What the Proposal never contains
 
@@ -298,14 +336,22 @@ world exists so discoveries have somewhere to live, and 04 owns its life from he
 hole must cost nothing to start — this rung is the anti-goal test for the entire ladder: any
 process creep here is a constitutional violation.
 
-**Rung 1 — venture: one confirm.** *"I want to launch a clothing brand."* The chip reads
-`→ new venture — will propose the setup first`. The Proposal opens: name ("Thread & Stone" —
-suggested, edited), setup stack ("Venture + Brand + Commerce — built-in, informed by your
-Stoke launch"), five areas, **zero automations** (ventures start quiet), two seed artifacts
-(positioning one-pager template, launch checklist from the playbook), one assembly question
-("physical goods or print-on-demand?" — it changes which areas mount), no grants (nothing
-sends yet). Thirty seconds of reading, one removal (no Wholesale area yet), one confirm.
-The Desk opens with three staged moves. Total ceremony: one screen, one gesture.
+**Rung 1 — venture: one confirm.** *"I want to start a clothing brand around Marco's
+artwork."* The chip reads `→ new venture — will propose the setup first`. The Proposal opens:
+name ("Thread & Stone" — suggested, edited), setup stack ("Venture + Brand + Commerce —
+built-in, informed by your Stoke launch"), five areas, **zero automations** (ventures start
+quiet), two seed artifacts (positioning one-pager template, launch checklist from the
+playbook), one assembly question — "physical goods or print-on-demand?" — whose answer
+redraws the Proposal in place (§9): *print-on-demand* mounts no inventory machinery at all —
+fulfillment will route through the print-on-demand connection, granted when the Store forms
+at the money rung, and the Proposal says so; *physical goods* mounts **Suppliers** into the
+tail and marks the Store's future Orders view inventory-bearing, with the restock automation
+listed as an unformed option for when sales are real (03 §7.4's dressing, forked live). One
+connections row — the authorization of Marco's print-licensed artwork, an asset grant that
+does not raise the rung (§4.7: it is approved from the artist world's own Queue) — and no
+send or spend grants, because nothing sends yet. Thirty seconds of reading,
+one removal (no Wholesale area yet), one confirm. The Desk opens with three staged moves.
+Total ceremony: one screen, one gesture.
 
 **Rung 2 — client money: proposal + connection grants.** *"I just signed Harbor Dental —
 $500/mo, website plus automations."* The Proposal arrives fully drafted from the prospect
@@ -466,10 +512,27 @@ setup"** — a *sibling reference*: structure, areas, automations with Mom's tun
 criteria, and playbook patterns, drafted from Mom's world with provenance on every row. What
 does **not** come across, structurally: Mom's data (her contacts, her listings, her threads —
 patterns travel, data doesn't) and Mom's connections (Dana's MLS login, Dana's sending
-identity are fresh grant rows — never inherited, constitution §11). The operator renames,
-removes one automation, charters. Rung 2 (money moves). **And then the compound step fires:**
-this was the second hand-assembly of the same shape, so the system proposes, through the
-knowledge gate:
+identity are fresh grant rows — never inherited, constitution §11).
+
+**Sibling seeds cross scrubbed, never concrete.** Mom's proven artifacts that ride as seeds —
+the postcard recipe, the market-update template — arrive as **recipe-flagged templates**
+(07 §6), passed through the same scrub preview promoted patterns pass (17 §7.2), right on the
+Proposal: agent-identity content becomes typed slots (name, headshot, license number, the
+brokerage disclosure every mailing carries), counterparty facts are stripped outright, and
+the stripped elements are listed on the seed's row ("removed: every seller, every sold price;
+slots: name · license · disclosure"). Dana's answers fill the slots at intake, and the
+template refusal rule holds — a derived artifact cannot send while a slot is unfilled. A seed
+whose value *is* Mom's data (her sold-price case study) is refused with the reason stated;
+only its format may cross, empty (17 §7.2's refused-promotion path). Following the Proposal
+literally must never birth a world wearing another agent's name.
+
+The operator renames, removes one automation, reads the isolation acknowledgment, and
+charters. **Rung 3, not rung 2:** money moves, *and* the world will send under Dana's own
+identity — her sending-identity grant row is exactly what §6's heaviest rung prices, so the
+isolation review renders ("runs under Dana's name: …; her data stays here") and charter is
+two deliberate marks, however casual the words that started it. **And then the compound step
+fires:** this was the second hand-assembly of the same shape, so the system proposes, through
+the knowledge gate:
 
 > *"You've now set up the same real-estate-agent environment twice. Save it as a setup?
 > Contains: 5 areas, 3 automations (cadences from Mom's proven values), the listing
@@ -482,8 +545,10 @@ the whole thing backs off until the third assembly.
 
 **n=50.** A year later the operator runs a brokerage's worth of agents. Agent #50's proposal
 reads **"based on your real-estate agent setup — adopted ×49, refined 6 times"**, and the
-Proposal takes ten seconds because everything but the name and the grants is proven. The
-differences from n=2, precisely:
+Proposal takes under a minute *including the isolation review*, because everything but the
+name, the grants, and that review is proven — and those never compress: counterparty rungs
+of the ladder do not drop below one explicit review, at any n (10 §J2.3). The differences
+from n=2, precisely:
 
 - **The base is the learned setup**, not a sibling — Mom's world is now just its most senior
   adopter, with the same standing as every other.
@@ -493,9 +558,10 @@ differences from n=2, precisely:
   shows adoption state as a column; batch-adopt walks per-world approvals in one sitting.
   Every world that adapted rather than adopted keeps its variant, visibly.
 - **Nothing degrades with count.** #50 charters exactly like #2 did — same screen, same rung,
-  same grants ceremony (grants never batch: each world's connections are its own) — and
-  arrives smarter: ×49 of refinement, the brokerage playbook, honest provenance on every
-  inherited row. The hundredth-world test, applied to creation (08 §8).
+  same grants and isolation ceremony (these never batch: each world's connections, and each
+  counterparty's acknowledgment, are its own) — and arrives smarter: ×49 of refinement, the
+  brokerage playbook, honest provenance on every inherited row. The hundredth-world test,
+  applied to creation (08 §8).
 
 ## 11. Templates, and how setups are learned
 
@@ -524,7 +590,7 @@ Declined proposals back off on the standard rhythm (next trigger at double the e
 and a setup the operator never wanted can be retired from the catalog without touching the
 worlds that used it — they keep their layers; the catalog just stops offering it.
 
-## 12. Duplication prevention — at birth and after
+## 12. When the guess was wrong — duplicates, wrong kinds, regret
 
 Duplicates are fought at three moments, none of them with a warning dialog:
 
@@ -543,8 +609,49 @@ by counterparty and presentation line everywhere they render; the system never b
 
 **And the symmetric repair:** a chartered world that was a mistake costs one gesture to
 archive — ghosts doctrine, reachable forever, resurrectable by meaning. Creation can afford
-to be this fast *because* every wrong outcome (duplicate, wrong container, regret) has a
-cheap, lossless repair. Speed and safety are the same design.
+to be this fast *because* every wrong outcome (duplicate, wrong container, wrong kind,
+regret) has a cheap, lossless repair. Speed and safety are the same design.
+
+### 12.1 The wrong kind — "change setup", the sideways re-genome
+
+The remaining wrong outcome is a world born the wrong *kind*: the router heard "brother's
+business you serve" and chartered a Client with an isolation contract, when the truth was a
+family business run together (10 §J3.5 narrates the correction in situ). The repair is a
+**re-genome in place** — identity-preserving, like promotion (§4.10) and demotion (04 §10),
+but sideways — and this document owns its mechanics as it owns birth:
+
+- **The surface.** The Bar, like everything else (*"stop invoicing my brother — we run this
+  together"* → chip: `→ Marco's Murals · change setup: Client → family business`), or
+  "change setup" on the world's setup stack — the same stack §4.2 chartered, living on. Either
+  opens a **re-genome proposal**: the one-screen grammar of §4, drafted as a diff against the
+  world as it stands — what re-dresses, what it will now run, and what cannot move. Nothing
+  moves: areas, artifacts, Ledger, Playbook, and thread history stay, because evolution is
+  identity-preserving (operating model D6) and dressing is what changes (03 §6).
+- **The rung.** Computed live from the diff's contents, exactly as §5.1 prices birth, with
+  one binding asymmetry: a change that *adds* weight (money, a counterparty, identity sends)
+  re-opens the Proposal at the heavier rung with its grants and review (04 §10); and a change
+  that *dissolves* an isolation contract is never lighter than the review that created it —
+  the family-business correction charters with the dissolution review below on the same
+  screen, its acknowledgment beside the confirm (the §6 rung-3 shape, pointed in reverse).
+- **The isolation-dissolution review.** Every formerly counterparty-scoped item — the contact
+  list, the commission records, the conversation history, the consent rows — is shown and
+  **deliberately re-scoped to the world, item by item, never silently**. Consent and
+  suppression survive untouched: consent was given to a channel and a sender, not to a
+  setup, and stays honored by every automation after the change.
+- **Identity-bearing sends re-charter.** An automation that sent under the counterparty's
+  identity (the inquiry acknowledgment, as Marco) does not silently continue once the
+  contract that governed it dissolves: the re-genome proposal lists each such automation,
+  re-bound to a named sending-identity grant row — still visible, still revocable on the
+  Face, still consent-gated (06 §3.7's locks outlive the kind that installed them) — or
+  paused until granted. No send crosses the change unexamined.
+- **The money re-dress.** "Family business" is a Money dressing, not a new skeleton: Money
+  re-dresses from invoice-the-counterparty to shared income and costs — one ledger, no
+  invoices between the people who run the thing, the Face's money vital reading the shared
+  ledger. (Its full entry belongs beside its siblings in 03 §7's catalog.)
+
+The audit shape mirrors AT-05's: zero loss, explicit re-scoping, no silent data crossing.
+The wrong guess cost one staged move and a sentence — the designed price, and the reason the
+router is entitled to guess at all (§9).
 
 ## 13. Acceptance checks for this document
 
@@ -567,6 +674,13 @@ cheap, lossless repair. Speed and safety are the same design.
 12. No learned setup contains counterparty data, contacts, or credentials.
 13. Creating world #100 uses the same screen, rung, and gestures as world #2, and arrives
     with more provenance, not more process.
+14. A sibling-reference seed crosses only as a scrubbed, slot-bearing template — no
+    counterparty fact and no agent-identity content survives the crossing unslotted; a seed
+    whose value is the sibling's data is refused, its format promoting empty at most.
+15. A wrong-kind world is corrected in place by "change setup": identity, artifacts, and
+    memory persist; an isolation contract dissolves only through an explicit item-by-item
+    re-scoping review; identity-bearing automations re-charter or pause — nothing crosses
+    silently, nothing is lost.
 
 ## 14. Direct answers to the phase brief
 
@@ -582,13 +696,16 @@ cheap, lossless repair. Speed and safety are the same design.
 | What does the AI ask vs infer? | It infers everything memory, siblings, and the record can answer; it asks only assembly-changing questions (usually 0–2), inline on the Proposal; operating details defer to Desk asks; preferences default from the playbook (§9). |
 | How does inheritance work? | Setup = base + learned pattern + local overrides. Locals win; improvements move only as adopt/adapt/decline proposals downward and gate-approved promotions upward. Demonstrated at n=2 and n=50 (§10). |
 | Where do learned setups come from? | Repetition noticed (second assembly, repeated overrides, stabilized patterns) → evidence-linked proposal → knowledge gate. Structure and criteria travel; data never does (§11). |
-| What if creation goes wrong? | Wrong container: overrule at the chip, or split/merge later. Regret: one-gesture archive, lossless, resurrectable. Cheap repair is what makes fast creation safe (§3, §12). |
+| What if creation goes wrong? | Wrong container: overrule at the chip, or split/merge later. Wrong kind: "change setup" re-genomes in place, with an explicit dissolution review when an isolation contract falls away (§12.1). Regret: one-gesture archive, lossless, resurrectable. Cheap repair is what makes fast creation safe (§3, §12). |
 
 ---
 
 *Cross-references: 02 §3 (the Bar, chip, and scope mechanics this flow rides on); 03 (the Face,
 Desk, and staged-move grammar the newborn world opens into); 04 §10 (promotion as this ceremony
 applied to a living exploration); 05 (the automation and grant grammars the Proposal quotes);
-06 §3.6 (automation proposals; charter-time naming); 07 (seed artifacts and deep-artifact
-spawn); 08 §5–§6 (edges, lineage, the close-won seam at portfolio scale); 13 (acceptance tests
-derived from §13); 17 (the learning loops that make setups compound).*
+06 §3.6 (automation proposals; charter-time naming); 07 §6 and passim (recipe-flagged
+templates — the form sibling seeds cross in; deep-artifact spawn); 08 §5–§6 (edges, lineage,
+the close-won seam at portfolio scale); 10 §J2 and §J3.5 (the agent walkthroughs and the
+wrong-genome correction in situ); 13 (acceptance tests derived from §13); 17 §7.2 (the
+scrubbing contract sibling seeds and promoted patterns share) and the learning loops that
+make setups compound.*

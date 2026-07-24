@@ -377,7 +377,7 @@ Three roads into the same proposal:
 One card, everything editable inline, ceremony proportional to weight (P4 — this is recurring
 cost, so it always asks once):
 
-> **Routine: Monday content from the March recipe** · *world: Clothing brand*
+> **Automation: Monday content from the March recipe** · *world: Clothing brand*
 > **Runs:** Mondays 7am · **Does:** drafts 3 posts from the committed recipe, scored against
 > your criteria, keeps ≥ 8 · **Budget:** $2/run · **Asks you:** every post stages for
 > approval before publishing (this is where it starts — trust is earned, §8) · **Stops

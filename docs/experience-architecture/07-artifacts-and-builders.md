@@ -14,7 +14,7 @@ words. The interface shows none of them. The operator sees the thing by its kind
 "the postcard," "Jane's site," "the March report," "v7" — inside a consistent surface this
 document calls the frame. The Builder presents as a Studio like every workshop ("Site Studio,"
 "App Studio," skinnable per genome); "open the studio" is the door. Publish states show as
-display words: **Draft · Waiting · Live · Superseded · Retired** (documents out for signature
+display words: **Draft · Waiting · Approved · Live · Superseded · Retired** (documents out for signature
 additionally show **Awaiting signature · Signed · Declined** — §2.4). Where UI text is quoted,
 it is quoted in display language only.
 
@@ -67,7 +67,7 @@ flowchart TB
         ID["identity<br/>name · kind · world stamp"]
         RAIL["version rail (append-only)<br/>every version provenance-stamped"]
         PROV["provenance trail<br/>which session / mission / automation · from what<br/>tap → the Ledger at that exact moment"]
-        PUB["publish state<br/>Draft → Waiting → Live → Superseded/Retired"]
+        PUB["publish state<br/>Draft → Waiting → Approved → Live → Superseded/Retired"]
         ACT["Open · Compare · Share · Reuse · Publish · Explore this"]
     end
     subgraph BODY["THE BODY — kind-native, never generic"]
@@ -77,7 +77,7 @@ flowchart TB
     FRAME --- BODY
     WS["workshop commit rails<br/>(any craft, any drive)"] -->|"commit mints a version"| RAIL
     RAIL -->|"Publish"| QI["Queue item<br/>inline preview / diff · live target named"]
-    QI -->|"one approval — it really happens"| LIVE["Live · immutable ledger row"]
+    QI -->|"one approval — Approved<br/>while execution runs, then it really happens"| LIVE["Live · immutable ledger row"]
     LIVE --> ANN["outcomes annotate the artifact<br/>('3 replies' · '2 conversions') → Playbook"]
     ANN -.->|"evidence for reuse"| PAL["the Palette<br/>(cross-world = explicit grant)"]
     PAL -.->|"reference, never copy"| WS
@@ -140,15 +140,18 @@ The state machine, display words:
 |---|---|---|
 | **Draft** | exists only inside its world | — |
 | **Waiting** | a Queue item is staged; the gate has it | the exact Queue item, decision context inline |
+| **Approved** | the gate said yes; the exit is executing (the deploy running, the send leaving, the scheduled hour not yet struck) | the approval's ledger row + the executing work |
 | **Live** | it really happened; target named ("live at janesbakery.com" · "sent to Jane" · "posted ×2") | the ledger row + the live target |
 | **Superseded** | a later version is Live; this one was | its ledger row |
 | **Retired** | deliberately pulled back, through the gate | the retirement's ledger row |
 
-(One naming note: constitution §9 writes the machine "draft → approved → live." On screen,
-approval has no duration — the gate's one approval *executes* the exit (§4.1) — so the
-approved moment renders as the transition itself, **Waiting** is the staged state before it,
-and no "Approved" chip exists to go stale. The divergence is recorded in
-`14-open-decisions.md`, per the constitution's own header rule.)
+(One naming note: this is constitution §9's machine — "draft → approved → live" — elaborated,
+never replaced. **Waiting** names the staged state before the gate; **Approved** is the
+constitution's own state rendered honestly — the yes given, the execution in flight;
+**Superseded** and **Retired** are what Live becomes afterward. Where execution is
+instantaneous the Approved chip may live for only a moment, but it exists — so an approval
+whose execution stalls or fails has a true state to show, never a premature "Live." This
+conformance closes OD-13 in `14-open-decisions.md`.)
 
 Rules, binding: publishing *any* version — including re-publishing an old one ("make v6 live
 again") — stages through the Queue identically; rollback is cheap but never gateless. The state
@@ -249,8 +252,9 @@ rules like every surface.
 
 Publishing is one path for every kind and every drive mode (doc 05 §9): the artifact's Publish
 action (or a commit rail's exit, or an automation's output) stages a Queue item; the frame
-flips to **Waiting**; one approval executes it for real; the ledger row is written; the frame
-flips to **Live** with the target named. There is no second path, no kind-specific gate, no
+flips to **Waiting**; one approval flips it to **Approved** and executes it for real; when the
+exit completes, the ledger row is written and the frame flips to **Live** with the target
+named. There is no second path, no kind-specific gate, no
 genome-local approval flow (dressing contract, doc 03 §6.2.3).
 
 ### 4.2 The Queue item carries the whole decision

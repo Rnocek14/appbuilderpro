@@ -516,13 +516,24 @@ The learning system is the highest-pressure point on the isolation contract, bec
 *wants* to generalize. The boundaries, restated as they bind this document's mechanisms:
 
 1. **Lessons are world-scoped by default.** A Playbook belongs to its world. Nothing in it
-   reaches another world except as a §7 pattern, through the gate, past the scrub preview.
+   *grounds* another world except as a §7 pattern, through the gate, past the scrub preview.
    There is no global "insights" pool that quietly reads every world — cross-world
-   intelligence is exactly the set of promoted patterns and nothing else (anti-goal: no
-   cross-world leakage through global intelligence).
+   intelligence that steers work is exactly the set of promoted patterns and nothing else
+   (anti-goal: no cross-world leakage through global intelligence). One carve-out is named
+   and bounded: **adjacency pointers.** The portfolio-level index that already powers the
+   switcher's semantic search (constitution §3) may point the operator — and only the
+   operator — at their own material across their own worlds ("your pricing work in the
+   agency world landed two lessons adjacent to this theory" — the re-entry and Desk moves
+   of 04 §12 and 03 §7.6). A pointer is a signpost, never a payload: it is
+   provenance-stamped; it opens in its home world; it renders no counterparty-derived
+   evidence rows outside that world; it never appears on any counterparty-visible surface;
+   and it never enters another world's session grounding, Palette, or Counsel context.
+   Acting on a pointer still goes through the front doors — explicit mention + grant (§13)
+   for material, §7 promotion for lessons. Pointers surface; only patterns travel.
 2. **Counterparty outcomes stay home.** Outcome annotations built on a counterparty's data
    (Rosa's call rows, Dave's reply rows, a client's analytics) are that world's material.
-   They may power that world's lessons in full fidelity; only the scrubbed pattern may leave.
+   They may power that world's lessons in full fidelity; only the scrubbed pattern may
+   leave — an adjacency pointer (§9.1) may *reference* such a lesson, never carry its rows.
    Bulk surfaces and Lenses render each row's counterparty data within that row's scope only.
 3. **Consent is explicit at the measurement seam.** What a world observes about a
    counterparty is declared in the Proposal's connections block ("call log — for missed-call
@@ -566,7 +577,8 @@ Testable statements, in the style of doc 13 (which formalizes them):
    derived world was ever mutated without a proposal.
 7. **The scrub test.** Inspect any promoted pattern: its provenance resolves; nothing in it
    identifies or quantifies a counterparty; the refused-promotion path fires on a pattern
-   whose value is counterparty data.
+   whose value is counterparty data. Follow any adjacency pointer (§9.1): it is provenance-
+   stamped, it lands in its home world, and no counterparty-derived row renders outside it.
 8. **The no-silent-steering test.** For any recommendation, "why this?" terminates in cited
    lessons, pack entries, or rows — or the recommendation presents itself as a hypothesis.
 
@@ -579,8 +591,9 @@ the product leaves the operator — not just the platform — better at the unde
 *Cross-references: `_constitution.md` §1 (the metabolism), §6 (Workshops, critique, the
 Ledger), §11 (inheritance by proposal), §12 (mastery — elaborated here), §13 (isolation and
 provenance); 01-experience-principles.md (P1, P9, P11, P12, P14); 03-world-experience.md
-(the Desk's staging classes and the Observe posture); 04-explore-and-rabbit-hole.md
-(predictions and the calibration record's origin in theory work); 05-capabilities-studios-
+(the Desk's staging classes and the Observe posture; the §7.6 adjacency Desk move — bounded
+by §9.1's pointer carve-out); 04-explore-and-rabbit-hole.md (predictions and the calibration
+record's origin in theory work; the §12 re-entry adjacency — same bounds); 05-capabilities-studios-
 and-automation.md (measurement contracts, the red-pen loop, earned autonomy);
 06-missions-and-standing-orders.md (judged outcomes, heartbeat and misfire traces);
 07-artifacts-and-builders.md (the artifact frame the outcome ribbon lives on);
