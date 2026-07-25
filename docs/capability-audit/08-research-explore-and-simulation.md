@@ -63,6 +63,52 @@ the gap is pure surface and wiring.
 
 ---
 
+## 1.5 The three-layer reconciliation — shipped spike vs prototype vs experience docs
+
+The brief demands honesty about one specific confusion: this domain has THREE artifacts that
+all look like "the Explorer," and they are not the same thing. Layer by layer:
+
+1. **Shipped** (`src/pages/spike/` + `src/lib/garvis/clustering|universe|loops|currents|lab|
+   inquiry`): a drift-grammar Explorer. You enter an idea, currents pull you forward, the
+   galaxy is the zoom-out, artifacts accumulate on branches, everything persists. Real,
+   metered, verified pure cores. Its own file headers call it a spike; [R03 §3] files it
+   "OPERATIONAL, filed as EXPERIMENTAL… grade B 'does nothing unattended'."
+2. **Prototype** (`prototypes/explore-make-real.html`, P2): a dialogue-grammar Explorer —
+   conversation-forward with a map margin, sentence-level provenance highlighting, a "hold"
+   affordance, and the "make this real" grow-in-place ceremony. Its header states the contract:
+   *"Staged data, real timing. One self-contained file, zero external requests."* Nothing in it
+   executes against the real graph. Preserved per charter non-goals as a validated interaction
+   experiment.
+3. **Documented** ([EA-04], 672 lines): the full binding design — seven anti-disposable-chat
+   mechanisms, beacons with held guesses, theory cards with tallies, decay tiers
+   (active/cooling/dormant, 2wk/6wk canonical), re-entry stories, watches, fold-in/split,
+   promotion/demotion symmetry, nine acceptance checks.
+
+What reconciles them, per mechanism (the honest map from design to code):
+
+| [EA-04] mechanism | Shipped analogue | Gap class |
+|---|---|---|
+| No unscoped conversation (§2) | TRUE in Explore (lazy world birth, `universe.ts`); FALSE at the Command front door (verify-pinned refusal, §1 step 12) | PARTIAL |
+| The map is the record (§3) | Galaxy IS the primary surface; but no transcript-subordination — the spike has no persistent thread to subordinate | PARTIAL (different grammar) |
+| Parked thoughts are rows (§4.2) | `loops.ts` open-loop ledger — gap named, no guess held, localStorage-only | PARTIAL |
+| Nothing unsaved (§9.1) | TRUE — local-first + sync, "the universe only grows" [R05 §9.9] | WORKING |
+| Decay is rendering (§9.2) | Storage never deletes (TRUE); rendering tiers absent | DOCUMENTED-ONLY |
+| Provenance on everything made (§7) | Artifacts live on their spawning cluster; sim records carry basis; edges are typed | WORKING (weaker: no per-turn citation of map elements) |
+| Promotion zero re-entry (§10) | `compileBuildBrief` bridge — real but export-shaped, not identity-preserving | PARTIAL |
+| Branch combine/synthesis (§4.4) | `findBridge` exists on demand; no join ceremony, no guess-checking at joins | PARTIAL |
+| Watches on explorations (§9.3) | `watch_url` standing order exists globally 🔌 [R13 §6.3]; not mountable from an exploration surface | DISCONNECTED (two built halves, no wire) |
+| Theory cards, tallies, criteria packs (§5) | Typed edges + epistemic labels + COMPARE/THEORY instruments; no card, no tally, no packs | PARTIAL |
+| Inline sims (§6) | Lab bench opens from a branch; nothing runs in-thread | PARTIAL |
+| Voice explore-walk (§13) | Nothing | MISSING |
+
+The load-bearing conclusion: **the schema is not the gap.** `knowledge_worlds/_clusters/
+_cluster_edges/_artifacts` + `epistemic` + `charter` + `mind` jsonb + `working_state`
+[R04 §2c, §3.3] can carry every mechanism above. The gap is surface and wiring — which is
+exactly what the charter's "what must be TRUE underneath" test wants to hear, because it means
+the five prototypes were validated against a substrate that already exists.
+
+---
+
 ## 2. Chain 2 — DEEP RESEARCH (question → cited, persistent, compounding knowledge)
 
 | Step | Status | Evidence | Build/Buy | Owner object | Approval posture | Portfolio surface | Breaks at |

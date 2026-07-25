@@ -177,6 +177,29 @@ monotonic webhook ranks like DocuSign. Nothing about it is research; all of it i
 plumbing plus one enum value. Consistent with [03]: until then the shipped truth is
 "print-ready PDF + CSV + an honest log of what YOU mailed."
 
+### 4.1 The fulfillment cost model (why the approval design matters more than the vendor)
+
+- **Today's cost model is invisible to the system.** The operator pays retail print + postage
+  out-of-band and logs the batch after the fact (`logMailBatch` — "the ledger counts real
+  outreach" [R05 §9.4]). No cost row, no estimate, no ceiling; mail spend cannot appear on any
+  scorecard or anomaly check because it never enters the database as money.
+- **The specced model inverts this**: cost computed and shown BEFORE approval, and "the
+  approved estimate as a hard ceiling the executor enforces" [R14 #5] — hash-bound into the
+  approval payload exactly like content-week judge scores [R14 #2], so a drop can never cost
+  more than the human saw. This is the precondition for any `earned` posture on mail: autonomy
+  over irreversible physical spend is only safe when the ceiling is structural.
+- **Vendor economics** (from-knowledge; verify current rates at build): Lob and PostGrid both
+  price per piece with print + postage bundled and volume tiers, no equipment or minimum-run
+  capital — which is what makes T-ME viable (a 200-piece EDDM-floor drop [03 §1 step 6] is
+  purchasable without a print shop relationship). The margin story for the managed service is
+  the retainer over per-piece cost, so the per-client **spend-anomaly check** matters from the
+  first drop — and the in-house template for it already exists (`ads-watch` daily anomaly
+  watchdog [R13 §9.11]).
+- **Choice note for doc 11**: Lob is the specced primary (webhooks + verification designed
+  against its API shapes [R14 #5]); PostGrid/Click2Mail are the competitive bids; the CASS
+  step can ride the same vendor (Lob verify) or a dedicated one (Smarty/Melissa) — [03 §8 Q6]
+  lists the same candidates; keep the two audits' choices reconciled in doc 11.
+
 ---
 
 ## 5. The `send_sms` enum bug — blast radius (CONFIRMED [R10 #10])

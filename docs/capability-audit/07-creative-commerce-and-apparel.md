@@ -396,3 +396,6 @@ brand kit, criteria-pack machinery) means the mural build is not a detour but a 
 | Commission stage model (inquiry→wall→final) | DOCUMENTED-ONLY | XA 03 §7.3; timelines.ts is the mold [R05 §9.26] | T-10 | Mission | rides the six-people-tables debt [R03 §5] |
 | Deposits/invoicing for commissions | WORKING 🔌 | [R13 §7.10] [R05 §9.26] | T-ME | Standing Order | |
 | Client-venture commerce (Stripe Connect) | MISSING + EXT-REQUIRED | [D11 §2.5] | T-100 | Capability | consistent with doc 11; operator-own ventures unblocked now |
+| Creative vertical pack (detection + artist-economics seeds) | WORKING | verticals.ts:50,321 [R05 §9.14] | T-ME | Capability | detects mural/artist DNA; framework data, zero-AI floor |
+| Artist/apparel venture template (work-web as data) | MISSING | workweb.ts:243 — only two WEB_TEMPLATES exist | T-ME | Workshop | genesis detects the venture but cannot dress it; XA 03 §7.3/7.4 is the spec |
+| Wardrobe-room builder escape hatch | WORKING (misaimed) | orchestratorCases.verify.ts:79 | T-ME | Capability | honest today; re-route to the Apparel Workshop once it exists |

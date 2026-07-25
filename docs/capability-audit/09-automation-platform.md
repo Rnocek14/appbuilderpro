@@ -35,11 +35,29 @@ different physics:
 3. **The builder itself** — the factory that manufactures substrate #2, and increasingly the
    platform's answer to "automate something the registry can't": build an app that does it.
 
+Commercially, this domain IS the recurring-revenue engine: websites land the client, the
+automation tier ($500/mo class, per `client_subscriptions` tier `website_automation`
+[R04 app_0077]) is the upgrade, and `menuForVertical()` is "the upsell ladder's third rung"
+(`registry.ts:183`) — with ROI shown at the point of sale from real ledger rows [R03 §8]. The
+platform's ability to *operate* automations at scale is therefore not an internal quality
+question; it is the margin on the main product.
+
 The lifecycle audit below (§1) is where the charter's expectations land hardest: detection,
 design, config, execution, and monitoring are real and verified; **testing, repair, and
 versioning are MISSING essentially everywhere**, and the template library is code, not data.
 One live defect — the `send_sms` approval-enum gap [R10 #10] — is audited in §1.1 at its full
 blast radius, which is wider than "SMS doesn't send."
+
+**Domain DISCONNECTED register** (charter's central disease, automation-platform instances;
+global register in [01]):
+
+| # | Built thing | Not connected to | Repair shape |
+|---|---|---|---|
+| 1 | The SMS trigger channel (channel-aware core, per-client FROM routing, TCPA gates) | the `approval_kind` enum — every SMS fire dies at approval insert, silently, on the clock | one-line migration + §1.3 failure ledger |
+| 2 | The capability registry's honesty contract | shipped reality — `online_booking` still `not_built` though app_0109 shipped the rail (§1.6) | flip two statuses; then templates-as-data |
+| 3 | `booking` edge function (an automation clients pay for) | every deploy list — silently absent from a fresh environment [R13 §13.4] | add to deploy list |
+| 4 | Child automation substrates' run ledgers (per-app dead-letter + runs UI) | any parent-side surface — the operator is blind across clients' apps | one read-only fleet seam (§2.1) |
+| 5 | `build_app` orchestrator action + job-worker autopilot + deploy executors | each other — a mission can open the forge but cannot commission a build (§3) | route the action through autopilot |
 
 ---
 
