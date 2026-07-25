@@ -115,6 +115,27 @@ the agency's own funnel (step 6). None of these are architecture except step 4.
 | 9. Campaign email leg from the composer | **PARTIAL (deliberate)** | marketing Publish email/`manual` channels end at a prefilled composer — "email needs a human-chosen audience" [R06 §9]; honest label, but the campaign chain's email leg is an operator handoff [01 DISCONNECTED #10] | Deliberate; revisit with segments (step 2) | Capability | approve | — | T-10 |
 | 10. Deliverability analytics (per-batch honest rates) | **PARTIAL** | raw events + engagement stamps recorded [R04 app_0081]; batch stats exist (`computeBatchStats`, `batchStatsLine` [R13 §10.11]); no per-domain/per-client deliverability surface; level-10's honest-rates rule ("no opens recorded — open tracking may be off", never a fake 0%) unbuilt [R14] | Build: per-brand deliverability panel over existing rows | Capability | none | Control-plane: per-domain health | T-10 |
 
+### 2.1 The throughput arithmetic (verified against the shipped gates)
+
+The numbers in the code define what "campaigns as a service" can physically mean today.
+`send-email/index.ts:219–226` (verified): the daily cap defaults to **25 sends/day** per
+OWNER (`daily_send_cap ?? 25`), the warmup ramp allows `(daysIn + 1) × warmup_daily_step`
+(default step 5) — and both are measured against the operator's single timezone midnight,
+shared across every client brand. The batch drain moves ~10 recipients per 15-minute tick
+[R03 §5]. The consequences for a service:
+
+- A single client's 500-contact newsletter is **20 days of the entire owner-wide budget** at
+  the default cap — or a deliberate cap raise that then applies to every brand at once.
+- Two clients' batches interleave on one drain and one budget; there is no fairness,
+  priority, or reservation concept anywhere in `batchCore`/the drain [R13 §10.11, §6.3].
+- These are cold-outreach-calibrated numbers — correct and conservative for the agency's own
+  pitching, structurally wrong for warm client lists (a consented 500-person list is not a
+  deliverability risk; the gate can't tell the difference because consent basis never feeds
+  the cap).
+
+None of this is a defect at T-ME; all of it is the T-10 wall, and it is the same wall as
+chain 1 step 4: safety scoped to the human, not the brand.
+
 **Chain verdict.** The spine (segments-as-snapshots → one approval → gate-checked drain →
 event log → suppression) is complete, crash-safe, and honest — batch email WORKS today 🔌. What
 is missing is precisely the layer a client pays a retainer for: behavioral segments, flows, A/B,
