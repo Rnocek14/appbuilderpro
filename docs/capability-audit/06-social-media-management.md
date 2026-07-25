@@ -204,7 +204,59 @@ Two absences turn ten clients from a business into a scramble, and neither needs
 
 ---
 
-## 5. Proposed Workshop: SOCIAL / CONTENT WORKSHOP (charter 14-field spec)
+## 5. Approval-posture map — where the dial sits today, and where it must sit
+
+The charter's posture ladder (approve → slate → earned → auto → none) is more fully realized in
+this domain than anywhere else in the system, which makes the remaining mismatches precise:
+
+| Action class | Posture today | Posture the service needs | Gap |
+|---|---|---|---|
+| One-off post (board / composer / Marketing Publish) | approve (per item, One Queue) [R06 §9] | approve at T-ME → slate at T-10 | slate generalization (§3) |
+| Scheduled post | approve, then the clock drains it [R13 §6.3] | same | none |
+| Content week (the weekly pack) | slate (ONE card) → **earned** (`auto_mode` after 3 clean, revocable) [R05 §9.6] | same — this is the template | per-client streaks don't aggregate into cohort trust until T-100 |
+| Re-queue of a failed post | does not exist | approve (payload unchanged = same hash, cheap to verify) | the verb itself (§4) |
+| Gap-fill drafts from the calendar | does not exist | none (drafts are Initiative-inward) | the surface (§8) |
+| Metrics / trend / audience syncs | none (read-only) [R13 §9.9] | none | pull more (audience, comments) |
+| Community replies (comments/DMs) | does not exist | approve → earned, mirroring the inbox-draft `draft_verdicts` pattern [R13 §7.7] | the entire engagement rail |
+| Monthly client report send | does not exist | approve (rides the send-email spine) | the report producer (§9 Q10) |
+
+Two facts make this domain the autonomy proving ground for the whole audit: the earned streak
+is computed from **human decisions only** ("streaks from human decisions only" [R01 inventory
+§0]), and revocation is instant and total ("rejecting a week revokes auto-mode" [R05 §6]).
+Nothing else in the system — email follow-ups included — has graduated past "eligible."
+
+---
+
+## 6. Scale-gate walk (what the managed service needs at each tier)
+
+- **T-ME (the operator, this quarter)**: viable today, with hands. Arm the heartbeat, set the
+  Ayrshare + OpenAI keys [R06 §0], map one Profile-Key per brand, and the draft→judge→approve→
+  publish→measure loop runs for a handful of brands — the operator personally serving as the
+  calendar (memory), the slate (One Queue triage), and the exception queue (reading mind
+  events). Cheapest unlocks at this tier: the canvas publish verb (register repair #2) and the
+  performance→producer feed, because "gets better with time" is the sales pitch from client one.
+- **T-10 (ten clients)**: the tier this document's gaps are ABOUT. Requires: the calendar
+  surface (§8), the generalized slate (§3), the failed-post exception queue + re-queue verb
+  (§4), the `social` checklist connector, and Ayrshare linking-URL automation (§2). Per-client
+  autonomy dials already exist (content weeks are per-standing-order); per-client voice
+  isolation already exists [R05 §9.4]. Without the four builds, ten clients ≈ 250
+  approvals/week hand-triaged and failures found by clients.
+- **T-100 (one hundred)**: cohort mechanics dominate — one vertical's strategy template
+  versioned and rolled out ([R03 §9] vertical-as-data is PLANNED), trust aggregation (a
+  cohort's clean record informing, never granting, a new client's dial), per-profile Ayrshare
+  fees forcing a native-API re-evaluation [doc 11], and credential scope migration
+  (`world_social_profiles` and Ayrshare keys into the per-client vault scope — doc 11's
+  ARCH-CHANGE row). Compliance packs need their update loop [R05 §9.14 note].
+- **T-1K (one thousand)**: nothing at this tier is domain-specific — it is doc 10's control
+  plane consuming this domain's signals: failed-post rate per client as an SLA, key-health
+  probes (Ayrshare 402/403 `available:false` already emits the signal [R13 §9.9]), spend
+  anomalies on image/video credits (the ads-watch pattern is the named template
+  [R01 inventory]), canary posts on a test profile. The domain's job between now and then is
+  to keep emitting honest, nullable, ledgered signals — which it already does.
+
+---
+
+## 7. Proposed Workshop: SOCIAL / CONTENT WORKSHOP (charter 14-field spec)
 
 *Like the real-estate case, this Workshop mostly exists as data already: the `social` studio
 flavor has a named workshop definition (`workshops.ts:57`, routed at `:191`), the social board

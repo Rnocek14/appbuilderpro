@@ -409,6 +409,18 @@ built-but-not-connected disease.
 
 ---
 
+## Class census (this document's judgments)
+
+Chain 1: 5 WORKING (2 🔌-dependent), 2 PARTIAL, 1 DISCONNECTED (SMS), 4 MISSING (2
++ARCH-CHANGE). Chain 2: 6 WORKING 🔌, 1 PARTIAL, 2 MISSING (1 +ARCH-CHANGE). Chain 3: 5
+WORKING, 1 PARTIAL. Fabric (§4): 5 WORKING 🔌, 2 PARTIAL. Zero EXT-REQUIRED anywhere — this
+is the rare domain where no missing capability needs an external provider; every gap is
+internal code or schema. The [R13 §13.1] pattern holds at its strongest here: what exists is
+real and honestly degrading; what's absent is absent, and the two biggest absences (testing,
+repair) sit directly on seams the codebase visibly prepared for them.
+
+---
+
 ## Matrix rows
 
 | Capability | Class | Evidence | Needed-at | Owner object | Note |
