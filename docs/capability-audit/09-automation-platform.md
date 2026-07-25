@@ -157,7 +157,31 @@ The minimum structure that answers "which version is each client running":
 - Aligned with `vertical_specs` [R03 §9]: a vertical's sector pack = a set of definition rows,
   making "new vertical = data" true for automations at the same time.
 
-### 1.5 Registry-as-code drift (found by this audit)
+### 1.5 One fire's complete paper trail (what monitoring CAN answer today)
+
+To be fair to step 7 before criticizing it: for a *successful* fire, the audit trail is
+complete and joins cleanly, all service-role-written [R04 §3.7, R13 §6.3]:
+
+```
+automation_triggers (the rule)
+  → dueFires() plan (pure; recomputable from the same inputs forever)
+  → trigger_fires row (the claim; unique on trigger+customer+due-date)
+  → contacts (select-first — an old unsubscribe/STOP always sticks)
+  → outreach_campaigns (kind 'automation') → outreach_messages (rendered
+    snapshot: the exact subject/body that will send — the de-facto content archive)
+  → approvals (kind send_email/send_sms, payload-hashed, requested_by 'garvis-auto')
+  → trigger_fires.approval_id backfilled (fire ↔ decision join)
+  → send-email/send-sms re-gates everything at send time
+  → execution_runs (immutable send/skip/fail) + outreach_events (delivered/opened/…)
+  → reportCore monthly rollup ("Quiet month so far" when quiet)
+```
+
+Every question about a send that *happened* is answerable. The two questions the trail cannot
+answer are the audit's step-7/8/9 findings: "what failed?" (the failure branch writes nothing)
+and "under which definition version?" (no version exists to stamp). Monitoring here is a
+success-side ledger of remarkable completeness with a failure-side hole and no version axis.
+
+### 1.6 Registry-as-code drift (found by this audit)
 
 `registry.ts:139–150` still lists `online_booking` as **`not_built`** ("NEVER proposed —
 surfaces as a gap") — but the booking rail SHIPPED in app_0109 with DB-level double-book

@@ -81,6 +81,44 @@ client's social — and after three clean weeks, do the drafting-to-posting loop
 a T-ME tool with the correct autonomy DNA. The service business begins at the calendar + slate +
 exception queue trio, all of which are views and verbs over rows that already exist.
 
+### Step notes — the quotes that carry the table
+
+- **Step 1 (connection)**: the fail-closed rule is stated in the component's own header —
+  "zero mappings = everything posts through the one connected account; once ANY mapping exists,
+  a business without one BLOCKS at publish rather than posting to the wrong brand"
+  (`AyrshareDestinations.tsx:2–6`). The UI copy then narrates the friction verbatim: "On
+  Ayrshare's multi-client plan each brand gets a Profile-Key — map it here" (`:67–70`). The
+  hard invariant is built; the onboarding around it is not.
+- **Step 5 (posts)**: the social board loads voice examples "from the world's most recent
+  *posted* row (the `world_id` filter is load-bearing 'so one business's voice doesn't bleed
+  into another's')" [R05 §9.4] — the exact isolation a multi-client service requires, already
+  in place. `board-copy` runs an "editor-in-the-loop: a judge scores 1–10, score <8 triggers
+  one revision… the better draft ships with `quality:{score,notes}`" [R13 §8.8].
+- **Step 6 (graphics)**: "a rendered brand design is the business's OWN graphic — not AI
+  imagery — so it carries no AI disclosure" [R13 §8.9]; for AI imagery, "first stamp wins,
+  provenance can never be stripped" and `disclosureGate` blocks undisclosed publishes
+  [R05 §9.5].
+- **Step 9 (content-week drain)**: "double hash check, social pieces → `social_posts` +
+  pre-authorized `publish_post` approvals, email piece → `outreach_batches`" [R13 §6.3] — the
+  one place where a BATCH decision flows to per-item execution with tamper evidence intact.
+  This is the slate mechanism, shipped, for one kind.
+- **Step 10 (publish)**: "schedule grace — a `scheduleAt` ≤1h past posts now, staler is
+  refused" [R13 §9.8] — the rail already encodes the judgment a calendar surface needs.
+- **Step 11 (metrics)**: the function's own purpose line names the loop this domain still
+  hasn't closed: "Garvis posted to social and never looked at the results; this closes that
+  loop" [R13 §9.9]. It closed the *reading* half only (see step 13).
+- **Step 12 (exceptions)**: the complete remediation surface today is two strings —
+  `error: 'Provider reported a per-platform failure — check the provider dashboard.'`
+  (`social-publish/index.ts:158`) and the mind_event subject "A social post failed — check the
+  provider." (`:166`). Recorded honestly; routed nowhere.
+- **Step 13 (learning)**: producers gather "the world's real materials (DNA, brand voice, vault
+  photos, prior research, goals), auto-loading prior concepts to diverge from" [R05 §9.20] —
+  the injection slot for performance data exists; performance data never arrives in it.
+- **Step 14 (canvas)**: "the 'Change it with Garvis' `ArtifactSheet` on the social canvas is
+  architecturally unable to publish… the real publish loop is one room over with no bridge"
+  [R06 §9] — the reconstruction's "signature dead-end," carried here as the domain's
+  DISCONNECTED emblem.
+
 ---
 
 ## 2. Step 1 expanded — per-client account connection (the build-vs-buy note)
