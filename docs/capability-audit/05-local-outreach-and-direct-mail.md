@@ -162,6 +162,7 @@ framed."
 | 10. Scheduling / recurring | **WORKING 🔌** | inbox-draft daily 12:45, followups 13:00, reactivate monthly — all on the 12-job heartbeat [R13 §2, R10 #11] | done | Standing Order | — | Control-plane: cron health (exists: Health board) | Holds 🔌 |
 | 11. Logs / audit | **WORKING** | every send in `execution_runs` + `mind_events`; engagement in `outreach_events`; reply records + classifications persisted [R13 §7.5–7.6] | done | substrate | none | — | Holds |
 | 12. Inbound mail → knowledge ingest | **MISSING** | `ingest-document` exists [R13 §8.6] but nothing bridges `inbound_mail` (attachments, forwarded docs) to it [01 §9] | Build: one bridge call behind a slate | Capability | slate | — | T-10 — forwarded contracts/briefs die in a table |
+| 13. Per-client inbox attribution | **MISSING** | verified: ONE alias per operator (`profiles.inbound_alias`, resend-inbound:112–114) and the `inbound_mail` insert carries only `owner_id` — no `world_id` (resend-inbound:117–124); forwarded client mail is un-attributable to a client | Build: per-world aliases + world_id on inbound_mail | substrate | none | Lens: inbound volume per client | T-10 — even the workaround wedge is single-tenant |
 
 **Chain verdict.** The system hears only its own echo: replies to its own sends are handled
 excellently (capture → classify → stop → draft → learn), and everything else that arrives by
@@ -170,7 +171,9 @@ extraction" as a sellable service is therefore MISSING at the front door (EXT-RE
 Gmail/IMAP/Nylas — a deliberate, reasoned deferral [R14 #5]) and MISSING at the parsing layer
 (no extraction rules), while the back half — drafting, approvals, scheduling, logging, learning
 — is already built and would serve a connected inbox unchanged. The forward-in alias +
-portal-lead parser is the honest T-ME wedge that needs no external ceremony.
+portal-lead parser is the honest T-ME wedge that needs no external ceremony — with the caveat
+that even the wedge is single-tenant today (one alias per operator, no world attribution on
+what arrives: step 13).
 
 ---
 
@@ -443,4 +446,8 @@ grounded in a chain row above; no new claims:
 | Call tracking numbers per campaign | MISSING + EXT-REQUIRED | missed-call text-back only [R13 §7.11, R07 §2.7] | T-10 | Capability | Twilio pool or CallRail — matches [03] |
 | Speed-to-lead responder touch | WORKING | site-events instant first touch [R13 §7.13] | T-ME | Standing Order | 🔌 pre-authorized, deterministic |
 | Per-owner cron caps → per-client caps (reactivation etc.) | MISSING | 10/owner/sweep [R13 §7.9] | T-10 | substrate | fairness across clients |
+| Per-client forward-in aliases (inbound world attribution) | MISSING | one alias/operator, inbound_mail has no world_id (resend-inbound:112–124, verified) | T-10 | substrate | the wedge is single-tenant too |
+| OpsInbox unified stream | WORKING | replies + leads + inbound_mail merged [R05 §9.24] | T-ME | Capability | operator-only reader |
+| Client warm lists + trigger engine (email leg) | WORKING | customer_lists/customers + window-guarded triggers [R04 app_0076, R03 §8] | T-ME | Standing Order | 🔌; SMS leg severed |
+| Missed-call text-back | WORKING | voice-inbound, signature-validated, bypasses send-sms by design [R13 §7.11] | T-ME | Capability | 🔌 survives the enum bug |
 | Unified people model | PARTIAL + ARCH-CHANGE | six unreconciled people tables [R03 §5]; two customer substrates [R04] | T-10 | substrate | shared row with [01]/[03] |
