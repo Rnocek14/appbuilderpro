@@ -33,6 +33,14 @@ superb single-tenant outreach machine, not yet a multi-tenant outreach service.*
 is further behind still: everything up to a print-ready PDF is real; everything after it is a
 level-10 spec [R14 #5].
 
+**Scope split with siblings.** [01] carries the neutral inventory rows for every capability
+named here; [03] owns the direct-mail FRONT half (territory, data acquisition, enrichment,
+dedup, economics, design) and its chain-1 verdict is treated as settled — §4 below picks up at
+the finished design and audits only fulfillment; the agency's own website-pitch funnel belongs
+to doc 04; the social rail to doc 06. Where a capability appears in two audits (SMS rail,
+people model, CASS, Lob), the classifications are kept identical and the matrix rows share
+names so the doc-13 aggregator dedupes cleanly.
+
 ---
 
 ## 1. Chain 1 — OUTREACH-AS-A-SERVICE for a client
