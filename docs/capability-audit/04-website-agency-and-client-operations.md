@@ -34,6 +34,15 @@ order**, **no offboarding/takedown on churn**, and **no ongoing upsell detection
 point of sale. The agency can *win* a client while the operator sleeps; it cannot yet *keep* one
 without the operator remembering everything.
 
+The domain's class profile, at a glance: the funnel and onboarding rows are overwhelmingly
+WORKING 🔌; the long-term rows are MISSING-with-substrate — the distinctive local pattern is
+that almost none of the §3 gaps are EXT-REQUIRED or greenfield builds. The monitors, ledgers,
+renderers, classifiers, and the send spine all exist and are verified; what is absent is six
+client-shaped objects and the sale-time wiring that would establish them (§3b), plus one genuine
+ARCH-CHANGE: the versioned service-package noun (§4). That makes this domain the cheapest
+high-revenue completion in the audit — and the clearest illustration of the charter's
+built-but-not-connected disease applied to *future* rather than existing loops.
+
 ---
 
 ## 1. Chain 1 — PROSPECT → CLIENT (the A-grade funnel, audited for its weak steps)

@@ -463,10 +463,3 @@ control plane); the 13-gap-matrix aggregator consumes the rows below.*
 | Rotation floor + staged hygiene | MISSING | [A5, A12] | T-1K | Standing Order | silent rot is T-1K steady state |
 | Cohort-evidence provisional autonomy | MISSING + ARCH-CHANGE | app_0097 (per-owner per-class only) | T-100 | substrate | kills the O(N) apprenticeship [A2] |
 | Multi-operator delegation | MISSING + ARCH-CHANGE | [01 §21] | T-1K | substrate | out of scope; named honestly |
-
----
-
-*Cross-references: `01-capability-inventory.md` §21–22 and its DISCONNECTED register (the
-heartbeat-never-self-arms posture applies to every Standing Order proposed here);
-`03-real-estate-marketing.md` (whose chains' "Portfolio surface" columns are consumers of this
-control plane); the 13-gap-matrix aggregator consumes the rows above.*

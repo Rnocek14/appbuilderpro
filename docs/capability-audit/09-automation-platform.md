@@ -277,6 +277,18 @@ visibly built waiting for these loops.
 
 ---
 
+**Chain 3 verdict.** As a factory, the builder is WORKING and load-bearing for the automation
+story: the generated-app path is the platform's only answer today for any automation the
+registry can't express, and its deploy rail is genuinely approval-spined end to end. The one
+PARTIAL that matters to automations is intent-level: a mission cannot yet *commission* a build
+— `build_app` opens the forge for a human instead of driving `job-worker` + the deploy
+approvals, so "every automation client also gets a status portal" is an operator-driven
+ceremony rather than a background arc. The pieces (autopilot, deploy executors, arc wake) all
+exist; the wiring between them is the gap — a chain-3 echo of the charter's
+built-but-not-connected disease.
+
+---
+
 ## 5. Proposed Workshop: THE AUTOMATION WORKSHOP (charter 14-field spec)
 
 - **Job**: take an automation from detected opportunity to armed, monitored, versioned

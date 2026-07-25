@@ -173,6 +173,25 @@ today on the builder, paperwork chain reusable for proposals. The gaps are data 
 row in the whole chain. This should be the domain's FIRST shipped vertical, and its
 art-ownership substrate is the same table Chain 1's grant case needs.
 
+### 3.1 Near-misses — the domain's built-but-unaimed pieces (the DISCONNECTED check)
+
+The charter demands flagging the built-but-not-connected disease. This domain's variant is
+subtler than the inventory's register: pieces built FOR this domain that no venture path can
+reach, because the venture itself has no front door.
+
+| # | Built thing | Not connected to | Evidence | Repair shape |
+|---|---|---|---|---|
+| 1 | The `creative` vertical: keyword detection includes `'mural'`, `'painter'`, `'tattoo'`, `'jewelry maker'`; seed pack includes "How creative work actually sells" — a real artist-economics brief | Any venture template: `WEB_TEMPLATES` contains exactly two entries (`MOM_REAL_ESTATE_TEMPLATE`, `APP_LAUNCH_TEMPLATE`) — genesis can DETECT an artist venture from DNA but has no artist work-web to instantiate, so Marco's world would be born generic | `verticals.ts:50,321`; `workweb.ts:243` | An ARTIST_TEMPLATE row (the mom template proves venture-as-data works); the [XA 03 §7.3] six-area dressing is the spec |
+| 2 | The mural-native opportunity `kind` enum + `opportunity_hunt` standing order 🔌 | Any pitch/proposal consumer: a promoted opportunity has nowhere to go — no proposal workshop, no mural criteria pack, no commission record to become | `opportunityHunt.ts:32`; [R03 §4] | Chain-3 pitch row (§6 workshop); the feed's catch currently dead-ends in the feed |
+| 3 | The flagship artist portfolio — a complete artist site riding the real edit/deploy pipeline | Genesis: `saveFlagshipAsProject()` creates a showcase PROJECT, never seeds an artist VENTURE; the corpus's best artist asset teaches the builder's ceiling and feeds nothing | [R05 §12.3]; `flagshipProject.ts` | Offer it as the Portfolio-area starter inside repair #1's template |
+| 4 | The builder-as-escape-hatch for placement: the orchestrator's own verified case routes "render t-shirt designs, try print placements" to `build_app` (the "wardrobe room") | The platform's product substrate: a bespoke wardrobe room would hold designs as app state — no grants, no provenance chips, no criteria packs, no drop missions, invisible to the portfolio | `orchestratorCases.verify.ts:79`; `actionCatalog.ts:137` | Honest today (the tool exists), wrong at T-10; Chain 1's Workshop is the real answer, and the case should re-route once it exists |
+| 5 | `/dev/flagship-artist` spike — ungated in production | The DEV gate the other nine dev pages have | [R03 §10]; `App.tsx:167` | One-line gate; carried here because it is this domain's page |
+
+The pattern across all five: **the domain's working pieces are aimed at demonstration, not
+operation.** The enum, the vertical pack, and the flagship site are each real; none of them can
+currently participate in an actual artist's actual business, because the venture-shaped
+container is missing.
+
 ---
 
 ## 4. Proposed Workshop: APPAREL / PRODUCT WORKSHOP (charter 14-field spec)
