@@ -101,6 +101,21 @@ What reconciles them, per mechanism (the honest map from design to code):
 | Inline sims (§6) | Lab bench opens from a branch; nothing runs in-thread | PARTIAL |
 | Voice explore-walk (§13) | Nothing | MISSING |
 
+And [EA-04]'s own nine acceptance checks (§16), scored against shipped code today — the
+sharpest single reading of the docs-to-code distance:
+
+| [EA-04] acceptance check | Shipped verdict |
+|---|---|
+| 1. Abandonment (return in a year, land on the map, nothing lost) | **PASS-minus** — worlds persist and reopen; no re-entry story, and loops are device-local |
+| 2. Disposable-chat (no transcript as primary record) | **PASS by accident** — the spike has no primary transcript at all |
+| 3. Zero-ceremony (utterance → live session, no dialogs) | **PASS** in Explore; FAIL at the Command door (business-bound refusal) |
+| 4. Promotion-without-loss (zero copies/exports/re-asks) | **FAIL** — `compileBuildBrief` is an export by construction |
+| 5. Evidence (every tally/claim survives "which rows?") | **PARTIAL** — artifacts and sim records yes; no tallies exist to test; sim evidence not labeled on edges |
+| 6. Scope (counterparty isolation in exploration) | **UNTESTABLE** — explorations don't mount counterparty scoping; the ~70%-true isolation estimate is world-level [R03 §8] |
+| 7. Mastery (visible calibration after ten sessions) | **FAIL** — the hit-rate math exists (`mind.ts:142`), nothing feeds or renders it from exploration |
+| 8. Walk (voice parity) | **FAIL** — no voice surface |
+| 9. Fold-in (attach exploration to operating world) | **FAIL** — no fold-in verb anywhere in the catalog |
+
 The load-bearing conclusion: **the schema is not the gap.** `knowledge_worlds/_clusters/
 _cluster_edges/_artifacts` + `epistemic` + `charter` + `mind` jsonb + `working_state`
 [R04 §2c, §3.3] can carry every mechanism above. The gap is surface and wiring — which is
