@@ -41,8 +41,10 @@ const dental: AuditView = {
 const rDental = detect(dental);
 ok('dental: emits no_online_booking (fingerprinted, no booking widget)', rDental.signals.some((s) => s.id === 'platform:no_online_booking'));
 ok('dental: does NOT emit manual_intake (has form + email)', !rDental.signals.some((s) => s.id === 'manual_process:manual_intake'));
-ok('dental: online_booking is a gap, not a proposal', rDental.proposals.every((p) => p.capabilityId !== 'online_booking'));
-ok('dental: the no_online_booking need surfaces as a gap (capability not built)', rDental.gaps.some((g) => g.signalId === 'platform:no_online_booking'));
+// online_booking shipped (app_0109: booking fn + appointments + confirmations/reminders) → the
+// registry now marks it 'beta', so the no_online_booking signal becomes a PROPOSAL, not a gap.
+ok('dental: online_booking is now PROPOSED (rail shipped, status beta)', rDental.proposals.some((p) => p.capabilityId === 'online_booking' && p.status === 'beta'));
+ok('dental: no stale gap remains for a deliverable capability', !rDental.gaps.some((g) => g.signalId === 'platform:no_online_booking'));
 
 // ---- HONESTY: with NO tech fingerprint we never assert "no booking" from missing keywords ----
 const noTech: AuditView = { vertical: 'health', checks: { form: true, email: true }, siteSignalIds: [], text: 'Smile Dental — no booking words at all here', tech: null };

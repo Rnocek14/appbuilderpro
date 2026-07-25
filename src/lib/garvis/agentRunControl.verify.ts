@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '../../..');
 const publicApi = readFileSync(join(here, 'index.ts'), 'utf8');
 const runtime = readFileSync(join(here, 'runtime.ts'), 'utf8');
-const migration = readFileSync(join(root, 'supabase/migrations/app_0092_execution_truth.sql'), 'utf8').toLowerCase();
+const migration = readFileSync(join(root, 'supabase/migrations/app_0100_execution_truth.sql'), 'utf8').toLowerCase();
 const worker = readFileSync(join(root, 'supabase/functions/garvis-worker/index.ts'), 'utf8');
 
 check('interactive API creates runs through one atomic RPC', publicApi.includes("supabase.rpc('create_and_claim_agent_run'") && (publicApi.match(/createClaimedRun\(\{/g) ?? []).length === 3);
@@ -27,7 +27,7 @@ check('security-definer create validates app ownership', migration.includes('id 
 check('migration appends the answer to checkpoint history', migration.includes("jsonb_build_object('role', 'user', 'content', trim(p_answer))"));
 check('resume repairs older checkpoints with the missing question', migration.includes("jsonb_build_object('role', 'assistant', 'content', question)"));
 check('signed worker uses authenticated claim RPC', worker.includes("authClient!.rpc('claim_agent_run'") && worker.includes("authClient!.rpc('claim_next_agent_run')"));
-check('only secret worker self-chains globally', worker.includes('if (bySecret && processed === RUNS_PER_INVOCATION && secret)'));
+check('only secret worker self-chains globally', worker.includes('if (processed === RUNS_PER_INVOCATION && bySecret && chainSecret)'));
 
 console.log(`\nagentRunControl.verify: ${passed} passed, ${failed} failed`);
 if (failed) throw new Error(`${failed} agent-run control check(s) failed`);

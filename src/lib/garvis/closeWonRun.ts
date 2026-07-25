@@ -72,11 +72,24 @@ export async function closeCampaignWon(input: {
   if (subErr || !sub) throw new Error(`Marked won, but could not add to the client book: ${subErr?.message ?? 'unknown'} — add them on the Clients page.`);
 
   let demoSlug: string | null = null;
+  let liveUrl: string | null = null;
   if (camp.preview_site_id) {
     const { data: site } = await supabase.from('preview_sites')
-      .select('slug').eq('id', camp.preview_site_id).maybeSingle();
+      .select('slug, live_url').eq('id', camp.preview_site_id).maybeSingle();
     demoSlug = (site?.slug as string | null) ?? null;
+    liveUrl = (site?.live_url as string | null) ?? null;
   }
+
+  // SERVICE PACKAGE (app_0115): pin the new client to the current package version for this tier
+  // and establish it — the site watch arms if a live URL exists (payment-time watch is the
+  // backstop), and the package's automations surface as asks. Fail-soft: the close stands alone.
+  try {
+    const { pinAndEstablish } = await import('./billing/servicePackagesRun');
+    await pinAndEstablish({
+      clientSubscriptionId: sub.id as string, packageKey: tier.id,
+      liveUrl, businessName,
+    });
+  } catch { /* pin is re-runnable from Clients; never blocks the close */ }
 
   // Ledgers connect (app_0086): a one-time deal with a real price and a real email gets its DRAFT
   // invoice minted with full provenance — nothing sends, it just appears on Money ready to queue.

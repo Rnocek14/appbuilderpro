@@ -18,6 +18,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { completeWithWebSearch } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 import { LOCAL_NICHES } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { bigMetroCities } from '../../../src/lib/garvis/bigCities.ts';
 import { parsePlace, buildDiscoveryQueries, exhaustionUpdate, PLACES_FIELD_MASK, type PlaceRaw } from '../../../src/lib/garvis/placesDiscovery.ts';
@@ -58,12 +59,20 @@ async function fetchPlaces(apiKey: string, textQuery: string): Promise<{ places:
 }
 
 /** Claude web-search scout for one (type × city) combo. Returns grounded leads + an apiError. */
-async function scout(keyword: string, city: string, state: string): Promise<{ leads: ScoutLead[]; apiError: string | null }> {
+// deno-lint-ignore no-explicit-any
+async function scout(admin: any, ownerId: string, keyword: string, city: string, state: string): Promise<{ leads: ScoutLead[]; apiError: string | null }> {
   try {
     const r = await completeWithWebSearch(
       [{ role: 'system', content: SCOUT_SYSTEM }, { role: 'user', content: buildScoutPrompt(keyword, city, state) }],
       { model: SCOUT_MODEL, maxUses: 6, maxTokens: 6000 },
     );
+    // audit 12 §1.2 (unmetered call sites): charge the real cost of this combo's web-search call the
+    // moment it's known — even if grounding drops every lead below, the tokens were spent.
+    // spendCredits never throws, so a ledger hiccup can't cost us leads we already paid for.
+    await spendCredits(admin, ownerId, {
+      costUsd: r.costUsd, kind: 'discover', provider: 'anthropic', model: SCOUT_MODEL,
+      inputTokens: r.inputTokens, outputTokens: r.outputTokens,
+    });
     const { leads } = groundScoutLeads(r.text, r.sources, keyword, city, state);
     return { leads, apiError: null };
   } catch (e) {
@@ -159,10 +168,23 @@ Deno.serve(async (req) => {
       .order('last_run_at', { ascending: true, nullsFirst: true }).limit(batch);
 
     let combosRun = 0; let newLeads = 0; let dupes = 0; let apiError: string | null = null;
-    for (const q of (queries ?? []) as QRow[]) {
+    // audit 12 §1.2 (unmetered call sites): gate the scout phase ONCE per run — every combo below is
+    // a paid Anthropic web-search call (each records its real cost inside scout()). Out of credits
+    // skips scouting with an honest note instead of a hard 402, because Places discovery is keyed
+    // (and billed) separately and must stay available.
+    let scoutAllowed = true;
+    if (source === 'claude') {
+      try { await checkCredits(admin, ownerId, 'discover'); }
+      catch (e) {
+        if (!(e instanceof InsufficientCreditsError)) throw e;
+        scoutAllowed = false;
+        apiError = 'Out of credits — Claude scouting skipped this run. Upgrade or wait for your monthly refill (Places discovery still works).';
+      }
+    }
+    for (const q of scoutAllowed ? ((queries ?? []) as QRow[]) : []) {
       let inserted = 0;
       if (source === 'claude') {
-        const { leads, apiError: err } = await scout(q.keyword, q.city ?? '', q.state ?? '');
+        const { leads, apiError: err } = await scout(admin, ownerId, q.keyword, q.city ?? '', q.state ?? '');
         if (err) { apiError = err; break; }   // a rejected key/model fails every combo — stop + surface
         combosRun++;
         for (const lead of leads) { if (await insertScout(admin, ownerId, lead, q.id)) { inserted++; } else { dupes++; } }

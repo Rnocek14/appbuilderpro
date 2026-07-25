@@ -450,7 +450,13 @@ Deno.serve(async (req) => {
         offset_days: number; window_days: number; template_subject: string; template_body: string;
         channel: TriggerChannel | null;
         client_subscription_id: string | null;   // attribution → per-client SMS FROM routing
+        consecutive_failures: number;            // circuit breaker (app_0113)
       }
+      // CIRCUIT BREAKER (app_0113): 5 straight failures with no success between → the trigger
+      // pauses ITSELF, loudly. A transient failure still releases-and-retries next tick; a broken
+      // trigger stops burning the shared fire budget instead of starving healthy automations
+      // behind it forever (the failure mode the send_sms enum bug ran for weeks, invisibly).
+      const BREAKER_LIMIT = 5;
       interface AutoCustRow {
         id: string; email: string | null; phone: string | null; name: string | null; consent_basis: string | null;
         last_service_at: string | null; last_visit_at: string | null;
@@ -461,7 +467,7 @@ Deno.serve(async (req) => {
       // silently NEVER checked. Ordered by id, capped at 500 — the fireBudget below still bounds
       // per-tick work, and a backlog beyond the budget drains across subsequent ticks.
       const { data: trigData } = await admin.from('automation_triggers')
-        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body, channel, client_subscription_id')
+        .select('id, owner_id, list_id, label, anchor_field, offset_days, window_days, template_subject, template_body, channel, client_subscription_id, consecutive_failures')
         .eq('status', 'active').order('id', { ascending: true }).limit(500);
 
       const custCache = new Map<string, CustomerRec[]>();
@@ -514,6 +520,7 @@ Deno.serve(async (req) => {
           customers, firedKeys, nowIso,
         );
         let queuedForTrigger = 0;
+        let failStreak = t.consecutive_failures ?? 0;
         for (const fire of plan) {
           if (fireBudget <= 0) break;
 
@@ -611,9 +618,35 @@ Deno.serve(async (req) => {
 
             await admin.from('trigger_fires').update({ approval_id: (ap as { id: string }).id }).eq('id', fireId);
             queuedForTrigger++;
-          } catch {
-            // Release the claim so the fire retries next tick — a failed fire is never silently lost.
+            // A success closes the breaker: transient blips never accumulate into a false pause.
+            if (failStreak > 0) {
+              failStreak = 0;
+              await admin.from('automation_triggers')
+                .update({ consecutive_failures: 0, last_error: null, last_error_at: null })
+                .eq('id', t.id).then(() => {}, () => {});
+            }
+          } catch (e) {
+            // Release the claim so the fire retries next tick — a failed fire is never silently
+            // lost — but RECORD it (app_0113): the old bare catch wrote zero error records
+            // anywhere while the retry loop burned budget every tick.
             await admin.from('trigger_fires').delete().eq('id', fireId);
+            const errMsg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+            failStreak++;
+            const tripped = failStreak >= BREAKER_LIMIT;
+            await admin.from('automation_triggers')
+              .update({
+                consecutive_failures: failStreak, last_error: errMsg, last_error_at: nowIso,
+                ...(tripped ? { status: 'paused' } : {}),
+              })
+              .eq('id', t.id).then(() => {}, () => {});
+            if (tripped) {
+              await admin.from('mind_events').insert({
+                owner_id: t.owner_id, event_type: 'note', source: 'execution',
+                subject: `🔴 Automation "${t.label.slice(0, 100)}" paused itself after ${BREAKER_LIMIT} straight failures: ${errMsg.slice(0, 160)}`,
+                payload: { key: `auto-breaker:${t.id}`, trigger_id: t.id, error: errMsg, consecutive_failures: failStreak },
+              }).then(() => {}, () => {});
+              break;   // stop attempting this trigger's remaining fires this tick
+            }
           }
         }
 

@@ -22,7 +22,7 @@ import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 import { complete, modelForPlan, getProviderConfig, type AIProvider } from '../_shared/ai.ts';
-import { getUserPlan } from '../_shared/credits.ts';
+import { checkCredits, getUserPlan, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 
@@ -32,6 +32,10 @@ async function draftReply(input: {
   voiceExample: string | null;
   trackRecord: string | null;
   model: { provider: AIProvider; model: string };
+  // audit 12 §1.2 (unmetered call sites): the ledger write happens where token usage is known, so
+  // the service client + owner ride in with the rest of the draft context.
+  // deno-lint-ignore no-explicit-any
+  admin: any; ownerId: string;
 }): Promise<{ subject: string; body: string } | null> {
   const system =
     'You draft a reply to a warm prospect who wrote back. Warm, direct, under 120 words, plain text. ' +
@@ -55,6 +59,13 @@ async function draftReply(input: {
       [{ role: 'system', content: system }, { role: 'user', content: user }],
       { provider: input.model.provider, model: input.model.model, maxTokens: 700 },
     );
+    // Charge the real cost BEFORE parsing — a draft that fails JSON validation below still spent
+    // the tokens. spendCredits is fail-soft by design (never throws), so the draft is never lost
+    // to a ledger hiccup. (audit 12 §1.2, unmetered call sites)
+    await spendCredits(input.admin, input.ownerId, {
+      costUsd: result.costUsd, kind: 'garvis', provider: input.model.provider, model: input.model.model,
+      inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+    });
     const parsed = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, ''));
     if (!parsed.subject || !parsed.body) return null;
     return { subject: String(parsed.subject).slice(0, 200), body: String(parsed.body).replace(/\\n/g, '\n').slice(0, 4000) };
@@ -130,8 +141,24 @@ Deno.serve(async (req) => {
     }
     return verdictCache.get(ownerId)!;
   };
+  // audit 12 §1.2 (unmetered call sites): ONE credit gate per owner per tick. An out-of-credits
+  // owner loses nothing — their replies stay inside the 14-day window and draft on a later tick
+  // once the balance refills — but tonight's drafts don't run on the house's dime.
+  const creditOk = new Map<string, boolean>();
+  const ownerHasCredits = async (ownerId: string) => {
+    if (!creditOk.has(ownerId)) {
+      try { await checkCredits(admin, ownerId, 'garvis'); creditOk.set(ownerId, true); }
+      catch (e) {
+        if (!(e instanceof InsufficientCreditsError)) throw e; // rpc hiccups keep the per-reply handling
+        console.log(`inbox-draft: owner ${ownerId} is out of credits — skipping their drafts this tick`);
+        creditOk.set(ownerId, false);
+      }
+    }
+    return creditOk.get(ownerId)!;
+  };
   for (const r of (replies ?? []) as { id: string; owner_id: string; campaign_id: string; from_address: string | null; subject: string | null; body_text: string | null; received_at: string }[]) {
     try {
+      if (!(await ownerHasCredits(r.owner_id))) { skipped++; continue; }
       // Already answered? Any message on the campaign created AFTER their reply (draft or sent —
       // ours either way) means a response exists. Our own drafts make this sweep idempotent.
       const { count: later } = await admin.from('outreach_messages')
@@ -165,6 +192,7 @@ Deno.serve(async (req) => {
         voiceExample: await ownerVoice(r.owner_id),
         trackRecord: await ownerTrackRecord(r.owner_id),
         model: await ownerModel(r.owner_id),
+        admin, ownerId: r.owner_id,
       });
       if (!draft) { skipped++; continue; }
 

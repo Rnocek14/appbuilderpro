@@ -243,7 +243,7 @@ export default function ProfileHome() {
         )}
         <CanvasChat onSend={onGarvisSend} hint={chatHint} />
       </div>
-      {sheet && <ArtifactSheet artifact={sheet} onClose={() => setSheet(null)} onAsk={(text) => onArtifactAsk(sheet, text)} />}
+      {sheet && <ArtifactSheet artifact={sheet} onClose={() => setSheet(null)} onAsk={(text) => onArtifactAsk(sheet, text)} worldId={businessId ?? null} />}
     </AppShell>
   );
 }

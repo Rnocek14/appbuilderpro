@@ -19,7 +19,8 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
-import { complete } from '../_shared/ai.ts';
+import { complete, getProviderConfig } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 
@@ -57,7 +58,7 @@ Deno.serve(async (req) => {
   if (error) return json({ error: error.message }, 500);
   const owners = [...new Set(((recentOwners ?? []) as { owner_id: string }[]).map((r) => r.owner_id))];
 
-  let checked = 0, proposed = 0, skippedThin = 0;
+  let checked = 0, proposed = 0, skippedThin = 0, skippedCredits = 0;
   for (const ownerId of owners) {
     if (Date.now() - started > TIME_BUDGET_MS) break; // honest partial progress; next week continues
     checked++;
@@ -77,6 +78,17 @@ Deno.serve(async (req) => {
       const evs = (events ?? []) as { event_type: string; source: string; subject: string | null }[];
       if (evs.length < MIN_EVENTS) { skippedThin++; continue; }
 
+      // audit 12 §1.2 (unmetered call sites): consolidation is one paid model call per owner — gate
+      // it on their balance. An out-of-credits owner just skips this cycle; the events keep
+      // accumulating and next week's run reads them all, so nothing is lost, only deferred.
+      try { await checkCredits(admin, ownerId, 'garvis'); }
+      catch (e) {
+        if (!(e instanceof InsufficientCreditsError)) throw e; // other failures keep the per-owner handling
+        console.log(`garvis-consolidate: owner ${ownerId} is out of credits — skipped this cycle`);
+        skippedCredits++;
+        continue;
+      }
+
       // Existing titles (any status) — a lesson proposed once is never re-proposed.
       const { data: existing } = await admin.from('garvis_knowledge')
         .select('title').eq('owner_id', ownerId).limit(400);
@@ -87,6 +99,13 @@ Deno.serve(async (req) => {
         { role: 'system', content: SYSTEM },
         { role: 'user', content: `EVENT LOG (newest first, ${evs.length} events):\n${log}\n\nCandidate lessons (strict JSON array):` },
       ], { maxTokens: 1200 });
+      // audit 12 §1.2 (unmetered call sites): record the real cost right where usage is known —
+      // fail-soft (spendCredits never throws), so a ledger hiccup never drops the proposals.
+      const cfg = getProviderConfig();
+      await spendCredits(admin, ownerId, {
+        costUsd: res.costUsd, kind: 'consolidate', provider: cfg.provider, model: cfg.model,
+        inputTokens: res.inputTokens, outputTokens: res.outputTokens,
+      });
 
       let candidates: { kind?: string; title?: string; body?: string; evidence?: string[] }[] = [];
       try {
@@ -124,5 +143,5 @@ Deno.serve(async (req) => {
     } catch { /* one owner's failure never blocks the rest */ }
   }
 
-  return json({ ok: true, checked, proposed, skippedThin });
+  return json({ ok: true, checked, proposed, skippedThin, skippedCredits });
 });

@@ -5978,6 +5978,241 @@ drop policy if exists "sender_domains owner all" on public.sender_domains;
 create policy "sender_domains owner all" on public.sender_domains
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
+-- ======== supabase/migrations/app_0112_send_sms_enum.sql ========
+-- app_0112_send_sms_enum.sql
+-- FIX (capability-audit fix-first ledger #1): the SMS rail shipped in app_0106 with
+-- send-sms/index.ts requiring approval.kind = 'send_sms', and execution.ts typing it client-side —
+-- but no migration ever added the value to the approval_kind enum (created app_0022; later alters
+-- added only send_batch/send_for_signature/content_week/send_mail-class values). Every approval
+-- insert with kind='send_sms' therefore failed at the DB, and the trigger-engine's SMS fires
+-- silently burned each tick's fire budget while starving email automations queued behind them
+-- (audit 09 §blast-radius). One line makes the rail real.
+alter type public.approval_kind add value if not exists 'send_sms';
+
+-- ======== supabase/migrations/app_0113_automation_reliability.sql ========
+-- app_0113_automation_reliability.sql
+-- THE REPAIR LOOP, first slice (capability-audit 09 §failure/repair; fix directive item 2).
+-- Before this, a failing automation fire was released-and-retried every 15-minute tick forever:
+-- the drain's catch block swallowed the error (zero records anywhere), and each doomed attempt
+-- burned the shared per-tick fire budget — a single broken trigger could starve every healthy
+-- automation queued behind it (the send_sms enum bug ran exactly this loop for weeks).
+--
+-- The fix is a per-trigger circuit breaker, because the TRIGGER is the operationally meaningful
+-- unit: a transient failure should retry (release the claim, as before), but a trigger that fails
+-- repeatedly is broken and must stop consuming the fleet's budget until a human looks at it.
+--   * every failure records itself (last_error / last_error_at) and increments the streak;
+--   * any successful enqueue resets the streak — transient blips never accumulate;
+--   * at 5 consecutive failures the worker flips status → 'paused' (already a legal status) and
+--     writes a LOUD mind_event; the operator re-activates from Automations after fixing the cause.
+alter table public.automation_triggers
+  add column if not exists consecutive_failures integer not null default 0,
+  add column if not exists last_error text,
+  add column if not exists last_error_at timestamptz;
+
+comment on column public.automation_triggers.consecutive_failures is
+  'Circuit breaker: successive fire failures with no success between; 5 auto-pauses the trigger. Reset to 0 on any successful enqueue.';
+comment on column public.automation_triggers.last_error is
+  'The most recent fire failure, verbatim — an automation must never fail silently (audit 09).';
+
+-- ======== supabase/migrations/app_0114_world_spine.sql ========
+-- app_0114_world_spine.sql
+-- THE WORLD_ID SPINE (capability-audit 10/12; fix directive items 3-4). Every fleet-level question
+-- — cost per client, automation health per client, isolation proofs — was unanswerable because the
+-- operational ledgers carried only owner_id. Three structural stamps + world-scoped retrieval:
+--
+--   1. execution_runs.world_id — auto-stamped from the approval that authorized the run (approvals
+--      gained world_id in app_0083), via BEFORE INSERT trigger so every existing writer inherits
+--      the stamp with zero call-site changes; backfilled from the approvals lineage.
+--   2. usage_events.world_id — the column + index now; writers thread it as they route through the
+--      metering chokepoint (same campaign, next slice).
+--   3. embeddings.world_id — the isolation fix. match_embeddings was owner- but not world-scoped,
+--      so a world-scoped ask mixed one client's documents into another client's AI context
+--      (ask.ts's own comment: "vector is account-wide; world scope uses lexical"). The column is
+--      backfilled from documents (which already carry world_id) and artifacts (via their cluster's
+--      world), stamped server-side by embed-worker on new rows, and the RPC gains a _world filter.
+
+-- ---------- 1. execution_runs ----------
+alter table public.execution_runs
+  add column if not exists world_id uuid references public.knowledge_worlds(id) on delete set null;
+create index if not exists idx_execution_runs_world on public.execution_runs(owner_id, world_id, created_at desc);
+
+create or replace function public.stamp_execution_world()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.world_id is null and new.approval_id is not null then
+    select a.world_id into new.world_id from public.approvals a where a.id = new.approval_id;
+  end if;
+  return new;
+end;
+$$;
+-- Definer is deliberate: run inserts come from executors whose RLS view of approvals varies;
+-- the stamp must read the approval row regardless. It only copies world_id, nothing else.
+revoke all on function public.stamp_execution_world() from public;
+
+drop trigger if exists trg_execution_runs_world on public.execution_runs;
+create trigger trg_execution_runs_world
+  before insert on public.execution_runs
+  for each row execute function public.stamp_execution_world();
+
+update public.execution_runs r
+   set world_id = a.world_id
+  from public.approvals a
+ where r.approval_id = a.id and r.world_id is null and a.world_id is not null;
+
+-- ---------- 2. usage_events ----------
+alter table public.usage_events
+  add column if not exists world_id uuid references public.knowledge_worlds(id) on delete set null;
+create index if not exists idx_usage_events_world on public.usage_events(world_id, created_at);
+
+-- ---------- 3. embeddings ----------
+alter table public.embeddings
+  add column if not exists world_id uuid references public.knowledge_worlds(id) on delete set null;
+create index if not exists idx_embeddings_world on public.embeddings(owner_id, world_id);
+
+update public.embeddings e
+   set world_id = d.world_id
+  from public.documents d
+ where e.subject_type = 'document' and e.subject_id = d.id
+   and e.world_id is null and d.world_id is not null;
+
+update public.embeddings e
+   set world_id = c.world_id
+  from public.knowledge_artifacts a
+  join public.knowledge_clusters c on c.id = a.cluster_id
+ where e.subject_type = 'artifact' and e.subject_id = a.id
+   and e.world_id is null;
+
+update public.embeddings e
+   set world_id = c.world_id
+  from public.knowledge_clusters c
+ where e.subject_type = 'cluster' and e.subject_id = c.id
+   and e.world_id is null;
+
+-- ---------- 4. match_embeddings gains the world filter ----------
+-- Recreated (not overloaded): a second signature would make PostgREST rpc-by-name ambiguous.
+drop function if exists public.match_embeddings(uuid, vector, int, text, float, uuid);
+create or replace function public.match_embeddings(
+  _owner uuid,
+  _query vector(1536),
+  _k int default 8,
+  _subject_type text default null,
+  _min_similarity float default 0.0,
+  _exclude_subject uuid default null,
+  _world uuid default null
+)
+returns table (
+  subject_type text,
+  subject_id   uuid,
+  chunk_ix     int,
+  content      text,
+  similarity   float
+)
+language sql
+stable
+as $$
+  select e.subject_type, e.subject_id, e.chunk_ix, e.content,
+         1 - (e.embedding <=> _query) as similarity
+  from public.embeddings e
+  where e.owner_id = _owner
+    and (_subject_type is null or e.subject_type = _subject_type)
+    and (_exclude_subject is null or e.subject_id <> _exclude_subject)
+    and (_world is null or e.world_id = _world)
+    and (1 - (e.embedding <=> _query)) >= _min_similarity
+  order by e.embedding <=> _query
+  limit greatest(1, least(_k, 50));
+$$;
+
+-- ======== supabase/migrations/app_0115_service_packages.sql ========
+-- app_0115_service_packages.sql
+-- THE SERVICE-PACKAGE NOUN (capability-audit 04 §4, 10 §rollout; fix directive item 7).
+-- Before this, "what a client buys" lived as two hardcoded offers in clientTiers.ts — no versioning,
+-- no record of WHICH definition a client is on, and no honest answer to "roll an improvement out to
+-- a cohort." The audits ruled this the one true ARCH-CHANGE that must land before any care-plan
+-- feature, and the same definition/instance/pin shape doubles as automation versioning later.
+--
+-- Two tables, deliberately minimal:
+--   * service_packages — a VERSIONED package definition. Built-ins ship owner_id-null (the
+--     VerticalSpec convention); the operator's own packages carry their owner_id. `definition`
+--     holds what the package ESTABLISHES on a client (watch, proposed automations, reporting
+--     cadence) — data, not code, so a new offer is a row.
+--   * package_pins — which package VERSION each client runs (one pin per client; upgrade =
+--     re-pin), with a cohort tag so a future rollout can bake on a small group first. The pin is
+--     the fleet-level answer to "which version is this client on?" — unanswerable before this.
+--
+-- Cohort ROLLOUT machinery (bake/promote/rollback) is deliberately NOT here — the roadmap's
+-- do-not-build-yet list forbids cohort machinery before the noun. The noun carries the cohort tag;
+-- the machinery comes when T-100 needs it.
+
+create table if not exists public.service_packages (
+  id          uuid primary key default gen_random_uuid(),
+  owner_id    uuid references public.profiles(id) on delete cascade,  -- null = built-in
+  key         text not null,                     -- 'website' | 'website_automation' | future offers
+  version     integer not null,
+  name        text not null,
+  blurb       text not null default '',
+  cadence     text not null check (cadence in ('one_time', 'monthly')),
+  price_hint  text not null default '',
+  definition  jsonb not null default '{}',       -- { includes: [], establishes: { watch_site, propose_automations[], reporting } }
+  status      text not null default 'current' check (status in ('draft', 'current', 'retired')),
+  created_at  timestamptz not null default now(),
+  -- nulls-not-distinct: built-ins are owner_id-null; a plain unique treats NULLs as distinct and
+  -- would let a re-run of this migration double-seed. PG15 syntax; Supabase runs PG15+.
+  unique nulls not distinct (owner_id, key, version)
+);
+create index if not exists idx_service_packages_key on public.service_packages(key, status);
+
+create table if not exists public.package_pins (
+  id                      uuid primary key default gen_random_uuid(),
+  owner_id                uuid not null references public.profiles(id) on delete cascade,
+  client_subscription_id  uuid not null references public.client_subscriptions(id) on delete cascade,
+  package_id              uuid not null references public.service_packages(id) on delete restrict,
+  cohort                  text not null default 'general',
+  established_at          timestamptz,           -- when packageEstablishes() materialized the objects
+  created_at              timestamptz not null default now(),
+  unique (client_subscription_id)                -- one pin per client; an upgrade re-pins
+);
+create index if not exists idx_package_pins_owner on public.package_pins(owner_id, created_at desc);
+create index if not exists idx_package_pins_package on public.package_pins(package_id);
+
+-- RLS: house owner-all pattern; packages additionally readable when built-in (owner_id null).
+alter table public.service_packages enable row level security;
+alter table public.package_pins enable row level security;
+
+drop policy if exists service_packages_read on public.service_packages;
+create policy service_packages_read on public.service_packages
+  for select using (owner_id is null or owner_id = auth.uid());
+drop policy if exists service_packages_write on public.service_packages;
+create policy service_packages_write on public.service_packages
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop policy if exists package_pins_all on public.package_pins;
+create policy package_pins_all on public.package_pins
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- Seed v1 of the two shipped offers from clientTiers.ts, verbatim — the code becomes data. The
+-- `establishes` block is honest about what is MECHANICAL (watching the live site) vs what needs
+-- the operator/client (automations are PROPOSED, never silently configured — per-client config,
+-- consent, and customer lists are deliberate acts).
+insert into public.service_packages (owner_id, key, version, name, blurb, cadence, price_hint, definition, status)
+values
+  (null, 'website', 1, 'New Website',
+   'A rebuilt, modern, mobile-ready site — live and hosted.',
+   'one_time', 'from $1,500 one-time',
+   '{"includes": ["Full rebuild from your real content + photos", "Mobile-ready, secure (HTTPS)", "Contact form + search-ready basics", "Hosting included"],
+     "establishes": {"watch_site": true, "propose_automations": [], "reporting": null}}'::jsonb,
+   'current'),
+  (null, 'website_automation', 1, 'Website + Automation',
+   'The new site, plus recurring automations that bring customers back — on autopilot.',
+   'monthly', 'from $500/mo',
+   '{"includes": ["Everything in New Website", "Recall / seasonal reminders to your customers", "Review requests after each job", "Lead follow-up + win-back of past customers", "Every message approval-gated — nothing sends without your OK"],
+     "establishes": {"watch_site": true, "propose_automations": ["lead_followup", "review_request", "recall_reminder"], "reporting": "monthly"}}'::jsonb,
+   'current')
+on conflict (owner_id, key, version) do nothing;
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).

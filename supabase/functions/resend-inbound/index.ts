@@ -10,6 +10,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { notifyText } from '../_shared/notify.ts';
+import { spendCredits } from '../_shared/credits.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-inbound-secret' };
 
@@ -20,7 +21,8 @@ function classifyHeuristic(text: string): 'positive' | 'negative' | 'neutral' {
   return 'neutral';
 }
 
-async function classifyAI(subject: string, body: string): Promise<'positive' | 'negative' | 'neutral' | null> {
+// deno-lint-ignore no-explicit-any
+async function classifyAI(admin: any, ownerId: string, subject: string, body: string): Promise<'positive' | 'negative' | 'neutral' | null> {
   const openai = Deno.env.get('OPENAI_API_KEY');
   const lovable = Deno.env.get('LOVABLE_API_KEY');
   if (!openai && !lovable) return null;
@@ -42,6 +44,18 @@ async function classifyAI(subject: string, body: string): Promise<'positive' | '
     });
     if (!res.ok) return null;
     const data = await res.json();
+    // audit 12 §1.2 (unmetered call sites): record-only, NO checkCredits gate on purpose — the
+    // reply MUST be recorded and the sequence stopped even when the balance is empty
+    // (classification only annotates; heuristic fallback covers the rest). Raw fetch bypasses the
+    // ai.ts seam, so the cost is computed here: gpt-4o-mini list price; the Lovable gateway doesn't
+    // bill our key (cost 0) but tokens are still recorded. spendCredits never throws.
+    const inTok = data.usage?.prompt_tokens ?? 0;
+    const outTok = data.usage?.completion_tokens ?? 0;
+    await spendCredits(admin, ownerId, {
+      costUsd: openai ? (inTok * 0.15 + outTok * 0.6) / 1_000_000 : 0,
+      kind: 'classify', provider: openai ? 'openai' : 'lovable', model,
+      inputTokens: inTok, outputTokens: outTok,
+    });
     const word = (data.choices?.[0]?.message?.content ?? '').toLowerCase().trim();
     return word.includes('positive') ? 'positive' : word.includes('negative') ? 'negative' : 'neutral';
   } catch {
@@ -114,6 +128,15 @@ Deno.serve(async (req) => {
     if (!prof) return json({ ok: true, note: 'alias unknown; ignored' });
     const ownerId = (prof as { id: string }).id;
     const sender = parseAddr(payload.from ?? '');
+    // WORLD STAMP (app_0114): the forward-in alias is owner-level, so the mail's world is only
+    // knowable when the sender is already a known contact with a world (app_0082). Best-effort and
+    // honest — an unknown sender's mail stays world-null rather than guessing.
+    let mailWorldId: string | null = null;
+    if (sender.address) {
+      const { data: known } = await admin.from('contacts')
+        .select('world_id').eq('owner_id', ownerId).eq('email', sender.address.toLowerCase()).maybeSingle();
+      mailWorldId = (known as { world_id?: string | null } | null)?.world_id ?? null;
+    }
     await admin.from('inbound_mail').insert({
       owner_id: ownerId,
       from_address: sender.address, from_name: sender.name,
@@ -121,6 +144,7 @@ Deno.serve(async (req) => {
       subject: subject.slice(0, 300),
       body_text: text.slice(0, 16000),
       message_id: (payload.message_id ?? payload.provider_message_id ?? '').replace(/[<>]/g, '') || null,
+      world_id: mailWorldId,
     });
     await admin.from('mind_events').insert({
       owner_id: ownerId, event_type: 'note', source: 'inbound-mail',
@@ -144,7 +168,7 @@ Deno.serve(async (req) => {
     .split(/\nOn .{0,120}wrote:\s*$/m)[0]
     .split(/\n-- ?\n/)[0]
     .trim();
-  const classification = (await classifyAI(subject, ownWords)) ?? classifyHeuristic(ownWords);
+  const classification = (await classifyAI(admin, msg.owner_id, subject, ownWords)) ?? classifyHeuristic(ownWords);
 
   await admin.from('replies').insert({
     owner_id: msg.owner_id, message_id: msg.id, campaign_id: msg.campaign_id,

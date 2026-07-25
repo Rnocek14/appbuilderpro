@@ -135,7 +135,6 @@ export const CAPABILITIES: Capability[] = [
       body: 'Hi {first_name},\n\nOur records show it’s been about six months since your last visit — you’re due for your routine check-up. Reply here and we’ll find a time that works.\n\nThank you!',
     },
   },
-  // ---- Documented but NOT deliverable yet → surfaced as a roadmap GAP, never proposed. ----
   {
     id: 'online_booking',
     title: 'Self-serve online booking',
@@ -146,7 +145,8 @@ export const CAPABILITIES: Capability[] = [
     matchesSignals: ['platform:no_online_booking', 'manual_process:phone_only_booking'],
     verticals: ['health', 'home_services', 'events', 'food', 'services'],
     monthlyPrice: '$300–500/mo',
-    status: 'not_built',
+    complianceNote: 'Customer-initiated transactional flow; confirmations/reminders ride the booking rail (app_0109), double-booking blocked at the DB.',
+    status: 'beta',
   },
   {
     id: 'missed_call_text_back',

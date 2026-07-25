@@ -82,6 +82,27 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
     } else { outcome = 'paid — click Go Live to publish'; }   // 'notify'
   }
 
+  // WATCH-AT-SALE (capability-audit fix-first #5): a sold, live site immediately gets a daily
+  // watch_url standing order, so "their site went down" reaches the operator instead of the client
+  // discovering it first. Idempotent (webhook redelivery must not double-watch) and fail-soft —
+  // the sale handling never breaks on the watch.
+  if (liveUrl) {
+    try {
+      const { data: existing } = await admin.from('standing_orders')
+        .select('id').eq('owner_id', ownerId).eq('kind', 'watch_url')
+        .eq('config->>url', liveUrl).limit(1);
+      if (!existing?.length) {
+        const nowIso = new Date().toISOString();
+        await admin.from('standing_orders').insert({
+          owner_id: ownerId, world_id: null, kind: 'watch_url',
+          label: `Client site: ${sub.business_name}`.slice(0, 120), cadence: 'daily',
+          config: { url: liveUrl, client_subscription_id: sub.id },
+          status: 'active', anchor_at: nowIso, next_run_at: nowIso,
+        });
+      }
+    } catch { /* watch is best-effort; the operator can arm one from Automations */ }
+  }
+
   // Tell the operator, in-app + webhook. This is a raised hand that paid — never let it land silently.
   await admin.from('mind_events').insert({
     owner_id: ownerId, source: 'execution', event_type: 'note',
