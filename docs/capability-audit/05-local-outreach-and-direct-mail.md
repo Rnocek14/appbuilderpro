@@ -37,9 +37,32 @@ level-10 spec [R14 #5].
 
 ## 1. Chain 1 — OUTREACH-AS-A-SERVICE for a client
 
-*The audit's control is the agency's own outreach (WORKING end-to-end, [R06 §5]). Each row
-asks: does the same step exist when the sender is a CLIENT's brand and the beneficiary is the
-client's business?*
+### 1.0 The control: what the agency's own outreach proves, stage by stage
+
+The revenue engine [R06 §5] is the measuring stick — each of its stages already closes for the
+agency's OWN pitching. The service question is whether the same stage exists when the sender is
+a CLIENT's brand and the beneficiary is the client's business:
+
+| Agency-own stage [R06 §5] | Own status | Client-side counterpart | Client-side status |
+|---|---|---|---|
+| (a) DISCOVER — Places grid, national sweep, self-capped | WORKING 🔌 | Cold-audience building in the CLIENT's vertical | PARTIAL — engine generalized, output drains only into the agency's demo/pitch funnel (step 6 below) |
+| (b) SCRAPE — fetch-url audit, tech fingerprint | WORKING | Enriching a client's prospect list | WORKING as machinery — reusable unchanged, unrouted |
+| (c)–(d) BUILD/PUBLISH — demo sites | WORKING 🔌 | Campaign assets under the client's brand (boards, composer, brand kits) | WORKING — the marketing production rail is already per-world [R03 §6] |
+| (e) PITCH — placeholder gate, review-before-send, one send path | WORKING 🔌 | Client batch/segment sends | WORKING 🔌 — but personalization drops from per-prospect AI drafting to token merge (step 8) |
+| (f) SIGNALS — webhooks + live board | WORKING 🔌 | Per-client engagement + deliverability surface | PARTIAL — events recorded per brand; no per-client analytics view (chain 2 step 10) |
+| (g) FOLLOW-UP — crons, drafts mint approvals | WORKING 🔌 | Same crons over client campaigns | WORKING 🔌 — but caps are per-OWNER, not per-client (step 10) |
+| (h) REPLY — inbound, classify, draft, read in-app | WORKING 🔌 | Reply handling in the client's context | PARTIAL — world-scoped, operator-only; the client never sees it (step 11) |
+| (i) CLAIM — inbound conversion event, never silent | WORKING 🔌 | Lead capture on client sites (site-events, speed-to-lead) | WORKING 🔌 — this piece is already genuinely multi-client |
+| (j) CLOSE — close-won → subscription + invoice | WORKING | Attributing the CLIENT's closed business back to outreach | PARTIAL — ledger rows exist [R03 §8]; no report ever composes them for the client (step 13) |
+
+The pattern the table exposes: **the machinery generalizes; the routing, scoping, and reporting
+don't.** Nothing in the client column needs a new engine — every gap is a seam (routing
+discovery output, scoping caps, surfacing replies, composing reports) on rails already proven
+by the agency's own funnel.
+
+### 1.1 The chain
+
+*One row per step of running outreach FOR a client, end to end.*
 
 | Step | Status | Evidence | Build/Buy | Owner object | Approval posture | Portfolio surface | Breaks at |
 |---|---|---|---|---|---|---|---|

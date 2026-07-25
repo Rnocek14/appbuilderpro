@@ -319,7 +319,36 @@ container is missing.
 
 ---
 
-## 7. The fifteen questions
+## 7. The dependency spine (what unblocks what)
+
+Not a roadmap (doc 13's job) — a dependency record, because this domain's gaps are unusually
+order-constrained and the ordering IS an audit finding:
+
+1. **Art-ownership metadata + `asset_grants`** (§1.1) unblocks: the founding move of any
+   granted-artwork venture, the courthouse-mural refusal, the provenance registry row of
+   Chain 3, and every publish gate downstream. Nothing else in Chain 1 is honest without it —
+   a design pipeline over unlicensed art is a liability engine.
+2. **Printful integration** (§1.2) unblocks three steps at once: real product templates
+   (mockup API is the fidelity engine — step 3), fulfillment (step 6), and the order-webhook
+   substrate (step 10). It is this domain's Lob: the single buy the whole chain hangs on, with
+   the spec pattern already written for the sibling case [D11 §2.2–2.3].
+3. **Criteria packs as data** (apparel §4, mural-pitch §6) unblock critique and the mastery
+   loop; they cost nothing external and reuse the judge seam — highest ratio of leverage to
+   effort in the domain.
+4. **Orders-as-rows** (step 10) is the precondition for every learning claim the experience
+   corpus makes about this domain (sell-through vitals, outcome annotations, Playbook lessons,
+   restock automation). Until it exists, "outcome learning" cannot even be PARTIAL.
+5. **The artist venture template** (§3.1 #1) is independent of all four — data-only, buildable
+   today, and turns three already-working rails (opportunity feed, invoicing, portfolio) into
+   the domain's first operating business. That independence is why Chain 3 should ship first.
+
+The mural business needs items 3 and 5 only. The apparel business needs all five. Same
+domain, different distances from reality — and the shared substrate (ownership metadata,
+brand kit, criteria-pack machinery) means the mural build is not a detour but a down payment.
+
+---
+
+## 8. The fifteen questions
 
 | # | Question | Answer for this domain |
 |---|---|---|
