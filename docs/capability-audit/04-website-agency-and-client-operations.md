@@ -112,6 +112,90 @@ churn mission, re-audit order). Every gap but one is wiring-plus-one-object, not
 The chain's grade as a whole: the funnel is A−; long-term management is honestly a **D+** — and
 it is where the recurring revenue lives.
 
+### 3b. Gap anatomy — the six missing client-shaped objects, one by one
+
+Because this half of the domain is the audit's focus, each §3 gap gets its precise build shape.
+Every one reuses substrate that already exists; the "New code" column is honest about how little
+is genuinely new.
+
+**(1) `site_change_requests` — the care plan's front door.**
+- *Shape*: `{ id, owner_id, client_subscription_id, preview_site_id, source: 'form'|'reply'|
+  'operator', ask (text), status: 'open'|'in_progress'|'shipped'|'declined', shipped_note,
+  created_at }`.
+- *Intake a — form slice on sold sites*: `exportStatic.ts` already injects the claim-submit lead
+  form into published HTML with the channel-token security model [R13 §7.13]; a "Request a
+  change" variant is the same pattern posting to a new anon endpoint with the same burst caps
+  (claim-submit's 5/preview/min precedent [R13 §7.15]).
+- *Intake b — inbound replies*: `resend-inbound` already AI-classifies replies with a 3-tier
+  fallback [R13 §7.6]; adding a `change_request` class + insert is a branch, not a system.
+- *Surface*: OpsInbox already merges replies + leads + inbound mail [R06 §12]; change requests
+  are a fourth stream into the same page.
+- *New code*: one table, one endpoint variant, one classifier branch, one inbox filter. The loop
+  then closes through §3 step 2 (exists) and step 3 (one send-email template + shot-worker call).
+
+**(2) Per-client monthly report.**
+- *Numbers already on the shelf*: `trigger_fires`/approvals/sends per campaign
+  (`automation/report.ts` proves the counting pattern), site_events visits + leads per channel
+  token, `social_post_metrics`, booking counts, missed-call saves, invoice state. All owner-RLS'd
+  ledger rows; the report is a per-client GROUP BY the current code never does (it filters by
+  owner only, `report.ts:12`).
+- *Composition*: `deliverable.ts` DOC_TYPES already includes `report` and enforces "[needs your
+  input]" honesty [R05 §9.22]; the house `DATA_SYSTEM` rule ("never compute a new number
+  yourself") is exactly the client-report contract.
+- *Cadence + send*: a `cadence_digest`-style standing order per active subscription → composed
+  draft → `send_email` approval → the one send path. Earned autonomy is the natural maturation:
+  the content-week streak machinery [R03 §6] applies verbatim to "3 clean report approvals".
+- *New code*: one per-client aggregation module, one producer, one order kind config. Zero new
+  external services.
+
+**(3) Per-site uptime/SSL watch.**
+- *Already built*: `watch_url` fetches through safeFetch on the 15-minute tick and the verified
+  core rules "a failed fetch is UNREACHABLE (never 'no change'); first sight is a baseline"
+  (`standing-worker/index.ts:5–9`, `_shared/standingCore.ts`). Change/unreachable → mind_event +
+  operator webhook, deduped.
+- *The wiring gap*: nothing creates a watch when a sale activates. `handleClientSale` is the
+  exact hook point — it already flips the sale, republishes, and notifies [R13 §9.1].
+- *The additions that are real work*: TLS-expiry check (safeFetch doesn't surface cert dates) and
+  custom-domain re-verification (connect-domain's `resolveDns` check runs once, interactively
+  [R13 §5.9]) — both small, both server-side.
+- *New code*: ~one insert in the webhook + one probe extension. This is the purest DISCONNECTED
+  case in the domain: the monitor exists, the assets exist, no row joins them.
+
+**(4) `site_refresh` standing order.**
+- *Already built*: the regeneration path takes a directive and honors it through draft AND refine
+  (`engine.ts:251–279`); publish overwrites in place preserving `purchased` (`publishCore.ts`).
+- *The gap*: regeneration + the static-HTML render run **in the operator's browser**
+  (`exportStatic` DOM-inlines CSS — "it must run here, not server-side", `engine.ts:328–333`), so
+  a clock-driven refresh cannot ship the final HTML today. Two honest options: (a) the order
+  produces a *pending refresh approval* whose approval executes in the operator's next session
+  (weakest, but zero new infra); (b) a server-side renderer for the spec→HTML step (real work;
+  the deploy-site precedent shows the pattern of client-built/server-uploaded being deliberate).
+- *New code*: order kind + config (`{ directive_template, cadence }`); the render question is the
+  one genuine design decision in this whole section.
+
+**(5) Churn offboarding + win-back.**
+- *Already built*: honest churn booking with the NO RESURRECTION guard (`stripe-webhook/
+  index.ts:109–119`); operator webhook push; invoice-fail chase notes.
+- *Missing decisions the mission template must force*: keep the site up as goodwill / take it
+  down / offer transfer (the Netlify site sits on the operator's token — grep `takedown|
+  unpublish` → zero paths); revoke or keep the site-events channel token (revocation exists
+  [R13 §7.13]); final report ("here's what we did for you"); win-back sequence (outreach-
+  reactivate's monthly pattern [R13 §7.9] retargeted at `client_subscriptions.status='canceled'`
+  instead of silent campaigns).
+- *New code*: one mission template + one takedown executor behind an approval (Netlify DELETE is
+  a one-call function next to publish-preview).
+
+**(6) Quarterly client re-audit (the upsell engine).**
+- *Already built*: `detect.ts` is pure and deterministic over signals; the registry never
+  proposes `not_built`; the intake regexes recognize manual-process language [R05 §9.23]; the
+  client's own ledgers (bookings, missed calls, lead volumes, site events) are richer signal than
+  any scrape.
+- *The gap*: detection only ever runs on *prospect* scrape output; no caller feeds it a paying
+  client's current state.
+- *New code*: a standing order that re-fingerprints the client's site + composes ledger-derived
+  signals (`manual_process:*` from real volumes) → proposals land on the upsell slate, never
+  auto-sent. The ClientBilling rung-3 menu is the display surface, already built.
+
 ---
 
 ## 4. SERVICE PACKAGES as inherited genome layers
@@ -136,6 +220,21 @@ table + `package_version` on `client_subscriptions` + a `packageEstablishes()` s
 mechanically; cohort rollout/migration is genuine T-100 architecture and should wait for the
 control plane (doc 10). The trap to avoid: building §3's six missing objects as one-off
 per-client features *without* the package object, which would make T-10 → T-100 a rewrite.
+
+What a package row must carry, concretely, for the $1,500/$500 offer to become rollout-able:
+
+- **Identity + version**: `(package_key, version, published_at, superseded_by)` — a client
+  subscribes to `website_care@2`, not to a string; price changes create versions, never mutate.
+- **Contents as obligations**: which connectors are `needed` (subsumes `seedForTier`'s tier
+  switch [R07 §3.3]), which standing orders are established at sale (monthly report, site watch,
+  content week, quarterly re-audit — §3b's six objects become package lines), which automations
+  are included vs rung-3 upsells, report cadence, change-request SLA.
+- **Autonomy defaults**: which order classes start `approve` vs are eligible to earn (the
+  autonomy-grant classes already exist per action class [R05 §6]; the package supplies per-client
+  defaults).
+- **Migration story**: `client_subscriptions.package_version` + a diff-driven migration mission
+  ("v2 adds the GBP connector: 12 clients need one new connection each") — at T-10 this is a
+  slate of missions; at T-100 it is the cohort/canary machinery doc 10 owns.
 
 ---
 
@@ -222,7 +321,68 @@ the spec names what formalizing it adds.*
 
 ---
 
-## 7. The fifteen questions
+## 7. Domain DISCONNECTED register + break-point index
+
+The charter's central disease, scoped to this domain. Items 1–2 also appear in the global
+register (doc 01); 3–7 are surfaced by this audit's greps.
+
+| # | Built thing | Not connected to | One-line repair shape | Evidence |
+|---|---|---|---|---|
+| 1 | The SMS rail (send-sms, TCPA core, per-client from-numbers) | The `approval_kind` enum — every SMS approval insert fails at the DB | One-line enum migration | [R06 §15 #0] |
+| 2 | `sender-domain` + `booking` edge functions | Every deploy list — silently absent from a fresh environment | Two deploy-list lines | [R13 §13.4] |
+| 3 | `watch_url` standing order + UNREACHABLE-honest core | Sold sites — nothing creates a watch at sale time | Insert in `handleClientSale` | §3 step 5 grep |
+| 4 | Operator refine→republish loop (targeted directive, purchase-safe overwrite) | Any client-facing intake — no request object, form, or classifier branch feeds it | §3b(1): table + form variant + classifier branch | engine.ts:251–279; grep |
+| 5 | Ledger-counting report pattern + document studio `report` type + send spine | Each other, per client, on a cadence — the only report is one owner-wide line on page visit | §3b(2): per-client aggregation + producer + order | report.ts:12–43 |
+| 6 | detect.ts + registry + client ledgers (bookings/calls/leads/site events) | Active clients — detection only ever consumes prospect scrape output | §3b(6): quarterly re-audit order → upsell slate | [R05 §9.23]; grep |
+| 7 | Funnel outcome signals (visits/claims/replies per demo) | The demo generator — no strategy/spec_source-vs-outcome loop | Outcome scoring order feeding strategist context | grep engine.ts |
+
+**Break-point index (where each chain actually stops today):**
+
+- Chain 1 ⛔ **step 6 for no-email businesses** — the pitch has no channel; the SMS substitute is
+  register #1. Everything else in the funnel closes.
+- Chain 2 ⛔ **nowhere structurally**, but fresh-environment onboarding silently lacks
+  sender-domain + booking (register #2), and three connectors are catalog-only [R07 §3.3].
+- Chain 3 ⛔ **step 1** — the chain has no entry point a client can trigger. Steps 4–9 then
+  fail independently as MISSING objects (§3b). Step 2 alone works, driven by operator memory.
+- Chain 4 (packages) ⛔ **at birth** — there is no package noun; the tier string on
+  `client_subscriptions` cannot version, establish, or roll out.
+
+---
+
+## 8. Scale-gate walkthrough (what breaks at each tier, in this domain's terms)
+
+**T-ME (the operator, this quarter).** The funnel runs armed 🔌 and can genuinely win clients
+this week; the enum + two deploy-list lines are the only code fixes it needs. Long-term care runs
+on operator heroics: she reads client texts on her phone, drives the Refine box herself, and no
+report/watch/refresh exists — survivable at 1–3 clients, already embarrassing at the first
+"your site was down yesterday" text she learns about from the client.
+
+**T-10 (ten active clients).** Heroics stop scaling first in exactly the §3 gaps: ten monthly
+reports composed by hand don't happen; ten sites unwatched means the next outage is discovered by
+a client; change requests scattered across her personal inbox start getting lost; churned
+clients' zombie sites accumulate on her Netlify token; upsell-by-memory forfeits the expansion
+margin. The package object (§4) becomes load-bearing here — without `packageEstablishes()`,
+every new client is a manual checklist of order-creation the operator will eventually skip.
+The connections checklist and automationReady gate, by contrast, already hold at this tier —
+they are the pattern the rest of the tier needs.
+
+**T-100 (one hundred).** New failure class: versioning and cohorts. Package v2 must roll out to
+40 clients as a slate, not 40 manual missions; billing reconciliation can no longer be manual
+[R06 §6 ⚠]; per-client autonomy streaks need cohort aggregation; the client-ops bench must go
+exception-only (only DOWN sites, missed SLAs, failed payments, skipped reports surface). All of
+this is doc-10 control-plane territory plus the §4 ARCH-CHANGE — building it before the package
+noun exists would be building it twice.
+
+**T-1K.** Nothing in this domain survives without the full control plane: fleet cost anomalies
+(every demo build and report composition is metered AI spend), credential drift across a thousand
+client_connections rows, canary rollout of package/generator changes, and a policy engine
+deciding which client classes may earn which autonomy. The one component already shaped for this
+tier is the evidence-derived checklist pattern — status computed from the connector's own table
+generalizes to fleet health checks without redesign.
+
+---
+
+## 9. The fifteen questions
 
 | # | Question | Answer for this domain |
 |---|---|---|

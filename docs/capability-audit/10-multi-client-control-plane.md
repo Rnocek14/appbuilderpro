@@ -91,6 +91,27 @@ spine; quiet-when-green; every rollup drills to rows [exp-arch 08 §2.2, DOCUMEN
 adopted here as the design bar]; fail-closed on missing data (a missing report is never zero
 [R13 §9.11]).
 
+### 2.0 The complete object inventory — everything the control plane adds
+
+For the aggregator and the roadmap: the minimal control plane is **2 column additions, 5 new
+tables, 6 new standing jobs, 1 new approval kind, and 0 new external services.** Everything
+else is generalization of shipped code.
+
+| New object | Kind | Subsystem | Precedent it generalizes |
+|---|---|---|---|
+| `execution_runs.world_id` + `client_subscription_id`; same on `usage_events` | columns | §2.1/§2.3 | `approvals.world_id` (app_0083, nullable, old rows honestly null) |
+| `world_health` (world × day rollup, derived state incl. `dark`) | table | §2.1 | scorecard's per-business split [R13 §6.5] |
+| `policies` (scope × gate-seam × predicate × enforce/monitor) | table | §2.4 | `outreach_settings` gates + `autonomy_grants` caps, made declarative |
+| `automation_packages` (capability × semver × templates × status) | table | §2.5 | automation registry [R05 §9.23] + vertical-as-data intent [R03 §9] |
+| `package_pins` (client × package × version × overrides) | table | §2.5 | `automation_triggers.client_subscription_id` (app_0108) |
+| `exceptions` (severity × world × source × state) | table | §2.6 | `mind_events` capture + Queue badges, tiered |
+| fleet-tick · credential-watch · cost-sweep · performance-sweep · policy-monitor · audit-sampler/rotation | pg_cron jobs | §2.1–2.6 | the 12-job heartbeat + `garvis_arm_heartbeat()` [R13 §2] |
+| `approval_kind` + `'approve_slate'` (hash-bound member manifest) | enum value + executor path | §2.6 | `content_week` one-approval-many-pieces (app_0088_content_week) — and the enum-extension bug class is known: the SMS rail died on exactly a missing enum value [01 §DISCONNECTED #1], so the kind ships WITH its executor in one migration |
+
+Everything in this inventory is additive and idempotent per the house migration rule
+[R04 §1]; nothing amputates the operator cockpit — it becomes the fleet plane's single-world
+drill-down.
+
 ### 2.1 Fleet health model — rollups over execution_runs / trigger_fires / heartbeat, per world
 
 **Exists:** the three ledgers (`execution_runs`, `trigger_fires`, `system_heartbeat`) plus
@@ -346,6 +367,53 @@ Buy-shaped decision is whether T-1K observability outgrows Postgres rollups.
 
 ---
 
+## 4b. Toolchain — COHORT ROLLOUT of an automation version (the T-100 defining chain)
+
+The second operational sequence: what happens when the operator improves an automation that
+90 clients run. This chain is where fleet questions 7–9 either close or stay open.
+
+| Step | Status | Evidence | Build/Buy | Owner object | Approval posture | Portfolio surface | Breaks at |
+|---|---|---|---|---|---|---|---|
+| 1. Author v(n+1) of a package (templates, trigger params, changelog) | **MISSING + ARCH-CHANGE** | packs are code registries + copied config today [R05 §9.23; app_0076] | Build: `automation_packages` (§2.5) | substrate | none (a draft row) | registry entry with variance line | T-10 — without a package noun, an "improvement" is 10 hand-edits |
+| 2. Verify the version against the harness before any client sees it | **PARTIAL** | 116 verify suites gate deploys [R03 §10] — but they test the PLATFORM's code, not a package's templates/params; trigger QA covers dedupe/indexes only (app_0078) | Build: per-package dry-run (compile templates against a synthetic customer list; placeholder/policy gates replayed) | Capability | none (internal) | bake report, pre-cohort section | T-100 — unvalidated templates × 90 clients |
+| 3. Select the canary cohort (3–5 clients, low-risk, mixed verticals) | **MISSING** | no cohort noun anywhere; closest is `customer_lists` (client-side, wrong axis) [R04 §3.7] | Build: cohort = a saved selection over `package_pins` | Mission (the rollout) | **approve** — cohort choice is judgment | rollout board: version × cohort | T-100 |
+| 4. Stage per-client adoption to the cohort | **DOCUMENTED-ONLY** | batch-adopt walked per world [exp-arch 08 §6.2, 09 §10.2] | Build: pin updates through per-client approvals | Mission step | approve (per client, batchable) | Queue, class-batched | T-100 |
+| 5. Bake: run N days / M fires; measure vs v(n) baseline | **MISSING** | measurement substrate half-exists: `trigger_fires` + `execution_runs` (needs §2.1 attribution + `package_version` stamp) | Build: bake verdict job (content-week judge generalized [R03 §6]) | Standing Order | none (detection) | bake report: success/violations/engagement/cost deltas, insufficient-sample honest | T-100 |
+| 6. Promote: advance remaining pins, conflicts-only attention | **MISSING** | standing-answer-per-improvement is reality-check fix #4 (design input, no code) | Build: §2.5 step 4 | Mission step | **slate** (no-conflict pins) + approve (conflicts) | variance line updates live | T-100 — 294 diff-reads/year per setup family otherwise [A8] |
+| 7. Watch the promoted fleet at higher sensitivity for K days | **MISSING** | ads-watch dedupe/threshold machinery is the template [R13 §9.11] | Build: temporary threshold override in the §2.1 sweep | Standing Order | none | exceptions, severity-boosted for this version | T-100 |
+| 8. Rollback on breach: re-pin to last-good | **MISSING** | idempotency keys make re-pin safe — (trigger, customer, due-date) never re-fires [R04 app_0076] | Build: §2.5 step 5 | Capability | **auto** (config-only, inward, provably no re-send) — justified by the fire-key invariant | rollout board flips version to `failed-bake` | T-100 |
+| 9. Record the rollout as history (who runs what, since when, why) | **MISSING** | `package_pins` + approvals + execution ledger compose this for free once they exist | Build (falls out of §2.5) | substrate | none | question 7's answer, forever | T-100 |
+
+**Chain verdict.** Zero steps exist in code; one is DOCUMENTED-ONLY; yet six of nine reuse a
+shipped invariant (verify harness, approval spine, fire idempotency, anomaly core, content-week
+bake). The chain's genuinely new inventions are only steps 1 and 3 — the package noun and the
+cohort noun. This is the charter's pattern at its clearest: the fleet capability is MISSING,
+but the distance to it is short because the per-world engineering underneath is real.
+
+---
+
+## 4c. Acceptance checks for the control plane (when is it real?)
+
+1. **The one-query test:** "which clients had a failed or missing automation run yesterday"
+   is one query over `world_health`, and every row drills to `execution_runs`/`trigger_fires`.
+2. **The dark-world test:** a client whose due automations produced zero rows surfaces as
+   `dark` the next morning — job-level heartbeat green is not accepted as world-level health.
+3. **The expiry test:** no credential expiry is ever first observed as an execution failure;
+   every one was an exception at T-14.
+4. **The attribution test:** every metered AI call, connector run, and fire made on behalf of
+   a client carries that client's id; the margin line sums only real ledger rows.
+5. **The version test:** "what is client #37 running, since when, approved by whom" is
+   answerable for every automation, forever — including after a rollback.
+6. **The rollback test:** re-pinning a cohort to last-good re-sends nothing (fire-key
+   invariant holds) and requires no template archaeology.
+7. **The slate test:** no sequence of slate gestures can make anything outbound happen with
+   fewer per-item gates than individual approval (the exp-arch 08 bypass test, inherited);
+   outliers are excluded from the slate before it renders, not after.
+8. **The invisibility test:** an operation the operator never saw can still be reconstructed
+   end-to-end from ledgers — and has a nonzero probability of having been sampled for audit.
+
+---
+
 ## 5. The fifteen questions
 
 | # | Question | Answer |
@@ -367,6 +435,11 @@ Buy-shaped decision is whether T-1K observability outgrows Postgres rollups.
 | 15 | Mastery needs | Domain knowledge: SRE practice (SLOs, error budgets, canary analysis) translated to business operations; per-vertical "normal" baselines. Tools: the six subsystems. Feedback loops: bake verdicts → registry; audit samples → autonomy dials; exception outcomes → severity calibration; margin lines → packaging/pricing [§2.5–2.6]. |
 
 ---
+
+*Cross-references: `01-capability-inventory.md` §21–22 and its DISCONNECTED register (the
+heartbeat-never-self-arms posture applies to every Standing Order proposed here);
+`03-real-estate-marketing.md` (whose chains' "Portfolio surface" columns are consumers of this
+control plane); the 13-gap-matrix aggregator consumes the rows below.*
 
 ## Matrix rows
 
