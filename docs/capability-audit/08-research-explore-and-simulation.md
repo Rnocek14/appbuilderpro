@@ -300,6 +300,37 @@ that.
 
 ---
 
+## 6.7 The dependency-honest build order (what unblocks what)
+
+Not a roadmap — a dependency statement, so the aggregator can order gaps by leverage rather
+than by domain:
+
+1. **Close the five compounding seams first** [R06 §8] — embedding coverage (call the existing
+   `embed-worker` for the other 4 subject types), insights cron, world-intel cron, decision
+   outcome-observation, belief distillation. Every later item in this domain *reads* through
+   these. All five are wiring over shipped machinery; the 01-inventory register already carries
+   their one-line repair shapes (#3, #4, #5).
+2. **Multi-hop research arc** — an orchestrator arc kind that loops plan → `completeWithWebSearch`
+   / `fetch-url` → read → follow-up → synthesize → `persistResearch`. Depends on nothing new;
+   unblocks "serious undertaking" research everywhere, including genesis and campaign grounding
+   (both already consume research-on-record [R05 §9.6]).
+3. **Experiment lifecycle** — experiment object (a mission with a verify step, on the existing
+   `missionRun` verified-handoff spine [R05 §9.1]) whose close writes a `mind_decisions`
+   outcome. Depends on seam 2; unblocks calibration (§3 step 5), theory tallies (§3 step 3),
+   and sim-evidence write-back (§4 step 8) in one stroke — this is the single highest-leverage
+   build in the domain.
+4. **Beacon guesses + cloud state** — guess field on `loops.ts`, persist to
+   `knowledge_worlds.mind` (schema-ready since app_0018). Small; feeds calibration once #3
+   exists.
+5. **The [EA-04] surface** (dual view, theory table, decay rendering, re-entry story, promotion
+   ceremony) — last, deliberately: every mechanism it renders must have real rows behind it
+   first, or the surface performs depth the substrate doesn't have — the invented-confidence
+   sin [R05 §9.10] at the architectural scale.
+6. **Simulation expansion** (templates-as-data, sweeps, Pyodide) — parallel to 2–5; only #3
+   depends on it, and only optionally.
+
+---
+
 ## 7. The fifteen questions
 
 | # | Question | Answer |

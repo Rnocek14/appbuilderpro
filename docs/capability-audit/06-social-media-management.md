@@ -221,8 +221,8 @@ this domain than anywhere else in the system, which makes the remaining mismatch
 | Monthly client report send | does not exist | approve (rides the send-email spine) | the report producer (§9 Q10) |
 
 Two facts make this domain the autonomy proving ground for the whole audit: the earned streak
-is computed from **human decisions only** ("streaks from human decisions only" [R01 inventory
-§0]), and revocation is instant and total ("rejecting a week revokes auto-mode" [R05 §6]).
+is computed from **human decisions only** ("streaks from human decisions only" [doc 01 §0]),
+and revocation is instant and total ("rejecting a week revokes auto-mode" [R05 §6]).
 Nothing else in the system — email follow-ups included — has graduated past "eligible."
 
 ---
@@ -251,7 +251,7 @@ Nothing else in the system — email follow-ups included — has graduated past 
   plane consuming this domain's signals: failed-post rate per client as an SLA, key-health
   probes (Ayrshare 402/403 `available:false` already emits the signal [R13 §9.9]), spend
   anomalies on image/video credits (the ads-watch pattern is the named template
-  [R01 inventory]), canary posts on a test profile. The domain's job between now and then is
+  [doc 01 §22]), canary posts on a test profile. The domain's job between now and then is
   to keep emitting honest, nullable, ledgered signals — which it already does.
 
 ---
