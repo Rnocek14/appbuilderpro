@@ -40,8 +40,11 @@ async function clusterIdsForWorld(worldId: string): Promise<string[]> {
 }
 
 /** Semantic hits via the owner-scoped match_embeddings RPC. Returns [] when embeddings aren't
- *  configured (embedTexts → null) — the lexical path carries the search alone. */
-async function vectorHits(question: string, uid: string): Promise<RawHit[]> {
+ *  configured (embedTexts → null) — the lexical path carries the search alone. When worldId is
+ *  given the match is WORLD-scoped at the index (app_0114): a scoped ask must never mix another
+ *  client's vectors into this world's context — the old post-hoc filter ran the k-NN account-wide
+ *  and let cross-world content shape which k results even came back. */
+async function vectorHits(question: string, uid: string, worldId?: string | null): Promise<RawHit[]> {
   const vecs = await embedTexts([question]);
   if (!vecs || !vecs[0]?.length) return [];
   const literal = `[${vecs[0].join(',')}]`;
@@ -50,6 +53,7 @@ async function vectorHits(question: string, uid: string): Promise<RawHit[]> {
   const call = async (subjectType: 'artifact' | 'document'): Promise<RawHit[]> => {
     const { data, error } = await supabase.rpc('match_embeddings', {
       _owner: uid, _query: literal, _k: 8, _subject_type: subjectType, _min_similarity: 0.15,
+      _world: worldId ?? null,
     });
     if (error) return [];
     return ((data ?? []) as { subject_id: string; content: string; similarity: number }[])
@@ -161,7 +165,7 @@ export async function retrieveSources(question: string, opts?: { worldId?: strin
     if (!uid) return [];
     const clusterIds = opts?.worldId ? await clusterIdsForWorld(opts.worldId) : null;
     const [vhits, lArts, lDocs] = await Promise.all([
-      vectorHits(q, uid),
+      vectorHits(q, uid, opts?.worldId),
       lexicalHits(q, clusterIds),
       documentLexicalHits(q, opts?.worldId),
     ]);
@@ -205,14 +209,14 @@ export async function askGarvis(question: string, opts?: { worldId?: string }): 
 
   const clusterIds = opts?.worldId ? await clusterIdsForWorld(opts.worldId) : null;
   const [vhits, lArts, lDocs] = await Promise.all([
-    opts?.worldId ? Promise.resolve([]) : vectorHits(q, uid),  // vector is account-wide; world scope uses lexical
+    // World scope now applies AT the index (app_0114): the old path ran the k-NN account-wide and
+    // filtered after resolving, so another world's vectors decided which k results existed at all.
+    vectorHits(q, uid, opts?.worldId),
     lexicalHits(q, clusterIds),
     documentLexicalHits(q, opts?.worldId), // uploaded docs are lexically searchable too
   ]);
   const lhits = [...lArts, ...lDocs];
-  // When scoped to a world, still run vector but filter to the world's clusters after resolving.
-  const vScoped = opts?.worldId ? await vectorHits(q, uid) : vhits;
-  const merged = mergeHits(vScoped, lhits, 8);
+  const merged = mergeHits(vhits, lhits, 8);
   const sources = await resolveSources(merged);
   const scoped = opts?.worldId ? sources.filter((s) => s.worldId === opts.worldId) : sources;
 

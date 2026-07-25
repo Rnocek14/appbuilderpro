@@ -81,6 +81,7 @@
     "verify:techfingerprint": "tsx supabase/functions/_shared/techFingerprint.verify.ts",
     "verify:triggers": "tsx src/lib/garvis/automation/triggers.verify.ts",
     "verify:breaker": "tsx src/lib/garvis/automation/breaker.verify.ts",
+    "verify:worldspine": "tsx src/lib/garvis/worldSpine.verify.ts",
     "test:e2e": "playwright test",
     "verify:clienttiers": "tsx src/lib/garvis/billing/clientTiers.verify.ts",
     "verify:clientconsole": "tsx src/lib/garvis/billing/clientConsole.verify.ts",

@@ -114,6 +114,15 @@ Deno.serve(async (req) => {
     if (!prof) return json({ ok: true, note: 'alias unknown; ignored' });
     const ownerId = (prof as { id: string }).id;
     const sender = parseAddr(payload.from ?? '');
+    // WORLD STAMP (app_0114): the forward-in alias is owner-level, so the mail's world is only
+    // knowable when the sender is already a known contact with a world (app_0082). Best-effort and
+    // honest — an unknown sender's mail stays world-null rather than guessing.
+    let mailWorldId: string | null = null;
+    if (sender.address) {
+      const { data: known } = await admin.from('contacts')
+        .select('world_id').eq('owner_id', ownerId).eq('email', sender.address.toLowerCase()).maybeSingle();
+      mailWorldId = (known as { world_id?: string | null } | null)?.world_id ?? null;
+    }
     await admin.from('inbound_mail').insert({
       owner_id: ownerId,
       from_address: sender.address, from_name: sender.name,
@@ -121,6 +130,7 @@ Deno.serve(async (req) => {
       subject: subject.slice(0, 300),
       body_text: text.slice(0, 16000),
       message_id: (payload.message_id ?? payload.provider_message_id ?? '').replace(/[<>]/g, '') || null,
+      world_id: mailWorldId,
     });
     await admin.from('mind_events').insert({
       owner_id: ownerId, event_type: 'note', source: 'inbound-mail',

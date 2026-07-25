@@ -67,6 +67,31 @@ Deno.serve(async (req) => {
     if (!vecs) return json({ embedded: 0, skipped: subjects.length, reason: 'embed_failed' }, 502);
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+    // WORLD STAMP (app_0114): every vector carries its world so match_embeddings can scope
+    // retrieval — a world-scoped ask must never surface another client's documents. Resolved
+    // SERVER-side (never trusted from the client): documents carry world_id directly; artifacts
+    // and clusters resolve through their cluster's world. Unresolvable subjects stay null (global).
+    const worldBySubject = new Map<string, string | null>();
+    const docIds = subjects.filter((s) => s.subject_type === 'document').map((s) => s.subject_id!);
+    const artIds = subjects.filter((s) => s.subject_type === 'artifact').map((s) => s.subject_id!);
+    const cluIds = subjects.filter((s) => s.subject_type === 'cluster').map((s) => s.subject_id!);
+    if (docIds.length) {
+      const { data } = await admin.from('documents').select('id, world_id').in('id', docIds).eq('owner_id', user.id);
+      for (const d of (data ?? []) as { id: string; world_id: string | null }[]) worldBySubject.set(`document:${d.id}`, d.world_id);
+    }
+    if (artIds.length) {
+      const { data } = await admin.from('knowledge_artifacts')
+        .select('id, knowledge_clusters(world_id)').in('id', artIds).eq('owner_id', user.id);
+      for (const a of (data ?? []) as { id: string; knowledge_clusters: { world_id: string } | null }[]) {
+        worldBySubject.set(`artifact:${a.id}`, a.knowledge_clusters?.world_id ?? null);
+      }
+    }
+    if (cluIds.length) {
+      const { data } = await admin.from('knowledge_clusters').select('id, world_id').in('id', cluIds).eq('owner_id', user.id);
+      for (const c of (data ?? []) as { id: string; world_id: string | null }[]) worldBySubject.set(`cluster:${c.id}`, c.world_id);
+    }
+
     const rows = subjects.map((s, i) => ({
       owner_id: user.id,
       subject_type: s.subject_type,
@@ -75,6 +100,7 @@ Deno.serve(async (req) => {
       content: s.content!.trim().slice(0, 8000),
       embedding: toVectorLiteral(vecs[i]),
       model: EMBED_MODEL,
+      world_id: worldBySubject.get(`${s.subject_type}:${s.subject_id}`) ?? null,
     }));
 
     const { error } = await admin.from('embeddings').upsert(rows, { onConflict: 'owner_id,subject_type,subject_id,chunk_ix' });
