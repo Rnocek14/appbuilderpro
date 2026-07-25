@@ -83,6 +83,7 @@
     "verify:breaker": "tsx src/lib/garvis/automation/breaker.verify.ts",
     "verify:worldspine": "tsx src/lib/garvis/worldSpine.verify.ts",
     "verify:servicepackages": "tsx src/lib/garvis/billing/servicePackages.verify.ts",
+    "verify:scopecontract": "tsx src/lib/garvis/scopeContract.verify.ts",
     "test:e2e": "playwright test",
     "verify:clienttiers": "tsx src/lib/garvis/billing/clientTiers.verify.ts",
     "verify:clientconsole": "tsx src/lib/garvis/billing/clientConsole.verify.ts",

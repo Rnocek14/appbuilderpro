@@ -474,13 +474,16 @@ Deno.serve(async (req) => {
       // Per-client SMS FROM routing: resolve (and cache) each attributed client's own number so an
       // automation text comes from THEIR line; null when the client hasn't connected one (send-sms then
       // falls back to the global number). Keyed by client_subscription_id, fetched on first miss.
-      const clientNumCache = new Map<string, string | null>();
-      const clientNumberFor = async (subId: string): Promise<string | null> => {
+      const clientNumCache = new Map<string, { num: string | null; worldId: string | null }>();
+      const clientInfoFor = async (subId: string): Promise<{ num: string | null; worldId: string | null }> => {
         if (clientNumCache.has(subId)) return clientNumCache.get(subId)!;
-        const { data: cs } = await admin.from('client_subscriptions').select('twilio_number').eq('id', subId).maybeSingle();
-        const num = (cs as { twilio_number?: string | null } | null)?.twilio_number ?? null;
-        clientNumCache.set(subId, num);
-        return num;
+        const { data: cs } = await admin.from('client_subscriptions').select('twilio_number, world_id').eq('id', subId).maybeSingle();
+        const info = {
+          num: (cs as { twilio_number?: string | null } | null)?.twilio_number ?? null,
+          worldId: (cs as { world_id?: string | null } | null)?.world_id ?? null,
+        };
+        clientNumCache.set(subId, info);
+        return info;
       };
       let fireBudget = 40; // bound tick time — a backlog drains over ticks, never in one stampede
       for (const t of (trigData ?? []) as AutoTrigRow[]) {
@@ -603,7 +606,8 @@ Deno.serve(async (req) => {
 
             // Route the text from the client's own number when this trigger is theirs and they've
             // connected one; otherwise send-sms falls back to the operator's shared number.
-            const smsFrom = isSms && t.client_subscription_id ? resolveSmsFrom(await clientNumberFor(t.client_subscription_id), null) : null;
+            const client = t.client_subscription_id ? await clientInfoFor(t.client_subscription_id) : null;
+            const smsFrom = isSms && client ? resolveSmsFrom(client.num, null) : null;
             const payload = isSms
               ? { message_id: (msg as { id: string }).id, campaign_id: campaignId, sms_kind: 'transactional', ...(smsFrom ? { from_number: smsFrom } : {}) }
               : { message_id: (msg as { id: string }).id, campaign_id: campaignId };
@@ -612,6 +616,10 @@ Deno.serve(async (req) => {
               owner_id: t.owner_id, kind: isSms ? 'send_sms' : 'send_email',
               title: `${t.label} → ${to}`,
               preview: isSms ? bodyText : `${subject}\n\n${bodyText}`,
+              // Scope contract (app_0116): a client automation's approval carries the client's
+              // world — execution_runs inherit it via the app_0114 stamp trigger, so this one
+              // line makes the whole downstream ledger client-attributable.
+              world_id: client?.worldId ?? null,
               payload, payload_hash, requested_by: 'garvis-auto',
             }).select('id').single();
             if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');
