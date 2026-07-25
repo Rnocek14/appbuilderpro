@@ -6227,6 +6227,161 @@ create index if not exists idx_client_subscriptions_world on public.client_subsc
 comment on column public.client_subscriptions.world_id is
   'The client''s world — created at close-won. Every ledger row, watch, report, and fleet rollup for this client scopes through it.';
 
+-- ======== supabase/migrations/app_0117_change_requests.sql ========
+-- app_0117_change_requests.sql
+-- THE CHANGE REQUEST (vertical slice §1): a durable object, not a note. The audit found no
+-- client-facing change loop at all — requests lived in email and memory. This is the client-ops
+-- workhorse: every request is world-scoped BY CONSTRUCTION (world_id NOT NULL — the scope
+-- contract forbids an account-wide fallback here; a request always belongs to a client), carries
+-- its whole lifecycle in one row, and links every downstream object it causes (mission, approval,
+-- deployment, rollback, the notify message) so time and cost attribute to the client.
+--
+-- Lifecycle (enforced in the pure core, recorded in `history` append-only):
+--   received → understood → scoped → [approved] → in_progress → preview_ready → deployed
+--   → verified → client_notified → closed        (+ declined, from any pre-deploy state)
+-- Act-with-undo inside; EXPLICIT approval (needs_approval → approval_id) for publishing, billing
+-- changes, destructive operations, or anything outside the client's established policy.
+
+create table if not exists public.change_requests (
+  id                       uuid primary key default gen_random_uuid(),
+  owner_id                 uuid not null references public.profiles(id) on delete cascade,
+  world_id                 uuid not null references public.knowledge_worlds(id) on delete cascade,
+  client_subscription_id   uuid references public.client_subscriptions(id) on delete set null,
+  source                   text not null check (source in ('operator', 'client_email', 'portal')),
+  requester                text,                     -- who asked (name / email), their identity as given
+  request                  text not null,            -- the requested change, in their words
+  affected_url             text,                     -- the site/page it touches
+  affected_artifact_id     uuid,                     -- or the artifact it touches
+  priority                 text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
+  status                   text not null default 'received' check (status in
+    ('received', 'understood', 'scoped', 'approved', 'in_progress', 'preview_ready',
+     'deployed', 'verified', 'client_notified', 'closed', 'declined')),
+  clarification            text not null default 'none' check (clarification in ('none', 'waiting_client', 'answered')),
+  needs_approval           boolean not null default false,
+  approval_id              uuid references public.approvals(id) on delete set null,
+  mission_id               uuid,                     -- the assigned mission/execution, when one is spun up
+  deploy_execution_id      uuid references public.execution_runs(id) on delete set null,
+  rollback_ref             text,                     -- what restores the previous state (stashed html path / prior live url)
+  notify_message_id        uuid,                     -- the completion communication (outreach_messages)
+  received_at              timestamptz not null default now(),
+  closed_at                timestamptz,
+  minutes_spent            integer not null default 0,
+  cost_usd                 numeric(10, 4) not null default 0,
+  history                  jsonb not null default '[]',   -- append-only [{at, from, to, note}]
+  created_at               timestamptz not null default now(),
+  updated_at               timestamptz not null default now()
+);
+
+create index if not exists idx_change_requests_world on public.change_requests(world_id, status);
+create index if not exists idx_change_requests_open on public.change_requests(owner_id, status, received_at)
+  where status not in ('closed', 'declined');
+
+alter table public.change_requests enable row level security;
+drop policy if exists change_requests_all on public.change_requests;
+create policy change_requests_all on public.change_requests
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop trigger if exists trg_change_requests_touch on public.change_requests;
+create trigger trg_change_requests_touch before update on public.change_requests
+  for each row execute function public.touch_updated_at();
+
+-- ======== supabase/migrations/app_0118_client_reports.sql ========
+-- app_0118_client_reports.sql
+-- THE MONTHLY CLIENT REPORT (vertical slice §2): an ARTIFACT with provenance, not a rendered
+-- summary. The audit's finding was brutal — "the monthly report is one owner-wide sentence
+-- rendered on page visit." This row is the fix's spine: derived ONLY from world-scoped ledgers
+-- (the compile core refuses owner-wide aggregation presented as client truth), every claim
+-- traceable (evidence jsonb: claim → row refs), unknowns EXPLICIT (a metric whose source is
+-- empty/unarmed is listed as unavailable, never invented), approval-gated before delivery
+-- through the one send spine, and correctable via version/supersedes history.
+
+create table if not exists public.client_reports (
+  id                      uuid primary key default gen_random_uuid(),
+  owner_id                uuid not null references public.profiles(id) on delete cascade,
+  world_id                uuid not null references public.knowledge_worlds(id) on delete cascade,
+  client_subscription_id  uuid references public.client_subscriptions(id) on delete set null,
+  period_start            date not null,
+  period_end              date not null,
+  package_id              uuid references public.service_packages(id) on delete set null,  -- version reported under
+  ledger_from             timestamptz not null,     -- the exact source range the numbers came from
+  ledger_to               timestamptz not null,
+  generated_at            timestamptz not null default now(),
+  body_md                 text not null,            -- client-facing, concise
+  evidence                jsonb not null default '{}',  -- operator view: claim key → {count, row_refs[], source}
+  unknowns                jsonb not null default '[]',  -- explicitly unavailable metrics + why
+  approval_state          text not null default 'draft' check (approval_state in ('draft', 'approved')),
+  approval_id             uuid references public.approvals(id) on delete set null,
+  delivery_state          text not null default 'not_sent' check (delivery_state in ('not_sent', 'queued', 'sent')),
+  message_id              uuid,                     -- the outreach message that delivered it
+  version                 integer not null default 1,
+  supersedes              uuid references public.client_reports(id) on delete set null,  -- corrections chain
+  created_at              timestamptz not null default now(),
+  unique (owner_id, world_id, period_start, period_end, version)
+);
+
+create index if not exists idx_client_reports_world on public.client_reports(world_id, period_end desc);
+create index if not exists idx_client_reports_due on public.client_reports(owner_id, delivery_state, period_end);
+
+alter table public.client_reports enable row level security;
+drop policy if exists client_reports_all on public.client_reports;
+create policy client_reports_all on public.client_reports
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- ======== supabase/migrations/app_0119_package_lifecycle.sql ========
+-- app_0119_package_lifecycle.sql
+-- PACKAGE LIFECYCLE + OFFBOARDING (vertical slice §4-5). The pin (app_0115) recorded which
+-- version a client runs; this makes the noun OPERATIONAL: pins carry a lifecycle
+-- (active → paused → terminated) with client-specific overrides preserved across version
+-- migrations; newly introduced outbound actions require RECORDED CONSENT before they arm
+-- (package_consents — an upgrade may propose, never silently enable); and termination produces
+-- an OFFBOARDING INVENTORY — the audit found sold sites run forever on the operator's
+-- credentials with no takedown path. Nothing continues after a relationship ends without an
+-- explicit retained-service entry.
+
+alter table public.package_pins
+  add column if not exists status text not null default 'active' check (status in ('active', 'paused', 'terminated')),
+  add column if not exists paused_at timestamptz,
+  add column if not exists terminated_at timestamptz,
+  add column if not exists overrides jsonb not null default '{}',          -- client-specific deltas, survive migrate
+  add column if not exists retained_services jsonb not null default '[]'; -- explicit post-termination retentions
+
+comment on column public.package_pins.retained_services is
+  'The ONLY legitimate way anything keeps running after termination: explicit entries [{service, reason, until}]. Empty = everything stops.';
+
+create table if not exists public.package_consents (
+  id                      uuid primary key default gen_random_uuid(),
+  owner_id                uuid not null references public.profiles(id) on delete cascade,
+  client_subscription_id  uuid not null references public.client_subscriptions(id) on delete cascade,
+  package_id              uuid not null references public.service_packages(id) on delete cascade,
+  action                  text not null,             -- the outbound action consented to (registry capability id)
+  consented_at            timestamptz not null default now(),
+  evidence                text not null,             -- how consent was given (their words / the signed doc / the call note)
+  unique (client_subscription_id, action)
+);
+
+create table if not exists public.offboarding_inventories (
+  id                      uuid primary key default gen_random_uuid(),
+  owner_id                uuid not null references public.profiles(id) on delete cascade,
+  world_id                uuid not null references public.knowledge_worlds(id) on delete cascade,
+  client_subscription_id  uuid references public.client_subscriptions(id) on delete set null,
+  inventory               jsonb not null,            -- the resolved checklist: hosting, domains, sites, keys, social, mailboxes, providers, automations, jobs, data, assets, billing, requests, reports, transfer obligations
+  status                  text not null default 'draft' check (status in ('draft', 'resolved')),
+  created_at              timestamptz not null default now(),
+  resolved_at             timestamptz
+);
+
+create index if not exists idx_package_consents_sub on public.package_consents(client_subscription_id);
+create index if not exists idx_offboarding_owner on public.offboarding_inventories(owner_id, status);
+
+alter table public.package_consents enable row level security;
+alter table public.offboarding_inventories enable row level security;
+drop policy if exists package_consents_all on public.package_consents;
+create policy package_consents_all on public.package_consents
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists offboarding_inventories_all on public.offboarding_inventories;
+create policy offboarding_inventories_all on public.offboarding_inventories
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).
