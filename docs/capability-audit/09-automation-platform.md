@@ -303,7 +303,7 @@ lifecycle gaps must be judged against what already exists to hang them on.
 
 | Fabric element | Honest state | Evidence | What §1's gaps hook into it |
 |---|---|---|---|
-| Standing orders (6 kinds; drift-free anchored cadences; "a failed fetch is UNREACHABLE, never 'no change'"; orders read and record, never send) | WORKING 🔌 | [R05 §7.2] [R13 §6.3] | The failure watchdog and registry-drift check (§1.3/§1.5) are themselves standing orders — the fabric can watch itself |
+| Standing orders (6 kinds; drift-free anchored cadences; "a failed fetch is UNREACHABLE, never 'no change'"; orders read and record, never send) | WORKING 🔌 | [R05 §7.2] [R13 §6.3] | The failure watchdog and registry-drift check (§1.3/§1.6) are themselves standing orders — the fabric can watch itself |
 | The 8 drain/sweep subsystems (reminders, booking reminders, arc wake, arc advance, bulk send, social, **client automation triggers**, content week) | WORKING 🔌 | [R13 §6.3] | The trigger drain is drain #7 of 8 — repair instrumentation belongs inside the same tick |
 | Arc wake loop (structured blockers, atomic claims; a plan blocked on an approval resumes itself when it lands, app_0095) | WORKING | [R03 §2] | Cohort version-migration arcs (§1.4) inherit resumability for free |
 | Approval spine (payload SHA-256, CAS claims, `execution_runs` ledger; canary nightly proves the send gate refuses) | WORKING | [R03 §2] [R13 §13.2] | The arming gate (§1.2) is just an approval whose payload is the dry-run plan hash — no new trust machinery |
@@ -366,7 +366,7 @@ built-but-not-connected disease.
 - **Missions it creates**: "Roll recall v3 to all dental clients" (cohort migration arc);
   "Diagnose client X's failing missed-call automation."
 - **Standing Orders it establishes**: the trigger drain (exists 🔌); the failure watchdog
-  (§1.3, itself a standing order); a weekly registry-drift check (§1.5's lesson: does every
+  (§1.3, itself a standing order); a weekly registry-drift check (§1.6's lesson: does every
   `not_built`/`beta` claim still match shipped reality).
 - **Outcome signals it learns from**: fires → approvals → sends → opens/replies/bookings per
   version (the A/B substrate versioning creates); failure taxonomy frequencies; per-client ROI
@@ -395,7 +395,7 @@ built-but-not-connected disease.
 | 2 | Partial/scaffold | Failure handling (retries everywhere, repair nowhere); monitoring of failures (success ledgers only — drain catch is silent); earned autonomy (eligible-not-granted; triggers not a class); builder-from-missions (`build_app` = handoff, not a build); child observability (per-app UIs, no fleet rollup); heartbeat self-arm (CI step defaults off) |
 | 3 | Docs/prompts/prototypes only | Heartbeat-trace UX (morning-brief prototype); drip flows / multi-step sequences (level-10 #4); `vertical_specs` templates-as-data (planned, zero code); cohort/canary rollout concepts (charter-era only) |
 | 4 | Missing | TESTING (dry-run, simulation, fixtures, sandbox sends, arming gate — seed SQL is the whole harness); REPAIR loop (failure ledger, auto-pause, classification, repair proposals); VERSIONING (definition/instance split, per-client pins, migration path, fire version stamps); templates-as-data; fleet rollup of child automations; visual flow design (ruled: not yet needed) |
-| 5 | Build internal | Everything in #4 — no external service is the answer to any of it; the enum migration; registry drift fixes (§1.5); `build_app` → autopilot wiring; failure ledger before all else |
+| 5 | Build internal | Everything in #4 — no external service is the answer to any of it; the enum migration; registry drift fixes (§1.6); `build_app` → autopilot wiring; failure ledger before all else |
 | 6 | External API | Nothing new required for the platform itself (Resend/Twilio/Supabase Management already live); n8n/Inngest-class engines were implicitly evaluated and answered by building the child substrate in-house [prompts.ts:409] |
 | 7 | Reusable Capability | Detection, dry-run/simulation engine (pure core exists), failure watchdog, version-pin machinery — all channel- and vertical-agnostic |
 | 8 | Domain Workshop | THE AUTOMATION WORKSHOP (§5) — DEEP-ENVIRONMENT for the test bench; config/fleet benches fit the grammar |
@@ -427,7 +427,7 @@ repair) sit directly on seams the codebase visibly prepared for them.
 |---|---|---|---|---|---|
 | Automation opportunity detection | WORKING | [R05 §9.23] [R13 §7.14] | T-ME | Capability | pure, no model call; gaps = roadmap signal |
 | Automation registry (honest maturity) | WORKING | [R05 §9.23] | T-ME | substrate | drift found: online_booking `not_built` vs shipped app_0109 |
-| Registry update loop (drift check) | MISSING | grep registry.ts:139 vs [R03 §8] | T-10 | Standing Order | §1.5; code-only library goes stale |
+| Registry update loop (drift check) | MISSING | grep registry.ts:139 vs [R03 §8] | T-10 | Standing Order | §1.6; code-only library goes stale |
 | Visual flow design | MISSING | [R05 §9.23; single-step class only] | T-10 | Workshop | ruled not-yet-needed; builder is the pressure valve |
 | Automation test harness (dry-run/sim/fixtures/sandbox) | MISSING | docs/automation-triggers-seed.sql is the whole harness | T-10 | Workshop bench | pure injectable-clock core makes it cheap (§1.2) |
 | Arming gate (dry-run-before-active) | MISSING | [no evidence anywhere] | T-10 | substrate | approval payload = plan hash |

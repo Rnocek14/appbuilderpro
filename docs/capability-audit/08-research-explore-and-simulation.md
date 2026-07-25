@@ -241,6 +241,50 @@ across client worlds without code.
 
 ---
 
+## 6.5 Deltas vs Phase 1 / the 01-inventory (grep-verified corrections)
+
+This audit's greps found the reconstruction and the sibling inventory stale in three places and
+confirmed them in two — recorded here so the 13-gap-matrix aggregation dedupes against THESE
+classes, not the older ones:
+
+| Item | Phase-1 / 01-inventory class | Current class (this audit) | Proof |
+|---|---|---|---|
+| Builder research persistence | DISCONNECTED — "evaporates into chat" [R06 §8]; 01-inventory §17 + register #6 | **WORKING** (best-effort) | `aiClient.ts:359–376` `persistResearch()` files every ≥200-char research answer through `ingest-document` on both edge and DIRECT paths; the code comment narrates the fix of exactly the [R06 §8] defect |
+| PDF ingest | PARTIAL — "no PDF ingest… post-audit state unverified" [R03 §3] | **WORKING** (no OCR) | `src/lib/docExtract.ts` (pdfjs-dist + mammoth, 200-page cap, scanned-PDF honest refusal); consumed by ProjectWorkspace, PaperworkStudio, brain.ts |
+| Beacons | implied buildable from [EA-04] | **PARTIAL** (loops only) | grep `beacon` over `src/` → zero hits; `loops.ts` is the shipped half (no guess, no calibration, localStorage) |
+| Free-floating research | MISSING (deliberate) [R06 §15 #13] | **CONFIRMED MISSING (deliberate)** | `orchestratorCases.verify.ts:223–227` still pins the refusal as a compile hole — the hole is tested, which is the house style for "decided, not drifted" |
+| Insights scanner / world-intel cron / depth wiring / embedding 2-of-6 | DISCONNECTED / PARTIAL [R06 §8 seams] | **CONFIRMED unchanged** | embed-worker callers unchanged (grep: `embeddings.ts`, `ingest-document`, `system-control`, `healthRun`); `producers.ts:544–565` depth on business plans only |
+
+One classification judgment worth stating: `persistResearch` is fire-and-forget by explicit
+design ("a missing function or un-applied migration must never break research itself"). At T-ME
+that is the right honesty trade; at T-100 a silently-failing knowledge pipe is a control-plane
+exception ("N research runs unfiled this week"), not a shrug — the row's Breaks-at reflects
+that.
+
+---
+
+## 6.6 Scale gates — where this domain's current design fails, tier by tier
+
+- **T-ME (now):** The domain performs curiosity and shallow research well and deep work poorly.
+  The four T-ME breaks that gate "serious undertaking" work: no multi-hop research, a
+  five-formula simulation ceiling, no experiment lifecycle, and the unbuilt promotion ceremony
+  (today's operator tolerates the export-shaped bridge; a client-facing practice cannot).
+- **T-10:** State locality bites first — `loops.ts` and `currents.ts` never leave the device
+  [R05 §9.12], so ten client engagements explored across a laptop and a desktop shed their
+  open questions. Then legibility: no decay rendering and no Explorations lens means ~30
+  explorations render as one undifferentiated pile; the gardener (shipped) and the insights
+  scanner (disconnected) are the only cross-world noticing.
+- **T-100:** Knowledge economics dominate — source re-fetching across sibling worlds wastes
+  spend; validated sim models need cohort distribution (templates-as-data); embedding coverage
+  (2/6) starves any "what do my hundred clients' worlds have in common" query; silent
+  best-effort filing needs exception surfacing.
+- **T-1K:** Nothing in this domain is the bottleneck at T-1K provided T-100 lands — research/
+  explore is per-world work whose substrate (RLS, credits, owner-scoped kNN) already partitions
+  correctly [R04 §4.4, §5]. The control-plane items (spend anomaly per world, unfiled-research
+  exceptions, model-version drift across cohorts) belong to document 10's fleet plane.
+
+---
+
 ## 7. The fifteen questions
 
 | # | Question | Answer |

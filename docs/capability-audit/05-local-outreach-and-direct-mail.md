@@ -232,6 +232,40 @@ honest note that fixing the enum only makes SMS *possible*; per-client A2P 10DLC
 
 ---
 
+## 5b. This domain's DISCONNECTED register (built-but-severed, confirmed and added)
+
+Feeding [01]'s register — the charter's central disease, as it manifests here. Items 1–2
+confirm [01]'s rows from this domain's angle; 3–6 are additions this audit surfaces:
+
+| # | Built thing | Not connected to | One-line repair shape | Evidence |
+|---|---|---|---|---|
+| 1 | The entire SMS rail (executor, TCPA core, per-client from-numbers, trigger channel) | The `approval_kind` enum | One-line migration (§5) — confirms [01 #1] | [R10 #10] |
+| 2 | `sender-domain` (and `booking`) edge functions | Every deploy list — fresh environments silently lack per-brand deliverability | Add to deploy lists — confirms [01 #7–8] | [R13 §13.4] |
+| 3 | Generalized (niche × metro) discovery engine | Any CLIENT's campaign audience — output drains only into the agency's own demo/pitch funnel | Route a discovery run into a client world's contacts behind an approve gate | [R13 §8.1] [R06 §5] |
+| 4 | `outreach_events` engagement log (written on every Resend event) | Any segment engine — the behavioral-segmentation substrate records and is never read for targeting | Build the specced segment engine over the existing rows | [R04 app_0081] [R14 #4] |
+| 5 | The complete client-ROI ledger (trigger_fires, approvals, sends, opens, bookings, invoices) | The CLIENT — composed only as an operator-facing page line, never delivered | Monthly report artifact → existing send spine (chain 1 step 13) | report.ts / Automations.tsx:173 (verified) |
+| 6 | Per-brand identity resolution (`world_sender_identities`, per-brand CAN-SPAM address) | Per-brand SAFETY — caps/warmup/kill remain one row per operator by declared design | Per-world gate layer under an owner ceiling (chain 1 step 4) | send-email/index.ts:147–148 [R04] |
+
+---
+
+## 5c. Tier readiness and closure order
+
+What must close, in dependency order, for this domain to be true at each tier — every item
+grounded in a chain row above; no new claims:
+
+| Order | Gap to close | Tier it unblocks | Why this order |
+|---|---|---|---|
+| 1 | `send_sms` enum migration | T-ME | One line; un-severs the sold automation catalog's SMS half (§5) before any client conversation |
+| 2 | Deploy-list fix (sender-domain, booking) | T-ME | Zero-cost; a fresh environment must actually contain the per-brand rail [R13 §13.4] |
+| 3 | Client monthly report (compose from existing ledger rows → send via spine) | T-ME | The retainer's proof-of-life; all data exists (chain 1 step 13) |
+| 4 | Print-DPI render → `send_mail` kind + cost-ceiling executor → Lob + CASS | T-ME (mail revenue) | Strict dependency chain: no vendor call without a true artifact, no spend without the ceiling (chain 4 steps 1→4→5, 3) |
+| 5 | Per-world safety gates (caps/warmup/kill) + per-client cron budgets | T-10 | The single-tenant design decision that must be reversed before client #2's volume collides with client #1's (chain 1 steps 4, 10) |
+| 6 | Wave-4 email engine: behavioral segments → flows → A/B → branded shell | T-10 | All four sit on tables already recording (chain 2 steps 2, 4, 7, 8); order within the wave is the spec's own [R14 #4] |
+| 7 | Extraction rules + portal-lead parser on the forward-in alias | T-ME wedge / T-10 full | The no-external-ceremony inbox wedge (chain 3 steps 5–6); full inbox needs item 8 |
+| 8 | Mailbox connection (Gmail/IMAP/Nylas) + people-model reconciliation | T-10 | The two structural moves: EXT-REQUIRED front door and the ARCH-CHANGE substrate extraction lands on (chain 3 steps 1, 8) |
+
+---
+
 ## 6. Proposed Workshop: OUTREACH WORKSHOP (charter 14-field spec)
 
 - **Job**: run a client's complete local outreach operation — warm-list campaigns, sequences,

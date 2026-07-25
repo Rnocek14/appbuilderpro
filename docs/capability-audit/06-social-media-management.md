@@ -315,7 +315,7 @@ is a working bench, and producers/content-weeks are its engine room. The spec be
 
 ---
 
-## 6. Proposed surface: CONTENT-CALENDAR (charter 14-field spec + the archetype ruling)
+## 8. Proposed surface: CONTENT-CALENDAR (charter 14-field spec + the archetype ruling)
 
 - **Job**: see and shape time — every client's planned/queued/scheduled/posted/failed content on
   one grid; drag to reschedule; gaps and pile-ups visible at a glance; the weekly slate composed
@@ -361,7 +361,7 @@ is a working bench, and producers/content-weeks are its engine room. The spec be
 
 ---
 
-## 7. The fifteen questions
+## 9. The fifteen questions
 
 | # | Question | Answer for this domain |
 |---|---|---|
