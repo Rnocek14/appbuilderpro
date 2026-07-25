@@ -13,7 +13,7 @@ const root = join(here, '../../..');
 const lifecycle = readFileSync(join(here, 'productLifecycle.ts'), 'utf8');
 const bridge = readFileSync(join(here, 'buildBridge.ts'), 'utf8');
 const execution = readFileSync(join(here, 'execution.ts'), 'utf8');
-const migration = readFileSync(join(root, 'supabase/migrations/app_0092_execution_truth.sql'), 'utf8');
+const migration = readFileSync(join(root, 'supabase/migrations/app_0100_execution_truth.sql'), 'utf8');
 
 check('project/app identity is unique per owner', migration.includes('uq_apps_owner_project') && migration.includes('where project_id is not null'));
 check('new project links as a building portfolio app', lifecycle.includes("stage: 'building'") && lifecycle.includes('project_id: projectId'));
