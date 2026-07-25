@@ -10,6 +10,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { notifyText } from '../_shared/notify.ts';
+import { spendCredits } from '../_shared/credits.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-inbound-secret' };
 
@@ -20,7 +21,8 @@ function classifyHeuristic(text: string): 'positive' | 'negative' | 'neutral' {
   return 'neutral';
 }
 
-async function classifyAI(subject: string, body: string): Promise<'positive' | 'negative' | 'neutral' | null> {
+// deno-lint-ignore no-explicit-any
+async function classifyAI(admin: any, ownerId: string, subject: string, body: string): Promise<'positive' | 'negative' | 'neutral' | null> {
   const openai = Deno.env.get('OPENAI_API_KEY');
   const lovable = Deno.env.get('LOVABLE_API_KEY');
   if (!openai && !lovable) return null;
@@ -42,6 +44,18 @@ async function classifyAI(subject: string, body: string): Promise<'positive' | '
     });
     if (!res.ok) return null;
     const data = await res.json();
+    // audit 12 §1.2 (unmetered call sites): record-only, NO checkCredits gate on purpose — the
+    // reply MUST be recorded and the sequence stopped even when the balance is empty
+    // (classification only annotates; heuristic fallback covers the rest). Raw fetch bypasses the
+    // ai.ts seam, so the cost is computed here: gpt-4o-mini list price; the Lovable gateway doesn't
+    // bill our key (cost 0) but tokens are still recorded. spendCredits never throws.
+    const inTok = data.usage?.prompt_tokens ?? 0;
+    const outTok = data.usage?.completion_tokens ?? 0;
+    await spendCredits(admin, ownerId, {
+      costUsd: openai ? (inTok * 0.15 + outTok * 0.6) / 1_000_000 : 0,
+      kind: 'classify', provider: openai ? 'openai' : 'lovable', model,
+      inputTokens: inTok, outputTokens: outTok,
+    });
     const word = (data.choices?.[0]?.message?.content ?? '').toLowerCase().trim();
     return word.includes('positive') ? 'positive' : word.includes('negative') ? 'negative' : 'neutral';
   } catch {
@@ -154,7 +168,7 @@ Deno.serve(async (req) => {
     .split(/\nOn .{0,120}wrote:\s*$/m)[0]
     .split(/\n-- ?\n/)[0]
     .trim();
-  const classification = (await classifyAI(subject, ownWords)) ?? classifyHeuristic(ownWords);
+  const classification = (await classifyAI(admin, msg.owner_id, subject, ownWords)) ?? classifyHeuristic(ownWords);
 
   await admin.from('replies').insert({
     owner_id: msg.owner_id, message_id: msg.id, campaign_id: msg.campaign_id,

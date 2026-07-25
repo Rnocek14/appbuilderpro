@@ -18,6 +18,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { embedTexts, embeddingsConfigured, toVectorLiteral, EMBED_MODEL } from '../_shared/embeddings.ts';
+import { spendCredits } from '../_shared/credits.ts';
 
 const SUBJECT_TYPES = new Set(['document', 'artifact', 'cluster', 'knowledge', 'business', 'app']);
 
@@ -46,6 +47,23 @@ Deno.serve(async (req) => {
 
     const body = (await req.json().catch(() => ({}))) as { subjects?: SubjectIn[]; texts?: string[] };
 
+    // Service-role client hoisted above both modes: the usage ledger below needs it in the VECTORS
+    // path too, not just for persisting vectors.
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+    // Record-only usage ledger, deliberately NO checkCredits gate (audit 12 §1.2, unmetered call
+    // sites): embeddings cost fractions of a cent, and blocking ingest on an empty balance would be
+    // hostile — the brain would silently stop remembering what the owner just wrote. embedTexts
+    // doesn't surface provider usage, so tokens use the standard ~4 chars/token estimate at the
+    // text-embedding-3-small list price ($0.02/1M). spendCredits never throws.
+    const recordEmbedSpend = (totalChars: number) => {
+      const tokens = Math.ceil(totalChars / 4);
+      return spendCredits(admin, user.id, {
+        costUsd: (tokens / 1_000_000) * 0.02, kind: 'embed', provider: 'openai', model: EMBED_MODEL,
+        inputTokens: tokens,
+      });
+    };
+
     // VECTORS mode — return embeddings without persisting (server-side key for the browser).
     if (Array.isArray(body.texts)) {
       const texts = body.texts.filter((t) => typeof t === 'string');
@@ -53,6 +71,7 @@ Deno.serve(async (req) => {
       if (texts.length > 256) return json({ error: 'Max 256 texts per call.' }, 400);
       if (!embeddingsConfigured()) return json({ vectors: null, reason: 'embeddings_not_configured' });
       const vectors = await embedTexts(texts);
+      if (vectors) await recordEmbedSpend(texts.reduce((n, t) => n + t.length, 0));
       return json({ vectors });
     }
     const subjects = (body.subjects ?? []).filter(
@@ -66,7 +85,8 @@ Deno.serve(async (req) => {
     const vecs = await embedTexts(subjects.map((s) => s.content!.trim()));
     if (!vecs) return json({ embedded: 0, skipped: subjects.length, reason: 'embed_failed' }, 502);
 
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    // Record-only, no gate — see recordEmbedSpend above (audit 12 §1.2, unmetered call sites).
+    await recordEmbedSpend(subjects.reduce((n, s) => n + s.content!.trim().length, 0));
 
     // WORLD STAMP (app_0114): every vector carries its world so match_embeddings can scope
     // retrieval — a world-scoped ask must never surface another client's documents. Resolved

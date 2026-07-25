@@ -18,11 +18,13 @@ import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
+import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const MAX_FOLLOWUPS = 2;
 
-async function draftFollowup(subject: string, body: string, firstName: string, n: number): Promise<{ subject: string; body: string } | null> {
+// deno-lint-ignore no-explicit-any
+async function draftFollowup(admin: any, ownerId: string, subject: string, body: string, firstName: string, n: number): Promise<{ subject: string; body: string } | null> {
   const openai = Deno.env.get('OPENAI_API_KEY');
   const lovable = Deno.env.get('LOVABLE_API_KEY');
   if (!openai && !lovable) return null;
@@ -38,6 +40,18 @@ async function draftFollowup(subject: string, body: string, firstName: string, n
     });
     if (!res.ok) return null;
     const data = await res.json();
+    // audit 12 §1.2 (unmetered call sites): this raw fetch bypasses the _shared/ai.ts seam, so the
+    // ledger entry is computed here — gpt-4o-mini list price ($0.15/1M in, $0.60/1M out); the
+    // Lovable gateway doesn't bill our OpenAI key, so its cost is honestly 0 but the tokens are
+    // still recorded. Charged before the JSON parse below — a malformed draft still spent the
+    // tokens. spendCredits never throws, so the draft is never lost to a ledger hiccup.
+    const inTok = data.usage?.prompt_tokens ?? 0;
+    const outTok = data.usage?.completion_tokens ?? 0;
+    await spendCredits(admin, ownerId, {
+      costUsd: openai ? (inTok * 0.15 + outTok * 0.6) / 1_000_000 : 0,
+      kind: 'followup_draft', provider: openai ? 'openai' : 'lovable', model,
+      inputTokens: inTok, outputTokens: outTok,
+    });
     const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
     if (!parsed.subject || !parsed.body) return null;
     parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
@@ -52,7 +66,8 @@ async function draftFollowup(subject: string, body: string, firstName: string, n
  *  surveillance, and reputational damage); the signal shapes the TONE — assume interest, make
  *  replying trivially easy. The signal is stated honestly where it belongs: in the OWNER's
  *  approval preview. */
-async function draftEngagedFollowup(subject: string, body: string, firstName: string, opens: number): Promise<{ subject: string; body: string } | null> {
+// deno-lint-ignore no-explicit-any
+async function draftEngagedFollowup(admin: any, ownerId: string, subject: string, body: string, firstName: string, opens: number): Promise<{ subject: string; body: string } | null> {
   const openai = Deno.env.get('OPENAI_API_KEY');
   const lovable = Deno.env.get('LOVABLE_API_KEY');
   if (!openai && !lovable) return null;
@@ -68,6 +83,15 @@ async function draftEngagedFollowup(subject: string, body: string, firstName: st
     });
     if (!res.ok) return null;
     const data = await res.json();
+    // audit 12 §1.2 (unmetered call sites): same record-only ledger write as draftFollowup — raw
+    // fetch bypasses the ai.ts seam, so the cost lands here, before the parse can fail.
+    const inTok = data.usage?.prompt_tokens ?? 0;
+    const outTok = data.usage?.completion_tokens ?? 0;
+    await spendCredits(admin, ownerId, {
+      costUsd: openai ? (inTok * 0.15 + outTok * 0.6) / 1_000_000 : 0,
+      kind: 'followup_draft', provider: openai ? 'openai' : 'lovable', model,
+      inputTokens: inTok, outputTokens: outTok,
+    });
     const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
     if (!parsed.subject || !parsed.body) return null;
     parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
@@ -88,6 +112,22 @@ Deno.serve(async (req) => {
   await stampHeartbeat(admin, 'garvis-followups-daily');
   const limit = Math.min(25, Number(new URL(req.url).searchParams.get('limit') ?? 10));
   const nowIso = new Date().toISOString();
+
+  // audit 12 §1.2 (unmetered call sites): drafting is the only paid step of this cron — gate it per
+  // owner, checked once per tick (both passes share the cache). An out-of-credits owner's
+  // follow-ups simply wait; the bookkeeping walls (reply stops, budgets) still run for everyone.
+  const creditOk = new Map<string, boolean>();
+  const ownerHasCredits = async (ownerId: string) => {
+    if (!creditOk.has(ownerId)) {
+      try { await checkCredits(admin, ownerId, 'garvis'); creditOk.set(ownerId, true); }
+      catch (e) {
+        if (!(e instanceof InsufficientCreditsError)) throw e;
+        console.log(`outreach-followups: owner ${ownerId} is out of credits — drafting skipped this tick`);
+        creditOk.set(ownerId, false);
+      }
+    }
+    return creditOk.get(ownerId)!;
+  };
 
   const { data: due } = await admin.from('outreach_campaigns')
     .select('id, owner_id, contact_id, preview_site_id, follow_up_count')
@@ -117,7 +157,10 @@ Deno.serve(async (req) => {
       firstName = (c?.full_name ?? '').trim().split(/\s+/)[0] ?? '';
     }
     const n = (camp.follow_up_count ?? 0) + 1;
-    const draft = await draftFollowup(first.subject ?? '', first.body_text ?? '', firstName, n);
+    // Credit gate (audit 12 §1.2) — skipping BEFORE the draft leaves next_followup_at set, so the
+    // campaign is retried on a later tick once the balance refills. Nothing is lost, only deferred.
+    if (!(await ownerHasCredits(camp.owner_id))) { skipped++; continue; }
+    const draft = await draftFollowup(admin, camp.owner_id, first.subject ?? '', first.body_text ?? '', firstName, n);
     if (!draft) { skipped++; continue; }
 
     const { data: newMsg } = await admin.from('outreach_messages').insert({
@@ -189,7 +232,10 @@ Deno.serve(async (req) => {
       firstName = (c?.full_name ?? '').trim().split(/\s+/)[0] ?? '';
     }
     const n = (camp.follow_up_count ?? 0) + 1;
-    const draft = await draftEngagedFollowup(m.subject ?? '', m.body_text ?? '', firstName, m.open_count);
+    // Credit gate (audit 12 §1.2) — same as the cadence pass: skip before any state is touched, so
+    // the signal is still fresh for a later tick.
+    if (!(await ownerHasCredits(camp.owner_id))) { hotSkipped++; continue; }
+    const draft = await draftEngagedFollowup(admin, camp.owner_id, m.subject ?? '', m.body_text ?? '', firstName, m.open_count);
     if (!draft) { hotSkipped++; continue; }
 
     const { data: newMsg } = await admin.from('outreach_messages').insert({
