@@ -114,11 +114,14 @@ async function settle(body, maxMs = 60000) {
   R('THE CLAIM: no node is re-authored by the promotion',
     n > 0 && JSON.stringify(before.authored) === JSON.stringify(after.authored), `${n} nodes compared`);
   const moved = Math.max(...after.screen.map(([x, y], i) => Math.hypot(x - before.screen[i][0], y - before.screen[i][1])));
-  R('the sentence "Nothing moved" is shown', /nothing moved/i.test(await body()));
-  // Honest footnote: it is a camera move. The layout is untouched; the pixels do travel.
-  R('...and it is honest as a LAYOUT claim, not a pixel claim',
+  // The wording matters and was corrected once already. The promotion is a camera move: relative
+  // layout is preserved exactly, but the whole map is re-framed, so pixels DO travel. A bare
+  // "Nothing moved" would have been a claim the screen could not keep — "out of place" is what is
+  // actually true, and this check pins the sentence to the measurement.
+  R('the claim on screen is the one the geometry supports', /nothing moved out of place/i.test(await body()));
+  R('...because relative position is preserved while the frame changes',
     before.camera !== after.camera && moved > 0,
-    `camera ${before.camera} -> ${after.camera}; nodes traverse ~${moved.toFixed(0)}px on screen while keeping every relative position`);
+    `camera ${before.camera} -> ${after.camera}; nodes traverse ~${moved.toFixed(0)}px on screen, every relative position identical`);
   R('the new world docks around the intact map', (await page.locator('.orb').count()) > 0);
   R('no errors while playing', errs.length === 0, errs.join(' ;; '));
   await page.close();
@@ -234,23 +237,33 @@ async function settle(body, maxMs = 60000) {
   R('each panel carries where it came from', /from |because |demo site|3d ago|pulled/i.test(after));
   R('THE CLAIM: "0 questions asked"', /0 questions asked|no questions/i.test(after));
   R('the money stays editable rather than assumed', (await page.locator('#amt-build,#amt-monthly').count()) === 2);
-  R('the outbound ceremony is staged and named before it can fire',
-    /send welcome|invoice/i.test(after));
-  const send = page.locator('#btn-send-confirm');
-  const sendState = await send.evaluate((e) => `${getComputedStyle(e).visibility}/"${e.innerText.trim()}"`).catch(() => 'absent');
-  if (await send.isVisible().catch(() => false)) {
-    await send.click({ force: true }); await page.waitForTimeout(1500);
-    R('the single ceremony arrives at the first outbound act', /confirm|will send|welcome|invoice/i.test(await body()));
-    if (await page.locator('#btn-undo').isVisible().catch(() => false)) {
-      const s = await body();
-      await page.click('#btn-undo', { force: true }); await page.waitForTimeout(1200);
-      R('and it can be taken back', (await body()) !== s);
-    }
+  // The ceremony is two beats, not one: the next-move card offers "send welcome + invoice", and
+  // only that opens the confirm sheet holding "send it". Driving straight at #btn-send-confirm
+  // clicks a sheet that was never opened — the same mistake that once produced a phantom defect
+  // report in P1. Walk it the way the screen walks you.
+  // NB: the prospect panel legitimately contains "demo site sent 3 days ago" — a bare /sent/ here
+  // matched that and reported a phantom failure. Assert on the ceremony's own state instead.
+  R('nothing has gone out yet — the outbound act is staged, not taken',
+    /send welcome|invoice/i.test(after) &&
+    !(await page.evaluate(() => document.querySelector('#ceremony-wrap').classList.contains('on'))));
+  const move = page.locator('#btn-send-move');
+  // The next-move card reveals only after the docking motion settles and the voice lands — a
+  // deliberate beat, well after the panels stop appearing. Wait for it rather than racing it.
+  await move.waitFor({ state: 'visible', timeout: 45000 });
+  R('the first beat is offered as a deliberate move', await move.isVisible());
+  await move.click(); await page.waitForTimeout(1200);
+  R('it opens a confirm sheet rather than sending', await page.evaluate(() => document.querySelector('#ceremony-wrap').classList.contains('on')));
+  const sheet = await body();
+  R('the sheet names exactly what will go out', /welcome|invoice/i.test(sheet));
+  await page.click('#btn-send-confirm'); await page.waitForTimeout(1600);
+  const sent = await body();
+  R('confirming actually sends', /sent|on its way|delivered/i.test(sent));
+  const undo = page.locator('#btn-undo');
+  if (await undo.isVisible().catch(() => false)) {
+    await undo.click({ force: true }); await page.waitForTimeout(1400);
+    R('and the one irreversible-looking act is reversible', (await body()) !== sent);
   } else {
-    // Say it loudly. A skipped path that prints nothing reads as a path that passed.
-    say(`  NOT COVERED - the send/undo ceremony is still ${sendState}; it unlocks later in the`);
-    say('                sequence than this walkthrough drives. Confirm that beat by hand until');
-    say('                this script learns how to reach it.');
+    say('  NOT COVERED - undo was not offered after sending; check that beat by hand.');
   }
   R('no errors while playing', errs.length === 0, errs.join(' ;; '));
   await page.close();
