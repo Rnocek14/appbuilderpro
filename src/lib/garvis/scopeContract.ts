@@ -79,4 +79,6 @@ export const WORLD_STAMPED_WRITERS = [
   'execution_runs ← approvals.world_id (app_0114 stamp trigger — every executor inherits)',
   'embed-worker subjects mode → embeddings.world_id (server-resolved)',
   'resend-inbound → inbound_mail.world_id (known contacts)',
+  'queueReportDelivery → approvals.world_id (the monthly report send)',
+  'change_requests.world_id NOT NULL (app_0117 — a request always belongs to a client)',
 ] as const;
