@@ -60,7 +60,7 @@ fi
 
 say "5/5  Pilot suites (substrate · isolation · query shapes)"
 FAILED=0
-for f in 10-substrate 20-isolation 30-query-shapes; do
+for f in 10-substrate 20-isolation 21-isolation-negatives 30-query-shapes; do
   out=$(su "$PG" -c "psql -q -d $DB -f $WORK/$f.sql" 2>&1 | sed 's/^psql[^ ]* NOTICE:  //')
   echo "$out" | grep -E 'PASS|FAIL|ERROR' || true
   if echo "$out" | grep -qE '^FAIL|ERROR'; then FAILED=1; fi
