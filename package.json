@@ -88,6 +88,7 @@
     "verify:changerequests": "tsx src/lib/garvis/clients/changeRequests.verify.ts",
     "verify:fleetview": "tsx src/lib/garvis/fleetView.verify.ts",
     "verify:clientreport": "tsx src/lib/garvis/clients/clientReport.verify.ts",
+    "verify:lifecycleproof": "tsx src/lib/garvis/clients/lifecycleProof.verify.ts",
     "test:e2e": "playwright test",
     "verify:clienttiers": "tsx src/lib/garvis/billing/clientTiers.verify.ts",
     "verify:clientconsole": "tsx src/lib/garvis/billing/clientConsole.verify.ts",
