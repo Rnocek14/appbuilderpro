@@ -32,7 +32,7 @@ const PERIOD: ReportPeriod = { start: '2026-06-01', end: '2026-06-30' };
     'received', 'understood', 'scoped', 'in_progress', 'preview_ready',
     'deployed', 'verified', 'client_notified', 'closed',
   ];
-  let history: { at: string; from: string | null; to: string; note?: string }[] = [];
+  let history: ReturnType<typeof appendHistory> = [];
   let legal = true;
   for (let i = 0; i < road.length - 1; i++) {
     if (!canTransition(road[i], road[i + 1], needsApproval)) legal = false;

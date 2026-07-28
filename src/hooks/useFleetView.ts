@@ -43,9 +43,16 @@ export function useFleetView(): FleetViewState {
         const { data } = await supabase.from('client_subscriptions')
           .select('id, business_name, world_id, package_pins(status, overrides, service_packages(key, version, definition))')
           .neq('status', 'canceled');
+        type PkgEmbed = { key: string; version: number; definition: { establishes?: { watch_site?: boolean; propose_automations?: string[]; reporting?: 'monthly' | null } } };
         const rows = (data ?? []) as unknown as {
           id: string; business_name: string; world_id: string | null;
-          package_pins: { status: string; overrides: Record<string, unknown> | null; service_packages: { key: string; version: number; definition: { establishes?: { watch_site?: boolean; propose_automations?: string[]; reporting?: 'monthly' | null } } }[] | null }[] | null;
+          // PostgREST shape (verified against the live FK graph in the shadow-DB pilot):
+          //   client_subscriptions -> package_pins is ONE-TO-MANY  => array
+          //   package_pins        -> service_packages is MANY-TO-ONE => OBJECT, not array
+          // The pilot caught this: reading the package as [0] silently yielded undefined, which
+          // made every client look packageless and killed the drift/report-due exceptions. We
+          // normalize defensively so either shape survives a PostgREST upgrade.
+          package_pins: { status: string; overrides: Record<string, unknown> | null; service_packages: PkgEmbed | PkgEmbed[] | null }[] | null;
         }[];
         // Consents, one query for all clients.
         const { data: cons } = await supabase.from('package_consents').select('client_subscription_id, action');
@@ -60,7 +67,8 @@ export function useFleetView(): FleetViewState {
 
         return rows.map((r) => {
           const pin = r.package_pins?.[0] ?? null;
-          const pkg = pin?.service_packages?.[0] ?? null;
+          const embed = pin?.service_packages ?? null;
+          const pkg: PkgEmbed | null = Array.isArray(embed) ? (embed[0] ?? null) : embed;
           const est = pkg?.definition?.establishes ?? {};
           const declined = Array.isArray((pin?.overrides as { declined_actions?: string[] } | null)?.declined_actions)
             ? ((pin!.overrides as { declined_actions: string[] }).declined_actions) : [];
