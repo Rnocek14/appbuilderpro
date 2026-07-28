@@ -46,6 +46,7 @@ const MissedCall = lazy(() => import('./pages/MissedCall'));
 const EmailDomains = lazy(() => import('./pages/EmailDomains'));
 const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
+const FleetView = lazy(() => import('./pages/FleetView'));
 const Working = lazy(() => import('./pages/Working'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
 const Workshops = lazy(() => import('./pages/Workshops'));
@@ -134,6 +135,7 @@ function AppRoutes() {
           <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
           <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
           <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
+          <Route path="/garvis/fleet" element={<Protected><FleetView /></Protected>} />
           <Route path="/garvis/working" element={<Protected><Working /></Protected>} />
           <Route path="/garvis/setup" element={<Protected><ClientReadiness /></Protected>} />
           <Route path="/garvis/approvals" element={<Navigate to="/garvis/queue" replace />} />
