@@ -234,5 +234,19 @@ check('three dead buttons in one file report once, not three times',
   run(jsx(`export default function A(){return <div><button>a</button><button>b</button><button>c</button></div>}`))
     .filter((i) => i.message.includes('does nothing when clicked')).length === 1);
 
+// comments are prose — scanning them caused a false positive AND a false negative on the first
+// run against real generated apps, which is why stripComments() exists.
+check('a <button> mentioned in a comment is not a dead button',
+  !has(jsx(`// the clickable element is a real <button>, on purpose\nexport default function A(){const s=()=>{};return <button onClick={s}>Save</button>}`),
+  'does nothing when clicked'));
+check('a handler named only in a comment still counts as undefined',
+  has(jsx(`// wire this to onClick={handleShare} later\nexport default function A(){return <button onClick={handleShare}>Share</button>}`),
+  "bound to 'handleShare'"));
+check('a block comment cannot hide a real dead button',
+  has(jsx(`/* a nice toolbar */\nexport default function A(){return <button>Export</button>}`), 'does nothing when clicked'));
+check('a // inside a string does not swallow the line',
+  !has(jsx(`export default function A(){const u='https://x.example'; const s=()=>u; return <button onClick={s}>Go</button>}`),
+  'does nothing when clicked'));
+
 console.log(`\nqaCheck.verify: ${pass} passed, ${fail} failed`);
 if (fail) throw new Error(`${fail} check(s) failed`);

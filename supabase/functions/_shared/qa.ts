@@ -271,7 +271,32 @@ function openingTags(content: string, tag: string): string[] {
   return out;
 }
 
-function interactionIssues(files: { path: string; content: string }[]): QAIssue[] {
+/**
+ * Comments are prose, not code, and scanning them produces both false positives and false
+ * negatives. Both showed up on the first real run against generated apps: a comment reading
+ * "the clickable element is a real <button>" was reported as a dead button, and a comment
+ * documenting `onClick={handleShare}` made the undefined-handler check believe the name was
+ * defined (it counts occurrences, and the comment was the second one). Strings are blanked first
+ * so a `//` inside a URL or a quoted snippet cannot swallow the rest of a line.
+ */
+function stripComments(src: string): string {
+  const blanked = src.replace(
+    /(`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")/g,
+    (m) => m[0] + ' '.repeat(Math.max(0, m.length - 2)) + m[0],
+  );
+  let out = '';
+  for (let i = 0; i < src.length; i++) {
+    if (blanked[i] === '/' && blanked[i + 1] === '/') { while (i < src.length && src[i] !== '\n') { out += ' '; i++; } out += '\n'; }
+    else if (blanked[i] === '/' && blanked[i + 1] === '*') { while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) { out += src[i] === '\n' ? '\n' : ' '; i++; } out += '  '; i++; }
+    else if (blanked[i] === '{' && blanked[i + 1] === '/' && blanked[i + 2] === '*') { // {/* JSX comment */}
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/' && src[i + 2] === '}')) { out += src[i] === '\n' ? '\n' : ' '; i++; } out += '   '; i += 2;
+    } else out += src[i];
+  }
+  return out;
+}
+
+function interactionIssues(fileList: { path: string; content: string }[]): QAIssue[] {
+  const files = fileList.map((f) => ({ path: f.path, content: stripComments(f.content) }));
   const out: QAIssue[] = [];
   const seen = new Set<string>();
   const flag = (path: string, severity: QAIssue['severity'], message: string) => {
