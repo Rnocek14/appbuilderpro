@@ -155,7 +155,7 @@ const D = {
       why:'no analytics connected on this site — nothing was ever collected' },
   ],
   facts: {
-    uptimeChecks: 30, uptimeFails: 1, incident:'13 jun · HTTP 503 · recovered within the hour',
+    uptimeFails: 1, incident:'13 jun · HTTP 503 · recovered within the hour',
     change:'a gift-card page, requested 20 jun and live on 24 jun',
     fire:'one lead follow-up sent on 18 jun', cost: 45.63,
   },
@@ -164,6 +164,8 @@ const D = {
 };
 const $ = (id) => document.getElementById(id);
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+// uptimeChecks lives in exactly one place — the sources array — and the prose reads it from there.
+D.facts.uptimeChecks = D.sources.find((s) => s.key === 'watch').rows;
 const known   = D.sources.filter((s) => s.rows !== null);
 const unknown = D.sources.filter((s) => s.rows === null);
 
@@ -194,19 +196,20 @@ function render(){
   // for a source that has no observation.
   const f = D.facts;
   const uptimeLine = f.uptimeChecks >= D.MIN_OBS_FOR_PERCENT
-    ? `We checked the site <span class="fig">${f.uptimeChecks}</span> times in June and it answered every time but one.`
+    ? `We checked the site <span class="fig">${f.uptimeChecks}</span> times in June and it answered on all but <span class="fig">${f.uptimeFails}</span> of them.`
     : `We checked the site <span class="fig">${f.uptimeChecks}</span> times — too few to state a percentage, so here are the checks themselves.`;
   const leadLine = `The site produced <span class="fig">0</span> enquiries through the contact form this month. That is a measured zero, not a gap.`;
-  const fireObs = 1;
+  // read from the sources array rather than restated — the same count lived in two places.
+  const fireObs = D.sources.find((s) => s.key === 'autos').rows;
   const fireLine = fireObs >= D.MIN_OBS_FOR_PERCENT
     ? `Automations fired ${fireObs} times with a success rate of …`
-    : `One automation fired this month — <span class="fig">${fireObs}</span> event is not enough to quote a success rate, so: ${f.fire}, and it went through.`;
+    : `<span class="fig">${fireObs}</span> automation fired this month — that is not enough events to quote a success rate, so: ${f.fire}, and it went through.`;
 
   $('paper').innerHTML =
     `<h2>June at ${D.business}</h2>
      <div class="per">${D.period} · compiled ${new Date().toISOString().slice(0,10)} · ${known.length} of ${D.sources.length} sources measured</div>
      <p>${uptimeLine} ${f.incident ? `The exception was ${f.incident}.` : ''}</p>
-     <p>You asked for one change and got it: ${f.change}.</p>
+     <p>You asked for <span class="fig">${D.sources.find((s) => s.key === "changes").rows}</span> change and got it: ${f.change}.</p>
      <p>${fireLine}</p>
      <p>${leadLine}</p>
      <p>Serving you cost <span class="fig">$${f.cost.toFixed(2)}</span> in June, across every recorded operation.</p>

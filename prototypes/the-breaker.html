@@ -224,7 +224,7 @@ function trip(){
   $('run').textContent = 'let it run'; $('step').disabled = true; $('resume').disabled = false;
   $('auto').classList.add('tripped');
   $('state').textContent = 'paused itself'; $('state').className = 'state paused';
-  log(`five failures in a row — pausing this automation and telling you instead of trying again`, 'trip');
+  log(`${D.THRESHOLD} failures in a row — pausing this automation and telling you instead of trying again`, 'trip');
   const wouldSpend = D.FIRES_REMAINING_TODAY * D.COST_PER_FIRE;
   setTimeout(() => {
     $('saved').textContent =

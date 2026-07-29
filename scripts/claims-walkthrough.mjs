@@ -315,8 +315,12 @@ async function open(name) {
   R('THE CLAIM: an empty source reads as a measured zero, not a gap', /measured zero, not a gap/i.test(paper));
 
   // THE CLAIM 3: too few observations refuses a percentage.
+  // Assert the SUBSTANCE, not the sentence: it must decline to quote a rate, and no percentage may
+  // appear for that source. The first version of this check pinned the exact wording and broke the
+  // moment the prose was corrected to stop duplicating a count — a test failing for a reason
+  // unrelated to its claim.
   R('THE CLAIM: one observation refuses to become a success rate',
-    /not enough to quote a success rate/i.test(paper) && !/100%|0% success/i.test(paper));
+    /not enough[^.]{0,30}to quote a success rate/i.test(paper) && !/\d+% *(success|uptime)/i.test(paper));
   R('while a well-observed source is happy to be stated', /checked the site/i.test(paper) && /30/.test(paper));
 
   // Filling the gaps must be refused, in words, with a reason.

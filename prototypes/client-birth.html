@@ -489,7 +489,7 @@ const STAGED_DATA = {
     name: "Riverside Dental",
     stage: "Pitched",
     daysAgo: 3,
-    sub: "Prospect · pitched 3 days ago · demo site sent",
+    sub: null,          // derived below from daysAgo — see the note after STAGED_DATA
     reply: {
       from: "dr.patel@riversidedental.com · today 9:12 AM",
       body: "ok let’s do it. what’s next?",
@@ -526,10 +526,10 @@ const STAGED_DATA = {
     { id: "noticed", title: "What I noticed", status: "unbilled", statusClass: "",
       body: "noticed-body",
       prov: "from their reviews · read May 12 · nothing acted on",
-      log: "3 opportunities", logProv: "from their reviews · inert" }
+      log: null, logProv: "from their reviews · inert" }
   ],
   noticed: {
-    countLabel: "3 opportunities",
+    countLabel: null,   // derived below from evidence.length
     text: " in their own reviews — phone-tag complaints, no online booking, no reminder texts. Held quietly; nothing acted on.",
     evidence: [
       { ts: "Apr 02", row: "“tried calling twice, phone tag for days” — G. review ★★2" },
@@ -578,6 +578,12 @@ function evSpan(label, rows) {
 }
 
 /* ================= static fill from STAGED_DATA ================= */
+/* Three figures used to be typed into STAGED_DATA beside the data that already held them: the
+   prospect's age (next to daysAgo) and the opportunity count (twice, next to a 3-item evidence
+   array). Derived here so there is exactly one place to change any of them. */
+STAGED_DATA.prospect.sub = `Prospect · pitched ${STAGED_DATA.prospect.daysAgo} days ago · demo site sent`;
+STAGED_DATA.noticed.countLabel = `${STAGED_DATA.noticed.evidence.length} opportunities`;
+STAGED_DATA.panels.find((x) => x.id === "noticed").log = STAGED_DATA.noticed.countLabel;
 const P = STAGED_DATA.prospect;
 $("drawer-name").textContent = P.name;
 $("drawer-age").textContent = P.stage + " · " + P.daysAgo + "d ago";

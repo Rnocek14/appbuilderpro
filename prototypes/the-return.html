@@ -93,7 +93,9 @@ body.focused .day.gap{transform:scale(1.0)}
 
 <div class="wrap">
   <div class="top">
-    <div class="face">Home <span class="kind">· 3 worlds · back after nine days</span></div>
+    <!-- empty slot: the script writes this from D.awayDays. "nine" typed here was a second
+         source of truth for a number the data already holds. -->
+    <div class="face">Home <span class="kind" id="facekind"></span></div>
     <div class="acct mono" id="acct"></div>
   </div>
 
@@ -168,6 +170,7 @@ const accounted = D.days.filter((d) => d.rows).length;
 const missing = D.days.length - accounted;
 const rowCount = D.days.reduce((a, d) => a + (d.rows ? d.rows.length : 0), 0);
 
+$('facekind').textContent = `· 3 worlds · back after ${D.awayDays} days`;
 $('acct').innerHTML = `days accounted for <b>${accounted} of ${D.days.length}</b> · ${rowCount} rows`;
 $('lede').textContent =
   `You were away ${D.awayDays} days. I can account for ${accounted} of them from ${rowCount} rows. ` +
