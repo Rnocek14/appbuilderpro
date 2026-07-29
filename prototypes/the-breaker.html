@@ -1,0 +1,273 @@
+<!--
+  P7 — The Breaker: an automation that stops itself before it stops you.
+  Settles: the "automate the repeatable portions" clause the capability audit marked YES-with-a-
+  caveat — the front half was real and the back half (failure ledger, streak, auto-pause) was not.
+  Rides on real substrate: automation_triggers.consecutive_failures / last_error (app_0113) and the
+  standing-worker's break-at-5.
+  Inevitable when: watching it trip feels like relief rather than an error — and you can say what
+  it saved you without the screen telling you.
+  Staged data, REAL timing: the clock below is an actual interval, not a scripted animation.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P7 · The Breaker</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --forge:cubic-bezier(.22,1,.36,1);
+  --serif:Charter,Georgia,"Times New Roman",serif;
+  --chrome:-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 14px/1.45 var(--chrome);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ember);outline-offset:3px;border-radius:3px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.micro{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+
+.wrap{max-width:780px;margin:0 auto;padding:26px 22px 130px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:24px}
+.face{font-size:13px}.face .kind{color:var(--dim)}
+.pulse{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.pulse .n{color:var(--warn)}
+.pulse.calm .n{color:var(--ok)}
+
+/* the automation card */
+.auto{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:17px 19px;
+  transition:border-color 500ms var(--forge),background 500ms var(--forge)}
+.auto.tripped{border-color:rgba(217,164,65,.55);background:rgba(217,164,65,.045)}
+.auto .hd{display:flex;align-items:baseline;gap:12px;margin-bottom:4px}
+.auto .nm{font-size:15px;flex:1 1 auto}
+.state{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:2px 8px;border-radius:4px;border:1px solid var(--line);color:var(--ok)}
+.state.paused{color:var(--warn);border-color:rgba(217,164,65,.5)}
+.auto .sched{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+/* the streak — five lamps */
+.streak{display:flex;align-items:center;gap:9px;margin:16px 0 4px}
+.lamp{width:26px;height:5px;border-radius:3px;background:var(--line);transition:background 300ms var(--forge)}
+.lamp.lit{background:var(--blocked)}
+.lamp.trip{background:var(--warn)}
+.streak .cap{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-left:5px}
+
+.err{font-family:var(--mono);font-size:11.5px;color:var(--blocked);margin-top:9px;min-height:16px}
+
+/* the log */
+.log{margin-top:24px;border-top:1px solid var(--line);padding-top:12px;max-height:290px;overflow-y:auto;
+  font-family:var(--mono);font-size:11.5px}
+.ev{display:flex;gap:13px;padding:3px 0;color:var(--dim);opacity:0;animation:in 260ms var(--forge) forwards}
+@keyframes in{to{opacity:1}}
+.ev .ts{color:var(--faint);flex:0 0 76px}
+.ev .tx{flex:1 1 auto}
+.ev.bad .tx{color:var(--blocked)}
+.ev.good .tx{color:var(--ok)}
+.ev.trip .tx{color:var(--warn)}
+
+.acts{margin-top:24px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);border-radius:999px;padding:8px 17px;font-size:13px;color:var(--dim);
+  transition:all 170ms var(--forge)}
+.btn:hover,.btn:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.45);background:var(--ember-soft)}
+.btn.primary{background:var(--ember);color:#0B0E14;border-color:var(--ember);font-weight:600}
+.btn.primary:hover{background:#f0913f}
+.btn[disabled]{opacity:.32;cursor:default;pointer-events:none}
+
+.meter{margin-top:18px;font-family:var(--mono);font-size:11.5px;color:var(--faint);line-height:1.9}
+.meter b{color:var(--ink);font-weight:400}
+.saved{margin-top:22px;font-family:var(--serif);font-size:17.5px;line-height:1.55;max-width:54ch;
+  opacity:0;transform:translateY(7px);transition:opacity .55s var(--forge),transform .55s var(--forge)}
+.saved.on{opacity:1;transform:none}
+
+.hud{position:fixed;left:14px;bottom:12px;display:flex;align-items:center;gap:10px;
+  font-size:11px;color:var(--faint);font-family:var(--mono);z-index:40}
+.hud button{border:1px solid var(--line);border-radius:6px;width:22px;height:22px;color:var(--faint)}
+.hud button:hover{color:var(--ember);border-color:rgba(232,131,58,.4)}
+.keys{position:fixed;right:16px;bottom:14px;font-family:var(--mono);font-size:11px;color:var(--faint);z-index:40}
+.card{position:fixed;inset:auto auto 46px 14px;width:min(390px,calc(100vw - 28px));background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:16px 18px;z-index:50;
+  opacity:0;visibility:hidden;transform:translateY(6px);transition:all .25s var(--forge)}
+.card.on{opacity:1;visibility:visible;transform:none}
+.card h4{margin:0 0 9px;font-family:var(--serif);font-weight:500;font-size:15px}
+.card li{font-size:13px;color:var(--dim);margin-bottom:6px;line-height:1.45}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:1ms!important;transition-duration:1ms!important} }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div class="face">Jane's Bakery <span class="kind">· client · automation</span></div>
+    <div class="pulse mono" id="pulse">consecutive failures · <span class="n" id="pn">0</span></div>
+  </div>
+
+  <div class="auto" id="auto">
+    <div class="hd">
+      <span class="nm">Lead follow-up</span>
+      <span class="state" id="state">active</span>
+    </div>
+    <div class="sched" id="sched">fires when a form lead arrives · provider: twilio · last ok —</div>
+    <div class="streak" id="streak">
+      <span class="lamp"></span><span class="lamp"></span><span class="lamp"></span>
+      <span class="lamp"></span><span class="lamp"></span>
+      <span class="cap" id="cap">0 of 5 before it pauses itself</span>
+    </div>
+    <div class="err mono" id="err"></div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <div class="acts">
+    <button class="btn primary" id="run">let it run</button>
+    <button class="btn" id="step">fire once</button>
+    <button class="btn" id="fix">fix the provider</button>
+    <button class="btn" id="resume" disabled>resume it</button>
+  </div>
+
+  <div class="meter mono" id="meter"></div>
+  <p class="saved" id="saved"></p>
+</div>
+
+<div class="keys">Space fire · R run/stop · F fix · Z resume</div>
+<div class="hud">
+  <span>P7 · The Breaker — staged data, real timing</span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>When it trips, is that relief or alarm? It should be relief.</li>
+    <li>Could you say what it saved you before the screen told you?</li>
+    <li>After you fix the provider, does resuming feel safe — or does it feel like a gamble?</li>
+    <li>Would you rather it had kept trying and told you at the end of the day?</li>
+  </ul>
+</div>
+
+<script>
+/* ===================== staged data — one source of truth =====================================
+   THRESHOLD is the real one from the standing-worker (break at 5). COST_PER_FIRE is the real
+   metered figure. Everything the screen says about waste is computed from these, never typed. */
+const D = {
+  THRESHOLD: 5,
+  COST_PER_FIRE: 0.0398,
+  FIRES_REMAINING_TODAY: 43,        // what the schedule would still have attempted
+  error: 'HTTP 401 from twilio — “Authenticate” (the A2P number was released on jun 12)',
+  okLine: 'sent · 1 recipient · queued in 240ms',
+};
+const $ = (id) => document.getElementById(id);
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let S;
+function reset(){
+  S = { streak:0, paused:false, providerOk:false, fires:0, ok:0, failed:0, running:false, t0:Date.now() };
+  $('log').innerHTML = '';
+  $('auto').classList.remove('tripped');
+  $('state').textContent = 'active'; $('state').className = 'state';
+  $('err').textContent = '';
+  $('saved').classList.remove('on'); $('saved').textContent = '';
+  $('sched').textContent = 'fires when a form lead arrives · provider: twilio · last ok —';
+  $('resume').disabled = true; $('fix').disabled = false;
+  $('run').textContent = 'let it run'; $('step').disabled = false;
+  paint();
+}
+function clock(){
+  const s = Math.floor((Date.now() - S.t0) / 1000);
+  return `${String(9 + Math.floor(s / 60)).padStart(2,'0')}:${String(s % 60).padStart(2,'0')}:${String(Math.floor((Date.now()-S.t0)%1000/10)).padStart(2,'0')}`;
+}
+function log(tx, kind){
+  const d = document.createElement('div');
+  d.className = 'ev ' + (kind || '');
+  d.innerHTML = `<span class="ts">${clock()}</span><span class="tx">${tx}</span>`;
+  $('log').appendChild(d);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+function paint(){
+  [...$('streak').querySelectorAll('.lamp')].forEach((l, i) => {
+    l.className = 'lamp' + (i < S.streak ? (S.paused && i === D.THRESHOLD - 1 ? ' trip' : ' lit') : '');
+  });
+  $('cap').textContent = S.paused
+    ? `${D.THRESHOLD} of ${D.THRESHOLD} — it paused itself`
+    : `${S.streak} of ${D.THRESHOLD} before it pauses itself`;
+  $('pn').textContent = String(S.streak);
+  $('pulse').classList.toggle('calm', S.streak === 0);
+  $('meter').innerHTML =
+    `fires attempted <b>${S.fires}</b> · succeeded <b>${S.ok}</b> · failed <b>${S.failed}</b><br>` +
+    `spent on fires that could not work <b>$${(S.failed * D.COST_PER_FIRE).toFixed(4)}</b>`;
+}
+
+/* ===================== one fire ============================================================= */
+function fire(){
+  if (S.paused) { log('refused — this automation is paused', 'trip'); return; }
+  S.fires++;
+  if (S.providerOk) {
+    S.ok++; S.streak = 0;
+    $('err').textContent = '';
+    $('sched').textContent = `fires when a form lead arrives · provider: twilio · last ok ${clock()}`;
+    log('Lead follow-up → ' + D.okLine, 'good');
+  } else {
+    S.failed++; S.streak++;
+    $('err').textContent = D.error;
+    log(`Lead follow-up → failed (${S.streak}/${D.THRESHOLD}) · ${D.error}`, 'bad');
+    if (S.streak >= D.THRESHOLD) trip();
+  }
+  paint();
+}
+
+/* ===================== the one orchestrated move: the trip ================================== */
+function trip(){
+  S.paused = true; S.running = false;
+  $('run').textContent = 'let it run'; $('step').disabled = true; $('resume').disabled = false;
+  $('auto').classList.add('tripped');
+  $('state').textContent = 'paused itself'; $('state').className = 'state paused';
+  log(`five failures in a row — pausing this automation and telling you instead of trying again`, 'trip');
+  const wouldSpend = D.FIRES_REMAINING_TODAY * D.COST_PER_FIRE;
+  setTimeout(() => {
+    $('saved').textContent =
+      `It stopped after ${D.THRESHOLD}. Left alone it would have tried ${D.FIRES_REMAINING_TODAY} more times today ` +
+      `and spent $${wouldSpend.toFixed(2)} doing nothing — and Jane would have heard about it before you did.`;
+    $('saved').classList.add('on');
+  }, reduced() ? 10 : 520);
+}
+
+/* ===================== controls ============================================================= */
+let timer = null;
+function setRun(on){
+  S.running = on && !S.paused;
+  $('run').textContent = S.running ? 'stop' : 'let it run';
+  clearInterval(timer); timer = null;
+  if (S.running) timer = setInterval(() => { fire(); if (!S.running) { clearInterval(timer); timer = null; } }, 900);
+}
+$('run').addEventListener('click', () => setRun(!S.running));
+$('step').addEventListener('click', fire);
+$('fix').addEventListener('click', () => {
+  S.providerOk = true;
+  $('fix').disabled = true;
+  $('err').textContent = '';
+  log('provider credentials replaced — a2p number re-registered', 'good');
+  paint();
+});
+$('resume').addEventListener('click', () => {
+  S.paused = false; S.streak = 0;
+  $('auto').classList.remove('tripped');
+  $('state').textContent = 'active'; $('state').className = 'state';
+  $('resume').disabled = true; $('step').disabled = false;
+  $('saved').classList.remove('on');
+  log(S.providerOk ? 'resumed — streak cleared' : 'resumed — but the provider is still failing', S.providerOk ? 'good' : 'trip');
+  paint();
+});
+$('restart').addEventListener('click', () => { clearInterval(timer); timer = null; reset(); });
+$('feel').addEventListener('click', () => $('feelcard').classList.toggle('on'));
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === ' ') { e.preventDefault(); if (!$('step').disabled) fire(); }
+  else if (k === 'r') { e.preventDefault(); setRun(!S.running); }
+  else if (k === 'f') { e.preventDefault(); if (!$('fix').disabled) $('fix').click(); }
+  else if (k === 'z') { e.preventDefault(); if (!$('resume').disabled) $('resume').click(); }
+  else if (k === 'escape') $('feelcard').classList.remove('on');
+});
+reset();
+log('watching for form leads · nothing has fired yet');
+</script>

@@ -143,7 +143,9 @@
     "verify:autonomygrants": "tsx src/lib/garvis/autonomy.verify.ts",
     "verify:ics": "tsx src/lib/garvis/ics.verify.ts",
     "verify:huntreadiness": "tsx src/lib/garvis/huntReadiness.verify.ts",
-    "walkthrough:prototypes": "node scripts/prototype-walkthrough.mjs"
+    "walkthrough:prototypes": "node scripts/prototype-walkthrough.mjs",
+    "walkthrough:claims": "node scripts/claims-walkthrough.mjs",
+    "probe:prototypes": "node scripts/probe.mjs prototypes/*.html"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
