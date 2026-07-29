@@ -112,7 +112,9 @@ button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:poin
     <div class="streak" id="streak">
       <span class="lamp"></span><span class="lamp"></span><span class="lamp"></span>
       <span class="lamp"></span><span class="lamp"></span>
-      <span class="cap" id="cap">0 of 5 before it pauses itself</span>
+      <!-- empty on purpose: the script writes this from D.THRESHOLD. Typing "5" here would
+           go stale the moment the threshold changed. -->
+      <span class="cap" id="cap"></span>
     </div>
     <div class="err mono" id="err"></div>
   </div>

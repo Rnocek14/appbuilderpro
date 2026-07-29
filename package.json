@@ -145,7 +145,8 @@
     "verify:huntreadiness": "tsx src/lib/garvis/huntReadiness.verify.ts",
     "walkthrough:prototypes": "node scripts/prototype-walkthrough.mjs",
     "walkthrough:claims": "node scripts/claims-walkthrough.mjs",
-    "probe:prototypes": "node scripts/probe.mjs prototypes/*.html"
+    "probe:prototypes": "node scripts/probe.mjs prototypes/*.html",
+    "verify:prototypesource": "node scripts/prototype-source-audit.mjs"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
