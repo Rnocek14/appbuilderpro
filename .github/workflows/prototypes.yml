@@ -1,0 +1,62 @@
+# Prototype gate — the browser tier. The verify:* suites prove pure logic and the shadow DB proves
+# the schema; neither ever renders a pixel or clicks anything. This runs the actual pages.
+#
+# Two layers, on purpose:
+#   probe        — generic. Knows nothing about any page: discovers its controls and exercises each
+#                  from a fresh load. Proves "not broken", which is explicitly NOT "good".
+#   walkthroughs — specific. Know what each page CLAIMS and try to catch it lying. The sharpest one
+#                  scrapes every row out of the ledger's DOM and sums them in Node, so a page that
+#                  printed a stored total instead of adding up its rows would fail here.
+#
+# Why these are not `verify:*` scripts: CI auto-runs every verify suite and those are contractually
+# pure-logic — no DB, no network, no browser. These need Chromium, so they get their own gate.
+name: Prototypes
+
+on:
+  push:
+    paths:
+      - 'prototypes/**'
+      - 'scripts/probe.mjs'
+      - 'scripts/prototype-walkthrough.mjs'
+      - 'scripts/claims-walkthrough.mjs'
+      - '.github/workflows/prototypes.yml'
+  pull_request:
+    paths:
+      - 'prototypes/**'
+      - 'scripts/probe.mjs'
+      - 'scripts/prototype-walkthrough.mjs'
+      - 'scripts/claims-walkthrough.mjs'
+
+concurrency:
+  group: prototypes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      # The scripts prefer a pinned local Chromium and fall back to Playwright's own install, so no
+      # path needs to be threaded through here.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Probe every prototype (generic — is anything broken?)
+        run: npm run probe:prototypes
+
+      - name: Wave 1 — does each prototype keep its promise?
+        run: npm run walkthrough:prototypes
+
+      - name: Wave 2 — do the generated prototypes keep theirs?
+        run: npm run walkthrough:claims
+
+      # A prototype whose design contract or limits went missing is a prototype nobody can review.
+      - name: The contract and the README still exist
+        run: test -s prototypes/DESIGN.md && test -s prototypes/README.md

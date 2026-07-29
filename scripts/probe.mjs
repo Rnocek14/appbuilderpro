@@ -34,14 +34,19 @@ const args = process.argv.slice(2);
 const VERBOSE = args.includes('--verbose');
 const files = args.filter((a) => !a.startsWith('--'));
 if (!files.length) { console.error('usage: node scripts/probe.mjs <file.html> [...]'); process.exit(2); }
-const EXE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+import { existsSync } from 'node:fs';
+// Prefer an explicit CHROMIUM_PATH, then this container's pinned build, then let Playwright find
+// whatever it installed (which is what happens in CI). Passing a nonexistent executablePath fails
+// with a confusing "browser not found", so only pass it when it is really there.
+const PINNED = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const LAUNCH = existsSync(PINNED) ? { executablePath: PINNED } : {};
 
 // Controls that are *supposed* to be no-ops from a resting state, so a "nothing changed" verdict
 // on them would be a false accusation rather than a finding.
 const EXEMPT = /^(⟲|↺|⟳|↻)$/;
 const EXEMPT_LABEL = /restart|reset|reload/i;
 
-const browser = await chromium.launch({ executablePath: EXE });
+const browser = await chromium.launch(LAUNCH);
 
 // A signature of what a person can currently see. Compared before/after an interaction to decide
 // whether the control did anything at all.

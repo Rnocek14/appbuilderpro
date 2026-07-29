@@ -30,6 +30,17 @@ makes one falsifiable claim that `scripts/claims-walkthrough.mjs` tries to catch
 | P8 | `the-handoff.html` | A client leaves and nothing is destroyed — stop, retain-with-a-reason, or carry unresolved | `offboarding_inventories` + `retained_services` (app_0119) | Delete is offered nowhere; a retention without a reason blocks the inventory; every item is accounted for |
 | P9 | `the-return.html` | Nine days away, four of which the clock was not running | the heartbeat + pg_cron/pg_net seam named in `scripts/shadow-db/LIMITATIONS.md` | An unobserved day renders as *unknown*, never as zero — and no row or timestamp is ever fabricated inside the gap |
 
+## Wave 3 — the rest of the client operating chain
+
+The vertical slice shipped `fleetView.ts`, `changeRequests.ts` and `clientReport.ts` with verify
+suites and a route — and no way to see what any of it feels like. These are that.
+
+| # | File | The moment | Rides on | The claim it must keep |
+|---|---|---|---|---|
+| P10 | `the-fleet.html` | Ten clients, and a screen that mostly stays empty | `fleetView.ts` + `/garvis/fleet` (real thresholds: breaker at 5, requests aging at 10 days, cost outlier at 3× / $5) | No well-served client appears anywhere on it — and signing an eleventh adds no row |
+| P11 | `the-request.html` | A client's email becomes an object whose shape refuses to bend | `change_requests` (app_0117) — same 11 states, same append-only history | You cannot skip a step; a *deployed* change can never be declined; refusals are recorded too |
+| P12 | `the-report.html` | The month compiled, with its holes left in | `clientReport.ts` | An absent source becomes a named unknown, an empty one a measured zero, and one observation refuses to become a percentage |
+
 ## Testing them
 
 Two harnesses, deliberately separate, because they answer different questions:
@@ -37,7 +48,7 @@ Two harnesses, deliberately separate, because they answer different questions:
 ```
 npm run probe:prototypes        # generic: is this page broken?
 npm run walkthrough:prototypes  # wave 1: does each keep its specific promise?
-npm run walkthrough:claims      # wave 2: same, for the four above
+npm run walkthrough:claims      # waves 2+3: same, for the seven above
 ```
 
 `scripts/probe.mjs` knows nothing about any particular page — it discovers the controls and

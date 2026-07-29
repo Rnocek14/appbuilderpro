@@ -34,14 +34,19 @@ function staticSlotsAreEmpty(file, ids) {
   return dirty;
 }
 
-const EXE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+import { existsSync } from 'node:fs';
+// Prefer an explicit CHROMIUM_PATH, then this container's pinned build, then let Playwright find
+// whatever it installed (which is what happens in CI). Passing a nonexistent executablePath fails
+// with a confusing "browser not found", so only pass it when it is really there.
+const PINNED = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const LAUNCH = existsSync(PINNED) ? { executablePath: PINNED } : {};
 let failed = 0, total = 0;
 const say = console.log;
 const R = (label, pass, detail = '') => {
   total++; if (!pass) failed++;
   console.log(`  ${pass ? 'ok  ' : 'FAIL'} - ${label}${detail ? ' — ' + detail : ''}`);
 };
-const browser = await chromium.launch({ executablePath: EXE });
+const browser = await chromium.launch(LAUNCH);
 async function open(name) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
   const errs = [];
@@ -200,6 +205,137 @@ async function open(name) {
   R('the gap view says what did not run', /never fired|did not run/i.test(focused));
   R('and states explicitly that it did not estimate', /not going to guess|did not do|estimate/i.test(focused));
   R('the closing line refuses to split the difference', /nothing on this screen splits the difference/i.test(focused));
+  R('no errors', errs.length === 0, errs.join(' ;; '));
+  await page.close();
+}
+
+// ============================== P10 · The Fleet =============================================
+{
+  say('\nP10 · The Fleet — is a served client really invisible, and does the screen stay flat?');
+  const { page, errs, body } = await open('the-fleet.html');
+  const opening = await body();
+  R('it opens by stating how many need something vs how many do not', /of your 10 clients need something/i.test(opening));
+
+  const rows = await page.locator('.exc').count();
+  R('only the exceptions are rendered', rows === 3, `${rows} exception rows`);
+
+  // THE CLAIM: no healthy client's name may appear anywhere in the exception area.
+  const excText = await page.evaluate(() => document.querySelector('#excs').innerText);
+  const quietNames = ['Riverside Dental', 'Fern & Frond', 'Petal & Stem', "Marco's", 'Copper Kettle', 'Northgate', 'Salt & Cedar'];
+  const leaked = quietNames.filter((n) => excText.includes(n));
+  R('THE CLAIM: no well-served client appears in the exception area', leaked.length === 0,
+    leaked.length ? `leaked: ${leaked.join(', ')}` : '7 quiet clients, none named');
+
+  // Evidence must be on tap, and must be real rows rather than a restatement.
+  await page.locator('.evbtn').first().click(); await page.waitForTimeout(700);
+  const evRows = await page.locator('.exc.open .evlist .r').count();
+  R('every claim opens into timestamped rows', evRows >= 3, `${evRows} rows behind the first exception`);
+
+  // The load-bearing one: signing another client must not grow the screen.
+  const before = await page.locator('.exc').count();
+  await page.click('#add'); await page.waitForTimeout(1200);
+  const after = await page.locator('.exc').count();
+  const totalNow = await body();
+  R('THE CLAIM: signing an eleventh client adds no row', before === after, `${before} rows before, ${after} after`);
+  R('but the client count really did go up', /11 clients/i.test(totalNow));
+
+  // Resolving one must remove it entirely, not grey it out.
+  await page.click('#resolve'); await page.waitForTimeout(1200);
+  const resolved = await page.locator('.exc').count();
+  R('a fixed problem leaves the screen rather than turning green', resolved === after - 1, `${resolved} rows left`);
+  R('and nothing on screen still says that site is down',
+    !/unreachable/i.test(await page.evaluate(() => document.querySelector('#excs').innerText)));
+  R('no errors', errs.length === 0, errs.join(' ;; '));
+  await page.close();
+}
+
+// ============================== P11 · The Request ===========================================
+{
+  say('\nP11 · The Request — does the state machine actually refuse, or just look strict?');
+  const { page, errs, body } = await open('the-request.html');
+  R('it starts at received', /state received/i.test(await body()));
+
+  // THE CLAIM 1: you cannot skip a step.
+  await page.locator('button[data-to]').nth(1).click();   // the "skip to …" verb
+  await page.waitForTimeout(700);
+  const refusal = await body();
+  R('THE CLAIM: skipping a step is refused, with the missing step named',
+    /cannot go from/i.test(refusal) && /the step between them is/i.test(refusal));
+  R('the refusal is itself recorded in history, not swallowed',
+    await page.evaluate(() => document.querySelectorAll('.hrow.refused').length) === 1);
+
+  // Walk the legal road to deployed.
+  for (let i = 0; i < 5; i++) { await page.locator('button.primary[data-to]').first().click(); await page.waitForTimeout(320); }
+  const deployed = await body();
+  R('the legal road advances one step at a time', /state deployed/i.test(deployed), (deployed.match(/state \w+/i) || [''])[0]);
+
+  // THE CLAIM 2: a deployed change can never be declined.
+  await page.click('button[data-to="declined"]'); await page.waitForTimeout(700);
+  const declineRefusal = await body();
+  R('THE CLAIM: a deployed change cannot be declined', /cannot decline something you have published/i.test(declineRefusal));
+  R('it is still deployed afterwards, not moved', /state deployed/i.test(await body()));
+
+  // History must be append-only: entries only ever grow, including the refusals.
+  const beforeCount = await page.evaluate(() => document.querySelectorAll('.hrow').length);
+  for (let i = 0; i < 3; i++) { await page.locator('button.primary[data-to]').first().click(); await page.waitForTimeout(300); }
+  const afterCount = await page.evaluate(() => document.querySelectorAll('.hrow').length);
+  R('history only ever grows', afterCount > beforeCount, `${beforeCount} → ${afterCount} entries`);
+  R('both refusals are still in the record after the request closes',
+    await page.evaluate(() => document.querySelectorAll('.hrow.refused').length) === 2);
+  R('it reaches closed', /state closed/i.test(await body()));
+  await page.waitForTimeout(1200);   // the closing line lands after the last transition settles
+  const close = (await body()).match(/(\d+) steps, (\d+) recorded, none of them editable/i);
+  R('the closing line exists and counts the real history', !!close, close ? close[0] : 'absent');
+  if (close) {
+    // Both figures must be derived, not typed: 8 transitions on the road, and the kept entries
+    // are total history minus the two refusals.
+    const kept = await page.evaluate(() => document.querySelectorAll('.hrow:not(.refused)').length);
+    R('...and both of its numbers match what is actually on the page',
+      Number(close[1]) === 8 && Number(close[2]) === kept, `says ${close[1]}/${close[2]}, page has 8/${kept}`);
+  }
+  R('no errors', errs.length === 0, errs.join(' ;; '));
+  await page.close();
+}
+
+// ============================== P12 · The Report ============================================
+{
+  say('\nP12 · The Report — do the holes survive, and does it refuse to fill them?');
+  const { page, errs, body } = await open('the-report.html');
+  const opening = await body();
+  R('it separates measured sources from unknown ones', /measured 5/i.test(opening) && /unknown 2/i.test(opening));
+
+  // THE CLAIM 1: an absent source contributes no number anywhere.
+  const paper = await page.evaluate(() => document.querySelector('#paper').innerText);
+  R('THE CLAIM: neither unknown source is given a figure',
+    !/\b\d+\s*(sms|replies|visitors|visits)\b/i.test(paper) && /not metered before/i.test(paper) && /no analytics connected/i.test(paper));
+  R('the unknowns are listed under their own heading', /what this report does not know/i.test(paper));
+  R('and it states they were not counted as zero', /none of them was counted as zero/i.test(paper));
+
+  // THE CLAIM 2: a measured zero is stated AS a zero, and distinguished from an unknown.
+  R('THE CLAIM: an empty source reads as a measured zero, not a gap', /measured zero, not a gap/i.test(paper));
+
+  // THE CLAIM 3: too few observations refuses a percentage.
+  R('THE CLAIM: one observation refuses to become a success rate',
+    /not enough to quote a success rate/i.test(paper) && !/100%|0% success/i.test(paper));
+  R('while a well-observed source is happy to be stated', /checked the site/i.test(paper) && /30/.test(paper));
+
+  // Filling the gaps must be refused, in words, with a reason.
+  await page.click('#fill'); await page.waitForTimeout(800);
+  const refused = await body();
+  R('THE CLAIM: estimating the unknowns is refused', /^(?!.*estimated).*/s.test(refused) && /\bNo\./.test(refused));
+  R('the refusal explains what it would cost', /unverifiable/i.test(refused));
+  R('the report is unchanged by the attempt',
+    (await page.evaluate(() => document.querySelector('#paper').innerText)) === paper);
+
+  // Sending is gated on approval, and approval is reversible.
+  R('send is blocked before approval', await page.locator('#send').isDisabled());
+  await page.click('#approve'); await page.waitForTimeout(500);
+  R('approving unblocks sending', !(await page.locator('#send').isDisabled()));
+  await page.click('#approve'); await page.waitForTimeout(500);
+  R('withdrawing approval blocks it again', await page.locator('#send').isDisabled());
+  await page.click('#approve'); await page.waitForTimeout(400);
+  await page.click('#send'); await page.waitForTimeout(800);
+  R('it sends with both unknowns still in it', /sent · with both unknowns still in it/i.test(await body()));
   R('no errors', errs.length === 0, errs.join(' ;; '));
   await page.close();
 }

@@ -23,7 +23,12 @@
 import { chromium } from 'playwright';
 
 const DIR = new URL('../prototypes/', import.meta.url).href;
-const EXE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+import { existsSync } from 'node:fs';
+// Prefer an explicit CHROMIUM_PATH, then this container's pinned build, then let Playwright find
+// whatever it installed (which is what happens in CI). Passing a nonexistent executablePath fails
+// with a confusing "browser not found", so only pass it when it is really there.
+const PINNED = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const LAUNCH = existsSync(PINNED) ? { executablePath: PINNED } : {};
 let failed = 0, total = 0;
 const say = (s) => console.log(s);
 const R = (label, pass, detail = '') => {
@@ -31,7 +36,7 @@ const R = (label, pass, detail = '') => {
   console.log(`  ${pass ? 'ok  ' : 'FAIL'} - ${label}${detail ? ' — ' + detail : ''}`);
 };
 
-const browser = await chromium.launch({ executablePath: EXE });
+const browser = await chromium.launch(LAUNCH);
 async function open(name) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errs = [];

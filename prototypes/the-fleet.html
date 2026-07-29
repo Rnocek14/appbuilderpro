@@ -1,0 +1,263 @@
+<!--
+  P10 — The Fleet: ten clients, and a screen that mostly stays empty.
+  Settles: the control-plane question the capability audit answered "NO today" — 0 of 11 fleet
+  questions answerable. The argument here is that the answer is not a dashboard: a served client
+  produces nothing to look at, and the screen should honour that by staying quiet.
+  Rides on real substrate: fleetView.ts + /garvis/fleet, whose exception kinds and thresholds
+  (breaker at 5, change requests aging at 10 days, cost outlier at 3× and $5) are the real ones.
+  Inevitable when: adding the eleventh client does not add a row to this screen.
+  Staged data, real timing. One self-contained file, zero external requests.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P10 · The Fleet</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --forge:cubic-bezier(.22,1,.36,1);
+  --serif:Charter,Georgia,"Times New Roman",serif;
+  --chrome:-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 14px/1.45 var(--chrome);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ember);outline-offset:3px;border-radius:3px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.wrap{max-width:790px;margin:0 auto;padding:28px 22px 140px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:26px}
+.face{font-size:13px}.face .kind{color:var(--dim)}
+.marks{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right;line-height:1.7}
+.marks b{color:var(--ink);font-weight:400}
+
+.lede{font-family:var(--serif);font-size:19px;line-height:1.55;max-width:56ch;margin:0 0 24px}
+
+/* an exception */
+.exc{border-left:2px solid var(--line);padding:12px 0 12px 16px;margin-bottom:4px;
+  transition:background 160ms var(--forge)}
+.exc.act{border-left-color:var(--blocked)}
+.exc.watch{border-left-color:var(--warn)}
+.exc.ask{border-left-color:var(--judgment)}
+.exc:hover{background:rgba(255,255,255,.018)}
+.exc .hd{display:flex;align-items:baseline;gap:11px}
+.exc .who{font-size:14px;flex:0 0 auto}
+.exc .kindtag{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.exc .when{font-family:var(--mono);font-size:11px;color:var(--faint);margin-left:auto}
+.exc .sum{font-family:var(--serif);font-size:16px;line-height:1.5;color:var(--ink);margin-top:5px;max-width:56ch}
+.exc .sum .fig{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.evbtn{margin-top:7px;font-family:var(--mono);font-size:11px;color:var(--faint);
+  border-bottom:1px dotted var(--faint);padding-bottom:1px}
+.evbtn:hover,.evbtn:focus-visible{color:var(--ember);border-bottom-color:var(--ember)}
+.ev{max-height:0;overflow:hidden;transition:max-height 340ms var(--forge)}
+.exc.open .ev{max-height:220px}
+.evlist{padding:8px 0 2px;font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+.evlist .r{display:flex;gap:12px;padding:2px 0}
+.evlist .r .t{color:var(--faint);flex:0 0 96px}
+
+.quiet{margin-top:30px;border-top:1px solid var(--line);padding-top:18px}
+.quietline{font-family:var(--serif);font-size:17px;line-height:1.55;max-width:56ch;color:var(--dim)}
+.quietlist{max-height:0;overflow:hidden;transition:max-height 460ms var(--forge)}
+.quiet.open .quietlist{max-height:420px}
+.qrow{display:flex;gap:14px;align-items:baseline;padding:6px 0;font-size:13.5px;color:var(--dim);
+  border-bottom:1px solid rgba(35,43,59,.5)}
+.qrow .n{flex:1 1 auto}
+.qrow .st{font-family:var(--mono);font-size:11px;color:var(--ok)}
+.qnote{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:12px}
+
+.acts{margin-top:26px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);border-radius:999px;padding:8px 17px;font-size:13px;color:var(--dim);
+  transition:all 170ms var(--forge)}
+.btn:hover,.btn:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.45);background:var(--ember-soft)}
+.btn.primary{background:var(--ember);color:#0B0E14;border-color:var(--ember);font-weight:600}
+.said{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+.closing{margin-top:24px;font-family:var(--serif);font-size:17.5px;line-height:1.55;max-width:55ch;
+  opacity:0;transform:translateY(7px);transition:opacity .55s var(--forge),transform .55s var(--forge)}
+.closing.on{opacity:1;transform:none}
+
+.hud{position:fixed;left:14px;bottom:12px;display:flex;align-items:center;gap:10px;
+  font-size:11px;color:var(--faint);font-family:var(--mono);z-index:40}
+.hud button{border:1px solid var(--line);border-radius:6px;width:22px;height:22px;color:var(--faint)}
+.hud button:hover{color:var(--ember);border-color:rgba(232,131,58,.4)}
+.keys{position:fixed;right:16px;bottom:14px;font-family:var(--mono);font-size:11px;color:var(--faint);z-index:40}
+.card{position:fixed;inset:auto auto 46px 14px;width:min(400px,calc(100vw - 28px));background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:16px 18px;z-index:50;
+  opacity:0;visibility:hidden;transform:translateY(6px);transition:all .25s var(--forge)}
+.card.on{opacity:1;visibility:visible;transform:none}
+.card h4{margin:0 0 9px;font-family:var(--serif);font-weight:500;font-size:15px}
+.card li{font-size:13px;color:var(--dim);margin-bottom:6px;line-height:1.45}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:1ms!important;transition-duration:1ms!important} }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div class="face">The fleet <span class="kind">· ten clients · thursday 07:11</span></div>
+    <div class="marks mono" id="marks"></div>
+  </div>
+
+  <p class="lede" id="lede"></p>
+  <div id="excs"></div>
+
+  <div class="quiet" id="quiet">
+    <button class="quietline" id="quietbtn"></button>
+    <div class="quietlist"><div id="qrows"></div>
+      <div class="qnote">nothing above needs a decision. that is why it is one line and not ten rows.</div>
+    </div>
+  </div>
+
+  <div class="acts">
+    <button class="btn primary" id="add">sign an eleventh client</button>
+    <button class="btn" id="resolve">fix the site that is down</button>
+    <span class="said" id="said"></span>
+  </div>
+  <p class="closing" id="closing"></p>
+</div>
+
+<div class="keys">J/K move · Enter evidence · Q quiet ones</div>
+<div class="hud">
+  <span>P10 · The Fleet — staged data, real timing</span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>Seven clients are being served and are not on this screen. Does that read as missing, or as calm?</li>
+    <li>Sign an eleventh. Notice the screen does not grow. Is that the feeling you want at fifty?</li>
+    <li>Fix the one that is down. Does the row leaving feel like progress?</li>
+    <li>Could you run today from this screen alone?</li>
+  </ul>
+</div>
+
+<script>
+/* ===================== staged data — one source of truth ===================================
+   Thresholds are the real ones from fleetView.ts: breaker at 5 consecutive failures, a change
+   request aging past 10 days, a cost outlier at 3× the fleet median and at least $5. */
+const D = {
+  clients: [
+    { n:"Jane's Bakery", quiet:false },
+    { n:'Riverside Dental', quiet:true },
+    { n:'Harbor Point Physio', quiet:false },
+    { n:'Fern & Frond Landscaping', quiet:true },
+    { n:'Petal & Stem', quiet:true },
+    { n:"Marco's Barbershop", quiet:true },
+    { n:'Ridgeline Roofing', quiet:false },
+    { n:'Copper Kettle Cafe', quiet:true },
+    { n:'Northgate Dance', quiet:true },
+    { n:'Salt & Cedar Studio', quiet:true },
+  ],
+  exceptions: [
+    { who:'Ridgeline Roofing', kind:'act', tag:'site down', when:'since 04:12',
+      sum:'Their site has been unreachable for <span class="fig">2h 59m</span>. Three checks in a row got HTTP 503.',
+      ev:[['jul 30 04:12','watch → HTTP 503 · ridgelineroofing.example.com'],
+          ['jul 30 05:12','watch → HTTP 503 (2 consecutive)'],
+          ['jul 30 06:12','watch → HTTP 503 (3 consecutive)'],
+          ['jul 30 07:11','last successful check was 04:11 — 3h ago']] },
+    { who:"Jane's Bakery", kind:'watch', tag:'automation paused itself', when:'06:48',
+      sum:'Lead follow-up paused itself after <span class="fig">5</span> consecutive failures. The provider is returning 401.',
+      ev:[['jul 30 06:03','fire → HTTP 401 from twilio (1/5)'],
+          ['jul 30 06:14','fire → HTTP 401 (2/5)'],
+          ['jul 30 06:26','fire → HTTP 401 (3/5)'],
+          ['jul 30 06:37','fire → HTTP 401 (4/5)'],
+          ['jul 30 06:48','fire → HTTP 401 (5/5) · paused, 43 remaining fires cancelled']] },
+    { who:'Harbor Point Physio', kind:'ask', tag:'request aging', when:'12 days',
+      sum:'“Move the booking button above the fold” has been open <span class="fig">12</span> days. It has not moved since it was scoped.',
+      ev:[['jul 18 09:40','received · from reception@harborpointphysio.example.com'],
+          ['jul 18 14:02','understood → scoped · 40 minutes estimated'],
+          ['jul 30 07:11','no state change in 12 days · threshold is 10']] },
+  ],
+};
+const $ = (id) => document.getElementById(id);
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let S, sel = 0;
+function reset(){
+  S = { clients: D.clients.map((c) => ({ ...c })), exceptions: D.exceptions.map((e) => ({ ...e })), quietOpen:false, added:0 };
+  sel = 0;
+  $('closing').classList.remove('on'); $('closing').textContent = '';
+  $('said').textContent = ''; $('quiet').classList.remove('open');
+  $('add').textContent = 'sign an eleventh client';
+  $('resolve').style.display = '';
+  render();
+}
+function render(){
+  const total = S.clients.length;
+  const quiet = total - S.exceptions.length;
+  $('lede').innerHTML =
+    `${S.exceptions.length} of your ${total} clients need something this morning. ` +
+    `The other ${quiet} are being served and have nothing to say.`;
+  $('excs').innerHTML = '';
+  S.exceptions.forEach((e, i) => {
+    const el = document.createElement('div');
+    el.className = 'exc ' + e.kind + (i === sel ? ' sel' : '');
+    el.innerHTML =
+      `<div class="hd"><span class="who">${e.who}</span>
+        <span class="kindtag">${e.tag}</span><span class="when">${e.when}</span></div>
+       <div class="sum">${e.sum}</div>
+       <button class="evbtn">which rows is that?</button>
+       <div class="ev"><div class="evlist">${e.ev.map(([t, x]) =>
+          `<div class="r"><span class="t">${t}</span><span>${x}</span></div>`).join('')}</div></div>`;
+    el.querySelector('.evbtn').addEventListener('click', () => { sel = i; el.classList.toggle('open'); countMarks(); });
+    $('excs').appendChild(el);
+  });
+  $('quietbtn').textContent = S.quietOpen
+    ? `${quiet} clients are quiet — hide them again`
+    : `${quiet} clients are quiet. Show me them anyway →`;
+  $('qrows').innerHTML = S.clients.filter((c) => !S.exceptions.some((e) => e.who === c.n))
+    .map((c) => `<div class="qrow"><span class="n">${c.n}</span><span class="st">served · nothing to decide</span></div>`).join('');
+  countMarks();
+}
+/* The ≤12 resting-marks budget from the design contract, counted rather than asserted. */
+function countMarks(){
+  const marks = document.querySelectorAll('#excs .exc .hd .who, #excs .exc .kindtag, #excs .evbtn, .acts .btn').length;
+  $('marks').innerHTML = `${S.clients.length} clients · <b>${S.exceptions.length}</b> need you<br>marks on this screen <b>${marks}</b>`;
+}
+$('quietbtn').addEventListener('click', () => {
+  S.quietOpen = !S.quietOpen;
+  $('quiet').classList.toggle('open', S.quietOpen);
+  render();
+  $('said').textContent = S.quietOpen ? 'a served client produces nothing to look at' : '';
+});
+
+/* ===================== the one orchestrated move: the fleet does not grow =================== */
+$('add').addEventListener('click', () => {
+  S.added++;
+  S.clients.push({ n: ['Alder & Oak Bakery','Kestrel Cycles','Willowbank Vets'][(S.added - 1) % 3] + (S.added > 3 ? ' ' + S.added : ''), quiet:true });
+  render();
+  $('said').textContent = `${S.clients.length} clients · still ${S.exceptions.length} rows`;
+  $('closing').textContent =
+    `You just signed a client and this screen did not change. Ten or fifty, it only ever shows the ` +
+    `${S.exceptions.length} things that need a decision.`;
+  $('closing').classList.add('on');
+});
+$('resolve').addEventListener('click', () => {
+  const before = S.exceptions.length;
+  S.exceptions = S.exceptions.filter((e) => e.kind !== 'act');
+  if (S.exceptions.length === before) { $('said').textContent = 'nothing is down right now'; return; }
+  render();
+  $('said').textContent = 'the site came back — the row is gone, not greyed out';
+  $('resolve').style.display = 'none';
+  $('closing').textContent =
+    `Ridgeline is not "resolved" on this screen — it is simply absent, like the other ` +
+    `${S.clients.length - S.exceptions.length}. Being fine is not a state you look at.`;
+  $('closing').classList.add('on');
+});
+$('restart').addEventListener('click', reset);
+$('feel').addEventListener('click', () => $('feelcard').classList.toggle('on'));
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  const rows = [...document.querySelectorAll('.exc')];
+  if (k === 'j') { e.preventDefault(); sel = Math.min(sel + 1, rows.length - 1); rows[sel]?.scrollIntoView({block:'nearest'}); }
+  else if (k === 'k') { e.preventDefault(); sel = Math.max(sel - 1, 0); rows[sel]?.scrollIntoView({block:'nearest'}); }
+  else if (k === 'enter') { e.preventDefault(); rows[sel]?.querySelector('.evbtn').click(); }
+  else if (k === 'q') { e.preventDefault(); $('quietbtn').click(); }
+  else if (k === 'escape') $('feelcard').classList.remove('on');
+});
+reset();
+</script>

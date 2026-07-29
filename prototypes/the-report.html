@@ -1,0 +1,255 @@
+<!--
+  P12 — The Report: the month, compiled, with its holes left in.
+  Settles: "client reporting is MISSING despite every number existing as rows" — and the harder
+  half, which is what a report does with the months where a source was not recording.
+  Rides on real substrate: clientReport.ts — a null source becomes a named unknown contributing
+  nothing numeric, an empty array is a measured zero, and fewer than seven observations refuses to
+  state a percentage. The same three rules, made visible.
+  Inevitable when: you would send this to a client without editing it, and the unknowns are the
+  reason rather than the embarrassment.
+  Staged data, real timing. One self-contained file, zero external requests.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P12 · The Report</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --forge:cubic-bezier(.22,1,.36,1);
+  --serif:Charter,Georgia,"Times New Roman",serif;
+  --chrome:-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 14px/1.45 var(--chrome);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ember);outline-offset:3px;border-radius:3px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.wrap{max-width:840px;margin:0 auto;padding:26px 22px 140px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:22px}
+.face{font-size:13px}.face .kind{color:var(--dim)}
+.sources{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right;line-height:1.7}
+.sources b{color:var(--ink);font-weight:400}
+.sources .u{color:var(--warn)}
+
+.cols{display:flex;gap:26px;align-items:flex-start}
+@media (max-width:760px){ .cols{flex-direction:column} }
+.left{flex:0 0 auto;width:min(260px,100%)}
+.right{flex:1 1 auto;min-width:0}
+
+.src{display:flex;align-items:baseline;gap:9px;padding:6px 0;font-size:12.5px;
+  border-bottom:1px solid rgba(35,43,59,.55)}
+.src .n{flex:1 1 auto;color:var(--dim)}
+.src .v{font-family:var(--mono);font-size:11.5px;color:var(--ok);flex:0 0 auto}
+.src.zero .v{color:var(--dim)}
+.src.unknown .n{color:var(--warn)}
+.src.unknown .v{color:var(--warn)}
+.srchead{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:6px}
+.srcnote{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:11px;line-height:1.7}
+
+.paper{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:22px 26px}
+.paper h2{font-family:var(--serif);font-weight:500;font-size:20px;margin:0 0 3px}
+.paper .per{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-bottom:16px}
+.paper p{font-family:var(--serif);font-size:16.5px;line-height:1.6;color:var(--ink);max-width:58ch;margin:0 0 13px}
+.paper .fig{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.paper .unk{color:var(--warn)}
+.paper .hr{border-top:1px solid var(--line);margin:16px 0 14px}
+.paper .unkhead{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--warn);margin-bottom:8px}
+.paper .unkrow{font-family:var(--mono);font-size:11.5px;color:var(--dim);padding:3px 0;line-height:1.6}
+.paper .unkrow b{color:var(--warn);font-weight:400}
+
+.acts{margin-top:20px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);border-radius:999px;padding:8px 17px;font-size:13px;color:var(--dim);
+  transition:all 170ms var(--forge)}
+.btn:hover,.btn:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.45);background:var(--ember-soft)}
+.btn.primary{background:var(--ember);color:#0B0E14;border-color:var(--ember);font-weight:600}
+.btn[disabled]{opacity:.32;cursor:default;pointer-events:none}
+.said{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+.refusal{margin-top:16px;border-left:2px solid var(--blocked);padding:11px 15px;
+  background:linear-gradient(90deg,rgba(194,94,94,.07),transparent 72%);
+  opacity:0;max-height:0;overflow:hidden;transition:opacity .3s var(--forge),max-height .35s var(--forge)}
+.refusal.on{opacity:1;max-height:210px}
+.refusal .h{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--blocked);margin-bottom:6px}
+.refusal .t{font-family:var(--serif);font-size:15.5px;line-height:1.55;color:var(--ink);max-width:54ch}
+.refusal .sub{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:8px}
+
+.hud{position:fixed;left:14px;bottom:12px;display:flex;align-items:center;gap:10px;
+  font-size:11px;color:var(--faint);font-family:var(--mono);z-index:40}
+.hud button{border:1px solid var(--line);border-radius:6px;width:22px;height:22px;color:var(--faint)}
+.hud button:hover{color:var(--ember);border-color:rgba(232,131,58,.4)}
+.keys{position:fixed;right:16px;bottom:14px;font-family:var(--mono);font-size:11px;color:var(--faint);z-index:40}
+.card{position:fixed;inset:auto auto 46px 14px;width:min(400px,calc(100vw - 28px));background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:16px 18px;z-index:50;
+  opacity:0;visibility:hidden;transform:translateY(6px);transition:all .25s var(--forge)}
+.card.on{opacity:1;visibility:visible;transform:none}
+.card h4{margin:0 0 9px;font-family:var(--serif);font-weight:500;font-size:15px}
+.card li{font-size:13px;color:var(--dim);margin-bottom:6px;line-height:1.45}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:1ms!important;transition-duration:1ms!important} }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div class="face">Jane's Bakery <span class="kind">· client · june report</span></div>
+    <div class="sources mono" id="tally"></div>
+  </div>
+
+  <div class="cols">
+    <div class="left">
+      <div class="srchead">sources</div>
+      <div id="srclist"></div>
+      <div class="srcnote" id="srcnote"></div>
+    </div>
+
+    <div class="right">
+      <div class="paper" id="paper"></div>
+      <div class="acts">
+        <button class="btn primary" id="approve">approve it</button>
+        <button class="btn" id="send" disabled>send to Jane</button>
+        <button class="btn" id="fill">fill the gaps with estimates</button>
+        <span class="said" id="said"></span>
+      </div>
+      <div class="refusal" id="refusal"><div class="h">refused</div>
+        <div class="t" id="reftx"></div><div class="sub" id="refsub"></div></div>
+    </div>
+  </div>
+</div>
+
+<div class="keys">A approve · S send · F fill gaps</div>
+<div class="hud">
+  <span>P12 · The Report — staged data, real timing</span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>Two sources are unknown. Would you still send this, or would you want it tidied first?</li>
+    <li>Try filling the gaps. Does the refusal feel like integrity or like an obstacle?</li>
+    <li>One figure refuses to be a percentage. Is the reason convincing?</li>
+    <li>If Jane forwards this to her accountant, does anything embarrass you?</li>
+  </ul>
+</div>
+
+<script>
+/* ===================== staged data — one source of truth ====================================
+   `rows: null` means NO OBSERVATION EXISTS. `rows: []` means we looked and there was nothing.
+   The report renders those two differently, which is the whole argument. */
+const D = {
+  business:"Jane's Bakery", period:'1–30 June 2026',
+  sources: [
+    { key:'watch',   name:'Site checks',        rows:30,   unit:'checks',   why:null },
+    { key:'changes', name:'Change requests',    rows:1,    unit:'completed',why:null },
+    { key:'autos',   name:'Automation fires',   rows:1,    unit:'fires',    why:null },
+    { key:'cost',    name:'Cost to serve',      rows:45,   unit:'events',   why:null },
+    { key:'leads',   name:'Leads from the site',rows:0,    unit:'leads',    why:null },
+    { key:'sms',     name:'SMS replies',        rows:null, unit:'',
+      why:'not metered before 12 jun — six sends went out unrecorded' },
+    { key:'traffic', name:'Visitor numbers',    rows:null, unit:'',
+      why:'no analytics connected on this site — nothing was ever collected' },
+  ],
+  facts: {
+    uptimeChecks: 30, uptimeFails: 1, incident:'13 jun · HTTP 503 · recovered within the hour',
+    change:'a gift-card page, requested 20 jun and live on 24 jun',
+    fire:'one lead follow-up sent on 18 jun', cost: 45.63,
+  },
+  // Below seven observations a share is refused rather than stated — the real rule.
+  MIN_OBS_FOR_PERCENT: 7,
+};
+const $ = (id) => document.getElementById(id);
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const known   = D.sources.filter((s) => s.rows !== null);
+const unknown = D.sources.filter((s) => s.rows === null);
+
+let S;
+function reset(){
+  S = { approved:false, sent:false };
+  $('refusal').classList.remove('on');
+  $('send').disabled = true; $('approve').disabled = false;
+  $('approve').textContent = 'approve it'; $('said').textContent = '';
+  render();
+}
+function render(){
+  $('tally').innerHTML =
+    `sources <b>${D.sources.length}</b> · measured <b>${known.length}</b> · ` +
+    `<span class="u">unknown <b>${unknown.length}</b></span><br>` +
+    `${S.sent ? 'sent to Jane' : S.approved ? 'approved, not yet sent' : 'draft'}`;
+
+  $('srclist').innerHTML = D.sources.map((s) => {
+    const cls = s.rows === null ? 'unknown' : s.rows === 0 ? 'zero' : '';
+    const v = s.rows === null ? 'unknown' : `${s.rows} ${s.unit}`;
+    return `<div class="src ${cls}"><span class="n">${s.name}</span><span class="v">${v}</span></div>`;
+  }).join('');
+  $('srcnote').innerHTML =
+    `<b>0 ${''}</b>an empty source is a measured zero.<br>` +
+    `an absent source is <span style="color:var(--warn)">unknown</span> and contributes no number.`;
+
+  // The prose. Every figure below reads from D.facts; nothing numeric is typed into the string
+  // for a source that has no observation.
+  const f = D.facts;
+  const uptimeLine = f.uptimeChecks >= D.MIN_OBS_FOR_PERCENT
+    ? `We checked the site <span class="fig">${f.uptimeChecks}</span> times in June and it answered every time but one.`
+    : `We checked the site <span class="fig">${f.uptimeChecks}</span> times — too few to state a percentage, so here are the checks themselves.`;
+  const leadLine = `The site produced <span class="fig">0</span> enquiries through the contact form this month. That is a measured zero, not a gap.`;
+  const fireObs = 1;
+  const fireLine = fireObs >= D.MIN_OBS_FOR_PERCENT
+    ? `Automations fired ${fireObs} times with a success rate of …`
+    : `One automation fired this month — <span class="fig">${fireObs}</span> event is not enough to quote a success rate, so: ${f.fire}, and it went through.`;
+
+  $('paper').innerHTML =
+    `<h2>June at ${D.business}</h2>
+     <div class="per">${D.period} · compiled ${new Date().toISOString().slice(0,10)} · ${known.length} of ${D.sources.length} sources measured</div>
+     <p>${uptimeLine} ${f.incident ? `The exception was ${f.incident}.` : ''}</p>
+     <p>You asked for one change and got it: ${f.change}.</p>
+     <p>${fireLine}</p>
+     <p>${leadLine}</p>
+     <p>Serving you cost <span class="fig">$${f.cost.toFixed(2)}</span> in June, across every recorded operation.</p>
+     <div class="hr"></div>
+     <div class="unkhead">what this report does not know</div>
+     ${unknown.map((u) => `<div class="unkrow"><b>${u.name}</b> — ${u.why}</div>`).join('')}
+     <div class="unkrow" style="margin-top:8px;color:var(--faint)">these are absent from every figure above. none of them was counted as zero.</div>`;
+}
+
+/* ===================== the refusals ========================================================= */
+function refuse(t, sub){
+  $('reftx').textContent = t; $('refsub').textContent = sub || '';
+  $('refusal').classList.add('on');
+}
+$('fill').addEventListener('click', () => {
+  refuse(
+    `No. Estimating those two would make every figure above unverifiable, and this report's only ` +
+    `value to Jane is that each number came from rows she could ask to see.`,
+    `${unknown.map((u) => u.name.toLowerCase()).join(' · ')} — no observations exist to estimate from`);
+  $('said').textContent = 'the gaps stay gaps';
+});
+$('approve').addEventListener('click', () => {
+  S.approved = !S.approved;
+  $('approve').textContent = S.approved ? 'approved — undo' : 'approve it';
+  $('send').disabled = !S.approved;
+  $('refusal').classList.remove('on');
+  $('said').textContent = S.approved ? 'approved · sending is now possible' : 'approval withdrawn · sending is blocked again';
+  render();
+});
+$('send').addEventListener('click', () => {
+  if (!S.approved) return refuse('This report has not been approved. Nothing goes to a client from a draft.');
+  S.sent = true; $('send').disabled = true; $('approve').disabled = true;
+  $('said').textContent = 'sent · with both unknowns still in it';
+  render();
+});
+$('restart').addEventListener('click', reset);
+$('feel').addEventListener('click', () => $('feelcard').classList.toggle('on'));
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === 'a') { e.preventDefault(); if (!$('approve').disabled) $('approve').click(); }
+  else if (k === 's') { e.preventDefault(); if (!$('send').disabled) $('send').click(); }
+  else if (k === 'f') { e.preventDefault(); $('fill').click(); }
+  else if (k === 'escape') { $('feelcard').classList.remove('on'); $('refusal').classList.remove('on'); }
+});
+reset();
+</script>
