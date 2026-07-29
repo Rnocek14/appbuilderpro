@@ -103,6 +103,13 @@ export function DataPanel({ projectId, onClose }: { projectId: string; onClose: 
     setGrid({ columns: (d.columns as string[]) ?? [], rows: (d.rows as Row[]) ?? [] }); setActive(table); setOffset(off); setSql('');
   });
   const runQuery = async () => { if (!sql.trim()) return; await guard(async () => { const d = await invoke({ action: 'query', sql }); setGrid({ columns: (d.columns as string[]) ?? [], rows: (d.rows as Row[]) ?? [] }); setActive(null); }); };
+  /** Start editing a cell. Lifted out of the onClick so the keyboard path runs identically —
+   *  a grid you can only edit with a mouse is not an editable grid. */
+  const beginEdit = (rowIdx: number, col: string, value: Row[string]) => {
+    if (!pkCol || !active) return;
+    setEditing({ row: rowIdx, col });
+    setDraft(value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value));
+  };
   const saveCell = async (rowIdx: number, col: string) => {
     setEditing(null);
     if (!pkCol || !active || String(grid.rows[rowIdx][col] ?? '') === draft) return;
@@ -178,7 +185,10 @@ export function DataPanel({ projectId, onClose }: { projectId: string; onClose: 
                         {grid.columns.map((c) => (
                           <td key={c} className="max-w-xs truncate border-b border-forge-border/50 px-2 py-1 font-mono text-forge-ink/90"
                             title={pkCol && active ? 'click to edit' : cell(r[c])}
-                            onClick={() => { if (pkCol && active) { setEditing({ row: i, col: c }); setDraft(r[c] === null ? '' : typeof r[c] === 'object' ? JSON.stringify(r[c]) : String(r[c])); } }}>
+                            onClick={() => beginEdit(i, c, r[c])}
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); beginEdit(i, c, r[c]); } }}
+                            role={pkCol && active ? 'button' : undefined}
+                            tabIndex={pkCol && active ? 0 : undefined}>
                             {editing && editing.row === i && editing.col === c
                               ? <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={() => saveCell(i, c)} onKeyDown={(e) => { if (e.key === 'Enter') saveCell(i, c); if (e.key === 'Escape') setEditing(null); }} className="w-full rounded bg-forge-raised px-1 text-forge-ink outline-none ring-1 ring-forge-ember/50" />
                               : cell(r[c])}

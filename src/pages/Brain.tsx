@@ -181,6 +181,10 @@ export function BrainContent() {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
           onClick={() => fileInput.current?.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.current?.click(); } }}
+          role="button"
+          tabIndex={0}
+          aria-label="Choose files to upload, or drop them here"
           className={`cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center transition-colors ${dragOver ? 'border-forge-ember bg-forge-ember/5' : 'border-forge-border hover:border-forge-ember/40'}`}
         >
           <input

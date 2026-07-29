@@ -295,6 +295,26 @@ function stripComments(src: string): string {
   return out;
 }
 
+/**
+ * Blank the CONTENTS of every template literal, keeping length and newlines. Used only by the
+ * tag-shape rules: html assembled in a backtick string is injected markup whose handlers are wired
+ * by delegation, so judging it as JSX produces confident, wrong findings.
+ */
+function maskTemplateLiterals(src: string): string {
+  let out = '', i = 0;
+  while (i < src.length) {
+    if (src[i] === '`') {
+      out += '`'; i++;
+      while (i < src.length && src[i] !== '`') {
+        if (src[i] === '\\') { out += '  '; i += 2; continue; }
+        out += src[i] === '\n' ? '\n' : ' '; i++;
+      }
+      if (i < src.length) { out += '`'; i++; }
+    } else { out += src[i]; i++; }
+  }
+  return out;
+}
+
 function interactionIssues(fileList: { path: string; content: string }[]): QAIssue[] {
   const files = fileList.map((f) => ({ path: f.path, content: stripComments(f.content) }));
   const out: QAIssue[] = [];
@@ -309,8 +329,16 @@ function interactionIssues(fileList: { path: string; content: string }[]): QAIss
   for (const f of files) {
     if (!/\.(t|j)sx$/.test(f.path)) continue;          // JSX only — plain modules have no controls
 
+    // Markup built inside a template literal is INJECTED html, not JSX: its handlers are attached
+    // by delegation somewhere else, and the JSX rules cannot see that. Masking those regions stops
+    // a real, correctly-wired control being reported as dead — which is what happened to the code
+    // block's Copy button, whose listener is a `closest('.ff-code-copy')` delegate.
+    // Only the tag-shape rules use the masked copy; the identifier count in rule 2 does not, so a
+    // handler genuinely referenced inside a template string still counts as defined.
+    const masked = maskTemplateLiterals(f.content);
+
     // 1. A button that cannot do anything. The single most common "looks finished, isn't" defect.
-    for (const attrs of openingTags(f.content, 'button')) {
+    for (const attrs of openingTags(masked, 'button')) {
       if (/\{\s*\.\.\./.test(attrs)) continue;                       // a spread may carry the handler
       if (/\bon[A-Z]\w*\s*=/.test(attrs)) continue;                  // any handler at all is enough
       if (/\btype\s*=\s*["']submit["']/.test(attrs)) continue;       // submits via its form
@@ -332,20 +360,37 @@ function interactionIssues(fileList: { path: string; content: string }[]): QAIss
         `A handler is bound to '${name}', which is never defined, imported or destructured in this file — clicking it throws a ReferenceError. Define '${name}' or point the handler at the real function.`);
     }
 
-    // 3. A click handler on an element no keyboard can reach. Mouse users see a working control;
-    //    keyboard and screen-reader users see nothing at all.
+    // 3. A click handler on an element no keyboard can reach — a div ACTING AS A BUTTON.
+    //
+    //    Narrowed after pointing this at 172 real .tsx files and getting 12 findings, all 12 of
+    //    them wrong. Real UI code is full of click handlers that are not controls at all:
+    //    full-surface modal backdrops, click-away dismissers, and stopPropagation guards on the
+    //    panel inside a backdrop. None of those is something a keyboard user needs to "reach" —
+    //    Escape closes them — so flagging them was pure noise, and noise in a self-heal loop makes
+    //    a generator rewrite working code. What remains is the case actually worth catching: an
+    //    element with an onClick that DOES something, dressed as a control.
     for (const tag of NON_INTERACTIVE) {
-      for (const attrs of openingTags(f.content, tag)) {
-        if (!/\bonClick\s*=/.test(attrs)) continue;
+      for (const attrs of openingTags(masked, tag)) {
+        const onClick = attrs.match(/\bonClick\s*=\s*\{([\s\S]*?)\}\s*(?=\s[a-zA-Z-]+=|$)/);
+        if (!onClick) continue;
         if (/\{\s*\.\.\./.test(attrs)) continue;
         if (/\brole\s*=/.test(attrs) && /\btabIndex\s*=/.test(attrs)) continue;
+        const body = onClick[1];
+        // a full-surface overlay is a backdrop, not a control
+        if (/\b(fixed|absolute)\b[^"']*\binset-0\b|backdrop|overlay|scrim/.test(attrs)) continue;
+        // a propagation guard is not an action
+        if (/^\s*\(?\s*e\s*\)?\s*=>\s*e\.stopPropagation\(\)\s*$/.test(body)) continue;
+        // a pure dismiss — closing what is already open — is reachable by Escape, not by Tab
+        if (/^\s*\(?\s*\)?\s*=>\s*(set\w+\((null|false)\)|on?Close\(\)|close\(\)|dismiss\(\))\s*$/.test(body)) continue;
+        // a prop passed straight through: the decision belongs to the caller, not here
+        if (/^\s*on[A-Z]\w*\s*$/.test(body)) continue;
         flag(f.path, 'warning',
           `<${tag}> has onClick but no role + tabIndex — it works with a mouse and is unreachable by keyboard. Use a <button>, or add role="button" tabIndex={0} and a key handler.`);
       }
     }
 
     // 4. A form with no submit path: pressing Enter in a field reloads the page and loses the input.
-    for (const attrs of openingTags(f.content, 'form')) {
+    for (const attrs of openingTags(masked, 'form')) {
       if (/\{\s*\.\.\./.test(attrs)) continue;
       if (/\bonSubmit\s*=/.test(attrs)) continue;
       if (/\baction\s*=/.test(attrs)) continue;

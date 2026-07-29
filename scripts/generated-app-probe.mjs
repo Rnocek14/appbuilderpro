@@ -103,8 +103,10 @@ async function run(dir) {
 }
 
 const args = process.argv.slice(2);
+const FIXTURE_DIR = join(REPO, 'scripts/fixtures/generated-app');
 const targets = args.includes('--fixtures')
-  ? readdirSync(join(REPO, 'scripts/fixtures/generated-app')).map((d) => join(REPO, 'scripts/fixtures/generated-app', d))
+  // Directories only — the README living beside them is documentation, not a fixture.
+  ? readdirSync(FIXTURE_DIR).map((d) => join(FIXTURE_DIR, d)).filter((p) => statSync(p).isDirectory())
   : args.filter((a) => !a.startsWith('--'));
 if (!targets.length) { console.error('usage: node scripts/generated-app-probe.mjs <project-dir> | --fixtures'); process.exit(2); }
 
