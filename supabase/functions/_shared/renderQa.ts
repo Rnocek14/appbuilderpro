@@ -71,6 +71,8 @@ import {
   innerText,
   openTags,
   snippet,
+  stripComments,
+  stripElements,
   stripNonContent,
 } from './scanTypes.ts';
 
@@ -135,6 +137,36 @@ const CRITICAL_TAGS = ['html', 'head', 'body', 'div', 'section'] as const;
 // same way: isolate a bare `name="value"` pair first (one not glued to a preceding word character or
 // hyphen), then hand that slice to the shared helper so the quoting rules stay in exactly one place.
 
+/**
+ * The attribute-list body of an opening tag, quote-aware — a local copy of scanTypes' TAG_ATTRS,
+ * which is not exported. Same two branches for the same reason: the strict one lets a `>` live inside
+ * a quoted value, and the permissive fallback keeps a tag with an unbalanced quote visible instead of
+ * dropping it. Used to walk "every opening tag" when a rule must distinguish markup from the text and
+ * attribute VALUES that merely look like markup.
+ */
+const ANY_OPEN_TAG = `<[a-zA-Z][a-zA-Z0-9:-]*(?:(?:"[^"]*"|'[^']*'|[^>"'])*|[^>]*)>`;
+
+/**
+ * CSS with its comments removed, linearly.
+ *
+ * Same rule as rule 1 in the header: a commented-out `url()` is not a request the browser makes, and
+ * a page must never be discarded for a background image its author had already switched off. A
+ * comment that is opened and never closed swallows the rest of the sheet, which is what a CSS parser
+ * does, and is also the direction that can only ever produce fewer blocks.
+ */
+function stripCssComments(css: string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const s = css.indexOf('/*', i);
+    if (s < 0) return out + css.slice(i);
+    out += `${css.slice(i, s)} `;
+    const end = css.indexOf('*/', s + 2);
+    if (end < 0) return out; // unterminated: the rest of the sheet is inside the comment
+    i = end + 2;
+  }
+}
+
 /** attr(), but refusing `data-`/vendor look-alikes. Delegates the actual quote handling to attr(). */
 function bareAttr(attrs: string, name: string): string | null {
   const m = new RegExp(`(?:^|[\\s"'/])(${name}\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s"'>]+))`, 'i').exec(attrs);
@@ -165,6 +197,13 @@ function bareHasAttr(attrs: string, name: string): boolean {
  * When the body never closes (a truncated document) we take everything after `<body>` rather than
  * giving up: the unclosed tags are reported by their own rule, and refusing to count the text here
  * would stack a phantom empty_body on top of it.
+ *
+ * A `<` only opens a tag when a name-ish character follows it, exactly as the HTML tokenizer has it.
+ * `/<[^>]*>/` does not know that, so one unescaped `<` in ordinary copy — "pipes < 2 inches",
+ * "< 1 hour response", "temperaturas < 0°" — swallowed everything from there to the next `>`, i.e.
+ * the entire rest of the page. A full page of copy measured 69 characters and was BLOCKED as
+ * effectively empty, while a browser rendered every word of it. Requiring a letter, `/`, `!` or `?`
+ * after the `<` is what the parser does and what a reader sees.
  */
 function visibleText(clean: string): string {
   const open = /<body\b[^>]*>/i.exec(clean);
@@ -172,7 +211,7 @@ function visibleText(clean: string): string {
     ? clean.slice(open.index + open[0].length).replace(/<\/body\s*>[\s\S]*$/i, ' ')
     : clean;
   return region
-    .replace(/<[^>]*>/g, ' ')
+    .replace(/<[a-zA-Z!/?][^>]*>/g, ' ')
     .replace(/&[a-zA-Z]+;|&#\d+;|&#x[0-9a-fA-F]+;/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -236,13 +275,21 @@ function blockedResources(noComments: string, noScripts: string): string[] {
   }
 
   // url() in CSS — the single most common way an AI-written page reaches off-host, because
-  // `@import url('https://fonts.googleapis.com/…')` is muscle memory. Read from real CSS only:
-  // <style> element bodies, plus inline style="" attributes taken from markup with <script> removed,
-  // so `const css = "background:url(https://…)"` inside a script cannot block the page.
-  const cssRegions: string[] = elements(noComments, 'style').map((e) => e.inner);
-  const styleAttr = /(?:^|[\s"'/])style\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
-  let sm: RegExpExecArray | null;
-  while ((sm = styleAttr.exec(noScripts))) cssRegions.push(sm[1] ?? sm[2] ?? '');
+  // `@import url('https://fonts.googleapis.com/…')` is muscle memory. Read from real CSS only, which
+  // means three narrowings, each of which was a live false block before it was added:
+  //  - <style> element bodies are taken from noScripts, not noComments, so a `<style>…</style>`
+  //    written as a STRING inside a script is not read as this page's stylesheet.
+  //  - inline style="" is read only off a real opening tag, never by scanning the document for the
+  //    characters `style=`. Prose that quotes a CSS snippet, or an escaped code sample in <pre>, is
+  //    text — a reader sees it, a browser never fetches it.
+  //  - CSS comments are stripped, so a `url()` the author had already switched off is not a request.
+  const cssRegions: string[] = elements(noScripts, 'style').map((e) => stripCssComments(e.inner));
+  const tagRe = new RegExp(ANY_OPEN_TAG, 'g');
+  let tm: RegExpExecArray | null;
+  while ((tm = tagRe.exec(noScripts))) {
+    const inline = bareAttr(tm[0], 'style');
+    if (inline) cssRegions.push(stripCssComments(inline));
+  }
   const urlFn = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"\s]*))\s*\)/gi;
   for (const css of cssRegions) {
     urlFn.lastIndex = 0; // reused across regions — reset so the walk is order-independent
@@ -256,16 +303,34 @@ function blockedResources(noComments: string, noScripts: string): string[] {
 // ─── Placeholder text ────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Words that name a SLOT — the thing a generator was supposed to substitute into. Used to tell an
+ * unreplaced "[BUSINESS NAME]" from a badge a copywriter actually meant, e.g. "[ABIERTO 24 HORAS]".
+ * \b-anchored at the use site so "TEL" does not fire inside "HOTEL".
+ */
+const SLOT_WORDS = [
+  'YOUR', 'BUSINESS', 'COMPANY', 'CLIENT', 'CUSTOMER', 'BRAND', 'NAME', 'CITY', 'TOWN', 'STATE',
+  'ZIP', 'PHONE', 'TEL', 'EMAIL', 'ADDRESS', 'LOGO', 'IMAGE', 'IMG', 'PHOTO', 'TEXT', 'COPY',
+  'HEADLINE', 'TAGLINE', 'SLOGAN', 'TESTIMONIAL', 'INSERT', 'PLACEHOLDER', 'TODO', 'TBD', 'LOREM',
+].join('|');
+
+/**
  * Unreplaced scaffolding in the VISIBLE copy. Every pattern here is one a reader would see and
  * immediately understand as "this was sent to me by a robot that did not finish".
  *
- * Case sensitivity is load-bearing, not fussiness. `TODO` is uppercase-only because "todo" is an
- * ordinary Spanish word ("todo el día", "todo incluido") and we generate pages for Spanish-speaking
- * businesses; a case-insensitive match would block every one of them. `XXX` is uppercase and
- * \b-anchored so a clothing shop's "XXXL" survives while a "555-XXX-XXXX" phone stub does not.
+ * Case sensitivity is load-bearing, not fussiness. `todo` is an ordinary Spanish word ("todo el día",
+ * "todo incluido") and we generate pages for Spanish-speaking businesses, so an insensitive match
+ * would block every one of them. Uppercase alone is NOT enough either — Spanish copy is set in caps
+ * as often as English is ("REPARAMOS TODO TIPO DE FUGAS", "ABIERTO TODO EL DÍA"), and a bare
+ * uppercase `TODO` blocked those pages outright. So the marker must carry marker PUNCTUATION —
+ * `TODO:`, `TODO(bob)`, `TODO -` — the shapes a leftover note actually takes. A bare standing
+ * "TODO" in visible copy goes unreported, which is the correct direction: a missed break costs one
+ * embarrassing email, a wrong block throws away the demo. `XXX` is uppercase and \b-anchored so a
+ * clothing shop's "XXXL" survives while a "555-XXX-XXXX" phone stub does not.
  *
- * The bracketed-token pattern requires four or more characters so a legitimate "[NEW]" badge is not
- * mistaken for "[YOUR NAME]".
+ * The bracketed-token pattern needs four or more characters (so a "[NEW]" badge survives) AND the
+ * token has to look like a slot — an underscore, or a word that names content someone meant to fill
+ * in. "[YOUR NAME]", "[CITY]" and "[BUSINESS_NAME]" are caught; "[ABIERTO 24 HORAS]" and
+ * "[OPEN 24 HOURS]" are ordinary copy and are left alone.
  *
  * These run over visible text extracted from stripNonContent() output, which is what makes the whole
  * set safe: `${count}` in a JS template literal, a `{{mustache}}` in a commented-out block, and
@@ -273,14 +338,26 @@ function blockedResources(noComments: string, noScripts: string): string[] {
  */
 const PLACEHOLDER_PATTERNS: [string, RegExp][] = [
   ['lorem ipsum', /\blorem\s+ipsum\b/i],
-  ['TODO marker', /\bTODO\b/],
+  ['TODO marker', /\bTODO\s*[:(\[=–—-]/],
   ['FIXME marker', /\bFIXME\b/],
   ['XXX marker', /\bXXX\b/],
   ['unreplaced {{token}}', /\{\{[^}]*\}\}/],
   ['unreplaced ${token}', /\$\{[^}]*\}/],
-  ['[BRACKETED PLACEHOLDER]', /\[[A-Z][A-Z0-9_ ]{3,}\]/],
+  ['[BRACKETED PLACEHOLDER]', new RegExp(`\\[(?=[A-Z][A-Z0-9_ ]{3,}\\])[A-Z0-9_ ]*(?:_|\\b(?:${SLOT_WORDS})\\b)[A-Z0-9_ ]*\\]`)],
   ['"your … here" stub', /\byour\s+(?:text|content|copy|headline|tagline|message|name|logo|image|photo|business)\s+here\b/i],
 ];
+
+// ─── Contact routes visible in the copy ──────────────────────────────────────────────────────────
+// Deliberately loose. These only ever SUPPRESS a block, so a pattern that matches something which is
+// not really a phone number costs nothing worse than a page shipping that we would have withheld,
+// while a pattern that misses one costs the demo. They are matched against visible text, never raw
+// markup, so a digit run inside a base64 data: URI cannot stand in for a phone number.
+
+/** A dialable-looking number: NANP with any common separator, or an international `+` run. */
+const PHONE_IN_TEXT = /\+\d[\d\s().-]{7,}\d|\(?\b\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/;
+
+/** An email address printed in the copy, linked or not. */
+const EMAIL_IN_TEXT = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b/;
 
 // ─── Inline script sanity ────────────────────────────────────────────────────────────────────────
 
@@ -475,16 +552,26 @@ export function renderQa(html: string): RenderQa {
 
   // Three views of the document, each the narrowest one its rules can honestly use. See the
   // presence/absence split in the file header.
-  const noComments = raw.replace(/<!--[\s\S]*?-->/g, ' ');            // comments never render
-  const noScripts = noComments.replace(/<script[\s\S]*?<\/script>/gi, ' '); // markup outside JS
-  const clean = stripNonContent(raw);                                  // renderable markup only
+  //
+  // Both strips are the shared linear ones, not `/<!--[\s\S]*?-->/g` and friends. Two reasons, and
+  // the first one is a correctness bug, not a performance note:
+  //  - An UNTERMINATED `<!--` swallows the rest of the document in a browser. The lazy regex simply
+  //    fails to match and leaves the tail in place, so a `<link rel=stylesheet href="https://…">`
+  //    parked inside a comment that never closes was reported as a cross-origin resource the page
+  //    loads. It is not: the browser never sees a tag there. Such a page is still blocked — by
+  //    unclosed_critical, which is the true reason — but the gate must not state a false one.
+  //  - The regexes re-scan the tail from every unterminated opener, which is quadratic; 300KB with a
+  //    few thousand stray `<!--` took over a second, and this runs inside an edge function.
+  const noComments = stripComments(raw);                       // comments never render
+  const noScripts = stripElements(noComments, ['script']);     // markup outside JS
+  const clean = stripNonContent(raw);                          // renderable markup only
 
   // ── render.not_html — terminal ─────────────────────────────────────────────────────────────────
   // A leading BOM, whitespace, or a generator comment before the doctype is fine; browsers cope and
   // so do we. A markdown code fence, a prose preamble, or an empty string is not fine, and neither is
   // a document with no <body> — our generator is required to emit one, so its absence means the
   // output is a fragment rather than a page.
-  const lead = raw.replace(/^﻿/, '').replace(/^(?:\s|<!--[\s\S]*?-->)+/, '');
+  const lead = noComments.replace(/^﻿/, '').replace(/^\s+/, '');
   const startsAsDoc = /^<!doctype\s+html/i.test(lead) || /^<html\b/i.test(lead);
   const hasBody = /<body\b/i.test(noComments);
   if (!startsAsDoc || !hasBody) {
@@ -500,7 +587,10 @@ export function renderQa(html: string): RenderQa {
 
   // ── render.empty_body ──────────────────────────────────────────────────────────────────────────
   if (text.length < EMPTY_BODY_CHARS) {
-    block('render.empty_body', `The body holds ${text.length} visible character${text.length === 1 ? '' : 's'} (floor is ${EMPTY_BODY_CHARS}) — the page renders effectively blank.`);
+    // States the count, not what a visitor will see. We cannot render, so "the page looks blank" is
+    // a claim this module has no way to make — a body could in principle be all imagery. What was
+    // actually measured is that there is essentially no copy in it.
+    block('render.empty_body', `The body holds ${text.length} visible character${text.length === 1 ? '' : 's'} of text (floor is ${EMPTY_BODY_CHARS}) — the page carries essentially no copy.`);
   }
 
   // ── render.external_resource ───────────────────────────────────────────────────────────────────
@@ -513,10 +603,21 @@ export function renderQa(html: string): RenderQa {
   // Counted on `clean`, so a `<div>` written inside a script string, a style block, or a comment
   // cannot skew the tally. Exact balance is the test — see the header on why that is fair for a
   // machine-written single-file document and would not be for a hand-maintained site.
+  // Closing tags are counted on a copy with every OPENING tag blanked out. `<` and `>` are legal,
+  // unescaped, inside a quoted attribute value, so `<div data-tpl="</div>">` is ONE element to a
+  // browser and perfectly balanced — counting the `</div>` in the attribute as a second closing tag
+  // discarded a page that renders fine. Blanking cannot hide a real closing tag: `</` never matches
+  // an opening-tag pattern that requires a letter after the `<`.
+  const closeOnly = clean.replace(new RegExp(ANY_OPEN_TAG, 'g'), ' ');
   const unbalanced: string[] = [];
   for (const tag of CRITICAL_TAGS) {
-    const open = openTags(clean, tag).length;
-    const close = (clean.match(new RegExp(`</${tag}\\s*>`, 'gi')) ?? []).length;
+    // An XHTML-style `<div/>` is NOT self-closing in HTML — a browser ignores the slash and leaves
+    // the element open until something else closes it — but it is also not the signature this rule
+    // exists to catch, and a page carrying one still renders. Truncation never produces a `/>`. So
+    // the slash form is left out of the tally rather than blocking a page over a habit an LLM
+    // brought with it from JSX.
+    const open = openTags(clean, tag).filter((t) => !/\/\s*$/.test(t.attrs)).length;
+    const close = (closeOnly.match(new RegExp(`</${tag}\\s*>`, 'gi')) ?? []).length;
     if (open !== close) unbalanced.push(`${tag} (${open} opening, ${close} closing)`);
   }
   if (unbalanced.length > 0) {
@@ -537,19 +638,30 @@ export function renderQa(html: string): RenderQa {
   }
 
   // ── render.no_contact_path ─────────────────────────────────────────────────────────────────────
-  // Widest possible haystack, and the accepted set is widened past the spec to include sms:, because
-  // the failure mode of this rule is discarding a page that had a perfectly good way to get in touch.
-  // A demo with no route to contact is worse than the site it replaces, so its absence is a block —
-  // but only when nothing anywhere in the document looks like one.
-  const hasContact = /\b(?:tel|mailto|sms):/i.test(raw) || /<form\b/i.test(raw);
+  // Widest possible haystack, and the accepted set is widened past the spec every time we find
+  // another shape a real contact route takes, because the failure mode of this rule is discarding a
+  // page that had a perfectly good way to get in touch.
+  //
+  // A PHONE NUMBER OR EMAIL ADDRESS PRINTED AS PLAIN TEXT COUNTS. This is not a technicality: a hero
+  // that reads "Call us: (559) 555-0142" with no tel: wrapper is an extremely common generator
+  // output, the number is right there on the page, and a reader can dial it. Blocking that page said
+  // something demonstrably untrue about it — the copy the rule was reading contained the phone
+  // number — and threw away the demo. The linked forms are read from `raw`; the plain-text forms are
+  // read from the visible copy, because a digit run inside a base64 data: URI is not a phone number.
+  const hasContact = /\b(?:tel|mailto|sms):/i.test(raw)
+    || /<form\b/i.test(raw)
+    || PHONE_IN_TEXT.test(text)
+    || EMAIL_IN_TEXT.test(text);
   if (!hasContact) {
-    block('render.no_contact_path', 'No tel:, mailto: or sms: reference and no <form> appears anywhere in the document — the page offers a visitor no way to make contact.');
+    block('render.no_contact_path', 'No tel:, mailto: or sms: link and no <form> appears anywhere in the document, and no phone number or email address appears in the visible copy — nothing on the page was found that a visitor could use to get in touch.');
   }
 
   // ── render.script_error ────────────────────────────────────────────────────────────────────────
   const broken = scriptIssues(noComments);
   if (broken.length > 0) {
-    block('render.script_error', `${broken.length} inline <script> ${broken.length === 1 ? 'is' : 'are'} syntactically broken (${examples(broken)}) — the browser will abort ${broken.length === 1 ? 'it' : 'them'}, so any motion or reveal it drives never runs.`);
+    // We read the script's shape, not its purpose — "the motion it drives" was an assumption about
+    // code we never ran. What is observable is that a script the parser rejects does not execute.
+    block('render.script_error', `${broken.length} inline <script> ${broken.length === 1 ? 'is' : 'are'} syntactically broken (${examples(broken)}) — a script the browser cannot parse does not run at all.`);
   }
 
   // ── Warnings ───────────────────────────────────────────────────────────────────────────────────
@@ -587,10 +699,17 @@ export function renderQa(html: string): RenderQa {
   // Images with no alt attribute at all. alt="" is the correct markup for a decorative image and is
   // deliberately not counted. We sell against exactly this failure, so shipping it in our own demo is
   // worth surfacing even though it does not break rendering.
+  //
+  // An image named by aria-label or aria-labelledby is not counted either. It has an accessible name
+  // — a screen reader announces it — so "no alt attribute" would be literally true while the sentence
+  // it sits in ("the exact failure this demo is meant to fix") would not be. a11yScan's lens made the
+  // same correction in 1.1.0; the message has to be true end to end, warn or not.
   const altless = openTags(clean, 'img').filter((t) => {
     const role = (bareAttr(t.attrs, 'role') ?? '').toLowerCase();
     if (role === 'presentation' || role === 'none') return false;
     if ((bareAttr(t.attrs, 'aria-hidden') ?? '').toLowerCase() === 'true') return false;
+    if ((bareAttr(t.attrs, 'aria-label') ?? '').trim()) return false;
+    if ((bareAttr(t.attrs, 'aria-labelledby') ?? '').trim()) return false;
     return !bareHasAttr(t.attrs, 'alt');
   });
   if (altless.length > 0) {

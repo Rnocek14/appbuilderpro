@@ -91,8 +91,40 @@ export interface DeepScan {
  * learned a dozen more consent platforms, so pages previously reported as having no consent
  * mechanism may now correctly report none. Counts from 1.0.0 are NOT comparable with counts
  * from 1.1.0.
+ *
+ * 1.2.0 — the conversion lens stopped reporting an absent contact path at businesses that have one in
+ * a shape the HTML does not spell `<form>`: an embedded HubSpot/Typeform/Jotform/Google Form, a framed
+ * contact form, a live-chat widget, or a WhatsApp/Messenger/SMS link. conv.phone_only no longer claims
+ * the phone is the only way in on a page that also links an email address; conv.form_no_action no
+ * longer fires on framework-rendered forms, which never carry an action; conv.no_cta_above_fold now
+ * resolves aria-labelledby names, reads elements that straddle the fold cut, and stays quiet when
+ * broken markup makes the fold unreadable. Pages previously reported as having no contact path may
+ * now correctly report none. Conversion counts from 1.1.0 are NOT comparable with 1.2.0.
+ *
+ * 1.3.0 — the mobile lens stopped reading, as this page's own markup, things a browser never renders
+ * as markup: an escaped code sample printed in <pre>/<code>, an embed snippet parked in a <textarea>,
+ * an inert <template> body, and any subtree an inline `display:none` takes out of the layout. It also
+ * stopped counting `font-size:0` (a whitespace hack, not body copy) and font sizes on elements that
+ * render no text of their own; stopped calling a viewport tag's content "empty" when a broken quote
+ * merely made it unreadable; started reading a viewport tag on the pages that legally omit
+ * <html>/<head>; refused a space-separated `(500) 300 2000` and labelled part/model numbers as phone
+ * numbers; and now discloses when an unterminated element or comment left the tail of a page
+ * unexamined. Mobile counts from 1.2.0 are NOT comparable with counts from 1.3.0.
+ *
+ * 1.4.0 — the presence lens stopped reporting absences it had not actually verified. A JSON-LD block
+ * sitting inside an unterminated HTML comment is no longer read as the page's structured data (nor,
+ * when the commented-out draft did not parse, reported as a broken block); a tree too large or too
+ * deep for the bounded walk no longer produces "none of it identifies a business"; a block parsing to
+ * `[]` or `null` is no longer "structured data is present"; and an unrendered app shell no longer
+ * gets a 'detected' claim about a <head> its own JavaScript writes. Suppression signals it was
+ * missing are now seen: unquoted attributes (`itemtype=…`, `class=hours`, `name=twitter:card`), RDFa
+ * declared with `prefix`/`typeof` rather than `vocab`, addresses written with `&nbsp;`, and hours
+ * written as a bare range ("Mon-Fri 9-5"). Two owner-facing strings that asserted a tag was absent
+ * when it was present but empty were reworded. It also discloses, per result, when a page was too
+ * bare to read, when its structured data was too large to finish, and when an unclosed comment or
+ * element left the tail unexamined. Presence counts from 1.3.0 are NOT comparable with 1.4.0.
  */
-export const SCAN_VERSION = '1.1.0';
+export const SCAN_VERSION = '1.4.0';
 
 /** Cap for an evidence snippet — enough to prove the point, small enough to store and show. */
 export const EVIDENCE_MAX = 300;

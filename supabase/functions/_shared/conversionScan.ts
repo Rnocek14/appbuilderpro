@@ -16,6 +16,10 @@
 //  - It does not follow the tag manager. A booking widget injected by GTM, or mounted by a framework
 //    after load, is invisible to a static read. "No booking platform detected" therefore means "we
 //    did not see one in this page's HTML", never "this business cannot be booked". Also in `limits`.
+//  - It does not open iframes or run third-party embed scripts. A HubSpot/Jotform/Google Form embed,
+//    or a chat widget, is a real working way to reach the business that puts NO <form> in the HTML.
+//    The known vendors are recognised by hostname purely so their absence is never reported as the
+//    absence of a contact path; the unknown ones are covered by a stated limit instead.
 //  - It does not read the rest of the site. A contact page one click away is not visible from here,
 //    so every finding is scoped to THIS page and the copy says "on the page", never "on the site".
 //  - It does not measure the fold. "Above the fold" is a screen position and we have source order.
@@ -45,6 +49,7 @@ import {
   innerText,
   openTags,
   snippet,
+  stripElements,
   stripNonContent,
 } from './scanTypes.ts';
 
@@ -124,9 +129,31 @@ const BOOKING_LABELS: Record<string, string> = {
  * stripping script bodies would delete the only evidence there is. What we DO strip is HTML comments
  * — a commented-out Calendly embed does not load, and reporting it as a booking platform would be a
  * false fact about the business, which is the one outcome this codebase refuses.
+ *
+ * Linear, NOT `/<!--[\s\S]*?-->/g` — the exact pattern scanTypes.stripComments was written to get rid
+ * of. That regex re-scans the whole tail of the document from every `<!--` that never closes, which is
+ * quadratic; a 360KB page carrying 20,000 unterminated `<!--` (routine broken-CMS output) spent 1.5
+ * seconds here, twice per scan, before this was a loop. An edge function that times out returns
+ * nothing at all, so every finding on that page is lost.
+ *
+ * An UNTERMINATED comment keeps its tail, deliberately, unlike stripComments. Everything this function
+ * feeds either suppresses a finding or names a booking vendor, so reading more of the page can only
+ * make the scan quieter — and quiet is the cheap mistake.
  */
 function loadedMarkup(html: string): string {
-  return html.replace(/<!--[\s\S]*?-->/g, ' ');
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const s = html.indexOf('<!--', i);
+    if (s < 0) return out + html.slice(i);
+    let end = html.indexOf('-->', s + 4);
+    let width = 3;
+    const bang = html.indexOf('--!>', s + 4); // the spec's other, rarer terminator
+    if (bang >= 0 && (end < 0 || bang < end)) { end = bang; width = 4; }
+    if (end < 0) return `${out}${html.slice(i, s)} ${html.slice(s + 4)}`;
+    out += `${html.slice(i, s)} `;
+    i = end + width;
+  }
 }
 
 /**
@@ -152,9 +179,59 @@ export function bookingPlatform(html: string): string | null {
  *
  * The framework hints in HANDLER_ATTR are read from the RAW attribute string on purpose — there the
  * `data-` prefix is the signal, not the noise.
+ *
+ * Written as a tokeniser, not a regex, because the regex this replaces could not tell an attribute
+ * POSITION from the inside of an attribute VALUE. `action="http://acme.example/v-2=1/send.php"`
+ * contains the sequence `/v-2=1`, which the old pattern read as a Vue attribute and blanked — so the
+ * scan then told the owner, as a flat statement of fact, that their form submits to
+ * `http://acme.example/`. Naming a URL that is not the one in their markup is exactly the kind of
+ * small, confident, checkable falsehood that makes a business bin the whole email. A tokeniser only
+ * ever looks at names, so a value is never touched.
  */
+const FRAMEWORK_ATTR = /^(?:data|ng|v|x|hx|wire)[-:]/i;
+
 function ownAttrs(attrs: string): string {
-  return attrs.replace(/(^|[\s"'/])(?:data|ng|v|x|hx|wire)[-:][a-z0-9:._-]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+)/gi, '$1 ');
+  let out = '';
+  let i = 0;
+  const n = attrs.length;
+  while (i < n) {
+    const c = attrs.charCodeAt(i);
+    // Whitespace, a stray solidus, a stray '=' or a stray quote between attributes: copy and move on.
+    // The quote case is not hypothetical — `<form action="https://a/x method="post">` leaves a bare
+    // `"` sitting where a name should be, and a name cannot start with one, so without this the
+    // cursor has nothing to consume. A scanner that spins on malformed markup returns no findings at
+    // all, which is the same outcome as a crash.
+    if (c <= 32 || c === 47 || c === 61 || c === 34 || c === 39) { out += attrs[i]; i += 1; continue; }
+    const nameStart = i;
+    while (i < n && !isNameEnd(attrs.charCodeAt(i))) i += 1;
+    const name = attrs.slice(nameStart, i);
+    let end = i;
+    let j = i;
+    while (j < n && attrs.charCodeAt(j) <= 32) j += 1;
+    if (attrs.charCodeAt(j) === 61) { // '='
+      j += 1;
+      while (j < n && attrs.charCodeAt(j) <= 32) j += 1;
+      const q = attrs[j];
+      if (q === '"' || q === "'") {
+        const close = attrs.indexOf(q, j + 1);
+        end = close < 0 ? n : close + 1; // an unbalanced quote runs to the end, as a browser reads it
+      } else {
+        let k = j;
+        while (k < n && attrs.charCodeAt(k) > 32) k += 1;
+        end = k;
+      }
+    }
+    // Belt and braces: whatever the input, the cursor moves. No shape of markup can stall this loop.
+    if (end <= nameStart) { out += attrs[nameStart]; i = nameStart + 1; continue; }
+    out += FRAMEWORK_ATTR.test(name) ? ' ' : attrs.slice(nameStart, end);
+    i = end;
+  }
+  return out;
+}
+
+/** An attribute name ends at whitespace, `=`, `/`, `>` or a quote — nothing else is legal in one. */
+function isNameEnd(c: number): boolean {
+  return c <= 32 || c === 61 || c === 47 || c === 62 || c === 34 || c === 39;
 }
 
 /** One real attribute off an element, immune to the `data-` look-alikes above. */
@@ -189,11 +266,19 @@ function forms(clean: string): FormEl[] {
  * This matters in both directions. A search form must not suppress "no contact path" — a customer
  * cannot hire you through your own search box. And it must not FIRE conv.form_no_action either: a
  * search form with no action is the normal shape of a JS-filtered listing, not a broken enquiry form.
+ *
+ * The word is matched with `(?<![a-z])` rather than as a bare substring: `research` contains `search`,
+ * and a plain `/search/i` read `<form class="research-enquiry" action="…/enquiry">` as a search box.
+ * That did not merely mislabel it internally — conv.no_contact_path then printed "The one form on the
+ * page is a site-search box" at a market-research firm whose one form is its enquiry form. The
+ * lookbehind still matches `searchform`, `search-box` and `site-search`, which is every real spelling.
  */
 function isSearchForm(f: FormEl): boolean {
+  // A box you type a message into is not a search box, whatever it is called.
+  if (/<textarea\b|type\s*=\s*["']?email\b|type\s*=\s*["']?tel\b/i.test(f.inner)) return false;
   const own = ownAttrs(f.attrs);
   const marks = [attr(own, 'role') ?? '', attr(own, 'id') ?? '', attr(own, 'class') ?? '', attr(own, 'name') ?? ''].join(' ');
-  if (/search/i.test(marks)) return true;
+  if (/(?<![a-z])search/i.test(marks)) return true;
   // WordPress's default search field is `<input type="search" name="s">` and carries no other clue.
   return /type\s*=\s*["']?search|name\s*=\s*["']s["']/i.test(f.inner);
 }
@@ -238,7 +323,58 @@ const LINKED_CONTACT = /(?:href|url|link)["']?\s*[=:]\s*["']?\s*(?:mailto:|tel:)
  * there, and it is not a link.
  */
 const TEXT_PHONE = /(?:\+?\d{1,3}[\s.\-]?)?\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}\b/;
-const TEXT_EMAIL = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b/i;
+// Every quantifier is bounded and the dot is a separator, never a member of the label class. The
+// obvious spelling — `[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}` — is ambiguous about where a label ends,
+// so on text that is nearly-but-not-quite an address it backtracks: 240KB of `@`-laden prose took
+// 3.5 seconds. This form cannot backtrack past a fixed width and matches the same addresses.
+const TEXT_EMAIL = /[a-z0-9._%+-]{1,64}@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){1,4}[a-z]{2,24}\b/i;
+
+/** A mailto: specifically, so conv.phone_only can stop claiming the phone is the ONLY way in. */
+const MAILTO_LINK = /(?:href|url|link)["']?\s*[=:]\s*["']?\s*mailto:/i;
+
+/**
+ * A messaging app in a link position: SMS, WhatsApp, Facebook Messenger.
+ *
+ * A mobile trades business whose one call-to-action is `<a href="https://wa.me/…">Message us on
+ * WhatsApp</a>` has a contact path that works, and telling them "no contact form, email link or phone
+ * link found on the page" is a false statement about a page they can see with their own eyes.
+ * Suppression only, so a loose match here costs nothing.
+ */
+const MESSAGING_LINK =
+  /(?:href|url|link)["']?\s*[=:]\s*["']?\s*(?:sms:|whatsapp:|imessage:|(?:https?:)?\/\/(?:api\.whatsapp\.com|wa\.me|web\.whatsapp\.com|m\.me|messenger\.com\/t)\/)/i;
+
+/**
+ * A third-party form the business really has and the HTML really does not contain.
+ *
+ * These embeds are the single biggest source of false "no contact path" findings: HubSpot, Typeform,
+ * Jotform, Google Forms and Mailchimp all ship a `<div>` plus a script, or an `<iframe>`, and put no
+ * `<form>` element in the served markup at all. Anchored on vendor HOSTNAMES for the same reason the
+ * booking table is — the brand word in a sentence is not an embed.
+ */
+const FORM_EMBED =
+  /js\.hsforms\.net|forms\.hsforms\.com|hbspt\.forms|embed\.typeform\.com|typeform\.com\/to\/|tally\.so\/(?:embed|r|widgets)|form\.jotform\.com|jotform\.com\/(?:jsform|form)\/|\.formstack\.com|\.wufoo\.com|123formbuilder\.com|cognitoforms\.com|paperform\.co|formspree\.io\/f\/|getform\.io\/f\/|formcarry\.com|docs\.google\.com\/forms|forms\.gle\/|forms\.office\.com|airtable\.com\/(?:embed\/)?(?:app|shr)|list-manage\.com\/subscribe|static\.klaviyo\.com\/onsite|zohopublic\.com\/forms|formsite\.com|gravityforms|wufoo\.com\/embed/i;
+
+/**
+ * A live-chat or messaging widget. A page with Intercom or Tawk.to on it has a way to start a
+ * conversation that is not a form, not an email link and not a phone link.
+ */
+const CHAT_WIDGET =
+  /widget\.intercom\.io|js\.intercomcdn\.com|intercomSettings|js\.driftt\.com|embed\.tawk\.to|tawk\.to\/[0-9a-f]{8}|client\.crisp\.chat|cdn\.livechatinc\.com|static\.zdassets\.com|zendesk\.com\/embeddable|code\.tidio\.co|widget\.tidiochat\.com|fb-customer-?chat|olark\.com|hubspot-messages|podium\.com\/widget|gorgias\.chat|front\.chat|smartsupp\.com|chatway|hubspotusercontent.*conversations/i;
+
+/**
+ * An `<iframe>` whose src reads like a form, a booking calendar or a contact page. Deliberately loose
+ * — every hit only ever silences a finding, and a page that frames something called "contact" is a
+ * page we cannot honestly say has no way to make contact.
+ */
+const CONTACT_IFRAME = /<iframe\b[^>]{0,600}\bsrc\s*=\s*["']?[^"'>\s]{0,300}(?:form|contact|enquir|inquir|schedul|appoint|booking|\/book)/i;
+
+/**
+ * A link to a contact page somewhere else on the site. Not a contact path on THIS page, so it does
+ * not suppress anything — it changes the sentence, because "there is no way to start a conversation"
+ * is not a true thing to say about a page whose header says "Contact us" and links to a contact page.
+ * Only this page was read, and the finding now says that out loud.
+ */
+const CONTACT_PAGE_LINK = /<a\b[^>]{0,400}\bhref\s*=\s*["']?[^"'>\s]{0,200}(?:contact|enquir|inquir|get-a-quote|get-in-touch|request-a-quote|book)/i;
 
 // ─── Call to action ──────────────────────────────────────────────────────────────────────────────
 
@@ -256,14 +392,78 @@ const ABOVE_FOLD_CHARS = 4000;
  * the one false positive this pattern would otherwise hand to every small business on earth.
  */
 const CTA_NAME =
-  /\b(?:call|book|booking|quote|estimate|schedule|scheduling|contact|request|appointment|appointments|consultation|consult|reserve|reservation|order|buy|shop|checkout|enquir\w*|inquir\w*|hire)\b|\bget\s+(?:started|a\s+quote|in\s+touch)\b|\b(?:talk|message|email)\s+(?:to\s+)?us\b/i;
+  /\b(?:call|book|booking|quote|estimate|schedule|scheduling|contact|request|appointment|appointments|consultation|consult|reserve|reservation|order|buy|shop|checkout|enquir\w*|inquir\w*|hire|send|submit|subscribe|apply|chat|directions|whatsapp)\b|\bget\s+(?:started|a\s+quote|in\s+touch)\b|\b(?:talk|message|email|text)\s+(?:to\s+)?us\b|\bsign\s*up\b|\blet'?s\s+talk\b|\bspeak\s+(?:to|with)\b|\b(?:find|visit)\s+us\b|\bstart\s+(?:your|a)\b/i;
+
+/**
+ * How far past the fold cut we still read, so an element that STRADDLES the cut can be paired with
+ * its closing tag. Without it, `<a href="/book">Book online</a>` opening at character 3,990 has no
+ * `</a>` inside the slice, so it is silently not a call to action and the finding fires on a page
+ * whose hero button is right there. Only the OPEN TAG position decides membership — an element that
+ * begins after the cut is still out.
+ */
+const FOLD_TAIL_CHARS = 2000;
 
 /** The slice of the body a visitor most likely sees first. Falls back to the whole document when
  *  there is no <body> tag, because fragments are handed to this scanner too. */
 function aboveFold(clean: string): string {
+  return foldWindow(clean).slice(0, ABOVE_FOLD_CHARS);
+}
+
+/** The fold slice plus the tail needed to close a straddling element. */
+function foldWindow(clean: string): string {
   const m = /<body\b[^>]*>/i.exec(clean);
   const start = m ? m.index + m[0].length : 0;
-  return clean.slice(start, start + ABOVE_FOLD_CHARS);
+  return clean.slice(start, start + ABOVE_FOLD_CHARS + FOLD_TAIL_CHARS);
+}
+
+/**
+ * Elements of `tag` whose OPEN TAG begins before the fold cut, read out of the wider window so their
+ * inner text is complete. elements() returns matches in document order and they never overlap, so a
+ * forward-only cursor recovers each one's offset without re-parsing.
+ */
+function foldElements(ext: string, tag: string): { attrs: string; inner: string; raw: string }[] {
+  const out: { attrs: string; inner: string; raw: string }[] = [];
+  let cursor = 0;
+  for (const e of elements(ext, tag)) {
+    const at = ext.indexOf(e.raw, cursor);
+    if (at < 0) break;
+    cursor = at + e.raw.length;
+    if (at < ABOVE_FOLD_CHARS) out.push(e);
+  }
+  return out;
+}
+
+/** Regex-safe form of an id attribute value. */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The text of the elements an `aria-labelledby` points at.
+ *
+ * An icon-only CTA named this way — `<a href="/appointments" aria-labelledby="cta"><svg…></a>` with
+ * `<span id="cta">Book an appointment</span>` beside it — is a completely ordinary, and completely
+ * accessible, way to build a hero button. accessibleName() reports it as the placeholder
+ * '(labelledby)', which matches no call-to-action word, so the page was told it had no next step when
+ * its next step is the biggest thing on the screen.
+ */
+function textOfIds(doc: string, ids: string): string {
+  let out = '';
+  for (const id of ids.trim().split(/\s+/).slice(0, 4)) {
+    if (!id) continue;
+    const m = new RegExp(`<([a-z][a-z0-9-]*)\\b[^>]{0,400}\\bid\\s*=\\s*["']${escapeRe(id)}["'][^>]{0,400}>([\\s\\S]{0,400}?)<\\/\\1>`, 'i').exec(doc);
+    if (m) out += ` ${m[2].replace(/<[^>]*>/g, ' ')}`;
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+/** A name we could not read. Never the same as a name that reads as "no next step". */
+const UNREADABLE = ' unreadable';
+
+function ctaName(el: { attrs: string; inner: string }, doc: string): string {
+  const name = accessibleName(el.attrs, el.inner);
+  if (name !== '(labelledby)') return name;
+  return textOfIds(doc, attr(el.attrs, 'aria-labelledby') ?? '') || UNREADABLE;
 }
 
 /**
@@ -273,19 +473,42 @@ function aboveFold(clean: string): string {
  * href counts whatever its label says, because a phone number IS the call to action on a trades
  * site and reporting "no call to action" over a big tap-to-call number would be plainly wrong.
  */
-function hasCta(slice: string): boolean {
+function hasCta(clean: string, markup: string): boolean {
+  const ext = foldWindow(clean);
+  const slice = ext.slice(0, ABOVE_FOLD_CHARS);
+  // An embedded form, a framed contact form or an inline booking widget at the top of the page IS the
+  // next step — it just has no anchor and no button, because the vendor's script draws it. Read from
+  // the loaded markup so a `<script>`-mounted widget counts; scoped to the fold-sized head of it so a
+  // footer embed cannot silence a finding about the top of the page. Measured from <body> like every
+  // other fold reading, so a page with a heavy <head> is not judged on its meta tags — and cut at
+  // exactly the 4,000 characters the finding's own wording promises, with none of the pairing tail:
+  // that tail exists to close a straddling element, and letting it widen the search instead let an
+  // embed 1,100 characters into the footer answer a question about the top of the page.
+  const foldMarkup = foldWindow(markup).slice(0, ABOVE_FOLD_CHARS);
+  if (FORM_EMBED.test(foldMarkup) || CONTACT_IFRAME.test(foldMarkup)) return true;
+  for (const [, re] of BOOKING) if (re.test(foldMarkup)) return true;
   for (const t of openTags(slice, 'a')) {
     // Checked on the open tag, not the closed element, so a link straddling the 4,000-character cut
     // still counts. Suppressing on the weaker signal is the safe direction.
-    if (/^\s*(?:tel:|mailto:|sms:)/i.test(ownAttr(t.attrs, 'href') ?? '')) return true;
+    if (/^\s*(?:tel:|mailto:|sms:|whatsapp:)/i.test(ownAttr(t.attrs, 'href') ?? '')) return true;
   }
-  for (const a of elements(slice, 'a')) if (CTA_NAME.test(accessibleName(a.attrs, a.inner))) return true;
-  for (const b of elements(slice, 'button')) if (CTA_NAME.test(accessibleName(b.attrs, b.inner))) return true;
+  for (const tag of ['a', 'button'] as const) {
+    const els = foldElements(ext, tag);
+    // An element we could not pair with a closing tag has an unknown name, and unknown must never be
+    // read as "not a call to action". Broken-CMS pages ship never-closed anchors by the hundred; on
+    // one of those the whole fold becomes unreadable, and an unreadable fold is not an empty one.
+    if (els.length < openTags(slice, tag).length) return true;
+    for (const e of els) {
+      const name = ctaName(e, clean);
+      if (name === UNREADABLE || CTA_NAME.test(name)) return true;
+    }
+  }
   for (const i of openTags(slice, 'input')) {
     const type = (ownAttr(i.attrs, 'type') ?? '').toLowerCase();
     if (type !== 'submit' && type !== 'button') continue;
     // A submit input's label lives in its value attribute; an aria-label overrides it.
     if (CTA_NAME.test(`${ownAttr(i.attrs, 'value') ?? ''} ${attr(i.attrs, 'aria-label') ?? ''}`)) return true;
+    if (attr(i.attrs, 'aria-labelledby')) return true; // named elsewhere — not nameless
   }
   return false;
 }
@@ -294,6 +517,18 @@ function hasCta(slice: string): boolean {
 
 /** The mount points single-page apps leave behind when the real page is assembled in JavaScript. */
 const SPA_MOUNT = /<(?:div|main|section)\b[^>]*\bid\s*=\s*["'](?:root|app|__next|__nuxt|__gatsby|q-app|svelte)["']/i;
+
+/**
+ * Fingerprints of a page whose interactivity is definitely wired in JavaScript.
+ *
+ * Used for one thing only: to stop conv.form_no_action firing on a framework-rendered form. A
+ * server-rendered React, Next, Nuxt, Vue, Svelte, Angular or Livewire form carries no `action` — the
+ * submit handler is a function reference that never reaches the HTML — so "no submit destination in
+ * the markup" describes the framework, not a broken form. The `limits` already say a JS-wired form
+ * cannot be verified from markup; this makes the scanner act on its own sentence.
+ */
+const JS_APP =
+  /__NEXT_DATA__|window\.__NUXT__|__remixContext|__sveltekit_|data-sveltekit|data-reactroot|data-react-helmet|\bng-version\s*=|\bwire:id\s*=|\bdata-v-[0-9a-f]{6,}|<(?:div|main|section)\b[^>]{0,300}\bid\s*=\s*["'](?:root|app|__next|__nuxt|__gatsby|q-app|svelte)["']/i;
 /** Enough of a tag vocabulary to say "this is a page", so garbage input never gets an opinion. */
 const LOOKS_LIKE_HTML = /<(?:html|body|div|main|section|article|header|footer|nav|p|h[1-6]|a|form|span|ul|table|img)\b/i;
 
@@ -335,6 +570,9 @@ const LIMITS: string[] = [
   'Booking widgets loaded by a tag manager, or mounted by JavaScript after the page loads, may not be visible here. "No booking platform detected" means none was seen in this page\'s HTML, not that the business cannot be booked.',
   'Only this one page was read. A contact page, a booking page or a phone number elsewhere on the site is not visible from here.',
   'A phone number or email address set inside an image, or written as plain text with no tel:/mailto: link, cannot be tapped on a phone and is not counted as a link — though a person reading the page can still use it.',
+  'A form, booking calendar or chat window inside an <iframe>, or built by a third-party embed script, puts no <form> in this page\'s HTML. The common vendors are recognised by name so their absence is never reported as a missing contact path, but an unusual or self-hosted embed may still be invisible here.',
+  'Whether the page is usable at all — how it looks, what loads, what a script does after the page arrives — is outside a static read. Only the bytes the server sent were examined.',
+  '"The top of the page" is approximated from source order, not from screen position: the first 4,000 characters of the body. A page whose hero button is placed by CSS, or rendered later by a script, can look completely different to a visitor.',
 ];
 
 /**
@@ -354,35 +592,57 @@ export function scanConversion(html: string): ScanResult {
 
   const findings: Finding[] = [];
 
-  const allForms = forms(clean);
-  const contactForms = allForms.filter((f) => !isSearchForm(f));
-  // A <form> that survives only inside a <script> template is not something we can point at, but it
-  // is strong evidence one renders. It suppresses; it never fires.
-  const scriptBorneForm = allForms.length === 0 && /<form\b/i.test(markup);
-  const hasContactForm = contactForms.length > 0 || scriptBorneForm;
+  // A <form> inside a <template> is a stencil, not a control: an Alpine/Vue modal keeps its enquiry
+  // form there until it is opened. It is real evidence a form renders (so it suppresses, through
+  // `markup`, below) but it must never be the thing a finding points AT — accusing a stencil of
+  // posting in the clear, or of having no destination, is an accusation about markup no visitor met.
+  const rendered = stripElements(clean, ['template']);
 
-  const anchors = openTags(clean, 'a');
+  const allForms = forms(rendered);
+  const contactForms = allForms.filter((f) => !isSearchForm(f));
+  // A <form> that survives only inside a <script> template, or inside a <template> stencil, is not
+  // something we can point at, but it is strong evidence one renders. It suppresses; it never fires.
+  const scriptBorneForm = allForms.length === 0 && /<form\b/i.test(markup);
+  // A HubSpot/Typeform/Jotform/Google-Forms embed or a framed contact form: a working way in that
+  // puts no <form> element in the served HTML at all.
+  const embeddedForm = FORM_EMBED.test(markup) || CONTACT_IFRAME.test(markup);
+  const hasContactForm = contactForms.length > 0 || scriptBorneForm || embeddedForm;
+
+  const anchors = openTags(rendered, 'a');
   const telTag = anchors.find((t) => /^\s*tel:/i.test(ownAttr(t.attrs, 'href') ?? ''));
   const hasLinkedContact = LINKED_CONTACT.test(markup);
+  const hasEmailLink = MAILTO_LINK.test(markup);
+  const hasMessaging = MESSAGING_LINK.test(markup);
+  const hasChat = CHAT_WIDGET.test(markup);
 
   const booking = bookingPlatform(raw);
 
   const bodyText = bodyTextOf(clean);
-  const controls = anchors.length + openTags(clean, 'button').length + allForms.length;
+  const controls = anchors.length + openTags(rendered, 'button').length + allForms.length;
   const blind = tooLittleToJudge(clean, bodyText, controls);
+
+  // Every route into the business that this page really offers, whatever shape it takes.
+  const anyWayIn = hasContactForm || hasLinkedContact || hasMessaging || hasChat || booking !== null;
 
   // ── No contact path at all ─────────────────────────────────────────────────────────────────────
   // The strongest thing this lens can say, so it is hedged everywhere it can be without weakening
   // it: a mailto: or tel: anywhere in the loaded markup suppresses it, a form anywhere suppresses
   // it, and an unlinked number in the text changes the sentence rather than the verdict.
-  if (!blind && !hasContactForm && !hasLinkedContact) {
+  if (!blind && !anyWayIn) {
     const textPhone = TEXT_PHONE.test(bodyText);
     const textEmail = TEXT_EMAIL.test(bodyText);
+    // Scoped to what the bytes show, and stopping there. The old wording finished "…so there is
+    // nothing on it a visitor can fill in or tap to start a conversation", which is an inference
+    // about a rendered page rather than a reading of the markup — and it was plainly false on the
+    // very ordinary page whose header carries a "Contact us" link to a contact page.
     let detail =
       'This page has no <form>, no mailto: email link and no tel: phone link anywhere in its HTML, ' +
-      'so there is nothing on it a visitor can fill in or tap to start a conversation.';
+      'and no messaging link, chat window or embedded form from any of the usual providers was found in it either.';
     if (allForms.length > contactForms.length) {
       detail += ' The one form on the page is a site-search box, which is not a way to reach the business.';
+    }
+    if (CONTACT_PAGE_LINK.test(rendered)) {
+      detail += ' The page does link to what looks like a contact page elsewhere on the site; only this one page was read, so what is on that one is unknown.';
     }
     if (textPhone) {
       detail += ' A phone number does appear in the page text, but it is not a link — on a phone it cannot be tapped to dial, and it cannot be copied by anything that reads the page automatically.';
@@ -393,6 +653,7 @@ export function scanConversion(html: string): ScanResult {
     if (!textPhone && !textEmail) {
       detail += ' No phone number or email address was found written in the page text either.';
     }
+    detail += ' If any of this is put on the page by JavaScript after it loads, it would not be visible to a scan of the source — worth opening the page to confirm.';
     findings.push({
       code: 'conv.no_contact_path',
       category: 'conversion',
@@ -406,7 +667,12 @@ export function scanConversion(html: string): ScanResult {
   // ── The phone is the only door ─────────────────────────────────────────────────────────────────
   // Requires a real tel: anchor in the content, not a generous markup-wide match: this finding says
   // "a phone link exists" out loud, so it has to be one we can actually point at.
-  if (!blind && telTag && !hasContactForm && !booking) {
+  //
+  // The title is a claim about EVERY other channel, so every other channel has to be checked. It used
+  // to fire on the ordinary trades page carrying both `tel:` and `mailto:` — headlining "the phone is
+  // the only way in" and then asserting the visitor "has no second option" over a page whose second
+  // option is a link right beside the first. Two false sentences in one finding, marked 'detected'.
+  if (!blind && telTag && !hasContactForm && !booking && !hasEmailLink && !hasMessaging && !hasChat) {
     findings.push({
       code: 'conv.phone_only',
       category: 'conversion',
@@ -414,9 +680,10 @@ export function scanConversion(html: string): ScanResult {
       confidence: 'detected',
       title: 'The phone is the only way in — no form and no booking tool on the page',
       detail:
-        'The page links a phone number (tel:) but carries no <form> and no scheduling or booking tool. ' +
-        'Anyone who cannot talk right now — at work, on a job site, at 9pm with the kids down — has no ' +
-        'second option, and there is no record of the enquiry afterwards to follow up on.',
+        'The page links a phone number (tel:) but carries no <form>, no email link and no scheduling or ' +
+        'booking tool. Anyone who cannot talk right now — at work, on a job site, at 9pm with the kids ' +
+        'down — has no second option on this page, and there is no record of the enquiry afterwards to ' +
+        'follow up on.',
       evidence: snippet(telTag.raw),
     });
   }
@@ -433,16 +700,24 @@ export function scanConversion(html: string): ScanResult {
       title: 'No booking or scheduling tool, and no form, on the page',
       detail:
         'No booking or scheduling platform was detected in this page\'s HTML and the page has no <form>. ' +
+        // Not "have nowhere to land" — on a page that links an email address they land in an inbox.
+        // What is actually missing is a way to BOOK, and that is what the sentence now says.
         'Enquiries that arrive outside business hours — evenings and weekends, when people actually sit ' +
-        'down to sort a job out — have nowhere to land, so they go to whoever can be reached instead. ' +
-        'A booking widget loaded by a tag manager, or mounted after page load, would not be visible here.',
+        'down to sort a job out — have nothing on this page that books them in, so the work often goes ' +
+        'to whoever can be booked on the spot. A booking widget loaded by a tag manager, or mounted ' +
+        'after page load, would not be visible here.',
     });
   }
 
   // ── A form that may submit nowhere ─────────────────────────────────────────────────────────────
   // The weakest of the form findings and marked as such. Search boxes are excluded, anything that
   // smells of a handler is excluded, and the detail tells the reader exactly which check to run.
-  const unwired = contactForms.filter((f) => ownAttr(f.attrs, 'action') === null && !looksWiredUp(f));
+  //
+  // Suppressed outright on a page a framework built: a Next/Nuxt/Remix/Svelte/Vue/Angular/Livewire
+  // form NEVER carries an action — the handler is a function reference that cannot be serialised into
+  // HTML — so this finding would fire on every one of them and describe the framework, not the form.
+  const jsApp = JS_APP.test(markup);
+  const unwired = jsApp ? [] : contactForms.filter((f) => ownAttr(f.attrs, 'action') === null && !looksWiredUp(f));
   if (unwired.length) {
     const n = unwired.length;
     findings.push({
@@ -486,7 +761,7 @@ export function scanConversion(html: string): ScanResult {
   }
 
   // ── Nothing to press at the top of the page ────────────────────────────────────────────────────
-  if (!blind && !hasCta(aboveFold(clean))) {
+  if (!blind && !hasCta(clean, markup)) {
     findings.push({
       code: 'conv.no_cta_above_fold',
       category: 'conversion',

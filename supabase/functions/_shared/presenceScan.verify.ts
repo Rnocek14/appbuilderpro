@@ -300,6 +300,218 @@ ok('language: never threatens legal consequence', !/sued|lawsuit|liabilit|illega
 ok('language: never promises rankings or traffic', !/guarantee|rank (?:higher|first)|top of google|\d+% more (?:traffic|leads|customers)/i.test(allText));
 ok('language: states absence as "found none", not "there is none"', /was found|were found/i.test(allText));
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// ADVERSARIAL: pages a competent small business really ships, that must NOT be accused of an
+// absence. Every case below was a live false finding before the fix that follows it.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── An UNTERMINATED comment swallows the rest of the document, as a browser does. ────────────────
+// A block inside one is never loaded by anything, so it is neither this page's structured data nor
+// this page's broken structured data.
+const unterminated = scanPresence(`<html><head><title>Acme</title>
+  <!-- <script type="application/ld+json">{"@type":"Plumber",}</script>
+  </head><body><h1>Acme</h1><p>Plumbing and heating across the county, gas safe registered.</p></body></html>`);
+ok('unterminated comment: a block inside it is NOT reported as broken structured data',
+  !has(unterminated, 'pres.malformed_json_ld'));
+ok('unterminated comment: nor is it counted as structured data that exists',
+  has(unterminated, 'pres.no_structured_data'));
+ok('unterminated comment: the `--!>` terminator closes a comment too',
+  !has(scanPresence(`<html><head><!-- <script type="application/ld+json">{oops}</script> --!>
+    </head><body><p>Acme plumbing, county wide.</p></body></html>`), 'pres.malformed_json_ld'));
+ok('script bodies still keep their own <!-- : a real block after one is still read',
+  !has(scanPresence(`<html><head><script>var s="<!--";</script>
+    <script type="application/ld+json">{"@type":"Plumber","name":"Acme"}</script>
+    </head><body><p>Acme plumbing on Main Street.</p></body></html>`), 'pres.no_structured_data'));
+ok('perf: a document full of unterminated comment openers does not stall the scan', (() => {
+  const bomb = `<html><body><p>hello there friend</p>${'<!--'.repeat(60000)}</body></html>`;
+  const t = Date.now();
+  scanPresence(bomb);
+  return Date.now() - t < 1500;
+})());
+
+// ── JSON-LD that parses to nothing is not "structured data is present". ─────────────────────────
+const emptyLd = scanPresence(`<html><head><script type="application/ld+json">[]</script></head>
+  <body><p>Acme roofing, Lake Geneva WI 53147, call 262-555-0143. Mon-Fri 8am-5pm.</p></body></html>`);
+ok('empty ld array: not reported as structured data that fails to identify a business',
+  !has(emptyLd, 'pres.no_localbusiness'));
+ok('empty ld array: reported as the absence it is', has(emptyLd, 'pres.no_structured_data'));
+ok('null ld literal: same', (() => {
+  const r = scanPresence(`<html><head><script type="application/ld+json">null</script></head>
+    <body><p>Acme roofing, Lake Geneva WI 53147, 262-555-0143. Mon-Fri 8am-5pm.</p></body></html>`);
+  return !has(r, 'pres.no_localbusiness') && has(r, 'pres.no_structured_data');
+})());
+ok('an object with no @type IS structured data and still gets judged',
+  has(scanPresence(`<html><head><script type="application/ld+json">{"name":"Acme"}</script></head>
+    <body><p>Acme roofing, Lake Geneva WI 53147, 262-555-0143. Mon-Fri 8am-5pm.</p></body></html>`),
+  'pres.no_localbusiness'));
+
+// ── A business buried past the walk budget must not be reported as absent. ──────────────────────
+const bigGraph = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@graph': [...Array.from({ length: 2500 }, (_, i) => ({ '@type': 'ListItem', position: i })),
+    { '@type': 'Plumber', name: 'Acme' }],
+});
+const budgeted = scanPresence(`<html><head><script type="application/ld+json">${bigGraph}</script></head>
+  <body><p>Acme plumbing, 262-555-0143, Mon-Fri 8am-5pm, 1 Main Street.</p></body></html>`);
+ok('walk budget: a tree too big to finish reading is never called "no business here"',
+  !has(budgeted, 'pres.no_localbusiness'));
+ok('walk budget: and the truncation ships as a stated limit',
+  budgeted.limits.some((l) => /too large to read in full|not read in full/i.test(l)));
+
+// ── A tag that is PRESENT but empty must not be described as missing. ───────────────────────────
+const emptyAttrs = scanPresence(`<html><head><link rel="canonical" href=""><meta property="og:title" content=""></head>
+  <body><p>Acme roofing, Lake Geneva WI 53147, 262-555-0143. Mon-Fri 8am-5pm.</p></body></html>`);
+ok('empty href: the canonical finding still fires (it carries no address)', has(emptyAttrs, 'pres.no_canonical'));
+ok('empty href: but the title never says the TAG is absent — it is right there in the markup',
+  !/no canonical link tag/i.test(get(emptyAttrs, 'pres.no_canonical')?.title ?? 'no canonical link tag'));
+ok('empty content: the og finding still fires', has(emptyAttrs, 'pres.no_open_graph'));
+ok('empty content: but the detail never says no such META TAG was found',
+  !/meta tag was found on the page/i.test(get(emptyAttrs, 'pres.no_open_graph')?.detail ?? 'meta tag was found on the page'));
+
+// ── Unquoted and un-vocab'd machine-readable identity still counts. ─────────────────────────────
+ok('unquoted itemtype suppresses no_structured_data',
+  !has(scanPresence(`<html><body><div itemscope itemtype=https://schema.org/Plumber>
+    <span itemprop=name>Acme</span></div><p>Acme plumbing, 262-555-0143, Mon-Fri 8am-5pm, 1 Main St.</p></body></html>`),
+  'pres.no_structured_data'));
+ok('unquoted twitter:card still means the link does not share as a bare URL',
+  !has(scanPresence(`<html><head><meta name=twitter:card content=summary_large_image>
+    <meta name=twitter:title content=Acme></head><body><p>Acme roofing, 262-555-0143, 1 Main St, WI 53147.</p></body></html>`),
+  'pres.no_open_graph'));
+ok('RDFa declared with typeof/prefix rather than vocab is still structured data',
+  !has(scanPresence(`<html><body prefix="schema: https://schema.org/">
+    <div typeof="schema:Plumber"><span property="schema:name">Acme</span></div>
+    <p>Acme plumbing, 262-555-0143, Mon-Fri 8am-5pm, 1 Main St.</p></body></html>`), 'pres.no_structured_data'));
+
+// ── An address or hours typed with non-breaking spaces is still an address. ─────────────────────
+ok('nbsp: a street line written with &nbsp; is not read as no address at all',
+  !has(scanPresence(`<html><body><h1>Acme</h1>
+    <p>Visit us at 1&nbsp;Main&nbsp;Street, Lake Geneva. Open Mon&nbsp;-&nbsp;Fri 8am&nbsp;-&nbsp;5pm.</p></body></html>`),
+  'pres.no_nap'));
+ok('nbsp: the facts agree',
+  presenceFacts('<html><body><p>Come see us at 1&nbsp;Main&nbsp;Street, Lake Geneva</p></body></html>').hasNap === true);
+
+// ── Hours written the way half the trades write them: a bare numeric range. ─────────────────────
+ok('hours: "Open Monday to Friday, 9 to 5" is opening hours',
+  !has(scanPresence(`<html><body><h1>Acme</h1>
+    <p>Open Monday to Friday, 9 to 5. Call 262-555-0143. 1 Main Street, Lake Geneva.</p></body></html>`),
+  'pres.no_hours'));
+ok('hours: "Mon-Fri 9-5, Sat 10-2" is opening hours',
+  !has(scanPresence(`<html><body><h1>Acme</h1>
+    <p>Mon-Fri 9-5, Sat 10-2. Call 262-555-0143. 1 Main Street, Lake Geneva.</p></body></html>`),
+  'pres.no_hours'));
+ok('hours: a lone number range with no day name is still not hours',
+  has(scanPresence('<html><body><h1>Acme</h1><p>Packages from 9 to 5 thousand dollars, fitted county wide.</p></body></html>'),
+    'pres.no_hours'));
+
+// ── A page we admit we cannot read gets no "detected" claim about its <head>. ───────────────────
+const shell = scanPresence('<html><head><title>App</title></head><body><div id="root"></div><script src="/b.js"></script></body></html>');
+ok('app shell: no_canonical does not fire — this page\'s head is written by the script we cannot run',
+  !has(shell, 'pres.no_canonical'));
+ok('app shell: no_open_graph does not fire either', !has(shell, 'pres.no_open_graph'));
+ok('app shell: claims nothing at all', shell.findings.length === 0);
+ok('app shell: and says out loud that it could not read the page',
+  shell.limits.some((l) => /almost no rendered content|assembled in the browser/i.test(l)));
+ok('app shell: an unquoted mount id is recognised too',
+  scanPresence('<html><head><title>App</title></head><body><div id=root></div></body></html>').findings.length === 0);
+ok('a real page is still judged — the shell rule is not a blanket amnesty',
+  has(bare, 'pres.no_canonical') && has(bare, 'pres.no_open_graph'));
+
+// ── Markup a browser never finishes parsing: say so rather than read the absence as fact. ───────
+const cut = scanPresence(`<html><head><title>Acme</title><style>body{color:red}
+  </head><body><h1>Acme Roofing</h1><p>1 Main Street, Lake Geneva, WI 53147. 262-555-0143. Mon-Fri 8am-5pm.</p></body></html>`);
+ok('truncation: an unterminated <style> leaves the tail unexamined, and the result says so',
+  cut.limits.some((l) => /never closes|was not examined/i.test(l)));
+ok('truncation: a well-formed page carries no such sentence',
+  !good.limits.some((l) => /never closes|was not examined/i.test(l)));
+ok('truncation: a </body> that only exists inside a <script> string is not read as a cut tail',
+  !scanPresence(`<html><head><title>Docs</title></head><body><h1>Docs</h1>
+    <p>Acme roofing, 1 Main Street, 262-555-0143, Mon-Fri 8am-5pm.</p>
+    <script>document.write("</body></html>");</script>`)
+    .limits.some((l) => /never closes|was not examined/i.test(l)));
+ok('truncation: an unterminated comment cuts the tail and says so',
+  scanPresence('<html><body><p>Acme roofing across the county</p><!-- todo')
+    .limits.some((l) => /never closes|was not examined/i.test(l)));
+
+// ── A bound we hit is never reported as an absence we verified. ─────────────────────────────────
+ok('bounds: JSON-LD nested past the depth bound is not reported as no structured data',
+  !has(scanPresence(`<html><body><script type="application/ld+json">${'['.repeat(200)}{"@type":"Plumber"}${']'.repeat(200)}</script>
+    <p>Acme plumbing on Main Street, county wide.</p></body></html>`), 'pres.no_structured_data'));
+ok('bounds: nor is it reported as structured data that identifies no business',
+  !has(scanPresence(`<html><body><script type="application/ld+json">${'['.repeat(200)}{"@type":"Plumber"}${']'.repeat(200)}</script>
+    <p>Acme plumbing on Main Street, county wide.</p></body></html>`), 'pres.no_localbusiness'));
+ok('bounds: an empty nest we CAN see the bottom of is still reported as the absence it is',
+  has(scanPresence(`<html><body><script type="application/ld+json">${'['.repeat(5)}${']'.repeat(5)}</script>
+    <p>Acme plumbing on Main Street, county wide.</p></body></html>`), 'pres.no_structured_data'));
+ok('bounds: one we cannot see the bottom of claims nothing in either direction',
+  scanPresence(`<html><body><script type="application/ld+json">${'['.repeat(200)}${']'.repeat(200)}</script>
+    <p>Acme plumbing on Main Street, county wide.</p></body></html>`)
+    .findings.every((f) => f.code !== 'pres.no_structured_data' && f.code !== 'pres.no_localbusiness'));
+
+// ── Crash surface. ──────────────────────────────────────────────────────────────────────────────
+const survives = (label: string, html: string) => ok(`crash: ${label}`, (() => {
+  try { scanPresence(html); presenceFacts(html); return true; } catch { return false; }
+})());
+survives('a lone surrogate', '<html><body><p>\uD800 hello</p></body></html>');
+survives('a null byte', '<html><body><p>a b</p><script type="application/ld+json">{ }</script></body></html>');
+survives('an unterminated tag', '<html><body><p>hi<a href="tel:+15550100100"');
+survives('an unbalanced quote in a link tag', '<html><head><link rel="canonical href="https://a.example/"></head><body><p>hi</p></body></html>');
+survives('deeply nested JSON-LD', `<html><body><script type="application/ld+json">${'['.repeat(400)}1${']'.repeat(400)}</script><p>x</p></body></html>`);
+survives('JSON-LD nested deep enough to overflow a recursive read',
+  `<html><body><script type="application/ld+json">${'['.repeat(50000)}{"@type":"Plumber"}${']'.repeat(50000)}</script><p>x</p></body></html>`);
+survives('deeply nested JSON-LD objects',
+  `<html><body><script type="application/ld+json">${'{"a":'.repeat(50000)}1${'}'.repeat(50000)}</script><p>x</p></body></html>`);
+survives('an enormous single line', `<html><body><p>${'a'.repeat(500000)}</p></body></html>`);
+ok('perf: a megabyte of markup still scans quickly', (() => {
+  const big = `<html><head><title>x</title></head><body>${'<div class="row"><p>Acme roofing and siding</p></div>'.repeat(20000)}</body></html>`;
+  const t = Date.now();
+  scanPresence(big);
+  return Date.now() - t < 3000;
+})());
+
+// ── Minified / uppercase / unquoted / self-closing markup reads the same as pretty markup. ──────
+ok('minified: uppercase, unquoted, self-closing head tags are seen',
+  scanPresence('<!DOCTYPE HTML><HTML LANG=en><HEAD><LINK REL=canonical HREF=https://a.example/ />' +
+    '<META PROPERTY=og:title CONTENT=Acme /></HEAD><BODY><P>Acme roofing, 262-555-0143, 1 Main Street.</P></BODY></HTML>')
+    .findings.every((f) => f.code !== 'pres.no_canonical' && f.code !== 'pres.no_open_graph'));
+
+// ── An attribute whose NAME merely ends in the one we want is a different attribute. ────────────
+// `data-href`, `data-content` and friends must not be read as `href`/`content`, or a page with a
+// perfectly good canonical tag gets told it has none.
+const prefixed = scanPresence(`<html><head><link rel="canonical" data-href="" href="https://a.example/">
+  <meta property="og:title" data-content="" content="Acme"></head>
+  <body><p>Acme roofing, 262-555-0143, 1 Main St, Mon-Fri 9-5.</p></body></html>`);
+ok('prefixed attrs: data-href does not shadow the real href', !has(prefixed, 'pres.no_canonical'));
+ok('prefixed attrs: data-content does not shadow the real content', !has(prefixed, 'pres.no_open_graph'));
+ok('prefixed attrs: and the canonical fact is the real one',
+  presenceFacts('<html><head><link rel="canonical" data-href="/wrong" href="https://a.example/"></head><body><p>x y z</p></body></html>')
+    .canonical === 'https://a.example/');
+ok('prefixed attrs: a data-rel is not a rel',
+  presenceFacts('<html><head><link data-rel="canonical" href="https://a.example/x.css" rel="stylesheet"></head><body><p>x y z</p></body></html>')
+    .canonical === null);
+
+// ── A JSON-LD body wrapped whole in an HTML comment. ────────────────────────────────────────────
+ok('comment-wrapped ld+json that IS valid JSON is credited, never accused',
+  !has(scanPresence(`<html><head><script type="application/ld+json"><!--{"@type":"Roofer","name":"Acme"}//--></script>
+    </head><body><p>Acme roofing, 262-555-0143, 1 Main St, Mon-Fri 9-5.</p></body></html>`), 'pres.malformed_json_ld'));
+ok('comment-wrapped ld+json that is only a NOTE is not called a broken block',
+  !has(scanPresence(`<html><head><script type="application/ld+json"><!-- TODO: add the schema here --></script>
+    </head><body><p>Acme roofing, 262-555-0143, 1 Main St, Mon-Fri 9-5.</p></body></html>`), 'pres.malformed_json_ld'));
+ok('comment-wrapped ld+json that is only a note still reports the absence',
+  has(scanPresence(`<html><head><script type="application/ld+json"><!-- TODO: add the schema here --></script>
+    </head><body><p>Acme roofing, 262-555-0143, 1 Main St, Mon-Fri 9-5.</p></body></html>`), 'pres.no_structured_data'));
+ok('a genuinely broken block is still reported', has(broken, 'pres.malformed_json_ld'));
+
+// ── Honesty sweep over EVERY string this module can emit. ───────────────────────────────────────
+const everyString = [good, bare, article, graph, arrayLd, broken, halfBroken, commentedOut, scriptText,
+  scriptedHead, unterminated, emptyLd, budgeted, emptyAttrs, cut, shell]
+  .flatMap((r) => [...r.findings.map((f) => `${f.title} ${f.detail}`), ...r.limits]).join(' ');
+ok('honesty: no string anywhere asserts compliance, legality or a guarantee',
+  !/complian|conform|certif|illegal|unlawful|violat|penalt|lawsuit|liabilit|\bsued\b|guarantee/i.test(everyString));
+ok('honesty: no string claims a search ranking, an index position or traffic',
+  !/\brank(?:s|ed|ing)?\b|\bindexed\b|\binvisible to (?:google|search)\b|top of google/i.test(everyString));
+ok('honesty: no finding claims the declared data is correct or current',
+  !/\b(?:up to date|accurate|correct(?:ly)? listed)\b/i.test(everyString));
+
 // ── Determinism. ────────────────────────────────────────────────────────────────────────────────
 ok('deterministic: scanPresence', JSON.stringify(scanPresence(GOOD)) === JSON.stringify(scanPresence(GOOD)));
 ok('deterministic: presenceFacts', JSON.stringify(presenceFacts(BARE)) === JSON.stringify(presenceFacts(BARE)));

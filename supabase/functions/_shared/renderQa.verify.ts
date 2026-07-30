@@ -282,6 +282,199 @@ ok('alt="" is correct markup for a decorative image and is not counted',
 ok('aria-hidden and role=presentation images are not counted',
   !has(renderQa(doc({ body: '<img src="/a.png" aria-hidden="true"><img src="/b.png" role="presentation">' })), 'render.img_missing_alt'));
 
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// ADVERSARIAL PASS — every case below was a real WRONG BLOCK or a false sentence when it was written.
+// A wrong block costs the prospect the best demo we had, so each of these is a page that renders fine
+// (or renders as well as it ever would) and must not be withheld for the reason named.
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+
+// ── An unescaped `<` in ordinary copy is text, not a tag ──────────────────────────────────────────
+// `/<[^>]*>/` ate from the `<` to the next `>` — i.e. the whole rest of the page — so a page full of
+// copy measured 69 characters and was BLOCKED as effectively empty while a browser rendered it all.
+const ltProse = renderQa(doc({ text: `Pipes < 2 inches are our specialty. ${FILLER}` }));
+ok('a lone "<" in prose does not swallow the page into empty_body', !has(ltProse, 'render.empty_body'));
+ok('a lone "<" in prose leaves the page clean', ltProse.issues.length === 0);
+ok('several "<" comparisons in copy are still just copy',
+  renderQa(doc({ text: `Pressure < 40 psi, flow < 2 gpm, temp < 120 F. ${FILLER}` })).issues.length === 0);
+ok('"<" in copy does not hide a real {{token}} that follows it',
+  has(renderQa(doc({ text: `Jobs < 1 hour. Welcome to {{business_name}}. ${FILLER}` })), 'render.placeholder_text'));
+ok('a genuinely short page is still short after the fix',
+  has(renderQa(doc({ text: 'Pipes < 2 inches are our specialty in Fresno.' })), 'render.empty_body'));
+
+// ── A phone number or email in the copy IS a contact path ─────────────────────────────────────────
+// "Call us: (559) 555-0142" with no tel: wrapper is routine generator output. Blocking it said
+// something the page itself disproved, and threw the demo away. doc() always links its phone, so
+// these need a fixture with no link, no mailto: and no <form> anywhere.
+const unlinked = (contact: string): string =>
+  `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width"><title>Nolan and Sons</title></head><body><section class="hero"><h1>Fresno plumbing</h1><p>${FILLER}</p><p class="contact">${contact}</p></section></body></html>`;
+
+const textPhone = renderQa(unlinked('Call us: (559) 555-0142 any day.'));
+ok('an unlinked (559) 555-0142 in the copy is a contact path', !has(textPhone, 'render.no_contact_path'));
+ok('and that page ships', textPhone.ok === true);
+ok('an unlinked 559.555.0142 counts too',
+  !has(renderQa(unlinked('Call 559.555.0142')), 'render.no_contact_path'));
+ok('an unlinked 559-555-0142 counts too',
+  !has(renderQa(unlinked('Call 559-555-0142')), 'render.no_contact_path'));
+ok('an international +34 912 345 678 counts too',
+  !has(renderQa(unlinked('Llame al +34 912 345 678')), 'render.no_contact_path'));
+ok('an unlinked email address in the copy counts too',
+  !has(renderQa(unlinked('Email jobs@nolanplumbing.com for a quote.')), 'render.no_contact_path'));
+ok('but a page with only an address and a founding year still blocks',
+  has(renderQa(unlinked('1400 Van Ness Ave, Fresno CA 93728, since 1998.')), 'render.no_contact_path'));
+ok('and a price list is not a phone number either',
+  has(renderQa(unlinked('Drains $189. Water heaters $1,450. Repipes from $6,900.')), 'render.no_contact_path'));
+ok('a phone number that only exists inside a base64 data: URI does NOT count',
+  has(renderQa(unlinked('<img src="data:image/gif;base64,R0lGOD5595550142aaaa" alt="dot">')), 'render.no_contact_path'));
+ok('the message names the plain-text search it actually ran',
+  /visible copy/.test(msg(noContact, 'render.no_contact_path')));
+ok('the message no longer asserts the visitor has no way to make contact',
+  !/no way to make contact/i.test(msg(noContact, 'render.no_contact_path')));
+
+// ── Uppercase Spanish copy is not a TODO marker ───────────────────────────────────────────────────
+// Uppercase alone never distinguished a leftover note from "REPARAMOS TODO TIPO DE FUGAS"; Spanish
+// copy is set in caps as often as English is, and every one of those pages was blocked.
+ok('trap: uppercase Spanish "TODO" in a headline is not a marker',
+  !has(renderQa(doc({ text: `REPARAMOS TODO TIPO DE FUGAS. ABIERTO TODO EL DIA. ${FILLER}` })), 'render.placeholder_text'));
+ok('trap: "TODO INCLUIDO" is not a marker',
+  !has(renderQa(doc({ text: `TODO INCLUIDO EN EL PRECIO. ${FILLER}` })), 'render.placeholder_text'));
+ok('a real "TODO:" note still blocks',
+  has(renderQa(doc({ text: `TODO: write the services section. ${FILLER}` })), 'render.placeholder_text'));
+ok('a real "TODO(marketing):" note still blocks',
+  has(renderQa(doc({ text: `TODO(marketing) add testimonials. ${FILLER}` })), 'render.placeholder_text'));
+ok('a real "TODO - " note still blocks',
+  has(renderQa(doc({ text: `TODO - swap this hero image. ${FILLER}` })), 'render.placeholder_text'));
+
+// ── A bracketed badge is not a bracketed placeholder ──────────────────────────────────────────────
+ok('trap: "[ABIERTO 24 HORAS]" is a badge, not a slot',
+  !has(renderQa(doc({ text: `[ABIERTO 24 HORAS] ${FILLER}` })), 'render.placeholder_text'));
+ok('trap: "[OPEN 24 HOURS]" is a badge, not a slot',
+  !has(renderQa(doc({ text: `[OPEN 24 HOURS] ${FILLER}` })), 'render.placeholder_text'));
+ok('trap: "[HOTEL DELUXE]" does not match on TEL inside HOTEL',
+  !has(renderQa(doc({ text: `[HOTEL DELUXE] ${FILLER}` })), 'render.placeholder_text'));
+ok('[YOUR NAME] still blocks', has(renderQa(doc({ text: `Ask for [YOUR NAME]. ${FILLER}` })), 'render.placeholder_text'));
+ok('[CITY] still blocks', has(renderQa(doc({ text: `Serving [CITY] since 1998. ${FILLER}` })), 'render.placeholder_text'));
+ok('[BUSINESS_NAME] still blocks (snake_case is never copy)',
+  has(renderQa(doc({ text: `Welcome to [BUSINESS_NAME]. ${FILLER}` })), 'render.placeholder_text'));
+
+// ── CSS the author had already switched off is not a request ──────────────────────────────────────
+ok('trap: a url() inside a CSS comment is not loaded',
+  !has(renderQa(doc({ head: '<style>/* .hero{background:url(https://old.cdn.example.com/bg.jpg)} */ .hero{background:#111}</style>' })), 'render.external_resource'));
+ok('a real url() sitting AFTER a CSS comment still blocks',
+  has(renderQa(doc({ head: '<style>/* brand */ .h{background:url(https://cdn.example.com/a.jpg)}</style>' })), 'render.external_resource'));
+ok('a real @import after a commented-out one still blocks',
+  has(renderQa(doc({ head: '<style>/* old: url(https://a.example/x.css) */ @import url("https://fonts.googleapis.com/css2");</style>' })), 'render.external_resource'));
+
+// ── `style=` in prose is prose ────────────────────────────────────────────────────────────────────
+// The inline-style reader scanned the whole document for the characters `style=`, so an escaped code
+// sample in <pre> — and even a sentence quoting one — was read as this page's own CSS.
+ok('trap: an escaped code sample in <pre> is not this page\'s markup',
+  !has(renderQa(doc({ body: '<pre><code>&lt;div style="background:url(https://example.com/a.png)"&gt;&lt;/div&gt;</code></pre>' })), 'render.external_resource'));
+ok('trap: a sentence quoting a style attribute is not a style attribute',
+  !has(renderQa(doc({ body: '<p>Write style="background:url(https://example.com/a.png)" in your CSS.</p>' })), 'render.external_resource'));
+ok('trap: a <style> element written as a JS string is not this page\'s stylesheet',
+  !has(renderQa(doc({ body: `<script>const s = '<style>.x{background:url("https://example.com/a.png")}</style>'; console.log(s);</script>` })), 'render.external_resource'));
+ok('a real inline style="" with an external url still blocks',
+  has(renderQa(doc({ body: '<div style="background:url(https://cdn.example.com/bg.jpg)"><p>hi</p></div>' })), 'render.external_resource'));
+ok('a real UNQUOTED inline style with an external url still blocks',
+  has(renderQa(doc({ body: '<div style=background:url(https://cdn.example.com/a.png)><p>hi</p></div>' })), 'render.external_resource'));
+
+// ── An unterminated comment swallows the tail, exactly as a browser does ──────────────────────────
+// The lazy regex simply failed to match, leaving a <link> the browser never sees, so the gate named
+// a cross-origin load that does not happen. The page is still withheld — for the true reason.
+const openComment = renderQa(doc({ body: '<!-- oops <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">' }));
+ok('an unterminated comment does not conjure an external resource', !has(openComment, 'render.external_resource'));
+ok('an unterminated comment is still caught, as malformed markup', openComment.ok === false);
+ok('and the reason given is the true one', has(openComment, 'render.unclosed_critical'));
+
+// ── `</div>` inside a quoted attribute value is one element, not two closes ───────────────────────
+ok('trap: a closing tag inside an attribute value does not skew the tally',
+  !has(renderQa(doc({ body: '<div data-tpl="</div>"><p>hi</p></div>' })), 'render.unclosed_critical'));
+ok('trap: same for </section> inside an attribute value',
+  !has(renderQa(doc({ body: '<div data-tpl="</section>"><p>hi</p></div>' })), 'render.unclosed_critical'));
+
+// ── A JSX-habit `<div/>` renders; truncation never produces one ───────────────────────────────────
+ok('trap: a self-closed <div/> is not the truncation signature',
+  !has(renderQa(doc({ body: '<div class="spacer"/>' })), 'render.unclosed_critical'));
+ok('trap: a self-closed <section/> inside a real div is not either',
+  !has(renderQa(doc({ body: '<div class="w"><section class="s"/><p>Fresno</p></div>' })), 'render.unclosed_critical'));
+ok('a genuinely missing </div> still blocks',
+  has(renderQa(doc({ body: '<section><div class="card"><h2>Repiping</h2></section>' })), 'render.unclosed_critical'));
+
+// ── An image with an accessible name is not the failure we sell against ───────────────────────────
+ok('trap: an <img aria-label> has a name, so the alt sentence would be false',
+  !has(renderQa(doc({ body: '<img src="/t.jpg" aria-label="Our service truck">' })), 'render.img_missing_alt'));
+ok('trap: an <img aria-labelledby> likewise',
+  !has(renderQa(doc({ body: '<img src="/t.jpg" aria-labelledby="cap"><span id="cap">Our truck</span>' })), 'render.img_missing_alt'));
+ok('an <img> with nothing at all still warns',
+  has(renderQa(doc({ body: '<img src="/t.jpg">' })), 'render.img_missing_alt'));
+
+// ── Markup shapes a competent page really ships ───────────────────────────────────────────────────
+const MINIFIED = `<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Nolan and Sons Plumbing</title><style>body{margin:0}</style></head><body><section class=hero><h1>Fresno plumbing, answered on the first ring</h1><p>${FILLER}</p><a class=btn href=tel:+15595550142>Call (559) 555-0142</a></section><section class=svc><div class=card><h2>Drains</h2><p>We snake it and camera it.</p></div></section></body></html>`;
+ok('minified markup with unquoted attributes and no whitespace is clean', renderQa(MINIFIED).issues.length === 0);
+
+const UPPERCASE = `<!DOCTYPE HTML><HTML LANG="en"><HEAD><META CHARSET="utf-8"><META NAME="viewport" CONTENT="width=device-width"><TITLE>Nolan</TITLE></HEAD><BODY><SECTION><H1>Fresno plumbing</H1><P>${FILLER}</P><A HREF="tel:+15595550142">Call</A><IMG SRC="/t.jpg" ALT="Truck"></SECTION></BODY></HTML>`;
+ok('uppercase tag and attribute names are clean', renderQa(UPPERCASE).issues.length === 0);
+
+ok('single-quoted attributes are clean',
+  renderQa(doc({ body: `<img src='/t.jpg' alt='Our truck'><div style='color:#111'><p>Fresno</p></div>` })).issues.length === 0);
+ok('Alpine/Vue attribute syntax does not confuse the tag reader',
+  renderQa(doc({ body: `<div x-data="{ open: false }" @click="open = !open" :class="{ 'on': open }"><p>Menu</p></div>` })).issues.length === 0);
+ok('a <body> tag with a ">" inside an attribute is still a body',
+  renderQa(`<!doctype html><html lang="en"><head><title>N</title><meta name="viewport" content="w"></head><body onload="if(2>1){go()}"><section><h1>Fresno plumbing</h1><p>${FILLER}</p><a href="tel:+15595550142">Call</a></section></body></html>`).issues.length === 0);
+ok('CRLF line endings are clean',
+  renderQa(doc({ body: '<div class="a">\r\n<p>Fresno and Clovis.</p>\r\n</div>' }).replace(/\n/g, '\r\n')).issues.length === 0);
+ok('a BOM before the doctype is accepted', renderQa(`﻿${GOOD}`).issues.length === 0);
+ok('an <img> inside a <template> and a data: srcset are clean',
+  renderQa(doc({ body: '<template id="r"><div class="r"><img src="/x.jpg" alt="x"></div></template><img src="data:image/gif;base64,R0lGOD" srcset="data:image/gif;base64,R0lGOD 1x" alt="dot">' })).issues.length === 0);
+ok('an <h1> named only by an inline <svg><title> is named',
+  !has(renderQa(doc({ h1: false, body: '<h1><svg viewBox="0 0 10 10"><title>Nolan and Sons</title><path d="M0 0"/></svg></h1>' })), 'render.no_h1'));
+ok('an <h1> named only by aria-labelledby is named',
+  !has(renderQa(doc({ h1: false, body: '<h1 aria-labelledby="lede"></h1><p id="lede">Fresno plumbing</p>' })), 'render.no_h1'));
+ok('an old-school <script><!-- … //--></script> wrapper is clean',
+  renderQa(doc({ body: '<script>\n<!--\nvar a = 1;\n//-->\n</script>' })).issues.length === 0);
+ok('a type="module" script is lexed and passes',
+  renderQa(doc({ body: '<script type="module">const x = { a: 1 }; console.log(x);</script>' })).issues.length === 0);
+ok('an importmap is data, not JavaScript',
+  !has(renderQa(doc({ body: '<script type="importmap">{"imports":{"a":"/a.js"}}</script>' })), 'render.script_error'));
+ok('a regex holding quotes and braces is not a brace imbalance',
+  !has(renderQa(doc({ body: `<script>const re = /["'{}]/g; const s = "a".replace(re, ""); if (s) { console.log(s); }</script>` })), 'render.script_error'));
+
+// ── Totality: no input crashes, everything gets a verdict ─────────────────────────────────────────
+const HOSTILE: [string, string][] = [
+  ['null bytes', doc({ text: `Fresno plumbing ${FILLER}` })],
+  ['lone surrogate', doc({ text: `\uD800 ${FILLER}` })],
+  ['astral plane + RTL', doc({ text: `🚰 مرحبا ${FILLER}` })],
+  ['unterminated tag at EOF', `${doc()}<div class="`],
+  ['unterminated quote in a tag', doc({ body: '<img src="/a.jpg alt="Truck">' })],
+  ['nothing but "<"', '<'.repeat(500)],
+  ['a bare doctype', '<!doctype html>'],
+  ['deeply nested ${', doc({ body: `<script>const s = ${'`${'.repeat(5000)}</script>` })],
+  ['1MB of one word', doc({ text: 'plumbing '.repeat(120000) })],
+  ['angle brackets only', '<><><>'.repeat(1000)],
+];
+ok('no hostile input throws, and each gets a verdict', HOSTILE.every(([, html]) => {
+  try {
+    const r = renderQa(html);
+    return typeof r.ok === 'boolean' && Array.isArray(r.issues) && r.issues.every((i) => typeof i.message === 'string');
+  } catch { return false; }
+}));
+ok('every hostile input is deterministic',
+  HOSTILE.every(([, html]) => JSON.stringify(renderQa(html)) === JSON.stringify(renderQa(html))));
+
+// A 2MB well-formed page and a 1MB page of prose both have to finish inside an edge function's
+// budget. Generous bound — this is a guard against a quadratic regression, not a benchmark.
+const bigOk = doc({ body: '<div class="card"><p>Drain clearing in Fresno.</p></div>'.repeat(40000) });
+const bigStart = Date.now();
+renderQa(bigOk);
+const bigMs = Date.now() - bigStart;
+ok(`a 2MB well-formed page finishes promptly (${bigMs}ms)`, bigMs < 5000);
+const proseStart = Date.now();
+renderQa(doc({ text: 'Pipes < 2 inches. '.repeat(60000) }));
+ok(`1MB of prose with stray "<" finishes promptly (${Date.now() - proseStart}ms)`, Date.now() - proseStart < 5000);
+const cmtStart = Date.now();
+renderQa(doc({ body: '<!-- note '.repeat(30000) }));
+ok(`300KB of unterminated comments finishes promptly (${Date.now() - cmtStart}ms)`, Date.now() - cmtStart < 5000);
+
 // ── House rules: shape, language, determinism ────────────────────────────────────────────────────
 const kitchenSink = renderQa(`<!doctype html>
 <html><head></head><body><div><p>Lorem ipsum.</p>
@@ -300,9 +493,50 @@ ok('every severity is block or warn',
   kitchenSink.issues.every((i) => i.severity === 'block' || i.severity === 'warn'));
 ok('every message is a non-empty sentence',
   kitchenSink.issues.every((i) => i.message.length > 20 && i.message.trim().endsWith('.')));
+// Every message this gate can emit, gathered once so the language rules below are swept over the
+// whole vocabulary rather than a hand-picked few. One input per declared code, plus the fixtures.
+const EVERY_RESULT: RenderQa[] = [
+  good, empty, fenced, noBody, fragment, blank, fonts, cdn, hotlink, cssUrl, protoRel, multi,
+  unclosed, extraClose, noContact, brokenBrace, brokenTmpl, noVp, noTitle, thin, noH1, noAlt,
+  kitchenSink, openComment, textPhone, ltProse,
+  renderQa(doc({ text: `Lorem ipsum dolor sit amet. ${FILLER}` })),
+  renderQa(unlinked('1400 Van Ness Ave, Fresno CA 93728.')),
+  renderQa(doc({ body: '<div class="spacer"><p>x</p>' })),
+];
+const EVERY_MESSAGE = EVERY_RESULT.flatMap((r) => r.issues.map((i) => i.message));
+ok('the sweep really covers every declared code',
+  RENDER_QA_CODES.every((c) => EVERY_RESULT.some((r) => has(r, c))));
 ok('no message ever makes a compliance, legal, or liability claim',
-  [good, empty, kitchenSink, noAlt, fonts, noContact, brokenBrace].every((r) =>
-    r.issues.every((i) => !/non-?compliant|\bADA\b|WCAG|lawsuit|sue[ds]?\b|illegal|violat|liable|liability|penalt/i.test(i.message))));
+  EVERY_MESSAGE.every((m) => !/non-?compliant|\bADA\b|WCAG|lawsuit|sue[ds]?\b|illegal|unlawful|violat|liable|liability|penalt|\bfine[ds]?\b|\brisk\b/i.test(m)));
+ok('no message ever guarantees or promises an outcome',
+  EVERY_MESSAGE.every((m) => !/\bguarantee|\bpromis|\bensure[sd]?\b|\bwe will\b|\balways\b|\bnever fails?\b|\b100%/i.test(m)));
+ok('no message claims to have fetched, loaded, or rendered anything',
+  EVERY_MESSAGE.every((m) => !/\bwe (?:fetched|loaded|rendered|visited|tested|checked)\b|\bdead link\b|\b404\b|\blooks? (?:right|wrong|good|bad)\b/i.test(m)));
+ok('no message asserts how the page appears to a visitor beyond what was counted',
+  EVERY_MESSAGE.every((m) => !/renders effectively blank|appears blank|looks empty/i.test(m)));
+ok('no message speculates about what a script was for',
+  EVERY_MESSAGE.every((m) => !/motion or reveal|animation it drives/i.test(m)));
+ok('every message is a single observational sentence with a full stop',
+  EVERY_MESSAGE.every((m) => m.length > 20 && m.trim().endsWith('.')));
+// Determinism swept over every adversarial input above, run interleaved so a sticky regex lastIndex
+// or a mutated module-level pattern would show up as one run disagreeing with the next.
+const ALL_INPUTS: string[] = [
+  GOOD, MINIFIED, UPPERCASE, '', '<!doctype html>',
+  doc(), doc({ text: `Pipes < 2 inches. ${FILLER}` }), doc({ text: `TODO: fix. ${FILLER}` }),
+  doc({ text: `REPARAMOS TODO TIPO DE FUGAS. ${FILLER}` }), doc({ text: `[ABIERTO 24 HORAS] ${FILLER}` }),
+  doc({ head: '<style>/* url(https://a.example/x.png) */ .h{background:#111}</style>' }),
+  doc({ body: '<div data-tpl="</div>"><p>hi</p></div>' }), doc({ body: '<div class="spacer"/>' }),
+  doc({ body: '<!-- oops <link rel="stylesheet" href="https://fonts.googleapis.com/x">' }),
+  unlinked('Call us: (559) 555-0142'), unlinked('Fresno CA 93728'),
+  ...HOSTILE.map(([, h]) => h),
+];
+const firstPass = ALL_INPUTS.map((h) => JSON.stringify(renderQa(h)));
+const secondPass = ALL_INPUTS.map((h) => JSON.stringify(renderQa(h)));
+const shuffled = [...ALL_INPUTS].reverse().map((h) => JSON.stringify(renderQa(h))).reverse();
+ok('deterministic across every adversarial input, twice',
+  firstPass.every((s, i) => s === secondPass[i]));
+ok('deterministic regardless of the order inputs are scanned in',
+  firstPass.every((s, i) => s === shuffled[i]));
 
 ok('deterministic: the good page', JSON.stringify(renderQa(GOOD)) === JSON.stringify(renderQa(GOOD)));
 ok('deterministic: the kitchen sink (no sticky regex state leaks between runs)',
