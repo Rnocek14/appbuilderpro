@@ -17,6 +17,7 @@ import { domainOf } from './nationalSweepCore.ts';
 import { auditIssues, type SiteAudit } from './siteAudit.ts';
 import { buildProfile, type ExtractedFields, type ScrapeContext } from '../preview/scrapeProfileCore.ts';
 import { restraintFor } from '../../../supabase/functions/_shared/previewSpec.ts';
+import { findingSentence, claimsAreSafe, SCAN_DISCLOSURE, type PitchFinding } from './prospects/pitchFindings.ts';
 import type { BusinessProfile } from '../preview/spec';
 
 // Big aggregators/directories aren't prospects — we want a business's OWN (beatable) site.
@@ -355,16 +356,74 @@ Want the link? Just reply "send it" and it's yours. No obligation either way.`;
  *  website+automation offer — the pitch sells the monthly relationship, not just the rebuild.
  *  This is the PLAIN-TEXT body (the email's `text` part + deliverability fallback); the HTML body
  *  that SHOWS the site as a screenshot is buildHuntPitchEmailHtml below. */
-export function buildHuntPitch(profile: BusinessProfile, previewUrl: string, upsells: PitchUpsell[] = []): string {
+export function buildHuntPitch(
+  profile: BusinessProfile,
+  previewUrl: string,
+  upsells: PitchUpsell[] = [],
+  findings: PitchFinding[] = [],
+): string {
   return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
 I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
 
 Rather than just tell you that, I built you a new one:
 
-${previewUrl}${automationUpsellParagraph(upsells)}
+${previewUrl}${scanFindingsParagraph(findings)}${automationUpsellParagraph(upsells)}
 
 If you like it, publishing it takes a day. No obligation either way.`;
+}
+
+/** The deep-scan findings as a plain-text block, ordered revenue-first by selectPitchFindings.
+ *
+ *  DELIBERATELY UNDERSTATED. These are the strongest, most checkable things we know, and the
+ *  temptation is to lead the whole email with them — which reads as a threat and turns a web shop
+ *  into a compliance salesman. So the demo link stays the headline and this rides underneath as
+ *  evidence for why the rebuild is worth opening. Each line carries its own hedge (findingSentence
+ *  bakes it in, so it can't be edited out downstream without removing the claim), and the block
+ *  always closes with SCAN_DISCLOSURE — an automated screen of one page, not an audit, establishing
+ *  nothing about compliance. No findings ⇒ '' — the email simply omits the block rather than
+ *  manufacturing a reason to worry. */
+export function scanFindingsParagraph(findings: PitchFinding[]): string {
+  const lines = safeFindingLines(findings);
+  if (!lines.length) return '';
+  return `
+
+A few specific things I noticed on your current site while I was there:
+
+${lines.map((l) => `• ${l}`).join('\n')}
+
+${SCAN_DISCLOSURE}`;
+}
+
+/** The findings copy, with the claim gate applied PER LINE.
+ *
+ *  The gate lives here rather than on the send path on purpose. A blanket check over every outbound
+ *  email would be wrong — a roofer's own approved copy may legitimately say "satisfaction
+ *  guaranteed" about their own work, and blocking that would be us censoring a client's claim about
+ *  their own business. What must never ship is US asserting compliance, illegality, or a legal
+ *  outcome from an automated scan. That copy is generated in exactly one place — here — so gating
+ *  here makes the violation structurally impossible without any collateral damage elsewhere.
+ *
+ *  A tripped line is DROPPED, not rewritten: if a scanner ever starts emitting a sentence we can't
+ *  stand behind, the honest failure is to say less, not to paraphrase around the gate. */
+function safeFindingLines(findings: PitchFinding[]): string[] {
+  return findings
+    .slice(0, 3)
+    .map((p) => findingSentence(p.finding))
+    .filter((line) => claimsAreSafe(line));
+}
+
+/** The HTML twin of scanFindingsParagraph. Same order, same hedges, same mandatory disclosure —
+ *  the two bodies of one email must never disagree about what we claim. */
+export function scanFindingsHtml(findings: PitchFinding[]): string {
+  const lines = safeFindingLines(findings);
+  if (!lines.length) return '';
+  const items = lines
+    .map((l) => `<li style="margin:0 0 8px">${escHtml(l)}</li>`)
+    .join('');
+  return `<p style="margin:20px 0 6px;font-size:15px;color:#1c1c1e">A few specific things I noticed on your current site while I was there:</p>
+<ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>
+<p style="margin:8px 0 0;font-size:12px;line-height:1.45;color:#8a8a8f">${escHtml(SCAN_DISCLOSURE)}</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +467,7 @@ export function buildHuntPitchEmailHtml(
   screenshotUrl: string,
   upsells: PitchUpsell[] = [],
   beforeShotUrl?: string | null,
+  findings: PitchFinding[] = [],
 ): string {
   const name = escHtml(profile.business_name);
   const greetName = profile.business_name ? ` ${name} team` : '';
@@ -434,6 +494,7 @@ export function buildHuntPitchEmailHtml(
 <a href="${url}" style="display:inline-block;background:#c8501e;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 26px;border-radius:10px">See the full site (mobile too) &rarr;</a>
 </p>
 ${before}
+${scanFindingsHtml(findings)}
 ${automationUpsellHtml(upsells)}
 <p style="margin:18px 0 12px">If you like it, publishing it takes a day. I can also set it up to <strong>acknowledge every new enquiry and follow up the quiet ones automatically</strong> — reply and tell me how you run things and I&#39;ll show you exactly what I&#39;d automate.</p>
 <p style="margin:0 0 4px">No obligation either way.</p>

@@ -136,7 +136,15 @@
     "verify:situation": "tsx src/lib/garvis/situation.verify.ts",
     "verify:autonomygrants": "tsx src/lib/garvis/autonomy.verify.ts",
     "verify:ics": "tsx src/lib/garvis/ics.verify.ts",
-    "verify:huntreadiness": "tsx src/lib/garvis/huntReadiness.verify.ts"
+    "verify:huntreadiness": "tsx src/lib/garvis/huntReadiness.verify.ts",
+    "verify:a11yscan": "tsx supabase/functions/_shared/a11yScan.verify.ts",
+    "verify:trackingscan": "tsx supabase/functions/_shared/trackingScan.verify.ts",
+    "verify:mobilescan": "tsx supabase/functions/_shared/mobileScan.verify.ts",
+    "verify:conversionscan": "tsx supabase/functions/_shared/conversionScan.verify.ts",
+    "verify:presencescan": "tsx supabase/functions/_shared/presenceScan.verify.ts",
+    "verify:renderqa": "tsx supabase/functions/_shared/renderQa.verify.ts",
+    "verify:deepscan": "tsx supabase/functions/_shared/deepScan.verify.ts",
+    "verify:pitchfindings": "tsx src/lib/garvis/prospects/pitchFindings.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

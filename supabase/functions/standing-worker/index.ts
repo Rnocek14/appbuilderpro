@@ -35,6 +35,8 @@ import { parseHuntConfig, LOCAL_NICHES, type HuntConfig } from '../../../src/lib
 import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, MAX_QUERIES, DRY_RUNS_BEFORE_ROTATE, QUERY_VARIANTS } from '../../../src/lib/garvis/opportunityHunt.ts';
 import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
 import { buildHuntProfileRaw, buildHuntPitch, buildHuntPitchEmailHtml, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
+import { selectPitchFindings } from '../../../src/lib/garvis/prospects/pitchFindings.ts';
+import type { DeepScan } from '../_shared/scanTypes.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
 import {
@@ -1683,6 +1685,10 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   let pageChecks: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean } = {};
   let pageText = '';
   let pageTech: Record<string, unknown> | null = null;
+  // The deep scan rides along on the SAME fetch-url 'text' call the hunt already makes, so the
+  // checkable findings cost no extra request. Absent on an older fetch-url deployment ⇒ null, and
+  // the pitch simply omits the findings block rather than inventing one.
+  let pageScan: DeepScan | null = null;
 
   if (lead.website) {
     const text = await scrapePage(lead.website, 'text', env);
@@ -1691,6 +1697,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       pageChecks = checks;
       pageText = (text.text as string) ?? '';
       pageTech = (text.tech as Record<string, unknown> | undefined) ?? null;
+      pageScan = (text.scan as DeepScan | undefined) ?? null;
       finalUrl = (typeof text.url === 'string' && text.url) || lead.website;
       page = { title: (text.title as string) ?? null, description: (text.description as string) ?? null };
       audit = auditSite({
@@ -1931,7 +1938,12 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
     title: p.title, pitch: p.pitch, monthlyPrice: p.monthlyPrice,
     evidence: sigs.find((s) => s.id === p.matchedSignal)?.evidence ?? '',
   }));
-  const pitch = buildHuntPitch(profile, previewUrl, upsells);
+  // REVENUE-FIRST ORDERING (selectPitchFindings): the demo link stays the headline and the scan
+  // findings ride underneath as evidence. Leading a cold email with accessibility/legal exposure
+  // reads as a threat and mis-positions a web shop as a compliance firm; the same findings placed
+  // second do the persuasive work without either problem. Needs-review findings never lead.
+  const pitchFindings = pageScan ? selectPitchFindings(pageScan.findings) : [];
+  const pitch = buildHuntPitch(profile, previewUrl, upsells, pitchFindings);
 
   const { data: site, error: sErr } = await admin.from('preview_sites').insert({
     user_id: order.owner_id, profile_id: profileRow.id, slug,
@@ -1976,7 +1988,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       : ((audit.reachable && /^https?:\/\//.test(finalUrl))
         ? await genPreviewShot(admin, order.owner_id, finalUrl, `before-${slug}`)
         : null);
-    bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl);
+    bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl, pitchFindings);
   }
 
   const ok = await queueHuntPitch(admin, order.owner_id, {

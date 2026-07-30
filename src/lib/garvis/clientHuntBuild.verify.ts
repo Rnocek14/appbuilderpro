@@ -2,8 +2,10 @@
 import {
   pickHuntTargets, cleanBusinessName, fieldsFromPage, buildHuntProfileRaw, buildHuntPitch, huntRunLine,
   extractSiteFacts, buildHuntPitchEmailHtml, automationUpsellHtml, escHtml,
+  scanFindingsParagraph, scanFindingsHtml,
   type HuntProfileInput,
 } from './clientHuntBuild';
+import { SCAN_DISCLOSURE, claimsAreSafe, type PitchFinding } from './prospects/pitchFindings';
 import { auditSite, type SiteAudit } from './siteAudit';
 import { parseBusinessProfile, assembleFallbackSpec } from '../preview/spec';
 
@@ -220,6 +222,55 @@ const serper = {
   const noFacts = buildHuntProfileRaw(base);
   check('no facts → the honest generic trade service stands, nothing invented',
     (noFacts.services as string[]).join(',') === 'Plumbing' && noFacts.description === undefined && noFacts.service_area === undefined);
+}
+
+// ── deep-scan findings in the pitch ────────────────────────────────────────
+{
+  const pf = (over: Partial<PitchFinding['finding']> & { code: string }): PitchFinding => ({
+    role: 'support',
+    finding: {
+      category: 'conversion', severity: 'high', confidence: 'detected',
+      title: 'No way to get in touch', detail: 'There is no form, phone link or email on the page.',
+      ...over,
+    },
+  });
+
+  check('no findings → the block is omitted entirely (no empty heading)', scanFindingsParagraph([]) === '');
+  check('no findings → the HTML block is omitted too', scanFindingsHtml([]) === '');
+
+  const one = [pf({ code: 'conv.no_contact_path' })];
+  const text = scanFindingsParagraph(one);
+  check('a finding renders as a bullet', /• No way to get in touch/.test(text));
+  check('the disclosure always rides with the findings', text.includes(SCAN_DISCLOSURE));
+  check('the HTML twin also carries the disclosure', scanFindingsHtml(one).includes(escHtml(SCAN_DISCLOSURE)));
+
+  const many = ['a', 'b', 'c', 'd', 'e'].map((c) => pf({ code: `conv.${c}` }));
+  check('at most three findings reach the email', (scanFindingsParagraph(many).match(/•/g) ?? []).length === 3);
+  check('at most three reach the HTML body', (scanFindingsHtml(many).match(/<li/g) ?? []).length === 3);
+
+  // The gate: a scanner that ever emitted an unsupportable sentence must not reach a prospect.
+  const bad = [pf({ code: 'x.bad', title: 'Not ADA compliant', detail: 'You will be sued.' })];
+  check('a finding asserting compliance is DROPPED, not rewritten', scanFindingsParagraph(bad) === '');
+  check('the HTML twin drops it too', scanFindingsHtml(bad) === '');
+  const mixed = [pf({ code: 'x.bad', title: 'Not ADA compliant', detail: 'You will be sued.' }), pf({ code: 'conv.ok' })];
+  check('one bad finding does not suppress the good ones', (scanFindingsParagraph(mixed).match(/•/g) ?? []).length === 1);
+
+  // Hedges must survive into the body — they cannot be edited out without losing the claim.
+  const likely = [pf({ code: 'a11y.input_missing_label', confidence: 'likely', title: '3 fields with no label' })];
+  check('a likely finding carries its hedge into the email', /worth confirming/.test(scanFindingsParagraph(likely)));
+
+  // The whole composed pitch must pass the gate.
+  const { profile: prof } = parseBusinessProfile(buildHuntProfileRaw({
+    url: 'http://acmeroofing.com', niche: 'roofers', fallbackName: 'Acme Roofing',
+    page: { title: 'Acme Roofing' }, images: [], email: 'a@b.com',
+    audit: auditSite({ url: 'http://acmeroofing.com', reachable: true, title: 'x', text: 'thin', hasViewport: false }, 2026),
+  }));
+  const composed = buildHuntPitch(prof!, 'https://x.test/p/acme', [], one);
+  check('the composed pitch names the finding', /No way to get in touch/.test(composed));
+  check('the composed pitch passes the claim gate', claimsAreSafe(composed));
+  check('a pitch with no findings is unchanged in shape', !buildHuntPitch(prof!, 'https://x.test/p/acme').includes(SCAN_DISCLOSURE));
+  check('HTML escaping still applies to finding copy',
+    !scanFindingsHtml([pf({ code: 'x.y', title: '<script>alert(1)</script>' })]).includes('<script>alert(1)</script>'));
 }
 
 console.log(`\nclientHuntBuild.verify: ${passed} passed, ${failed} failed`);
