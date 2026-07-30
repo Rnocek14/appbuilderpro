@@ -73,20 +73,47 @@ create table if not exists public.findings (
 create index if not exists idx_findings_owner_code on public.findings(owner_id, code);
 create index if not exists idx_findings_audit on public.findings(audit_id);
 create index if not exists idx_findings_owner_triage on public.findings(owner_id, category, severity);
+-- Partial: most findings carry no world (an on-demand scan from Win Clients has none), so the index
+-- only covers the rows a per-world index run would actually ask for.
+create index if not exists idx_findings_world on public.findings(world_id) where world_id is not null;
 
 -- ---------- 2. outreach_finding_refs ----------
 create table if not exists public.outreach_finding_refs (
-  id          uuid primary key default gen_random_uuid(),
-  owner_id    uuid not null references public.profiles(id) on delete cascade,
-  message_id  uuid not null references public.outreach_messages(id) on delete cascade,
-  finding_id  uuid not null references public.findings(id) on delete cascade,
-  emphasized  boolean not null default false,  -- true = this was the headline finding in the pitch
-  created_at  timestamptz not null default now(),
-  unique (message_id, finding_id)              -- a message names a finding once
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.profiles(id) on delete cascade,
+  message_id    uuid not null references public.outreach_messages(id) on delete cascade,
+
+  -- THE DURABLE IDENTITY IS THE CODE, NOT THE ROW.
+  -- This was originally `finding_id ... on delete cascade`, which was quietly fatal: findingsStore
+  -- deletes an audit's findings and re-inserts them on every re-scan, so a monthly monitoring scan
+  -- would cascade away the entire record of what we had pitched. The one table whose whole purpose
+  -- is to outlive a re-scan was being erased by it. Caught by applying this migration to a real
+  -- Postgres and deleting an audit.
+  --
+  -- So the assertion is stored by CODE — the stable machine identifier that is never renumbered
+  -- precisely because outcomes join on it — and finding_id is now a nullable convenience pointer at
+  -- the observation as it stood when we spoke, released (not cascaded) when that row is replaced.
+  -- What we SAID is immutable history; what is TRUE about the site is a current reading. Those are
+  -- different facts with different lifetimes and they no longer share one.
+  finding_code  text not null,
+  finding_id    uuid references public.findings(id) on delete set null,
+
+  emphasized    boolean not null default false,  -- true = this was the headline finding in the pitch
+  created_at    timestamptz not null default now(),
+  unique (message_id, finding_code)              -- a message names a given finding once
 );
 
-create index if not exists idx_outreach_finding_refs_owner_finding
-  on public.outreach_finding_refs(owner_id, finding_id);
+-- The performance question groups by CODE, so this is the index that answers "which finding, when
+-- we led with it, produced a reply?" without touching the findings table at all.
+create index if not exists idx_outreach_finding_refs_owner_code
+  on public.outreach_finding_refs(owner_id, finding_code);
+-- Postgres does NOT index a foreign key column for you, and both parents act on delete (message
+-- cascades, finding sets null), so without these each removal scans this whole table to find its
+-- children — and this is the table that grows fastest, one row per finding per pitch.
+create index if not exists idx_outreach_finding_refs_message
+  on public.outreach_finding_refs(message_id);
+create index if not exists idx_outreach_finding_refs_finding
+  on public.outreach_finding_refs(finding_id) where finding_id is not null;
 
 -- ---------- 3. prospect_audits roll-ups ----------
 -- The headline numbers from a deep scan, denormalised onto the audit so the index/report layer can
@@ -100,6 +127,13 @@ alter table public.prospect_audits add column if not exists session_replay   boo
 alter table public.prospect_audits add column if not exists consent_platform text;
 alter table public.prospect_audits add column if not exists booking_platform text;
 alter table public.prospect_audits add column if not exists deep_scanned_at  timestamptz;
+
+-- "Which prospects have we deep-scanned, and when" — the working queue for an index run, and the
+-- query behind "is this reading stale enough to re-scan?". Partial for the same reason the column is
+-- nullable: an audit taken before the deep scan existed is honestly absent from this queue rather
+-- than sorting in as an ancient zero. Declared here, AFTER the column exists.
+create index if not exists idx_prospect_audits_owner_deep
+  on public.prospect_audits(owner_id, deep_scanned_at desc) where deep_scanned_at is not null;
 
 -- ---------- 4. RLS ----------
 -- House owner-all pattern, identical to prospect_audits in app_0074: one policy covering

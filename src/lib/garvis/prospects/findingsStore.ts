@@ -107,23 +107,23 @@ export async function linkPitchFindings(input: {
   const { ownerId, messageId, auditId, picks } = input;
   if (picks.length === 0) return false;
   try {
-    // Resolve the finding rows we just wrote for this audit, by code.
+    // The assertion is recorded by CODE, which is why it survives a re-scan: findings are deleted
+    // and rewritten every time we look at a site again, and what we SAID must outlive what is
+    // currently true. finding_id is a convenience pointer at the observation as it stood when we
+    // spoke; it is released rather than cascaded when that row is replaced, so a failed lookup here
+    // costs us the link, never the record.
     const codes = picks.map((p) => p.finding.code);
-    const { data, error } = await supabase.from('findings')
+    const { data } = await supabase.from('findings')
       .select('id, code').eq('audit_id', auditId).in('code', codes);
-    if (error || !data) return false;
+    const idByCode = new Map(((data ?? []) as { id: string; code: string }[]).map((r) => [r.code, r.id]));
 
-    const idByCode = new Map((data as { id: string; code: string }[]).map((r) => [r.code, r.id]));
-    const rows = picks
-      .map((p) => ({
-        owner_id: ownerId,
-        message_id: messageId,
-        finding_id: idByCode.get(p.finding.code),
-        emphasized: p.role === 'lead',
-      }))
-      .filter((r): r is { owner_id: string; message_id: string; finding_id: string; emphasized: boolean } =>
-        typeof r.finding_id === 'string');
-    if (rows.length === 0) return false;
+    const rows = picks.map((p) => ({
+      owner_id: ownerId,
+      message_id: messageId,
+      finding_code: p.finding.code,
+      finding_id: idByCode.get(p.finding.code) ?? null,
+      emphasized: p.role === 'lead',
+    }));
 
     const { error: insErr } = await supabase.from('outreach_finding_refs').insert(rows);
     return !insErr;
@@ -160,19 +160,19 @@ export interface FindingPerformance {
  * Early on this returns mostly nulls, and that is the correct answer — top-of-funnel questions need
  * hundreds of sends before they mean anything, and close/churn questions need far more than that.
  *
- * Two queries joined in memory rather than one nested PostgREST select: the embed would depend on
- * FK names resolving through two hops, and a silent embed failure here would look like "no data"
- * rather than an error. Explicit is cheaper to debug and the row counts are small.
+ * NO JOIN TO `findings`. The code is denormalised onto the ref precisely so this question survives a
+ * re-scan — joining back would silently drop every pitch whose finding has since been rewritten or
+ * fixed, which is exactly the set of pitches whose outcome we most want to learn from.
  */
 export async function findingPerformance(minSample = 25): Promise<FindingPerformance[]> {
   try {
     const { data: refs, error: refErr } = await supabase
       .from('outreach_finding_refs')
-      .select('message_id, emphasized, findings!inner(code)')
+      .select('message_id, emphasized, finding_code')
       .limit(5000);
     if (refErr || !refs) return [];
 
-    type Ref = { message_id: string; emphasized: boolean; findings: { code: string } | { code: string }[] | null };
+    type Ref = { message_id: string; emphasized: boolean; finding_code: string | null };
     const rows = refs as unknown as Ref[];
     const messageIds = [...new Set(rows.map((r) => r.message_id).filter(Boolean))];
     if (messageIds.length === 0) return [];
@@ -192,9 +192,7 @@ export async function findingPerformance(minSample = 25): Promise<FindingPerform
 
     const acc = new Map<string, { pitched: number; led: number; opened: number; clicked: number; replied: number }>();
     for (const r of rows) {
-      // PostgREST returns an embedded to-one as an object, but older/looser shapes hand back an
-      // array — normalise rather than trusting one form.
-      const code = Array.isArray(r.findings) ? r.findings[0]?.code : r.findings?.code;
+      const code = r.finding_code;
       if (!code) continue;
       const cur = acc.get(code) ?? { pitched: 0, led: 0, opened: 0, clicked: 0, replied: 0 };
       cur.pitched++;
