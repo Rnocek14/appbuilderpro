@@ -45,5 +45,12 @@ ok('empty: not DIY', empty.diyBuilder === false);
 // Determinism.
 ok('deterministic', JSON.stringify(fingerprintTech(plain ? 'x' : 'x')) === JSON.stringify(fingerprintTech('x')));
 
+// Acuity's *.as.me short client-booking domain — the form most businesses actually link. Kept in
+// step with the same signature in _shared/conversionScan.ts; the negative cases guard the anchoring.
+ok('acuity: *.as.me detected', fingerprintTech('<a href="https://lumen.as.me/schedule.php">Book</a>').booking === 'acuity');
+ok('acuity: bare as.me/<slug> detected', fingerprintTech('<a href="https://as.me/lumen">Book</a>').booking === 'acuity');
+ok('acuity: canvas.me is not as.me', fingerprintTech('<a href="https://canvas.me/x">canvas</a>').booking === null);
+ok('acuity: prose "was.me" is not a booking link', fingerprintTech('<p>He was.me before that</p>').booking === null);
+
 console.log(`${fail === 0 ? '✓' : '✗'} techFingerprint.verify: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

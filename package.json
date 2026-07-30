@@ -137,6 +137,7 @@
     "verify:autonomygrants": "tsx src/lib/garvis/autonomy.verify.ts",
     "verify:ics": "tsx src/lib/garvis/ics.verify.ts",
     "verify:huntreadiness": "tsx src/lib/garvis/huntReadiness.verify.ts",
+    "scan:probe": "tsx scripts/scanProbe/probe.ts",
     "verify:a11yscan": "tsx supabase/functions/_shared/a11yScan.verify.ts",
     "verify:trackingscan": "tsx supabase/functions/_shared/trackingScan.verify.ts",
     "verify:mobilescan": "tsx supabase/functions/_shared/mobileScan.verify.ts",

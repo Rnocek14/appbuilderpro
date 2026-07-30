@@ -73,7 +73,13 @@ export const CONV_CODES = [
 const BOOKING: [string, RegExp][] = [
   ['calendly', /calendly\.com/i],
   // Acuity was bought by Squarespace and now ships under both hostnames.
-  ['acuity', /acuityscheduling\.com|squarespace-scheduling\.com|squarespacescheduling\.com/i],
+  // `*.as.me` is Acuity's short client-booking domain and is how most businesses actually link a
+  // booking page (`lumen.as.me/schedule.php`), so matching only acuityscheduling.com missed the
+  // common case and reported "no booking" at a business that plainly has one. A false NEGATIVE here
+  // is not harmless: "we didn't find a way to book" in an email to someone who booked you through
+  // Acuity that morning discredits every other finding in the message. Both alternatives are
+  // anchored so a word ending in "as" ("canvas.me/x") cannot match.
+  ['acuity', /acuityscheduling\.com|squarespace-scheduling\.com|squarespacescheduling\.com|\b[a-z0-9-]+\.as\.me\b|\bas\.me\/[a-z0-9]/i],
   ['jobber', /getjobber\.com|clienthub\.getjobber|jobber\.com\/online-booking/i],
   ['housecall', /housecallpro\.com|book\.housecallpro|hcpapp\.com/i],
   ['servicetitan', /servicetitan\.com|servicetitan[-_](?:scheduler|booking|widget)/i],

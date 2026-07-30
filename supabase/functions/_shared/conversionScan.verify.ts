@@ -250,5 +250,18 @@ ok('deterministic: bookingPlatform', bookingPlatform(sample) === bookingPlatform
 ok('deterministic: repeated booking calls do not drift (no sticky /g state)',
   bookedBy('https://calendly.com/x') === 'calendly' && bookedBy('https://calendly.com/x') === 'calendly');
 
+// ── Acuity's *.as.me short domain ────────────────────────────────────────────────────────────────
+// Caught by scanning a realistic med-spa page: the booking link most businesses actually publish is
+// `theirname.as.me/schedule.php`, not `acuityscheduling.com`, so the original signature reported "no
+// booking" at a business that plainly had one. A false NEGATIVE is not the harmless direction here —
+// telling someone we found no way to book, when they took a booking through Acuity that morning,
+// discredits every other finding in the same email.
+ok('acuity: the *.as.me client-booking domain is detected', bookedBy('<a href="https://lumen.as.me/schedule.php">Book</a>') === 'acuity');
+ok('acuity: the bare as.me/<slug> form is detected', bookedBy('<a href="https://as.me/lumen">Book</a>') === 'acuity');
+ok('acuity: the long acuityscheduling.com form still works', bookedBy('<a href="https://acuityscheduling.com/schedule.php?owner=1">Book</a>') === 'acuity');
+ok('acuity: canvas.me is NOT read as as.me', bookedBy('<a href="https://canvas.me/portfolio">canvas</a>') === null);
+ok('acuity: prose "was.me" is NOT a booking link', bookedBy('<p>He was.me before anything else</p>') === null);
+ok('acuity: "overseas.mercury" is NOT a booking link', bookedBy('<p>Overseas.mercury launched</p>') === null);
+
 console.log(`${fail === 0 ? '✓' : '✗'} conversionScan.verify: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
