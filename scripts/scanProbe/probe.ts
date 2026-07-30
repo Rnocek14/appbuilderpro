@@ -39,11 +39,9 @@
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { scanAccessibility } from '../../supabase/functions/_shared/a11yScan.ts';
-import { scanMobile } from '../../supabase/functions/_shared/mobileScan.ts';
-import { scanConversion, bookingPlatform } from '../../supabase/functions/_shared/conversionScan.ts';
-import { scanTracking, trackingInventory } from '../../supabase/functions/_shared/trackingScan.ts';
+import { deepScan, scanFacts } from '../../supabase/functions/_shared/deepScan.ts';
 import { fingerprintTech } from '../../supabase/functions/_shared/techFingerprint.ts';
+import { selectPitchFindings } from '../../src/lib/garvis/prospects/pitchFindings.ts';
 
 const PAGES_DIR = join(import.meta.dirname ?? 'scripts/scanProbe', 'pages');
 
@@ -57,21 +55,23 @@ for (const file of files) {
   try { html = readFileSync(file, 'utf8'); }
   catch (e) { console.error(`\n!! could not read ${file}: ${(e as Error).message}`); continue; }
 
-  const results = [scanAccessibility(html), scanMobile(html), scanConversion(html), scanTracking(html)];
-  const findings = results.flatMap((r) => r.findings);
-  const inv = trackingInventory(html);
+  const scan = deepScan(html);
+  const facts = scanFacts(html);
   const tech = fingerprintTech(html);
 
   console.log(`\n${'═'.repeat(78)}`);
-  console.log(`${file}   ${(html.length / 1024).toFixed(0)}kb`);
-  console.log(`platform=${tech.builder ?? '—'}  booking=${bookingPlatform(html) ?? '—'}  ` +
-    `trackers=${[...inv.trackers, ...inv.sessionReplay].join(',') || '—'}  consent=${inv.consentPlatform ?? 'NONE'}`);
+  console.log(`${file}   ${(html.length / 1024).toFixed(0)}kb   scan v${scan.version}`);
+  console.log(`platform=${tech.builder ?? '—'}  booking=${facts.booking ?? '—'}  ` +
+    `trackers=${[...facts.tracking.trackers, ...facts.tracking.sessionReplay].join(',') || '—'}  ` +
+    `consent=${facts.tracking.consentPlatform ?? 'NONE'}  schema=${facts.presence.jsonLdTypes.join(',') || '—'}`);
+  console.log(`findings=${scan.findings.length}  a11y instances=${scan.a11yInstances}  ` +
+    `by category: ${Object.entries(scan.counts).filter(([, n]) => n).map(([k, n]) => `${k}:${n}`).join(' ') || '—'}`);
   console.log(`${'─'.repeat(78)}`);
 
-  if (!findings.length) {
+  if (!scan.findings.length) {
     console.log('  (no findings)');
   } else {
-    for (const f of findings) {
+    for (const f of scan.findings) {
       console.log(`  [${f.severity.padEnd(4)}|${f.confidence.padEnd(12)}] ${f.code}${f.count ? ` ×${f.count}` : ''}` +
         `${f.wcag ? `  wcag ${f.wcag}` : ''}`);
       console.log(`         ${f.detail}`);
@@ -79,10 +79,18 @@ for (const file of files) {
     }
   }
 
+  // WHAT WOULD ACTUALLY BE SAID TO THIS BUSINESS. The findings above are the report; the pitch is a
+  // different, smaller, revenue-first selection, and it is the thing that lands in a stranger's
+  // inbox. Read it as the prospect would — anything here you would not defend on a phone call is a
+  // bug, whatever the rule that produced it says.
+  const picks = selectPitchFindings(scan.findings);
+  console.log(`\n  what the PITCH would lead with (${picks.length}):`);
+  if (!picks.length) console.log('   · nothing — no finding qualifies to lead, so no pitch is sent');
+  for (const p of picks) console.log(`   ${p.role === 'lead' ? '▸' : '·'} [${p.role}] ${p.finding.code}`);
+
   // The limits are not decoration and they are not optional — they ship with every result and any
   // report built on this is expected to show them. Printing them here keeps them in front of the
   // person deciding whether the findings above are safe to put in an email.
-  const limits = [...new Set(results.flatMap((r) => r.limits))];
-  console.log(`\n  what this scan could NOT see (${limits.length}):`);
-  for (const l of limits) console.log(`   · ${l}`);
+  console.log(`\n  what this scan could NOT see (${scan.limits.length}):`);
+  for (const l of scan.limits) console.log(`   · ${l}`);
 }
