@@ -38,6 +38,8 @@ import {
   attr,
   elements,
   snippet,
+  stripComments,
+  stripElements,
   stripNonContent,
 } from './scanTypes.ts';
 
@@ -60,10 +62,14 @@ export interface TrackingInventory {
 // the scanner non-deterministic.
 
 const TRACKERS: [string, RegExp][] = [
-  // `facebook[-_]pixel` matches the slug the WordPress/Shopify integrations enqueue
-  // (id="facebook-pixel-js"). It deliberately does NOT match the English words "Facebook Pixel",
-  // which appear in plenty of honest privacy-policy prose.
-  ['meta_pixel', /connect\.facebook\.net|fbevents\.js|\bfbq\s*\(|facebook[-_]pixel/i],
+  // NOT the bare host `connect.facebook.net`: that host also serves sdk.js, the Facebook JS SDK
+  // behind the Like box, the page plugin and Messenger chat. Half the small businesses with a
+  // Facebook presence load it, and NONE of them are running a conversion pixel because of it.
+  // Anchored instead on the pixel's own loader, its global, and its no-JS beacon.
+  // `facebook[-_]pixel[-_.]js` is the slug the WordPress/Shopify integrations enqueue
+  // (id="facebook-pixel-js"); the bare slug is not enough, because `/blog/facebook-pixel-guide`
+  // is a link to an article, not an installed tag.
+  ['meta_pixel', /fbevents\.js|\bfbq\s*\(|facebook\.com\/tr\?id=|facebook[-_]pixel[-_.]js\b/i],
   ['ga', /googletagmanager\.com\/gtag|google-analytics\.com\/(analytics|ga|collect|gtm)|\bgtag\s*\(|\b_gaq\b/i],
   // The tag manager is listed as a tool in its own right because it IS a third-party script the page
   // loads — and because its presence is the reason `limits` warns the list is a floor.
@@ -75,21 +81,31 @@ const TRACKERS: [string, RegExp][] = [
   ['pinterest', /\bpintrk\s*\(|s\.pinimg\.com\/ct\//i],
   ['snap', /sc-static\.net\/scevent|\bsnaptr\s*\(/i],
   ['reddit', /redditstatic\.com\/ads|\brdt\s*\(\s*['"]init/i],
-  ['bing', /bat\.bing\.com|\buetq\b/i],
+  // `\buetq\b` alone matched inside base64: a data: URI is alphanumeric with `+` and `/` as the
+  // only non-word characters, so an inline image can contain `…+uetq/…` and read as a Bing tag.
+  // Anchored on the forms the real snippet actually writes.
+  ['bing', /bat\.bing\.com|['"]uetq['"]|\bwindow\.uetq\b|\buetq\.push\b/i],
 ];
 
 // Session replay is split out because it is a different kind of thing. A pixel counts a visit; these
 // record the visit — pointer path, clicks, scrolling, and whatever was typed into a form unless the
 // vendor's masking was configured. That difference is what the finding explains, in those words.
+// Every pattern here is a CDN/script host or the vendor's own global — never the vendor's marketing
+// domain. `logrocket.(com|io)` used to be in this table and matched a link to blog.logrocket.com,
+// one of the most-cited engineering blogs on the web: citing an article would have produced a
+// high-severity "session-recording tool detected" about a tool the site does not run. The same trap
+// was open for mouseflow.com, smartlook.com, luckyorange.com and inspectlet.com.
 const SESSION_REPLAY: [string, RegExp][] = [
   ['hotjar', /static\.hotjar\.com|\bhjid\s*:|\bwindow\.hj\b/i],
-  ['clarity', /clarity\.ms|\bclarity\s*\(\s*['"]/i],
+  // `clarity.ms/` with the path separator: that host only ever serves the tag (the marketing site
+  // people link to is clarity.microsoft.com), and the asset path varies by install.
+  ['clarity', /clarity\.ms\/|\bclarity\s*\(\s*['"]/i],
   ['fullstory', /fullstory\.com\/s\/fs\.js|edge\.fullstory\.com|\bFS\.identify\b/i],
-  ['logrocket', /cdn\.lr-ingest\.|logrocket\.(com|io)|\bLogRocket\.init\b/i],
-  ['mouseflow', /mouseflow\.com|\b_mfq\b/i],
-  ['smartlook', /smartlook\.com|\bsmartlook\s*\(/i],
-  ['luckyorange', /luckyorange\.(com|net)/i],
-  ['inspectlet', /inspectlet\.com|\b__insp\b/i],
+  ['logrocket', /cdn\.lr-ingest\.|cdn\.lr-in(?:-prod)?\.com|cdn\.logrocket\.(?:com|io)|logrocket\.min\.js|\bLogRocket\.init\b/i],
+  ['mouseflow', /cdn\.mouseflow\.com|\b_mfq\b/i],
+  ['smartlook', /(?:web-sdk|rec|manager)\.smartlook\.(?:com|cloud)|\bsmartlook\s*\(/i],
+  ['luckyorange', /(?:tools|cdn)\.luckyorange\.com|luckyorange\.(?:com|net)\/(?:core|w\.js|lo\.js)|\b__lo_site_id\b|\b__wtw_lucky_site_id\b/i],
+  ['inspectlet', /cdn\.inspectlet\.com|\b__insp\b/i],
 ];
 
 // Consent platforms. Matching here is deliberately GENEROUS — every extra match SUPPRESSES a
@@ -111,20 +127,52 @@ const CONSENT: [string, RegExp][] = [
   ['cookie_script', /cookie-script\.com|\bcookiescript\b/i],
   ['borlabs', /borlabs[-_]?cookie/i],
   ['civic', /cookiecontrol|civiccomputing/i],
+  ['trustarc', /consent\.trustarc\.com|trustarc\.com\/notice|\btrustarc\b|\btruste\b/i],
+  ['axeptio', /axept\.io|\baxeptio\b/i],
+  ['cookiehub', /cookiehub\.(?:com|eu|net)|\bcookiehub\b/i],
+  ['consentmanager', /consentmanager\.(?:net|mgr)|\bcmpBox\b|\b__cmpapi\b/i],
+  ['ketch', /ketchcdn\.com|\bketchjs\b|\bwindow\.ketch\b|\bketch\s*\(/i],
+  ['sourcepoint', /sp-prod\.net|cdn\.privacy-mgmt\.com|sourcepoint|\b_sp_\b/i],
+  ['tarteaucitron', /tarteaucitron/i],
+  ['enzuzo', /enzuzo\.com|\benzuzo\b/i],
+  ['secure_privacy', /secureprivacy\.ai|\bsecureprivacy\b/i],
+  ['termsfeed', /termsfeed\.com|\btermsfeed\b/i],
+  ['pandectes', /\bpandectes\b/i],
+  ['consentmo', /\bconsentmo\b|isenselabs/i],
+  // WordPress ships more consent banners than every SaaS CMP combined; these are the plugin slugs
+  // they leave in the markup (Cookie Notice, GDPR Cookie Consent, Real Cookie Banner).
+  ['wp_cookie_plugin', /cookie-law-info|\bcli[-_]bar\b|\bcnArgs\b|\bcookie-notice\b|real-cookie-banner|\brcb-/i],
+  // Shopify's native consent API. A store that calls it has wired consent up, whatever the banner
+  // it renders looks like.
+  ['shopify_privacy', /customerPrivacy|setTrackingConsent|privacyBanner/i],
   // The IAB TCF API is defined by every certified CMP — a strong generic signal that SOME consent
   // framework is present even when the vendor's own name never appears in the HTML.
   ['iab_tcf', /\b__tcfapi\b|\b__cmp\b/i],
   ['cookieconsent', /cookieconsent|cookie-consent|cookie_consent/i],
+  // Last of the named signals, because it is the weakest: Google Consent Mode says consent state is
+  // being managed, without naming who manages it. Still far better evidence of a consent mechanism
+  // than the silence we would otherwise report.
+  ['google_consent_mode', /gtag\s*\(\s*['"]consent['"]|['"]consent['"]\s*,\s*['"](?:default|update)['"]/i],
 ];
 
 /**
  * A hand-rolled banner: no library, just a div and a button. It is still a consent mechanism, and
- * calling it absent would be a false statement about the page. Both halves are required — a cookie
- * *phrase* on its own is just prose (a privacy policy says "we use cookies" too), so we insist on
- * something that looks like a control or a banner container next to it.
+ * calling it absent would be a false statement about the page. EITHER half is enough — a banner
+ * container OR a control that reads like a cookie choice. That is deliberately the loose direction:
+ * every match here only ever SUPPRESSES a finding, so the cost of being generous is a missed
+ * opportunity, and the cost of being strict is telling an owner their banner does not exist.
+ *
+ * The value is matched with the quotes OPTIONAL, because `class=cookie-banner` (no quotes) is legal
+ * HTML that real hand-written pages ship, and the earlier quote-only pattern read those pages as
+ * having no banner at all.
  */
-const BANNER_CONTAINER = /(?:id|class)\s*=\s*["'][^"']*cookie[-_ ]?(banner|consent|notice|bar|popup|law|policy[-_]?bar)/i;
-const BANNER_CONTROL = /(accept|allow|agree)[\s\-_]*(?:to\s*)?(?:all[\s\-_]*)?cookies?\b/i;
+const BANNER_CONTAINER =
+  /(?:id|class)\s*=\s*["']?[^"'>]{0,200}?(?:cookie[-_ ]?(?:banner|consent|notice|bar|popup|law|disclaimer|compliance|policy[-_]?bar)|(?:gdpr|ccpa)[-_ ]?(?:banner|consent|notice|bar|popup|modal|wrap)?|consent[-_ ]?(?:banner|bar|popup|modal|manager|notice))/i;
+// "Accept all" on its own is NOT here: "we accept all major credit cards" is on half the plumbing
+// sites in the country, and silencing the finding on that sentence would be sloppy in the other
+// direction. Every control below has to mention cookies or consent explicitly.
+const BANNER_CONTROL =
+  /(?:accept|allow|agree|reject|decline|deny|manage)[\s\-_]*(?:to\s*)?(?:all[\s\-_]*)?(?:the[\s\-_]*)?cookies?\b|cookie[\s\-_]*(?:settings|preferences|choices)|(?:only|just)[\s\-_]*(?:necessary|essential)[\s\-_]*cookies?\b|manage[\s\-_]*(?:consent|cookie)[\s\-_]*(?:preferences|settings|choices)?/i;
 
 /** Human-readable names, used only in owner-facing `title`/`detail` text. */
 const LABELS: Record<string, string> = {
@@ -161,19 +209,41 @@ function listOf(names: string[]): string {
   return `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}`;
 }
 
+// An opening tag, matched with a bounded quantifier so a `>`-free stretch of a malformed document
+// can never make this quadratic.
+const META_TAG = /<meta\b[^>]{0,4000}>/gi;
+const LINK_TAG = /<link\b[^>]{0,4000}>/gi;
+const RESOURCE_HINT = /\brel\s*=\s*["']?\s*(?:dns-prefetch|preconnect)\b/i;
+
 /**
  * The markup a browser would actually execute.
  *
  * We can NOT run stripNonContent() here the way the content scanners do: tracker snippets live
- * inside <script>, so stripping script bodies would delete the only evidence there is. What we do
- * strip is HTML comments — a commented-out pixel does not load, and reporting one would be exactly
- * the false positive that gets a real business told a false thing about itself.
+ * inside <script>, so stripping script bodies would delete the only evidence there is. <noscript>
+ * is kept for the same reason: the Meta pixel's standard install puts an
+ * <img src="facebook.com/tr?id=…"> fallback in there, and for a visitor without JS that image
+ * request really does fire.
  *
- * <noscript> is kept on purpose: the Meta pixel's standard install puts an <img src="facebook.com/tr">
- * fallback in there, and for a visitor without JS that image request really does fire.
+ * What comes out is everything a browser would ACT on. Four things are removed because a browser
+ * would not, and reporting any of them is telling a business it runs a tool it does not run:
+ *
+ *  1. HTML comments. A commented-out pixel does not load. (An UNTERMINATED `<!--` swallows the rest
+ *     of the document here, exactly as a browser does — see stripComments.)
+ *  2. <pre>, <code> and <textarea> bodies. Their contents are TEXT. An agency page titled "How to
+ *     install the Meta pixel" ships `&lt;script&gt;fbq('init'…)` as escaped characters a browser
+ *     prints rather than runs, and a tutorial about a pixel is not a pixel.
+ *  3. Content-Security-Policy <meta> tags. A CSP names every host the site MAY use; it is a
+ *     restriction, not a load. Reading one back as an inventory would credit a careful site with
+ *     every tracker it took the trouble to think about.
+ *  4. <link rel="preconnect"|"dns-prefetch">. These warm a connection. They fetch nothing and run
+ *     nothing. (rel="preload"/"prefetch" are LEFT IN: those do fetch the resource.)
  */
 function loadedMarkup(html: string): string {
-  return html.replace(/<!--[\s\S]*?-->/g, ' ');
+  let out = stripComments(html);
+  out = stripElements(out, ['pre', 'code', 'textarea']);
+  out = out.replace(META_TAG, (tag) => (/content-security-policy/i.test(tag) ? ' ' : tag));
+  out = out.replace(LINK_TAG, (tag) => (RESOURCE_HINT.test(tag) ? ' ' : tag));
+  return out;
 }
 
 /** Names matched from a table, in table order, plus a snippet of the first hit as proof. */
@@ -217,6 +287,9 @@ const PRIVACY_HREF = /(?:href|url|link)\s*[=:]\s*["'][^"']*privacy/i;
 // silence the finding on half the pages that most need it.
 const PRIVACY_PATH = /\/privacy(?:[-_/?#."']|$)|\bprivacy[-_](policy|notice|statement)\b/i;
 const PRIVACY_TEXT = /privacy\s*(policy|notice|statement|&(amp;)?\s*(cookie|terms))/i;
+// Applied ONLY to the text of a real <a>, never to page prose. Footers that read just "Privacy" or
+// "Data Protection" are everywhere, and "we respect your privacy" is not a link.
+const PRIVACY_LINK_TEXT = /\bprivacy\b|\bdata protection\b|\bdatenschutz\b/i;
 
 function hasPrivacyLink(html: string): boolean {
   // 1. Real anchors, read from stripped content so a URL inside a <script> string can't stand in
@@ -226,7 +299,7 @@ function hasPrivacyLink(html: string): boolean {
     const href = attr(a.attrs, 'href') ?? '';
     if (/privacy/i.test(href)) return true;
     const text = a.inner.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (PRIVACY_TEXT.test(text)) return true;
+    if (PRIVACY_TEXT.test(text) || PRIVACY_LINK_TEXT.test(text)) return true;
   }
   // 2 + 3. The false-positive guard: anything privacy-shaped anywhere in the page, including the
   //    script-borne nav config. Suppressing a finding on a weaker signal is the safe direction.
@@ -250,7 +323,9 @@ export function trackingInventory(html: string): TrackingInventory {
 const LIMITS: string[] = [
   'Consent TIMING cannot be determined from static HTML: whether any of these scripts runs before a visitor accepts, or only after, requires loading the page in a real browser and watching the network. A consent tool that blocks tags correctly and one that fires everything on load look identical here.',
   'Tag managers (Google Tag Manager, Tealium and similar) fetch and inject their tags at runtime, so any tracker delivered that way is invisible to this scan. The list of tools found is a floor, not a ceiling.',
-  'Consent tools are matched against a list of known platforms plus a generic cookie-banner signature; a custom-built banner that matches none of those, or one injected by JavaScript after load, would not be seen.',
+  'Consent tools are matched against a list of known platforms plus a generic cookie-banner signature; a custom-built banner that matches none of those would not be seen. Many consent tools also render only for visitors in certain regions, so a banner that a European or Californian visitor sees may be genuinely absent from the HTML served here.',
+  'Only the HTML this one page returns was read. Anything the page builds with JavaScript after load — a cookie banner, a footer, a menu, or the whole body of a React/Vue site — is not visible to this scan, and neither is a privacy policy or consent tool that lives on another page of the site.',
+  'A script being present in the HTML is not proof it runs for a given visitor: the site\'s own consent logic, a regional rule, or the visitor\'s browser may block it. Equally, what a tool records once it does run depends on settings held by the vendor, which are not in this page.',
   'This is an observation of what this page\'s own HTML loads and links to, not a legal assessment. No claim is made about any law, regulation, jurisdiction, or the obligations of this business.',
 ];
 
@@ -296,7 +371,7 @@ export function scanTracking(html: string): ScanResult {
       severity: 'high',
       confidence: 'detected',
       title: `Session-recording tool detected: ${listOf(replay.names)}`,
-      detail: `${listOf(replay.names)} ${replay.names.length === 1 ? 'is' : 'are'} loaded on this page. Tools of this kind record what a visitor does — pointer movement, clicks, scrolling, and often text typed into form fields unless those fields are explicitly masked — and the recording is stored by the vendor for playback.`,
+      detail: `This page's HTML loads ${listOf(replay.names)}. Tools of this kind are built to record what a visitor does — pointer movement, clicks, scrolling, and often text typed into form fields unless those fields are masked — and to store the recording with the vendor for playback. Exactly what is captured depends on settings held in the vendor's account, which this scan cannot see.`,
       count: replay.names.length,
       evidence: replay.evidence,
     });
@@ -313,7 +388,7 @@ export function scanTracking(html: string): ScanResult {
       // "ad and analytics" on purpose: this count excludes the session-replay tools, which get
       // their own finding. A title saying "tools" would contradict the number next to it.
       title: `${tracked.names.length} separate ad and analytics trackers loading on one page`,
-      detail: `Distinct third-party tracking scripts detected: ${listOf(tracked.names)}. Each is a separate vendor the page hands visitor data to, and a separate script the browser has to fetch before the page settles.`,
+      detail: `Distinct third-party tracking scripts detected: ${listOf(tracked.names)}. Each is a separate vendor whose code this page loads, and a separate script the browser has to fetch before the page settles.`,
       count: tracked.names.length,
       evidence: tracked.evidence,
     });

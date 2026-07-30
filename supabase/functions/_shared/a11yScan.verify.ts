@@ -244,5 +244,182 @@ ok('deterministic: same input, byte-identical result',
 ok('deterministic: good page too', JSON.stringify(scanAccessibility(GOOD)) === JSON.stringify(scanAccessibility(GOOD)));
 ok('deterministic: empty input too', JSON.stringify(scanAccessibility('')) === JSON.stringify(scanAccessibility('')));
 
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+// ADVERSARIAL PASS — every case below is markup a competent site really ships. A finding here is
+// a false accusation sent to a stranger's inbox, which is the worst outcome this project has.
+// ══════════════════════════════════════════════════════════════════════════════════════════════
+
+const D = (body: string) => `<!doctype html><html lang="en"><head><title>T</title></head><body>${body}</body></html>`;
+const none = (name: string, html: string) => ok(name, scanAccessibility(html).findings.length === 0);
+
+// ── A `>` inside a quoted attribute value does NOT end the tag ────────────────────────────────
+// `onclick="if(a>b)"`, `data-target="ul > li"`, `alt="Small > Large"` are all legal HTML. A tag
+// matcher that stops at the first `>` truncates the attribute list and then reports the attributes
+// it never got to as missing — telling a site with perfectly good alt text that it has none.
+none('FP: img with a `>` in an earlier attribute still counts its alt',
+  D(`<img src="a.jpg" data-caption="Bread > Sourdough" alt="A sourdough loaf">`));
+none('FP: input with a `>` in an earlier attribute still counts its aria-label',
+  D(`<form><input type="text" data-rule="len>3" aria-label="Search"></form>`));
+none('FP: textarea with a `>` in an earlier attribute still counts its aria-label',
+  D(`<form><textarea data-max="n>10" aria-label="Message"></textarea></form>`));
+none('FP: iframe with a `>` in an earlier attribute still counts its title',
+  D(`<iframe src="/m" data-sel="div > iframe" title="Map of the clinic"></iframe>`));
+ok('FP: <html> with a `>` in an earlier attribute still counts its lang',
+  !has(`<!doctype html><html data-theme="a > b" lang="en"><head><title>T</title></head><body>x</body></html>`,
+    'a11y.missing_lang'));
+ok('FP: an onclick comparison does not truncate the tag',
+  !has(D(`<form><input type="text" onchange="if(this.value.length>2)go()" aria-label="Postcode"></form>`),
+    'a11y.input_missing_label'));
+ok('evidence: a `>` inside an attribute value does not truncate the proof snippet',
+  get(D(`<img src="a.jpg" data-caption="Bread > Sourdough">`), 'a11y.img_missing_alt')?.evidence
+    === '<img src="a.jpg" data-caption="Bread > Sourdough">');
+
+// ── An image can be named by something other than alt ─────────────────────────────────────────
+none('FP: img named by aria-label is not "an image with no alt text"',
+  D(`<img src="/logo.svg" aria-label="Riverside Dental logo">`));
+none('FP: img named by aria-labelledby is not "an image with no alt text"',
+  D(`<p id="cap">Our team outside the clinic</p><img src="/t.jpg" aria-labelledby="cap">`));
+
+// ── Invisible images are not barriers ─────────────────────────────────────────────────────────
+// A 1x1 display:none tracking pixel is on a large share of small-business pages. Counting it as
+// "an image a screen reader announces by file name" is simply false, and the owner who views source
+// finds a Facebook pixel and bins the whole email.
+none('FP: a 1x1 display:none tracking pixel is not an image barrier',
+  D(`<img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=1&ev=PageView">`));
+none('FP: a bare 1x1 pixel with no inline style is not an image barrier',
+  D(`<img src="https://px.example/p.gif" width="1" height="1">`));
+none('FP: an img with the hidden attribute is not an image barrier', D(`<img src="p.gif" hidden>`));
+none('FP: a zero-size img is not an image barrier', D(`<img src="s.gif" width="0" height="0">`));
+none('FP: an img hidden with visibility:hidden is not an image barrier',
+  D(`<img src="s.gif" style="visibility:hidden">`));
+ok('a real content image with no alt STILL fires (suppression is not a blanket)',
+  get(D(`<img src="/hero.jpg" width="1200" height="600">`), 'a11y.img_missing_alt')?.count === 1);
+ok('a normal alt-less img with no dimensions STILL fires',
+  has(D(`<img src="/hero.jpg">`), 'a11y.img_missing_alt'));
+
+none('FP: a 1x1 tracking iframe is not a frame barrier',
+  D(`<iframe src="https://px.example/f" width="1" height="1"></iframe>`));
+none('FP: an iframe with the hidden attribute is not a frame barrier', D(`<iframe src="https://gtm" hidden></iframe>`));
+ok('a real embedded map with no title STILL fires',
+  has(D(`<iframe src="https://maps.example.com/embed" width="600" height="450"></iframe>`), 'a11y.iframe_missing_title'));
+
+// ── "alt" is an attribute NAME, not a substring ───────────────────────────────────────────────
+none('FP: a lazy-loader data-alt still suppresses the finding',
+  D(`<img data-src="/a.jpg" data-alt="Our shopfront">`));
+ok('the word "alt" in a file path does not count as alt text',
+  has(D(`<img src="/img/alt-view.jpg">`), 'a11y.img_missing_alt'));
+ok('the word "Alt" in a title attribute does not count as alt text',
+  has(D(`<img src="/a.jpg" title="Alt view">`), 'a11y.img_missing_alt'));
+
+// ── An attribute-looking string inside a VALUE is not an attribute ─────────────────────────────
+none('FP: "id=" inside a URL path is not an id (no phantom duplicate id)',
+  D(`<a href="/p/id=12">One</a><a href="/p/id=12">Two</a>`));
+none('FP: "tabindex=" inside a URL path is not a tabindex',
+  D(`<a href="/help/tabindex=3">Help</a>`));
+none('FP: an attribute name glued to a quote is still read correctly',
+  D(`<div data-x="y"id="one"></div><div data-x="y"id="two"></div>`));
+
+// ── Skip links ────────────────────────────────────────────────────────────────────────────────
+none('FP: a skip link as the first thing inside the nav still counts as a skip link',
+  D(`<nav><a class="skip-link" href="#main">Skip to main content</a><a href="/">Home</a></nav><main id="main">x</main>`));
+none('FP: a skip link inside a nav still counts when the page holds a length-changing uppercase char',
+  D(`<h1>İSTANBUL</h1><nav><a class="skip-link" href="#main">Skip to content</a><a href="/">Home</a></nav><main id="main">x</main>`));
+ok('skip: the detail says what was searched for, not that no such link exists',
+  /wording this scan recognises|looked for/i.test(
+    get(D(`<nav><a href="/">Home</a></nav>`), 'a11y.no_skip_link')?.detail ?? ''));
+
+// ── <template> is an inert fragment, not part of the document outline ──────────────────────────
+none('FP: headings inside a <template> are not part of the document heading order',
+  D(`<h1>Riverside Dental</h1><template id="card"><h4>Card title</h4></template><h2>Book</h2>`));
+
+// ── Markup a real framework ships ─────────────────────────────────────────────────────────────
+none('FP: uppercase tags, unquoted and single-quoted attributes',
+  `<!DOCTYPE HTML><HTML LANG=en><HEAD><TITLE>Shop</TITLE></HEAD><BODY><IMG SRC=a.jpg ALT='A dog'><LABEL FOR=q>Search</LABEL><INPUT ID=q TYPE=text></BODY></HTML>`);
+none('FP: minified markup with no whitespace between tags',
+  `<!doctype html><html lang="en"><head><title>X</title></head><body><img src=a.jpg alt=x><button aria-label="Menu"><svg></svg></button></body></html>`);
+none('FP: XHTML self-closing void elements',
+  `<html lang="en"><head><title>T</title></head><body><img src="a.jpg" alt="" /><label for="e">E</label><input type="text" id="e" /></body></html>`);
+none('FP: a React shell with an empty root div claims nothing',
+  `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>App</title></head><body><div id="root"></div><script src="/main.js"></script></body></html>`);
+none('FP: Bootstrap navbar toggler is a named button',
+  D(`<button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-expanded="false" aria-label="Toggle navigation"><span class="navbar-toggler-icon"></span></button>`));
+none('FP: <picture> with a source and an alt-bearing img',
+  D(`<picture><source srcset="a.webp" type="image/webp"><img src="a.jpg" alt="A cake"></picture>`));
+none('FP: an inline svg <image> element is not an <img>', D(`<svg><image href="a.png"></image></svg>`));
+none('FP: a role="img" svg with a <title> names its link',
+  D(`<a href="/fb"><svg role="img" viewBox="0 0 24 24"><title>Facebook</title><path d="M0 0"/></svg></a>`));
+none('FP: a button whose second svg carries the name',
+  D(`<button><svg aria-hidden="true"><path/></svg><svg><title>Close</title></svg></button>`));
+none('FP: an input named by aria-labelledby', D(`<span id="lbl">Email</span><input type="email" aria-labelledby="lbl">`));
+none('FP: a select wrapped in a label with nested markup',
+  D(`<label class="f"><span>Choose a branch</span><select name="s"><option>1</option></select></label>`));
+none('FP: an svg sprite sheet with unique symbol ids',
+  D(`<svg style="display:none"><symbol id="ico-a"></symbol><symbol id="ico-b"></symbol></svg><svg aria-hidden="true"><use href="#ico-a"></use></svg>`));
+
+// An unclosed <a> swallows the next one, because the closing tag it pairs with belongs to the
+// anchor after it. That loses a finding and can never invent one — which is the direction this
+// scanner is allowed to be wrong in, and it is asserted here so the trade stays deliberate.
+none('unclosed <a> under-counts rather than inventing a finding',
+  D(`<a href="/a">Home<a href="/b"><span class="i"></span></a>`));
+ok('once the markup closes properly the empty link is found',
+  get(D(`<a href="/a">Home</a><a href="/b"><span class="i"></span></a>`), 'a11y.empty_link')?.count === 1);
+
+// ── Malformed / hostile input must not throw and must not hang ────────────────────────────────
+const survives = (name: string, html: string) => {
+  try { scanAccessibility(html); ok(name, true); } catch (e) { ok(`${name} — threw ${e}`, false); }
+};
+survives('crash: unterminated tag and stray angle brackets',
+  `<html lang="en"><head><title>T</title></head><body><img src="a  <p>3 < 5 and 6 > 2<a href="/x">`);
+survives('crash: unbalanced quote runs to end of document', `<html lang="en"><body><img src="a.jpg alt=x></body></html>`);
+survives('crash: null bytes and control characters', D(`<img src="a .jpg" alt="">`));
+survives('crash: lone surrogate in an attribute value', D(`<img src="\uD800.jpg">`));
+survives('crash: astral-plane text and RTL overrides', D(`<h1>\u{1F600}‮abc</h1><h3>\u{1F3E5}</h3>`));
+survives('crash: 500k bare angle brackets', '<'.repeat(500000));
+survives('crash: attribute soup of stray quotes, equals signs and slashes',
+  `<html lang="en"><body><img """ === /// alt><input = "" ='' type=></body></html>`);
+survives('crash: an attribute whose quote never closes', D(`<img src="a.jpg alt=x width=1`));
+survives('crash: 50k deeply nested divs',
+  D('<div>'.repeat(50000) + 'x' + '</div>'.repeat(50000)));
+
+// A 1.3MB page of never-closed <a> tags is ordinary broken-CMS output. A tag matcher that rescans
+// to end-of-document for every unclosed element goes quadratic and stalls the edge function.
+const UNCLOSED = `<html lang="en"><head><title>T</title></head><body>` + `<a href="/x">link`.repeat(80000) + `</body></html>`;
+const t0 = Date.now();
+scanAccessibility(UNCLOSED);
+const unclosedMs = Date.now() - t0;
+ok(`perf: 80k unclosed <a> completes promptly (took ${unclosedMs}ms)`, unclosedMs < 4000);
+const UNCLOSED_L = `<html lang="en"><head><title>T</title></head><body>` + `<label>x <input>`.repeat(40000) + `</body></html>`;
+const t1 = Date.now();
+scanAccessibility(UNCLOSED_L);
+const labelMs = Date.now() - t1;
+ok(`perf: 40k unclosed <label> completes promptly (took ${labelMs}ms)`, labelMs < 4000);
+
+// ── Limits must name everything this scan structurally cannot see ─────────────────────────────
+const lim2 = scanAccessibility(GOOD).limits.join(' ');
+ok('limits: says only the one fetched page was looked at', /only the (single|one) page|this one page|other pages/i.test(lim2));
+ok('limits: says content inside an <iframe> was not fetched', /inside an? <iframe>|inside those frames/i.test(lim2));
+ok('limits: says alt text is checked for presence, not usefulness', /presence, not|actually describes/i.test(lim2));
+ok('limits: says visibility depends on stylesheets it does not load', /stylesheet/i.test(lim2));
+
+// ── Honesty across EVERY finding this scanner can emit, not just the ones on BAD ───────────────
+const everyFinding = [
+  ...scanAccessibility(BAD).findings,
+  ...scanAccessibility(D(`<nav><a href="/">Home</a></nav>`)).findings,
+  ...scanAccessibility(`<html><head></head><body><h1>a</h1></body></html>`).findings,
+];
+ok('honesty: nothing claims compliance, legality, guarantees or risk',
+  everyFinding.every((f) => !/complian|conformance|ADA\b|WCAG-?compliant|lawsuit|sued|illegal|legal|guarantee|violat|penalt|fine[sd]?\b|must comply/i
+    .test(`${f.title} ${f.detail}`)));
+ok('honesty: every code is declared in A11Y_CODES', everyFinding.every((f) => (A11Y_CODES as readonly string[]).includes(f.code)));
+ok('honesty: every confidence is one of the three contract values',
+  everyFinding.every((f) => ['detected', 'likely', 'needs_review'].includes(f.confidence)));
+ok('honesty: nothing counted at zero', everyFinding.every((f) => f.count === undefined || f.count > 0));
+ok('honesty: evidence never exceeds the contract cap', everyFinding.every((f) => (f.evidence?.length ?? 0) <= 300));
+
+// Determinism under the adversarial inputs too.
+ok('deterministic: adversarial page is byte-identical across runs',
+  JSON.stringify(scanAccessibility(D(`<img src="a" data-x="a>b"><nav><a href="/">H</a></nav>`)))
+  === JSON.stringify(scanAccessibility(D(`<img src="a" data-x="a>b"><nav><a href="/">H</a></nav>`))));
+
 console.log(`${fail === 0 ? '✓' : '✗'} a11yScan.verify: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
