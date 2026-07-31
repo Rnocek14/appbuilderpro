@@ -420,15 +420,27 @@ Phase 0 and the core of Phase 1 landed together as the first full circuit:
 - Studio surfaces: channel baseline, winning-hook count, per-episode perf lines with verdicts,
   live posted status read from the publisher's own record.
 
-Explicitly deferred (in priority order): a `social_content` service-package row + client-world
-channel provisioning (avenue #1's productization); retention-field promotion in social-sync
-(TikTok `averageTimeWatched`/`fullVideoWatchedRate` and YouTube quartiles already land verbatim
-in `social_post_metrics.raw`); Instagram Trial Reels as the native hook-test lab; the
-creative-board platform widening for image posts (`socialBoard.ts`/`campaignCore.ts` still expose
-4 platforms — the VIDEO path already reaches all of them); a cheap posting head next to Ayrshare
-(Post Bridge/upload-post seam); Phase 2's AI clip engine (`generate-clip` with the Veo +
-aggregator seam over `reel_jobs`/`reel_clips`); a direct YouTube Analytics API integration (the
-only API exposing the full 100-point retention curve).
+**Round 3 (same day) — retention, the hook lab, and the sellable service (app_0125):**
+
+- **Retention into the loop**: social-sync now promotes TikTok `averageTimeWatched` /
+  `fullVideoWatchedRate` and YouTube `averageViewPercentage` to real columns; `retentionRead()`
+  turns them into the honest diagnosis (≥55% avg viewed = algorithm-push territory; <30% = fix
+  the hook/pacing; no data = null, never a guess) on every episode card.
+- **The Hook Lab**: a rendered episode spins a **B-cut** — same script, same art (persisted in
+  `episode.assets` and reused), a different hook variant — for ~$0.30 (new VO + render). The only
+  hook A/B the loop can trust: otherwise-identical videos. UI guides spacing cuts hours apart.
+- **The `social_content` service package** (v1, monthly, from $1,000/mo) seeded into the client
+  machinery: 12 videos/mo from the client's real footage, approval slates, branded channel
+  identity, attributed destination links, monthly performance report.
+
+Explicitly deferred (in priority order): client-world channel auto-provisioning when the
+`social_content` package is pinned (`packageEstablishes` hook); Instagram Trial Reels as a native
+hook-test surface next to the in-house B-cut lab; the creative-board platform widening for image
+posts (`socialBoard.ts`/`campaignCore.ts` still expose 4 platforms — the VIDEO path already
+reaches all of them); a cheap posting head next to Ayrshare (Post Bridge/upload-post seam);
+Phase 2's AI clip engine (`generate-clip` with the Veo + aggregator seam over
+`reel_jobs`/`reel_clips`); a direct YouTube Analytics API integration (the only API exposing the
+full 100-point retention curve).
 
 ## 10. Why this wins
 

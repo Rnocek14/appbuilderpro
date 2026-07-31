@@ -1,6 +1,6 @@
 // Run: npx tsx src/lib/garvis/growthLoop.verify.ts
 import {
-  episodePerf, channelBaseline, classifyEpisode, hookIntel, perfLine,
+  episodePerf, channelBaseline, classifyEpisode, hookIntel, perfLine, retentionRead,
   WINNER_MULTIPLE, QUIET_MULTIPLE, MIN_MEASURED, type EpisodeMetricRow, type EpisodePerf,
 } from './growthLoop';
 
@@ -13,7 +13,7 @@ const row = (over: Partial<EpisodeMetricRow>): EpisodeMetricRow => ({
   saves: null, clicks: null, engagement: null, ...over,
 });
 const perf = (id: string, reach: number | null, hook = `hook-${id}`): EpisodePerf =>
-  ({ episodeId: id, title: id, hook, reach, engagements: null, clicks: null });
+  ({ episodeId: id, title: id, hook, reach, engagements: null, clicks: null, avgViewPct: null, fullWatchRate: null });
 
 {
   const p = episodePerf('e1', 't', 'h', [
@@ -64,6 +64,21 @@ const perf = (id: string, reach: number | null, hook = `hook-${id}`): EpisodePer
   check('perfLine is honest about missing numbers', perfLine(perf('u', null), 100) === 'no numbers synced yet');
   check('perfLine names a winner and says what to do', perfLine(perf('w', 300), 100).includes('WINNER, double down'));
   check('perfLine names quiet honestly', perfLine(perf('q', 30), 100).includes('change the mechanism'));
+}
+{
+  // Retention — the signal the algorithms actually rank on (app_0125).
+  const p = episodePerf('r', 't', 'h', [
+    row({ video_views: 100, avg_view_pct: 62, full_watch_rate: 0.4 }),   // youtube
+    row({ video_views: 200, avg_view_pct: 48 }),                          // tiktok
+  ]);
+  check('avg-%-viewed is the MEAN of platforms that reported it', p.avgViewPct === 55);
+  check('completion rate averages only reporters (no null-dilution)', p.fullWatchRate === 0.4);
+  check('≥55% avg viewed reads as algorithm-push territory', retentionRead(p)?.includes('strong retention') === true);
+  check('<30% reads as a hook/pacing problem', retentionRead({ avgViewPct: 22, fullWatchRate: null })?.includes('fix the hook') === true);
+  check('mid-band gets the number, no editorializing', retentionRead({ avgViewPct: 45, fullWatchRate: null }) === '45% avg viewed');
+  check('completion rate speaks when avg-%-viewed is absent', retentionRead({ avgViewPct: null, fullWatchRate: 0.71 }) === '71% watched to the end');
+  check('no retention data → null, never a guess', retentionRead({ avgViewPct: null, fullWatchRate: null }) === null);
+  check('retention rides the perf line', perfLine(p, null).includes('avg viewed'));
 }
 
 console.log(`\ngrowthLoop.verify: ${passed} passed, ${failed} failed`);

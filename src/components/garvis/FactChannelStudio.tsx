@@ -16,7 +16,8 @@ import {
 } from '../../lib/garvis/factChannel';
 import {
   listChannels, createChannel, listEpisodes, draftEpisode, updateEpisode, generateSceneImage,
-  queueEpisodePost, loadChannelPerf, setChannelCta, type GrowthChannel, type ChannelEpisode, type ChannelPerf,
+  queueEpisodePost, loadChannelPerf, setChannelCta, createVariantEpisode,
+  type GrowthChannel, type ChannelEpisode, type ChannelPerf,
 } from '../../lib/garvis/channelsRun';
 import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
 import { buildStoryboard } from '../../lib/garvis/storyboard';
@@ -104,16 +105,24 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       const { scenes, imagePrompts } = scriptToScenes(script, ep.hook_index);
 
       // Illustrate every beat — one image per UNIQUE prompt (the hook reuses beat 1's art), each
-      // provenance-stamped by generate-image. Sequential on purpose: honest progress, metered spend.
-      const byPrompt = new Map<string, string>();
-      const uniquePrompts = [...new Set(imagePrompts.filter(Boolean))];
-      for (let i = 0; i < uniquePrompts.length; i++) {
-        setProgress(`Illustrating beat ${i + 1}/${uniquePrompts.length}…`);
-        byPrompt.set(uniquePrompts[i], await generateSceneImage(
-          illustrationPrompt(uniquePrompts[i], channel.visual_style), clusterId, `${script.title} — beat art`,
-        ));
+      // provenance-stamped by generate-image. Sequential on purpose: honest progress, metered
+      // spend. A B-cut (or a re-produce after a failure) REUSES the saved art — same beats, same
+      // frames, only the hook differs: the comparison the loop can actually trust, for pennies.
+      let imageUrls = ep.assets?.imageUrls ?? [];
+      if (imageUrls.length !== scenes.length) {
+        const byPrompt = new Map<string, string>();
+        const uniquePrompts = [...new Set(imagePrompts.filter(Boolean))];
+        for (let i = 0; i < uniquePrompts.length; i++) {
+          setProgress(`Illustrating beat ${i + 1}/${uniquePrompts.length}…`);
+          byPrompt.set(uniquePrompts[i], await generateSceneImage(
+            illustrationPrompt(uniquePrompts[i], channel.visual_style), clusterId, `${script.title} — beat art`,
+          ));
+        }
+        imageUrls = imagePrompts.map((p) => byPrompt.get(p) ?? '');
+        await updateEpisode(ep.id, { assets: { imageUrls } }).catch(() => {});
+        patchEpisode(ep.id, { assets: { imageUrls } });
       }
-      const withArt = scenes.map((s, i) => ({ ...s, imageUrl: byPrompt.get(imagePrompts[i]) ?? null }));
+      const withArt = scenes.map((s, i) => ({ ...s, imageUrl: imageUrls[i] || null }));
       const sb = buildStoryboard({ title: script.title, aspect: '9:16', accent: '#FF8A3D', scenes: withArt });
 
       setProgress('Narrating…');
@@ -152,6 +161,16 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       patchEpisode(ep.id, { status: 'failed', error: msg });
       onToast('error', msg);
     } finally { setBusy(false); setProgress(null); }
+  };
+
+  // THE HOOK LAB: spin a B-cut with a different hook, reusing the parent's art, and produce it.
+  const doVariant = async (ep: ChannelEpisode, hookIndex: number) => {
+    try {
+      const cut = await createVariantEpisode(ep, hookIndex);
+      setEpisodes((cur) => [cut, ...cur]); setOpenEpisode(cut.id);
+      onToast('info', 'B-cut created — same video, different hook. Post cuts hours apart so each gets its own test window.');
+      await doProduce(cut);
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not create the B-cut.'); }
   };
 
   const doQueue = async (ep: ChannelEpisode) => {
@@ -244,7 +263,11 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
               return (
                 <div key={ep.id} className="rounded-xl border border-forge-border p-3">
                   <button className="flex w-full items-center justify-between gap-2 text-left" onClick={() => setOpenEpisode(open ? null : ep.id)}>
-                    <span className="text-xs font-semibold text-forge-ink">{ep.title || 'Untitled'}{verdict === 'winner' && <span className="ml-1.5 text-[10px] font-bold text-green-500">WINNER</span>}</span>
+                    <span className="text-xs font-semibold text-forge-ink">
+                      {ep.title || 'Untitled'}
+                      {ep.variant_of && <span className="ml-1.5 rounded border border-forge-border px-1 text-[10px] text-forge-dim">B-CUT</span>}
+                      {verdict === 'winner' && <span className="ml-1.5 text-[10px] font-bold text-green-500">WINNER</span>}
+                    </span>
                     <span className={cn('rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide',
                       liveStatus === 'posted' ? 'border-green-600/50 text-green-500'
                         : liveStatus === 'queued' ? 'border-forge-ember/50 text-forge-ember'
@@ -297,6 +320,13 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                             {queueingId === ep.id ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue to {channel.platforms.join(' + ') || 'social'}
                           </Button>
                         )}
+                        {ep.status === 'rendered' && !ep.variant_of && script.hooks.map((_, i) => i !== ep.hook_index && (
+                          <button key={i} onClick={() => void doVariant(ep, i)} disabled={busy}
+                            title="Same video, this hook instead — reuses the art, costs only a new voiceover + render"
+                            className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">
+                            B-cut with hook {i + 1}
+                          </button>
+                        ))}
                       </div>
                     </div>
                   )}

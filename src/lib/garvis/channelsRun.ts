@@ -26,10 +26,13 @@ export interface ChannelEpisode {
   status: 'draft' | 'rendered' | 'queued' | 'posted' | 'failed';
   render_id: string | null; video_url: string | null; srt_url: string | null;
   caption: string; post_id: string | null; error: string | null; created_at: string;
+  /** Produced assets persisted for reuse — a B-cut re-renders with the SAME art for pennies. */
+  assets: { imageUrls?: string[] };
+  variant_of: string | null;
 }
 
 const CHANNEL_COLS = 'id, world_id, cluster_id, name, handle, niche, persona, platforms, cadence_per_week, monetization_mode, voice, music_mood, visual_style, status, created_at, cta_url, cta_label';
-const EPISODE_COLS = 'id, channel_id, cluster_id, title, topic, script, hook_index, status, render_id, video_url, srt_url, caption, post_id, error, created_at';
+const EPISODE_COLS = 'id, channel_id, cluster_id, title, topic, script, hook_index, status, render_id, video_url, srt_url, caption, post_id, error, created_at, assets, variant_of';
 
 export async function listChannels(worldId?: string | null): Promise<GrowthChannel[]> {
   let q = supabase.from('growth_channels').select(CHANNEL_COLS).order('created_at', { ascending: true }).limit(50);
@@ -91,7 +94,7 @@ export async function loadChannelPerf(episodes: ChannelEpisode[]): Promise<Chann
   const [{ data: posts }, { data: metrics }] = await Promise.all([
     supabase.from('social_posts').select('id, status').in('id', postIds).limit(200),
     supabase.from('social_post_metrics')
-      .select('post_id, likes, comments, shares, impressions, video_views, saves, clicks, engagement')
+      .select('post_id, likes, comments, shares, impressions, video_views, saves, clicks, engagement, avg_watch_seconds, full_watch_rate, avg_view_pct')
       .in('post_id', postIds).limit(500),
   ]);
   const statusByPost = new Map(((posts ?? []) as { id: string; status: string }[]).map((p) => [p.id, p.status]));
@@ -153,10 +156,32 @@ export async function draftEpisode(channel: GrowthChannel, topic?: string, intel
 export async function updateEpisode(id: string, patch: Partial<{
   hook_index: number; status: ChannelEpisode['status']; render_id: string | null;
   video_url: string | null; srt_url: string | null; caption: string; post_id: string | null; error: string | null;
+  assets: { imageUrls?: string[] };
 }>): Promise<void> {
   const { error } = await supabase.from('channel_episodes')
     .update({ ...patch, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+/** THE HOOK LAB: spin a B-CUT of a produced episode — the SAME script, art, and beats with a
+ *  DIFFERENT hook variant. Because the parent's scene images are reused, the variant costs only a
+ *  fresh voiceover + render (~$0.30) — a real hook A/B on otherwise-identical videos, which is the
+ *  only comparison the loop can trust. Post cuts hours apart (or on different platforms) so each
+ *  gets its own algorithm test window. */
+export async function createVariantEpisode(parent: ChannelEpisode, hookIndex: number): Promise<ChannelEpisode> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  if (!parent.script) throw new Error('The parent episode has no script.');
+  if (hookIndex === parent.hook_index) throw new Error('Pick a different hook than the parent cut.');
+  const { data: row, error } = await supabase.from('channel_episodes').insert({
+    owner_id: uid, channel_id: parent.channel_id, cluster_id: parent.cluster_id,
+    title: `${parent.title} (hook ${hookIndex + 1})`, topic: parent.topic,
+    script: parent.script, hook_index: hookIndex,
+    assets: parent.assets ?? {}, variant_of: parent.id,
+  }).select(EPISODE_COLS).single();
+  if (error || !row) throw new Error(`Could not create the B-cut: ${error?.message ?? 'unknown'}`);
+  return row as unknown as ChannelEpisode;
 }
 
 /** Illustrate one scene through the metered generate-image seam (provenance is stamped there). */

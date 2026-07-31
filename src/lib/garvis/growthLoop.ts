@@ -16,6 +16,8 @@ export interface EpisodeMetricRow {
   likes: number | null; comments: number | null; shares: number | null;
   impressions: number | null; video_views: number | null; saves: number | null;
   clicks: number | null; engagement: number | null;
+  // RETENTION (app_0125) — what the algorithms actually rank on. Nullable: absent = unknown.
+  avg_watch_seconds?: number | null; full_watch_rate?: number | null; avg_view_pct?: number | null;
 }
 
 export interface EpisodePerf {
@@ -25,6 +27,8 @@ export interface EpisodePerf {
   reach: number | null;      // best view-like number across platforms, summed; null = unmeasured
   engagements: number | null; // likes+comments+shares+saves, when any exist
   clicks: number | null;
+  avgViewPct: number | null;  // mean avg-%-viewed across platforms that reported it (0..100)
+  fullWatchRate: number | null; // mean completion rate across platforms that reported it (0..1)
 }
 
 export type EpisodeVerdict = 'winner' | 'solid' | 'quiet' | 'unmeasured';
@@ -48,12 +52,32 @@ export function episodePerf(episodeId: string, title: string, hook: string, rows
   const shares = sum((r) => r.shares) ?? 0;
   const saves = sum((r) => r.saves) ?? 0;
   const anyEng = [sum((r) => r.likes), sum((r) => r.comments), sum((r) => r.shares), sum((r) => r.saves)].some((v) => v !== null);
+  const mean = (pick: (r: EpisodeMetricRow) => number | null | undefined): number | null => {
+    const vals = rows.map(pick).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    return vals.length ? Math.round((vals.reduce((n, v) => n + v, 0) / vals.length) * 100) / 100 : null;
+  };
   return {
     episodeId, title, hook,
     reach: views ?? impressions,
     engagements: anyEng ? likes + comments + shares + saves : null,
     clicks: sum((r) => r.clicks),
+    avgViewPct: mean((r) => r.avg_view_pct),
+    fullWatchRate: mean((r) => r.full_watch_rate),
   };
+}
+
+/** The retention read — the diagnosis the algorithms act on, in one honest line. Thresholds are
+ *  for the 60-90s band this engine produces: ≥55% average-viewed = the algorithm pushes it;
+ *  <30% = the hook/pacing failed regardless of view count; between = healthy. Null when no
+ *  platform reported retention — never a guess. */
+export function retentionRead(perf: Pick<EpisodePerf, 'avgViewPct' | 'fullWatchRate'>): string | null {
+  if (perf.avgViewPct !== null) {
+    if (perf.avgViewPct >= 55) return `${Math.round(perf.avgViewPct)}% avg viewed — strong retention, algorithm-push territory`;
+    if (perf.avgViewPct < 30) return `${Math.round(perf.avgViewPct)}% avg viewed — weak retention; fix the hook or cut dead beats`;
+    return `${Math.round(perf.avgViewPct)}% avg viewed`;
+  }
+  if (perf.fullWatchRate !== null) return `${Math.round(perf.fullWatchRate * 100)}% watched to the end`;
+  return null;
 }
 
 /** The channel baseline: MEDIAN reach of measured episodes (median, not mean — one viral video
@@ -103,6 +127,8 @@ export function perfLine(perf: EpisodePerf, baseline: number | null): string {
   const parts = [`${perf.reach.toLocaleString()} views`];
   if (perf.engagements !== null) parts.push(`${perf.engagements.toLocaleString()} engagements`);
   if (perf.clicks !== null) parts.push(`${perf.clicks.toLocaleString()} clicks`);
+  const ret = retentionRead(perf);
+  if (ret) parts.push(ret);
   const c = classifyEpisode(perf, baseline);
   if (c.multiple !== null) parts.push(`${c.multiple}x baseline${c.verdict === 'winner' ? ' — WINNER, double down' : c.verdict === 'quiet' ? ' — quiet, change the mechanism' : ''}`);
   return parts.join(' · ');
