@@ -56,6 +56,10 @@ import {
 import { parseBusinessProfile, assembleFallbackSpec, normalizeSpec, navFor, pickRecipe, previewSlug, restraintFor, type SiteSpec } from '../_shared/previewSpec.ts';
 import { BESPOKE_SYSTEM, buildBespokePrompt, bespokeHonest, looksLikeHtmlDoc } from '../../../src/lib/preview/bespokeSite.ts';
 import { renderQa } from '../_shared/renderQa.ts';
+import { areaSweepPlan, frameSentence, frameNounFor } from '../../../src/lib/garvis/prospects/areaSweepCore.ts';
+import { persistFindingsAdmin } from '../_shared/persistFindings.ts';
+import { SCAN_VERSION } from '../_shared/scanTypes.ts';
+import type { ScanFacts } from '../_shared/deepScan.ts';
 import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 // CONTENT WEEK (app_0088): the same editor rubric the boards use (fail-CLOSED here — an unjudged
 // draft never auto-queues) + the pure week machinery from standingCore.
@@ -1043,6 +1047,37 @@ Deno.serve(async (req) => {
       continue;
     }
 
+    // ---- area_study: the county machine, a slice per tick until done --------------------------
+    if (order.kind === 'area_study') {
+      try {
+        const r = await runAreaStudy(admin, order, nowIso);
+        ran++;
+        if (r.audited > 0) changed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: r.done ? 'changed' : 'unchanged', line: r.line, hash: null, excerpt: null, checkedAt: nowIso },
+          // Unfinished ⇒ continue on the very next tick; finished ⇒ pause — a completed study must
+          // not silently re-run and overwrite its own frozen readings on tomorrow's heartbeat.
+          next_run_at: r.done ? nextRunAfter(order.cadence, order.anchor_at, nowIso) : nowIso,
+          ...(r.done ? { status: 'paused' } : {}),
+          updated_at: nowIso,
+        }).eq('id', order.id);
+        if (r.done) {
+          const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
+          await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, `📊 ${r.line}`).catch(() => {});
+        }
+      } catch (e) {
+        failed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Study tick failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. The cursor is unchanged — it will resume.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
+
     // ---- idea_stream: continuous ideation onto a project's Idea Board -------------------------
     // Garvis ideating on a clock: N fresh, grounded ideas appended to the world's idea board as
     // ordinary tiles, grouped by date ("Auto · 2026-07-16") so the board never drowns. HONESTY:
@@ -1476,6 +1511,136 @@ interface QueryRowDB { id: string; query_text: string; keyword: string; last_run
 interface LeadRow { id: string; place_id: string | null; company_name: string; keyword: string; website: string | null; phone: string | null; city: string | null; state: string | null }
 
 // deno-lint-ignore no-explicit-any
+/** THE COUNTY STUDY, unattended (order kind 'area_study', app_0122). The browser sweep dies with
+ *  the tab; this runs the identical plan — towns × trade synonyms, from the SAME areaSweepCore the
+ *  browser uses, so the frame a study publishes is computed by one piece of code everywhere — on
+ *  the heartbeat, a SLICE per tick.
+ *
+ *  Why slices: a county plan is 100+ paginated Places queries plus an audit per find. One 15-minute
+ *  tick attempting all of it risks the function's time budget, and a mid-run crash would LOOK like
+ *  total loss. So each tick processes a few queries, persists every audit/finding/membership the
+ *  moment it lands, advances config.cursor, and sets next_run_at=now so the next tick continues
+ *  immediately. A crash resumes at the cursor; re-found businesses are naturally idempotent (audits
+ *  upsert by owner+url, memberships are unique per cohort). When the cursor reaches the end the
+ *  cohort completes under one SCAN_VERSION and the order pauses itself — done, visibly.
+ *
+ *  What each business gets is exactly what the interactive sweep gives it: the same fetch-url read
+ *  (deep scan rides along), the same honest auditSite, findings as rows via persistFindingsAdmin,
+ *  and a membership with reachable/scan_version/trade FROZEN at measurement. No-website businesses
+ *  are honestly outside a "business websites" study and are skipped here (the daily hunt already
+ *  courts them as leads). */
+// deno-lint-ignore no-explicit-any
+async function runAreaStudy(admin: any, order: OrderRow, nowIso: string):
+  Promise<{ line: string; done: boolean; audited: number; failed: number }> {
+  const cfg = (order.config ?? {}) as { niche?: string; area_label?: string; towns?: string[]; cursor?: number; cohort_id?: string; audited?: number; failed?: number };
+  const niche = (cfg.niche ?? '').trim();
+  const towns = Array.isArray(cfg.towns) ? cfg.towns : [];
+  const areaLabel = (cfg.area_label ?? '').trim();
+  if (!niche || towns.length === 0 || !areaLabel) {
+    return { line: `${order.label}: config is missing niche/towns/area — nothing to study.`, done: true, audited: 0, failed: 0 };
+  }
+  const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+  if (!placesKey) return { line: `${order.label}: GOOGLE_PLACES_API_KEY missing — study cannot search.`, done: false, audited: 0, failed: 0 };
+
+  const env: HuntEnv = {
+    supabaseUrl: Deno.env.get('SUPABASE_URL')!,
+    workerSecret: Deno.env.get('WORKER_SECRET') ?? '',
+    serviceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    appOrigin: Deno.env.get('APP_ORIGIN') ?? '',
+    placesKey,
+    nowYear: new Date(nowIso).getUTCFullYear(),
+    runRatings: new Map(),
+  };
+
+  const plan = areaSweepPlan(niche, towns);
+  if (plan.length === 0) return { line: `${order.label}: empty plan.`, done: true, audited: 0, failed: 0 };
+
+  // First tick: open the study, frame written from the plan — before any result exists.
+  let cohortId = cfg.cohort_id ?? null;
+  if (!cohortId) {
+    const { data: c, error: cErr } = await admin.from('scan_cohorts').insert({
+      owner_id: order.owner_id, world_id: order.world_id,
+      name: `${niche} — ${areaLabel} — ${nowIso.slice(0, 10)}`,
+      area: areaLabel, frame: frameSentence(niche, towns),
+      trade: niche.toLowerCase(), frame_noun: frameNounFor(niche), status: 'scanning',
+    }).select('id').single();
+    if (cErr || !c) return { line: `${order.label}: could not open the study (${cErr?.message ?? 'insert failed'}).`, done: false, audited: 0, failed: 0 };
+    cohortId = c.id as string;
+  }
+
+  const SLICE = 8;                          // queries per tick; each is up to 3 billed Places pages
+  const start = cfg.cursor ?? 0;
+  const slice = plan.slice(start, start + SLICE);
+  let audited = cfg.audited ?? 0;
+  let failed = cfg.failed ?? 0;
+
+  for (const q of slice) {
+    const { places, apiError } = await fetchPlaces(placesKey, `${q.niche} in ${q.town}`, 3);
+    if (apiError) { failed++; continue; }
+    for (const raw of places) {
+      const biz = parsePlace(raw, niche);
+      if (!biz?.website) continue;          // a "business websites" frame — no site, not in the study
+
+      // Idempotent by construction: one audit row per (owner, url); already-a-member is a no-op.
+      const url = biz.website;
+      const text = await scrapePage(url, 'text', env);
+      const reachable = !!(text && !text.error && text.checks);
+      const checks = (reachable ? text!.checks : {}) as { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
+      const audit = reachable
+        ? auditSite({
+            url: (typeof text!.url === 'string' && text!.url) || url, reachable: true,
+            title: (text!.title as string) ?? null, description: (text!.description as string) ?? null,
+            text: (text!.text as string) ?? '', hasViewport: !!checks.viewport, hasForm: !!checks.form, emailFound: !!checks.email,
+          }, env.nowYear)
+        : auditSite({ url, reachable: false }, env.nowYear);
+      const scan = reachable ? ((text!.scan as DeepScan | undefined) ?? null) : null;
+      const facts = reachable ? ((text!.facts as ScanFacts | undefined) ?? null) : null;
+
+      const row = {
+        owner_id: order.owner_id, url, host: biz.website_normalized,
+        business_name: biz.company_name, niche, area: areaLabel, source: 'sweep',
+        reachable: audit.reachable, score: audit.score, verdict: audit.verdict, headline: audit.headline,
+        signals: audit.signals, strengths: audit.strengths,
+        vertical: detectVertical([niche, biz.company_name, (text?.text as string) ?? ''].join(' ')),
+        checks, tech: (text?.tech as Record<string, unknown>) ?? {},
+        meta_title: (text?.title as string) ?? null, meta_description: (text?.description as string) ?? null,
+        text_snippet: text?.text ? String(text.text).slice(0, 8000) : null,
+        last_audited_at: nowIso,
+      };
+      const { data: existing } = await admin.from('prospect_audits')
+        .select('id').eq('owner_id', order.owner_id).eq('url', url).maybeSingle();
+      let auditId: string | null = existing?.id ?? null;
+      if (auditId) await admin.from('prospect_audits').update(row).eq('id', auditId);
+      else {
+        const { data: ins } = await admin.from('prospect_audits').insert(row).select('id').maybeSingle();
+        auditId = ins?.id ?? null;
+      }
+      if (!auditId) { failed++; continue; }
+      if (scan) await persistFindingsAdmin(admin, { auditId, ownerId: order.owner_id, worldId: order.world_id, scan, facts });
+      await admin.from('cohort_members').upsert({
+        owner_id: order.owner_id, cohort_id: cohortId, audit_id: auditId,
+        reachable: audit.reachable, scan_version: audit.reachable ? SCAN_VERSION : null, trade: niche.toLowerCase(),
+      }, { onConflict: 'cohort_id,audit_id', ignoreDuplicates: true });
+      audited++;
+    }
+  }
+
+  const cursor = start + slice.length;
+  const done = cursor >= plan.length;
+  await admin.from('standing_orders').update({
+    config: { ...cfg, cursor, cohort_id: cohortId, audited, failed },
+  }).eq('id', order.id);
+  if (done) {
+    await admin.from('scan_cohorts').update({
+      status: 'complete', scan_version: SCAN_VERSION, completed_at: nowIso,
+    }).eq('id', cohortId);
+  }
+  const line = done
+    ? `Study complete: ${areaLabel} ${niche} — ${audited} sites audited across ${plan.length} searches. Open /garvis/studies to read it.`
+    : `Study in progress: ${cursor}/${plan.length} searches done, ${audited} sites audited so far.`;
+  return { line, done, audited, failed };
+}
+
 async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
   Promise<{ discovered: number; built: number; queued: number; line: string }> {
   const cfg = parseHuntConfig(order.config);

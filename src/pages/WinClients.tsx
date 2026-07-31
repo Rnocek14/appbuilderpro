@@ -246,6 +246,21 @@ export default function WinClients() {
     finally { setSweeping(false); }
   };
 
+  // The unattended twin of sweepAreaStudy: same plan, but handed to the heartbeat. One toast, done —
+  // progress lives on the standing order's last_result line and the finished study on /garvis/studies.
+  const startServerStudy = async () => {
+    const n = niche.trim();
+    const towns = area.split(',').map((t) => t.trim()).filter(Boolean);
+    if (!n || towns.length < 2) { toast('error', 'Enter a niche and a comma-separated town list first.'); return; }
+    const areaLabel = window.prompt('Name this study area (appears in the report and the pitch line):', `${towns[0]} area`)?.trim();
+    if (!areaLabel) return;
+    try {
+      const { createAreaStudyOrder } = await import('../lib/garvis/standingRun');
+      await createAreaStudyOrder({ niche: n, areaLabel, towns });
+      toast('success', `Study queued: ${n} across ${towns.length} towns. The server works a slice every ~15 minutes — safe to close this tab. Results land in Studies.`);
+    } catch (e) { toast('error', emsg(e)); }
+  };
+
   // The chosen scope as a SweepScope (for the daily hunt config + its summary preview).
   const scopeToSweep = (): SweepScope =>
     scope === 'all' ? { mode: 'topN', n: US_CITIES.length }
@@ -399,10 +414,19 @@ export default function WinClients() {
                     every find audited AND recorded, and the whole run filed into a scan cohort —
                     the raw material of the "your site was one of N we looked at" pitch line. */}
                 {area.includes(',') && (
-                  <Button variant="outline" size="md" onClick={() => void sweepAreaStudy()} disabled={!niche.trim()}
-                    title="Sweep every town listed in the Area box, audit everything found, and file it all into a study cohort.">
-                    <Radar size={15} /> Sweep these towns (collect study)
-                  </Button>
+                  <>
+                    <Button variant="outline" size="md" onClick={() => void sweepAreaStudy()} disabled={!niche.trim()}
+                      title="Sweep every town listed in the Area box, audit everything found, and file it all into a study cohort.">
+                      <Radar size={15} /> Sweep these towns (collect study)
+                    </Button>
+                    {/* The same study, unattended: hands the plan to the heartbeat, which processes a
+                        slice every tick until done and pauses itself with the study attached. The
+                        version to use for anything bigger than a handful of towns. */}
+                    <Button variant="outline" size="md" onClick={() => void startServerStudy()} disabled={!niche.trim()}
+                      title="Run the same study on the server — a slice every 15 minutes until complete. Safe to close this tab.">
+                      <CalendarClock size={15} /> Run on the server
+                    </Button>
+                  </>
                 )}
               </>
             )}

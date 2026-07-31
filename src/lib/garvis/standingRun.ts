@@ -81,6 +81,27 @@ export async function createClientHuntOrder(config: HuntConfig): Promise<Standin
   return toOrder(data as OrderRow);
 }
 
+/** START AN UNATTENDED COUNTY STUDY (order kind 'area_study', app_0122). The server does what the
+ *  interactive sweep does — same plan, same audits, same cohort — a slice per heartbeat tick until
+ *  the plan is exhausted, then pauses itself with the completed study attached. Close the laptop;
+ *  the study finishes anyway. */
+export async function createAreaStudyOrder(input: { niche: string; areaLabel: string; towns: string[] }): Promise<StandingOrder> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase.from('standing_orders').insert({
+    owner_id: uid, world_id: null, kind: 'area_study',
+    label: `Study: ${input.niche.trim()} — ${input.areaLabel.trim()}`,
+    cadence: 'daily',                       // cadence only matters after completion; ticks self-chain via next_run_at
+    config: { niche: input.niche.trim(), area_label: input.areaLabel.trim(), towns: input.towns, cursor: 0 },
+    status: 'active', anchor_at: nowIso,
+    next_run_at: nowIso,                    // first slice on the next heartbeat tick (≤15 min)
+  }).select('id, world_id, kind, label, cadence, config, status, anchor_at, next_run_at, last_run_at, last_result').single();
+  if (error || !data) throw new Error(error?.message ?? 'Could not start the study.');
+  return toOrder(data as OrderRow);
+}
+
 export async function setOrderStatus(id: string, status: 'active' | 'paused'): Promise<void> {
   const { error } = await supabase.from('standing_orders').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
   if (error) throw new Error(error.message);

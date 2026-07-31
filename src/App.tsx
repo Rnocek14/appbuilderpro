@@ -59,6 +59,7 @@ const PreviewSite = lazy(() => import('./pages/PreviewSite'));
 const PreviewReport = lazy(() => import('./pages/PreviewReport'));
 const BookingSetup = lazy(() => import('./pages/BookingSetup'));
 const BookingPage = lazy(() => import('./pages/BookingPage'));
+const Studies = lazy(() => import('./pages/Studies'));
 const ProfileHome = lazy(() => import('./pages/ProfileHome'));
 const CanvasPreview = lazy(() => import('./pages/dev/CanvasPreview'));
 const ProfileHomePreview = lazy(() => import('./pages/dev/ProfileHomePreview'));
@@ -135,6 +136,8 @@ function AppRoutes() {
           <Route path="/garvis/contacts" element={<Protected><Contacts /></Protected>} />
           <Route path="/garvis/money" element={<Protected><Money /></Protected>} />
           <Route path="/garvis/health" element={<Protected><Health /></Protected>} />
+          <Route path="/garvis/studies" element={<Protected><Studies /></Protected>} />
+          <Route path="/garvis/studies/:id" element={<Protected><Studies /></Protected>} />
           <Route path="/garvis/fleet" element={<Protected><FleetView /></Protected>} />
           <Route path="/garvis/working" element={<Protected><Working /></Protected>} />
           <Route path="/garvis/setup" element={<Protected><ClientReadiness /></Protected>} />
