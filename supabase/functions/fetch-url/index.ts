@@ -14,6 +14,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch, urlAllowed, urlStaticOk } from '../_shared/safeFetch.ts';
 import { fingerprintTech } from '../_shared/techFingerprint.ts';
+import { deepScan, scanFacts } from '../_shared/deepScan.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -346,6 +347,18 @@ Deno.serve(async (req) => {
     // computed here while we still have the raw HTML. The best qualifier for a rebuild + automation pitch.
     const tech = fingerprintTech(bodyRaw);
 
+    // THE DEEP SCAN — the checkable findings a prospect will actually pay to hear about
+    // (accessibility barriers, trackers with no consent mechanism, unusable on a phone, no way to
+    // book, no machine-readable identity). Computed HERE, in the same pass, for two reasons: the
+    // raw bytes only exist at this point in the pipeline, and folding it into the mode we already
+    // call means the audit costs no extra fetch and no extra round trip.
+    //
+    // Landing-page only, deliberately — same rule as `checks` and `tech` above. A finding must name
+    // the page it was seen on, and mixing the shallow crawl's section pages in would produce counts
+    // nobody could reproduce by viewing one URL. `scan.limits` states this among its caveats.
+    const scan = deepScan(bodyRaw);
+    const facts = scanFacts(bodyRaw);
+
     // SHALLOW CRAWL: append the services/about/gallery pages' text so extraction sees what the
     // business actually offers (checks/tech stay landing-page-only — those are homepage signals).
     // Best-effort per page; a slow or dead section page never sinks the scrape.
@@ -370,7 +383,7 @@ Deno.serve(async (req) => {
         crawled.push(path);
       } catch { /* skip */ }
     }
-    return json({ url: finalUrl, title: title || url.hostname, description, text: fullText, contentType: type, checks, tech, crawled });
+    return json({ url: finalUrl, title: title || url.hostname, description, text: fullText, contentType: type, checks, tech, crawled, scan, facts });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return json({ error: /abort/i.test(msg) ? 'The page took too long to load.' : msg }, 200);

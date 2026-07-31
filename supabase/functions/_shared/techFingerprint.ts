@@ -31,7 +31,10 @@ const BUILDERS: [string, RegExp, boolean][] = [
 
 const BOOKING: [string, RegExp][] = [
   ['calendly', /calendly\.com/i],
-  ['acuity', /acuityscheduling\.com|squarespace-scheduling/i],
+  // `*.as.me` is Acuity's short client-booking domain — the form most businesses actually link.
+  // Anchored so a word ending in "as" ("canvas.me/x") cannot match. Kept in step with the same
+  // signature in _shared/conversionScan.ts.
+  ['acuity', /acuityscheduling\.com|squarespace-scheduling|\b[a-z0-9-]+\.as\.me\b|\bas\.me\/[a-z0-9]/i],
   ['jobber', /getjobber\.com|clienthub\.getjobber/i],
   ['housecall', /housecallpro\.com/i],
   ['square', /squareup\.com\/appointments|square\.site\/book/i],

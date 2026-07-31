@@ -7,6 +7,9 @@ import { supabase } from '../supabase';
 import { parsePlace, type PlaceRaw } from './placesDiscovery';
 import { deriveSignals, proposeFromSignals } from './automation/detect';
 import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit';
+import type { DeepScan } from '../../../supabase/functions/_shared/scanTypes.ts';
+import type { ScanFacts } from '../../../supabase/functions/_shared/deepScan.ts';
+import { persistScan } from './prospects/findingsStore';
 import { sweepPlan, registerDomain } from './nationalSweepCore';
 import { detectVertical } from './verticals';
 import type { UsCity } from './usCities';
@@ -150,6 +153,12 @@ export interface ScrapeContext {
   text: string;                 // readable page text (capped by fetch-url)
   checks: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean };
   tech: TechFingerprint | null; // the tech fingerprint, when fetch-url returned one
+  // The deep scan (fetch-url computes it from the same raw bytes, so it costs no extra fetch):
+  // the checkable findings — accessibility barriers, trackers with no consent mechanism, mobile
+  // usability, whether there is any way to book — that a prospect will actually pay to hear about.
+  // Null when the page was unreachable or the function predates the scan; never faked.
+  scan: DeepScan | null;
+  facts: ScanFacts | null;      // storable roll-ups (trackers, consent platform, booking, identity)
 }
 
 /** Fetch a business's site ONCE and return both the honest audit and the raw scrape context (so the
@@ -157,16 +166,18 @@ export interface ScrapeContext {
  *  Unreachable → an honest 'unknown' audit + an empty context, never faked. */
 export async function scrapeAndAudit(url: string): Promise<{ audit: SiteAudit; scrape: ScrapeContext }> {
   const nowYear = new Date().getFullYear();
-  const empty: ScrapeContext = { reachable: false, title: null, description: null, text: '', checks: {}, tech: null };
+  const empty: ScrapeContext = { reachable: false, title: null, description: null, text: '', checks: {}, tech: null, scan: null, facts: null };
   try {
     const { data, error } = await supabase.functions.invoke('fetch-url', { body: { url, mode: 'text' } });
     if (error) throw new Error(error.message);
-    const d = data as { url?: string; title?: string; description?: string; text?: string; error?: string; checks?: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean }; tech?: TechFingerprint };
+    const d = data as { url?: string; title?: string; description?: string; text?: string; error?: string; checks?: { viewport?: boolean; form?: boolean; email?: boolean; https?: boolean }; tech?: TechFingerprint; scan?: DeepScan; facts?: ScanFacts };
     if (!d || d.error) return { audit: auditSite({ url, reachable: false }, nowYear), scrape: empty };
     const c = d.checks ?? {};
     const scrape: ScrapeContext = {
       reachable: true, title: d.title ?? null, description: d.description ?? null, text: d.text ?? '', checks: c,
       tech: d.tech ?? null,
+      // Older deployments of fetch-url don't return these; absent ⇒ null, never a fabricated empty scan.
+      scan: d.scan ?? null, facts: d.facts ?? null,
     };
     const audit = auditSite({
       url: d.url || url, reachable: true, title: d.title ?? null, description: d.description ?? null,
@@ -194,6 +205,9 @@ export interface RecordAuditInput {
   businessName?: string | null;
   niche?: string | null;
   area?: string | null;
+  /** Which world this prospect belongs to, when the caller knows (app_0114 world spine). Stamped
+   *  onto the findings so a per-world index can be built later without re-scanning. */
+  worldId?: string | null;
 }
 export async function recordProspectAudit(input: RecordAuditInput): Promise<void> {
   try {
@@ -259,6 +273,19 @@ export async function recordProspectAudit(input: RecordAuditInput): Promise<void
     if (wErr && /proposals/.test(wErr.message)) {
       const { proposals: _drop, ...legacy } = row;
       await write(legacy);
+    }
+
+    // DEEP-SCAN FINDINGS (app_0116) — written as ROWS, not folded into the audit's JSONB, because
+    // the whole point is being able to ask "which finding produced a reply?" later, and you cannot
+    // GROUP BY a blob. Best-effort and last: if the migration isn't applied, persistScan no-ops and
+    // the audit above is already safely stored.
+    if (sc?.scan) {
+      const { data: saved } = await supabase.from('prospect_audits')
+        .select('id').eq('owner_id', uid).eq('url', url).maybeSingle();
+      const auditId = (saved as { id: string } | null)?.id;
+      if (auditId) {
+        await persistScan({ auditId, ownerId: uid, worldId: input.worldId ?? null, scan: sc.scan, facts: sc.facts });
+      }
     }
   } catch { /* best-effort: persistence never breaks the audit UI */ }
 }
