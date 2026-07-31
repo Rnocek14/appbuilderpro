@@ -88,8 +88,15 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* BUILD — the field parts */
 #build{flex-direction:row;align-items:stretch;justify-content:stretch;gap:22px;padding:56px 44px 118px}
 #build[hidden],#open[hidden],#explore[hidden]{display:none}
-#logcol{width:min(390px,36vw);flex:none;position:relative;opacity:0;transform:translateX(-26px);transition:opacity .65s var(--forge),transform .65s var(--forge)}
-#canvascol{flex:1;opacity:0;transform:translateX(26px);transition:opacity .65s var(--forge),transform .65s var(--forge)}
+/* min-width:0 on both columns: a flex item defaults to min-width:auto, so the browser chrome
+   inside the canvas column pushed it 5px past the viewport at phone width and the page scrolled
+   sideways. Found by probing at a real 390px load rather than by resizing a desktop layout. */
+#logcol{width:min(390px,36vw);flex:none;min-width:0;position:relative;opacity:0;transform:translateX(-26px);transition:opacity .65s var(--forge),transform .65s var(--forge)}
+#canvascol{flex:1;min-width:0;opacity:0;transform:translateX(26px);transition:opacity .65s var(--forge),transform .65s var(--forge)}
+@media (max-width:560px){
+  #build{padding:44px 16px 118px;gap:14px}
+  #logcol{width:min(390px,42vw)}
+}
 #build.in #logcol,#build.in #canvascol{opacity:1;transform:none}
 #loglines{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px;line-height:2.1;color:var(--dim);transition:opacity .45s var(--forge)}
 #loglines .ll{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

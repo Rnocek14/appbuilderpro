@@ -20,6 +20,11 @@ export interface FoundBusiness {
   snippet: string;
   audit: SiteAudit | null;   // filled once we've looked at their site
   auditing?: boolean;
+  // Google's own rating for this business. parsePlace has always extracted these and findBusinesses
+  // used to throw them away, so the operator paid Places for a number they never saw. DISPLAY ONLY
+  // (Places ToS) — shown in the results list, never persisted to the lead pool.
+  rating: number | null;
+  ratingCount: number | null;
 }
 
 /** The REAL error behind a failed functions.invoke. supabase-js flattens every non-2xx to a generic
@@ -40,7 +45,12 @@ async function realInvokeError(error: unknown, fallback: string): Promise<string
 /** Real businesses for "niche + area", from Google Places (the SAME backend as the daily hunt).
  *  Places returns structured leads — real name, website, address, category — so there are no
  *  directory snippets to filter out. Deduped by normalized website (falling back to name). */
-export async function findBusinesses(niche: string, area: string): Promise<FoundBusiness[]> {
+/** How many businesses one search may return. Was a hard-coded 12, which truncated even a single
+ *  full Places page (20) — so a search that found plenty still looked thin. Now a parameter with a
+ *  cap that matches what pagination can actually deliver (3 pages × 20). */
+export const FIND_LIMIT_DEFAULT = 60;
+
+export async function findBusinesses(niche: string, area: string, limit = FIND_LIMIT_DEFAULT): Promise<FoundBusiness[]> {
   const q = [niche.trim(), area.trim()].filter(Boolean).join(' in ');
   if (!q) throw new Error('Add a niche and an area first.');
   const { data, error } = await supabase.functions.invoke('discover-media', {
@@ -61,8 +71,11 @@ export async function findBusinesses(niche: string, area: string): Promise<Found
     seen.add(key);
     // The snippet carries what Places knows: address + category (never invented).
     const snippet = [biz.address, biz.category?.replace(/_/g, ' ')].filter(Boolean).join(' · ');
-    out.push({ name: biz.company_name, url: biz.website, snippet, audit: null });
-    if (out.length >= 12) break;
+    out.push({
+      name: biz.company_name, url: biz.website, snippet, audit: null,
+      rating: biz.rating, ratingCount: biz.rating_count,
+    });
+    if (out.length >= limit) break;
   }
   return out;
 }
@@ -209,13 +222,13 @@ export interface RecordAuditInput {
    *  onto the findings so a per-world index can be built later without re-scanning. */
   worldId?: string | null;
 }
-export async function recordProspectAudit(input: RecordAuditInput): Promise<void> {
+export async function recordProspectAudit(input: RecordAuditInput): Promise<string | null> {
   try {
     const { data: sess } = await supabase.auth.getUser();
     const uid = sess.user?.id;
-    if (!uid) return;                                   // not signed in — nothing to scope the row to
+    if (!uid) return null;                              // not signed in — nothing to scope the row to
     const url = input.url.trim();
-    if (!url) return;
+    if (!url) return null;
     let host = url;
     try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* keep raw url as host */ }
 
@@ -275,19 +288,22 @@ export async function recordProspectAudit(input: RecordAuditInput): Promise<void
       await write(legacy);
     }
 
+    // The row's id — the handle a cohort membership (app_0117) needs to freeze this reading into a
+    // study. Read back after the write because the SELECT-first upsert can have gone either way.
+    const { data: saved } = await supabase.from('prospect_audits')
+      .select('id').eq('owner_id', uid).eq('url', url).maybeSingle();
+    const auditId = (saved as { id: string } | null)?.id ?? null;
+
     // DEEP-SCAN FINDINGS (app_0116) — written as ROWS, not folded into the audit's JSONB, because
     // the whole point is being able to ask "which finding produced a reply?" later, and you cannot
     // GROUP BY a blob. Best-effort and last: if the migration isn't applied, persistScan no-ops and
     // the audit above is already safely stored.
-    if (sc?.scan) {
-      const { data: saved } = await supabase.from('prospect_audits')
-        .select('id').eq('owner_id', uid).eq('url', url).maybeSingle();
-      const auditId = (saved as { id: string } | null)?.id;
-      if (auditId) {
-        await persistScan({ auditId, ownerId: uid, worldId: input.worldId ?? null, scan: sc.scan, facts: sc.facts });
-      }
+    if (sc?.scan && auditId) {
+      await persistScan({ auditId, ownerId: uid, worldId: input.worldId ?? null, scan: sc.scan, facts: sc.facts });
     }
+    return auditId;
   } catch { /* best-effort: persistence never breaks the audit UI */ }
+  return null;
 }
 
 /** A saved audit row, as read back from prospect_audits (the accumulating prospect intelligence). */

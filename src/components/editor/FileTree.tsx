@@ -69,6 +69,9 @@ export function FileTree({ files, activePath, onOpen, onCreate, onRename, onDele
           )}
           style={{ paddingLeft: 8 + depth * 14 }}
           onClick={() => onOpen(node.path)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(node.path); } }}
+          role="button"
+          tabIndex={0}
         >
           <File size={13} className="shrink-0" />
           <span className="flex-1 truncate font-mono">{node.name}</span>

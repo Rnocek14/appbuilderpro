@@ -551,7 +551,9 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 
 <main class="stage">
   <!-- THE BRIEF -->
-  <div class="masthead" id="masthead">Thursday, July 24 · 7:04 am</div>
+  <!-- empty on purpose: the script writes `${D.date} · ${stagedClock()}`. A dateline typed
+       here would be a second source of truth for a value the data already owns. -->
+  <div class="masthead" id="masthead"></div>
   <p class="closing-line" id="closingLine" aria-live="polite" hidden></p>
   <section class="brief" aria-label="The morning brief">
     <p id="briefProse"></p>
@@ -858,7 +860,7 @@ function renderSlateSettled(){
     `<span id="settlePending">${pending ? ` — ${numword(pending)} unusual still wait below` : ""}</span>.</p>` +
     `<div class="settle-sub">` +
       `<button class="chip-undo" id="undoChip" aria-label="Undo the slate approval">undo · ${mmss(D.undoWindowMs)}</button>` +
-      `<span>undo window 10 min · logged as one decision</span>` +
+      `<span>undo window ${D.undoWindowMs / 60000} min · logged as one decision</span>` +
     `</div>`;
   $("undoChip").addEventListener("click", undoSlate);
 }
@@ -978,7 +980,7 @@ function renderDrawer(){
       `<textarea id="replyText" aria-label="Your reply">${state.replyDraft}</textarea>` +
       `<div class="qactions"><button class="btn primary" data-qact="reply">send reply</button><span class="keyhint">A</span></div></div>`
     : `<div class="qitem done" data-q="reply"><div class="qstamp"><span>${jane.world} · reply</span><span class="t">${jane.at}</span></div>` +
-      `<div class="qdone"><span class="ok">✓</span> queued — sends ${stagedClock(D.undoWindowMs)} · undo window 10 min</div></div>`);
+      `<div class="qdone"><span class="ok">✓</span> queued — sends ${stagedClock(D.undoWindowMs)} · undo window ${D.undoWindowMs / 60000} min</div></div>`);
   items.push(state.bounce === "pending"
     ? `<div class="qitem" data-q="bounce" tabindex="-1">` +
       `<div class="qstamp"><span>${b.world} · bounced ×${b.times.length}</span><span class="t">${b.times[0]}</span></div>` +
@@ -997,7 +999,7 @@ function renderDrawer(){
 function actQueue(which){
   if (which === "reply" && state.reply === "pending") {
     state.reply = "done";
-    showToast("reply to Jane queued — sends in 10 min", () => {
+    showToast(`reply to Jane queued — sends in ${D.undoWindowMs / 60000} min`, () => {
       state.reply = "pending"; renderDrawer(); unshowMorning(); updatePulse(); focusDrawerItem(0);
     });
   } else if (which === "bounce" && state.bounce === "pending") {   // reversible → act now, undo after (D4)

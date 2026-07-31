@@ -62,14 +62,34 @@ export async function closeCampaignWon(input: {
       .then(() => {}, () => {});
   }
 
+  // THE CLIENT'S WORLD (app_0116): a yes births the world, right here — the container every
+  // scoped ledger, watch, report, and fleet rollup for this client hangs off. Created BEFORE the
+  // subscription so the money row links to it at insert; fail-soft (a close must stand even if
+  // the world insert hiccups — the Clients page can re-link).
+  let worldId: string | null = null;
+  {
+    const { data: w } = await supabase.from('knowledge_worlds').insert({
+      owner_id: uid, title: businessName,
+      description: `Client world — won ${new Date().toISOString().slice(0, 10)} (${tier.name}).`,
+    }).select('id').maybeSingle();
+    worldId = (w as { id: string } | null)?.id ?? null;
+  }
+
   const { data: sub, error: subErr } = await supabase.from('client_subscriptions').insert({
     owner_id: uid, business_name: businessName, email,
     business_profile_id: camp.business_profile_id ?? null,
     preview_site_id: camp.preview_site_id ?? null,
+    world_id: worldId,
     tier: tier.id, cadence: tier.cadence, price_cents: priceCents, status: 'pending',
     notes: `Won from cold-pitch reply (campaign ${String(camp.id).slice(0, 8)}).`,
   }).select('id').single();
   if (subErr || !sub) throw new Error(`Marked won, but could not add to the client book: ${subErr?.message ?? 'unknown'} — add them on the Clients page.`);
+
+  // The contact belongs to the client's world too (app_0082 stamping) — fail-soft.
+  if (worldId && camp.contact_id) {
+    await supabase.from('contacts').update({ world_id: worldId }).eq('id', camp.contact_id)
+      .is('world_id', null).then(() => {}, () => {});
+  }
 
   let demoSlug: string | null = null;
   let liveUrl: string | null = null;
@@ -87,7 +107,7 @@ export async function closeCampaignWon(input: {
     const { pinAndEstablish } = await import('./billing/servicePackagesRun');
     await pinAndEstablish({
       clientSubscriptionId: sub.id as string, packageKey: tier.id,
-      liveUrl, businessName,
+      liveUrl, businessName, worldId,
     });
   } catch { /* pin is re-runnable from Clients; never blocks the close */ }
 

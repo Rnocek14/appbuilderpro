@@ -10,6 +10,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, Info, Radar, Square, CalendarClock, Pause, Play, Power } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
+import { supabase } from '../lib/supabase';
 import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
 import { US_CITIES, US_STATES, citiesFor, type SweepScope } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
@@ -19,7 +20,8 @@ import { automationUpsellParagraph } from '../lib/garvis/clientHuntBuild';
 import { detectVertical } from '../lib/garvis/verticals';
 import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder, runOrderNow } from '../lib/garvis/standingRun';
 import { orderStatusLine, type StandingOrder } from '../lib/garvis/standing';
-import { type Verdict } from '../lib/garvis/siteAudit';
+import { noWebsiteAudit, type Verdict } from '../lib/garvis/siteAudit';
+import { parseTownList } from '../lib/garvis/prospects/areaSweepCore';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
@@ -89,7 +91,13 @@ export default function WinClients() {
         while (i < found.length) {
           const idx = i++;
           const b = found[idx];
-          if (!b.url) { continue; }
+          if (!b.url) {
+            // No website is a FINDING, not a reason to skip. These rows used to stay blank forever
+            // — no verdict, not even the "checking site…" spinner — which read as a broken scrape
+            // when it was actually the best prospect in the list.
+            setRows((r) => r.map((x, j) => (j === idx ? { ...x, audit: noWebsiteAudit() } : x)));
+            continue;
+          }
           const { audit, scrape } = await scrapeAndAudit(b.url);
           setRows((r) => r.map((x, j) => (j === idx ? { ...x, audit } : x)));
           // Keep the audit we just paid for (Phase 0) — best-effort, never blocks the UI.
@@ -159,7 +167,7 @@ export default function WinClients() {
     setScanning(true); setSearched(true);
     try {
       const { audit, scrape } = await scrapeAndAudit(href);
-      setRows((r) => [{ name: host, url: href, snippet: '', audit }, ...r]);
+      setRows((r) => [{ name: host, url: href, snippet: '', audit, rating: null, ratingCount: null }, ...r]);
       void recordProspectAudit({ url: href, audit, scrape, source: 'scan', businessName: host, niche, area });
       setScanUrl('');
       toast('success', `Scanned ${host} — ${audit.reachable ? 'audited. Press Build to make their demo.' : 'couldn’t load it; worth a manual look.'}`);
@@ -186,7 +194,7 @@ export default function WinClients() {
     try {
       const res = await sweepNation(n, cities, {
         concurrency: 3,
-        onFound: (b) => setRows((r) => (r.length >= MAX_ROWS ? r : [...r, { name: b.name, url: b.url, snippet: b.snippet, audit: null }])),
+        onFound: (b) => setRows((r) => (r.length >= MAX_ROWS ? r : [...r, { name: b.name, url: b.url, snippet: b.snippet, audit: null, rating: b.rating, ratingCount: b.ratingCount }])),
         onProgress: (p) => setSweepProg(p),
         shouldStop: () => stopSweep.current,
       });
@@ -201,6 +209,57 @@ export default function WinClients() {
       }
     } catch (e) { toast('error', emsg(e)); }
     finally { setSweeping(false); }
+  };
+
+  // AREA STUDY SWEEP — the Area field as a town list. Distinct from the nationwide sweep in the two
+  // ways that matter: it fans TRADE SYNONYMS (one phrase undercounts a county), and it AUDITS AND
+  // PERSISTS every find while filing the run into a scan cohort — so the study data ("41% of the N
+  // sites we scanned…") accrues as a side effect of prospecting instead of being a separate chore.
+  // Every row is persisted the moment it lands; stopping early yields a smaller study, never a lost one.
+  const sweepAreaStudy = async () => {
+    const n = niche.trim();
+    const towns = parseTownList(area);
+    if (!n || towns.length < 2) { toast('error', 'Enter a niche and a comma-separated town list first.'); return; }
+    const { data: sess } = await supabase.auth.getUser();
+    const uid = sess.user?.id;
+    if (!uid) { toast('error', 'Sign in first.'); return; }
+    const areaLabel = window.prompt('Name this study area (appears in the report and the pitch line):', `${towns[0]} area`)?.trim();
+    if (!areaLabel) return;
+    stopSweep.current = false;
+    setSweeping(true); setSearched(true); setRows([]);
+    setSweepProg({ done: 0, total: 0, found: 0, failed: 0, city: '' });
+    try {
+      const { sweepArea } = await import('../lib/garvis/prospects/areaSweep');
+      const res = await sweepArea({
+        ownerId: uid, niche: n, areaLabel, towns, concurrency: 2,
+        onFound: (b) => setRows((r) => (r.length >= 400 ? r : [...r, b])),
+        // Audits attach to the same row objects during the audit phase — refresh refs so badges appear.
+        onProgress: (p) => { setSweepProg({ done: p.queriesDone, total: p.queriesTotal, found: p.found, failed: p.failed, city: p.current }); setRows((r) => [...r]); },
+        shouldStop: () => stopSweep.current,
+      });
+      if (res.failed > 0 && res.found.length === 0) {
+        toast('error', `The sweep couldn’t search: ${res.lastError ?? 'unknown error'}`);
+      } else {
+        toast('success', `Swept ${areaLabel} — ${res.found.length} unique ${n}, ${res.audited} audited and recorded` +
+          `${res.cohort ? `, filed into study “${res.cohort.name}”` : ' (study table not installed — leads still saved)'}.`);
+      }
+    } catch (e) { toast('error', emsg(e)); }
+    finally { setSweeping(false); }
+  };
+
+  // The unattended twin of sweepAreaStudy: same plan, but handed to the heartbeat. One toast, done —
+  // progress lives on the standing order's last_result line and the finished study on /garvis/studies.
+  const startServerStudy = async () => {
+    const n = niche.trim();
+    const towns = parseTownList(area);
+    if (!n || towns.length < 2) { toast('error', 'Enter a niche and a comma-separated town list first.'); return; }
+    const areaLabel = window.prompt('Name this study area (appears in the report and the pitch line):', `${towns[0]} area`)?.trim();
+    if (!areaLabel) return;
+    try {
+      const { createAreaStudyOrder } = await import('../lib/garvis/standingRun');
+      await createAreaStudyOrder({ niche: n, areaLabel, towns });
+      toast('success', `Study queued: ${n} across ${towns.length} towns. The server works a slice every ~15 minutes — safe to close this tab. Results land in Studies.`);
+    } catch (e) { toast('error', emsg(e)); }
   };
 
   // The chosen scope as a SweepScope (for the daily hunt config + its summary preview).
@@ -347,9 +406,30 @@ export default function WinClients() {
                 <Square size={13} /> Stop
               </Button>
             ) : (
-              <Button variant="primary" size="md" onClick={() => void sweepNationwide()} disabled={!niche.trim()}>
-                <Radar size={15} /> Sweep the nation
-              </Button>
+              <>
+                <Button variant="primary" size="md" onClick={() => void sweepNationwide()} disabled={!niche.trim()}>
+                  <Radar size={15} /> Sweep the nation
+                </Button>
+                {/* THE COUNTY STUDY: appears only when the Area field holds a town LIST ("Lake
+                    Geneva, Delavan, Elkhorn WI"). One press = every town × every trade synonym,
+                    every find audited AND recorded, and the whole run filed into a scan cohort —
+                    the raw material of the "your site was one of N we looked at" pitch line. */}
+                {parseTownList(area).length >= 2 && (
+                  <>
+                    <Button variant="outline" size="md" onClick={() => void sweepAreaStudy()} disabled={!niche.trim()}
+                      title="Sweep every town listed in the Area box, audit everything found, and file it all into a study cohort.">
+                      <Radar size={15} /> Sweep these towns (collect study)
+                    </Button>
+                    {/* The same study, unattended: hands the plan to the heartbeat, which processes a
+                        slice every tick until done and pauses itself with the study attached. The
+                        version to use for anything bigger than a handful of towns. */}
+                    <Button variant="outline" size="md" onClick={() => void startServerStudy()} disabled={!niche.trim()}
+                      title="Run the same study on the server — a slice every 15 minutes until complete. Safe to close this tab.">
+                      <CalendarClock size={15} /> Run on the server
+                    </Button>
+                  </>
+                )}
+              </>
             )}
             {sweepProg && (
               <span className="text-[11px] text-forge-dim">
@@ -446,8 +526,18 @@ export default function WinClients() {
                             <button onClick={() => setSelected(i)} className="truncate text-sm font-semibold text-forge-ink hover:text-forge-ember" title="Open this business's web">{b.name}</button>
                             {b.audit && <span className={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium', VERDICT_STYLE[b.audit.verdict].cls)}>{VERDICT_STYLE[b.audit.verdict].label}{b.audit.score != null ? ` · ${b.audit.score}` : ''}</span>}
                             {!b.audit && b.url && <span className="inline-flex items-center gap-1 text-[11px] text-forge-dim"><Loader2 size={11} className="animate-spin" /> checking site…</span>}
+                            {/* Google's own rating. Places returns it on every search and we were paying
+                                for it and discarding it — it is the fastest read on whether a business
+                                is worth the call. Display-at-use only (Places ToS): never persisted. */}
+                            {b.rating != null && (
+                              <span className="text-[10.5px] text-forge-dim" title={b.ratingCount != null ? `${b.ratingCount} Google review${b.ratingCount === 1 ? '' : 's'}` : 'Google rating'}>
+                                ★ {b.rating.toFixed(1)}{b.ratingCount != null ? ` (${b.ratingCount})` : ''}
+                              </span>
+                            )}
                           </div>
-                          {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-[11px] text-forge-dim hover:text-forge-ember">{b.url.replace(/^https?:\/\//, '')} <ExternalLink size={10} /></a>}
+                          {b.url
+                            ? <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-[11px] text-forge-dim hover:text-forge-ember">{b.url.replace(/^https?:\/\//, '')} <ExternalLink size={10} /></a>
+                            : <span className="text-[11px] text-forge-ember">no website listed</span>}
                           {b.audit && b.audit.signals.length > 0 && (
                             <div className="mt-1.5 flex flex-wrap gap-1.5">
                               {b.audit.signals.map((s) => (

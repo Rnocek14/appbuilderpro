@@ -37,6 +37,10 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
   const [moreOpen, setMoreOpen] = useState(false);
   // A lead must never arrive invisibly (UX audit): the ops inbox gets the same badge treatment —
   // new leads + pending approvals, counted from real rows on mount and window focus.
+  // ONE count on Queue, and that is correct: /garvis/inbox is a redirect INTO Queue — the Queue is
+  // the unified ops surface (decisions + messages, one pass), so leads, replies and approvals are
+  // all answered on the page this badge points at. A walkthrough briefly "fixed" this into two
+  // badges on two nav items for the same page; the redirect is the design, not a gap.
   const [opsCount, setOpsCount] = useState(0);
   useEffect(() => {
     let live = true;

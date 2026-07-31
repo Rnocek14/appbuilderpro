@@ -58,6 +58,39 @@ Deno.serve(async (req) => {
   for (const p of (profiles ?? []) as { id: string; full_name: string | null; webhook_url: string; last_pulse_at: string | null; calendar_ics_url?: string | null }[]) {
     checked++;
     try {
+      // ── HOT-REPLY ESCALATION — every hourly tick, NOT just the morning ─────────────────────
+      // A reply is the single most perishable object in the funnel: answer inside the hour and
+      // it's a conversation, answer tomorrow and it's a stranger again. The morning brief counts
+      // replies once a day, which is exactly the wrong cadence for the one thing where hours
+      // decide the outcome. So: any human reply that CROSSED THE 4-HOUR MARK during the last
+      // hour, with no send back on its campaign since, pings the owner NOW. The crossing window
+      // is the dedupe — the pulse runs hourly, so each reply crosses [now-5h, now-4h] exactly
+      // once and is never nagged twice. 'auto' replies (OOO, bounce bodies) never escalate.
+      try {
+        const { data: aging } = await admin.from('replies')
+          .select('id, campaign_id, from_address, subject, received_at')
+          .eq('owner_id', p.id).neq('classification', 'auto')
+          .gte('received_at', new Date(now.getTime() - 5 * 3_600_000).toISOString())
+          .lt('received_at', new Date(now.getTime() - 4 * 3_600_000).toISOString())
+          .limit(5);
+        const hot: string[] = [];
+        for (const r of (aging ?? []) as { id: string; campaign_id: string | null; from_address: string | null; subject: string | null; received_at: string }[]) {
+          if (r.campaign_id) {
+            const { count: answered } = await admin.from('outreach_messages')
+              .select('id', { count: 'exact', head: true })
+              .eq('campaign_id', r.campaign_id).eq('status', 'sent').gte('sent_at', r.received_at);
+            if ((answered ?? 0) > 0) continue;           // already answered — nothing to nag
+          }
+          hot.push(`${r.from_address ?? 'someone'}${r.subject ? ` — “${r.subject.slice(0, 60)}”` : ''}`);
+        }
+        if (hot.length > 0) {
+          await notifyText(p.webhook_url,
+            `🔥 ${hot.length === 1 ? 'A reply has' : `${hot.length} replies have`} sat unanswered for 4 hours:\n` +
+            hot.map((h) => `  • ${h}`).join('\n') +
+            `\nEvery hour it cools. Open the inbox: /garvis/inbox`);
+        }
+      } catch { /* escalation is best-effort; the brief below must never be lost to it */ }
+
       // Their timezone (outreach settings hold it; default matches the send-cap default).
       const { data: os } = await admin.from('outreach_settings').select('timezone').eq('owner_id', p.id).maybeSingle();
       const tz = (os as { timezone?: string } | null)?.timezone ?? 'America/Chicago';
@@ -66,7 +99,7 @@ Deno.serve(async (req) => {
       if (p.last_pulse_at && localParts(new Date(p.last_pulse_at), tz).date === today) continue; // already briefed today
 
       const since = p.last_pulse_at ?? new Date(now.getTime() - 24 * 3_600_000).toISOString();
-      const [leads, touched, replies, approvals, reminders, stalledArcs] = await Promise.all([
+      const [leads, touched, replies, approvals, reminders, stalledArcs, staleDemos, lastSend] = await Promise.all([
         admin.from('leads').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).gte('created_at', since),
         admin.from('leads').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).gte('first_touch_at', since),
         admin.from('replies').select('id', { count: 'exact', head: true }).eq('owner_id', p.id).gte('received_at', since),
@@ -77,10 +110,27 @@ Deno.serve(async (req) => {
         admin.from('orchestrator_plans').select('title, waiting_reason')
           .eq('owner_id', p.id).eq('status', 'waiting')
           .lt('last_activity_at', new Date(now.getTime() - 24 * 3_600_000).toISOString()).limit(3),
+        // THE ACCOUNTABILITY PAIR — what the funnel is holding vs. how long since anything left.
+        // The brief's "quiet night stays quiet" rule is about not inventing activity; a stalled
+        // funnel is not invented, it is real rows sitting still, and the operator's consistency —
+        // not the machine's — is the variable that decides whether any of this makes money.
+        admin.from('preview_sites').select('id', { count: 'exact', head: true })
+          .eq('user_id', p.id).eq('status', 'preview')
+          .lt('created_at', new Date(now.getTime() - 48 * 3_600_000).toISOString()),
+        admin.from('outreach_messages').select('sent_at')
+          .eq('owner_id', p.id).eq('status', 'sent')
+          .order('sent_at', { ascending: false }).limit(1),
       ]);
       const nLeads = leads.count ?? 0, nTouched = touched.count ?? 0, nReplies = replies.count ?? 0,
         nApprovals = approvals.count ?? 0, nReminders = reminders.count ?? 0;
       const arcs = (stalledArcs.data ?? []) as { title: string; waiting_reason: string | null }[];
+      const nStaleDemos = staleDemos.count ?? 0;
+      // Days since anything was actually sent. Only speaks when the funnel is HOLDING work (built
+      // demos or pending approvals) — silence with nothing to send is rest; silence with a loaded
+      // funnel is the leak.
+      const lastSentAt = ((lastSend.data ?? []) as { sent_at: string | null }[])[0]?.sent_at ?? null;
+      const sendGapDays = lastSentAt ? Math.floor((now.getTime() - Date.parse(lastSentAt)) / 86_400_000) : null;
+      const funnelStalled = sendGapDays !== null && sendGapDays >= 3 && (nStaleDemos > 0 || nApprovals > 0);
 
       // THE CALENDAR SENSE (app_0098): today's real events, read from the operator's own ICS
       // feed. Fail-soft — a broken feed contributes nothing, never a guess or an error line.
@@ -97,7 +147,7 @@ Deno.serve(async (req) => {
 
       // Always stamp the brief-check so tomorrow's window works; only SPEAK when something's real.
       await admin.from('profiles').update({ last_pulse_at: now.toISOString() }).eq('id', p.id);
-      if (nLeads + nReplies + nApprovals + nReminders + arcs.length + calendar.length === 0) continue;   // quiet night stays quiet
+      if (nLeads + nReplies + nApprovals + nReminders + arcs.length + calendar.length + nStaleDemos + (funnelStalled ? 1 : 0) === 0) continue;   // quiet night stays quiet
 
       const lines = [
         `Morning brief${p.full_name ? `, ${p.full_name.split(' ')[0]}` : ''} — while you were away:`,
@@ -107,6 +157,8 @@ Deno.serve(async (req) => {
         nApprovals > 0 && `• ${nApprovals} action${nApprovals === 1 ? '' : 's'} waiting on your approval`,
         nReminders > 0 && `• ${nReminders} reminder${nReminders === 1 ? '' : 's'} due`,
         ...arcs.map((a) => `⏸ Arc "${a.title}" has been waiting a day+: ${a.waiting_reason ?? 'a prerequisite'} — one approval + Resume continues it`),
+        nStaleDemos > 0 && `▲ ${nStaleDemos} finished demo${nStaleDemos === 1 ? ' has' : 's have'} sat unsent for 2+ days — a demo only earns in an inbox`,
+        funnelStalled && `▲ Nothing has gone out in ${sendGapDays} days while work sits ready. The funnel compounds only when something leaves daily.`,
         ...calendar.map((c) => c.line),
         `Open Garvis → Command to act on all of it.`,
       ].filter(Boolean) as string[];

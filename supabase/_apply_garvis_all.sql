@@ -6364,6 +6364,318 @@ drop policy if exists "outreach_finding_refs owner all" on public.outreach_findi
 create policy "outreach_finding_refs owner all" on public.outreach_finding_refs
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
+-- ======== supabase/migrations/app_0117_scan_cohorts.sql ========
+-- app_0117_scan_cohorts.sql
+-- THE COHORT — a named, reproducible set of businesses, so a scan can become a STUDY.
+--
+-- app_0116 made findings countable. It did not make them countable ABOUT ANYTHING: every audit sat
+-- in one undifferentiated pool per owner, so there was no way to say "these 618 businesses, measured
+-- this way, on these dates" — and without that sentence there is no denominator, and without a
+-- denominator there is no percentage anyone should publish.
+--
+-- The gap this closes is one sentence in an email:
+--
+--     "Your site was one of 618 plumber websites in Walworth County we looked at."
+--
+-- That line is the difference between a stranger selling something and a report about something that
+-- already happened, and it cannot be written honestly without a cohort. It is also the line a local
+-- editor needs before they will run the story.
+--
+-- WHY A COHORT IS NOT JUST A FILTER over prospect_audits. Three things have to be pinned at the
+-- moment of measurement or the number is not reproducible later:
+--   * THE FRAME — what we set out to measure, in words, before we knew the answer. "Every business
+--     returned by Places for these queries in this area, that had a website." A frame written after
+--     seeing the results is not a frame, it is a selection.
+--   * THE VERSION — which detection logic took the readings. v1.2.0 and v1.4.0 detect different
+--     things deliberately; a percentage mixing them is comparing unlike measurements. cohortStats
+--     refuses to publish a mixed cohort, and this column is how it knows.
+--   * THE DATES — a site changes. "41% had no booking path" is only true as of when we looked.
+--
+-- MEMBERSHIP IS A JOIN TABLE, not a cohort_id column on prospect_audits, because one business can
+-- legitimately belong to several studies — the Q1 county index and the Q3 re-run and a trade-
+-- specific cut — and a single foreign key would force the second run to either overwrite the first
+-- or duplicate the audit. The audit is the business's current reading; the membership is the fact
+-- that it was in a study. Keeping them separate is what makes a year-on-year trend possible at all.
+--
+-- Additive + idempotent. Nothing existing changes behaviour; the deep scan and the per-business
+-- pitch both work exactly as before without a cohort ever being created.
+
+-- ---------- 1. scan_cohorts ----------
+create table if not exists public.scan_cohorts (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.profiles(id) on delete cascade,
+  world_id      uuid references public.knowledge_worlds(id) on delete set null,
+
+  -- Identity, in the words a reader would use.
+  name          text not null,                  -- 'Walworth County plumbers, Q3 2026'
+  area          text not null,                  -- 'Walworth County, WI' — appears verbatim in the email
+  frame         text not null,                  -- what we set out to measure, WRITTEN BEFORE the results
+  -- The trade this cohort is about, when it is about one. Null for a mixed/all-business index; the
+  -- per-trade breakdown then comes from the members' own niches rather than from the cohort.
+  trade         text,
+  -- Singular noun used in owner-facing copy: "one of 618 <noun> websites". Kept as data because
+  -- "plumber" / "roofer" / "restaurant" cannot be derived from `trade` reliably enough to guess.
+  frame_noun    text not null default 'business',
+
+  -- Reproducibility. scan_version is stamped when the run completes; a cohort whose members carry
+  -- more than one version is not publishable (cohortStats enforces it) and this records the intent.
+  scan_version  text,
+  status        text not null default 'open'
+                  check (status in ('open', 'scanning', 'complete', 'abandoned')),
+
+  started_at    timestamptz not null default now(),
+  completed_at  timestamptz,
+  created_at    timestamptz not null default now(),
+
+  unique (owner_id, name)
+);
+
+alter table public.scan_cohorts enable row level security;
+drop policy if exists "scan_cohorts owner all" on public.scan_cohorts;
+create policy "scan_cohorts owner all" on public.scan_cohorts
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+create index if not exists idx_scan_cohorts_owner_status on public.scan_cohorts(owner_id, status, started_at desc);
+create index if not exists idx_scan_cohorts_world on public.scan_cohorts(world_id) where world_id is not null;
+
+-- ---------- 2. cohort_members ----------
+-- One business's participation in one study. Deliberately a join rather than a column on the audit:
+-- a business measured in Q1 and again in Q3 is TWO memberships of ONE audit, which is exactly what a
+-- year-on-year trend needs and what a single cohort_id column would make impossible.
+create table if not exists public.cohort_members (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid not null references public.profiles(id) on delete cascade,
+  cohort_id     uuid not null references public.scan_cohorts(id) on delete cascade,
+  audit_id      uuid not null references public.prospect_audits(id) on delete cascade,
+
+  -- Frozen AT MEASUREMENT TIME, not read back from the audit later. The audit row is the business's
+  -- CURRENT state and will be overwritten by the next scan; a study has to remember what was true
+  -- when it looked, or every past percentage silently rewrites itself. Same discipline as
+  -- outreach_finding_refs.finding_code in app_0116.
+  reachable     boolean not null,
+  scan_version  text,
+  trade         text,                            -- the niche this business was discovered under
+
+  created_at    timestamptz not null default now(),
+
+  unique (cohort_id, audit_id)                   -- a business is in a given study once
+);
+
+alter table public.cohort_members enable row level security;
+drop policy if exists "cohort_members owner all" on public.cohort_members;
+create policy "cohort_members owner all" on public.cohort_members
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- Both FK columns indexed explicitly: Postgres does not do it for you and both parents cascade.
+create index if not exists idx_cohort_members_cohort on public.cohort_members(cohort_id);
+create index if not exists idx_cohort_members_audit on public.cohort_members(audit_id);
+create index if not exists idx_cohort_members_owner_trade on public.cohort_members(owner_id, trade);
+
+-- ---------- 3. the cohort a pitch cited ----------
+-- Which study an outreach message claimed membership of. Recorded for the same reason
+-- outreach_finding_refs exists: the assertion we made has to survive the data changing underneath
+-- it. If someone later asks "you told me I was one of 618 — one of 618 what?", this is the answer,
+-- and it stays answerable after the cohort has been re-run.
+alter table public.outreach_messages add column if not exists cohort_id uuid
+  references public.scan_cohorts(id) on delete set null;
+create index if not exists idx_outreach_messages_cohort
+  on public.outreach_messages(cohort_id) where cohort_id is not null;
+
+-- ======== supabase/migrations/app_0118_client_world.sql ========
+-- app_0118_client_world.sql
+-- CLIENT ⇄ WORLD LINKAGE (operating model D6/counterparty; capability-audit 04/10). The two client
+-- nouns were parallel and unconnected: client_subscriptions (the money) had no world_id, and
+-- close-won never created a world — so "the client's world" that every scoped ledger, report, and
+-- fleet rollup needs did not exist as a link. One column closes it; closeCampaignWon now creates
+-- the client's world at the moment of the yes and links both nouns to it.
+alter table public.client_subscriptions
+  add column if not exists world_id uuid references public.knowledge_worlds(id) on delete set null;
+create index if not exists idx_client_subscriptions_world on public.client_subscriptions(world_id);
+
+comment on column public.client_subscriptions.world_id is
+  'The client''s world — created at close-won. Every ledger row, watch, report, and fleet rollup for this client scopes through it.';
+
+-- ======== supabase/migrations/app_0119_change_requests.sql ========
+-- app_0119_change_requests.sql
+-- THE CHANGE REQUEST (vertical slice §1): a durable object, not a note. The audit found no
+-- client-facing change loop at all — requests lived in email and memory. This is the client-ops
+-- workhorse: every request is world-scoped BY CONSTRUCTION (world_id NOT NULL — the scope
+-- contract forbids an account-wide fallback here; a request always belongs to a client), carries
+-- its whole lifecycle in one row, and links every downstream object it causes (mission, approval,
+-- deployment, rollback, the notify message) so time and cost attribute to the client.
+--
+-- Lifecycle (enforced in the pure core, recorded in `history` append-only):
+--   received → understood → scoped → [approved] → in_progress → preview_ready → deployed
+--   → verified → client_notified → closed        (+ declined, from any pre-deploy state)
+-- Act-with-undo inside; EXPLICIT approval (needs_approval → approval_id) for publishing, billing
+-- changes, destructive operations, or anything outside the client's established policy.
+
+create table if not exists public.change_requests (
+  id                       uuid primary key default gen_random_uuid(),
+  owner_id                 uuid not null references public.profiles(id) on delete cascade,
+  world_id                 uuid not null references public.knowledge_worlds(id) on delete cascade,
+  client_subscription_id   uuid references public.client_subscriptions(id) on delete set null,
+  source                   text not null check (source in ('operator', 'client_email', 'portal')),
+  requester                text,                     -- who asked (name / email), their identity as given
+  request                  text not null,            -- the requested change, in their words
+  affected_url             text,                     -- the site/page it touches
+  affected_artifact_id     uuid,                     -- or the artifact it touches
+  priority                 text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
+  status                   text not null default 'received' check (status in
+    ('received', 'understood', 'scoped', 'approved', 'in_progress', 'preview_ready',
+     'deployed', 'verified', 'client_notified', 'closed', 'declined')),
+  clarification            text not null default 'none' check (clarification in ('none', 'waiting_client', 'answered')),
+  needs_approval           boolean not null default false,
+  approval_id              uuid references public.approvals(id) on delete set null,
+  mission_id               uuid,                     -- the assigned mission/execution, when one is spun up
+  deploy_execution_id      uuid references public.execution_runs(id) on delete set null,
+  rollback_ref             text,                     -- what restores the previous state (stashed html path / prior live url)
+  notify_message_id        uuid,                     -- the completion communication (outreach_messages)
+  received_at              timestamptz not null default now(),
+  closed_at                timestamptz,
+  minutes_spent            integer not null default 0,
+  cost_usd                 numeric(10, 4) not null default 0,
+  history                  jsonb not null default '[]',   -- append-only [{at, from, to, note}]
+  created_at               timestamptz not null default now(),
+  updated_at               timestamptz not null default now()
+);
+
+create index if not exists idx_change_requests_world on public.change_requests(world_id, status);
+create index if not exists idx_change_requests_open on public.change_requests(owner_id, status, received_at)
+  where status not in ('closed', 'declined');
+
+alter table public.change_requests enable row level security;
+drop policy if exists change_requests_all on public.change_requests;
+create policy change_requests_all on public.change_requests
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+drop trigger if exists trg_change_requests_touch on public.change_requests;
+create trigger trg_change_requests_touch before update on public.change_requests
+  for each row execute function public.touch_updated_at();
+
+-- ======== supabase/migrations/app_0120_client_reports.sql ========
+-- app_0120_client_reports.sql
+-- THE MONTHLY CLIENT REPORT (vertical slice §2): an ARTIFACT with provenance, not a rendered
+-- summary. The audit's finding was brutal — "the monthly report is one owner-wide sentence
+-- rendered on page visit." This row is the fix's spine: derived ONLY from world-scoped ledgers
+-- (the compile core refuses owner-wide aggregation presented as client truth), every claim
+-- traceable (evidence jsonb: claim → row refs), unknowns EXPLICIT (a metric whose source is
+-- empty/unarmed is listed as unavailable, never invented), approval-gated before delivery
+-- through the one send spine, and correctable via version/supersedes history.
+
+create table if not exists public.client_reports (
+  id                      uuid primary key default gen_random_uuid(),
+  owner_id                uuid not null references public.profiles(id) on delete cascade,
+  world_id                uuid not null references public.knowledge_worlds(id) on delete cascade,
+  client_subscription_id  uuid references public.client_subscriptions(id) on delete set null,
+  period_start            date not null,
+  period_end              date not null,
+  package_id              uuid references public.service_packages(id) on delete set null,  -- version reported under
+  ledger_from             timestamptz not null,     -- the exact source range the numbers came from
+  ledger_to               timestamptz not null,
+  generated_at            timestamptz not null default now(),
+  body_md                 text not null,            -- client-facing, concise
+  evidence                jsonb not null default '{}',  -- operator view: claim key → {count, row_refs[], source}
+  unknowns                jsonb not null default '[]',  -- explicitly unavailable metrics + why
+  approval_state          text not null default 'draft' check (approval_state in ('draft', 'approved')),
+  approval_id             uuid references public.approvals(id) on delete set null,
+  delivery_state          text not null default 'not_sent' check (delivery_state in ('not_sent', 'queued', 'sent')),
+  message_id              uuid,                     -- the outreach message that delivered it
+  version                 integer not null default 1,
+  supersedes              uuid references public.client_reports(id) on delete set null,  -- corrections chain
+  created_at              timestamptz not null default now(),
+  unique (owner_id, world_id, period_start, period_end, version)
+);
+
+create index if not exists idx_client_reports_world on public.client_reports(world_id, period_end desc);
+create index if not exists idx_client_reports_due on public.client_reports(owner_id, delivery_state, period_end);
+
+alter table public.client_reports enable row level security;
+drop policy if exists client_reports_all on public.client_reports;
+create policy client_reports_all on public.client_reports
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- ======== supabase/migrations/app_0121_package_lifecycle.sql ========
+-- app_0121_package_lifecycle.sql
+-- PACKAGE LIFECYCLE + OFFBOARDING (vertical slice §4-5). The pin (app_0115) recorded which
+-- version a client runs; this makes the noun OPERATIONAL: pins carry a lifecycle
+-- (active → paused → terminated) with client-specific overrides preserved across version
+-- migrations; newly introduced outbound actions require RECORDED CONSENT before they arm
+-- (package_consents — an upgrade may propose, never silently enable); and termination produces
+-- an OFFBOARDING INVENTORY — the audit found sold sites run forever on the operator's
+-- credentials with no takedown path. Nothing continues after a relationship ends without an
+-- explicit retained-service entry.
+
+alter table public.package_pins
+  add column if not exists status text not null default 'active' check (status in ('active', 'paused', 'terminated')),
+  add column if not exists paused_at timestamptz,
+  add column if not exists terminated_at timestamptz,
+  add column if not exists overrides jsonb not null default '{}',          -- client-specific deltas, survive migrate
+  add column if not exists retained_services jsonb not null default '[]'; -- explicit post-termination retentions
+
+comment on column public.package_pins.retained_services is
+  'The ONLY legitimate way anything keeps running after termination: explicit entries [{service, reason, until}]. Empty = everything stops.';
+
+create table if not exists public.package_consents (
+  id                      uuid primary key default gen_random_uuid(),
+  owner_id                uuid not null references public.profiles(id) on delete cascade,
+  client_subscription_id  uuid not null references public.client_subscriptions(id) on delete cascade,
+  package_id              uuid not null references public.service_packages(id) on delete cascade,
+  action                  text not null,             -- the outbound action consented to (registry capability id)
+  consented_at            timestamptz not null default now(),
+  evidence                text not null,             -- how consent was given (their words / the signed doc / the call note)
+  unique (client_subscription_id, action)
+);
+
+create table if not exists public.offboarding_inventories (
+  id                      uuid primary key default gen_random_uuid(),
+  owner_id                uuid not null references public.profiles(id) on delete cascade,
+  world_id                uuid not null references public.knowledge_worlds(id) on delete cascade,
+  client_subscription_id  uuid references public.client_subscriptions(id) on delete set null,
+  inventory               jsonb not null,            -- the resolved checklist: hosting, domains, sites, keys, social, mailboxes, providers, automations, jobs, data, assets, billing, requests, reports, transfer obligations
+  status                  text not null default 'draft' check (status in ('draft', 'resolved')),
+  created_at              timestamptz not null default now(),
+  resolved_at             timestamptz
+);
+
+create index if not exists idx_package_consents_sub on public.package_consents(client_subscription_id);
+create index if not exists idx_offboarding_owner on public.offboarding_inventories(owner_id, status);
+
+alter table public.package_consents enable row level security;
+alter table public.offboarding_inventories enable row level security;
+drop policy if exists package_consents_all on public.package_consents;
+create policy package_consents_all on public.package_consents
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+drop policy if exists offboarding_inventories_all on public.offboarding_inventories;
+create policy offboarding_inventories_all on public.offboarding_inventories
+  for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+-- ======== supabase/migrations/app_0122_area_study_order.sql ========
+-- app_0122_area_study_order.sql
+-- THE COUNTY STUDY MOVES TO THE SERVER — a standing-order kind for unattended area sweeps.
+--
+-- The interactive sweep (areaSweep.ts) runs in the operator's browser tab: close the laptop and a
+-- 100-query county run dies mid-flight. Everything it persists survives (that was designed in), but
+-- "leave it running overnight" — the way a study of any real size actually gets collected — needs
+-- the heartbeat, not a tab. This adds the 'area_study' kind; the runner lives in standing-worker.
+--
+-- HOW IT RUNS, and why the config carries a CURSOR: a county plan is towns × synonyms ≈ 100+
+-- paginated Places queries plus an audit per find. One 15-minute heartbeat tick should not attempt
+-- all of it — a long tick risks the function's time budget and a mid-run crash loses nothing but
+-- looks like everything. So each tick processes a SLICE of the plan and advances config.cursor;
+-- while unfinished, next_run_at is set to now (the next tick continues immediately); when the
+-- cursor reaches the end, the cohort is completed and the order pauses itself — done, visibly,
+-- with the study attached. A stopped or crashed tick resumes exactly where the cursor points,
+-- because every audit and membership row was persisted the moment it happened.
+--
+-- Same pattern as 0079/0080/0092: the kind check is dropped and re-added with the full union —
+-- the constraint's history IS the list of things the clock has learned to run.
+
+alter table public.standing_orders drop constraint if exists standing_orders_kind_check;
+alter table public.standing_orders
+  add constraint standing_orders_kind_check
+  check (kind in ('watch_url', 'cadence_digest', 'client_hunt', 'idea_stream', 'content_week', 'opportunity_hunt', 'area_study'));
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).

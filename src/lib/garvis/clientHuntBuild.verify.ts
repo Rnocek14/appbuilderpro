@@ -273,5 +273,26 @@ const serper = {
     !scanFindingsHtml([pf({ code: 'x.y', title: '<script>alert(1)</script>' })]).includes('<script>alert(1)</script>'));
 }
 
+
+// ── the cohort opening: the sentence that changes the email ────────────────
+{
+  const { profile: cp } = parseBusinessProfile(buildHuntProfileRaw({
+    url: 'http://acmeroofing.com', niche: 'roofers', fallbackName: 'Acme Roofing',
+    page: { title: 'Acme Roofing' }, images: [], email: 'a@b.com',
+    audit: auditSite({ url: 'http://acmeroofing.com', reachable: true, title: 'x', text: 'thin', hasViewport: false }, 2026),
+  }));
+  const line = 'Your site was one of 618 roofer websites in Walworth County we looked at.';
+  const withCohort = buildHuntPitch(cp!, 'https://x.test/p/a', [], [], line);
+  const without = buildHuntPitch(cp!, 'https://x.test/p/a', [], [], null);
+
+  check('cohort: the study line opens the email', withCohort.indexOf(line) < withCohort.indexOf('I built you a new one'));
+  check('cohort: the cold "I came across" opening is replaced, not appended', !/I came across/.test(withCohort));
+  check('cohort: no cohort ⇒ the ordinary cold opening still stands', /I came across/.test(without));
+  check('cohort: a null cohort line never leaks "null" into the body', !/null/.test(without));
+  check('cohort: the demo link survives either opening', withCohort.includes('https://x.test/p/a') && without.includes('https://x.test/p/a'));
+  check('cohort: the composed cohort pitch passes the claim gate', claimsAreSafe(withCohort));
+  check('cohort: an empty-string cohort line falls back to the cold opening', /I came across/.test(buildHuntPitch(cp!, 'https://x.test/p/a', [], [], '')));
+}
+
 console.log(`\nclientHuntBuild.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} clientHuntBuild check(s) failed`);

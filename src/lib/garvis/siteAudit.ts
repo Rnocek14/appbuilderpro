@@ -47,6 +47,37 @@ function copyrightYear(text: string): number | null {
   return best;
 }
 
+/**
+ * A business Places found that has NO WEBSITE AT ALL — not one that failed to load.
+ *
+ * These were being dropped on the floor: the hunt skipped them because there was nothing to fetch,
+ * so they rendered as a blank row with no verdict and no spinner, and the operator read that as
+ * "the scrape didn't work". They are in fact the strongest prospect on the page — there is no
+ * rebuild to argue for, only a site to build — and sweepNation's own comment has said so all along.
+ *
+ * Kept distinct from the unreachable case on purpose. "We couldn't load it" and "there isn't one"
+ * are different facts about a business and only the second is a certainty: Places told us the
+ * website field was empty, which is a real observation, not a failed fetch. Verdict stays 'weak'
+ * rather than 'unknown' because nothing here is unknown — and it sorts to the top, which is where
+ * this prospect belongs.
+ */
+export function noWebsiteAudit(): SiteAudit {
+  return {
+    url: '',
+    reachable: false,
+    signals: [{
+      id: 'no_website',
+      label: 'No website',
+      severity: 'high',
+      detail: 'Google has this business listed with no website at all. Everyone searching for them lands on a map pin, a competitor, or nothing.',
+    }],
+    strengths: [],
+    score: null,          // there is no site to score, and a 0 would read as a measurement
+    verdict: 'weak',
+    headline: 'No website at all — the strongest case for building one.',
+  };
+}
+
 /** Audit a fetched page against a reference year (injected for determinism). */
 export function auditSite(input: SiteSignalsInput, nowYear: number): SiteAudit {
   const url = input.url.trim();

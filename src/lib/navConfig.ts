@@ -6,10 +6,11 @@
 
 import type { LucideIcon } from 'lucide-react';
 import {
+  BookOpen,
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
   CreditCard, Settings, Activity, Wand2, Crosshair, BookUser,
-  Hammer, PhoneMissed, Target, Film, HeartPulse, CalendarClock, MailCheck,
+  Hammer, PhoneMissed, Target, Film, HeartPulse, CalendarClock, MailCheck, Radar,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -38,6 +39,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
       // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
       { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
+      { to: '/garvis/studies', label: 'Studies', icon: BookOpen },
       { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],
   },
@@ -71,6 +73,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/email-domains', label: 'Sending domains', icon: MailCheck },
       { to: '/garvis/working', label: 'Working for you', icon: Activity },
       { to: '/garvis/setup', label: 'Setup', icon: KeyRound },
+      { to: '/garvis/fleet', label: 'Fleet', icon: Radar },
       { to: '/garvis/health', label: 'Health', icon: HeartPulse },
     ],
   },

@@ -84,6 +84,8 @@ export function CodeEditorPane({ files, openPaths, activePath, drafts, onDraftCh
                   p === activePath ? 'bg-forge-bg text-forge-ink ember-seam' : 'text-forge-dim hover:text-forge-ink',
                 )}
                 onClick={() => onActivate(p)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(p); } }}
+                tabIndex={0}
               >
                 {isDirty && <Dot size={16} className="-ml-1.5 text-forge-ember" aria-label="Unsaved changes" />}
                 {p.split('/').pop()}

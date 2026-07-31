@@ -1,0 +1,270 @@
+<!--
+  P9 — The Return: nine days away, and a four-day hole the system refuses to paper over.
+  Settles: the sharpest honesty test in the corpus — what the machine says about a window in which
+  it was not running. Every claim here is either backed by rows you can open, or named as an
+  absence. Nothing is inferred to fill the gap.
+  Rides on real substrate: the heartbeat + pg_cron/pg_net link that LIMITATIONS.md names as the
+  single most untested seam in the system. This is what its failure should look like.
+  Inevitable when: the gap is the part you trust most.
+  Staged data, real timing. One self-contained file, zero external requests.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P9 · The Return</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --forge:cubic-bezier(.22,1,.36,1);
+  --serif:Charter,Georgia,"Times New Roman",serif;
+  --chrome:-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 14px/1.45 var(--chrome);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ember);outline-offset:3px;border-radius:3px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.wrap{max-width:770px;margin:0 auto;padding:28px 22px 140px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:22px}
+.face{font-size:13px}.face .kind{color:var(--dim)}
+.acct{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right}
+.acct b{color:var(--warn);font-weight:400}
+
+.lede{font-family:var(--serif);font-size:19px;line-height:1.55;max-width:56ch;margin:0 0 22px}
+
+.day{border-left:2px solid var(--line);margin-left:6px;padding:0 0 0 18px;position:relative}
+.dayhd{display:flex;align-items:baseline;gap:12px;padding:10px 0;width:100%;text-align:left;
+  transition:background 150ms var(--forge)}
+.dayhd:hover{background:rgba(255,255,255,.02)}
+.day::before{content:'';position:absolute;left:-5px;top:17px;width:8px;height:8px;border-radius:50%;
+  background:var(--line)}
+.day.has::before{background:var(--dim)}
+.day.gap::before{background:var(--warn)}
+.day .d{font-family:var(--mono);font-size:11.5px;color:var(--faint);flex:0 0 74px}
+.day .s{flex:1 1 auto;font-size:14px;color:var(--dim)}
+.day.has .s{color:var(--ink)}
+.day.gap .s{color:var(--warn)}
+.day .c{font-family:var(--mono);font-size:11px;color:var(--faint);flex:0 0 auto}
+.rows{max-height:0;overflow:hidden;transition:max-height 400ms var(--forge)}
+.day.open .rows{max-height:420px;overflow-y:auto}
+.rowlist{padding:2px 0 12px;font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+.r{display:flex;gap:12px;padding:2.5px 0}
+.r .t{color:var(--faint);flex:0 0 58px}
+.r .x{flex:1 1 auto}
+
+.gapbox{padding:4px 0 14px;max-width:54ch}
+.gapbox .big{font-family:var(--serif);font-size:16.5px;line-height:1.55;color:var(--warn)}
+.gapbox .sm{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:9px;line-height:1.8}
+.gapbox .sm b{color:var(--dim);font-weight:400}
+
+.acts{margin-top:28px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);border-radius:999px;padding:8px 17px;font-size:13px;color:var(--dim);
+  transition:all 170ms var(--forge)}
+.btn:hover,.btn:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.45);background:var(--ember-soft)}
+.btn.primary{background:var(--ember);color:#0B0E14;border-color:var(--ember);font-weight:600}
+.said{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+body.focused .day:not(.gap){opacity:.28;transition:opacity 600ms var(--forge)}
+body.focused .day.gap{transform:scale(1.0)}
+
+.closing{margin-top:26px;font-family:var(--serif);font-size:17.5px;line-height:1.55;max-width:55ch;
+  opacity:0;transform:translateY(7px);transition:opacity .55s var(--forge),transform .55s var(--forge)}
+.closing.on{opacity:1;transform:none}
+
+.hud{position:fixed;left:14px;bottom:12px;display:flex;align-items:center;gap:10px;
+  font-size:11px;color:var(--faint);font-family:var(--mono);z-index:40}
+.hud button{border:1px solid var(--line);border-radius:6px;width:22px;height:22px;color:var(--faint)}
+.hud button:hover{color:var(--ember);border-color:rgba(232,131,58,.4)}
+.keys{position:fixed;right:16px;bottom:14px;font-family:var(--mono);font-size:11px;color:var(--faint);z-index:40}
+.card{position:fixed;inset:auto auto 46px 14px;width:min(400px,calc(100vw - 28px));background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:16px 18px;z-index:50;
+  opacity:0;visibility:hidden;transform:translateY(6px);transition:all .25s var(--forge)}
+.card.on{opacity:1;visibility:visible;transform:none}
+.card h4{margin:0 0 9px;font-family:var(--serif);font-weight:500;font-size:15px}
+.card li{font-size:13px;color:var(--dim);margin-bottom:6px;line-height:1.45}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:1ms!important;transition-duration:1ms!important} }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <!-- empty slot: the script writes this from D.awayDays. "nine" typed here was a second
+         source of truth for a number the data already holds. -->
+    <div class="face">Home <span class="kind" id="facekind"></span></div>
+    <div class="acct mono" id="acct"></div>
+  </div>
+
+  <p class="lede" id="lede"></p>
+  <div id="days"></div>
+
+  <div class="acts">
+    <button class="btn primary" id="gapbtn">show me the gap</button>
+    <button class="btn" id="openall">open every day</button>
+    <span class="said" id="said"></span>
+  </div>
+
+  <p class="closing" id="closing"></p>
+</div>
+
+<div class="keys">J/K move · Enter open · G gap</div>
+<div class="hud">
+  <span>P9 · The Return — staged data, real timing</span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>Four days have no rows. Does the way that is said make you trust the other five more?</li>
+    <li>Nothing estimates what “probably” happened. Do you want it to?</li>
+    <li>Could you tell a client exactly what did and did not run, from this screen alone?</li>
+    <li>Which is worse — the outage, or having been told a smooth story about it?</li>
+  </ul>
+</div>
+
+<script>
+/* ===================== staged data — one source of truth ====================================
+   Days 4–7 have `rows: null`. That is not an empty array. An empty array is a measured zero;
+   null is "no observation exists", and the screen renders the two differently on purpose. */
+const D = {
+  awayDays: 9,
+  days: [
+    { d:'jul 19', s:'Two site watches ran. Nothing changed.', rows:[
+      {t:'06:00', x:'watch janesbakery.example.com → reachable, no diff'},
+      {t:'06:00', x:'watch riversidedental.example.com → reachable, no diff'} ]},
+    { d:'jul 20', s:'A lead arrived and was answered.', rows:[
+      {t:'06:00', x:'watch ×2 → reachable'},
+      {t:'11:42', x:'form lead — “do you do wedding cakes?” → classified'},
+      {t:'11:43', x:'follow-up drafted · held for approval (you were away)'} ]},
+    { d:'jul 21', s:'Quiet. Watches only.', rows:[
+      {t:'06:00', x:'watch ×2 → reachable, no diff'} ]},
+    { d:'jul 22', s:'The clock stopped here.', rows:null, gapStart:true },
+    { d:'jul 23', s:'No rows exist for this day.', rows:null },
+    { d:'jul 24', s:'No rows exist for this day.', rows:null },
+    { d:'jul 25', s:'No rows exist for this day.', rows:null },
+    { d:'jul 26', s:'The clock came back at 06:00.', rows:[
+      {t:'06:00', x:'heartbeat re-armed · 12 cron jobs re-registered'},
+      {t:'06:00', x:'watch ×2 → reachable · janesbakery diff: new hours on the footer'} ]},
+    { d:'jul 27', s:'Normal. One reply still waiting for you.', rows:[
+      {t:'06:00', x:'watch ×2 → reachable'},
+      {t:'09:14', x:'reply from wedding-cake enquiry — still unanswered'} ]},
+  ],
+  gap: {
+    big:'Between 22 and 25 July the clock was not running. I have no rows for those four days and I am not going to guess what happened in them.',
+    facts:[
+      ['what stopped','the heartbeat missed its re-arm; 12 scheduled jobs never fired'],
+      ['what that means','8 site watches, 4 report checks and any inbound automation did not run'],
+      ['what I did not do','estimate them, average them, or carry the last known value forward'],
+      ['what you should check','anything a client reported in that window — I would not have seen it'],
+    ],
+  },
+};
+const $ = (id) => document.getElementById(id);
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const accounted = D.days.filter((d) => d.rows).length;
+const missing = D.days.length - accounted;
+const rowCount = D.days.reduce((a, d) => a + (d.rows ? d.rows.length : 0), 0);
+
+$('facekind').textContent = `· 3 worlds · back after ${D.awayDays} days`;
+$('acct').innerHTML = `days accounted for <b>${accounted} of ${D.days.length}</b> · ${rowCount} rows`;
+$('lede').textContent =
+  `You were away ${D.awayDays} days. I can account for ${accounted} of them from ${rowCount} rows. ` +
+  `The other ${missing} I cannot, and that is the first thing you should know.`;
+
+let sel = 0;
+function render(){
+  $('days').innerHTML = '';
+  D.days.forEach((day, i) => {
+    const el = document.createElement('div');
+    el.className = 'day ' + (day.rows ? 'has' : 'gap');
+    el.innerHTML =
+      `<button class="dayhd">
+         <span class="d">${day.d}</span>
+         <span class="s">${day.s}</span>
+         <span class="c">${day.rows ? day.rows.length + ' rows' : 'no rows'}</span>
+       </button>
+       <div class="rows"><div class="rowlist"></div></div>`;
+    el.querySelector('.dayhd').addEventListener('click', () => { sel = i; toggle(i); });
+    $('days').appendChild(el);
+  });
+  mark();
+}
+function toggle(i){
+  const el = $('days').children[i], day = D.days[i];
+  const open = el.classList.toggle('open');
+  const list = el.querySelector('.rowlist');
+  if (!open) { list.innerHTML = ''; return; }
+  if (day.rows) {
+    list.innerHTML = day.rows.map((r) => `<div class="r"><span class="t">${r.t}</span><span class="x">${r.x}</span></div>`).join('');
+  } else {
+    // The absence renders as prose, not as an empty table. An empty table would read as "zero".
+    list.innerHTML =
+      `<div class="gapbox"><div class="big">No observation exists for ${day.d}.</div>
+       <div class="sm">this is not zero activity — it is zero knowledge. the difference is the point.</div></div>`;
+  }
+}
+function mark(){
+  [...$('days').children].forEach((el, i) => el.style.background = i === sel ? 'rgba(255,255,255,.02)' : '');
+}
+
+/* ===================== the one orchestrated move: focus the gap ============================= */
+let focused = false;
+async function showGap(){
+  focused = !focused;
+  document.body.classList.toggle('focused', focused);
+  $('gapbtn').textContent = focused ? 'show the whole week' : 'show me the gap';
+  if (!focused) {
+    $('closing').classList.remove('on'); $('said').textContent = 'the five accounted days are back';
+    return;
+  }
+  const first = D.days.findIndex((d) => d.gapStart);
+  const el = $('days').children[first];
+  if (!el.classList.contains('open')) toggle(first);
+  el.querySelector('.rowlist').innerHTML =
+    `<div class="gapbox"><div class="big">${D.gap.big}</div>
+      <div class="sm">${D.gap.facts.map(([k, v]) => `<b>${k}</b> — ${v}`).join('<br>')}</div></div>`;
+  if (!reduced()) el.scrollIntoView({ block:'center', behavior:'smooth' });
+  $('said').textContent = `${missing} days · 0 rows · nothing inferred`;
+  setTimeout(() => {
+    $('closing').textContent =
+      'Five days are described from rows you can open. Four are described as unknown. ' +
+      'Nothing on this screen splits the difference.';
+    $('closing').classList.add('on');
+  }, reduced() ? 10 : 480);
+}
+$('gapbtn').addEventListener('click', showGap);
+$('openall').addEventListener('click', () => {
+  const anyClosed = [...$('days').children].some((el) => !el.classList.contains('open'));
+  D.days.forEach((_, i) => {
+    const el = $('days').children[i];
+    if (anyClosed ? !el.classList.contains('open') : el.classList.contains('open')) toggle(i);
+  });
+  $('openall').textContent = anyClosed ? 'close every day' : 'open every day';
+  $('said').textContent = anyClosed
+    ? `${rowCount} rows shown across ${accounted} days · ${missing} days have none`
+    : 'collapsed';
+});
+$('restart').addEventListener('click', () => {
+  focused = false; document.body.classList.remove('focused');
+  $('gapbtn').textContent = 'show me the gap';
+  $('openall').textContent = 'open every day';
+  $('closing').classList.remove('on'); $('closing').textContent = '';
+  $('said').textContent = ''; sel = 0; render();
+  window.scrollTo({ top: 0 });
+});
+$('feel').addEventListener('click', () => $('feelcard').classList.toggle('on'));
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === 'j') { e.preventDefault(); sel = Math.min(sel + 1, D.days.length - 1); mark(); $('days').children[sel].scrollIntoView({block:'nearest'}); }
+  else if (k === 'k') { e.preventDefault(); sel = Math.max(sel - 1, 0); mark(); $('days').children[sel].scrollIntoView({block:'nearest'}); }
+  else if (k === 'enter') { e.preventDefault(); toggle(sel); }
+  else if (k === 'g') { e.preventDefault(); showGap(); }
+  else if (k === 'escape') $('feelcard').classList.remove('on');
+});
+render();
+</script>

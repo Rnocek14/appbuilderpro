@@ -1,0 +1,121 @@
+# Prototype gate — the browser tier. The verify:* suites prove pure logic and the shadow DB proves
+# the schema; neither ever renders a pixel or clicks anything. This runs the actual pages.
+#
+# Two layers, on purpose:
+#   probe        — generic. Knows nothing about any page: discovers its controls and exercises each
+#                  from a fresh load. Proves "not broken", which is explicitly NOT "good".
+#   walkthroughs — specific. Know what each page CLAIMS and try to catch it lying. The sharpest one
+#                  scrapes every row out of the ledger's DOM and sums them in Node, so a page that
+#                  printed a stored total instead of adding up its rows would fail here.
+#
+# Why these are not `verify:*` scripts: CI auto-runs every verify suite and those are contractually
+# pure-logic — no DB, no network, no browser. These need Chromium, so they get their own gate.
+name: Prototypes
+
+on:
+  push:
+    paths:
+      - 'prototypes/**'
+      - 'scripts/probe.mjs'
+      - 'scripts/prototype-walkthrough.mjs'
+      - 'scripts/claims-walkthrough.mjs'
+      - 'scripts/lib/probe-core.mjs'
+      - 'scripts/generated-app-probe.mjs'
+      - 'scripts/fixtures/generated-app/**'
+      - 'supabase/functions/_shared/qa.ts'
+      - '.github/workflows/prototypes.yml'
+  pull_request:
+    paths:
+      - 'prototypes/**'
+      - 'scripts/probe.mjs'
+      - 'scripts/prototype-walkthrough.mjs'
+      - 'scripts/claims-walkthrough.mjs'
+      - 'scripts/lib/probe-core.mjs'
+      - 'scripts/generated-app-probe.mjs'
+      - 'scripts/fixtures/generated-app/**'
+      - 'supabase/functions/_shared/qa.ts'
+
+concurrency:
+  group: prototypes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # SHARDED, because this tier does not fit in one job any more.
+  #
+  # probe-core's settle() waits up to 75s for a page to stop changing, and probeUrl calls it on
+  # load, after the primary click, once per viewport, and once per control. A measured run of ONE
+  # prototype on a fast machine took 175 SECONDS — clean, no problems, just genuinely that patient.
+  # This directory grew from 5 pages to 12, so the single job needed ~35 minutes for this step alone
+  # and then had three more steps to run inside a 45-minute cap. It timed out.
+  #
+  # Raising the cap was the other option and it is the wrong one: an hour-long required check is a
+  # check people learn to ignore, which is exactly how deno-check sat red on main for six days.
+  # Sharding keeps every page, every control and every assertion — it only stops running them
+  # end-to-end. fail-fast is off so one bad page does not hide the state of the other eleven.
+  probe:
+    name: probe (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Probe this shard's prototypes (generic — is anything broken?)
+        run: |
+          # Round-robin rather than contiguous blocks, so a cluster of slow pages sitting next to
+          # each other alphabetically cannot land entirely in one shard.
+          files=$(ls prototypes/*.html | awk 'NR % 4 == ${{ matrix.shard }} % 4')
+          if [ -z "$files" ]; then echo "shard ${{ matrix.shard }}: no pages"; exit 0; fi
+          echo "shard ${{ matrix.shard }} probing:"; echo "$files"
+          node scripts/probe.mjs $files
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      # The scripts prefer a pinned local Chromium and fall back to Playwright's own install, so no
+      # path needs to be threaded through here.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The generic probe moved to the sharded `probe` job above — it is the slow half.
+      - name: Wave 1 — does each prototype keep its promise?
+        run: npm run walkthrough:prototypes
+
+      - name: Wave 2 — do the generated prototypes keep theirs?
+        run: npm run walkthrough:claims
+
+      # The generator's own output, built and driven. The 'broken' fixture carries four planted
+      # defects a compiler cannot see; this step asserts the two layers still catch them, so a
+      # regression in the interaction lint or the prober shows up here rather than in a shipped app.
+      - name: Generated-app harness catches what it is supposed to
+        run: |
+          out=$(npx tsx scripts/generated-app-probe.mjs --fixtures 2>&1) || true
+          echo "$out"
+          echo "$out" | grep -qE 'clean[^·]*static errors +0 · warnings +0 · browser problems +0' \
+            || (echo "::error::the CLEAN fixture no longer passes — the harness has false positives" && exit 1)
+          echo "$out" | grep -qE 'broken[^·]*static errors +[1-9]' \
+            || (echo "::error::the BROKEN fixture's planted defects are no longer caught by the lint" && exit 1)
+          echo "$out" | grep -qE 'broken.*browser problems +[1-9]' \
+            || (echo "::error::the BROKEN fixture's planted defects are no longer caught by the prober" && exit 1)
+
+      # A prototype whose design contract or limits went missing is a prototype nobody can review.
+      - name: The contract and the README still exist
+        run: test -s prototypes/DESIGN.md && test -s prototypes/README.md

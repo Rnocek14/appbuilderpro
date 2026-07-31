@@ -179,5 +179,74 @@ check('looksTruncated: cut-off file detected', looksTruncated('export function X
 check('looksTruncated: complete file is clean', !looksTruncated('export function X(){ return <div/>; }'));
 check('looksTruncated: braces in strings ignored', !looksTruncated('const s = "{{{{"; export default s;'));
 
+// ============================================================================================
+// 19) INTERACTION INTEGRITY — the checks that answer "will it respond?", not "will it build?"
+// Each pair is written as (fires when broken / silent when fine), because the value of a lint
+// that feeds a self-heal loop is entirely in the second half: a false positive makes the
+// generator rewrite code that already worked.
+// ============================================================================================
+const jsx = (content: string): F[] => [{ path: '/src/App.tsx', content }];
+
+// a button that does nothing — the "looks finished, isn't" defect
+check('dead button is flagged', has(jsx(`export default function A(){return <button>Save</button>}`),
+  'does nothing when clicked'));
+check('button with onClick is fine', !has(jsx(`export default function A(){const s=()=>{};return <button onClick={s}>Save</button>}`),
+  'does nothing when clicked'));
+check('type="submit" button inside a form is fine', !has(jsx(`export default function A(){return <form onSubmit={e=>e.preventDefault()}><button type="submit">Go</button></form>}`),
+  'does nothing when clicked'));
+check('a spread that may carry the handler is left alone', !has(jsx(`export default function A(p:any){return <button {...p}>Save</button>}`),
+  'does nothing when clicked'));
+check('a disabled button is not treated as dead', !has(jsx(`export default function A(){return <button disabled>Save</button>}`),
+  'does nothing when clicked'));
+check('an arrow body containing > does not truncate the tag scan',
+  !has(jsx(`export default function A(){const n=1;return <button onClick={()=>{if(n>0){}}}>Go</button>}`), 'does nothing when clicked'));
+
+// a handler pointing at a name that does not exist — throws on first click
+check('handler bound to an undefined name is flagged',
+  has(jsx(`export default function A(){return <button onClick={handleSave}>Save</button>}`), "bound to 'handleSave'"));
+check('handler defined in the file is fine',
+  !has(jsx(`export default function A(){const handleSave=()=>{};return <button onClick={handleSave}>Save</button>}`), "bound to 'handleSave'"));
+check('handler imported from elsewhere is fine',
+  !has([{ path: '/src/App.tsx', content: `import { handleSave } from './h';\nexport default function A(){return <button onClick={handleSave}>Save</button>}` },
+        { path: '/src/h.ts', content: `export const handleSave = () => {};` }], "bound to 'handleSave'"));
+check('handler destructured from props is fine',
+  !has(jsx(`export default function A({onSave}:{onSave:()=>void}){return <button onClick={onSave}>Save</button>}`), "bound to 'onSave'"));
+check('a browser global is not mistaken for a missing handler',
+  !has(jsx(`export default function A(){return <button onClick={print}>Print</button>}`), "bound to 'print'"));
+
+// a control a keyboard cannot reach
+check('onClick on a div is flagged as unreachable',
+  has(jsx(`export default function A(){const s=()=>{};return <div onClick={s}>Save</div>}`), 'unreachable by keyboard'));
+check('div with role + tabIndex is fine',
+  !has(jsx(`export default function A(){const s=()=>{};return <div role="button" tabIndex={0} onClick={s}>Save</div>}`), 'unreachable by keyboard'));
+check('a plain button is never flagged for reachability',
+  !has(jsx(`export default function A(){const s=()=>{};return <button onClick={s}>Save</button>}`), 'unreachable by keyboard'));
+
+// a form that loses what was typed
+check('form without onSubmit is flagged', has(jsx(`export default function A(){return <form><input/></form>}`), 'discards what was typed'));
+check('form with onSubmit is fine', !has(jsx(`export default function A(){return <form onSubmit={e=>e.preventDefault()}><input/></form>}`), 'discards what was typed'));
+
+// the lint must not fire on non-JSX modules, and must not flood
+check('plain .ts modules are untouched',
+  !has([{ path: '/src/App.tsx', content: `export default function A(){return null}` },
+        { path: '/src/x.ts', content: `export const html = '<button>Save</button>';` }], 'does nothing when clicked'));
+check('three dead buttons in one file report once, not three times',
+  run(jsx(`export default function A(){return <div><button>a</button><button>b</button><button>c</button></div>}`))
+    .filter((i) => i.message.includes('does nothing when clicked')).length === 1);
+
+// comments are prose — scanning them caused a false positive AND a false negative on the first
+// run against real generated apps, which is why stripComments() exists.
+check('a <button> mentioned in a comment is not a dead button',
+  !has(jsx(`// the clickable element is a real <button>, on purpose\nexport default function A(){const s=()=>{};return <button onClick={s}>Save</button>}`),
+  'does nothing when clicked'));
+check('a handler named only in a comment still counts as undefined',
+  has(jsx(`// wire this to onClick={handleShare} later\nexport default function A(){return <button onClick={handleShare}>Share</button>}`),
+  "bound to 'handleShare'"));
+check('a block comment cannot hide a real dead button',
+  has(jsx(`/* a nice toolbar */\nexport default function A(){return <button>Export</button>}`), 'does nothing when clicked'));
+check('a // inside a string does not swallow the line',
+  !has(jsx(`export default function A(){const u='https://x.example'; const s=()=>u; return <button onClick={s}>Go</button>}`),
+  'does nothing when clicked'));
+
 console.log(`\nqaCheck.verify: ${pass} passed, ${fail} failed`);
 if (fail) throw new Error(`${fail} check(s) failed`);
