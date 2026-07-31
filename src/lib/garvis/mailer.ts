@@ -17,6 +17,11 @@ import type { BusinessContext } from './genesis';
 
 export type MailerConcept = 'proof' | 'before_after' | 'local_authority' | 'question' | 'urgency' | 'offer_first' | 'story';
 
+/** How many distinct front LOOKS the postcard renderer carries per mode (photo / brand card).
+ *  Lives here — the pure core both the renderer and the board's spin cycle import — so "spin
+ *  another look" can never point past what the renderer can draw. */
+export const FRONT_VARIANTS = 5;
+
 export interface MailerBrand {
   palette?: string[];          // hex colors, first = primary accent
   fonts?: string[];

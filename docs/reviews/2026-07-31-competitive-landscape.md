@@ -76,8 +76,9 @@ Up Boss ≈ **$760+/mo**, across four logins, four data silos, zero shared appro
 
 1. AI + Resend + Ayrshare keys (without them, a $29/mo template shop beats our content).
 2. Lob + CASS fulfillment (without it, Wise Pelican wins mail on convenience).
-3. Card/post design-polish pass (close the Coffee & Contracts gap; the variant machinery
-   already exists — it needs richer layouts, not new architecture).
+3. Card/post design-polish pass — ✅ postcard side SHIPPED (this branch): FRONT_VARIANTS
+   expanded 3→5 per mode (editorial frame, chip, split panel, letterpress, serif gallery),
+   refined back hierarchy, Look cycler in the print designer. Social-card polish remains open.
 4. Print-DPI export (prerequisite/companion to 2).
 5. PropertyRadar-as-data-source workflow doc (buy the $119/mo data, keep our honesty pipeline).
 6. Portal-lead parsing + open-house capture (chips away at the FUB/Curb Hero conveniences).
