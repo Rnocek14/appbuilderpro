@@ -55,6 +55,7 @@ import {
 } from '../../../src/lib/garvis/placesDiscovery.ts';
 import { parseBusinessProfile, assembleFallbackSpec, normalizeSpec, navFor, pickRecipe, previewSlug, restraintFor, type SiteSpec } from '../_shared/previewSpec.ts';
 import { BESPOKE_SYSTEM, buildBespokePrompt, bespokeHonest, looksLikeHtmlDoc } from '../../../src/lib/preview/bespokeSite.ts';
+import { renderQa } from '../_shared/renderQa.ts';
 import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 // CONTENT WEEK (app_0088): the same editor rubric the boards use (fail-CLOSED here — an unjudged
 // draft never auto-queues) + the pure week machinery from standingCore.
@@ -1909,9 +1910,25 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
           if (!looksLikeHtmlDoc(html)) {
             buildLog.bespoke = 'discarded: not a complete HTML document';
           } else {
-            const gate = bespokeHonest(html, profile);
-            if (gate.ok) { spec = { ...spec, html }; buildLog.stage = 'bespoke'; buildLog.bespoke = 'ok'; }
-            else { buildLog.bespoke = `discarded: ${gate.violations.slice(0, 3).join('; ')}`; }
+            // TWO gates, because there are two ways a generated page can betray us and they are
+            // different failures. bespokeHonest catches LIES — a credential or rating the real
+            // business never claimed. renderQa catches BROKENNESS — a blank body, a hotlinked
+            // resource the publish host will block, placeholder text, no way to contact anyone.
+            // renderQa was written for exactly this spot and then sat uninstalled while every
+            // bespoke page shipped unexamined; a gate that exists but is not wired is how
+            // deno-check sat red for six days. Both fail closed to the deterministic template,
+            // which cannot exhibit either failure by construction.
+            const honesty = bespokeHonest(html, profile);
+            const render = renderQa(html);
+            if (honesty.ok && render.ok) {
+              spec = { ...spec, html }; buildLog.stage = 'bespoke'; buildLog.bespoke = 'ok';
+              const warns = render.issues.filter((i) => i.severity === 'warn');
+              if (warns.length) buildLog.bespoke_warns = warns.map((w) => w.code).slice(0, 5).join(',');
+            } else if (!honesty.ok) {
+              buildLog.bespoke = `discarded: ${honesty.violations.slice(0, 3).join('; ')}`;
+            } else {
+              buildLog.bespoke = `discarded (render QA): ${render.issues.filter((i) => i.severity === 'block').map((i) => i.code).slice(0, 3).join('; ')}`;
+            }
           }
         } catch (e) { buildLog.bespoke_error = String((e as Error)?.message ?? e).slice(0, 200); }
       }

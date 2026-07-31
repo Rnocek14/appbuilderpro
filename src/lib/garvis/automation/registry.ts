@@ -47,7 +47,16 @@ export const CAPABILITIES: Capability[] = [
   {
     id: 'lead_followup',
     title: 'Lead follow-up & intake',
-    pitch: 'Auto-acknowledge every enquiry and follow up the ones that go quiet, so no lead is dropped.',
+    // WHAT THE RAIL ACTUALLY DOES TODAY, no more: site-events captures every enquiry into one
+    // stream, links-or-creates the contact, and alerts the owner instantly; OpsInbox + inbox-draft
+    // put a drafted reply one approval away. The previous pitch promised "auto-acknowledge every
+    // enquiry" — an UNATTENDED transactional send to the lead — and no such executor exists. This
+    // registry's whole covenant is that a pitch names only what a real rail delivers (that is why
+    // 'not_built' entries are never proposed), and that covenant applies to half-built exactly as
+    // it applies to unbuilt. When the auto-ack executor lands (an event-triggered, pre-authorized
+    // template send, missed-call's consent model applied to web leads), the sentence below earns
+    // its old wording back.
+    pitch: 'Every enquiry lands in one inbox with the owner alerted instantly, and a drafted reply is waiting for one-tap approval — so no lead sits unanswered.',
     rail: 'outreach-followups',
     triggerKinds: ['event'],
     consentBasis: 'warm_transactional',
