@@ -46,9 +46,10 @@ posts, emails, mail batches, envelopes — stops at the same Queue. The rhythm:
 
 For future build sessions; each item is scoped and most are specced in the repo already.
 
-1. **MLS → composer autofill + mls-sync cron.** The DB already holds price/beds/baths the
-   operator retypes into the composer; wire `mls_listings` → `campaignCore` inputs and put the
-   sync on the heartbeat. Small build, daily payoff. (The audit's named DISCONNECTED seam.)
+1. **MLS → composer autofill + mls-sync cron.** ✅ SHIPPED (this branch): `mlsToCampaign.ts`
+   pure seam + "Fill from your MLS" picker in the composer; mls-sync gained the heartbeat
+   fan-out path and `app_0117` schedules it twice daily (13th job). Re-run the arm call after
+   deploying so the cron picks up.
 2. **Print-DPI postcard render.** Extend `render-design` (satori→PNG) with 6.25×9.25in @300dpi
    sizes so the approved card exports print-vendor-perfect instead of via the browser print
    dialog. Fully specced (level-10 #1).
