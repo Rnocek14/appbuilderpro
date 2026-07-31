@@ -6,6 +6,7 @@
 
 import type { LucideIcon } from 'lucide-react';
 import {
+  BookOpen,
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
   CreditCard, Settings, Activity, Wand2, Crosshair, BookUser,
@@ -38,6 +39,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
       // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
       { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
+      { to: '/garvis/studies', label: 'Studies', icon: BookOpen },
       { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],
   },
