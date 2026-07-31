@@ -361,10 +361,21 @@ export function buildHuntPitch(
   previewUrl: string,
   upsells: PitchUpsell[] = [],
   findings: PitchFinding[] = [],
+  cohortLine?: string | null,
 ): string {
+  // THE OPENING IS THE WHOLE EMAIL. "I came across you while researching…" is a stranger selling
+  // something. "Your site was one of 618 plumber websites in Walworth County we looked at" is a
+  // report about something that already happened, and the reader's posture is different by the end
+  // of the first line. cohortMentionLine returns null unless the study is genuinely publishable —
+  // big enough sample, single scan version — so an under-sampled sweep quietly falls back to the
+  // honest cold opening rather than dressing itself up as research.
+  const opening = cohortLine
+    ? `${cohortLine}\n\nI was looking at how ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''} handle their websites, and yours came up.`
+    : `I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.`;
+
   return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
-I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.
+${opening}
 
 Rather than just tell you that, I built you a new one:
 

@@ -206,7 +206,199 @@ export function validateProject(files: { path: string; content: string }[]): QAI
   // holding the anon key — the most common security hole in generated Supabase apps.
   issues.push(...rlsIssues(files));
 
+  // Interaction integrity: the checks above prove the app COMPILES and NAVIGATES. These prove its
+  // controls actually do something when a person uses them. See interactionIssues() for why this
+  // layer exists and what it deliberately cannot replace.
+  issues.push(...interactionIssues(files));
+
   return issues;
+}
+
+/* ============================================================================================
+ * INTERACTION INTEGRITY
+ *
+ * Everything else in this file answers "will it build?". This section answers "will it respond?".
+ *
+ * The gap it closes: a generated app can pass every static check — imports resolve, routes exist,
+ * nothing is truncated — and still ship a button that does nothing, a handler that throws the
+ * instant it is clicked, or a control no keyboard can reach. Those are invisible to a compiler and
+ * obvious to a person in about four seconds.
+ *
+ * HONEST LIMIT, stated where it cannot be missed: this is the STATIC half of behavioural QA. It
+ * reads source; it never runs the app. It cannot tell you that a flow makes sense, that state
+ * updates land, that an async path renders its error branch, or that the thing feels right. The
+ * browser tier is a separate harness (see scripts/prototype-walkthrough.mjs for the pattern that
+ * drives a real page and holds it to the promises it makes on screen). Do not read a clean
+ * interaction lint as "the app works".
+ *
+ * Every check here is deliberately CONSERVATIVE, because these issues feed the generator's
+ * self-heal loop: a false positive makes the model rewrite working code. Where a pattern is
+ * ambiguous (a spread that might supply the handler, a name that might come from anywhere) the
+ * check stays silent.
+ * ========================================================================================== */
+
+/** Identifiers a handler may reference with no local declaration. */
+const HANDLER_GLOBALS = new Set([
+  'alert', 'confirm', 'prompt', 'print', 'close', 'open', 'fetch', 'console', 'window', 'document',
+  'history', 'location', 'navigator', 'localStorage', 'sessionStorage', 'requestAnimationFrame',
+]);
+
+/** Elements that are not focusable or clickable for a keyboard user without help. */
+const NON_INTERACTIVE = ['div', 'span', 'li', 'td', 'tr', 'section', 'article', 'header', 'footer', 'img', 'p'];
+
+/**
+ * The attribute text of every opening `<tag ...>`, brace- and quote-aware so an arrow function in a
+ * prop (`onClick={() => a > b}`) does not truncate the match at its `>`.
+ */
+function openingTags(content: string, tag: string): string[] {
+  const out: string[] = [];
+  const re = new RegExp(`<${tag}(?=[\\s/>])`, 'g');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content))) {
+    const start = m.index + m[0].length;
+    let i = start, depth = 0, quote = '';
+    while (i < content.length) {
+      const c = content[i];
+      if (quote) { if (c === quote && content[i - 1] !== '\\') quote = ''; }
+      else if (c === '"' || c === "'" || c === '`') quote = c;
+      else if (c === '{') depth++;
+      else if (c === '}') depth--;
+      else if (c === '>' && depth === 0) break;
+      i++;
+    }
+    out.push(content.slice(start, i));
+  }
+  return out;
+}
+
+/**
+ * Comments are prose, not code, and scanning them produces both false positives and false
+ * negatives. Both showed up on the first real run against generated apps: a comment reading
+ * "the clickable element is a real <button>" was reported as a dead button, and a comment
+ * documenting `onClick={handleShare}` made the undefined-handler check believe the name was
+ * defined (it counts occurrences, and the comment was the second one). Strings are blanked first
+ * so a `//` inside a URL or a quoted snippet cannot swallow the rest of a line.
+ */
+function stripComments(src: string): string {
+  const blanked = src.replace(
+    /(`(?:\\.|[^`\\])*`|'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")/g,
+    (m) => m[0] + ' '.repeat(Math.max(0, m.length - 2)) + m[0],
+  );
+  let out = '';
+  for (let i = 0; i < src.length; i++) {
+    if (blanked[i] === '/' && blanked[i + 1] === '/') { while (i < src.length && src[i] !== '\n') { out += ' '; i++; } out += '\n'; }
+    else if (blanked[i] === '/' && blanked[i + 1] === '*') { while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) { out += src[i] === '\n' ? '\n' : ' '; i++; } out += '  '; i++; }
+    else if (blanked[i] === '{' && blanked[i + 1] === '/' && blanked[i + 2] === '*') { // {/* JSX comment */}
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/' && src[i + 2] === '}')) { out += src[i] === '\n' ? '\n' : ' '; i++; } out += '   '; i += 2;
+    } else out += src[i];
+  }
+  return out;
+}
+
+/**
+ * Blank the CONTENTS of every template literal, keeping length and newlines. Used only by the
+ * tag-shape rules: html assembled in a backtick string is injected markup whose handlers are wired
+ * by delegation, so judging it as JSX produces confident, wrong findings.
+ */
+function maskTemplateLiterals(src: string): string {
+  let out = '', i = 0;
+  while (i < src.length) {
+    if (src[i] === '`') {
+      out += '`'; i++;
+      while (i < src.length && src[i] !== '`') {
+        if (src[i] === '\\') { out += '  '; i += 2; continue; }
+        out += src[i] === '\n' ? '\n' : ' '; i++;
+      }
+      if (i < src.length) { out += '`'; i++; }
+    } else { out += src[i]; i++; }
+  }
+  return out;
+}
+
+function interactionIssues(fileList: { path: string; content: string }[]): QAIssue[] {
+  const files = fileList.map((f) => ({ path: f.path, content: stripComments(f.content) }));
+  const out: QAIssue[] = [];
+  const seen = new Set<string>();
+  const flag = (path: string, severity: QAIssue['severity'], message: string) => {
+    const k = `${path}|${message}`;
+    if (seen.has(k)) return;              // one voice per file per problem, not one per occurrence
+    seen.add(k);
+    out.push({ path, severity, message });
+  };
+
+  for (const f of files) {
+    if (!/\.(t|j)sx$/.test(f.path)) continue;          // JSX only — plain modules have no controls
+
+    // Markup built inside a template literal is INJECTED html, not JSX: its handlers are attached
+    // by delegation somewhere else, and the JSX rules cannot see that. Masking those regions stops
+    // a real, correctly-wired control being reported as dead — which is what happened to the code
+    // block's Copy button, whose listener is a `closest('.ff-code-copy')` delegate.
+    // Only the tag-shape rules use the masked copy; the identifier count in rule 2 does not, so a
+    // handler genuinely referenced inside a template string still counts as defined.
+    const masked = maskTemplateLiterals(f.content);
+
+    // 1. A button that cannot do anything. The single most common "looks finished, isn't" defect.
+    for (const attrs of openingTags(masked, 'button')) {
+      if (/\{\s*\.\.\./.test(attrs)) continue;                       // a spread may carry the handler
+      if (/\bon[A-Z]\w*\s*=/.test(attrs)) continue;                  // any handler at all is enough
+      if (/\btype\s*=\s*["']submit["']/.test(attrs)) continue;       // submits via its form
+      if (/\bform\s*=/.test(attrs)) continue;
+      if (/\bdisabled(\s|=|$)/.test(attrs)) continue;                // deliberately inert
+      flag(f.path, 'error',
+        'A <button> has no event handler and is not type="submit" — it renders but does nothing when clicked. Wire it to a handler, make it type="submit" inside its form, or remove it.');
+    }
+
+    // 2. A handler bound to a name this file never defines — a ReferenceError on first click.
+    //    Heuristic chosen for near-zero false positives: if the identifier is DECLARED, IMPORTED,
+    //    DESTRUCTURED or a parameter anywhere in the file it necessarily appears more than once.
+    for (const m of f.content.matchAll(/\bon[A-Z]\w*\s*=\s*\{\s*([A-Za-z_$][\w$]*)\s*\}/g)) {
+      const name = m[1];
+      if (HANDLER_GLOBALS.has(name)) continue;
+      const uses = f.content.match(new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\b`, 'g'))?.length ?? 0;
+      if (uses > 1) continue;
+      flag(f.path, 'error',
+        `A handler is bound to '${name}', which is never defined, imported or destructured in this file — clicking it throws a ReferenceError. Define '${name}' or point the handler at the real function.`);
+    }
+
+    // 3. A click handler on an element no keyboard can reach — a div ACTING AS A BUTTON.
+    //
+    //    Narrowed after pointing this at 172 real .tsx files and getting 12 findings, all 12 of
+    //    them wrong. Real UI code is full of click handlers that are not controls at all:
+    //    full-surface modal backdrops, click-away dismissers, and stopPropagation guards on the
+    //    panel inside a backdrop. None of those is something a keyboard user needs to "reach" —
+    //    Escape closes them — so flagging them was pure noise, and noise in a self-heal loop makes
+    //    a generator rewrite working code. What remains is the case actually worth catching: an
+    //    element with an onClick that DOES something, dressed as a control.
+    for (const tag of NON_INTERACTIVE) {
+      for (const attrs of openingTags(masked, tag)) {
+        const onClick = attrs.match(/\bonClick\s*=\s*\{([\s\S]*?)\}\s*(?=\s[a-zA-Z-]+=|$)/);
+        if (!onClick) continue;
+        if (/\{\s*\.\.\./.test(attrs)) continue;
+        if (/\brole\s*=/.test(attrs) && /\btabIndex\s*=/.test(attrs)) continue;
+        const body = onClick[1];
+        // a full-surface overlay is a backdrop, not a control
+        if (/\b(fixed|absolute)\b[^"']*\binset-0\b|backdrop|overlay|scrim/.test(attrs)) continue;
+        // a propagation guard is not an action
+        if (/^\s*\(?\s*e\s*\)?\s*=>\s*e\.stopPropagation\(\)\s*$/.test(body)) continue;
+        // a pure dismiss — closing what is already open — is reachable by Escape, not by Tab
+        if (/^\s*\(?\s*\)?\s*=>\s*(set\w+\((null|false)\)|on?Close\(\)|close\(\)|dismiss\(\))\s*$/.test(body)) continue;
+        // a prop passed straight through: the decision belongs to the caller, not here
+        if (/^\s*on[A-Z]\w*\s*$/.test(body)) continue;
+        flag(f.path, 'warning',
+          `<${tag}> has onClick but no role + tabIndex — it works with a mouse and is unreachable by keyboard. Use a <button>, or add role="button" tabIndex={0} and a key handler.`);
+      }
+    }
+
+    // 4. A form with no submit path: pressing Enter in a field reloads the page and loses the input.
+    for (const attrs of openingTags(masked, 'form')) {
+      if (/\{\s*\.\.\./.test(attrs)) continue;
+      if (/\bonSubmit\s*=/.test(attrs)) continue;
+      if (/\baction\s*=/.test(attrs)) continue;
+      flag(f.path, 'warning',
+        '<form> has no onSubmit — pressing Enter in a field reloads the page and discards what was typed. Add onSubmit={e => { e.preventDefault(); ... }}.');
+    }
+  }
+  return out;
 }
 
 /** Unbalanced-brace count (strings/comments stripped first). Positive = unclosed '{'. */

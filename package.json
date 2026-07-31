@@ -83,6 +83,12 @@
     "verify:breaker": "tsx src/lib/garvis/automation/breaker.verify.ts",
     "verify:worldspine": "tsx src/lib/garvis/worldSpine.verify.ts",
     "verify:servicepackages": "tsx src/lib/garvis/billing/servicePackages.verify.ts",
+    "verify:packagelifecycle": "tsx src/lib/garvis/billing/packageLifecycle.verify.ts",
+    "verify:scopecontract": "tsx src/lib/garvis/scopeContract.verify.ts",
+    "verify:changerequests": "tsx src/lib/garvis/clients/changeRequests.verify.ts",
+    "verify:fleetview": "tsx src/lib/garvis/fleetView.verify.ts",
+    "verify:clientreport": "tsx src/lib/garvis/clients/clientReport.verify.ts",
+    "verify:lifecycleproof": "tsx src/lib/garvis/clients/lifecycleProof.verify.ts",
     "test:e2e": "playwright test",
     "verify:clienttiers": "tsx src/lib/garvis/billing/clientTiers.verify.ts",
     "verify:clientconsole": "tsx src/lib/garvis/billing/clientConsole.verify.ts",
@@ -146,7 +152,14 @@
     "verify:presencescan": "tsx supabase/functions/_shared/presenceScan.verify.ts",
     "verify:renderqa": "tsx supabase/functions/_shared/renderQa.verify.ts",
     "verify:deepscan": "tsx supabase/functions/_shared/deepScan.verify.ts",
-    "verify:pitchfindings": "tsx src/lib/garvis/prospects/pitchFindings.verify.ts"
+    "verify:pitchfindings": "tsx src/lib/garvis/prospects/pitchFindings.verify.ts",
+    "walkthrough:prototypes": "node scripts/prototype-walkthrough.mjs",
+    "walkthrough:claims": "node scripts/claims-walkthrough.mjs",
+    "probe:prototypes": "node scripts/probe.mjs prototypes/*.html",
+    "verify:prototypesource": "node scripts/prototype-source-audit.mjs",
+    "probe:generated": "tsx scripts/generated-app-probe.mjs --fixtures",
+    "verify:selfinteraction": "tsx scripts/self-interaction-lint.mjs",
+    "verify:cohortstats": "tsx src/lib/garvis/prospects/cohortStats.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

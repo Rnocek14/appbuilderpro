@@ -1,0 +1,268 @@
+<!--
+  P8 — The Handoff: a client leaves and nothing is destroyed.
+  Settles: offboarding as a first-class act rather than an absence. The verb set here is
+  stop / retain-with-a-reason / carry-unresolved. Delete is not offered anywhere, on purpose.
+  Rides on real substrate: offboarding_inventories + retained_services (app_0119), and the
+  terminationPlan core that refuses to end quietly while work is still open.
+  Inevitable when: ending a relationship feels like filing rather than deleting, and you would be
+  comfortable showing the client the inventory you just produced.
+  Staged data, real timing. One self-contained file, zero external requests.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · The Handoff</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --forge:cubic-bezier(.22,1,.36,1);
+  --serif:Charter,Georgia,"Times New Roman",serif;
+  --chrome:-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 14px/1.45 var(--chrome);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+input{font:inherit;color:inherit;background:none;border:0}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ember);outline-offset:3px;border-radius:3px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.wrap{max-width:800px;margin:0 auto;padding:26px 22px 140px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:20px}
+.face{font-size:13px}.face .kind{color:var(--dim)}
+.tally{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right;line-height:1.7}
+.tally b{color:var(--ink);font-weight:400}
+.tally .zero{color:var(--ok)}
+
+.lede{font-family:var(--serif);font-size:18.5px;line-height:1.55;max-width:56ch;margin:0 0 6px}
+.note{font-size:12.5px;color:var(--faint);font-family:var(--mono);margin-bottom:24px}
+
+.item{border-bottom:1px solid var(--line);padding:13px 4px;display:flex;gap:14px;align-items:flex-start;
+  transition:background 160ms var(--forge),opacity 300ms var(--forge)}
+.item.sel{background:rgba(255,255,255,.022)}
+.item .body{flex:1 1 auto;min-width:0}
+.item .nm{font-size:14px}
+.item .meta{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:3px}
+.item .verdict{font-family:var(--mono);font-size:11.5px;margin-top:6px;min-height:0}
+.item.stopped .verdict{color:var(--dim)}
+.item.retained .verdict{color:var(--ok)}
+.item.unresolved .verdict{color:var(--warn)}
+.item .acts{flex:0 0 auto;display:flex;gap:7px}
+.pill{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:12px;color:var(--faint);
+  transition:all 160ms var(--forge)}
+.pill:hover,.pill:focus-visible{color:var(--ink);border-color:var(--dim)}
+.pill.on{color:#0B0E14;background:var(--dim);border-color:var(--dim);font-weight:600}
+.item.retained .pill.on{background:var(--ok);border-color:var(--ok)}
+.item.unresolved .pill.on{background:var(--warn);border-color:var(--warn)}
+.reason{margin-top:7px;width:100%;max-width:46ch;font-family:var(--mono);font-size:11.5px;color:var(--ink);
+  border-bottom:1px dotted var(--faint);padding:3px 0;display:none}
+.item.retained .reason{display:block}
+.reason::placeholder{color:var(--faint)}
+
+.blockers{margin-top:22px;border-left:2px solid var(--warn);padding:11px 15px;
+  background:linear-gradient(90deg,rgba(217,164,65,.06),transparent 70%)}
+.blockers .h{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--warn);margin-bottom:7px}
+.blockers li{font-size:13.5px;color:var(--dim);margin-bottom:4px}
+
+.acts-main{margin-top:26px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);border-radius:999px;padding:8px 17px;font-size:13px;color:var(--dim);
+  transition:all 170ms var(--forge)}
+.btn:hover,.btn:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.45);background:var(--ember-soft)}
+.btn.primary{background:var(--ember);color:#0B0E14;border-color:var(--ember);font-weight:600}
+.btn[disabled]{opacity:.32;cursor:default;pointer-events:none}
+.said{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+
+.doc{margin-top:26px;border:1px solid var(--line);border-radius:12px;background:var(--surface);
+  padding:0 20px;max-height:0;overflow:hidden;transition:max-height 620ms var(--forge),padding 620ms var(--forge)}
+.doc.on{max-height:760px;padding:19px 20px;overflow-y:auto}
+.doc h3{font-family:var(--serif);font-weight:500;font-size:16px;margin:0 0 4px}
+.doc .when{font-family:var(--mono);font-size:11px;color:var(--faint);margin-bottom:14px}
+.doc .grp{margin-bottom:15px}
+.doc .grp .h{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:6px}
+.doc .grp .r{font-family:var(--mono);font-size:11.5px;color:var(--dim);padding:2px 0}
+.doc .grp .r i{color:var(--faint);font-style:normal}
+.doc .foot{border-top:1px solid var(--line);padding-top:12px;font-family:var(--serif);font-size:15.5px;
+  line-height:1.55;color:var(--ink)}
+
+.hud{position:fixed;left:14px;bottom:12px;display:flex;align-items:center;gap:10px;
+  font-size:11px;color:var(--faint);font-family:var(--mono);z-index:40}
+.hud button{border:1px solid var(--line);border-radius:6px;width:22px;height:22px;color:var(--faint)}
+.hud button:hover{color:var(--ember);border-color:rgba(232,131,58,.4)}
+.keys{position:fixed;right:16px;bottom:14px;font-family:var(--mono);font-size:11px;color:var(--faint);z-index:40}
+.card{position:fixed;inset:auto auto 46px 14px;width:min(400px,calc(100vw - 28px));background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:16px 18px;z-index:50;
+  opacity:0;visibility:hidden;transform:translateY(6px);transition:all .25s var(--forge)}
+.card.on{opacity:1;visibility:visible;transform:none}
+.card h4{margin:0 0 9px;font-family:var(--serif);font-weight:500;font-size:15px}
+.card li{font-size:13px;color:var(--dim);margin-bottom:6px;line-height:1.45}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:1ms!important;transition-duration:1ms!important} }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div class="face">Riverside Dental <span class="kind">· client · ending 31 jul</span></div>
+    <div class="tally mono" id="tally"></div>
+  </div>
+
+  <p class="lede">Nine things exist because of this client. Decide what happens to each one.</p>
+  <div class="note">stop · retain with a reason · carry unresolved — delete is not offered</div>
+
+  <div id="items"></div>
+
+  <div class="blockers" id="blockers">
+    <div class="h">will not end quietly</div>
+    <ul id="blist"></ul>
+  </div>
+
+  <div class="acts-main">
+    <button class="btn primary" id="produce">produce the inventory</button>
+    <button class="btn" id="accept">accept every proposal</button>
+    <span class="said" id="said"></span>
+  </div>
+
+  <div class="doc" id="doc"></div>
+</div>
+
+<div class="keys">J/K move · S stop · R retain · U unresolved · Enter produce</div>
+<div class="hud">
+  <span>P8 · The Handoff — staged data, real timing</span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>Notice there is no delete. Does its absence feel like a missing feature or like relief?</li>
+    <li>Would you show the client the inventory this produces, unedited?</li>
+    <li>The two blockers refuse to disappear. Is that obstruction, or is that the product working?</li>
+    <li>A month from now, could you reconstruct what you stopped and why?</li>
+  </ul>
+</div>
+
+<script>
+/* ============ staged data — every count on screen derives from this, never typed twice ======= */
+const D = {
+  items: [
+    { nm:'Site watch — riversidedental.example.com', meta:'standing order · daily 06:00 · active 214 days', prop:'stop', why:'' },
+    { nm:'Missed-call text-back', meta:'automation · 61 fires · last jun 28', prop:'stop', why:'' },
+    { nm:'New-patient follow-up', meta:'automation · 18 fires · paused since jun 12', prop:'stop', why:'' },
+    { nm:'Published site + preview host', meta:'4.2 MB · paid through 31 aug', prop:'retain', why:'They paid hosting through August' },
+    { nm:'Booking page + calendar link', meta:'live · 34 bookings last 30 days', prop:'retain', why:'Their patients are still using it' },
+    { nm:'14 change requests', meta:'13 closed · 1 open since jul 19', prop:'unresolved', why:'' },
+    { nm:'6 monthly reports', meta:'5 sent · 1 generated, never delivered', prop:'unresolved', why:'' },
+    { nm:'Contacts — Dr Patel, front desk', meta:'2 people · 41 messages', prop:'retain', why:'The record of what was agreed lives here' },
+    { nm:'Twilio number + sender identity', meta:'credential · registered to them', prop:'stop', why:'' },
+  ],
+  blockers: [
+    'One change request has been open since jul 19 — “move the booking button above the fold”.',
+    'One report for June was generated and never delivered.',
+  ],
+};
+const VERBS = { stop:'stop', retain:'retain', unresolved:'carry' };
+const $ = (id) => document.getElementById(id);
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+let S, sel = 0;
+
+function reset(){
+  S = D.items.map((it) => ({ ...it, state: null }));
+  sel = 0;
+  $('doc').classList.remove('on'); $('doc').innerHTML = '';
+  $('said').textContent = '';
+  $('blist').innerHTML = D.blockers.map((b) => `<li>${b}</li>`).join('');
+  render();
+}
+function render(){
+  $('items').innerHTML = '';
+  S.forEach((it, i) => {
+    const el = document.createElement('div');
+    el.className = 'item' + (it.state ? ' ' + it.state : '') + (i === sel ? ' sel' : '');
+    el.innerHTML =
+      `<div class="body">
+         <div class="nm">${it.nm}</div>
+         <div class="meta">${it.meta}</div>
+         <div class="verdict">${it.state ? verdictText(it) : `proposed: ${VERBS[it.prop]}`}</div>
+         <input class="reason" value="${(it.why || '').replace(/"/g,'&quot;')}" placeholder="why is this being kept?" aria-label="Reason for retaining ${it.nm}">
+       </div>
+       <div class="acts">
+         <button class="pill${it.state==='stopped'?' on':''}" data-act="stopped">stop</button>
+         <button class="pill${it.state==='retained'?' on':''}" data-act="retained">retain</button>
+         <button class="pill${it.state==='unresolved'?' on':''}" data-act="unresolved">carry</button>
+       </div>`;
+    el.querySelectorAll('.pill').forEach((p) =>
+      p.addEventListener('click', () => { sel = i; decide(i, p.dataset.act); }));
+    el.querySelector('.reason').addEventListener('input', (e) => { S[i].why = e.target.value; tally(); });
+    $('items').appendChild(el);
+  });
+  tally();
+}
+function verdictText(it){
+  if (it.state === 'stopped') return 'stopped — kept on file, not running';
+  if (it.state === 'retained') return it.why.trim() ? `retained — ${it.why.trim()}` : 'retained — needs a reason';
+  return 'carried unresolved — this follows you, not them';
+}
+function decide(i, state){
+  S[i].state = state;
+  if (state === 'retained' && !S[i].why) S[i].why = D.items[i].why || '';
+  render();
+}
+function counts(){
+  const c = { stopped:0, retained:0, unresolved:0, undecided:0, noReason:0 };
+  S.forEach((it) => {
+    if (!it.state) c.undecided++;
+    else { c[it.state]++; if (it.state === 'retained' && !it.why.trim()) c.noReason++; }
+  });
+  return c;
+}
+function tally(){
+  const c = counts();
+  $('tally').innerHTML =
+    `${S.length} items · stopped <b>${c.stopped}</b> · retained <b>${c.retained}</b> · carried <b>${c.unresolved}</b><br>` +
+    `undecided <b>${c.undecided}</b> · deleted <b class="zero">0</b>`;
+  const blocked = c.undecided > 0 || c.noReason > 0;
+  $('produce').disabled = blocked;
+  $('said').textContent = c.undecided ? `${c.undecided} still undecided`
+    : c.noReason ? `${c.noReason} retained without a reason` : '';
+}
+
+/* ============ the one orchestrated move: the inventory ====================================== */
+async function produce(){
+  const c = counts();
+  const grp = (title, list) => list.length
+    ? `<div class="grp"><div class="h">${title}</div>${list.map((r) => `<div class="r">${r}</div>`).join('')}</div>` : '';
+  $('doc').innerHTML =
+    `<h3>Offboarding inventory — Riverside Dental</h3>
+     <div class="when">produced ${new Date().toISOString().slice(0,10)} · ${S.length} items accounted for · 0 deleted</div>
+     ${grp('Stopped', S.filter((x)=>x.state==='stopped').map((x)=>`${x.nm} <i>— kept on file, not running</i>`))}
+     ${grp('Retained, with a reason', S.filter((x)=>x.state==='retained').map((x)=>`${x.nm} <i>— ${x.why.trim()}</i>`))}
+     ${grp('Carried unresolved', S.filter((x)=>x.state==='unresolved').map((x)=>`${x.nm} <i>— follows you, not them</i>`))}
+     <div class="foot">Nothing here was deleted. ${c.stopped} things stopped, ${c.retained} are still
+     running for a stated reason, and ${c.unresolved} are unfinished and still yours. If Dr Patel
+     asks in a year what happened, this page is the answer.</div>`;
+  $('doc').classList.add('on');
+  if (!reduced()) $('doc').scrollIntoView({ block:'nearest', behavior:'smooth' });
+  $('said').textContent = 'inventory produced — nothing was destroyed to make it';
+}
+$('produce').addEventListener('click', produce);
+$('accept').addEventListener('click', () => {
+  S.forEach((it, i) => decide(i, it.prop === 'stop' ? 'stopped' : it.prop === 'retain' ? 'retained' : 'unresolved'));
+  $('said').textContent = 'every proposal accepted — change any of them before producing';
+});
+$('restart').addEventListener('click', reset);
+$('feel').addEventListener('click', () => $('feelcard').classList.toggle('on'));
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') { if (e.key === 'Escape') e.target.blur(); return; }
+  const k = e.key.toLowerCase();
+  if (k === 'j') { e.preventDefault(); sel = Math.min(sel + 1, S.length - 1); render(); }
+  else if (k === 'k') { e.preventDefault(); sel = Math.max(sel - 1, 0); render(); }
+  else if (k === 's') { e.preventDefault(); decide(sel, 'stopped'); }
+  else if (k === 'r') { e.preventDefault(); decide(sel, 'retained'); }
+  else if (k === 'u') { e.preventDefault(); decide(sel, 'unresolved'); }
+  else if (k === 'enter') { e.preventDefault(); if (!$('produce').disabled) produce(); }
+  else if (k === 'escape') $('feelcard').classList.remove('on');
+});
+reset();
+</script>

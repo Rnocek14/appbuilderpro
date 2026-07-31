@@ -1,0 +1,84 @@
+# Prototype gate — the browser tier. The verify:* suites prove pure logic and the shadow DB proves
+# the schema; neither ever renders a pixel or clicks anything. This runs the actual pages.
+#
+# Two layers, on purpose:
+#   probe        — generic. Knows nothing about any page: discovers its controls and exercises each
+#                  from a fresh load. Proves "not broken", which is explicitly NOT "good".
+#   walkthroughs — specific. Know what each page CLAIMS and try to catch it lying. The sharpest one
+#                  scrapes every row out of the ledger's DOM and sums them in Node, so a page that
+#                  printed a stored total instead of adding up its rows would fail here.
+#
+# Why these are not `verify:*` scripts: CI auto-runs every verify suite and those are contractually
+# pure-logic — no DB, no network, no browser. These need Chromium, so they get their own gate.
+name: Prototypes
+
+on:
+  push:
+    paths:
+      - 'prototypes/**'
+      - 'scripts/probe.mjs'
+      - 'scripts/prototype-walkthrough.mjs'
+      - 'scripts/claims-walkthrough.mjs'
+      - 'scripts/lib/probe-core.mjs'
+      - 'scripts/generated-app-probe.mjs'
+      - 'scripts/fixtures/generated-app/**'
+      - 'supabase/functions/_shared/qa.ts'
+      - '.github/workflows/prototypes.yml'
+  pull_request:
+    paths:
+      - 'prototypes/**'
+      - 'scripts/probe.mjs'
+      - 'scripts/prototype-walkthrough.mjs'
+      - 'scripts/claims-walkthrough.mjs'
+      - 'scripts/lib/probe-core.mjs'
+      - 'scripts/generated-app-probe.mjs'
+      - 'scripts/fixtures/generated-app/**'
+      - 'supabase/functions/_shared/qa.ts'
+
+concurrency:
+  group: prototypes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+
+      # The scripts prefer a pinned local Chromium and fall back to Playwright's own install, so no
+      # path needs to be threaded through here.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Probe every prototype (generic — is anything broken?)
+        run: npm run probe:prototypes
+
+      - name: Wave 1 — does each prototype keep its promise?
+        run: npm run walkthrough:prototypes
+
+      - name: Wave 2 — do the generated prototypes keep theirs?
+        run: npm run walkthrough:claims
+
+      # The generator's own output, built and driven. The 'broken' fixture carries four planted
+      # defects a compiler cannot see; this step asserts the two layers still catch them, so a
+      # regression in the interaction lint or the prober shows up here rather than in a shipped app.
+      - name: Generated-app harness catches what it is supposed to
+        run: |
+          out=$(npx tsx scripts/generated-app-probe.mjs --fixtures 2>&1) || true
+          echo "$out"
+          echo "$out" | grep -qE 'clean[^·]*static errors +0 · warnings +0 · browser problems +0' \
+            || (echo "::error::the CLEAN fixture no longer passes — the harness has false positives" && exit 1)
+          echo "$out" | grep -qE 'broken[^·]*static errors +[1-9]' \
+            || (echo "::error::the BROKEN fixture's planted defects are no longer caught by the lint" && exit 1)
+          echo "$out" | grep -qE 'broken.*browser problems +[1-9]' \
+            || (echo "::error::the BROKEN fixture's planted defects are no longer caught by the prober" && exit 1)
+
+      # A prototype whose design contract or limits went missing is a prototype nobody can review.
+      - name: The contract and the README still exist
+        run: test -s prototypes/DESIGN.md && test -s prototypes/README.md

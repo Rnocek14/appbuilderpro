@@ -29,7 +29,7 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
   // Stripe retry forever. A non-uuid ref is definitively not one of our sales → let FableForge handle it.
   if (!ref || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref)) return false;
   const { data: sub, error: lookupErr } = await admin.from('client_subscriptions')
-    .select('id, owner_id, business_name, tier, preview_site_id, status').eq('id', ref).maybeSingle();
+    .select('id, owner_id, business_name, tier, preview_site_id, status, world_id').eq('id', ref).maybeSingle();
   // A REAL lookup error (transient DB fault) must retry — throw so the outer catch 500s and Stripe
   // redelivers. Only a clean "no row" (error null, sub null) falls through to the FableForge branches.
   if (lookupErr) throw new Error(`client sale lookup failed: ${lookupErr.message}`);
@@ -94,7 +94,8 @@ async function handleClientSale(admin: any, session: Stripe.Checkout.Session): P
       if (!existing?.length) {
         const nowIso = new Date().toISOString();
         await admin.from('standing_orders').insert({
-          owner_id: ownerId, world_id: null, kind: 'watch_url',
+          // Scope contract: the watch is the CLIENT's (app_0116) — their world scopes it.
+          owner_id: ownerId, world_id: (sub as { world_id?: string | null }).world_id ?? null, kind: 'watch_url',
           label: `Client site: ${sub.business_name}`.slice(0, 120), cadence: 'daily',
           config: { url: liveUrl, client_subscription_id: sub.id },
           status: 'active', anchor_at: nowIso, next_run_at: nowIso,

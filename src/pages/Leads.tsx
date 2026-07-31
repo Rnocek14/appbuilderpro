@@ -185,7 +185,11 @@ export default function Leads() {
               return (
               <li key={r.id}
                 className="group flex cursor-pointer items-center gap-3 rounded-xl border border-forge-border bg-forge-panel/40 p-3 transition-colors hover:border-forge-ember/40"
-                onClick={() => setSelectedId(r.id)}>
+                onClick={() => setSelectedId(r.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(r.id); } }}
+                role="button"
+                tabIndex={0}
+                aria-pressed={selectedId === r.id}>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={cn('h-2 w-2 shrink-0 rounded-full', meta.dot)} title={meta.label} />

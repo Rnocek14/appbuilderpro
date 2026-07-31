@@ -90,7 +90,9 @@ export default function ProfileHomePreview() {
           resolveLevel={resolveLevel}
           onPathChange={setPath}
           onLeaf={(p, k) => { if (p.length === 2) setSheet({ ...SAMPLE_ARTIFACT, id: k }); }}
-          trailing={<button className="bc-cine"><Telescope size={14} /> Cinematic view</button>}
+          // dev preview: this affordance is not wired to anything yet, so it says so rather
+          // than looking like a working control.
+          trailing={<button className="bc-cine" disabled title="not wired up in this preview"><Telescope size={14} /> Cinematic view</button>}
         />
         {path.length === 2 && <StudioDock worldId="w1" clusterId="c1" title={path[1]} onToast={(_k, m) => console.log('[toast]', m)} onClosed={() => console.log('[studio closed]')} />}
         <CanvasChat onSend={stubSend} hint={path.length === 2 ? 'Ask about this area, or tell Garvis to make something…' : 'Ask Garvis…'} />

@@ -1,0 +1,69 @@
+# Shadow-database gate — the second verification tier. The pure verify suites prove business
+# logic; this proves the DATABASE the application believes in actually exists: every migration
+# applies in order on a real engine, triggers fire, constraints reject, RLS isolates under a
+# NON-superuser, and the FK cardinality matches what the query code assumes.
+#
+# It exists because that assumption gap is not theoretical: the first run of this harness found a
+# many-to-one PostgREST embed being read as an array, which would have made every client look
+# packageless and silently killed the fleet's drift and report-due exceptions — a false-negative
+# observability defect that 197 passing fixture checks could not see.
+#
+# Scoped to database-touching paths so ordinary UI work is not slowed. What this does NOT cover is
+# documented in scripts/shadow-db/LIMITATIONS.md — read it before quoting a green run.
+name: Shadow DB
+
+on:
+  push:
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/schema*.sql'
+      - 'scripts/shadow-db/**'
+      - 'scripts/generate-apply-all.mjs'
+      - 'src/hooks/useFleetView.ts'
+      - 'src/lib/garvis/clients/**'
+      - 'src/lib/garvis/billing/**'
+      - '.github/workflows/shadow-db.yml'
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'supabase/schema*.sql'
+      - 'scripts/shadow-db/**'
+      - 'scripts/generate-apply-all.mjs'
+      - 'src/hooks/useFleetView.ts'
+      - 'src/lib/garvis/clients/**'
+      - 'src/lib/garvis/billing/**'
+
+concurrency:
+  group: shadow-db-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install PostgreSQL 16
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-16 postgresql-client-16
+          sudo systemctl start postgresql || sudo pg_ctlcluster 16 main start
+          sudo -u postgres psql -tAc 'select version()'
+
+      # The bundle must be current: a migration added without regenerating it would apply an
+      # older schema here and pass, while a fresh production DB got something else.
+      - name: Migration bundle is freshly generated
+        run: |
+          node scripts/generate-apply-all.mjs
+          git diff --exit-code supabase/_apply_garvis_all.sql \
+            || (echo "::error::_apply_garvis_all.sql is stale — run node scripts/generate-apply-all.mjs" && exit 1)
+
+      - name: Apply every migration and run the pilot suites
+        run: sudo bash scripts/shadow-db/run.sh
+
+      - name: Limitations are documented alongside the harness
+        run: test -s scripts/shadow-db/LIMITATIONS.md

@@ -146,6 +146,36 @@ Deno.serve(async (req) => {
       message_id: (payload.message_id ?? payload.provider_message_id ?? '').replace(/[<>]/g, '') || null,
       world_id: mailWorldId,
     });
+    // CHANGE-REQUEST INTAKE (app_0117): client mail is a REQUEST by default when they're a paying
+    // client — the audit found requests living in email and memory, and "the operator remembers to
+    // file it" is not a system. When the sender's world has a client subscription with an ACTIVE
+    // package pin (one query chain: the contact's world already resolved to mailWorldId above →
+    // client_subscriptions → package_pins), the mail ALSO lands as a change_requests row in
+    // 'received'; the operator triages from there, and declining is one transition. Fail-soft:
+    // the mail itself already landed above — a hiccup here loses the auto-filed request, never
+    // the mail.
+    if (mailWorldId) {
+      try {
+        const { data: paying } = await admin.from('client_subscriptions')
+          .select('id, package_pins!inner(status)')
+          .eq('owner_id', ownerId).eq('world_id', mailWorldId)
+          .eq('package_pins.status', 'active').limit(1);
+        const clientSub = paying && paying.length ? (paying[0] as { id: string }) : null;
+        if (clientSub) {
+          await admin.from('change_requests').insert({
+            owner_id: ownerId,
+            world_id: mailWorldId,
+            client_subscription_id: clientSub.id,
+            source: 'client_email',
+            requester: sender.name ? `${sender.name} <${sender.address}>` : sender.address,
+            request: `${subject.trim() ? subject.trim() + '\n\n' : ''}${text.slice(0, 500)}`.trim() || '(empty message)',
+            status: 'received',
+            // Same seed shape as createChangeRequest (changeRequestsRun.ts): from:null at birth.
+            history: [{ at: new Date().toISOString(), from: null, to: 'received', note: 'intake via client_email' }],
+          });
+        }
+      } catch { /* fail-soft: the operator can still file it by hand from the inbox */ }
+    }
     await admin.from('mind_events').insert({
       owner_id: ownerId, event_type: 'note', source: 'inbound-mail',
       subject: `Mail from ${sender.name || sender.address}: ${subject.slice(0, 120) || '(no subject)'}`,

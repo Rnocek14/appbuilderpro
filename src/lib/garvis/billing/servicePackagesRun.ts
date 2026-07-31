@@ -12,6 +12,7 @@ import { currentPackage, establishPlan, type PackageRow } from './servicePackage
  *  what actually happened so the caller can tell the operator honestly. */
 export async function pinAndEstablish(input: {
   clientSubscriptionId: string; packageKey: string; liveUrl?: string | null; businessName?: string;
+  worldId?: string | null;
 }): Promise<{ pinned: boolean; packageName: string | null; watched: boolean; proposed: number }> {
   const none = { pinned: false, packageName: null, watched: false, proposed: 0 };
   const { data: sess } = await supabase.auth.getUser();
@@ -43,7 +44,9 @@ export async function pinAndEstablish(input: {
       if (!existing?.length) {
         const nowIso = new Date().toISOString();
         await supabase.from('standing_orders').insert({
-          owner_id: uid, world_id: null, kind: 'watch_url',
+          // Scope contract: the watch belongs to the CLIENT's world (app_0116) — a null here is
+          // only legal when the world genuinely doesn't exist yet (pre-linkage close).
+          owner_id: uid, world_id: input.worldId ?? null, kind: 'watch_url',
           label: `Client site: ${(input.businessName ?? input.packageKey).slice(0, 100)}`,
           cadence: 'daily', config: { url: plan.watchUrl, client_subscription_id: input.clientSubscriptionId },
           status: 'active', anchor_at: nowIso, next_run_at: nowIso,

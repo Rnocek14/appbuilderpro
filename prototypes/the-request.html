@@ -1,0 +1,247 @@
+<!--
+  P11 — The Request: a client's email becomes a thing with a shape, and the shape refuses to bend.
+  Settles: the audit's "long-term client management is the weakest half" — the acquisition funnel was
+  the crown and the after-the-sale road did not exist as an object. This is that road, and its point
+  is what it will NOT let you do.
+  Rides on real substrate: change_requests (app_0117) — the same 11 states, the same append-only
+  history jsonb, and the same rule that a deployed change can never be declined.
+  Inevitable when: the refusals feel like the product working rather than the product nagging.
+  Staged data, real timing. One self-contained file, zero external requests.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P11 · The Request</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --forge:cubic-bezier(.22,1,.36,1);
+  --serif:Charter,Georgia,"Times New Roman",serif;
+  --chrome:-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 14px/1.45 var(--chrome);
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+:focus{outline:none}
+:focus-visible{outline:1px solid var(--ember);outline-offset:3px;border-radius:3px}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.wrap{max-width:820px;margin:0 auto;padding:26px 22px 140px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:22px}
+.face{font-size:13px}.face .kind{color:var(--dim)}
+.hist{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right;line-height:1.7}
+.hist b{color:var(--ink);font-weight:400}
+
+/* the email it came from */
+.mail{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:15px 18px;margin-bottom:22px}
+.mail .from{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-bottom:7px}
+.mail .body{font-family:var(--serif);font-size:16.5px;line-height:1.55;color:var(--ink);max-width:58ch}
+
+.cols{display:flex;gap:26px;align-items:flex-start}
+@media (max-width:720px){ .cols{flex-direction:column;gap:20px} }
+.road{flex:0 0 auto;width:min(230px,100%)}
+.side{flex:1 1 auto;min-width:0}
+
+.step{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px;color:var(--faint);
+  transition:color 260ms var(--forge)}
+.step .dot{width:8px;height:8px;border-radius:50%;background:var(--line);flex:0 0 auto;
+  transition:background 260ms var(--forge),box-shadow 260ms var(--forge)}
+.step.done{color:var(--dim)} .step.done .dot{background:var(--dim)}
+.step.now{color:var(--ink)} .step.now .dot{background:var(--ember);box-shadow:0 0 0 3px var(--ember-soft)}
+.step.dead{color:var(--faint);text-decoration:line-through;opacity:.5}
+
+.acts{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
+.btn{border:1px solid var(--line);border-radius:999px;padding:7px 15px;font-size:12.5px;color:var(--dim);
+  transition:all 160ms var(--forge)}
+.btn:hover,.btn:focus-visible{color:var(--ember);border-color:rgba(232,131,58,.45);background:var(--ember-soft)}
+.btn.primary{background:var(--ember);color:#0B0E14;border-color:var(--ember);font-weight:600}
+.btn.danger:hover{color:var(--blocked);border-color:rgba(194,94,94,.5);background:rgba(194,94,94,.08)}
+
+.refusal{border-left:2px solid var(--blocked);padding:10px 14px;margin-bottom:14px;min-height:0;
+  background:linear-gradient(90deg,rgba(194,94,94,.07),transparent 72%);
+  opacity:0;max-height:0;overflow:hidden;transition:opacity .3s var(--forge),max-height .3s var(--forge)}
+.refusal.on{opacity:1;max-height:130px}
+.refusal .h{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--blocked);margin-bottom:5px}
+.refusal .t{font-family:var(--serif);font-size:15.5px;line-height:1.5;color:var(--ink);max-width:54ch}
+
+.log{border-top:1px solid var(--line);padding-top:12px;max-height:340px;overflow-y:auto;
+  font-family:var(--mono);font-size:11.5px}
+.h9{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+.hrow{display:flex;gap:12px;padding:3px 0;color:var(--dim);align-items:baseline}
+.hrow .t{color:var(--faint);flex:0 0 66px}
+.hrow .x{flex:1 1 auto}
+.hrow.refused .x{color:var(--blocked)}
+.hrow .lock{color:var(--faint);flex:0 0 auto;font-size:10px}
+
+.closing{margin-top:22px;font-family:var(--serif);font-size:17px;line-height:1.55;max-width:55ch;
+  opacity:0;transform:translateY(6px);transition:opacity .5s var(--forge),transform .5s var(--forge)}
+.closing.on{opacity:1;transform:none}
+
+.hud{position:fixed;left:14px;bottom:12px;display:flex;align-items:center;gap:10px;
+  font-size:11px;color:var(--faint);font-family:var(--mono);z-index:40}
+.hud button{border:1px solid var(--line);border-radius:6px;width:22px;height:22px;color:var(--faint)}
+.hud button:hover{color:var(--ember);border-color:rgba(232,131,58,.4)}
+.keys{position:fixed;right:16px;bottom:14px;font-family:var(--mono);font-size:11px;color:var(--faint);z-index:40}
+.card{position:fixed;inset:auto auto 46px 14px;width:min(400px,calc(100vw - 28px));background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:16px 18px;z-index:50;
+  opacity:0;visibility:hidden;transform:translateY(6px);transition:all .25s var(--forge)}
+.card.on{opacity:1;visibility:visible;transform:none}
+.card h4{margin:0 0 9px;font-family:var(--serif);font-weight:500;font-size:15px}
+.card li{font-size:13px;color:var(--dim);margin-bottom:6px;line-height:1.45}
+@media (prefers-reduced-motion: reduce){ *{animation-duration:1ms!important;transition-duration:1ms!important} }
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div class="face">Jane's Bakery <span class="kind">· client · change request</span></div>
+    <div class="hist mono" id="tally"></div>
+  </div>
+
+  <div class="mail">
+    <div class="from">from jane@janesbakery.example.com · today 09:14 · forwarded in</div>
+    <div class="body">“Hi! Could you add a gift-card page before the holidays? Nothing fancy —
+      just something people can buy a voucher from. Thanks!”</div>
+  </div>
+
+  <div class="cols">
+    <div class="road" id="road"></div>
+    <div class="side">
+      <div class="acts" id="acts"></div>
+      <div class="refusal" id="refusal"><div class="h">refused</div><div class="t" id="refusaltx"></div></div>
+      <div class="log">
+        <div class="h9" id="loghead">history · append only</div>
+        <div id="hrows"></div>
+      </div>
+      <p class="closing" id="closing"></p>
+    </div>
+  </div>
+</div>
+
+<div class="keys">Enter advance · D decline · Esc close</div>
+<div class="hud">
+  <span>P11 · The Request — staged data, real timing</span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>Try to skip a step. Does the refusal read as pedantic, or as the thing you wanted?</li>
+    <li>Once it is deployed, decline is gone. Is that reassuring or restrictive?</li>
+    <li>The history cannot be edited. Would you show it to Jane?</li>
+    <li>Is a request an object worth having, or would a note in a list have done?</li>
+  </ul>
+</div>
+
+<script>
+/* ===================== staged data — the real state machine ================================ */
+const STATES = ['received','understood','scoped','in_progress','preview_ready','deployed','verified','client_notified','closed'];
+const LABEL = {
+  received:'received', understood:'understood', scoped:'scoped', in_progress:'in progress',
+  preview_ready:'preview ready', deployed:'deployed', verified:'verified',
+  client_notified:'client notified', closed:'closed', declined:'declined',
+};
+const NOTE = {
+  understood:'read and understood — a gift-card page, purchasable, before the holidays',
+  scoped:'scoped · 40 minutes · inside the package, no extra charge',
+  in_progress:'started — act-with-undo covers this; publishing is what needs the gate',
+  preview_ready:'preview built at janesbakery.preview.example.com/gift-cards',
+  deployed:'published · approval ap-4471 · payload sha 9f2c…a71',
+  verified:'checked live — buy flow completes, voucher emails',
+  client_notified:'told Jane it is live, with the link',
+  closed:'closed · 41 minutes of work recorded against this client',
+};
+const $ = (id) => document.getElementById(id);
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clock = () => new Date().toTimeString().slice(0, 8);
+
+let S;
+function reset(){
+  S = { i:0, declined:false, history:[{ t: clock(), x:'received · from jane@janesbakery.example.com', refused:false }] };
+  $('refusal').classList.remove('on');
+  $('closing').classList.remove('on'); $('closing').textContent = '';
+  render();
+}
+/* The real rule set: forward one step only, and a deployed change can never be declined. */
+function canTransition(from, to){
+  if (to === 'declined') return STATES.indexOf(from) < STATES.indexOf('deployed');
+  return STATES.indexOf(to) === STATES.indexOf(from) + 1;
+}
+function refuse(msg){
+  $('refusaltx').textContent = msg;
+  $('refusal').classList.add('on');
+  S.history.push({ t: clock(), x: msg, refused:true });
+  render(true);
+}
+function advance(to){
+  const from = S.declined ? 'declined' : STATES[S.i];
+  if (S.declined) return refuse('This request was declined. A declined request is closed history — open a new one instead of reviving it.');
+  if (!canTransition(from, to)) {
+    if (to === 'declined') return refuse(`It is already ${LABEL[from]}. Work is live on Jane's site — you cannot decline something you have published. Open a reversal instead.`);
+    return refuse(`You cannot go from ${LABEL[from]} to ${LABEL[to]}. The step between them is ${LABEL[STATES[STATES.indexOf(from) + 1]]}, and skipping it would leave the record wrong.`);
+  }
+  $('refusal').classList.remove('on');
+  S.i = STATES.indexOf(to);
+  S.history.push({ t: clock(), x: `${LABEL[from]} → ${LABEL[to]} · ${NOTE[to] || ''}`, refused:false });
+  render();
+  if (to === 'closed') {
+    setTimeout(() => {
+      // Both numbers are derived. "Eight steps" was typed here at first — correct by luck, and
+      // exactly the second-source-of-truth the ledger prototype was written to argue against.
+      const steps = STATES.length - 1;
+      const kept = S.history.filter((h) => !h.refused).length;
+      $('closing').textContent =
+        `${steps} steps, ${kept} recorded, none of them editable. ` +
+        `In November when Jane asks when the gift-card page went up, the answer is a row, not a memory.`;
+      $('closing').classList.add('on');
+    }, reduced() ? 10 : 460);
+  }
+}
+function decline(){
+  const from = S.declined ? 'declined' : STATES[S.i];
+  if (!canTransition(from, 'declined')) return advance('declined');
+  S.declined = true;
+  $('refusal').classList.remove('on');
+  S.history.push({ t: clock(), x:`${LABEL[from]} → declined · told Jane why, in writing`, refused:false });
+  render();
+}
+function render(keepRefusal){
+  if (!keepRefusal) { /* refusal box managed by callers */ }
+  // the road
+  $('road').innerHTML = STATES.map((s, i) => {
+    const cls = S.declined ? (i <= S.i ? 'done' : 'dead') : i < S.i ? 'done' : i === S.i ? 'now' : '';
+    return `<div class="step ${cls}"><span class="dot"></span><span>${LABEL[s]}</span></div>`;
+  }).join('') + (S.declined ? `<div class="step now"><span class="dot"></span><span>declined</span></div>` : '');
+
+  // the verbs available RIGHT NOW — plus two that are deliberately offered and will refuse
+  const next = STATES[S.i + 1];
+  const skip = STATES[S.i + 2];
+  const acts = [];
+  if (!S.declined && next) acts.push(`<button class="btn primary" data-to="${next}">${LABEL[next]}</button>`);
+  if (!S.declined && skip) acts.push(`<button class="btn" data-to="${skip}">skip to ${LABEL[skip]}</button>`);
+  acts.push(`<button class="btn danger" data-to="declined">decline it</button>`);
+  $('acts').innerHTML = acts.join('');
+  $('acts').querySelectorAll('button').forEach((b) =>
+    b.addEventListener('click', () => b.dataset.to === 'declined' ? decline() : advance(b.dataset.to)));
+
+  // history — append only, and it says so
+  $('hrows').innerHTML = S.history.map((h) =>
+    `<div class="hrow${h.refused ? ' refused' : ''}"><span class="t">${h.t}</span><span class="x">${h.x}</span><span class="lock">🔒</span></div>`).join('');
+  const kept = S.history.filter((h) => !h.refused).length, ref = S.history.length - kept;
+  $('tally').innerHTML = `state <b>${S.declined ? 'declined' : LABEL[STATES[S.i]]}</b><br>history <b>${kept}</b> steps · <b>${ref}</b> refusals, also kept`;
+  $('loghead').textContent = `history · append only · ${S.history.length} entries, none editable`;
+}
+$('restart').addEventListener('click', reset);
+$('feel').addEventListener('click', () => $('feelcard').classList.toggle('on'));
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k === 'enter') { e.preventDefault(); $('acts').querySelector('.btn.primary')?.click(); }
+  else if (k === 'd') { e.preventDefault(); decline(); }
+  else if (k === 'escape') { $('feelcard').classList.remove('on'); $('refusal').classList.remove('on'); }
+});
+reset();
+</script>
