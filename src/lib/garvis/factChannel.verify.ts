@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/factChannel.verify.ts
 import {
   parseFactScript, scriptTotalSeconds, bandCheck, scriptToScenes, illustrationPrompt,
-  composeCaption, ctaLink, ILLUSTRATION_GUARDRAILS, CHANNEL_PRESETS,
+  composeCaption, ctaLink, deliveryInstructions, ILLUSTRATION_GUARDRAILS, CHANNEL_PRESETS,
 } from './factChannel';
 
 let passed = 0; let failed = 0;
@@ -44,7 +44,9 @@ const good = {
   check('no hooks → refusal', parseFactScript({ ...good, hooks: [] }).ok === false);
   check('no scenes → refusal', parseFactScript({ ...good, scenes: [] }).ok === false);
   const clamped = parseFactScript({ ...good, scenes: [{ voiceover: 'v', onScreen: 'o', imagePrompt: 'p', seconds: 99 }] });
-  check('scene seconds clamp to the 3-8 band', clamped.ok && clamped.script.scenes[0].seconds === 8);
+  check('scene seconds clamp to the 4-6 stills band (static past ~4s; captions+motion buy 6)', clamped.ok && clamped.script.scenes[0].seconds === 6);
+  const floor = parseFactScript({ ...good, scenes: [{ voiceover: 'v', onScreen: 'o', imagePrompt: 'p', seconds: 1 }] });
+  check('too-short beats clamp up to 4s', floor.ok && floor.script.scenes[0].seconds === 4);
 }
 {
   const r = parseFactScript(good);
@@ -71,6 +73,18 @@ const good = {
     check('caption composes caption + CTA + tags', cap.includes('idle cash') && cap.includes('Follow for') && cap.includes('#finance'));
   }
   check('channel presets are distinct brand postures', new Set(CHANNEL_PRESETS.map((c) => c.visualStyle)).size === CHANNEL_PRESETS.length);
+  check('preset style blocks lock a named palette with drift suppressors', CHANNEL_PRESETS.every((c) => /palette:/.test(c.visualStyle) && /no gradients/.test(c.visualStyle)));
+  check('every preset names a TTS voice', CHANNEL_PRESETS.every((c) => c.voice.length > 0));
+}
+{
+  // The TTS delivery direction — where pacing/energy actually live (the model's speed param is ignored).
+  const d = deliveryInstructions('Calm, precise, slightly wry.');
+  check('delivery uses the labeled-axis grammar (Voice/Tone/Pacing/Pauses)', /Voice Affect:/.test(d) && /Pacing:/.test(d) && /Pauses:/.test(d));
+  check('numbers get landed deliberately', d.includes('land each number'));
+  check('no lead-in silence — the first two seconds decide distribution', d.includes('Start speaking immediately'));
+  check('the channel persona is woven in', d.includes('slightly wry'));
+  check('an empty persona still yields a full direction', deliveryInstructions('').includes('Voice Affect:') && !deliveryInstructions('').includes('Personality:'));
+  check('deterministic', deliveryInstructions('x') === deliveryInstructions('x'));
 }
 {
   // The money route: every episode caption can carry the channel's ATTRIBUTED destination link.

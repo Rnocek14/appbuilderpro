@@ -30,9 +30,11 @@ const SETUP = [
 ];
 
 // OpenAI's built-in voices — validated so a typo degrades to the default, never a provider 400.
-const OPENAI_VOICES = new Set(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer']);
+// marin/cedar are the newest and OpenAI's own best-quality recommendation; marin is the default.
+const OPENAI_VOICES = new Set(['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar']);
 const MAX_SCENES = 14;              // matches the storyboard's scene cap
 const MAX_CHARS_PER_SCENE = 300;    // narration lines are short by design; refuse essays honestly
+const MAX_INSTRUCTIONS_CHARS = 900; // delivery steering — long blocks dilute adherence
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -50,6 +52,7 @@ Deno.serve(async (req) => {
 
     const body = (await req.json().catch(() => ({}))) as {
       scenes?: { text?: string; seconds?: number }[]; voice?: string; provider?: string; clusterId?: string | null;
+      instructions?: string;
     };
     const scenes = (Array.isArray(body.scenes) ? body.scenes : [])
       .map((s, i) => ({ index: i, text: String(s?.text ?? '').trim() }))
@@ -74,23 +77,34 @@ Deno.serve(async (req) => {
     const folder = (body.clusterId ?? '').trim() || 'world';
     const totalChars = scenes.reduce((n, s) => n + s.text.length, 0);
 
+    const instructions = (body.instructions ?? '').trim().slice(0, MAX_INSTRUCTIONS_CHARS);
     const synth = async (text: string): Promise<Uint8Array> => {
       if (useEleven) {
         const voiceId = (body.voice ?? '').trim() || 'JBFqnCBsd6RMkjVDRZzb'; // ElevenLabs' stock "George"
         const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
           method: 'POST',
           headers: { 'xi-api-key': elevenKey!, 'content-type': 'application/json' },
-          body: JSON.stringify({ text, model_id: 'eleven_flash_v2_5' }),
+          body: JSON.stringify({
+            text, model_id: 'eleven_flash_v2_5',
+            // The community-tested energetic-shorts settings: animated but stable, slightly quick.
+            // (Flash ignores what it can't apply — passing these is safe.)
+            voice_settings: { stability: 0.4, similarity_boost: 0.75, style: 0.3, speed: 1.1, use_speaker_boost: true },
+          }),
           signal: AbortSignal.timeout(60_000),
         });
         if (!res.ok) throw new Error(`ElevenLabs returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
         return new Uint8Array(await res.arrayBuffer());
       }
-      const voice = OPENAI_VOICES.has((body.voice ?? '').trim()) ? (body.voice as string).trim() : 'nova';
+      const voice = OPENAI_VOICES.has((body.voice ?? '').trim()) ? (body.voice as string).trim() : 'marin';
+      // gpt-4o-mini-tts steers on `instructions` (its `speed` param is ignored) — the delivery
+      // direction is where the energy/pacing lives, not a rate multiplier.
       const res = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: { Authorization: `Bearer ${openaiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice, input: text, response_format: 'mp3' }),
+        body: JSON.stringify({
+          model: 'gpt-4o-mini-tts', voice, input: text, response_format: 'mp3',
+          ...(instructions ? { instructions } : {}),
+        }),
         signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) {

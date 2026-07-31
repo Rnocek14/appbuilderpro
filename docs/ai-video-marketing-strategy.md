@@ -433,6 +433,37 @@ Phase 0 and the core of Phase 1 landed together as the first full circuit:
   machinery: 12 videos/mo from the client's real footage, approval slates, branded channel
   identity, attributed destination links, monthly performance report.
 
+**Round 4 (same day) — creation craft, researched and encoded:**
+
+The generation layer was audited against how winning operators actually prompt (two research
+sweeps: visual layer + audio/script layer). What changed, each rule sourced:
+
+- **TTS is now DIRECTED, not just voiced**: gpt-4o-mini-tts steers on an `instructions` block
+  (its `speed` param is silently ignored) — every channel narrates with a labeled-axis delivery
+  direction (brisk documentary pacing, numbers landed deliberately, zero lead-in silence, rising
+  energy) with the channel persona woven in (`deliveryInstructions`). Default voice moved to
+  `marin` (OpenAI's own best-quality pick); presets use onyx/marin/coral. ElevenLabs head gets
+  the community-tested energetic settings (stability 0.4 / similarity 0.75 / style 0.3 / 1.1x).
+- **Scripts write for the ear**: ~2.3 spoken words/second budget, 8-12-word sentences, concrete
+  number in every claim, numbers written as spoken, a curated banned-phrase list (delve,
+  game-changer, "imagine a world"…), hooks ≤12 words with three distinct mechanisms, and the
+  **open loop**: the hook's gap resolves only in the final beat, which recontextualizes the hook
+  so the video loops on rewatch.
+- **Images use the style-block architecture**: SUBJECT + the channel's STYLE block repeated
+  VERBATIM across a video's set (the only set-consistency lever a seedless model has) + FORMAT
+  (single bold focal subject, upper two-thirds, quiet bottom third for captions) + RULES in
+  prose (gpt-image-1 is an instruction-follower — no negative-prompt param). Preset styles now
+  lock named palettes with drift suppressors ("literal colors, no gradients").
+- **Beats shortened to 4-6s** — a Ken-Burns still reads as static past ~4s; word-timed captions
+  and alternating motion buy up to 6.
+- **The cut grammar**: hard cuts between scenes (one fade-in on frame one only); overlay text in
+  the TOP third; captions big bold white-with-stroke on a rounded 60%-black box at lower-middle
+  (margin.top 0.63) — above the platforms' ~300-400px bottom UI dead zone.
+
+Two named upgrades to verify against live docs when taken: **gpt-image-2** (native 1080x1920 —
+kills the crop) and **Shotstack Rich Captions** (word-level karaoke with active-word
+highlighting — the current caption meta; our SRT path is the compatible fallback).
+
 Explicitly deferred (in priority order): client-world channel auto-provisioning when the
 `social_content` package is pinned (`packageEstablishes` hook); Instagram Trial Reels as a native
 hook-test surface next to the in-house B-cut lab; the creative-board platform widening for image

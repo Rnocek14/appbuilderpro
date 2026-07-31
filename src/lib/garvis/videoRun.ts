@@ -122,13 +122,16 @@ export interface VoiceoverResult {
   provenance?: AiProvenance;
 }
 
-/** Generate per-scene voiceover mp3s for every scene with a narration line. The result carries the
- *  AI-audio provenance stamp — keep it with the render so the publish disclosure holds. */
-export async function generateVoiceover(sb: Storyboard, clusterId: string, opts?: { voice?: string; provider?: 'openai' | 'elevenlabs' }): Promise<VoiceoverResult> {
+/** Generate per-scene voiceover mp3s for every scene with a narration line. `instructions` steers
+ *  gpt-4o-mini-tts delivery (pacing/energy/emphasis — its speed param is ignored, direction is
+ *  everything). The result carries the AI-audio provenance stamp — keep it with the render so the
+ *  publish disclosure holds. */
+export async function generateVoiceover(sb: Storyboard, clusterId: string, opts?: { voice?: string; provider?: 'openai' | 'elevenlabs'; instructions?: string }): Promise<VoiceoverResult> {
   const { data, error } = await supabase.functions.invoke('tts-voiceover', {
     body: {
       scenes: sb.scenes.map((s) => ({ text: s.voiceover, seconds: s.durationS })),
       voice: opts?.voice, provider: opts?.provider, clusterId,
+      instructions: opts?.instructions,
     },
   });
   if (error) throw new Error(error.message);

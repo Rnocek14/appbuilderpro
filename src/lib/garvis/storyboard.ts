@@ -136,8 +136,13 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
   const imageClips: Record<string, unknown>[] = [];
   const textClips: Record<string, unknown>[] = [];
   let at = 0;
-  for (const s of sb.scenes) {
-    const base = { start: Math.round(at * 100) / 100, length: s.durationS, transition: { in: 'fade', out: 'fade' } };
+  for (let i = 0; i < sb.scenes.length; i++) {
+    const s = sb.scenes[i];
+    // HARD CUTS between scenes (the retention-era meta — dissolves read as template-slideshow);
+    // only the video's very first frame fades in. The alternating Ken-Burns motion carries the
+    // energy; direction flips every cut so no two moves repeat back-to-back.
+    const base: Record<string, unknown> = { start: Math.round(at * 100) / 100, length: s.durationS };
+    if (i === 0) base.transition = { in: 'fade' };
     if (s.imageUrl) {
       imageClips.push({ ...base, asset: { type: 'image', src: s.imageUrl }, effect: effectFor[s.motion], fit: 'cover' });
     } else {
@@ -145,7 +150,10 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
       imageClips.push({ ...base, asset: { type: 'title', text: s.shoot ?? '', style: 'minimal', size: 'small', background: '#0C0E13' } });
     }
     if (s.onScreen) {
-      textClips.push({ ...base, asset: { type: 'title', text: s.onScreen, style: 'subtitle', color: sb.accent, size: 'medium', position: 'bottom' } });
+      // Overlay text rides the TOP third — the bottom ~300-400px is the platforms' UI dead zone
+      // and the lower-middle belongs to the burned captions. The hook line on frame one IS the
+      // thumbnail in a vertical feed; it must read muted, instantly.
+      textClips.push({ ...base, asset: { type: 'title', text: s.onScreen, style: 'subtitle', color: sb.accent, size: 'medium', position: 'top' } });
     }
     at += s.durationS;
   }
@@ -159,14 +167,19 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
 
   const tracks: Record<string, unknown>[] = [];
   // Caption track on top when a hosted SRT exists (Shotstack CaptionAsset takes the SRT URL).
+  // Styled to the current short-form meta: big bold white with a black stroke on a soft rounded
+  // 60%-black box, sitting LOWER-MIDDLE (margin.top ≈ 0.63) — above the platforms' bottom UI dead
+  // zone, below the subject. Captions lift completion materially (~80% of viewers watch muted at
+  // least sometimes); they are half the perceived motion on a stills-based video.
   if (opts?.srtUrl) {
     tracks.push({
       clips: [{
         start: 0, length: sb.totalDurationS,
         asset: {
           type: 'caption', src: opts.srtUrl,
-          font: { color: '#ffffff', size: 30 },
-          background: { color: '#000000', opacity: 60 },
+          font: { family: 'Montserrat ExtraBold', color: '#ffffff', size: 80, lineHeight: 1.2, stroke: '#000000', strokeWidth: 2 },
+          background: { color: '#000000', opacity: 0.6, padding: 24, borderRadius: 18 },
+          margin: { top: 0.63, left: 0.1, right: 0.1 },
         },
       }],
     });

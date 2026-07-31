@@ -52,6 +52,8 @@ console.log('storyboard.verify');
   check('image scene → an image asset clip', edit.timeline.tracks[1].clips.some((c) => (c.asset as { type: string }).type === 'image'));
   check('photo-less scene → an honest title card (never a fake frame)', edit.timeline.tracks[1].clips.some((c) => (c.asset as { type: string; text?: string }).type === 'title' && String((c.asset as { text?: string }).text).includes('pier')));
   check('onScreen text becomes a title clip on the text track', edit.timeline.tracks[0].clips.length === 2);
+  check('overlay titles sit in the top third (never the bottom UI dead zone)',
+    edit.timeline.tracks[0].clips.every((c) => (c.asset as { position?: string }).position === 'top'));
 }
 {
   const scenes = defaultScenes({ businessName: 'Nocek Studio', craft: 'murals', audience: 'designers', offer: 'Book a commission', photos: [{ url: 'https://x/a.jpg', caption: 'lobby mural' }] });
@@ -81,6 +83,10 @@ console.log('storyboard.verify');
   const capTrack = full.timeline.tracks[0];
   check('caption track rides on top and spans the whole video',
     (capTrack.clips[0].asset as { type?: string }).type === 'caption' && capTrack.clips[0].length === sb.totalDurationS);
+  const capAsset = capTrack.clips[0].asset as { font?: { family?: string; size?: number; stroke?: string }; margin?: { top?: number } };
+  check('captions are big bold white-on-box in the LOWER-MIDDLE (not the platform UI dead zone)',
+    capAsset.font?.family === 'Montserrat ExtraBold' && (capAsset.font?.size ?? 0) >= 70 &&
+    capAsset.font?.stroke === '#000000' && capAsset.margin?.top === 0.63);
   const audio = full.timeline.tracks[full.timeline.tracks.length - 1].clips;
   check('voiceover clips land at their scene\'s cumulative start, sorted, out-of-range dropped',
     audio.length === 2 && audio[0].start === 0 && audio[1].start === 7 && audio[1].length === 5);
@@ -89,6 +95,13 @@ console.log('storyboard.verify');
   check('image/text tracks are unchanged by the media layers',
     JSON.stringify(full.timeline.tracks[1]) === JSON.stringify(plain.timeline.tracks[0]) &&
     JSON.stringify(full.timeline.tracks[2]) === JSON.stringify(plain.timeline.tracks[1]));
+
+  // The retention-era cut grammar: hard cuts between scenes, one fade-in on frame one, overlay
+  // text in the top third (bottom = platform UI graveyard; lower-middle = captions).
+  const images = plain.timeline.tracks[1].clips as ({ transition?: unknown })[];
+  check('only the first clip fades in — every other cut is HARD', images[0].transition !== undefined && images.slice(1).every((c) => c.transition === undefined));
+  const titles = plain.timeline.tracks[0].clips as ({ asset: { position?: string } })[];
+  check('on-screen text rides the top third, clear of captions and platform UI', titles.every((t) => t.asset.position === 'top'));
 }
 
 // ---- the three cuts: same real photos, different mechanism, deterministic ----

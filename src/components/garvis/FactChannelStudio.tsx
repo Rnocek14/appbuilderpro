@@ -12,7 +12,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle } from 'lucide-react';
 import {
   parseFactScript, scriptToScenes, scriptTotalSeconds, bandCheck, illustrationPrompt, composeCaption,
-  ctaLink, CHANNEL_PRESETS, type FactScript,
+  ctaLink, deliveryInstructions, CHANNEL_PRESETS, type FactScript,
 } from '../../lib/garvis/factChannel';
 import {
   listChannels, createChannel, listEpisodes, draftEpisode, updateEpisode, generateSceneImage,
@@ -72,6 +72,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       const c = await createChannel({
         worldId, clusterId, name: p.label, niche: p.niche, persona: p.persona,
         platforms: ['tiktok', 'youtube', 'instagram'], visualStyle: p.visualStyle, musicMood: p.mood,
+        voice: p.voice,
       });
       setChannels((cur) => [...(cur ?? []), c]); setChannelId(c.id);
       onToast('success', `Channel "${c.name}" created — one distinct brand, its own look and voice.`);
@@ -126,7 +127,8 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       const sb = buildStoryboard({ title: script.title, aspect: '9:16', accent: '#FF8A3D', scenes: withArt });
 
       setProgress('Narrating…');
-      const vo = await generateVoiceover(sb, clusterId, { voice: channel.voice });
+      // The delivery direction — energetic documentary pacing with the channel's persona woven in.
+      const vo = await generateVoiceover(sb, clusterId, { voice: channel.voice, instructions: deliveryInstructions(channel.persona) });
       if (vo.available === false) { onToast('info', 'Voiceover isn\'t configured — set OPENAI_API_KEY in the edge secrets first.'); return; }
       if (!vo.ok || !vo.clips?.length) { onToast('error', vo.error ?? 'The voiceover failed.'); return; }
       const srtUrl = await saveSrtAsset(clusterId, sb).catch(() => null);
