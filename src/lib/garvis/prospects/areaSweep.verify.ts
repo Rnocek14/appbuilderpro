@@ -46,5 +46,18 @@ check('roofers → roofer', frameNounFor('roofers') === 'roofer');
 check('a multiword canonical keeps its form', frameNounFor('restoration') === 'water damage restoration');
 check('an unknown trade uses itself', frameNounFor('taxidermists') === 'taxidermist');
 
+
+// ── coverage: the table must span the revenue model, not just the obvious trades ──
+check('30+ trades catalogued', Object.keys(TRADE_SYNONYMS).length >= 30);
+check('every high-ticket home-service trade present',
+  ['roofers', 'hvac', 'restoration', 'remodelers', 'contractors', 'pools', 'foundation', 'solar'].every((k) => k in TRADE_SYNONYMS));
+check('appointment-driven health/professional trades present',
+  ['dentists', 'chiropractors', 'veterinarians', 'medspas', 'lawyers', 'accountants'].every((k) => k in TRADE_SYNONYMS));
+check('no synonym appears under two trades (a business must land in one frame)',
+  (() => { const all = Object.values(TRADE_SYNONYMS).flat(); return new Set(all).size === all.length; })());
+check('no trade key collides with another trade\'s synonym (lookup must be unambiguous)',
+  Object.keys(TRADE_SYNONYMS).every((k) =>
+    Object.entries(TRADE_SYNONYMS).every(([k2, v2]) => k === k2 || !v2.some((s) => s.replace(/\s+/g, '') === k))));
+
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} area-sweep check(s) failed`);

@@ -44,19 +44,52 @@ import { SCAN_VERSION } from '../../../../supabase/functions/_shared/scanTypes.t
  *  the canonical trade noun (used as the cohort's frame noun). Plain data on purpose — the frame
  *  of a study should be readable by anyone, and extendable without touching logic. */
 export const TRADE_SYNONYMS: Record<string, string[]> = {
-  plumbers: ['plumbers', 'plumbing company', 'drain cleaning'],
-  roofers: ['roofers', 'roofing contractor', 'roof repair'],
+  // ---- high-ticket home services: one job pays for a year of the subscription. These are the
+  // trades the whole revenue model leans on, so their nets are the widest. ----
+  plumbers: ['plumbers', 'plumbing company', 'drain cleaning', 'water heater repair'],
+  roofers: ['roofers', 'roofing contractor', 'roof repair', 'storm damage roof repair'],
   hvac: ['hvac', 'heating and cooling', 'furnace repair', 'air conditioning repair'],
   electricians: ['electricians', 'electrical contractor'],
-  landscapers: ['landscapers', 'landscaping company', 'lawn care'],
   restoration: ['water damage restoration', 'fire damage restoration', 'mold remediation'],
-  remodelers: ['remodeling contractor', 'kitchen remodeling', 'bathroom remodeling'],
-  dentists: ['dentists', 'dental clinic'],
-  restaurants: ['restaurants'],
-  salons: ['hair salon', 'nail salon', 'barber shop'],
-  medspas: ['med spa', 'medical spa', 'aesthetics clinic'],
-  lawyers: ['law firm', 'attorney'],
-  autorepair: ['auto repair', 'mechanic', 'auto body shop'],
+  remodelers: ['remodeling contractor', 'kitchen remodeling', 'bathroom remodeling', 'basement finishing'],
+  contractors: ['general contractor', 'home builder', 'construction company'],
+  concrete: ['concrete contractor', 'paving company', 'asphalt paving', 'driveway contractor'],
+  excavation: ['excavation contractor', 'septic system service', 'well drilling'],
+  foundation: ['foundation repair', 'basement waterproofing'],
+  siding: ['siding contractor', 'window replacement', 'gutter installation'],
+  fencing: ['fence company', 'fence installation', 'deck builder'],
+  pools: ['pool builder', 'pool service', 'hot tub dealer'],
+  solar: ['solar installer', 'solar company'],
+  masonry: ['masonry contractor', 'chimney repair', 'brick repair'],
+  flooring: ['flooring company', 'carpet installation', 'tile contractor', 'epoxy flooring'],
+  painters: ['painting contractor', 'house painters'],
+  garagedoors: ['garage door repair', 'garage door installation'],
+  treeservice: ['tree service', 'tree removal', 'stump grinding'],
+  landscapers: ['landscapers', 'landscaping company', 'lawn care', 'irrigation company'],
+  pestcontrol: ['pest control', 'exterminator', 'wildlife removal'],
+  cleaning: ['cleaning service', 'house cleaning', 'commercial cleaning', 'carpet cleaning'],
+  movers: ['moving company', 'movers'],
+  towing: ['towing service', 'tow truck'],
+  // ---- health & professional: high lifetime value, appointment-driven — the booking and
+  // reminder automations sell themselves here. ----
+  dentists: ['dentists', 'dental clinic', 'orthodontist'],
+  chiropractors: ['chiropractor', 'chiropractic clinic'],
+  physicaltherapy: ['physical therapy', 'sports rehab'],
+  optometrists: ['optometrist', 'eye doctor'],
+  veterinarians: ['veterinarian', 'animal hospital', 'vet clinic'],
+  medspas: ['med spa', 'medical spa', 'aesthetics clinic', 'laser hair removal'],
+  lawyers: ['law firm', 'attorney', 'personal injury lawyer', 'estate planning attorney'],
+  accountants: ['accountant', 'cpa firm', 'tax preparation', 'bookkeeping service'],
+  insurance: ['insurance agency', 'insurance agent'],
+  realestate: ['real estate agency', 'property management company'],
+  // ---- main street: lower ticket, but dense — the volume floor of a county study. ----
+  restaurants: ['restaurants', 'catering company'],
+  salons: ['hair salon', 'nail salon', 'barber shop', 'day spa'],
+  gyms: ['gym', 'fitness studio', 'martial arts school', 'yoga studio'],
+  autorepair: ['auto repair', 'mechanic', 'auto body shop', 'auto detailing'],
+  storage: ['self storage', 'storage units'],
+  childcare: ['daycare', 'child care center', 'preschool'],
+  photographers: ['photographer', 'photography studio'],
 };
 
 /** The synonym set for a niche: the table's when we have one, else the niche itself — an unknown
