@@ -109,6 +109,22 @@ function specsLine(input: CampaignInput): string {
   return bits.join(' · ');
 }
 
+// The postcard front reads at arm's length, so compileMailer hard-clips it at 48 chars — which
+// used to eat the PRICE off "Just Listed — {full address}, {price}". Degrade the address instead
+// (full → street only → gone): the money fact always survives to print.
+const FRONT_MAX = 48;
+function fitFront(label: string, place: string, price: string): string {
+  const join = (a: string, p: string) =>
+    `${label}${a ? ` — ${a}` : ''}${p ? `${a ? ', ' : ' — '}${p}` : ''}`;
+  const street = place.split(',')[0].trim();
+  const candidates = price
+    ? [join(place, price), join(street, price), join('', price)]
+    : [join(place, ''), join(street, ''), label];
+  return candidates.find((c) => c.length <= FRONT_MAX) ?? candidates[candidates.length - 1];
+}
+
+const clip60 = (s: string) => (s.length <= 60 ? s : `${s.slice(0, 59).trimEnd()}…`);
+
 /** Compose the whole set. Deterministic; honest holes for anything missing. Routes real-estate
  *  announcements and generic ones through the same postcard/social/email machine. */
 export function composeCampaign(input: CampaignInput): CampaignSet {
@@ -129,28 +145,35 @@ export function composeCampaign(input: CampaignInput): CampaignSet {
   if (!agent) warnings.push('Add your name and phone so people know who to call.');
 
   // ---- the campaign's core headline (front of the card) ----
+  // `headline` is the campaign's full display title; `front` is the ≤48-char version that
+  // actually prints (fitFront keeps the price at the cost of the address, never the reverse).
   let headline: string;
+  let front: string;
   let concept: MailerConcept;
   let offer: string;
   switch (input.type) {
     case 'just_listed':
       headline = `Just Listed${addr ? ` — ${addr}` : ''}${price ? `, ${price}` : ''}`;
+      front = fitFront('Just Listed', addr, price);
       concept = input.photoUrl ? 'proof' : 'offer_first';
       offer = highlight || 'Book a private showing — scan the code for photos & details.';
       break;
     case 'just_sold':
       headline = `Just Sold${addr ? ` — ${addr}` : ''}`;
+      front = fitFront('Just Sold', addr, '');
       concept = input.photoUrl ? 'proof' : 'local_authority';
       offer = highlight || `Thinking of selling${area ? ` in ${area}` : ''}? Let's talk about your home's value.`;
       break;
     case 'open_house':
       headline = `Open House${input.openWhen ? ` — ${input.openWhen.trim()}` : ''}`;
+      front = fitFront('Open House', (input.openWhen ?? '').trim(), '');
       concept = input.photoUrl ? 'proof' : 'question';
       offer = `${addr ? `${addr}. ` : ''}${input.openWhen ? `${input.openWhen.trim()}. ` : ''}Come see it in person.`.trim() || EDIT('when and where the open house is');
       break;
     case 'find_sellers':
     default:
       headline = highlight || `Thinking of selling${area ? ` in ${area}` : ''}?`;
+      front = headline;
       concept = 'local_authority';
       offer = `Curious what your${area ? ` ${area}` : ''} home is worth? Scan for a free, no-pressure estimate.`;
       break;
@@ -164,9 +187,37 @@ export function composeCampaign(input: CampaignInput): CampaignSet {
     imageAlt: input.photoAlt ?? (addr || area || null),
     offer,
     linkUrl: input.link ?? null,
-    headline,
+    headline: front,
     phone: input.agentPhone ?? null,
   });
+
+  // ---- listing-true back copy ----
+  // The generic mailer concepts were written for any local business ("the front of this card is
+  // our real work"), which reads wrong on a property card. When the campaign is about a listing,
+  // the back states the listing: address up top, the facts line, the operator's highlight.
+  // Missing facts stay visible [EDIT] holes — same honesty rules, real-estate voice.
+  if (input.type === 'just_listed' || input.type === 'just_sold' || input.type === 'open_house') {
+    const facts = [
+      price ? (input.type === 'just_sold' ? `Sold at ${price}` : `Offered at ${price}`) : '',
+      specs,
+    ].filter(Boolean).join(' · ');
+    const lines: string[] = [];
+    if (input.type === 'open_house') {
+      lines.push(input.openWhen?.trim() ? `Open house: ${input.openWhen.trim()}.` : EDIT('when the open house is'));
+    }
+    if (facts) lines.push(`${facts}.`);
+    else if (input.type === 'just_listed') lines.push(EDIT('price · beds/baths'));
+    else if (input.type === 'just_sold') lines.push(EDIT('one honest line about this sale — e.g. days on market, over asking'));
+    if (highlight) lines.push(highlight);
+    else if (input.type === 'just_listed') lines.push(EDIT('one line: what makes this home special'));
+    postcard.back.headline = addr ? clip60(addr)
+      : input.type === 'just_listed' ? 'Just listed.'
+      : input.type === 'just_sold' ? 'Just sold.'
+      : 'Open house.';
+    postcard.back.body = lines.join('\n');
+    // The open-house offer repeats the address + time the back now states — keep just the invite.
+    if (input.type === 'open_house') postcard.back.offer = 'Come see it in person.';
+  }
 
   // ---- social: three distinct, ready-to-post captions from the same facts ----
   const socialPosts = socialFor(input, { addr, price, area, highlight, specs });
