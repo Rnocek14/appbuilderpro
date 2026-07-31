@@ -21,6 +21,7 @@ import { detectVertical } from '../lib/garvis/verticals';
 import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder, runOrderNow } from '../lib/garvis/standingRun';
 import { orderStatusLine, type StandingOrder } from '../lib/garvis/standing';
 import { noWebsiteAudit, type Verdict } from '../lib/garvis/siteAudit';
+import { parseTownList } from '../lib/garvis/prospects/areaSweepCore';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
@@ -217,7 +218,7 @@ export default function WinClients() {
   // Every row is persisted the moment it lands; stopping early yields a smaller study, never a lost one.
   const sweepAreaStudy = async () => {
     const n = niche.trim();
-    const towns = area.split(',').map((t) => t.trim()).filter(Boolean);
+    const towns = parseTownList(area);
     if (!n || towns.length < 2) { toast('error', 'Enter a niche and a comma-separated town list first.'); return; }
     const { data: sess } = await supabase.auth.getUser();
     const uid = sess.user?.id;
@@ -250,7 +251,7 @@ export default function WinClients() {
   // progress lives on the standing order's last_result line and the finished study on /garvis/studies.
   const startServerStudy = async () => {
     const n = niche.trim();
-    const towns = area.split(',').map((t) => t.trim()).filter(Boolean);
+    const towns = parseTownList(area);
     if (!n || towns.length < 2) { toast('error', 'Enter a niche and a comma-separated town list first.'); return; }
     const areaLabel = window.prompt('Name this study area (appears in the report and the pitch line):', `${towns[0]} area`)?.trim();
     if (!areaLabel) return;
@@ -413,7 +414,7 @@ export default function WinClients() {
                     Geneva, Delavan, Elkhorn WI"). One press = every town × every trade synonym,
                     every find audited AND recorded, and the whole run filed into a scan cohort —
                     the raw material of the "your site was one of N we looked at" pitch line. */}
-                {area.includes(',') && (
+                {parseTownList(area).length >= 2 && (
                   <>
                     <Button variant="outline" size="md" onClick={() => void sweepAreaStudy()} disabled={!niche.trim()}
                       title="Sweep every town listed in the Area box, audit everything found, and file it all into a study cohort.">

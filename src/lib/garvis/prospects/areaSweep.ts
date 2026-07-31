@@ -32,7 +32,7 @@
 // membership is persisted the moment it happens, so a stopped sweep is a smaller study, not a lost one.
 
 import { findBusinesses, scrapeAndAudit, recordProspectAudit, type FoundBusiness } from '../clientHuntRun';
-export { TRADE_SYNONYMS, synonymsFor, areaSweepPlan, frameSentence, frameNounFor, type AreaQuery } from './areaSweepCore.ts';
+export { TRADE_SYNONYMS, synonymsFor, areaSweepPlan, frameSentence, frameNounFor, parseTownList, type AreaQuery } from './areaSweepCore.ts';
 import { areaSweepPlan, frameSentence, frameNounFor } from './areaSweepCore.ts';
 import { registerDomain } from '../nationalSweepCore';
 import { createCohort, addCohortMembers, completeCohort, type Cohort } from './cohortStore';

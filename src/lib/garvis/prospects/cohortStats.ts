@@ -207,10 +207,22 @@ export function cohortStats(members: CohortMember[], opts: { minSample?: number;
  * The publishable sentence for one stat. Returns null when the rate is not reportable — the caller
  * must render nothing rather than a hedge, because "we don't have enough data on X" in a press
  * release is still a sentence about X.
+ *
+ * TWO REFUSALS, both found by reading a rendered study as an editor would:
+ *   - pct null (sample too small) → nothing, as before.
+ *   - n === 0 while unconfirmed findings exist → nothing. The headline counts 'detected' only, so
+ *     41 sites with a LIKELY finding and none confirmed computes to 0% — and "0% had no way to
+ *     book" reads as "we checked and none do", which is not what was measured. A zero built on a
+ *     pile of unconfirmed findings is not a zero anyone should print. A TRUE zero (nothing
+ *     detected, nothing suspected) still publishes — that is a real, meaningful absence.
  */
 export function statSentence(stat: CohortStat, frame: string): string | null {
   if (stat.pct === null) return null;
-  return `${stat.pct}% of the ${stat.denominator} ${frame} we scanned — ${stat.n} of them — ${stat.title.toLowerCase().startsWith('no ') ? 'had' : 'showed'} ${stat.title.toLowerCase()}.`;
+  if (stat.n === 0 && stat.nIncludingUnconfirmed > 0) return null;
+  // "41 roofers we scanned", not "41 roofer we scanned" — the frame noun is stored singular for
+  // the pitch line ("one of 41 roofer websites"), so sentences pluralise it.
+  const noun = stat.denominator === 1 || frame.endsWith('s') ? frame : `${frame}s`;
+  return `${stat.pct}% of the ${stat.denominator} ${noun} we scanned — ${stat.n} of them — ${stat.title.toLowerCase().startsWith('no ') ? 'had' : 'showed'} ${stat.title.toLowerCase()}.`;
 }
 
 /**

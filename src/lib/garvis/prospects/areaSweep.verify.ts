@@ -3,7 +3,7 @@
 // planning arithmetic the study's honesty rests on: which queries get asked, how the frame sentence
 // describes exactly those queries, and that degenerate input plans nothing.
 
-import { TRADE_SYNONYMS, synonymsFor, areaSweepPlan, frameSentence, frameNounFor } from './areaSweep';
+import { TRADE_SYNONYMS, synonymsFor, areaSweepPlan, frameSentence, frameNounFor, parseTownList } from './areaSweep';
 
 let passed = 0; let failed = 0;
 function check(name: string, cond: boolean) {
@@ -58,6 +58,23 @@ check('no synonym appears under two trades (a business must land in one frame)',
 check('no trade key collides with another trade\'s synonym (lookup must be unambiguous)',
   Object.keys(TRADE_SYNONYMS).every((k) =>
     Object.entries(TRADE_SYNONYMS).every(([k2, v2]) => k === k2 || !v2.some((s) => s.replace(/\s+/g, '') === k))));
+
+
+// ── parseTownList: the placeholder's own example must not become a study ──
+// The UI teaches "Lake Geneva, WI"; a naive comma-split turns that into a two-town study where one
+// town is the state of Wisconsin. Caught by driving the UI exactly as the placeholder suggests.
+check('"Lake Geneva, WI" is ONE town, not a study', parseTownList('Lake Geneva, WI').join('|') === 'Lake Geneva, WI');
+check('a bare state code never survives as a town', !parseTownList('Lake Geneva, WI, Delavan, WI').some((t) => /^WI$/i.test(t)));
+check('"Town, ST, Town, ST" is two towns', parseTownList('Lake Geneva, WI, Delavan, WI').length === 2);
+check('one explicit state extends to stateless towns (Delavan alone is also in Illinois)',
+  parseTownList('Lake Geneva, Delavan, Elkhorn WI').join('|') === 'Lake Geneva, WI|Delavan, WI|Elkhorn WI');
+check('no state anywhere ⇒ towns pass through untouched', parseTownList('Fontana, Sharon, Genoa City').join('|') === 'Fontana|Sharon|Genoa City');
+check('disagreeing states are never papered over by inference',
+  parseTownList('Beloit WI, Rockton IL, Sharon').includes('Sharon'));
+check('lowercase state codes are recognised', parseTownList('lake geneva, wi').length === 1);
+check('a leading orphan state code is dropped', parseTownList('WI, Delavan, Elkhorn').every((t) => !/^WI$/i.test(t)));
+check('dedupe is case-insensitive', parseTownList('Delavan, delavan, DELAVAN').length === 1);
+check('empty input parses to nothing', parseTownList('   ').length === 0);
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} area-sweep check(s) failed`);

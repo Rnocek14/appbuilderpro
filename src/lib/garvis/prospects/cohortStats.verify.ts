@@ -170,5 +170,17 @@ const cohort = (n: number, findings: ReturnType<typeof F>[] = [], trade: string 
     s.limits.some((l) => /extrapolat/i.test(l) && /describe that list only/i.test(l)));
 }
 
+
+// ── statSentence refusals found by reading a rendered study as an editor ──
+{
+  const zeroOnUnconfirmed = { code: 'conv.no_booking', category: 'conversion' as const, title: 'No way to book online', n: 0, denominator: 41, pct: 0, nIncludingUnconfirmed: 21 };
+  check('a 0% built entirely on unconfirmed findings is never published', statSentence(zeroOnUnconfirmed, 'roofer') === null);
+  const trueZero = { ...zeroOnUnconfirmed, nIncludingUnconfirmed: 0 };
+  check('a TRUE zero (nothing detected, nothing suspected) still publishes', statSentence(trueZero, 'roofer') !== null);
+  const plural = { code: 'a11y.img_missing_alt', category: 'accessibility' as const, title: 'Images with no alt text', n: 14, denominator: 41, pct: 34, nIncludingUnconfirmed: 14 };
+  check('the frame noun pluralises in sentences ("41 roofers", not "41 roofer")', /41 roofers we scanned/.test(statSentence(plural, 'roofer') ?? ''));
+  check('an already-plural frame is not double-pluralised', !/contractorss/.test(statSentence(plural, 'roofing contractors') ?? ''));
+}
+
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} cohort-stats check(s) failed`);

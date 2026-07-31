@@ -100,7 +100,12 @@ export default function Studies() {
 
         {id && (
           loading ? <Loader2 size={18} className="animate-spin text-forge-dim" />
-          : !cohort ? <div className="text-sm text-forge-dim">Study not found.</div>
+          : !cohort ? (
+            <div className="text-sm text-forge-dim">
+              Study not found.{' '}
+              <NavLink to="/garvis/studies" className="text-forge-ember hover:underline">Back to all studies</NavLink>
+            </div>
+          )
           : (
             <div className="space-y-4">
               <NavLink to="/garvis/studies" className="inline-flex items-center gap-1 text-xs text-forge-dim hover:text-forge-ember"><ArrowLeft size={12} /> all studies</NavLink>
@@ -145,7 +150,13 @@ export default function Studies() {
                         {stats.stats.map((s) => (
                           <tr key={s.code} className="border-t border-forge-border text-forge-ink">
                             <td className="px-3 py-2">{s.title}<span className="ml-1.5 text-[10px] text-forge-dim">{s.code}</span></td>
-                            <td className="px-3 py-2 font-medium">{s.pct === null ? <span className="text-forge-dim">not enough data</span> : `${s.pct}%`}</td>
+                            <td className="px-3 py-2 font-medium">{
+                              s.pct === null ? <span className="text-forge-dim">not enough data</span>
+                              // A 0% headline sitting on a pile of unconfirmed findings reads as "we
+                              // checked and none do" — which is not what was measured. Same refusal
+                              // statSentence makes; the table and the editor block must never disagree.
+                              : s.n === 0 && s.nIncludingUnconfirmed > 0 ? <span className="text-forge-dim" title="Findings exist but none were detected unambiguously — needs human confirmation before any rate is published.">unconfirmed only</span>
+                              : `${s.pct}%`}</td>
                             <td className="px-3 py-2 text-forge-dim">{s.n} / {s.denominator}</td>
                             <td className="px-3 py-2 text-forge-dim">{s.nIncludingUnconfirmed}</td>
                           </tr>
