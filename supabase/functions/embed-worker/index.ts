@@ -103,8 +103,16 @@ Deno.serve(async (req) => {
     if (artIds.length) {
       const { data } = await admin.from('knowledge_artifacts')
         .select('id, knowledge_clusters(world_id)').in('id', artIds).eq('owner_id', user.id);
-      for (const a of (data ?? []) as { id: string; knowledge_clusters: { world_id: string } | null }[]) {
-        worldBySubject.set(`artifact:${a.id}`, a.knowledge_clusters?.world_id ?? null);
+      // PostgREST hands an embedded relation back as an OBJECT for a to-one and an ARRAY for a
+      // to-many, and supabase-js's inferred type for this select is the array shape — so casting
+      // straight to the object shape is a type error under `deno check` (which is why that job has
+      // been red on main since app_0114 landed, quietly waved through on the last two merges).
+      // Normalise both forms rather than picking one: the runtime has always handled whichever it
+      // got, and this makes the types say so instead of asserting over it.
+      type ClusterRef = { world_id: string | null };
+      for (const a of (data ?? []) as { id: string; knowledge_clusters: ClusterRef | ClusterRef[] | null }[]) {
+        const cluster = Array.isArray(a.knowledge_clusters) ? a.knowledge_clusters[0] : a.knowledge_clusters;
+        worldBySubject.set(`artifact:${a.id}`, cluster?.world_id ?? null);
       }
     }
     if (cluIds.length) {
