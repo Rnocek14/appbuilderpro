@@ -5,9 +5,9 @@
 // marketing") or get opened here; the client's world goes through the normal draft approval on
 // Businesses, then links here.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BookUser, Loader2, Plus, Square, CheckSquare } from 'lucide-react';
+import { BookUser, Loader2, Plus, Search, Square, CheckSquare } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Badge, Button, Input } from '../components/ui';
 import { cn } from '../lib/utils';
@@ -22,6 +22,11 @@ export default function ClientBook() {
   const { toast } = useToast();
   const [rows, setRows] = useState<ClientEngagement[] | null>(null);
   const [worlds, setWorlds] = useState<{ id: string; title: string }[]>([]);
+  // Find-a-client: the book is fine at 5 rows and useless at 50 without this. Search matches
+  // name/business/scope/email; the status chips narrow to one lifecycle stage. Both are pure
+  // client-side filters over what's already loaded — nothing refetches.
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<EngagementStatus | 'all'>('all');
   // New-engagement form
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState('');
@@ -58,6 +63,14 @@ export default function ClientBook() {
     catch (e) { toast('error', e instanceof Error ? e.message : 'Update failed — nothing changed.'); }
   };
 
+  const shown = useMemo(() => {
+    if (!rows) return null;
+    const q = query.trim().toLowerCase();
+    return rows.filter((e) =>
+      (statusFilter === 'all' || e.status === statusFilter) &&
+      (!q || [e.client_name, e.business, e.scope, e.client_email ?? ''].some((f) => f.toLowerCase().includes(q))));
+  }, [rows, query, statusFilter]);
+
   return (
     <AppShell>
       <div className="mx-auto max-w-3xl px-4 py-8">
@@ -87,7 +100,7 @@ export default function ClientBook() {
           </div>
         )}
 
-        {rows === null ? (
+        {rows === null || shown === null ? (
           <p className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading the book…</p>
         ) : rows.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-forge-border p-6 text-center">
@@ -97,8 +110,37 @@ export default function ClientBook() {
             </p>
           </div>
         ) : (
+          <>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-forge-dim" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Find a client — name, business, scope, email…"
+                  aria-label="Search clients"
+                  className="w-full rounded-lg border border-forge-border bg-forge-panel py-1.5 pl-8 pr-2.5 text-xs text-forge-ink placeholder:text-forge-dim focus:border-forge-ember/60 focus:outline-none"
+                />
+              </div>
+              {(['all', ...STATUSES] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium',
+                    statusFilter === s ? 'border-forge-ember/60 bg-forge-ember/10 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink')}
+                >
+                  {s}{s !== 'all' && ` (${rows.filter((e) => e.status === s).length})`}
+                </button>
+              ))}
+            </div>
+            {shown.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-forge-border p-6 text-center text-xs text-forge-dim">
+                No clients match{query.trim() ? ` “${query.trim()}”` : ''}{statusFilter !== 'all' ? ` with status “${statusFilter}”` : ''}.{' '}
+                <button onClick={() => { setQuery(''); setStatusFilter('all'); }} className="text-forge-ember hover:underline">Clear filters</button>
+              </div>
+            ) : (
           <ul className="space-y-3">
-            {rows.map((e) => (
+            {shown.map((e) => (
               <li key={e.id} className="rounded-2xl border border-forge-border bg-forge-panel/40 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-semibold text-forge-ink">{e.client_name}</span>
@@ -158,6 +200,8 @@ export default function ClientBook() {
               </li>
             ))}
           </ul>
+            )}
+          </>
         )}
       </div>
     </AppShell>
