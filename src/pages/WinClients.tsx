@@ -19,7 +19,7 @@ import { automationUpsellParagraph } from '../lib/garvis/clientHuntBuild';
 import { detectVertical } from '../lib/garvis/verticals';
 import { listOrders, createClientHuntOrder, setOrderStatus, deleteOrder, runOrderNow } from '../lib/garvis/standingRun';
 import { orderStatusLine, type StandingOrder } from '../lib/garvis/standing';
-import { type Verdict } from '../lib/garvis/siteAudit';
+import { noWebsiteAudit, type Verdict } from '../lib/garvis/siteAudit';
 import { ConstellationWeb } from '../components/garvis/canvas/ConstellationWeb';
 import { Button } from '../components/ui';
 import type { WebNode, WebGroupDef } from '../lib/garvis/webLayout';
@@ -89,7 +89,13 @@ export default function WinClients() {
         while (i < found.length) {
           const idx = i++;
           const b = found[idx];
-          if (!b.url) { continue; }
+          if (!b.url) {
+            // No website is a FINDING, not a reason to skip. These rows used to stay blank forever
+            // — no verdict, not even the "checking site…" spinner — which read as a broken scrape
+            // when it was actually the best prospect in the list.
+            setRows((r) => r.map((x, j) => (j === idx ? { ...x, audit: noWebsiteAudit() } : x)));
+            continue;
+          }
           const { audit, scrape } = await scrapeAndAudit(b.url);
           setRows((r) => r.map((x, j) => (j === idx ? { ...x, audit } : x)));
           // Keep the audit we just paid for (Phase 0) — best-effort, never blocks the UI.
@@ -159,7 +165,7 @@ export default function WinClients() {
     setScanning(true); setSearched(true);
     try {
       const { audit, scrape } = await scrapeAndAudit(href);
-      setRows((r) => [{ name: host, url: href, snippet: '', audit }, ...r]);
+      setRows((r) => [{ name: host, url: href, snippet: '', audit, rating: null, ratingCount: null }, ...r]);
       void recordProspectAudit({ url: href, audit, scrape, source: 'scan', businessName: host, niche, area });
       setScanUrl('');
       toast('success', `Scanned ${host} — ${audit.reachable ? 'audited. Press Build to make their demo.' : 'couldn’t load it; worth a manual look.'}`);
@@ -186,7 +192,7 @@ export default function WinClients() {
     try {
       const res = await sweepNation(n, cities, {
         concurrency: 3,
-        onFound: (b) => setRows((r) => (r.length >= MAX_ROWS ? r : [...r, { name: b.name, url: b.url, snippet: b.snippet, audit: null }])),
+        onFound: (b) => setRows((r) => (r.length >= MAX_ROWS ? r : [...r, { name: b.name, url: b.url, snippet: b.snippet, audit: null, rating: b.rating, ratingCount: b.ratingCount }])),
         onProgress: (p) => setSweepProg(p),
         shouldStop: () => stopSweep.current,
       });
@@ -446,8 +452,18 @@ export default function WinClients() {
                             <button onClick={() => setSelected(i)} className="truncate text-sm font-semibold text-forge-ink hover:text-forge-ember" title="Open this business's web">{b.name}</button>
                             {b.audit && <span className={cn('rounded-full border px-2 py-0.5 text-[10.5px] font-medium', VERDICT_STYLE[b.audit.verdict].cls)}>{VERDICT_STYLE[b.audit.verdict].label}{b.audit.score != null ? ` · ${b.audit.score}` : ''}</span>}
                             {!b.audit && b.url && <span className="inline-flex items-center gap-1 text-[11px] text-forge-dim"><Loader2 size={11} className="animate-spin" /> checking site…</span>}
+                            {/* Google's own rating. Places returns it on every search and we were paying
+                                for it and discarding it — it is the fastest read on whether a business
+                                is worth the call. Display-at-use only (Places ToS): never persisted. */}
+                            {b.rating != null && (
+                              <span className="text-[10.5px] text-forge-dim" title={b.ratingCount != null ? `${b.ratingCount} Google review${b.ratingCount === 1 ? '' : 's'}` : 'Google rating'}>
+                                ★ {b.rating.toFixed(1)}{b.ratingCount != null ? ` (${b.ratingCount})` : ''}
+                              </span>
+                            )}
                           </div>
-                          {b.url && <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-[11px] text-forge-dim hover:text-forge-ember">{b.url.replace(/^https?:\/\//, '')} <ExternalLink size={10} /></a>}
+                          {b.url
+                            ? <a href={b.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 truncate text-[11px] text-forge-dim hover:text-forge-ember">{b.url.replace(/^https?:\/\//, '')} <ExternalLink size={10} /></a>
+                            : <span className="text-[11px] text-forge-ember">no website listed</span>}
                           {b.audit && b.audit.signals.length > 0 && (
                             <div className="mt-1.5 flex flex-wrap gap-1.5">
                               {b.audit.signals.map((s) => (

@@ -3,7 +3,7 @@
 // 'unknown' (never a fabricated verdict), a strong site scores high, and the derived score reflects
 // the real signal count rather than an invented number.
 
-import { auditSite, auditIssues } from './siteAudit';
+import { noWebsiteAudit, auditSite, auditIssues } from './siteAudit';
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean) => { if (cond) { pass++; } else { fail++; console.error(`✗ ${name}`); } };
@@ -60,5 +60,23 @@ const dated = auditSite({
 }, NOW);
 ok('dated: only a no-description low/med gap → dated, not weak', dated.verdict === 'dated' && !dated.signals.some((s) => s.severity === 'high'));
 
+// ── noWebsiteAudit: a business with NO site is a finding, not a skip ───────────────────────────
+{
+  const nw = noWebsiteAudit();
+  ok('no-website: verdict is weak, so it sorts to the TOP as the best prospect', nw.verdict === 'weak');
+  ok('no-website: score is null — there is no site to score, and 0 would read as a measurement', nw.score === null);
+  ok('no-website: carries one high-severity signal explaining it', nw.signals.length === 1 && nw.signals[0].severity === 'high');
+  ok('no-website: the signal id is stable', nw.signals[0].id === 'no_website');
+  ok('no-website: headline states the case plainly', /no website at all/i.test(nw.headline));
+  ok('no-website: claims no strengths it cannot see', nw.strengths.length === 0);
+  ok('no-website: distinct from the unreachable case', nw.headline !== auditSite({ url: 'http://x.test', reachable: false }, NOW).headline);
+  ok('no-website: unreachable stays unknown while no-website is weak',
+    auditSite({ url: 'http://x.test', reachable: false }, NOW).verdict === 'unknown' && nw.verdict === 'weak');
+  ok('no-website: deterministic', JSON.stringify(noWebsiteAudit()) === JSON.stringify(noWebsiteAudit()));
+  ok('no-website: makes no legal or compliance claim',
+    !/complian|lawsuit|sued|illegal|guarantee/i.test(nw.headline + ' ' + nw.signals[0].detail));
+}
+
 console.log(`\nsiteAudit.verify: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
+

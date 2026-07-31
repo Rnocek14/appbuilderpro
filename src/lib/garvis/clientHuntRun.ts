@@ -20,6 +20,11 @@ export interface FoundBusiness {
   snippet: string;
   audit: SiteAudit | null;   // filled once we've looked at their site
   auditing?: boolean;
+  // Google's own rating for this business. parsePlace has always extracted these and findBusinesses
+  // used to throw them away, so the operator paid Places for a number they never saw. DISPLAY ONLY
+  // (Places ToS) — shown in the results list, never persisted to the lead pool.
+  rating: number | null;
+  ratingCount: number | null;
 }
 
 /** The REAL error behind a failed functions.invoke. supabase-js flattens every non-2xx to a generic
@@ -40,7 +45,12 @@ async function realInvokeError(error: unknown, fallback: string): Promise<string
 /** Real businesses for "niche + area", from Google Places (the SAME backend as the daily hunt).
  *  Places returns structured leads — real name, website, address, category — so there are no
  *  directory snippets to filter out. Deduped by normalized website (falling back to name). */
-export async function findBusinesses(niche: string, area: string): Promise<FoundBusiness[]> {
+/** How many businesses one search may return. Was a hard-coded 12, which truncated even a single
+ *  full Places page (20) — so a search that found plenty still looked thin. Now a parameter with a
+ *  cap that matches what pagination can actually deliver (3 pages × 20). */
+export const FIND_LIMIT_DEFAULT = 60;
+
+export async function findBusinesses(niche: string, area: string, limit = FIND_LIMIT_DEFAULT): Promise<FoundBusiness[]> {
   const q = [niche.trim(), area.trim()].filter(Boolean).join(' in ');
   if (!q) throw new Error('Add a niche and an area first.');
   const { data, error } = await supabase.functions.invoke('discover-media', {
@@ -61,8 +71,11 @@ export async function findBusinesses(niche: string, area: string): Promise<Found
     seen.add(key);
     // The snippet carries what Places knows: address + category (never invented).
     const snippet = [biz.address, biz.category?.replace(/_/g, ' ')].filter(Boolean).join(' · ');
-    out.push({ name: biz.company_name, url: biz.website, snippet, audit: null });
-    if (out.length >= 12) break;
+    out.push({
+      name: biz.company_name, url: biz.website, snippet, audit: null,
+      rating: biz.rating, ratingCount: biz.rating_count,
+    });
+    if (out.length >= limit) break;
   }
   return out;
 }

@@ -80,29 +80,52 @@ Deno.serve(async (req) => {
       // leads with real websites, not organic-result snippets).
       const key = Deno.env.get('GOOGLE_PLACES_API_KEY');
       if (!key) return json({ available: false });
-      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'X-Goog-Api-Key': key,
-          'X-Goog-FieldMask': PLACES_FIELD_MASK,
-        },
-        body: JSON.stringify({ textQuery: String(q ?? ''), maxResultCount: 20, regionCode: 'US' }),
-      });
-      if (!res.ok) {
-        // Surface Google's ACTUAL reason — a bare "Places 403" hid the real cause (API not enabled /
-        // key restriction / billing) and made every key rotation look like it did nothing.
-        const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 260);
-        const hint = res.status === 403
-          ? ' — enable “Places API (New)” for this project, set the key’s Application restriction to None or IP addresses (NOT HTTP referrers — server calls send no referrer), and confirm billing is on'
-          : res.status === 429 ? ' — over quota / rate-limited'
-          : res.status === 400 ? ' — request rejected (usually billing not enabled on the project)'
-          : '';
-        return json({ error: `Places rejected the request (${res.status}${hint}). ${snippet}` }, 502);
+      // PAGINATE. PLACES_FIELD_MASK has always ASKED for nextPageToken and nothing ever followed it,
+      // so one search returned one page and a hunt over a small town came back with five businesses
+      // — not because five exist, but because that is where we stopped reading. Places (New) serves
+      // up to 3 pages of 20; we take all of them.
+      //
+      // Each page is a separately billed call, so credits are charged PER PAGE rather than once per
+      // request. A page fetch that fails after the first simply ends pagination: we return the
+      // places we really have instead of failing a search that already succeeded.
+      const places: unknown[] = [];
+      let pageToken: string | undefined;
+      let pagesFetched = 0;
+      for (let page = 0; page < 3; page++) {
+        const body: Record<string, unknown> = { textQuery: String(q ?? ''), maxResultCount: 20, regionCode: 'US' };
+        if (pageToken) body.pageToken = pageToken;
+        const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'X-Goog-Api-Key': key,
+            'X-Goog-FieldMask': PLACES_FIELD_MASK,
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          // A later page failing is not a failed search — keep what the earlier pages gave us.
+          if (page > 0) break;
+          // Surface Google's ACTUAL reason — a bare "Places 403" hid the real cause (API not enabled /
+          // key restriction / billing) and made every key rotation look like it did nothing.
+          const snippet = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 260);
+          const hint = res.status === 403
+            ? ' — enable “Places API (New)” for this project, set the key’s Application restriction to None or IP addresses (NOT HTTP referrers — server calls send no referrer), and confirm billing is on'
+            : res.status === 429 ? ' — over quota / rate-limited'
+            : res.status === 400 ? ' — request rejected (usually billing not enabled on the project)'
+            : '';
+          return json({ error: `Places rejected the request (${res.status}${hint}). ${snippet}` }, 502);
+        }
+        const pageData = await res.json() as { places?: unknown[]; nextPageToken?: string };
+        pagesFetched++;
+        if (Array.isArray(pageData.places)) places.push(...pageData.places);
+        pageToken = pageData.nextPageToken;
+        if (!pageToken) break;
       }
-      const data = await res.json();
-      await spendCredits(admin, user.id, { costUsd: PLACES_COST, kind: 'discover', provider: 'places', model: 'searchText' });
-      return json({ available: true, data });
+      await spendCredits(admin, user.id, {
+        costUsd: PLACES_COST * Math.max(1, pagesFetched), kind: 'discover', provider: 'places', model: 'searchText',
+      });
+      return json({ available: true, data: { places }, pages: pagesFetched });
     }
 
     return json({ error: 'Unknown provider.' }, 400);
