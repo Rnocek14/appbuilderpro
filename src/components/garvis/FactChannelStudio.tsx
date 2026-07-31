@@ -307,7 +307,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                         {script.scenes.map((s, i) => <li key={i}>{i + 1}. [{s.seconds}s] {s.voiceover} <span className="text-forge-dim/60">· {s.onScreen}</span></li>)}
                       </ol>
                       <p className="text-[11px] text-forge-dim">
-                        ~{total}s{band?.note ? ` — ${band.note}` : ' — inside the monetizable 60-90s band.'}
+                        {band?.note ?? `~${total}s — inside the monetizable 60-90s band.`}
                         {script.sources.length > 0 && <> · {script.sources.length} source{script.sources.length === 1 ? '' : 's'}: {script.sources.map((s, i) => <a key={i} href={s.url} target="_blank" rel="noreferrer" className="text-forge-ember hover:underline"> [{i + 1}]</a>)}</>}
                       </p>
                       <div className="flex flex-wrap gap-2">

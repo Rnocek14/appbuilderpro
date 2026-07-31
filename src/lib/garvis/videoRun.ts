@@ -73,6 +73,22 @@ export async function saveStoryboard(clusterId: string, sb: Storyboard): Promise
   if (error) throw new Error(`Could not save the storyboard: ${error.message}`);
 }
 
+/** supabase-js reports a failed invoke as a generic "non-2xx status code" — useless to an
+ *  operator. Surface the function's own error body when one exists, else an honest named reason.
+ *  (Found by the visual walkthrough: the toast literally read "Edge Function returned a non-2xx
+ *  status code".) */
+export async function invokeFailure(error: unknown, what: string): Promise<Error> {
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    const body = (await ctx.clone().json().catch(() => null)) as { error?: string } | null;
+    if (body?.error) return new Error(body.error);
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return new Error(/non-2xx|Failed to send a request|Failed to fetch/i.test(msg)
+    ? `${what} isn't answering — are the edge functions deployed? (npm run functions:deploy; System health shows status.)`
+    : msg);
+}
+
 export interface RenderStart { available: boolean; ok?: boolean; id?: string; error?: string; setup?: string[] }
 export interface RenderStatus {
   available: boolean; ok?: boolean; status?: string; url?: string | null; error?: string;
@@ -87,7 +103,7 @@ export async function startRender(sb: Storyboard, opts?: EditOpts): Promise<Rend
   const { data, error } = await supabase.functions.invoke('render-video', {
     body: { mode: 'render', edit: toShotstackEdit(sb, opts) },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw await invokeFailure(error, 'The render engine (render-video)');
   return data as RenderStart;
 }
 
@@ -98,7 +114,7 @@ export async function pollRender(id: string, finalize?: { clusterId: string; aiP
   const { data, error } = await supabase.functions.invoke('render-video', {
     body: { mode: 'status', id, clusterId: finalize?.clusterId, aiProvenance: finalize?.aiProvenance ?? undefined },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw await invokeFailure(error, 'The render engine (render-video)');
   return data as RenderStatus;
 }
 
@@ -134,7 +150,7 @@ export async function generateVoiceover(sb: Storyboard, clusterId: string, opts?
       instructions: opts?.instructions,
     },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw await invokeFailure(error, 'The voiceover engine (tts-voiceover)');
   return data as VoiceoverResult;
 }
 

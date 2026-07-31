@@ -9,6 +9,7 @@ import { supabase } from '../supabase';
 import { parseFactScript, type FactScript } from './factChannel';
 import { episodePerf, channelBaseline, hookIntel, type EpisodePerf, type EpisodeMetricRow, type HookIntel } from './growthLoop';
 import { queueSocialPost } from './socialRun';
+import { invokeFailure } from './videoRun';
 import { withDisclosure, type AiProvenance } from './mediaProvenance';
 
 export interface GrowthChannel {
@@ -138,7 +139,7 @@ export async function draftEpisode(channel: GrowthChannel, topic?: string, intel
       quietHooks: intel?.quietHooks?.length ? intel.quietHooks : undefined,
     },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw await invokeFailure(error, 'The script writer (fact-script)');
   const res = data as { ok?: boolean; script?: unknown; error?: string };
   if (!res.ok || !res.script) throw new Error(res.error ?? 'The script draft failed.');
 
@@ -189,7 +190,7 @@ export async function generateSceneImage(prompt: string, clusterId: string | nul
   const { data, error } = await supabase.functions.invoke('generate-image', {
     body: { prompt, size: '1024x1536', clusterId: clusterId ?? undefined, caption, label: 'ai-generated' },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw await invokeFailure(error, 'The image generator (generate-image)');
   const res = data as { available?: boolean; ok?: boolean; url?: string; error?: string; setup?: string[] };
   if (res.available === false) throw new Error('Image generation isn\'t configured — set OPENAI_API_KEY (see System health).');
   if (!res.ok || !res.url) throw new Error(res.error ?? 'The image generation failed.');
