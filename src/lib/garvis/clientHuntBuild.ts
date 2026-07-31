@@ -507,7 +507,7 @@ export function buildHuntPitchEmailHtml(
 ${before}
 ${scanFindingsHtml(findings)}
 ${automationUpsellHtml(upsells)}
-<p style="margin:18px 0 12px">If you like it, publishing it takes a day. I can also set it up so <strong>every enquiry lands in one place, you&#39;re alerted the moment it arrives, and a reply is drafted and waiting for you</strong> — reply and tell me how you run things and I&#39;ll show you exactly what I&#39;d automate.</p>
+<p style="margin:18px 0 12px">If you like it, publishing it takes a day. I can also set it up to <strong>answer every new enquiry within a minute and follow up the ones that go quiet</strong> — reply and tell me how you run things and I&#39;ll show you exactly what I&#39;d automate.</p>
 <p style="margin:0 0 4px">No obligation either way.</p>
 </div>`;
 }

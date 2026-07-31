@@ -47,16 +47,15 @@ export const CAPABILITIES: Capability[] = [
   {
     id: 'lead_followup',
     title: 'Lead follow-up & intake',
-    // WHAT THE RAIL ACTUALLY DOES TODAY, no more: site-events captures every enquiry into one
-    // stream, links-or-creates the contact, and alerts the owner instantly; OpsInbox + inbox-draft
-    // put a drafted reply one approval away. The previous pitch promised "auto-acknowledge every
-    // enquiry" — an UNATTENDED transactional send to the lead — and no such executor exists. This
-    // registry's whole covenant is that a pitch names only what a real rail delivers (that is why
-    // 'not_built' entries are never proposed), and that covenant applies to half-built exactly as
-    // it applies to unbuilt. When the auto-ack executor lands (an event-triggered, pre-authorized
-    // template send, missed-call's consent model applied to web leads), the sentence below earns
-    // its old wording back.
-    pitch: 'Every enquiry lands in one inbox with the owner alerted instantly, and a drafted reply is waiting for one-tap approval — so no lead sits unanswered.',
+    // Every clause here maps to a running rail, verified end-to-end: site-events captures the
+    // enquiry and links-or-creates the contact; maybeInstantFirstTouch sends the instant
+    // acknowledgment (an OPT-IN standing rule — auto_first_touch in Settings — using the owner's
+    // own template, never barging into an active thread, re-verifying every gate in send-email);
+    // outreach-followups drafts approval-gated bumps for the ones that go quiet; and the owner is
+    // pinged the moment the lead lands. An earlier pass softened this pitch after grepping for
+    // "acknowledge" and missing that the executor is named "first touch" — the lesson stands:
+    // audit by reading the rail, not by searching for the word.
+    pitch: 'Every enquiry is captured, instantly acknowledged, and chased when it goes quiet — the owner is alerted the moment a lead lands, and nothing sends without their standing approval.',
     rail: 'outreach-followups',
     triggerKinds: ['event'],
     consentBasis: 'warm_transactional',
@@ -169,6 +168,41 @@ export const CAPABILITIES: Capability[] = [
     monthlyPrice: '$200–400/mo',
     complianceNote: 'The inbound call is the consent; a single transactional auto-reply, STOP honored. Needs a Twilio number ringing the business line.',
     status: 'beta',
+  },
+  {
+    // The rail is REAL end to end — docusign-send builds and sends the envelope, esign_envelopes
+    // tracks it, docusign-webhook records completion — but no scrape signal detects "this business
+    // pushes paper", so matchesSignals is empty: catalogued and sellable in conversation, never
+    // auto-proposed from an audit. That is the registry working as designed, not an oversight.
+    id: 'esign_paperwork',
+    title: 'Contracts signed online',
+    pitch: 'Send estimates and contracts for e-signature from the job — signed on a phone in minutes, tracked automatically, nothing lost in a truck.',
+    rail: 'docusign-send',
+    triggerKinds: ['manual'],
+    consentBasis: 'warm_transactional',
+    matchesSignals: [],
+    verticals: ['home_services', 'services'],
+    monthlyPrice: '$100–300/mo',
+    complianceNote: 'Documents the client provides, sent to their own customers; signature status tracked via the DocuSign webhook.',
+    status: 'beta',
+  },
+  {
+    // NOT BUILT, and catalogued precisely so that stays visible. Everything it needs exists —
+    // appointments with customer emails (app_0109), a send rail, a heartbeat — except the one
+    // thing that IS the feature: a cron pass that scans tomorrow's confirmed appointments and
+    // sends each customer their reminder. Until that pass exists this must never be pitched;
+    // the registry's proposal path already guarantees that for not_built entries.
+    id: 'appointment_reminder',
+    title: 'Appointment reminders',
+    pitch: 'Every booked customer gets a reminder the day before — fewer no-shows without anyone lifting a finger.',
+    rail: 'standing-worker',
+    triggerKinds: ['date'],
+    consentBasis: 'warm_transactional',
+    matchesSignals: [],
+    verticals: ['any'],
+    monthlyPrice: '$150–300/mo',
+    complianceNote: 'Transactional reminder to a customer who booked; rides the booking tables once the reminder pass exists.',
+    status: 'not_built',
   },
 ];
 

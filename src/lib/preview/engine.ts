@@ -335,8 +335,24 @@ export async function publishPreviewSite(previewSiteId: string, spec: SiteSpec, 
   Promise<{ ok: boolean; url?: string; state?: string; error?: string }> {
   try {
     const { buildStaticSiteHtml } = await import('./exportStatic');
+    // The scheduler goes ON the site it belongs to. If this operator has an ENABLED booking page
+    // for this business, the published site carries a live "Book online" button wired to it — the
+    // registry's self-serve-booking capability made physically true on the deliverable. Matching is
+    // by business name when several pages exist, falling back to the operator's only page; no
+    // enabled page ⇒ no button, never a dead link. Best-effort: a lookup failure publishes the
+    // site without the button rather than blocking the publish.
+    let bookingUrl: string | null = null;
+    try {
+      const { data: pages } = await supabase.from('booking_pages')
+        .select('slug, business_name, enabled').eq('enabled', true).limit(20);
+      const all = (pages ?? []) as { slug: string; business_name: string; enabled: boolean }[];
+      const bizName = (spec.business_name ?? '').trim().toLowerCase();
+      const match = all.find((p) => p.business_name.trim().toLowerCase() === bizName) ?? (all.length === 1 ? all[0] : null);
+      if (match) bookingUrl = `${window.location.origin}/book/${encodeURIComponent(match.slug)}`;
+    } catch { /* the publish must not fail because a booking lookup did */ }
     const html = await buildStaticSiteHtml(spec, {
       previewSiteId, leadSubmitUrl: `${supabaseUrl}/functions/v1/claim-submit`,
+      bookingUrl,
     });
     const { data, error } = await supabase.functions.invoke('publish-preview', {
       body: { previewSiteId, html, customDomain: opts?.customDomain?.trim() || undefined },

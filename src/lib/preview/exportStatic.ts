@@ -49,6 +49,11 @@ export interface ExportOpts {
   canonicalUrl?: string | null; phone?: string | null; address?: string | null;
   /** When set, the exported quote form POSTs real leads to claim-submit (rate-limited, notified). */
   previewSiteId?: string | null; leadSubmitUrl?: string | null;
+  /** The business's live /book/:slug page, when they have one ENABLED. This is what turns the
+   *  registry's "self-serve online booking" from a page that exists NEXT TO the website into a
+   *  button ON it — the site sold as having a scheduler must actually carry one. Absent ⇒ nothing
+   *  renders; a disabled or unbuilt booking page must never produce a dead button. */
+  bookingUrl?: string | null;
 }
 
 /** Build the complete, self-contained HTML document for a SiteSpec. */
@@ -99,6 +104,10 @@ html { scroll-behavior: smooth; }
 </style>
 </head>
 <body class="pv-export">
+${opts.bookingUrl ? `<!-- The scheduler, ON the site. A fixed, unmissable "Book online" action wired to the
+     business's real /book page (race-proof availability + booking API behind it). Rendered only
+     when the booking page is genuinely enabled — this button must never 404 at a customer. -->
+<a href="${esc(opts.bookingUrl)}" class="pv-book-cta" style="position:fixed;right:18px;bottom:18px;z-index:60;display:inline-flex;align-items:center;gap:8px;padding:13px 22px;border-radius:999px;background:#111;color:#fff;font-weight:600;font-size:15px;text-decoration:none;box-shadow:0 8px 28px rgba(0,0,0,.28)">📅 Book online</a>` : ''}
 ${body}
 <script>
 /* Minimal interactivity for the static build: section CTAs scroll to the quote form

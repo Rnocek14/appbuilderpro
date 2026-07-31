@@ -24,14 +24,23 @@ const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const MAX_FOLLOWUPS = 2;
 
 // deno-lint-ignore no-explicit-any
-async function draftFollowup(admin: any, ownerId: string, subject: string, body: string, firstName: string, n: number): Promise<{ subject: string; body: string } | null> {
+async function draftFollowup(admin: any, ownerId: string, subject: string, body: string, firstName: string, n: number, warm = false): Promise<{ subject: string; body: string } | null> {
   const openai = Deno.env.get('OPENAI_API_KEY');
   const lovable = Deno.env.get('LOVABLE_API_KEY');
   if (!openai && !lovable) return null;
   const url = openai ? 'https://api.openai.com/v1/chat/completions' : 'https://ai.gateway.lovable.dev/v1/chat/completions';
   const model = openai ? 'gpt-4o-mini' : 'google/gemini-2.5-flash';
-  const system = 'You write short follow-ups to a cold email sent days ago. Under 50 words. Plain text. No "just following up"/"checking in". One question. No salutation if the first name is unknown.';
-  const user = `Write follow-up #${n}. ${n === 1 ? 'A short nudge; re-ask the original question a different way; 2-3 sentences.' : 'A one-sentence breakup note; acknowledge silence is fine; one yes/no question; leave the door open.'}\n\nFirst name: ${firstName || '(unknown)'}\nOriginal subject: ${subject}\nOriginal body:\n"""${body}"""\n\nReturn strict JSON {"subject": string, "body": string}. Subject MUST start with "Re: " + the original subject.`;
+  // TWO TONES, because the silence means different things. A cold prospect going quiet is someone
+  // who never asked to hear from us; a WARM lead going quiet is someone who filled in the
+  // business's own enquiry form and then didn't answer the acknowledgment — chasing them like a
+  // cold pitch ("my earlier email about...") reads as a stranger and squanders the warmest contact
+  // in the pipeline. Same rails either way: draft only, PENDING approval, reply hard-stops.
+  const system = warm
+    ? 'You write a short, friendly check-in to someone who ENQUIRED with this business days ago and has not answered the reply. They reached out first — never sound like a stranger or a salesperson. Under 45 words. Plain text. Offer one easy next step (a time, a quick call, a yes/no). No "just following up"/"checking in". No salutation if the first name is unknown.'
+    : 'You write short follow-ups to a cold email sent days ago. Under 50 words. Plain text. No "just following up"/"checking in". One question. No salutation if the first name is unknown.';
+  const user = warm
+    ? `Write the check-in. They enquired; we answered; they went quiet.\n\nFirst name: ${firstName || '(unknown)'}\nOur reply's subject: ${subject}\nOur reply:\n"""${body}"""\n\nReturn strict JSON {"subject": string, "body": string}. Subject MUST start with "Re: " + the original subject.`
+    : `Write follow-up #${n}. ${n === 1 ? 'A short nudge; re-ask the original question a different way; 2-3 sentences.' : 'A one-sentence breakup note; acknowledge silence is fine; one yes/no question; leave the door open.'}\n\nFirst name: ${firstName || '(unknown)'}\nOriginal subject: ${subject}\nOriginal body:\n"""${body}"""\n\nReturn strict JSON {"subject": string, "body": string}. Subject MUST start with "Re: " + the original subject.`;
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -130,7 +139,7 @@ Deno.serve(async (req) => {
   };
 
   const { data: due } = await admin.from('outreach_campaigns')
-    .select('id, owner_id, contact_id, preview_site_id, follow_up_count')
+    .select('id, owner_id, contact_id, preview_site_id, follow_up_count, kind')
     .eq('state', 'sent').eq('sequence_stopped', false)
     // WARM/COLD WALL: automation campaigns are messages to a client's own customers (recall,
     // review requests). Drafting a "following up on my earlier email about your website" cold
@@ -160,7 +169,7 @@ Deno.serve(async (req) => {
     // Credit gate (audit 12 §1.2) — skipping BEFORE the draft leaves next_followup_at set, so the
     // campaign is retried on a later tick once the balance refills. Nothing is lost, only deferred.
     if (!(await ownerHasCredits(camp.owner_id))) { skipped++; continue; }
-    const draft = await draftFollowup(admin, camp.owner_id, first.subject ?? '', first.body_text ?? '', firstName, n);
+    const draft = await draftFollowup(admin, camp.owner_id, first.subject ?? '', first.body_text ?? '', firstName, n, camp.kind === 'auto_first_touch');
     if (!draft) { skipped++; continue; }
 
     const { data: newMsg } = await admin.from('outreach_messages').insert({

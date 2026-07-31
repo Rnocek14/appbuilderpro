@@ -222,13 +222,13 @@ export interface RecordAuditInput {
    *  onto the findings so a per-world index can be built later without re-scanning. */
   worldId?: string | null;
 }
-export async function recordProspectAudit(input: RecordAuditInput): Promise<void> {
+export async function recordProspectAudit(input: RecordAuditInput): Promise<string | null> {
   try {
     const { data: sess } = await supabase.auth.getUser();
     const uid = sess.user?.id;
-    if (!uid) return;                                   // not signed in — nothing to scope the row to
+    if (!uid) return null;                              // not signed in — nothing to scope the row to
     const url = input.url.trim();
-    if (!url) return;
+    if (!url) return null;
     let host = url;
     try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* keep raw url as host */ }
 
@@ -288,19 +288,22 @@ export async function recordProspectAudit(input: RecordAuditInput): Promise<void
       await write(legacy);
     }
 
+    // The row's id — the handle a cohort membership (app_0117) needs to freeze this reading into a
+    // study. Read back after the write because the SELECT-first upsert can have gone either way.
+    const { data: saved } = await supabase.from('prospect_audits')
+      .select('id').eq('owner_id', uid).eq('url', url).maybeSingle();
+    const auditId = (saved as { id: string } | null)?.id ?? null;
+
     // DEEP-SCAN FINDINGS (app_0116) — written as ROWS, not folded into the audit's JSONB, because
     // the whole point is being able to ask "which finding produced a reply?" later, and you cannot
     // GROUP BY a blob. Best-effort and last: if the migration isn't applied, persistScan no-ops and
     // the audit above is already safely stored.
-    if (sc?.scan) {
-      const { data: saved } = await supabase.from('prospect_audits')
-        .select('id').eq('owner_id', uid).eq('url', url).maybeSingle();
-      const auditId = (saved as { id: string } | null)?.id;
-      if (auditId) {
-        await persistScan({ auditId, ownerId: uid, worldId: input.worldId ?? null, scan: sc.scan, facts: sc.facts });
-      }
+    if (sc?.scan && auditId) {
+      await persistScan({ auditId, ownerId: uid, worldId: input.worldId ?? null, scan: sc.scan, facts: sc.facts });
     }
+    return auditId;
   } catch { /* best-effort: persistence never breaks the audit UI */ }
+  return null;
 }
 
 /** A saved audit row, as read back from prospect_audits (the accumulating prospect intelligence). */
