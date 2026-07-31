@@ -40,6 +40,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # SHARDED, because this tier does not fit in one job any more.
+  #
+  # probe-core's settle() waits up to 75s for a page to stop changing, and probeUrl calls it on
+  # load, after the primary click, once per viewport, and once per control. A measured run of ONE
+  # prototype on a fast machine took 175 SECONDS — clean, no problems, just genuinely that patient.
+  # This directory grew from 5 pages to 12, so the single job needed ~35 minutes for this step alone
+  # and then had three more steps to run inside a 45-minute cap. It timed out.
+  #
+  # Raising the cap was the other option and it is the wrong one: an hour-long required check is a
+  # check people learn to ignore, which is exactly how deno-check sat red on main for six days.
+  # Sharding keeps every page, every control and every assertion — it only stops running them
+  # end-to-end. fail-fast is off so one bad page does not hide the state of the other eleven.
+  probe:
+    name: probe (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Probe this shard's prototypes (generic — is anything broken?)
+        run: |
+          # Round-robin rather than contiguous blocks, so a cluster of slow pages sitting next to
+          # each other alphabetically cannot land entirely in one shard.
+          files=$(ls prototypes/*.html | awk 'NR % 4 == ${{ matrix.shard }} % 4')
+          if [ -z "$files" ]; then echo "shard ${{ matrix.shard }}: no pages"; exit 0; fi
+          echo "shard ${{ matrix.shard }} probing:"; echo "$files"
+          node scripts/probe.mjs $files
+
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -56,9 +95,7 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Probe every prototype (generic — is anything broken?)
-        run: npm run probe:prototypes
-
+      # The generic probe moved to the sharded `probe` job above — it is the slow half.
       - name: Wave 1 — does each prototype keep its promise?
         run: npm run walkthrough:prototypes
 
