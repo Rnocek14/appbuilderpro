@@ -12,12 +12,13 @@ import { useEffect, useState } from 'react';
 import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle } from 'lucide-react';
 import {
   parseFactScript, scriptToScenes, scriptTotalSeconds, bandCheck, illustrationPrompt, composeCaption,
-  CHANNEL_PRESETS, type FactScript,
+  ctaLink, CHANNEL_PRESETS, type FactScript,
 } from '../../lib/garvis/factChannel';
 import {
   listChannels, createChannel, listEpisodes, draftEpisode, updateEpisode, generateSceneImage,
-  queueEpisodePost, type GrowthChannel, type ChannelEpisode,
+  queueEpisodePost, loadChannelPerf, setChannelCta, type GrowthChannel, type ChannelEpisode, type ChannelPerf,
 } from '../../lib/garvis/channelsRun';
+import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
 import { buildStoryboard } from '../../lib/garvis/storyboard';
 import { generateVoiceover, saveSrtAsset, startRender, pollRender, saveRenderedVideo } from '../../lib/garvis/videoRun';
 import { volumeForMusic } from '../../lib/garvis/musicBed';
@@ -40,6 +41,8 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [progress, setProgress] = useState<string | null>(null);
   const [openEpisode, setOpenEpisode] = useState<string | null>(null);
   const [queueingId, setQueueingId] = useState<string | null>(null);
+  const [perf, setPerf] = useState<ChannelPerf | null>(null);
+  const [ctaDraft, setCtaDraft] = useState('');
 
   const channel = channels?.find((c) => c.id === channelId) ?? null;
 
@@ -50,7 +53,16 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   useEffect(() => {
     if (!channelId) { setEpisodes([]); return; }
     void listEpisodes(channelId).then(setEpisodes).catch(() => setEpisodes([]));
-  }, [channelId]);
+    setCtaDraft(channels?.find((c) => c.id === channelId)?.cta_url ?? '');
+  }, [channelId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // THE LOOP'S READ SIDE: join episodes → posts → synced metrics. Re-runs when episodes change.
+  useEffect(() => {
+    if (!episodes.length) { setPerf(null); return; }
+    let live = true;
+    void loadChannelPerf(episodes).then((p) => { if (live) setPerf(p); }).catch(() => {});
+    return () => { live = false; };
+  }, [episodes]);
 
   const doCreate = async (presetId: string) => {
     const p = CHANNEL_PRESETS.find((x) => x.id === presetId)!;
@@ -66,11 +78,12 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
     finally { setBusy(false); }
   };
 
-  const doDraft = async () => {
+  const doDraft = async (topicOverride?: string) => {
     if (!channel) return;
     setBusy(true); setProgress('Drafting a cited script…');
     try {
-      const { episode, warnings } = await draftEpisode(channel, topic);
+      // The loop closes here: hooks that won/died on THIS channel steer the next draft.
+      const { episode, warnings } = await draftEpisode(channel, topicOverride ?? topic, perf?.intel);
       setEpisodes((cur) => [episode, ...cur]); setOpenEpisode(episode.id); setTopic('');
       onToast('success', `Drafted "${episode.title}" — pick a hook, review the sources, then produce.`);
       for (const w of warnings) onToast('info', w);
@@ -149,7 +162,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
     try {
       const platforms = (channel.platforms.length ? channel.platforms : ['tiktok', 'youtube']).filter((p): p is Platform => (VIDEO_PLATFORMS as string[]).includes(p));
       const out = await queueEpisodePost({
-        episode: ep, channel, caption: composeCaption(parsed.script),
+        episode: ep, channel, caption: composeCaption(parsed.script, ctaLink(channel.cta_url, channel.id, ep.id)),
         platforms: platforms.length ? platforms : ['youtube'],
         videoUrl: ep.video_url, provenance: aiProvenance('video', 'fact-channel-studio', Date.now()),
       });
@@ -188,7 +201,23 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
 
       {channel && (
         <>
-          <p className="mt-2 text-[11px] text-forge-dim">{channel.niche} · posts to {channel.platforms.join(', ') || '—'} · voice "{channel.voice}"</p>
+          <p className="mt-2 text-[11px] text-forge-dim">
+            {channel.niche} · posts to {channel.platforms.join(', ') || '—'} · voice "{channel.voice}"
+            {perf?.baseline !== null && perf?.baseline !== undefined && <> · baseline {Math.round(perf.baseline).toLocaleString()} views/episode</>}
+            {perf?.intel.winningHooks.length ? <> · {perf.intel.winningHooks.length} winning hook{perf.intel.winningHooks.length === 1 ? '' : 's'} feeding new drafts</> : null}
+          </p>
+          {/* THE MONEY ROUTE — one destination per channel; every caption carries it, src-stamped
+              so your own sites answer "which channel sold this" through site_events. */}
+          <div className="mt-2 flex flex-wrap gap-2">
+            <input value={ctaDraft} onChange={(e) => setCtaDraft(e.target.value)} placeholder="destination link (your app / shop / page) — rides every caption, src-tagged"
+              className="min-w-[280px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
+            {ctaDraft.trim() !== channel.cta_url && (
+              <button onClick={() => { void setChannelCta(channel.id, ctaDraft, channel.cta_label).then(() => { void reloadChannels(); onToast('success', 'Destination saved — new episodes link to it.'); }).catch((e) => onToast('error', e instanceof Error ? e.message : 'Could not save.')); }}
+                className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">
+                Save destination
+              </button>
+            )}
+          </div>
           <div className="mt-2 flex flex-wrap gap-2">
             <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="topic (optional — blank lets it pick one in the niche)"
               className="min-w-[240px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
@@ -207,17 +236,32 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
               const open = openEpisode === ep.id;
               const total = script ? scriptTotalSeconds(script) : 0;
               const band = script ? bandCheck(total) : null;
+              // Live truth beats the stored snapshot: once the publisher marks the post 'posted',
+              // the card says so without waiting for a write-back.
+              const liveStatus = perf?.liveStatus.get(ep.id) === 'posted' ? 'posted' : ep.status;
+              const epPerf = perf?.byEpisode.get(ep.id) ?? null;
+              const verdict = epPerf ? classifyEpisode(epPerf, perf?.baseline ?? null).verdict : null;
               return (
                 <div key={ep.id} className="rounded-xl border border-forge-border p-3">
                   <button className="flex w-full items-center justify-between gap-2 text-left" onClick={() => setOpenEpisode(open ? null : ep.id)}>
-                    <span className="text-xs font-semibold text-forge-ink">{ep.title || 'Untitled'}</span>
+                    <span className="text-xs font-semibold text-forge-ink">{ep.title || 'Untitled'}{verdict === 'winner' && <span className="ml-1.5 text-[10px] font-bold text-green-500">WINNER</span>}</span>
                     <span className={cn('rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide',
-                      ep.status === 'posted' ? 'border-green-600/50 text-green-500'
-                        : ep.status === 'queued' ? 'border-forge-ember/50 text-forge-ember'
-                        : ep.status === 'failed' ? 'border-red-600/50 text-red-500' : 'border-forge-border text-forge-dim')}>
-                      {ep.status}
+                      liveStatus === 'posted' ? 'border-green-600/50 text-green-500'
+                        : liveStatus === 'queued' ? 'border-forge-ember/50 text-forge-ember'
+                        : liveStatus === 'failed' ? 'border-red-600/50 text-red-500' : 'border-forge-border text-forge-dim')}>
+                      {liveStatus}
                     </span>
                   </button>
+                  {epPerf && liveStatus === 'posted' && (
+                    <p className="mt-1 text-[11px] text-forge-dim">{perfLine(epPerf, perf?.baseline ?? null)}</p>
+                  )}
+                  {verdict === 'winner' && (
+                    <button onClick={() => { setOpenEpisode(null); void doDraft(`A follow-up going deeper on the winning idea "${ep.title}" — same mechanism, a new surprising angle (part 2, not a rehash).`); }}
+                      disabled={busy}
+                      className="mt-1 rounded-lg border border-green-600/40 px-2 py-1 text-[11px] text-green-500 hover:border-green-500 disabled:opacity-60">
+                      Draft a follow-up to this winner
+                    </button>
+                  )}
                   {open && script && (
                     <div className="mt-2 space-y-2">
                       {script.needsReview && (

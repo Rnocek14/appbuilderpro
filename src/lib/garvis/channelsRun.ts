@@ -7,6 +7,7 @@
 
 import { supabase } from '../supabase';
 import { parseFactScript, type FactScript } from './factChannel';
+import { episodePerf, channelBaseline, hookIntel, type EpisodePerf, type EpisodeMetricRow, type HookIntel } from './growthLoop';
 import { queueSocialPost } from './socialRun';
 import { withDisclosure, type AiProvenance } from './mediaProvenance';
 
@@ -16,6 +17,7 @@ export interface GrowthChannel {
   platforms: string[]; cadence_per_week: number; monetization_mode: string;
   voice: string; music_mood: 'warm' | 'upbeat' | 'cinematic' | 'minimal';
   visual_style: string; status: 'active' | 'paused'; created_at: string;
+  cta_url: string; cta_label: string;
 }
 
 export interface ChannelEpisode {
@@ -26,7 +28,7 @@ export interface ChannelEpisode {
   caption: string; post_id: string | null; error: string | null; created_at: string;
 }
 
-const CHANNEL_COLS = 'id, world_id, cluster_id, name, handle, niche, persona, platforms, cadence_per_week, monetization_mode, voice, music_mood, visual_style, status, created_at';
+const CHANNEL_COLS = 'id, world_id, cluster_id, name, handle, niche, persona, platforms, cadence_per_week, monetization_mode, voice, music_mood, visual_style, status, created_at, cta_url, cta_label';
 const EPISODE_COLS = 'id, channel_id, cluster_id, title, topic, script, hook_index, status, render_id, video_url, srt_url, caption, post_id, error, created_at';
 
 export async function listChannels(worldId?: string | null): Promise<GrowthChannel[]> {
@@ -55,6 +57,14 @@ export async function createChannel(input: {
   return data as unknown as GrowthChannel;
 }
 
+/** Point the channel's attention at a destination — the app, shop, or page every caption links to. */
+export async function setChannelCta(channelId: string, ctaUrl: string, ctaLabel: string): Promise<void> {
+  const { error } = await supabase.from('growth_channels')
+    .update({ cta_url: ctaUrl.trim(), cta_label: ctaLabel.trim(), updated_at: new Date().toISOString() })
+    .eq('id', channelId);
+  if (error) throw new Error(error.message);
+}
+
 export async function listEpisodes(channelId: string, limit = 20): Promise<ChannelEpisode[]> {
   const { data, error } = await supabase.from('channel_episodes').select(EPISODE_COLS)
     .eq('channel_id', channelId).order('created_at', { ascending: false }).limit(limit);
@@ -62,9 +72,55 @@ export async function listEpisodes(channelId: string, limit = 20): Promise<Chann
   return (data ?? []) as unknown as ChannelEpisode[];
 }
 
+export interface ChannelPerf {
+  byEpisode: Map<string, EpisodePerf>;
+  liveStatus: Map<string, string>;   // episode id → the social_posts row's real status ('posted'…)
+  baseline: number | null;
+  intel: HookIntel;
+}
+
+/** THE LOOP'S READ SIDE: join this channel's episodes to their posts' synced metrics and reduce
+ *  through the pure core — per-episode reach, the channel median baseline, and the hook intel the
+ *  next draft consumes. Episodes with no numbers stay 'unmeasured', never fake zeros. */
+export async function loadChannelPerf(episodes: ChannelEpisode[]): Promise<ChannelPerf> {
+  const withPost = episodes.filter((e) => e.post_id);
+  const postIds = withPost.map((e) => e.post_id as string);
+  const empty: ChannelPerf = { byEpisode: new Map(), liveStatus: new Map(), baseline: null, intel: hookIntel([]) };
+  if (!postIds.length) return empty;
+
+  const [{ data: posts }, { data: metrics }] = await Promise.all([
+    supabase.from('social_posts').select('id, status').in('id', postIds).limit(200),
+    supabase.from('social_post_metrics')
+      .select('post_id, likes, comments, shares, impressions, video_views, saves, clicks, engagement')
+      .in('post_id', postIds).limit(500),
+  ]);
+  const statusByPost = new Map(((posts ?? []) as { id: string; status: string }[]).map((p) => [p.id, p.status]));
+  const rowsByPost = new Map<string, EpisodeMetricRow[]>();
+  for (const m of (metrics ?? []) as ({ post_id: string } & EpisodeMetricRow)[]) {
+    const arr = rowsByPost.get(m.post_id) ?? [];
+    arr.push(m);
+    rowsByPost.set(m.post_id, arr);
+  }
+
+  const perfs: EpisodePerf[] = [];
+  const byEpisode = new Map<string, EpisodePerf>();
+  const liveStatus = new Map<string, string>();
+  for (const ep of withPost) {
+    const st = statusByPost.get(ep.post_id as string);
+    if (st) liveStatus.set(ep.id, st);
+    const script = ep.script ? parseFactScript(ep.script) : null;
+    const hook = script?.ok ? (script.script.hooks[ep.hook_index] ?? script.script.hooks[0] ?? '') : '';
+    const p = episodePerf(ep.id, ep.title, hook, rowsByPost.get(ep.post_id as string) ?? []);
+    perfs.push(p);
+    byEpisode.set(ep.id, p);
+  }
+  return { byEpisode, liveStatus, baseline: channelBaseline(perfs), intel: hookIntel(perfs) };
+}
+
 /** Draft a cited script for this channel and save it as a draft episode. Returns the episode plus
- *  the parse warnings (needs_review etc.) so the studio surfaces them immediately. */
-export async function draftEpisode(channel: GrowthChannel, topic?: string): Promise<{ episode: ChannelEpisode; warnings: string[] }> {
+ *  the parse warnings (needs_review etc.) so the studio surfaces them immediately. `intel` closes
+ *  the loop: hooks that won/died on THIS channel steer the next draft's mechanisms. */
+export async function draftEpisode(channel: GrowthChannel, topic?: string, intel?: HookIntel): Promise<{ episode: ChannelEpisode; warnings: string[] }> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
@@ -75,6 +131,8 @@ export async function draftEpisode(channel: GrowthChannel, topic?: string): Prom
       niche: channel.niche || channel.name, topic: topic?.trim() || undefined,
       persona: channel.persona || undefined, targetSeconds: 75,
       avoidTitles: recent.map((e) => e.title).filter(Boolean),
+      winningHooks: intel?.winningHooks?.length ? intel.winningHooks : undefined,
+      quietHooks: intel?.quietHooks?.length ? intel.quietHooks : undefined,
     },
   });
   if (error) throw new Error(error.message);

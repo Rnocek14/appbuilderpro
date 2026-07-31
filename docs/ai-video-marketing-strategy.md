@@ -325,7 +325,63 @@ generic videos; at these COGS an honest-billing SaaS tier is viable later withou
 - Rotate every key that ever touched traction-engine before reuse; nothing from its Supabase
   project is imported.
 
-## 8. Build log — what shipped on this branch (July 31, 2026)
+## 8. THE MONEY MAP — how this actually pays (researched July 31, 2026)
+
+Deep-dive research into real operator earnings (income reports, case studies, platform policy)
+lands on one headline: **stack the avenues on one pipeline; don't pick one.** Ranked by realistic
+$/month for a solo operator with strong automation, months 3-6:
+
+| # | Avenue | Realistic mo. 3-6 | Ceiling | Notes |
+|---|---|---|---|---|
+| 1 | **Content-as-a-service for local businesses** | $3,000-8,000 | $15k+ | $1,000-5,000/mo retainers; short-form video is the biggest price driver; AI-assisted packages bill 20-50% HIGHER, not lower. Sales-driven, not virality-driven — ~10 conversations, not an algorithm. ~46%/yr churn; plan for it. |
+| 2 | **TikTok Shop affiliate** | $500-3,000 | $5-15k | Median mid-tier creator: ~$680/mo; survivors' earnings grow ~6x by month 12 (59% churn out). Commissions cut to 10-15% June 2026. See the AI-content warning below. |
+| 3 | **Own apps via organic** | $0-2,000 median | $70k+ MRR tail | Pure lottery with good EV: Starcrossed hit $70k MRR in 90 days — off 18 months of pre-built audience. Audience first, app second. 1M targeted views ≈ $1,700-4,000 of equivalent paid installs. |
+| 4 | **Finance/fact funnel → newsletter + digital product** | $200-1,500 | $10k+ at 12-24mo | The compounding asset: finance newsletters sponsor at $50-300 CPM; precedent exit at ~$43.50/subscriber (The Peak, $5M). Kyla Scanlon model: short-form as top-of-funnel AND as topic research. Cheap $20-40 products convert best (Easlo). |
+| 5 | **Maker/handmade multiplier** | +20-100% on an existing shop | production-capped | 80% process/BTS content, 20% selling; TikTok Shop native checkout converts 4.7% vs ~1-3% off-platform. Only monetizes without a product line as a service to makers (see #1). |
+| — | **Paid clipping (Whop bounties)** | $100-500 → $500-3,000 | $5k+ | The wildcard CPM floor: $0.50-2 per 1k views clipping others' content while your own funnels mature. |
+
+**The stack for this operator:** CaaS retainers as the floor → affiliate/CRP as the content-native
+cash layer → one finance newsletter + a small digital product as the compounding asset → app
+equity as the lottery ticket. All four ride the SAME pipeline this repo now ships.
+
+### Course corrections the research forced
+
+1. **TikTok Shop killed pure-AI product content (July 2026).** AI voices, slideshows, looping
+   footage, and static-image shoppable content are banned on Shop; violations dent the new
+   Account Health Rating and brands claw back commissions. **The two lanes must never mix:** the
+   fact-channel engine (AI visuals + AI voice, labeled) is for fact/education channels on
+   Shorts/Reels/general TikTok; product/Shop content follows the 70/30 rule — AI for scripts,
+   editing, scheduling; REAL hands, product, and voice on screen. The maker preset already
+   encodes this ("Real footage first — AI only for diagrams").
+2. **Per-video attribution is non-negotiable.** Click data under-credits short-form 2-5x; the
+   standard is a unique tag per video + your own landing page (21-50% conversion vs 3-6% for
+   Linktree-style pages) + a "how did you hear about us" survey at purchase. `ctaLink` now stamps
+   `src=gc_<channel>` + `utm_content=ep_<episode>` on every caption link.
+3. **The learning loop's design is validated by practice**: median-of-channel baseline (one viral
+   hit must not distort it), ≥3x = double down with a sequel inside 24-48h (serialized "part 2"
+   content drives 52% higher profile-visit rates; profile visits convert to follows at 11x feed
+   rate), ~3 attempts before killing a format, and deliberate variance when nothing clears 2x.
+   Trust the loop only after ~30 days / ~50 posts — before that everything is honest 'unmeasured'.
+4. **Retention data exists in the rails already**: Ayrshare returns TikTok `averageTimeWatched` /
+   `fullVideoWatchedRate` and YouTube quartile playbacks — social-sync stores the raw object
+   verbatim today; promoting those fields to columns is a cheap follow-up. YouTube's Analytics API
+   exposes the full 100-point retention curve — the richest loop signal — via a future direct
+   integration. Instagram **Trial Reels** (post to non-followers only, auto-promote winners) is
+   the industry's only native organic A/B surface and the natural home for hook testing.
+
+### How it ties to everything already built here
+
+| Existing asset | Role in the money map |
+|---|---|
+| Prospecting funnel (scrape → audit → demo → pitch) | Sells avenue #1: the same local businesses buying sites buy the $1-2k/mo content retainer. The growth channels ARE the portfolio that closes the deal. |
+| `service_packages` + client worlds + client reports | The CaaS offer is a package row (`key: 'social_content'`, monthly) — versioned, pinned per client, reported monthly. The noun already exists. |
+| Per-world Ayrshare Profile-Keys | Multi-client posting is already fail-closed per brand — the agency model works TODAY. |
+| FableForge app builder | Builds each channel's own landing page (the 21-50% converting destination) and the apps that avenue #3 promotes. |
+| `site_events` + `?src` attribution + leads | Answers "which channel/episode sold this" on every owned destination — the survey-grade attribution the research demands. |
+| Approval queue + standing orders + breaker | The unattended layer: content weeks approved in slates, publishing drained on the clock, channels pause themselves on repeated failures. |
+| Credits + cost guard | Honest per-client COGS — the margin math for retainer pricing. |
+
+## 9. Build log — what shipped on this branch (July 31, 2026)
 
 Phase 0 and the core of Phase 1 landed together as the first full circuit:
 
@@ -350,13 +406,31 @@ Phase 0 and the core of Phase 1 landed together as the first full circuit:
   band check, illustration guardrails), and the **Fact Channel Studio** in every `content_growth`
   area: draft → pick hook → illustrate → narrate → render → queue to the channel's platforms.
 
-Explicitly deferred (in priority order): the creative-board platform widening for image posts
-(`socialBoard.ts`/`campaignCore.ts` still expose 4 platforms — the VIDEO path already reaches all
-of them); a cheap posting head next to Ayrshare (Post Bridge/upload-post seam); Phase 2's AI clip
-engine (`generate-clip` with the Veo + aggregator seam over `reel_jobs`/`reel_clips`); Phase 3's
-hook leaderboard + winner detection over `social_post_metrics`.
+**Round 2 (same day) — the learning loop + money routing:**
 
-## 9. Why this wins
+- **`growthLoop.ts`** pure core: per-episode reach from synced metrics (null = honest
+  'unmeasured', never fake zeros), median-of-channel baseline (min 3 measured episodes),
+  winner (≥3x) / quiet (≤0.3x) classification, and hook intel for the next draft.
+- **The loop closes**: `loadChannelPerf` joins episodes → posts → metrics; `fact-script` receives
+  "hooks that won/died on THIS channel" and writes new hooks with winning mechanisms; winner
+  episodes get a one-click "Draft a follow-up" (the sequel-inside-48h play).
+- **Money routing v1** (app_0124): one destination per channel; every caption link stamped
+  `src=gc_<channel>&utm_content=ep_<episode>` — per-video attribution through the existing
+  site_events chain on owned destinations.
+- Studio surfaces: channel baseline, winning-hook count, per-episode perf lines with verdicts,
+  live posted status read from the publisher's own record.
+
+Explicitly deferred (in priority order): a `social_content` service-package row + client-world
+channel provisioning (avenue #1's productization); retention-field promotion in social-sync
+(TikTok `averageTimeWatched`/`fullVideoWatchedRate` and YouTube quartiles already land verbatim
+in `social_post_metrics.raw`); Instagram Trial Reels as the native hook-test lab; the
+creative-board platform widening for image posts (`socialBoard.ts`/`campaignCore.ts` still expose
+4 platforms — the VIDEO path already reaches all of them); a cheap posting head next to Ayrshare
+(Post Bridge/upload-post seam); Phase 2's AI clip engine (`generate-clip` with the Veo +
+aggregator seam over `reel_jobs`/`reel_clips`); a direct YouTube Analytics API integration (the
+only API exposing the full 100-point retention curve).
+
+## 10. Why this wins
 
 1. **The rails already exist here** — approval spine, publishing, metrics sync, credits, breaker,
    client machinery. Competitors have none of this; traction-engine had none of this.

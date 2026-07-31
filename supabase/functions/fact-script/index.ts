@@ -19,6 +19,9 @@ interface FactScriptInput {
   persona?: string;         // the channel's voice
   targetSeconds?: number;   // 60-90; default 75
   avoidTitles?: string[];   // recent episode titles — don't repeat them
+  // THE LEARNING LOOP feeding back in: hooks that won/died ON THIS CHANNEL (growthLoop.hookIntel).
+  winningHooks?: string[];
+  quietHooks?: string[];
 }
 
 const SYSTEM = `You are a senior short-form scriptwriter for a FACT CHANNEL (finance facts, interesting
@@ -65,6 +68,8 @@ function buildUser(input: FactScriptInput): string {
     input.persona ? `CHANNEL VOICE: ${input.persona}` : '',
     `TARGET RUNTIME: ~${target} seconds (hard band: 60-90).`,
     input.avoidTitles?.length ? `ALREADY COVERED (do not repeat): ${input.avoidTitles.slice(0, 20).join(' | ')}` : '',
+    input.winningHooks?.length ? `HOOKS THAT WON ON THIS CHANNEL (measured — write NEW hooks using the SAME underlying mechanisms; never copy them verbatim): ${input.winningHooks.slice(0, 5).join(' | ')}` : '',
+    input.quietHooks?.length ? `HOOKS THAT DIED ON THIS CHANNEL (measured — avoid these mechanisms): ${input.quietHooks.slice(0, 5).join(' | ')}` : '',
     '',
     'Return the single JSON object now.',
   ].filter(Boolean).join('\n');

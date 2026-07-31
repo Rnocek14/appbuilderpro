@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/factChannel.verify.ts
 import {
   parseFactScript, scriptTotalSeconds, bandCheck, scriptToScenes, illustrationPrompt,
-  composeCaption, ILLUSTRATION_GUARDRAILS, CHANNEL_PRESETS,
+  composeCaption, ctaLink, ILLUSTRATION_GUARDRAILS, CHANNEL_PRESETS,
 } from './factChannel';
 
 let passed = 0; let failed = 0;
@@ -71,6 +71,22 @@ const good = {
     check('caption composes caption + CTA + tags', cap.includes('idle cash') && cap.includes('Follow for') && cap.includes('#finance'));
   }
   check('channel presets are distinct brand postures', new Set(CHANNEL_PRESETS.map((c) => c.visualStyle)).size === CHANNEL_PRESETS.length);
+}
+{
+  // The money route: every episode caption can carry the channel's ATTRIBUTED destination link.
+  const id = 'abcd1234-5678-9abc-def0-123456789abc';
+  check('ctaLink stamps the channel src tag', ctaLink('https://shop.example.com', id) === 'https://shop.example.com?src=gc_abcd1234');
+  check('per-episode utm_content answers "which video sold this"',
+    ctaLink('https://shop.example.com', id, 'e1f2a3b4-0000-1111-2222-333344445555') === 'https://shop.example.com?src=gc_abcd1234&utm_content=ep_e1f2a3b4');
+  check('existing query strings get & not ?', ctaLink('https://shop.example.com?ref=x', id).includes('?ref=x&src=gc_'));
+  check('an already-attributed link is not double-stamped', ctaLink('https://x.com/p?src=mine', id) === 'https://x.com/p?src=mine');
+  check('a non-URL destination yields NO link, never a broken one', ctaLink('my shop', id) === '' && ctaLink('', id) === '');
+  const r = parseFactScript(good);
+  if (r.ok) {
+    const cap = composeCaption(r.script, ctaLink('https://shop.example.com', id));
+    check('the attributed link rides the caption next to the CTA', cap.includes('src=gc_abcd1234') && cap.indexOf('Follow for') < cap.indexOf('src=gc_'));
+    check('no link → the caption is unchanged from the linkless form', composeCaption(r.script) === composeCaption(r.script, ''));
+  }
 }
 
 console.log(`\nfactChannel.verify: ${passed} passed, ${failed} failed`);

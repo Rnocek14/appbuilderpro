@@ -132,11 +132,28 @@ export function illustrationPrompt(imagePrompt: string, channelStyle: string): s
   return [subject, style, ILLUSTRATION_GUARDRAILS].filter(Boolean).join(' — ');
 }
 
-/** The post caption: caption + CTA + hashtags. The AI disclosure is appended by the caller via
- *  withDisclosure (it knows the provenance); sources ride the episode record, not the caption. */
-export function composeCaption(script: FactScript): string {
+/** Stamp the channel's src tag — and the EPISODE's content tag — onto its destination link
+ *  (src=gc_<channel8>&utm_content=ep_<episode8>). The operator's own sites resolve src through the
+ *  existing site_events attribution chain; utm_content answers "WHICH video sold this" in any
+ *  analytics tool (per-video attribution is the difference between guessing and knowing — click
+ *  data alone under-credits short-form 2-5x, so the tag must ride every link).
+ *  Not a URL → '' (never a broken link). */
+export function ctaLink(url: string, channelId: string, episodeId?: string): string {
+  const u = url.trim();
+  if (!/^https?:\/\//.test(u)) return '';
+  if (u.includes('src=')) return u;                       // already attributed — don't double-stamp
+  const short = (id: string) => id.replace(/-/g, '').slice(0, 8);
+  const tags = [`src=gc_${short(channelId)}`, ...(episodeId ? [`utm_content=ep_${short(episodeId)}`] : [])].join('&');
+  return `${u}${u.includes('?') ? '&' : '?'}${tags}`;
+}
+
+/** The post caption: caption + CTA (+ the channel's attributed destination link) + hashtags. The
+ *  AI disclosure is appended by the caller via withDisclosure (it knows the provenance); sources
+ *  ride the episode record, not the caption. */
+export function composeCaption(script: FactScript, link?: string): string {
   const tags = script.hashtags.map((h) => `#${h}`).join(' ');
-  return [script.caption, script.cta, tags].map((s) => s.trim()).filter(Boolean).join('\n\n');
+  return [script.caption, [script.cta, link ?? ''].map((s) => s.trim()).filter(Boolean).join(' '), tags]
+    .map((s) => s.trim()).filter(Boolean).join('\n\n');
 }
 
 /** Channel starter presets — data, not machinery. Each is a distinct brand posture, not a clone. */
