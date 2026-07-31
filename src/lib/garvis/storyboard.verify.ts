@@ -14,7 +14,7 @@ console.log('storyboard.verify');
       { onScreen: 'No stock — real work', voiceover: 'Every frame is our own.', durationS: 20 },  // over-long → clamped
     ],
   });
-  check('per-scene duration clamped to the max', sb.scenes[2].durationS <= 6);
+  check('per-scene duration clamped to the max', sb.scenes[2].durationS <= 8);
   check('total duration is the sum, honest', Math.abs(sb.totalDurationS - sb.scenes.reduce((n, s) => n + s.durationS, 0)) < 0.01);
   check('a photo scene carries the real image, no shoot direction', sb.scenes[1].imageUrl === 'https://cdn/x/mural1.jpg' && sb.scenes[1].shoot === null);
   check('a photo-less scene gets a visible SHOOT direction, never a blank', sb.scenes[0].imageUrl === null && !!sb.scenes[0].shoot);
@@ -27,9 +27,10 @@ console.log('storyboard.verify');
 }
 {
   // Total-duration ceiling: many long scenes stop cleanly at the cap, never overflow.
-  const sb = buildStoryboard({ title: 't', scenes: Array.from({ length: 20 }, () => ({ imageUrl: 'https://x/p.jpg', voiceover: 'line', durationS: 6 })) });
-  check('scene count capped', sb.scenes.length <= 8);
-  check('total never exceeds the short-form ceiling', sb.totalDurationS <= 60);
+  const sb = buildStoryboard({ title: 't', scenes: Array.from({ length: 30 }, () => ({ imageUrl: 'https://x/p.jpg', voiceover: 'line', durationS: 8 })) });
+  check('scene count capped', sb.scenes.length <= 14);
+  check('total never exceeds the short-form ceiling (90s — the CRP-eligible band)', sb.totalDurationS <= 90);
+  check('the ceiling permits a monetizable ≥60s video (a 60s cap would exclude what earns)', sb.totalDurationS >= 60);
 }
 {
   const srt = buildCaptionsSrt(buildStoryboard({ title: 't', scenes: [
@@ -57,6 +58,37 @@ console.log('storyboard.verify');
   check('default storyboard: hook + photo(s) + CTA from real materials', scenes.length === 3 && scenes[1].imageUrl === 'https://x/a.jpg' && scenes[2].onScreen === 'Book a commission');
   check('a photo caption becomes its voiceover', scenes[1].voiceover === 'lobby mural');
   check('empty everything → still a valid board, no throw', buildStoryboard({ title: '', scenes: [] }).scenes.length === 0);
+}
+
+// ---- the media layers: voiceover / captions / music ride the SAME edit, opt-in ----
+{
+  const sb = buildStoryboard({ title: 't', aspect: '9:16', scenes: [
+    { imageUrl: 'https://x/a.jpg', voiceover: 'one', durationS: 3 },
+    { imageUrl: 'https://x/b.jpg', voiceover: 'two', durationS: 4 },
+    { imageUrl: 'https://x/c.jpg', voiceover: 'three', durationS: 5 },
+  ] });
+  type Edit = { timeline: { soundtrack?: { src: string; volume: number }; tracks: { clips: { start: number; length: number; asset: Record<string, unknown> }[] }[] } };
+  const plain = toShotstackEdit(sb) as Edit;
+  check('no opts → exactly the classic two tracks, no soundtrack (regression)',
+    plain.timeline.tracks.length === 2 && plain.timeline.soundtrack === undefined);
+  check('no opts is byte-identical to explicit undefined opts',
+    JSON.stringify(toShotstackEdit(sb)) === JSON.stringify(toShotstackEdit(sb, undefined)));
+
+  const full = toShotstackEdit(sb, {
+    voClips: [{ sceneIndex: 2, url: 'https://x/vo2.mp3' }, { sceneIndex: 0, url: 'https://x/vo0.mp3' }, { sceneIndex: 99, url: 'https://x/bad.mp3' }],
+    srtUrl: 'https://x/caps.srt', musicUrl: 'https://x/bed.mp3', musicVolume: 0.2,
+  }) as Edit;
+  const capTrack = full.timeline.tracks[0];
+  check('caption track rides on top and spans the whole video',
+    (capTrack.clips[0].asset as { type?: string }).type === 'caption' && capTrack.clips[0].length === sb.totalDurationS);
+  const audio = full.timeline.tracks[full.timeline.tracks.length - 1].clips;
+  check('voiceover clips land at their scene\'s cumulative start, sorted, out-of-range dropped',
+    audio.length === 2 && audio[0].start === 0 && audio[1].start === 7 && audio[1].length === 5);
+  check('the music bed is the timeline soundtrack, ducked under the voice',
+    full.timeline.soundtrack?.src === 'https://x/bed.mp3' && full.timeline.soundtrack?.volume === 0.2);
+  check('image/text tracks are unchanged by the media layers',
+    JSON.stringify(full.timeline.tracks[1]) === JSON.stringify(plain.timeline.tracks[0]) &&
+    JSON.stringify(full.timeline.tracks[2]) === JSON.stringify(plain.timeline.tracks[1]));
 }
 
 // ---- the three cuts: same real photos, different mechanism, deterministic ----

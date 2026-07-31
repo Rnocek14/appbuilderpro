@@ -325,7 +325,38 @@ generic videos; at these COGS an honest-billing SaaS tier is viable later withou
 - Rotate every key that ever touched traction-engine before reuse; nothing from its Supabase
   project is imported.
 
-## 8. Why this wins
+## 8. Build log — what shipped on this branch (July 31, 2026)
+
+Phase 0 and the core of Phase 1 landed together as the first full circuit:
+
+- **`tts-voiceover` edge fn** — per-scene TTS (OpenAI gpt-4o-mini-tts default, ElevenLabs Flash
+  optional), credit-metered under the pre-registered `voiceover` kind, provenance-stamped.
+- **`storyboard.ts`** — audio/caption/music layers on `toShotstackEdit` (no-opts output unchanged,
+  regression-checked); ceiling raised 60→90s for the CRP-eligible band; fixed a latent ceiling
+  overflow bug the new tests exposed.
+- **`render-video`** — server-side FINALIZE: finished mp4s are copied into durable storage (the
+  provider URL dies in 24h) and recorded as provenance-stamped vault rows; renders no longer
+  overwrite each other (`videoRun.ts` unique slugs).
+- **`musicBed.ts`** — CC0-only license gate (fail-closed), mood pick, the duck-under-VO volume rule.
+- **AI-label hard gate** — `mediaProvenanceCore.ts` shared pure core; `ai_provenance` jsonb on
+  `social_posts` + `cluster_files` with an ACCRETE-ONLY SQL trigger (app_0123); `social-publish`
+  blocks any AI-media post whose caption lacks the visible disclosure, server-side, fail-closed.
+- **VideoStudio** — voiceover toggle, music bed, and "Queue to social" straight into the approval
+  spine with TikTok/YouTube/Instagram/Facebook/LinkedIn/X reachable.
+- **The channel model** — `growth_channels` (a handful of distinct niche brands, not a farm) +
+  `channel_episodes` (app_0123).
+- **The fact-channel engine** — `fact-script` edge fn (cited 60-90s scripts, 3 hook variants,
+  NEVER-invent-a-URL rule), `factChannel.ts` pure core (`needs_review` flag on uncited claims,
+  band check, illustration guardrails), and the **Fact Channel Studio** in every `content_growth`
+  area: draft → pick hook → illustrate → narrate → render → queue to the channel's platforms.
+
+Explicitly deferred (in priority order): the creative-board platform widening for image posts
+(`socialBoard.ts`/`campaignCore.ts` still expose 4 platforms — the VIDEO path already reaches all
+of them); a cheap posting head next to Ayrshare (Post Bridge/upload-post seam); Phase 2's AI clip
+engine (`generate-clip` with the Veo + aggregator seam over `reel_jobs`/`reel_clips`); Phase 3's
+hook leaderboard + winner detection over `social_post_metrics`.
+
+## 9. Why this wins
 
 1. **The rails already exist here** — approval spine, publishing, metrics sync, credits, breaker,
    client machinery. Competitors have none of this; traction-engine had none of this.

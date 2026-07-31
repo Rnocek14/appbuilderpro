@@ -65,7 +65,9 @@ Set in Supabase → Edge Functions → Secrets. Required for core:
 Per-feature (add when you use the feature; every one degrades with a named message in the UI):
 `RESEND_API_KEY` (+`RESEND_WEBHOOK_SECRET`, `INBOUND_SECRET`) for email · `STRIPE_SECRET_KEY`
 (+webhook secret, price ids, `VITE_STRIPE_PUBLISHABLE_KEY`) for billing · `SERPER_API_KEY` for live
-research · `SHOTSTACK_API_KEY` for mp4 render · Meta/Google ads tokens for ad sync ·
+research · `SHOTSTACK_API_KEY` for mp4 render · `OPENAI_API_KEY` also powers TTS voiceover
+(tts-voiceover, gpt-4o-mini-tts) and scene illustrations for the Fact Channel Studio; optional
+`ELEVENLABS_API_KEY` upgrades the voice head · Meta/Google ads tokens for ad sync ·
 `NETLIFY_AUTH_TOKEN` / `GITHUB_TOKEN` for deploys/exports. · `DOCUSIGN_OAUTH_CLIENT_ID` +
 `DOCUSIGN_OAUTH_CLIENT_SECRET` (+ optional `DOCUSIGN_AUTH_BASE` — defaults to the developer
 sandbox `https://account-d.docusign.com`, where signatures are for testing and NOT legally

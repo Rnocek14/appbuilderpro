@@ -4,6 +4,13 @@
 // env only (SHOTSTACK_API_KEY); the browser never holds it. Renders are async, so two modes:
 //   { mode: 'render', edit }        → POST the edit, return the provider render id
 //   { mode: 'status', id }          → poll; returns { status, url? } (done → the mp4 url)
+//   { mode: 'status', id, clusterId?, aiProvenance? }
+//     → on done, FINALIZE server-side: the provider's mp4 is copied into the owner's storage and
+//       recorded as a cluster_files video row, and the DURABLE url is returned. Shotstack deletes
+//       render URLs after 24 hours — every caller shares this seam, so the rot is killed here once.
+//       aiProvenance (when the storyboard carried AI audio/visuals) is stamped on the file row so
+//       the social-publish disclosure gate can enforce the label downstream. Idempotent: the copy
+//       is keyed by render id and the row by url, so repeat polls never duplicate.
 //   { mode: 'status' } with no key  → { available: false, setup: [...] } (honest degradation)
 // Optional SHOTSTACK_ENV ('stage' free sandbox | 'v1' production). The browser preview works with
 // ZERO of this configured — this only produces the downloadable mp4.
@@ -12,6 +19,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { parseProvenance } from '../_shared/mediaProvenanceCore.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -42,7 +50,9 @@ Deno.serve(async (req) => {
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
-    const body = (await req.json().catch(() => ({}))) as { mode?: string; edit?: unknown; id?: string };
+    const body = (await req.json().catch(() => ({}))) as {
+      mode?: string; edit?: unknown; id?: string; clusterId?: string | null; aiProvenance?: unknown;
+    };
     if (!configured()) return json({ available: false, setup: SETUP });
 
     const key = Deno.env.get('SHOTSTACK_API_KEY')!;
@@ -73,7 +83,49 @@ Deno.serve(async (req) => {
         return json({ available: true, ok: false, error: data?.message ?? `Status returned ${res.status}` });
       }
       const r = data.response ?? {};
-      return json({ available: true, ok: true, status: r.status, url: r.url ?? null });
+      const clusterId = (body.clusterId ?? '').toString().trim() || null;
+      if (r.status !== 'done' || !r.url || !clusterId) {
+        return json({ available: true, ok: true, status: r.status, url: r.url ?? null });
+      }
+
+      // FINALIZE: copy the provider's short-lived mp4 into the owner's storage — but only against
+      // a cluster the user actually owns (the generate-image ownership pattern).
+      const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+      const { data: owned } = await admin.from('knowledge_clusters')
+        .select('id').eq('id', clusterId).eq('owner_id', user.id).maybeSingle();
+      if (!owned) return json({ available: true, ok: true, status: r.status, url: r.url ?? null });
+
+      const vidRes = await fetch(String(r.url), { signal: AbortSignal.timeout(120_000) });
+      if (!vidRes.ok) {
+        // The render finished but the copy failed — return the provider URL honestly (it still
+        // works for ~24h) with the reason, rather than pretending the durable save happened.
+        return json({ available: true, ok: true, status: r.status, url: r.url, durable: false, error: `Could not fetch the finished mp4 (${vidRes.status}).` });
+      }
+      const bytes = new Uint8Array(await vidRes.arrayBuffer());
+      const path = `${user.id}/studio/${clusterId}/render-${id}.mp4`;
+      const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'video/mp4', upsert: true });
+      if (up.error) {
+        return json({ available: true, ok: true, status: r.status, url: r.url, durable: false, error: `Could not store the mp4: ${up.error.message}` });
+      }
+      const { data: pub } = admin.storage.from('project-assets').getPublicUrl(path);
+      const durableUrl = pub.publicUrl;
+
+      // Record the vault row once (repeat polls find it by url). Provenance is re-parsed, never
+      // trusted as-shaped, and only ever ADDS the AI fact — parseProvenance returns null for junk.
+      const prov = parseProvenance(body.aiProvenance);
+      try {
+        const { data: existing } = await admin.from('cluster_files').select('id').eq('url', durableUrl).maybeSingle();
+        if (!existing) {
+          await admin.from('cluster_files').insert({
+            owner_id: user.id, cluster_id: clusterId, name: `render-${id}.mp4`, url: durableUrl,
+            kind: 'video', bytes: bytes.length, caption: 'Rendered video',
+            label: prov ? 'ai-video' : 'rendered-video',
+            ...(prov ? { ai_provenance: prov } : {}),
+          });
+        }
+      } catch (_) { /* the mp4 is stored either way; a vault-row hiccup must not fail the poll */ }
+
+      return json({ available: true, ok: true, status: r.status, url: durableUrl, durable: true, providerUrl: r.url });
     }
 
     return json({ error: 'mode must be render|status.' }, 400);

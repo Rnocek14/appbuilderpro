@@ -2,18 +2,30 @@
 // The video studio: build a storyboard from the world's REAL photos, watch it play in the browser
 // (a real Ken-Burns slideshow with text overlays + captions — usable with ZERO setup), edit each
 // scene's text, pick an aspect, download the caption .srt, save the storyboard, and render a real
-// mp4 when a render key is configured (honest degradation otherwise).
+// mp4 when a render key is configured (honest degradation otherwise). A render can carry a real
+// TTS voiceover + burned captions + a CC0 music bed, is FINALIZED into durable storage (provider
+// URLs die in 24h), and a finished render queues straight into the approval-gated social publisher
+// — the full storyboard → mp4 → TikTok/Shorts/Reels circuit in one place.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Play, Pause, Save, Film, Download, Clapperboard } from 'lucide-react';
-import { buildStoryboard, VIDEO_CONCEPTS, type Aspect, type Storyboard, type VideoConcept } from '../../lib/garvis/storyboard';
+import { Loader2, Play, Pause, Save, Film, Download, Clapperboard, Send, Mic } from 'lucide-react';
+import { buildStoryboard, VIDEO_CONCEPTS, type Aspect, type EditOpts, type Storyboard, type VideoConcept } from '../../lib/garvis/storyboard';
 import {
   loadVideoMaterials, defaultStoryboardFor, saveStoryboard, startRender, pollRender, saveRenderedVideo,
+  saveSrtAsset, generateVoiceover,
   type VideoMaterials,
 } from '../../lib/garvis/videoRun';
+import { volumeForMusic } from '../../lib/garvis/musicBed';
+import { withDisclosure, type AiProvenance } from '../../lib/garvis/mediaProvenance';
+import { PLATFORM_LABEL, type Platform } from '../../lib/garvis/social';
+import { queueSocialPost } from '../../lib/garvis/socialRun';
 import { cn } from '../../lib/utils';
 import { useUnsavedGuard } from '../../hooks/useUnsavedGuard';
 import { Button } from '../ui';
+
+// The platforms a finished VIDEO can ride to (socialCore supports all of them end-to-end; video on
+// the provider's free tier is plan-gated — checkDraft surfaces that warning honestly).
+const VIDEO_PLATFORMS: Platform[] = ['tiktok', 'youtube', 'instagram', 'facebook', 'linkedin', 'twitter'];
 
 const ASPECTS: { id: Aspect; label: string; box: string }[] = [
   { id: '9:16', label: 'Reel / TikTok', box: 'aspect-[9/16] max-w-[240px]' },
@@ -35,6 +47,12 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   const [scene, setScene] = useState(0);
   const [busy, setBusy] = useState(false);
   const [renderMsg, setRenderMsg] = useState<string | null>(null);
+  const [voiceoverOn, setVoiceoverOn] = useState(false);
+  const [musicUrl, setMusicUrl] = useState('');
+  const [lastRender, setLastRender] = useState<{ url: string; durable: boolean; provenance: AiProvenance | null } | null>(null);
+  const [pubPlatforms, setPubPlatforms] = useState<Platform[]>(['tiktok', 'youtube', 'instagram']);
+  const [pubCaption, setPubCaption] = useState('');
+  const [queueing, setQueueing] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Unsaved-edit guard: hand-edited lines live only in state until Save/Render — leaving the
   // browser with edits pending must ask first (design review).
@@ -99,22 +117,42 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
 
   const doRender = async () => {
     if (!sb) return;
-    setBusy(true); setRenderMsg('Starting render…');
+    setBusy(true); setLastRender(null); setRenderMsg('Starting render…');
     try {
-      const start = await startRender(sb);
+      // Media layers first: voiceover clips + hosted captions when the toggle is on. All honest —
+      // a missing TTS key degrades to the silent render with the setup steps, never a fake voice.
+      const opts: EditOpts = {};
+      let provenance: AiProvenance | null = null;
+      if (voiceoverOn) {
+        setRenderMsg('Narrating scenes…');
+        const vo = await generateVoiceover(sb, clusterId);
+        if (vo.available === false) { setRenderMsg(null); onToast('info', 'Voiceover isn\'t configured yet — set OPENAI_API_KEY (or ELEVENLABS_API_KEY) in the edge secrets. Rendering silently works now.'); return; }
+        if (!vo.ok || !vo.clips?.length) { setRenderMsg(null); onToast('error', vo.error ?? 'The voiceover failed.'); return; }
+        opts.voClips = vo.clips;
+        provenance = vo.provenance ?? null;
+        opts.srtUrl = (await saveSrtAsset(clusterId, sb).catch(() => null)) ?? undefined;
+      }
+      if (musicUrl.trim()) {
+        opts.musicUrl = musicUrl.trim();
+        opts.musicVolume = volumeForMusic(!!opts.voClips?.length);
+      }
+
+      const start = await startRender(sb, opts);
       if (start.available === false) { setRenderMsg(null); onToast('info', 'Video rendering isn\'t configured on the server yet — the preview above is fully usable. (Add a render key: see the system health page.)'); return; }
       if (!start.ok || !start.id) { setRenderMsg(null); onToast('error', start.error ?? 'Render could not start.'); return; }
       await saveStoryboard(clusterId, sb).then(() => setDirty(false)).catch(() => {});
-      // Poll to completion (renders take ~10-40s for short clips).
+      // Poll to completion (renders take ~10-40s for short clips). A finished render is FINALIZED
+      // server-side into durable storage — the provider's URL rots in 24h.
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 4000));
-        const st = await pollRender(start.id);
+        const st = await pollRender(start.id, { clusterId, aiProvenance: provenance });
         setRenderMsg(`Rendering… (${st.status ?? 'working'})`);
         if (st.status === 'done' && st.url) {
-          await saveRenderedVideo(clusterId, sb.title, st.url);
+          await saveRenderedVideo(clusterId, sb.title, st.url, start.id);
           setRenderMsg(null);
-          onToast('success', 'Video rendered — saved to this area.');
-          window.open(st.url, '_blank');
+          setLastRender({ url: st.url, durable: st.durable === true, provenance });
+          setPubCaption((c) => c || sb.title);
+          onToast('success', st.durable ? 'Video rendered — saved durably to this area.' : 'Video rendered (provider copy — the durable save reported an issue).');
           return;
         }
         if (st.status === 'failed') { setRenderMsg(null); onToast('error', 'The render failed on the provider.'); return; }
@@ -122,6 +160,23 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
       setRenderMsg(null); onToast('info', 'Render is taking longer than expected — it will appear as an artifact when done.');
     } catch (e) { setRenderMsg(null); onToast('error', e instanceof Error ? e.message : 'Render failed.'); }
     finally { setBusy(false); }
+  };
+
+  const doQueue = async () => {
+    if (!lastRender || !pubCaption.trim() || !pubPlatforms.length) return;
+    setQueueing(true);
+    try {
+      // The disclosure is applied HERE when the render carries AI media (TTS audio) — and the
+      // server-side publish gate re-derives + enforces it fail-closed either way.
+      const text = withDisclosure(pubCaption.trim(), lastRender.provenance);
+      const out = await queueSocialPost({
+        text, platforms: pubPlatforms, mediaUrls: [lastRender.url], worldId,
+        provenance: lastRender.provenance,
+      });
+      onToast('success', 'Post queued — approve it in the Queue to publish.');
+      for (const w of out.warnings) onToast('info', w);
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not queue the post.'); }
+    finally { setQueueing(false); }
   };
 
   if (!materials || !sb) return <div className="mt-4 flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading your photos…</div>;
@@ -215,6 +270,18 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
             ))}
           </div>
 
+          {/* Media layers: a real TTS voiceover (per-scene, caption-aligned) + an optional CC0
+              music bed. Honest: no key → the toggle degrades with setup steps, never a fake voice;
+              only a track the operator attests is CC0 belongs in the music field. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setVoiceoverOn((v) => !v)}
+              className={cn('flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors', voiceoverOn ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+              <Mic size={12} /> Voiceover {voiceoverOn ? 'on' : 'off'}
+            </button>
+            <input value={musicUrl} onChange={(e) => setMusicUrl(e.target.value)} placeholder="music bed URL (CC0 mp3 — FreePD/Mixkit), optional"
+              className="min-w-[220px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
+          </div>
+
           <div className="flex flex-wrap gap-2">
             <Button variant='primary' size='md' onClick={() => void doRender()} disabled={busy}>
               {busy ? <Loader2 size={14} className="animate-spin" /> : <Film size={14} />} Render mp4
@@ -227,6 +294,33 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
             </button>
           </div>
           {renderMsg && <p className="flex items-center gap-1.5 text-xs text-forge-dim"><Clapperboard size={12} /> {renderMsg}</p>}
+
+          {/* THE PUBLISH CIRCUIT — a finished render queues into the ONE approval-gated publisher.
+              Nothing posts here; the Queue does. AI-narrated renders carry the visible disclosure. */}
+          {lastRender && (
+            <div className="space-y-2 rounded-xl border border-forge-border bg-forge-raised/50 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-forge-ink">Queue to social</p>
+                <a href={lastRender.url} target="_blank" rel="noreferrer" className="text-[11px] text-forge-ember hover:underline">watch the mp4</a>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {VIDEO_PLATFORMS.map((p) => (
+                  <button key={p}
+                    onClick={() => setPubPlatforms((cur) => cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p])}
+                    className={cn('rounded-lg border px-2.5 py-1 text-xs transition-colors', pubPlatforms.includes(p) ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                    {PLATFORM_LABEL[p]}
+                  </button>
+                ))}
+              </div>
+              <textarea value={pubCaption} onChange={(e) => setPubCaption(e.target.value)} rows={2} placeholder="the post caption"
+                className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+              {lastRender.provenance && <p className="text-[11px] text-forge-dim">This render contains AI media — the visible AI disclosure is added to the caption and enforced again server-side.</p>}
+              <Button variant='primary' size='sm' onClick={() => void doQueue()} disabled={queueing || !pubCaption.trim() || !pubPlatforms.length}>
+                {queueing ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue for approval
+              </Button>
+            </div>
+          )}
+
           <p className="text-[11px] text-forge-dim">The preview plays your real photos with motion + captions — usable now. "Render mp4" produces a downloadable file when a render key is set (System health shows status).</p>
         </div>
       </div>

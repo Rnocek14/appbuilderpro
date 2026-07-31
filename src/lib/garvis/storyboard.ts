@@ -31,9 +31,12 @@ export interface Storyboard {
 }
 
 const MIN_SCENE_S = 2;
-const MAX_SCENE_S = 6;
-const MAX_TOTAL_S = 60;         // short-form ceiling
-const MAX_SCENES = 8;
+const MAX_SCENE_S = 8;
+// 90s ceiling: TikTok's Creator Rewards pays only on ORIGINAL videos ≥60s, and 60-90s is the
+// monetizable short-form band on every platform — a 60s cap would exclude exactly the videos
+// that earn. Still short-form: nothing here builds long-form.
+const MAX_TOTAL_S = 90;
+const MAX_SCENES = 14;
 const MOTIONS: StoryScene['motion'][] = ['zoomIn', 'panRight', 'zoomOut', 'panLeft'];
 
 const clampDur = (n: number) => Math.min(MAX_SCENE_S, Math.max(MIN_SCENE_S, Math.round(n * 10) / 10));
@@ -58,9 +61,10 @@ export function buildStoryboard(input: {
   const scenes: StoryScene[] = [];
   for (let i = 0; i < raw.length; i++) {
     const s = raw[i];
+    const remaining = Math.round((MAX_TOTAL_S - running) * 10) / 10;
+    if (remaining < MIN_SCENE_S) break;                 // no room left — stop cleanly
     let dur = clampDur(s.durationS ?? 3.5);
-    if (running + dur > MAX_TOTAL_S) dur = clampDur(MAX_TOTAL_S - running);
-    if (dur < MIN_SCENE_S) break;                       // no room left — stop cleanly
+    if (dur > remaining) dur = clampDur(remaining);     // remaining ≥ MIN here, so this never re-inflates past the ceiling
     running += dur;
     const imageUrl = s.imageUrl?.trim() || null;
     const shoot = imageUrl ? null : (s.shoot?.trim() || 'shoot: a shot that fits this line');
@@ -109,11 +113,23 @@ export function buildCaptionsSrt(scenes: StoryScene[]): string {
 
 const RESOLUTION: Record<Aspect, string> = { '9:16': 'hd', '1:1': 'hd', '16:9': 'hd' };
 
+/** Optional media layers for the render: per-scene voiceover clips (from tts-voiceover), a hosted
+ *  .srt caption track, and a music bed. All optional — an edit with no opts is byte-identical to
+ *  before these existed (regression-checked), so the zero-setup path never changes shape. */
+export interface EditOpts {
+  voClips?: { sceneIndex: number; url: string }[];
+  srtUrl?: string;
+  musicUrl?: string;
+  musicVolume?: number;   // musicBed.volumeForMusic decides: ducked under VO, fuller without
+}
+
 /** Compile the storyboard into a Shotstack Edit JSON (the render provider we target). Image clips
  *  get a Ken-Burns motion effect; onScreen text becomes a title clip on a track above; transitions
  *  are in/out fades. Scenes with no image render a colored title card carrying the shoot direction —
- *  so a preview/render is always producible, honestly labeled. Pure + deterministic. */
-export function toShotstackEdit(sb: Storyboard): Record<string, unknown> {
+ *  so a preview/render is always producible, honestly labeled. With opts, voiceover clips land at
+ *  their scene's cumulative start (per-scene audio aligns exactly — a single full track drifts),
+ *  captions ride the hosted SRT, and the music bed becomes the timeline soundtrack. Pure. */
+export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string, unknown> {
   const effectFor: Record<StoryScene['motion'], string | undefined> = {
     zoomIn: 'zoomIn', zoomOut: 'zoomOut', panLeft: 'slideLeft', panRight: 'slideRight', still: undefined,
   };
@@ -133,14 +149,50 @@ export function toShotstackEdit(sb: Storyboard): Record<string, unknown> {
     }
     at += s.durationS;
   }
+
+  // Scene-start offsets for aligning per-scene audio clips (cumulative, same rounding as clips).
+  const sceneStart = (index: number) => {
+    let t = 0;
+    for (let i = 0; i < index && i < sb.scenes.length; i++) t += sb.scenes[i].durationS;
+    return Math.round(t * 100) / 100;
+  };
+
+  const tracks: Record<string, unknown>[] = [];
+  // Caption track on top when a hosted SRT exists (Shotstack CaptionAsset takes the SRT URL).
+  if (opts?.srtUrl) {
+    tracks.push({
+      clips: [{
+        start: 0, length: sb.totalDurationS,
+        asset: {
+          type: 'caption', src: opts.srtUrl,
+          font: { color: '#ffffff', size: 30 },
+          background: { color: '#000000', opacity: 60 },
+        },
+      }],
+    });
+  }
+  tracks.push({ clips: textClips });   // text track on top of images
+  tracks.push({ clips: imageClips }); // images below
+  // Voiceover audio: one clip per scene, starting exactly at its scene's cumulative start.
+  const vo = (opts?.voClips ?? [])
+    .filter((c) => c.sceneIndex >= 0 && c.sceneIndex < sb.scenes.length && !!c.url)
+    .sort((a, b) => a.sceneIndex - b.sceneIndex);
+  if (vo.length) {
+    tracks.push({
+      clips: vo.map((c) => ({
+        start: sceneStart(c.sceneIndex),
+        length: sb.scenes[c.sceneIndex].durationS,
+        asset: { type: 'audio', src: c.url },
+      })),
+    });
+  }
+
+  const timeline: Record<string, unknown> = { background: '#000000', tracks };
+  if (opts?.musicUrl) {
+    timeline.soundtrack = { src: opts.musicUrl, effect: 'fadeInFadeOut', volume: opts.musicVolume ?? 0.2 };
+  }
   return {
-    timeline: {
-      background: '#000000',
-      tracks: [
-        { clips: textClips },   // text track on top
-        { clips: imageClips },  // images below
-      ],
-    },
+    timeline,
     output: { format: 'mp4', resolution: RESOLUTION[sb.aspect], aspectRatio: sb.aspect },
   };
 }

@@ -18,6 +18,7 @@ import { corsHeaders } from '../_shared/ai.ts';
 import { getConnection } from '../_shared/connections.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
 import { checkDraft, providerPayload, mapProviderResult, type SocialDraft } from '../_shared/socialCore.ts';
+import { disclosureGate, parseProvenance } from '../_shared/mediaProvenanceCore.ts';
 
 const AYRSHARE_URL = 'https://app.ayrshare.com/api/post';
 
@@ -74,7 +75,7 @@ Deno.serve(async (req) => {
     if (!rowId) return json({ error: 'Approval payload is missing post_row_id.' }, 400);
 
     const { data: row } = await admin.from('social_posts')
-      .select('id, owner_id, world_id, body, platforms, media_urls, scheduled_for, status, provider_post_id').eq('id', rowId).single();
+      .select('id, owner_id, world_id, body, platforms, media_urls, scheduled_for, status, provider_post_id, ai_provenance').eq('id', rowId).single();
     if (!row || row.owner_id !== uid) return json({ error: 'Post not found' }, 404);
     if (row.provider_post_id || !['queued'].includes(row.status)) return json({ error: `Post already ${row.status}.` }, 409);
 
@@ -116,6 +117,23 @@ Deno.serve(async (req) => {
     // Re-run the honesty/refusal gate server-side — a doc a platform would reject never goes out.
     const chk = checkDraft(draft, new Date().toISOString());
     if (!chk.ok) return await block(chk.reason ?? 'Not sendable.');
+
+    // THE AI-LABEL HARD GATE (fail-closed, server-side): AI-generated media never publishes without
+    // its visible disclosure in the caption. The approval payload is only { post_row_id }, so the
+    // payload hash alone can't protect body/media — this re-derivation from the DB is the binding:
+    // the post row's own stamp OR any attached media's cluster_files provenance triggers the gate.
+    // Platform policy (TikTok strikes for unlabeled AI since 2025) and the house honesty rule agree.
+    let prov = parseProvenance((row as { ai_provenance?: unknown }).ai_provenance);
+    if (!prov && (draft.mediaUrls ?? []).length) {
+      const { data: mediaRows } = await admin.from('cluster_files')
+        .select('ai_provenance').in('url', draft.mediaUrls as string[]).limit(20);
+      for (const m of (mediaRows ?? []) as { ai_provenance?: unknown }[]) {
+        prov = parseProvenance(m.ai_provenance);
+        if (prov) break;
+      }
+    }
+    const aiGate = disclosureGate(draft.text, prov);
+    if (aiGate) return await block(aiGate);
 
     const conn = await getConnection(admin, uid, 'ayrshare');
     if (!conn?.access_token) return await block('No social account connected — connect a provider (Ayrshare) in Settings first.');
