@@ -6676,6 +6676,178 @@ alter table public.standing_orders
   add constraint standing_orders_kind_check
   check (kind in ('watch_url', 'cadence_digest', 'client_hunt', 'idea_stream', 'content_week', 'opportunity_hunt', 'area_study'));
 
+-- ======== supabase/migrations/app_0123_growth_engine.sql ========
+-- app_0123_growth_engine.sql — THE GROWTH ENGINE, slice 1: structured AI-media provenance + the
+-- channel roster. Three things land here:
+--
+-- 1. ai_provenance (jsonb) on social_posts + cluster_files — the structured, ACCRETE-ONLY twin of
+--    mediaProvenanceCore.ts's AiProvenance. A BEFORE UPDATE trigger makes the stamp immutable in SQL
+--    (provenance can be added, never changed or stripped) — the social-publish executor holds a
+--    fail-closed disclosure gate on it, so "AI media never posts unlabeled" is enforced at the DB +
+--    executor layer, not by client goodwill. Existing AI images (label 'ai-generated'/'ai-social')
+--    are backfilled.
+--
+-- 2. growth_channels — the first-class CHANNEL: one distinctly-branded niche account persona
+--    (a finance-facts brand, a maker channel), NOT an account farm. The 2026 platform reality this
+--    encodes: a handful of branded channels posting original 60-90s videos beats 50 clones, which
+--    trip spam clustering + inauthentic-content policy. Persona/niche/platforms/cadence/voice live
+--    here so every produced episode inherits the channel's identity.
+--
+-- 3. channel_episodes — one produced video: the cited fact script (with its hook variants and
+--    sources), the render, and the queued/posted social row it became. The pipeline's durable record.
+--
+-- Additive + idempotent. Owner RLS everywhere; world pinned when set (the reel_jobs pattern).
+
+alter table public.social_posts  add column if not exists ai_provenance jsonb;
+alter table public.cluster_files add column if not exists ai_provenance jsonb;
+
+-- Backfill: images generate-image already labeled as AI get the structured stamp (createdAt 0 = "before stamping existed").
+update public.cluster_files
+   set ai_provenance = jsonb_build_object('aiGenerated', true, 'kind', 'image', 'tool', 'gpt-image-1', 'createdAt', 0)
+ where ai_provenance is null and label in ('ai-generated', 'ai-social');
+
+-- Accrete-only: once stamped, provenance never changes and never comes off (SQL twin of stampProvenance).
+create or replace function public.ai_provenance_accrete_only()
+returns trigger language plpgsql as $$
+begin
+  if old.ai_provenance is not null and new.ai_provenance is distinct from old.ai_provenance then
+    raise exception 'ai_provenance is accrete-only: an AI-media stamp can never be changed or removed';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists trg_social_posts_ai_prov on public.social_posts;
+create trigger trg_social_posts_ai_prov before update on public.social_posts
+  for each row execute function public.ai_provenance_accrete_only();
+drop trigger if exists trg_cluster_files_ai_prov on public.cluster_files;
+create trigger trg_cluster_files_ai_prov before update on public.cluster_files
+  for each row execute function public.ai_provenance_accrete_only();
+
+-- THE CHANNEL ROSTER ---------------------------------------------------------------------------
+create table if not exists public.growth_channels (
+  id                uuid primary key default gen_random_uuid(),
+  owner_id          uuid not null references public.profiles(id) on delete cascade,
+  world_id          uuid references public.knowledge_worlds(id) on delete set null,
+  cluster_id        uuid references public.knowledge_clusters(id) on delete set null,  -- its content_growth studio area
+  name              text not null default '',
+  handle            text not null default '',       -- the public @handle, for the operator's eyes
+  niche             text not null default '',       -- 'finance facts', 'space facts', 'handmade jewelry'
+  persona           text not null default '',       -- the channel's voice/character in one paragraph
+  platforms         text[] not null default '{}',   -- socialCore platform ids: tiktok/youtube/instagram/...
+  cadence_per_week  int not null default 7 check (cadence_per_week between 0 and 21),
+  monetization_mode text not null default 'rpm_first'
+                      check (monetization_mode in ('app_first', 'affiliate_first', 'shop_first', 'rpm_first')),
+  voice             text not null default 'nova',   -- tts-voiceover voice id
+  music_mood        text not null default 'minimal'
+                      check (music_mood in ('warm', 'upbeat', 'cinematic', 'minimal')),
+  visual_style      text not null default '',       -- the channel's image style clause — its distinct look
+  status            text not null default 'active' check (status in ('active', 'paused')),
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+alter table public.growth_channels enable row level security;
+drop policy if exists "growth_channels owner all" on public.growth_channels;
+create policy "growth_channels owner all" on public.growth_channels
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and (world_id is null or exists (select 1 from public.knowledge_worlds w where w.id = world_id and w.owner_id = auth.uid()))
+  );
+create index if not exists idx_growth_channels_owner on public.growth_channels(owner_id, created_at desc);
+
+-- ONE PRODUCED EPISODE -------------------------------------------------------------------------
+create table if not exists public.channel_episodes (
+  id           uuid primary key default gen_random_uuid(),
+  owner_id     uuid not null references public.profiles(id) on delete cascade,
+  channel_id   uuid not null references public.growth_channels(id) on delete cascade,
+  cluster_id   uuid references public.knowledge_clusters(id) on delete set null,
+  title        text not null default '',
+  topic        text not null default '',
+  script       jsonb not null default '{}'::jsonb,  -- FactScript: {title, hooks[], scenes[], sources[], caption, cta}
+  hook_index   int not null default 0,              -- which hook variant this cut uses
+  status       text not null default 'draft'
+                 check (status in ('draft', 'rendered', 'queued', 'posted', 'failed')),
+  render_id    text,
+  video_url    text,                                -- the DURABLE mp4 (storage copy, never the provider's 24h url)
+  srt_url      text,
+  caption      text not null default '',            -- the post caption (carries the AI disclosure)
+  post_id      uuid references public.social_posts(id) on delete set null,
+  error        text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+alter table public.channel_episodes enable row level security;
+drop policy if exists "channel_episodes owner all" on public.channel_episodes;
+create policy "channel_episodes owner all" on public.channel_episodes
+  for all using (owner_id = auth.uid())
+  with check (
+    owner_id = auth.uid()
+    and exists (select 1 from public.growth_channels c where c.id = channel_id and c.owner_id = auth.uid())
+  );
+create index if not exists idx_channel_episodes_channel on public.channel_episodes(channel_id, created_at desc);
+create index if not exists idx_channel_episodes_owner on public.channel_episodes(owner_id, created_at desc);
+
+-- ======== supabase/migrations/app_0124_channel_money.sql ========
+-- app_0124_channel_money.sql — THE MONEY ROUTE on a growth channel. Attention is only worth what
+-- it's routed into: every channel gets ONE destination (the app it promotes, the Etsy shop, the
+-- affiliate landing page, the newsletter) whose link rides every episode caption, stamped with a
+-- src tag (src=gc_<channel>) — so when the destination is one of the operator's own deployed
+-- sites, the existing site_events → leads attribution chain answers "which channel sold this"
+-- with real numbers, and any external destination still gets a countable UTM. Additive + idempotent.
+
+alter table public.growth_channels add column if not exists cta_url   text not null default '';
+alter table public.growth_channels add column if not exists cta_label text not null default '';
+
+-- ======== supabase/migrations/app_0125_retention_hooklab.sql ========
+-- app_0125_retention_hooklab.sql — GROWTH ENGINE slice 3: retention signals, the hook lab, and the
+-- sellable service. Three things land here:
+--
+-- 1. RETENTION COLUMNS on social_post_metrics. The research is unambiguous: retention — not raw
+--    views — is what the algorithms rank on (70%+ completion = viral-grade push; <40% = the hook
+--    failed). The provider already returns TikTok averageTimeWatched / fullVideoWatchedRate and
+--    YouTube averageViewPercentage; social-sync stored them only inside `raw`. Promoted to real
+--    columns so the learning loop can read them. Nullable — absent stays NULL, never a fake 0.
+--
+-- 2. THE HOOK LAB on channel_episodes: `assets` persists a produced episode's scene-image URLs so
+--    a B-CUT (same episode, different hook variant) reuses the art and re-renders for pennies
+--    (~$0.30: new VO + render, zero new images); `variant_of` ties the cut to its parent so the
+--    loop compares hooks on otherwise-identical videos — a real A/B, in-house, cross-platform.
+--
+-- 3. THE 'social_content' SERVICE PACKAGE — the researched #1 revenue avenue ($1,000-2,000/mo
+--    local-business retainers) as a versioned package row, so the offer exists as a sellable,
+--    pinnable noun in the client machinery (app_0115 pattern).
+--
+-- Additive + idempotent.
+
+alter table public.social_post_metrics add column if not exists avg_watch_seconds numeric;
+alter table public.social_post_metrics add column if not exists full_watch_rate   numeric;  -- 0..1
+alter table public.social_post_metrics add column if not exists avg_view_pct      numeric;  -- 0..100
+
+alter table public.channel_episodes add column if not exists assets jsonb not null default '{}'::jsonb;
+alter table public.channel_episodes add column if not exists variant_of uuid references public.channel_episodes(id) on delete set null;
+create index if not exists idx_channel_episodes_variant on public.channel_episodes(variant_of) where variant_of is not null;
+
+insert into public.service_packages (owner_id, key, version, name, blurb, cadence, price_hint, definition, status)
+values
+  (null, 'social_content', 1, 'Social Content Engine',
+   'A month of short-form video for your business — planned, produced, approved by you, posted, and reported.',
+   'monthly', 'from $1,000/mo',
+   '{"includes": ["12 short-form videos/mo (TikTok, Reels, Shorts) from your real photos and footage", "Scripts, captions, and posting handled — you approve a weekly slate, nothing posts without your OK", "Your own branded channel identity (look, voice, cadence)", "A destination link on every post with real click attribution", "Monthly performance report: views, engagement, clicks, and what we are doubling down on"],
+     "establishes": {"watch_site": false, "propose_automations": [], "reporting": "monthly", "growth_channel": true}}'::jsonb,
+   'current')
+on conflict (owner_id, key, version) do nothing;
+
+-- ======== supabase/migrations/app_0126_episode_draft_order.sql ========
+-- app_0126_episode_draft_order.sql — THE CHANNEL CLOCK. 'episode_draft' standing orders draft one
+-- cited fact-script per tick for a growth channel (config.channel_id), fed by the channel's own
+-- hook intel — so daily cadence stops being operator discipline. DRAFT-ONLY by the standing-order
+-- honesty rule: the worker spends model credits exactly like idea_stream/content_week but never
+-- illustrates, renders, or posts — the operator reviews, produces, and approves. (app_0088 shape.)
+alter table public.standing_orders drop constraint if exists standing_orders_kind_check;
+alter table public.standing_orders
+  add constraint standing_orders_kind_check
+  check (kind in ('watch_url', 'cadence_digest', 'client_hunt', 'idea_stream', 'content_week', 'opportunity_hunt', 'area_study', 'episode_draft'));
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).

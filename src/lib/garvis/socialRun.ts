@@ -7,6 +7,7 @@
 import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
 import { checkDraft, PLATFORM_LABEL, type SocialDraft, type Platform, type PostStatus } from './social';
+import type { AiProvenance } from './mediaProvenance';
 
 export interface SocialPostRow {
   id: string; body: string; platforms: string[]; media_urls: string[];
@@ -14,9 +15,12 @@ export interface SocialPostRow {
   provider_post_id: string | null; error: string | null; created_at: string;
 }
 
-/** Validate + snapshot + enqueue. Returns the approval id. Refuses exactly what a platform would. */
+/** Validate + snapshot + enqueue. Returns the approval id. Refuses exactly what a platform would.
+ *  `provenance` records that the attached media is AI-generated — it rides the social_posts row so
+ *  the server-side publisher can hold the disclosure gate fail-closed. */
 export async function queueSocialPost(input: {
   text: string; platforms: string[]; mediaUrls?: string[]; scheduleAt?: string | null; worldId?: string | null;
+  provenance?: AiProvenance | null;
 }): Promise<{ postId: string; warnings: string[] }> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
@@ -33,6 +37,7 @@ export async function queueSocialPost(input: {
     owner_id: uid, world_id: input.worldId ?? null, body: draft.text.trim(),
     platforms: draft.platforms, media_urls: draft.mediaUrls ?? [],
     scheduled_for: draft.scheduleAt ?? null, status: 'queued',
+    ...(input.provenance ? { ai_provenance: input.provenance } : {}),
   }).select('id').single();
   if (error || !row) throw new Error(`Could not queue the post: ${error?.message ?? 'unknown'}`);
 

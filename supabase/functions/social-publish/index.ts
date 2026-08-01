@@ -18,6 +18,7 @@ import { corsHeaders } from '../_shared/ai.ts';
 import { getConnection } from '../_shared/connections.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
 import { checkDraft, providerPayload, mapProviderResult, type SocialDraft } from '../_shared/socialCore.ts';
+import { disclosureGate, parseProvenance } from '../_shared/mediaProvenanceCore.ts';
 
 const AYRSHARE_URL = 'https://app.ayrshare.com/api/post';
 
@@ -74,7 +75,7 @@ Deno.serve(async (req) => {
     if (!rowId) return json({ error: 'Approval payload is missing post_row_id.' }, 400);
 
     const { data: row } = await admin.from('social_posts')
-      .select('id, owner_id, world_id, body, platforms, media_urls, scheduled_for, status, provider_post_id').eq('id', rowId).single();
+      .select('id, owner_id, world_id, body, platforms, media_urls, scheduled_for, status, provider_post_id, ai_provenance').eq('id', rowId).single();
     if (!row || row.owner_id !== uid) return json({ error: 'Post not found' }, 404);
     if (row.provider_post_id || !['queued'].includes(row.status)) return json({ error: `Post already ${row.status}.` }, 409);
 
@@ -89,9 +90,20 @@ Deno.serve(async (req) => {
 
     const ledger = (r: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'ayrshare', action: 'publish_post', ...r });
+    // Keep the channel episode's stored truth in step with its post — a blocked/failed publish
+    // must never leave an episode claiming 'queued' (the silent-outage dead-end the walkthrough
+    // audit found). Best-effort: episodes are optional callers of this path.
+    const episodeSync = (status: 'posted' | 'failed', err: string | null) =>
+      admin.from('channel_episodes').update({ status, error: err }).eq('post_id', rowId).then(() => {}, () => {});
     const block = async (reason: string): Promise<Response> => {
       await admin.from('social_posts').update({ status: 'failed', error: reason }).eq('id', rowId);
+      await episodeSync('failed', reason);
       await ledger({ status: 'skipped', request: { post_row_id: rowId }, error: reason });
+      await admin.from('mind_events').insert({
+        owner_id: uid, source: 'execution', event_type: 'note',
+        subject: `A social post was BLOCKED: ${reason.slice(0, 140)}`,
+        payload: { key: `social:${rowId}`, post_row_id: rowId, blocked: true },
+      }).then(() => {}, () => {});
       await releaseClaim({ blocked: reason, blocked_at: new Date().toISOString() });
       return json({ ok: false, error: reason }, 422);
     };
@@ -116,6 +128,23 @@ Deno.serve(async (req) => {
     // Re-run the honesty/refusal gate server-side — a doc a platform would reject never goes out.
     const chk = checkDraft(draft, new Date().toISOString());
     if (!chk.ok) return await block(chk.reason ?? 'Not sendable.');
+
+    // THE AI-LABEL HARD GATE (fail-closed, server-side): AI-generated media never publishes without
+    // its visible disclosure in the caption. The approval payload is only { post_row_id }, so the
+    // payload hash alone can't protect body/media — this re-derivation from the DB is the binding:
+    // the post row's own stamp OR any attached media's cluster_files provenance triggers the gate.
+    // Platform policy (TikTok strikes for unlabeled AI since 2025) and the house honesty rule agree.
+    let prov = parseProvenance((row as { ai_provenance?: unknown }).ai_provenance);
+    if (!prov && (draft.mediaUrls ?? []).length) {
+      const { data: mediaRows } = await admin.from('cluster_files')
+        .select('ai_provenance').in('url', draft.mediaUrls as string[]).limit(20);
+      for (const m of (mediaRows ?? []) as { ai_provenance?: unknown }[]) {
+        prov = parseProvenance(m.ai_provenance);
+        if (prov) break;
+      }
+    }
+    const aiGate = disclosureGate(draft.text, prov);
+    if (aiGate) return await block(aiGate);
 
     const conn = await getConnection(admin, uid, 'ayrshare');
     if (!conn?.access_token) return await block('No social account connected — connect a provider (Ayrshare) in Settings first.');
@@ -144,6 +173,7 @@ Deno.serve(async (req) => {
     if (!res.ok) {
       const msg = String((out as { message?: string })?.message ?? `HTTP ${res.status}`);
       await admin.from('social_posts').update({ status: 'failed', error: msg.slice(0, 400) }).eq('id', rowId);
+      await episodeSync('failed', msg.slice(0, 400));
       await ledger({ status: 'failed', request: { post_row_id: rowId }, response: { status: res.status }, error: `ayrshare ${res.status}` });
       await releaseClaim({ failed: `ayrshare ${res.status}` });
       return json({ ok: false, error: `Provider error ${res.status}: ${msg.slice(0, 300)}` }, 502);
@@ -157,6 +187,8 @@ Deno.serve(async (req) => {
       posted_at: mapped === 'posted' ? now : null,
       error: mapped === 'failed' ? 'Provider reported a per-platform failure — check the provider dashboard.' : null,
     }).eq('id', rowId);
+    if (mapped === 'posted') await episodeSync('posted', null);
+    if (mapped === 'failed') await episodeSync('failed', 'Provider reported a per-platform failure — check the provider dashboard.');
     await ledger({ status: mapped === 'failed' ? 'failed' : 'ok', request: { post_row_id: rowId, platforms: draft.platforms }, response: { provider_id: providerId, mapped } });
     await admin.from('approvals').update({ result: { ...priorResult, send_claimed_at: now, provider_id: providerId, status: mapped } }).eq('id', approval_id);
     await admin.from('mind_events').insert({

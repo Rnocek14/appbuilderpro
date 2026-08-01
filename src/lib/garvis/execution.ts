@@ -191,7 +191,13 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
 
   if (a.kind === 'publish_post') {
     const { data, error } = await supabase.functions.invoke('social-publish', { body: { approval_id: a.id } });
-    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    if (error) {
+      await revertToPending(a.id);
+      // A BLOCKED publish is a non-2xx — surface the executor's own reason (the Profile-Key hint,
+      // the disclosure gate…), never supabase-js's generic "non-2xx" line.
+      const { invokeFailure } = await import('./videoRun');
+      return { ok: false, error: (await invokeFailure(error, 'The publisher (social-publish)')).message };
+    }
     const res = data as { ok?: boolean; error?: string; status?: string };
     if (!res?.ok) await revertToPending(a.id);
     return { ok: !!res?.ok, error: res?.error, result: res };

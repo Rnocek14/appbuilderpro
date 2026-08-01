@@ -102,7 +102,11 @@ The new Twilio secrets now show under the **"texting" pillar** on the Health pag
 
 ## Tier 6 — Optional pillars (only if you sell them)
 
-- [ ] `AYRSHARE_API_KEY` — real social posting (content-week automation).
+- [ ] Ayrshare — real social posting. NOT an edge secret: paste the API key in **Settings →
+      Connections → Ayrshare** (it's sealed per-user in `provider_connections`), link your
+      TikTok/YouTube/Instagram accounts on the Ayrshare dashboard, and for multi-brand posting map
+      each business's Profile-Key in the same card. Video posts + analytics need a paid Ayrshare
+      tier (free = 50 image posts/mo; the learning loop's numbers arrive only with analytics).
 - [ ] `SHOTSTACK_API_KEY` — storyboard→mp4 video rendering. `GEMINI_API_KEY` — Veo photoreal scenes.
 - [ ] `EMBEDDINGS_API_KEY` — semantic memory (falls back to keyword search without it).
 - [ ] `NETLIFY_AUTH_TOKEN` — one-click site hosting (publish demos live). `SB_MANAGEMENT_TOKEN` — provisioning.

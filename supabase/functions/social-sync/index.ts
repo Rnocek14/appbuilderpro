@@ -31,10 +31,15 @@ interface PostRow {
 }
 
 /** Instagram's field names are web-confirmed; other platforms are best-effort — the raw object is
- *  stored verbatim either way, so a wrong mapping loses nothing. Absent = null, never 0. */
+ *  stored verbatim either way, so a wrong mapping loses nothing. Absent = null, never 0.
+ *  RETENTION (app_0125): the fields the algorithms actually rank on. TikTok returns
+ *  averageTimeWatched (seconds) + fullVideoWatchedRate (0..1); YouTube returns
+ *  averageViewDuration + averageViewPercentage (0..100). Promoted to columns for the learning
+ *  loop; a rate that arrives as a percentage is normalized to 0..1. */
 function mapMetrics(a: Record<string, unknown>): {
   likes: number | null; comments: number | null; shares: number | null; impressions: number | null;
   video_views: number | null; saves: number | null; clicks: number | null; engagement: number | null;
+  avg_watch_seconds: number | null; full_watch_rate: number | null; avg_view_pct: number | null;
 } {
   const n = (...keys: string[]): number | null => {
     for (const k of keys) {
@@ -43,6 +48,7 @@ function mapMetrics(a: Record<string, unknown>): {
     }
     return null;
   };
+  const rawRate = n('fullVideoWatchedRate', 'watchedFullVideoRate');
   return {
     likes: n('likeCount', 'likes', 'favoriteCount'),
     comments: n('commentsCount', 'commentCount', 'comments'),
@@ -52,6 +58,9 @@ function mapMetrics(a: Record<string, unknown>): {
     saves: n('savedCount', 'saveCount', 'saves'),
     clicks: n('clickCount', 'clicks'),
     engagement: n('engagementCount', 'engagement'),
+    avg_watch_seconds: n('averageTimeWatched', 'averageViewDuration', 'avgTimeWatched'),
+    full_watch_rate: rawRate === null ? null : (rawRate > 1 ? rawRate / 100 : rawRate),
+    avg_view_pct: n('averageViewPercentage', 'averageWatchPercentage'),
   };
 }
 

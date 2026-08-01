@@ -15,6 +15,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { aiProvenance } from '../_shared/mediaProvenanceCore.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -95,6 +96,8 @@ Deno.serve(async (req) => {
             kind: 'image', bytes: bytes.length,
             caption: (body.caption ?? '').trim() || 'AI-generated illustration',
             label: (body.label ?? 'ai-generated'),
+            // The structured, accrete-only stamp the publish disclosure gate reads (app_0123).
+            ai_provenance: aiProvenance('image', 'gpt-image-1', Date.now(), 'gpt-image-1'),
           });
         }
       } catch (_) { /* the image is already made + stored; a vault-row hiccup must not fail generation */ }

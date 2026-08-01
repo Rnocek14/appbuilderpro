@@ -25,7 +25,7 @@
 // social posts + 1 email — as ONE approval; the drain executes only after the approval verifies.
 // 'opportunity_hunt' is the OPPORTUNITY ENGINE: scheduled search sweeps → fetched pages → honest
 // extraction into the deduped opportunities feed (jobs/RFPs/grants/commissions).
-export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream' | 'content_week' | 'opportunity_hunt';
+export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream' | 'content_week' | 'opportunity_hunt' | 'area_study' | 'episode_draft';
 export type Cadence = 'hourly' | 'daily' | 'weekly';
 export type WatchStatus = 'changed' | 'unchanged' | 'unreachable';
 

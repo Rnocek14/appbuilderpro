@@ -55,6 +55,7 @@ const EmailBoard = lazy(() => import('../components/garvis/canvas/EmailBoard').t
 const SocialBoard = lazy(() => import('../components/garvis/canvas/SocialBoard').then((m) => ({ default: m.SocialBoard })));
 const IdeaStudio = lazy(() => import('../components/garvis/IdeaStudio').then((m) => ({ default: m.IdeaStudio })));
 const ReelStudio = lazy(() => import('../components/garvis/ReelStudio').then((m) => ({ default: m.ReelStudio })));
+const FactChannelStudio = lazy(() => import('../components/garvis/FactChannelStudio').then((m) => ({ default: m.FactChannelStudio })));
 const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
 const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').then((m) => ({ default: m.AnsweringDesk })));
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
@@ -170,7 +171,15 @@ export default function WorkWeb() {
   const docStudio = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'deliver'), [web]);
   const dataStudio = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'data'), [web]);
   const trackerDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'tracker'), [web]);
-  const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk;
+  // A growth-channel world's front page IS its studio (Reel + Fact Channel) — burying the
+  // production line behind the direct-mail canvas's "Advanced" toggle hid the product's
+  // centerpiece (found by the visual walkthrough). A world that ALSO runs outreach
+  // (launch/audience areas) still leads with the marketing canvas — the productLab exclusion,
+  // applied here too (review finding #1).
+  const growthDesk = useMemo(() => !!web
+    && web.clusters.some((c) => c.charter?.flavor === 'content_growth')
+    && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
+  const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk || growthDesk;
 
   const doRunPlay = async () => {
     if (!templatePlay) return;
@@ -873,6 +882,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           video needs a connected video model. Modeled on the traction-engine repo's flow. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
         <PanelBoundary name="reel studio"><ReelStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
+      )}
+
+      {/* FACT CHANNEL STUDIO — the faceless-channel production line: cited script → illustrated
+          beats → TTS narration → rendered 9:16 mp4 → approval-gated publish to the channel's
+          platforms. The growth engine's first full circuit. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
+        <PanelBoundary name="fact channel studio"><FactChannelStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded

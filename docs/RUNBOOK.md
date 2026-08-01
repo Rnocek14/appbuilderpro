@@ -65,7 +65,9 @@ Set in Supabase → Edge Functions → Secrets. Required for core:
 Per-feature (add when you use the feature; every one degrades with a named message in the UI):
 `RESEND_API_KEY` (+`RESEND_WEBHOOK_SECRET`, `INBOUND_SECRET`) for email · `STRIPE_SECRET_KEY`
 (+webhook secret, price ids, `VITE_STRIPE_PUBLISHABLE_KEY`) for billing · `SERPER_API_KEY` for live
-research · `SHOTSTACK_API_KEY` for mp4 render · Meta/Google ads tokens for ad sync ·
+research · `SHOTSTACK_API_KEY` for mp4 render · `OPENAI_API_KEY` also powers TTS voiceover
+(tts-voiceover, gpt-4o-mini-tts) and scene illustrations for the Fact Channel Studio; optional
+`ELEVENLABS_API_KEY` upgrades the voice head · Meta/Google ads tokens for ad sync ·
 `NETLIFY_AUTH_TOKEN` / `GITHUB_TOKEN` for deploys/exports. · `DOCUSIGN_OAUTH_CLIENT_ID` +
 `DOCUSIGN_OAUTH_CLIENT_SECRET` (+ optional `DOCUSIGN_AUTH_BASE` — defaults to the developer
 sandbox `https://account-d.docusign.com`, where signatures are for testing and NOT legally
@@ -110,6 +112,29 @@ Then `npm run build` and host `dist/`.
    "baseline recorded" line.
 4. Optional: Settings → paste a Discord/Slack webhook URL so the morning pulse and watch alerts
    reach you outside the app.
+
+## The growth engine — first channel to first post
+
+The faceless-channel pipeline (Fact Channel Studio) needs, beyond the core setup above:
+
+1. **Keys**: `OPENAI_API_KEY` (script images + TTS voiceover) and `SHOTSTACK_API_KEY` (mp4
+   render) as edge secrets. Optional `ELEVENLABS_API_KEY` upgrades the voice.
+2. **Ayrshare** (the posting rail — NOT an edge secret): create an account at ayrshare.com,
+   link the channel's TikTok/YouTube/Instagram accounts on their dashboard, then paste the API
+   key in **Settings → Connections → Ayrshare** in the app. Plan reality: the free tier posts
+   ~50 images/mo and NO video — daily video channels need a paid tier, and post analytics
+   (what the learning loop learns from) is Premium/Business-gated. Budget for it.
+3. **One world per channel brand.** Ayrshare destinations map per-WORLD (Settings →
+   Connections → Ayrshare → Profile-Keys), so two channels in one world would share one
+   brand's accounts. Give each channel its own world with a `content_growth` studio area.
+4. **First episode**: open the world → the studio is the front page → create a channel from a
+   preset → set its destination link (your shop/app/page — every caption carries it,
+   attribution-tagged) → Draft a cited episode → review the sources (uncited claims wear a
+   visible flag) → Produce → watch the mp4 → Queue → approve in the Queue. The AI disclosure
+   is enforced server-side; nothing posts without your yes.
+5. **Numbers**: social-sync pulls per-post metrics on the 6h heartbeat (or "sync now"); after
+   ~3 measured episodes the channel gets a baseline and episodes start wearing
+   winner/quiet verdicts that feed the next drafts.
 
 ## Optional: the forward-in mailbox (Tier 2)
 

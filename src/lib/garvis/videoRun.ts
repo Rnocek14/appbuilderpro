@@ -6,7 +6,8 @@
 
 import { supabase } from '../supabase';
 import { getBrandKit } from './artifacts';
-import { buildStoryboard, conceptScenes, toShotstackEdit, type Storyboard, type VideoConcept } from './storyboard';
+import { buildStoryboard, conceptScenes, toShotstackEdit, type EditOpts, type Storyboard, type VideoConcept } from './storyboard';
+import type { AiProvenance } from './mediaProvenance';
 import type { BusinessContext } from './genesis';
 
 export interface VideoMaterials {
@@ -72,32 +73,96 @@ export async function saveStoryboard(clusterId: string, sb: Storyboard): Promise
   if (error) throw new Error(`Could not save the storyboard: ${error.message}`);
 }
 
+/** supabase-js reports a failed invoke as a generic "non-2xx status code" — useless to an
+ *  operator. Surface the function's own error body when one exists, else an honest named reason.
+ *  (Found by the visual walkthrough: the toast literally read "Edge Function returned a non-2xx
+ *  status code".) */
+export async function invokeFailure(error: unknown, what: string): Promise<Error> {
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx instanceof Response) {
+    const body = (await ctx.clone().json().catch(() => null)) as { error?: string } | null;
+    if (body?.error) return new Error(body.error);
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return new Error(/non-2xx|Failed to send a request|Failed to fetch/i.test(msg)
+    ? `${what} isn't answering — are the edge functions deployed? (npm run functions:deploy; System health shows status.)`
+    : msg);
+}
+
 export interface RenderStart { available: boolean; ok?: boolean; id?: string; error?: string; setup?: string[] }
-export interface RenderStatus { available: boolean; ok?: boolean; status?: string; url?: string | null; error?: string }
+export interface RenderStatus {
+  available: boolean; ok?: boolean; status?: string; url?: string | null; error?: string;
+  /** true when the returned url is the owner's durable storage copy (the provider's rots in 24h). */
+  durable?: boolean; providerUrl?: string;
+}
 
 /** Kick a render. Returns the provider render id (poll pollRender), or an honest "not configured"
- *  with the setup steps — the browser preview stands regardless. */
-export async function startRender(sb: Storyboard): Promise<RenderStart> {
+ *  with the setup steps — the browser preview stands regardless. `opts` layers voiceover clips, a
+ *  hosted caption track, and a music bed onto the same edit. */
+export async function startRender(sb: Storyboard, opts?: EditOpts): Promise<RenderStart> {
   const { data, error } = await supabase.functions.invoke('render-video', {
-    body: { mode: 'render', edit: toShotstackEdit(sb) },
+    body: { mode: 'render', edit: toShotstackEdit(sb, opts) },
   });
-  if (error) throw new Error(error.message);
+  if (error) throw await invokeFailure(error, 'The render engine (render-video)');
   return data as RenderStart;
 }
 
-export async function pollRender(id: string): Promise<RenderStatus> {
-  const { data, error } = await supabase.functions.invoke('render-video', { body: { mode: 'status', id } });
-  if (error) throw new Error(error.message);
+/** Poll a render. With `clusterId`, a finished render is FINALIZED server-side: copied into durable
+ *  storage (Shotstack URLs die in 24h) and recorded as a vault video row — with the AI-provenance
+ *  stamp when the storyboard carried AI media, so the publish disclosure gate holds downstream. */
+export async function pollRender(id: string, finalize?: { clusterId: string; aiProvenance?: AiProvenance | null }): Promise<RenderStatus> {
+  const { data, error } = await supabase.functions.invoke('render-video', {
+    body: { mode: 'status', id, clusterId: finalize?.clusterId, aiProvenance: finalize?.aiProvenance ?? undefined },
+  });
+  if (error) throw await invokeFailure(error, 'The render engine (render-video)');
   return data as RenderStatus;
 }
 
-/** When a render finishes, record the mp4 as an artifact in the area so it lives with the world. */
-export async function saveRenderedVideo(clusterId: string, title: string, url: string): Promise<void> {
+/** Upload the storyboard's SRT captions as a small text asset so the render provider can fetch it.
+ *  Returns the public URL, or null when the board has no captions. */
+export async function saveSrtAsset(clusterId: string, sb: Storyboard): Promise<string | null> {
+  if (!sb.captionsSrt) return null;
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const path = `${uid}/studio/${clusterId}/captions-${crypto.randomUUID()}.srt`;
+  const { error } = await supabase.storage.from('project-assets')
+    .upload(path, new Blob([sb.captionsSrt], { type: 'text/plain' }), { upsert: false });
+  if (error) throw new Error(`Could not host the captions: ${error.message}`);
+  return supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
+}
+
+export interface VoiceoverResult {
+  available: boolean; ok?: boolean; error?: string; setup?: string[];
+  clips?: { sceneIndex: number; url: string }[];
+  provenance?: AiProvenance;
+}
+
+/** Generate per-scene voiceover mp3s for every scene with a narration line. `instructions` steers
+ *  gpt-4o-mini-tts delivery (pacing/energy/emphasis — its speed param is ignored, direction is
+ *  everything). The result carries the AI-audio provenance stamp — keep it with the render so the
+ *  publish disclosure holds. */
+export async function generateVoiceover(sb: Storyboard, clusterId: string, opts?: { voice?: string; provider?: 'openai' | 'elevenlabs'; instructions?: string }): Promise<VoiceoverResult> {
+  const { data, error } = await supabase.functions.invoke('tts-voiceover', {
+    body: {
+      scenes: sb.scenes.map((s) => ({ text: s.voiceover, seconds: s.durationS })),
+      voice: opts?.voice, provider: opts?.provider, clusterId,
+      instructions: opts?.instructions,
+    },
+  });
+  if (error) throw await invokeFailure(error, 'The voiceover engine (tts-voiceover)');
+  return data as VoiceoverResult;
+}
+
+/** When a render finishes, record the mp4 as an artifact in the area so it lives with the world.
+ *  Each render gets its OWN slug (keyed by render id) — renders never overwrite each other. */
+export async function saveRenderedVideo(clusterId: string, title: string, url: string, renderId?: string): Promise<void> {
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) return;
+  const slug = `rendered-video-${renderId ?? Date.now()}`;
   await supabase.from('knowledge_artifacts').upsert({
-    owner_id: uid, cluster_id: clusterId, slug: 'rendered-video', kind: 'video',
+    owner_id: uid, cluster_id: clusterId, slug, kind: 'video',
     title: `Rendered video — ${title}`, detail: `The finished mp4 for "${title}".`, url, source: 'garvis',
   }, { onConflict: 'cluster_id,slug' });
 }
