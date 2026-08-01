@@ -32,7 +32,8 @@ do $$
 declare n int; dbl int;
 begin
   select count(*) into n from public.service_packages where owner_id is null and version=1;
-  perform t('app_0115: both built-in packages seeded at v1', n=2, 'found '||n);
+  -- 3 since app_0125 added the growth engine's 'social_content' package to the built-ins.
+  perform t('app_0115+0125: all built-in packages seeded at v1', n=3, 'found '||n);
   -- re-running the seed must NOT duplicate (nulls-not-distinct uniqueness)
   begin
     insert into public.service_packages(owner_id,key,version,name,cadence,definition,status)
