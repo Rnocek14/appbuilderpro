@@ -70,8 +70,13 @@ Deno.serve(async (req) => {
     if (!useEleven && !openaiKey) return json({ available: false, setup: SETUP });
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    // CREDIT GATE — voiceover spends provider quota, so it spends the user's credits.
-    try { await checkCredits(admin, user.id, 'voiceover'); }
+    // CREDIT GATE — voiceover spends provider quota, so it spends the user's credits. The kind's
+    // estimate is per-CLIP, so the whole-episode job re-checks the balance against scene count
+    // (review finding: a 5-credit balance could start a 14-scene job).
+    try {
+      const balance = await checkCredits(admin, user.id, 'voiceover');
+      if (balance < scenes.length * 5) return json({ error: "You're out of credits for this many scenes. Upgrade your plan or wait for your monthly refill." }, 402);
+    }
     catch (e) { if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402); throw e; }
 
     const folder = (body.clusterId ?? '').trim() || 'world';
@@ -81,17 +86,19 @@ Deno.serve(async (req) => {
     const synth = async (text: string): Promise<Uint8Array> => {
       if (useEleven) {
         const voiceId = (body.voice ?? '').trim() || 'JBFqnCBsd6RMkjVDRZzb'; // ElevenLabs' stock "George"
-        const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        // The community-tested energetic-shorts settings; if the model rejects any of them (4xx),
+        // retry once with defaults rather than failing the whole episode.
+        const call = (withSettings: boolean) => fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
           method: 'POST',
           headers: { 'xi-api-key': elevenKey!, 'content-type': 'application/json' },
           body: JSON.stringify({
             text, model_id: 'eleven_flash_v2_5',
-            // The community-tested energetic-shorts settings: animated but stable, slightly quick.
-            // (Flash ignores what it can't apply — passing these is safe.)
-            voice_settings: { stability: 0.4, similarity_boost: 0.75, style: 0.3, speed: 1.1, use_speaker_boost: true },
+            ...(withSettings ? { voice_settings: { stability: 0.4, similarity_boost: 0.75, style: 0.3, speed: 1.1, use_speaker_boost: true } } : {}),
           }),
           signal: AbortSignal.timeout(60_000),
         });
+        let res = await call(true);
+        if (!res.ok && res.status >= 400 && res.status < 500) res = await call(false);
         if (!res.ok) throw new Error(`ElevenLabs returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
         return new Uint8Array(await res.arrayBuffer());
       }
@@ -114,14 +121,25 @@ Deno.serve(async (req) => {
       return new Uint8Array(await res.arrayBuffer());
     };
 
+    // Partial failure still spends for what was actually synthesized (review finding: the early
+    // returns billed the OPERATOR's provider account and charged the user nothing).
+    let spentChars = 0;
+    const spendSoFar = () => spentChars > 0
+      ? spendCredits(admin, user.id, {
+          costUsd: useEleven ? (spentChars / 1000) * 0.05 : (spentChars / 900) * 0.015,
+          kind: 'voiceover', provider: useEleven ? 'elevenlabs' : 'openai',
+          model: useEleven ? 'eleven_flash_v2_5' : 'gpt-4o-mini-tts',
+        })
+      : Promise.resolve(0);
     const clips: { sceneIndex: number; url: string }[] = [];
     for (const s of scenes) {
       let bytes: Uint8Array;
       try { bytes = await synth(s.text); }
-      catch (e) { return json({ available: true, ok: false, error: e instanceof Error ? e.message : String(e), clips }); }
+      catch (e) { await spendSoFar(); return json({ available: true, ok: false, error: e instanceof Error ? e.message : String(e), clips }); }
+      spentChars += s.text.length;
       const path = `${user.id}/studio/${folder}/vo-${crypto.randomUUID()}.mp3`;
       const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'audio/mpeg', upsert: false });
-      if (up.error) return json({ available: true, ok: false, error: `Could not store scene ${s.index + 1}'s audio: ${up.error.message}`, clips });
+      if (up.error) { await spendSoFar(); return json({ available: true, ok: false, error: `Could not store scene ${s.index + 1}'s audio: ${up.error.message}`, clips }); }
       const { data: pub } = admin.storage.from('project-assets').getPublicUrl(path);
       clips.push({ sceneIndex: s.index, url: pub.publicUrl });
     }

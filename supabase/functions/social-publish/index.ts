@@ -90,9 +90,20 @@ Deno.serve(async (req) => {
 
     const ledger = (r: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'ayrshare', action: 'publish_post', ...r });
+    // Keep the channel episode's stored truth in step with its post — a blocked/failed publish
+    // must never leave an episode claiming 'queued' (the silent-outage dead-end the walkthrough
+    // audit found). Best-effort: episodes are optional callers of this path.
+    const episodeSync = (status: 'posted' | 'failed', err: string | null) =>
+      admin.from('channel_episodes').update({ status, error: err }).eq('post_id', rowId).then(() => {}, () => {});
     const block = async (reason: string): Promise<Response> => {
       await admin.from('social_posts').update({ status: 'failed', error: reason }).eq('id', rowId);
+      await episodeSync('failed', reason);
       await ledger({ status: 'skipped', request: { post_row_id: rowId }, error: reason });
+      await admin.from('mind_events').insert({
+        owner_id: uid, source: 'execution', event_type: 'note',
+        subject: `A social post was BLOCKED: ${reason.slice(0, 140)}`,
+        payload: { key: `social:${rowId}`, post_row_id: rowId, blocked: true },
+      }).then(() => {}, () => {});
       await releaseClaim({ blocked: reason, blocked_at: new Date().toISOString() });
       return json({ ok: false, error: reason }, 422);
     };
@@ -162,6 +173,7 @@ Deno.serve(async (req) => {
     if (!res.ok) {
       const msg = String((out as { message?: string })?.message ?? `HTTP ${res.status}`);
       await admin.from('social_posts').update({ status: 'failed', error: msg.slice(0, 400) }).eq('id', rowId);
+      await episodeSync('failed', msg.slice(0, 400));
       await ledger({ status: 'failed', request: { post_row_id: rowId }, response: { status: res.status }, error: `ayrshare ${res.status}` });
       await releaseClaim({ failed: `ayrshare ${res.status}` });
       return json({ ok: false, error: `Provider error ${res.status}: ${msg.slice(0, 300)}` }, 502);
@@ -175,6 +187,8 @@ Deno.serve(async (req) => {
       posted_at: mapped === 'posted' ? now : null,
       error: mapped === 'failed' ? 'Provider reported a per-platform failure — check the provider dashboard.' : null,
     }).eq('id', rowId);
+    if (mapped === 'posted') await episodeSync('posted', null);
+    if (mapped === 'failed') await episodeSync('failed', 'Provider reported a per-platform failure — check the provider dashboard.');
     await ledger({ status: mapped === 'failed' ? 'failed' : 'ok', request: { post_row_id: rowId, platforms: draft.platforms }, response: { provider_id: providerId, mapped } });
     await admin.from('approvals').update({ result: { ...priorResult, send_claimed_at: now, provider_id: providerId, status: mapped } }).eq('id', approval_id);
     await admin.from('mind_events').insert({

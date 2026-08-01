@@ -28,7 +28,9 @@ const SECRETS: { name: string; pillar: string; unlocks: string }[] = [
   { name: 'TWILIO_ACCOUNT_SID', pillar: 'texting', unlocks: 'SMS reminders + missed-call text-back (send-sms, voice-inbound)' },
   { name: 'TWILIO_AUTH_TOKEN', pillar: 'texting', unlocks: 'Twilio auth + missed-call webhook signature check (send-sms, voice-inbound)' },
   { name: 'TWILIO_FROM_NUMBER', pillar: 'texting', unlocks: 'The number SMS automations send from (send-sms)' },
-  { name: 'AYRSHARE_API_KEY', pillar: 'social', unlocks: 'Real social posting (social-publish)' },
+  // Social posting does NOT use an edge secret: the Ayrshare key is per-user, sealed in
+  // provider_connections via Settings → Connections (getConnection). Listing a phantom
+  // AYRSHARE_API_KEY secret here sent operators to set an env var no code reads.
   { name: 'SHOTSTACK_API_KEY', pillar: 'video', unlocks: 'Video rendering (render-video)' },
   { name: 'GEMINI_API_KEY', pillar: 'video', unlocks: 'Veo photoreal scene generation (generate-video)' },
   { name: 'SERPER_API_KEY', pillar: 'research', unlocks: 'Web search for research + prospecting (discover-media)' },

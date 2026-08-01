@@ -89,11 +89,16 @@ const good = {
 {
   // The money route: every episode caption can carry the channel's ATTRIBUTED destination link.
   const id = 'abcd1234-5678-9abc-def0-123456789abc';
-  check('ctaLink stamps the channel src tag', ctaLink('https://shop.example.com', id) === 'https://shop.example.com?src=gc_abcd1234');
+  check('ctaLink stamps the channel src tag', ctaLink('https://shop.example.com', id) === 'https://shop.example.com/?src=gc_abcd1234');
   check('per-episode utm_content answers "which video sold this"',
-    ctaLink('https://shop.example.com', id, 'e1f2a3b4-0000-1111-2222-333344445555') === 'https://shop.example.com?src=gc_abcd1234&utm_content=ep_e1f2a3b4');
-  check('existing query strings get & not ?', ctaLink('https://shop.example.com?ref=x', id).includes('?ref=x&src=gc_'));
+    ctaLink('https://shop.example.com', id, 'e1f2a3b4-0000-1111-2222-333344445555') === 'https://shop.example.com/?src=gc_abcd1234&utm_content=ep_e1f2a3b4');
+  check('existing query strings get & not ?', ctaLink('https://shop.example.com/p?ref=x', id).includes('?ref=x&src=gc_'));
+  check('a #fragment URL keeps its anchor and the tag lands in the QUERY (sent to the server)', (() => {
+    const out = ctaLink('https://shop.example.com/page#pricing', id);
+    return out.includes('?src=gc_abcd1234') && out.endsWith('#pricing') && out.indexOf('?') < out.indexOf('#');
+  })());
   check('an already-attributed link is not double-stamped', ctaLink('https://x.com/p?src=mine', id) === 'https://x.com/p?src=mine');
+  check('a param merely CONTAINING "src" does not suppress stamping', ctaLink('https://x.com/p?imgsrc=a', id).includes('&src=gc_'));
   check('a non-URL destination yields NO link, never a broken one', ctaLink('my shop', id) === '' && ctaLink('', id) === '');
   const r = parseFactScript(good);
   if (r.ok) {

@@ -50,6 +50,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   const [voiceoverOn, setVoiceoverOn] = useState(false);
   const [musicUrl, setMusicUrl] = useState('');
   const [lastRender, setLastRender] = useState<{ url: string; durable: boolean; provenance: AiProvenance | null } | null>(null);
+  const [pendingRender, setPendingRender] = useState<{ id: string; provenance: AiProvenance | null } | null>(null);
   const [pubPlatforms, setPubPlatforms] = useState<Platform[]>(['tiktok', 'youtube', 'instagram']);
   const [pubCaption, setPubCaption] = useState('');
   const [queueing, setQueueing] = useState(false);
@@ -119,6 +120,20 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
     if (!sb) return;
     setBusy(true); setLastRender(null); setRenderMsg('Starting render…');
     try {
+      // A timed-out render is NOT lost: resume polling it rather than starting (and paying for) a new one.
+      if (pendingRender) {
+        const st = await pollRender(pendingRender.id, { clusterId, aiProvenance: pendingRender.provenance });
+        if (st.status === 'done' && st.url) {
+          await saveRenderedVideo(clusterId, sb.title, st.url, pendingRender.id);
+          setPendingRender(null); setRenderMsg(null);
+          setLastRender({ url: st.url, durable: st.durable === true, provenance: pendingRender.provenance });
+          setPubCaption((c) => c || sb.title);
+          onToast('success', 'The earlier render finished — saved durably.');
+          return;
+        }
+        if (st.status !== 'failed') { setRenderMsg(null); onToast('info', `Still rendering (${st.status ?? 'working'}) — try again in a minute.`); return; }
+        setPendingRender(null); // failed → fall through to a fresh render
+      }
       // Media layers first: voiceover clips + hosted captions when the toggle is on. All honest —
       // a missing TTS key degrades to the silent render with the setup steps, never a fake voice.
       const opts: EditOpts = {};
@@ -140,6 +155,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
       const start = await startRender(sb, opts);
       if (start.available === false) { setRenderMsg(null); onToast('info', 'Video rendering isn\'t configured on the server yet — the preview above is fully usable. (Add a render key: see the system health page.)'); return; }
       if (!start.ok || !start.id) { setRenderMsg(null); onToast('error', start.error ?? 'Render could not start.'); return; }
+      setPendingRender({ id: start.id, provenance });
       await saveStoryboard(clusterId, sb).then(() => setDirty(false)).catch(() => {});
       // Poll to completion (renders take ~10-40s for short clips). A finished render is FINALIZED
       // server-side into durable storage — the provider's URL rots in 24h.
@@ -149,15 +165,15 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
         setRenderMsg(`Rendering… (${st.status ?? 'working'})`);
         if (st.status === 'done' && st.url) {
           await saveRenderedVideo(clusterId, sb.title, st.url, start.id);
-          setRenderMsg(null);
+          setPendingRender(null); setRenderMsg(null);
           setLastRender({ url: st.url, durable: st.durable === true, provenance });
           setPubCaption((c) => c || sb.title);
           onToast('success', st.durable ? 'Video rendered — saved durably to this area.' : 'Video rendered (provider copy — the durable save reported an issue).');
           return;
         }
-        if (st.status === 'failed') { setRenderMsg(null); onToast('error', 'The render failed on the provider.'); return; }
+        if (st.status === 'failed') { setPendingRender(null); setRenderMsg(null); onToast('error', 'The render failed on the provider.'); return; }
       }
-      setRenderMsg(null); onToast('info', 'Render is taking longer than expected — it will appear as an artifact when done.');
+      setRenderMsg(null); onToast('info', 'Render is taking longer than expected — press "Render mp4" again shortly; it resumes checking this render instead of paying for a new one.');
     } catch (e) { setRenderMsg(null); onToast('error', e instanceof Error ? e.message : 'Render failed.'); }
     finally { setBusy(false); }
   };

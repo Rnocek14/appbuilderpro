@@ -110,18 +110,26 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       // spend. A B-cut (or a re-produce after a failure) REUSES the saved art — same beats, same
       // frames, only the hook differs: the comparison the loop can actually trust, for pennies.
       let imageUrls = ep.assets?.imageUrls ?? [];
-      if (imageUrls.length !== scenes.length) {
+      if (imageUrls.length !== scenes.length || !imageUrls.every(Boolean)) {
+        // Seed from any partial art already paid for (a mid-run failure persists what it made).
         const byPrompt = new Map<string, string>();
-        const uniquePrompts = [...new Set(imagePrompts.filter(Boolean))];
-        for (let i = 0; i < uniquePrompts.length; i++) {
-          setProgress(`Illustrating beat ${i + 1}/${uniquePrompts.length}…`);
-          byPrompt.set(uniquePrompts[i], await generateSceneImage(
-            illustrationPrompt(uniquePrompts[i], channel.visual_style), clusterId, `${script.title} — beat art`,
-          ));
+        imagePrompts.forEach((pr, i) => { if (pr && imageUrls[i]) byPrompt.set(pr, imageUrls[i]); });
+        const uniquePrompts = [...new Set(imagePrompts.filter(Boolean))].filter((pr) => !byPrompt.has(pr));
+        try {
+          for (let i = 0; i < uniquePrompts.length; i++) {
+            setProgress(`Illustrating beat ${i + 1}/${uniquePrompts.length}…`);
+            byPrompt.set(uniquePrompts[i], await generateSceneImage(
+              illustrationPrompt(uniquePrompts[i], channel.visual_style), clusterId, `${script.title} — beat art`,
+            ));
+          }
+        } finally {
+          // Persist whatever was made even when a beat fails — paid art is never thrown away.
+          imageUrls = imagePrompts.map((p) => byPrompt.get(p) ?? '');
+          if (byPrompt.size) {
+            await updateEpisode(ep.id, { assets: { imageUrls } }).catch(() => {});
+            patchEpisode(ep.id, { assets: { imageUrls } });
+          }
         }
-        imageUrls = imagePrompts.map((p) => byPrompt.get(p) ?? '');
-        await updateEpisode(ep.id, { assets: { imageUrls } }).catch(() => {});
-        patchEpisode(ep.id, { assets: { imageUrls } });
       }
       const withArt = scenes.map((s, i) => ({ ...s, imageUrl: imageUrls[i] || null }));
       const sb = buildStoryboard({ title: script.title, aspect: '9:16', accent: '#FF8A3D', scenes: withArt });
@@ -142,6 +150,9 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       });
       if (start.available === false) { onToast('info', 'Rendering isn\'t configured — add SHOTSTACK_API_KEY (see System health).'); return; }
       if (!start.ok || !start.id) { onToast('error', start.error ?? 'The render could not start.'); return; }
+      // Persist the render id NOW — a timed-out poll must be recoverable from the card, not lost.
+      await updateEpisode(ep.id, { render_id: start.id }).catch(() => {});
+      patchEpisode(ep.id, { render_id: start.id });
 
       for (let i = 0; i < 45; i++) {
         await new Promise((r) => setTimeout(r, 4000));
@@ -167,16 +178,42 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
 
   // THE HOOK LAB: spin a B-cut with a different hook, reusing the parent's art, and produce it.
   const doVariant = async (ep: ChannelEpisode, hookIndex: number) => {
+    if (busy) return;      // the create round-trip must not leave a window for a second production
+    setBusy(true);
     try {
       const cut = await createVariantEpisode(ep, hookIndex);
       setEpisodes((cur) => [cut, ...cur]); setOpenEpisode(cut.id);
       onToast('info', 'B-cut created — same video, different hook. Post cuts hours apart so each gets its own test window.');
       await doProduce(cut);
-    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not create the B-cut.'); }
+    } catch (e) { setBusy(false); onToast('error', e instanceof Error ? e.message : 'Could not create the B-cut.'); }
+  };
+
+  // A render whose poll timed out is finished on Shotstack's side minutes later — one click
+  // finalizes it into durable storage instead of re-spending VO + render.
+  const doCheckRender = async (ep: ChannelEpisode) => {
+    if (!ep.render_id) return;
+    setBusy(true); setProgress('Checking the render…');
+    try {
+      const st = await pollRender(ep.render_id, { clusterId, aiProvenance: aiProvenance('video', 'fact-channel-studio', Date.now()) });
+      if (st.status === 'done' && st.url) {
+        await updateEpisode(ep.id, { status: 'rendered', video_url: st.url });
+        patchEpisode(ep.id, { status: 'rendered', video_url: st.url });
+        onToast('success', st.durable ? 'Render recovered — durable mp4 saved.' : 'Render recovered (provider copy).');
+      } else if (st.status === 'failed') {
+        await updateEpisode(ep.id, { status: 'failed', error: 'render failed' });
+        patchEpisode(ep.id, { status: 'failed' });
+        onToast('error', 'The render failed on the provider.');
+      } else {
+        onToast('info', `Still rendering (${st.status ?? 'working'}) — check again in a minute.`);
+      }
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not check the render.'); }
+    finally { setBusy(false); setProgress(null); }
   };
 
   const doQueue = async (ep: ChannelEpisode) => {
     if (!channel || !ep.video_url || !ep.script) return;
+    // Re-queue after a failure creates a FRESH post row + approval — the failed row stays as
+    // honest history; social-publish (correctly) refuses to resurrect a failed post.
     const parsed = parseFactScript(ep.script);
     if (!parsed.ok) { onToast('error', parsed.reason); return; }
     setQueueingId(ep.id);
@@ -257,9 +294,12 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
               const open = openEpisode === ep.id;
               const total = script ? scriptTotalSeconds(script) : 0;
               const band = script ? bandCheck(total) : null;
-              // Live truth beats the stored snapshot: once the publisher marks the post 'posted',
-              // the card says so without waiting for a write-back.
-              const liveStatus = perf?.liveStatus.get(ep.id) === 'posted' ? 'posted' : ep.status;
+              // Live truth beats the stored snapshot: the publisher's own record decides. A FAILED
+              // post must never hide behind a stale 'queued' — that silent outage kills the
+              // day-45-75 compounding the whole strategy leans on.
+              const live = perf?.liveStatus.get(ep.id);
+              const liveStatus = live === 'posted' ? 'posted' : live === 'failed' ? 'failed' : ep.status;
+              const liveError = ep.error ?? perf?.liveError.get(ep.id) ?? null;
               const epPerf = perf?.byEpisode.get(ep.id) ?? null;
               const verdict = epPerf ? classifyEpisode(epPerf, perf?.baseline ?? null).verdict : null;
               return (
@@ -280,6 +320,23 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                   {epPerf && liveStatus === 'posted' && (
                     <p className="mt-1 text-[11px] text-forge-dim">{perfLine(epPerf, perf?.baseline ?? null)}</p>
                   )}
+                  {liveStatus === 'failed' && (
+                    <div className="mt-1 space-y-1">
+                      {liveError && <p className="text-[11px] text-red-500">{liveError}</p>}
+                      {ep.video_url && (
+                        <button onClick={() => void doQueue(ep)} disabled={queueingId === ep.id}
+                          className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-ink hover:border-forge-ember/50 disabled:opacity-60">
+                          Queue again (new post)
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {ep.status === 'draft' && ep.render_id && !ep.video_url && (
+                    <button onClick={() => void doCheckRender(ep)} disabled={busy}
+                      className="mt-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">
+                      Check render (it kept going after the timeout)
+                    </button>
+                  )}
                   {verdict === 'winner' && (
                     <button onClick={() => { setOpenEpisode(null); void doDraft(`A follow-up going deeper on the winning idea "${ep.title}" — same mechanism, a new surprising angle (part 2, not a rehash).`); }}
                       disabled={busy}
@@ -297,7 +354,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                       <div className="flex flex-wrap gap-1.5">
                         {script.hooks.map((h, i) => (
                           <button key={i} title="the opening line this cut tests"
-                            onClick={() => { void updateEpisode(ep.id, { hook_index: i }).catch(() => {}); patchEpisode(ep.id, { hook_index: i }); }}
+                            onClick={() => { void updateEpisode(ep.id, { hook_index: i }).catch(() => onToast('info', 'Could not save the hook choice — it may revert on reload.')); patchEpisode(ep.id, { hook_index: i }); }}
                             className={cn('rounded-lg border px-2 py-1 text-[11px] transition-colors', ep.hook_index === i ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
                             Hook {i + 1}: {h}
                           </button>

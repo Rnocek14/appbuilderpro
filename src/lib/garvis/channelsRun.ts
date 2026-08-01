@@ -79,6 +79,7 @@ export async function listEpisodes(channelId: string, limit = 20): Promise<Chann
 export interface ChannelPerf {
   byEpisode: Map<string, EpisodePerf>;
   liveStatus: Map<string, string>;   // episode id → the social_posts row's real status ('posted'…)
+  liveError: Map<string, string>;    // episode id → the post's failure reason, when it failed
   baseline: number | null;
   intel: HookIntel;
 }
@@ -89,16 +90,18 @@ export interface ChannelPerf {
 export async function loadChannelPerf(episodes: ChannelEpisode[]): Promise<ChannelPerf> {
   const withPost = episodes.filter((e) => e.post_id);
   const postIds = withPost.map((e) => e.post_id as string);
-  const empty: ChannelPerf = { byEpisode: new Map(), liveStatus: new Map(), baseline: null, intel: hookIntel([]) };
+  const empty: ChannelPerf = { byEpisode: new Map(), liveStatus: new Map(), liveError: new Map(), baseline: null, intel: hookIntel([]) };
   if (!postIds.length) return empty;
 
   const [{ data: posts }, { data: metrics }] = await Promise.all([
-    supabase.from('social_posts').select('id, status').in('id', postIds).limit(200),
+    supabase.from('social_posts').select('id, status, error').in('id', postIds).limit(200),
     supabase.from('social_post_metrics')
       .select('post_id, likes, comments, shares, impressions, video_views, saves, clicks, engagement, avg_watch_seconds, full_watch_rate, avg_view_pct')
       .in('post_id', postIds).limit(500),
   ]);
-  const statusByPost = new Map(((posts ?? []) as { id: string; status: string }[]).map((p) => [p.id, p.status]));
+  const postRows = (posts ?? []) as { id: string; status: string; error: string | null }[];
+  const statusByPost = new Map(postRows.map((p) => [p.id, p.status]));
+  const errorByPost = new Map(postRows.filter((p) => p.error).map((p) => [p.id, p.error as string]));
   const rowsByPost = new Map<string, EpisodeMetricRow[]>();
   for (const m of (metrics ?? []) as ({ post_id: string } & EpisodeMetricRow)[]) {
     const arr = rowsByPost.get(m.post_id) ?? [];
@@ -109,16 +112,19 @@ export async function loadChannelPerf(episodes: ChannelEpisode[]): Promise<Chann
   const perfs: EpisodePerf[] = [];
   const byEpisode = new Map<string, EpisodePerf>();
   const liveStatus = new Map<string, string>();
+  const liveError = new Map<string, string>();
   for (const ep of withPost) {
     const st = statusByPost.get(ep.post_id as string);
     if (st) liveStatus.set(ep.id, st);
+    const err = errorByPost.get(ep.post_id as string);
+    if (err) liveError.set(ep.id, err);
     const script = ep.script ? parseFactScript(ep.script) : null;
     const hook = script?.ok ? (script.script.hooks[ep.hook_index] ?? script.script.hooks[0] ?? '') : '';
     const p = episodePerf(ep.id, ep.title, hook, rowsByPost.get(ep.post_id as string) ?? []);
     perfs.push(p);
     byEpisode.set(ep.id, p);
   }
-  return { byEpisode, liveStatus, baseline: channelBaseline(perfs), intel: hookIntel(perfs) };
+  return { byEpisode, liveStatus, liveError, baseline: channelBaseline(perfs), intel: hookIntel(perfs) };
 }
 
 /** Draft a cited script for this channel and save it as a draft episode. Returns the episode plus

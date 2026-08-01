@@ -173,9 +173,12 @@ export default function WorkWeb() {
   const trackerDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'tracker'), [web]);
   // A growth-channel world's front page IS its studio (Reel + Fact Channel) — burying the
   // production line behind the direct-mail canvas's "Advanced" toggle hid the product's
-  // centerpiece (found by the visual walkthrough). A world that ALSO runs outreach still leads
-  // with the marketing canvas.
-  const growthDesk = useMemo(() => !!web && web.clusters.some((c) => c.charter?.flavor === 'content_growth'), [web]);
+  // centerpiece (found by the visual walkthrough). A world that ALSO runs outreach
+  // (launch/audience areas) still leads with the marketing canvas — the productLab exclusion,
+  // applied here too (review finding #1).
+  const growthDesk = useMemo(() => !!web
+    && web.clusters.some((c) => c.charter?.flavor === 'content_growth')
+    && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
   const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk || growthDesk;
 
   const doRunPlay = async () => {

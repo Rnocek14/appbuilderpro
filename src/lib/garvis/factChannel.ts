@@ -154,12 +154,21 @@ export function illustrationPrompt(imagePrompt: string, channelStyle: string): s
  *  data alone under-credits short-form 2-5x, so the tag must ride every link).
  *  Not a URL → '' (never a broken link). */
 export function ctaLink(url: string, channelId: string, episodeId?: string): string {
-  const u = url.trim();
-  if (!/^https?:\/\//.test(u)) return '';
-  if (u.includes('src=')) return u;                       // already attributed — don't double-stamp
-  const short = (id: string) => id.replace(/-/g, '').slice(0, 8);
-  const tags = [`src=gc_${short(channelId)}`, ...(episodeId ? [`utm_content=ep_${short(episodeId)}`] : [])].join('&');
-  return `${u}${u.includes('?') ? '&' : '?'}${tags}`;
+  const raw = url.trim();
+  if (!/^https?:\/\//.test(raw)) return '';
+  // Real URL surgery, not string appends: a naive `url + '?src='` lands the tag inside a #fragment
+  // (never sent to the server — attribution silently dead) and `includes('src=')` false-positives
+  // on params like `imgsrc` (review finding #4).
+  try {
+    const u = new URL(raw);
+    if (u.searchParams.has('src')) return raw;            // already attributed — don't double-stamp
+    const short = (id: string) => id.replace(/-/g, '').slice(0, 8);
+    u.searchParams.set('src', `gc_${short(channelId)}`);
+    if (episodeId) u.searchParams.set('utm_content', `ep_${short(episodeId)}`);
+    return u.toString();
+  } catch {
+    return '';                                            // unparsable → no link, never a broken one
+  }
 }
 
 /** The post caption: caption + CTA (+ the channel's attributed destination link) + hashtags. The

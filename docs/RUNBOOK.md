@@ -113,6 +113,29 @@ Then `npm run build` and host `dist/`.
 4. Optional: Settings → paste a Discord/Slack webhook URL so the morning pulse and watch alerts
    reach you outside the app.
 
+## The growth engine — first channel to first post
+
+The faceless-channel pipeline (Fact Channel Studio) needs, beyond the core setup above:
+
+1. **Keys**: `OPENAI_API_KEY` (script images + TTS voiceover) and `SHOTSTACK_API_KEY` (mp4
+   render) as edge secrets. Optional `ELEVENLABS_API_KEY` upgrades the voice.
+2. **Ayrshare** (the posting rail — NOT an edge secret): create an account at ayrshare.com,
+   link the channel's TikTok/YouTube/Instagram accounts on their dashboard, then paste the API
+   key in **Settings → Connections → Ayrshare** in the app. Plan reality: the free tier posts
+   ~50 images/mo and NO video — daily video channels need a paid tier, and post analytics
+   (what the learning loop learns from) is Premium/Business-gated. Budget for it.
+3. **One world per channel brand.** Ayrshare destinations map per-WORLD (Settings →
+   Connections → Ayrshare → Profile-Keys), so two channels in one world would share one
+   brand's accounts. Give each channel its own world with a `content_growth` studio area.
+4. **First episode**: open the world → the studio is the front page → create a channel from a
+   preset → set its destination link (your shop/app/page — every caption carries it,
+   attribution-tagged) → Draft a cited episode → review the sources (uncited claims wear a
+   visible flag) → Produce → watch the mp4 → Queue → approve in the Queue. The AI disclosure
+   is enforced server-side; nothing posts without your yes.
+5. **Numbers**: social-sync pulls per-post metrics on the 6h heartbeat (or "sync now"); after
+   ~3 measured episodes the channel gets a baseline and episodes start wearing
+   winner/quiet verdicts that feed the next drafts.
+
 ## Optional: the forward-in mailbox (Tier 2)
 
 Give Garvis a real inbox without OAuth:
