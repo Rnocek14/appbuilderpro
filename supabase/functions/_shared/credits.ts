@@ -58,6 +58,13 @@ export class InsufficientCreditsError extends Error {
   }
 }
 
+/** THE SPEND GUARD (app_0127) — real-dollar caps + kill switch, thrown from the same chokepoint so
+ *  every existing catch (402) handles it. Subclasses InsufficientCreditsError on purpose: no call
+ *  site changes, but the message tells the operator exactly which wall they hit. */
+export class SpendCapError extends InsufficientCreditsError {
+  constructor(message: string) { super(0); this.message = message; this.name = 'SpendCapError'; }
+}
+
 /** The user's plan ('free' | 'starter' | 'pro'), defaulting to 'free'. Drives model selection.
  *  `admin.from` is typed loosely (=> any) on purpose: the full supabase-js query-builder type is so
  *  deep that matching it structurally trips TS's "excessively deep" guard at every call site. */
@@ -67,8 +74,17 @@ export async function getUserPlan(admin: { from: (table: string) => any }, userI
   return (data?.plan as string | undefined) ?? 'free';
 }
 
-/** Refresh the monthly window and ensure the user can afford `kind`. Throws InsufficientCreditsError. */
+/** Refresh the monthly window and ensure the user can afford `kind`. Throws InsufficientCreditsError
+ *  — and FIRST the spend guard: kill switch + daily/monthly REAL-dollar caps (app_0127). Fail-open
+ *  only when the guard rpc itself is missing (pre-migration), never on an over-cap answer. */
 export async function checkCredits(admin: Admin, userId: string, kind: CreditKind): Promise<number> {
+  const guard = await admin.rpc('spend_guard_state', { p_user: userId });
+  if (!guard.error && guard.data && typeof guard.data === 'object') {
+    const g = guard.data as { kill?: boolean; daily_cap?: number; monthly_cap?: number; spent_today?: number; spent_month?: number };
+    if (g.kill) throw new SpendCapError('The AI kill switch is ON — nothing spends until you flip it off in Settings → Spending guard.');
+    if (Number(g.spent_today) >= Number(g.daily_cap)) throw new SpendCapError(`Daily spend cap reached ($${Number(g.spent_today).toFixed(2)} of $${Number(g.daily_cap).toFixed(2)}) — raise it in Settings → Spending guard, or wait for the UTC day to reset.`);
+    if (Number(g.spent_month) >= Number(g.monthly_cap)) throw new SpendCapError(`Monthly spend cap reached ($${Number(g.spent_month).toFixed(2)} of $${Number(g.monthly_cap).toFixed(2)}) — raise it in Settings → Spending guard if this is intentional.`);
+  }
   const { data, error } = await admin.rpc('refresh_credits', { p_user: userId });
   if (error) throw new Error(`credits check failed: ${error.message}`);
   const balance = typeof data === 'number' ? data : Number(data) || 0;

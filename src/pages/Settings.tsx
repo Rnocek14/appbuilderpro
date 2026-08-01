@@ -205,6 +205,105 @@ function SpendCard() {
  *  the kill switch, sender identity, the CAN-SPAM mailing address (required to send), daily cap,
  *  and timezone (drives the cap window AND your morning brief). All gates stay server-side in
  *  send-email; this only supplies the settings they read. */
+
+// THE SPENDING GUARD (app_0127) — the card that keeps automation off your card. Caps + kill switch
+// are enforced server-side inside checkCredits, the chokepoint every AI-spending seam passes; this
+// card just edits the guard row and shows the REAL ledger numbers (usage_events), never estimates.
+function SpendGuardCard() {
+  const { toast } = useToast();
+  const [state, setState] = useState<{ kill: boolean; daily_cap: number; monthly_cap: number; spent_today: number; spent_month: number } | null>(null);
+  const [daily, setDaily] = useState('');
+  const [monthly, setMonthly] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = async () => {
+    const { data: sess } = await supabase.auth.getUser();
+    if (!sess.user) return;
+    const { data } = await supabase.rpc('spend_guard_state', { p_user: sess.user.id });
+    if (data && typeof data === 'object') {
+      const g = data as { kill: boolean; daily_cap: number; monthly_cap: number; spent_today: number; spent_month: number };
+      setState(g); setDaily(String(g.daily_cap)); setMonthly(String(g.monthly_cap));
+    }
+  };
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = async (patch: { daily?: string; monthly?: string; kill?: boolean }) => {
+    const { data: sess } = await supabase.auth.getUser();
+    if (!sess.user) return;
+    const d = Number(patch.daily ?? daily), m = Number(patch.monthly ?? monthly);
+    if (!Number.isFinite(d) || d < 0 || !Number.isFinite(m) || m < 0) { toast('error', 'Caps must be zero or positive dollars.'); return; }
+    setSaving(true);
+    const { error } = await supabase.from('spend_guard').upsert({
+      owner_id: sess.user.id, daily_cap_usd: d, monthly_cap_usd: m,
+      kill_switch: patch.kill ?? state?.kill ?? false, updated_at: new Date().toISOString(),
+    }, { onConflict: 'owner_id' });
+    setSaving(false);
+    if (error) { toast('error', error.message); return; }
+    toast('success', patch.kill === undefined ? 'Caps saved — every AI call checks them before spending.' : (patch.kill ? 'KILL SWITCH ON — nothing spends until you flip it back.' : 'Kill switch off — spending resumes under your caps.'));
+    void load();
+  };
+
+  const KEYS: { name: string; where: string; unlocks: string }[] = [
+    { name: 'AI_PROVIDER + AI_MODEL + *_API_KEY', where: 'supabase secrets set …', unlocks: 'every generative feature (scripts, chat, workers)' },
+    { name: 'OPENAI_API_KEY', where: 'supabase secrets set …', unlocks: 'scene illustrations (gpt-image-1) + TTS voiceover' },
+    { name: 'SHOTSTACK_API_KEY', where: 'supabase secrets set …', unlocks: 'mp4 rendering' },
+    { name: 'ELEVENLABS_API_KEY (optional)', where: 'supabase secrets set …', unlocks: 'premium voice head' },
+    { name: 'Ayrshare key + Profile-Keys', where: 'Settings → Connections', unlocks: 'real social posting + analytics (the learning loop)' },
+  ];
+
+  return (
+    <Card className="mt-4 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-forge-ink">Spending guard</p>
+          <p className="mt-1 text-xs text-forge-dim">
+            Hard caps on REAL provider spend, checked server-side before every AI call — at the cap,
+            calls refuse with the reason until the UTC window resets. Numbers below are the actual
+            usage ledger, not estimates.
+          </p>
+        </div>
+        {state && (
+          <p className="shrink-0 text-right text-xs text-forge-dim">
+            today <span className="font-mono text-forge-ink">${Number(state.spent_today).toFixed(2)}</span> / ${Number(state.daily_cap).toFixed(0)}
+            <br />month <span className="font-mono text-forge-ink">${Number(state.spent_month).toFixed(2)}</span> / ${Number(state.monthly_cap).toFixed(0)}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="text-xs text-forge-dim">Daily cap ($)
+          <Input value={daily} onChange={(e) => setDaily(e.target.value)} className="mt-1 w-28" />
+        </label>
+        <label className="text-xs text-forge-dim">Monthly cap ($)
+          <Input value={monthly} onChange={(e) => setMonthly(e.target.value)} className="mt-1 w-28" />
+        </label>
+        <Button size="sm" onClick={() => void save({})} disabled={saving || !state}>Save caps</Button>
+        <Button size="sm" variant={state?.kill ? 'primary' : 'ghost'} onClick={() => void save({ kill: !state?.kill })} disabled={saving || !state}>
+          {state?.kill ? 'KILL SWITCH: ON — click to resume' : 'Kill switch: off'}
+        </Button>
+      </div>
+      {!state && <p className="mt-3 text-xs text-forge-dim">Guard not reachable yet — apply migration app_0127 (re-paste the bundle) first.</p>}
+
+      <p className="mt-5 text-sm font-medium text-forge-ink">Where your API keys live</p>
+      <table className="mt-2 w-full text-xs">
+        <tbody>
+          {KEYS.map((k) => (
+            <tr key={k.name} className="border-t border-forge-border">
+              <td className="py-1.5 pr-2 font-mono text-forge-ink">{k.name}</td>
+              <td className="py-1.5 pr-2 text-forge-dim">{k.where}</td>
+              <td className="py-1.5 text-forge-dim">{k.unlocks}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="mt-2 text-[11px] text-forge-dim">
+        Edge secrets never touch the browser — set them with the Supabase CLI (RUNBOOK §3); the
+        System health page shows which are live. The Ayrshare key is per-account in Connections.
+      </p>
+    </Card>
+  );
+}
+
 function OutreachCard() {
   const { session } = useAuth();
   const { toast } = useToast();
@@ -544,6 +643,7 @@ export default function Settings() {
         </Card>
 
         <SpendCard />
+      <SpendGuardCard />
       </div>
     </AppShell>
   );
