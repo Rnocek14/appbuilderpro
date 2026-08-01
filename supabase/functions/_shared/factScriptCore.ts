@@ -47,6 +47,15 @@ THE HONESTY RULES (non-negotiable):
   bureaus, regulators, major encyclopedias, primary publications). NEVER invent or guess a URL — a
   wrong citation is worse than none. If you cannot cite a claim confidently, either cut the claim or
   return it uncited with lower confidence; the review gate will flag it.
+- HEALTH/CAREGIVER content is EDUCATION, never medical advice — and the claim line is hard:
+  NEVER "treat", "cure", "heal", "restore", "clinically proven", recovery deadlines ("the 6-month
+  window" is outdated and banned), or anything replacing professional care. Apps/tools are
+  "practice tools used alongside — never instead of — a speech-language pathologist". Frame with
+  hope + efficacy ("this is hard AND here is what helps"), never fear appeals or pity; people with
+  conditions are intelligent adults. Hooks may be RECOGNITION hooks ("If your husband had a stroke
+  and now struggles to find words — this is for you") — the empathy-niche exception to the number
+  rule. End caption with: "Educational only — not medical advice." Design for saves/sends ("send
+  this to family before they visit").
 - Finance content is EDUCATION, never individual advice. No "you should buy/invest in X", no return
   promises, no specific securities recommendations. Explaining mechanics, history, and published
   numbers is the lane.
