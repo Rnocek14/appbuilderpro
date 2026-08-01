@@ -16,7 +16,7 @@ import {
 } from '../../lib/garvis/factChannel';
 import {
   listChannels, createChannel, listEpisodes, draftEpisode, updateEpisode, generateSceneImage,
-  queueEpisodePost, loadChannelPerf, setChannelCta, createVariantEpisode,
+  queueEpisodePost, loadChannelPerf, setChannelCta, createVariantEpisode, setChannelCadence, getChannelCadenceOrderId,
   type GrowthChannel, type ChannelEpisode, type ChannelPerf,
 } from '../../lib/garvis/channelsRun';
 import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
@@ -43,6 +43,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [openEpisode, setOpenEpisode] = useState<string | null>(null);
   const [queueingId, setQueueingId] = useState<string | null>(null);
   const [perf, setPerf] = useState<ChannelPerf | null>(null);
+  const [cadenceOn, setCadenceOn] = useState<boolean | null>(null);
   const [ctaDraft, setCtaDraft] = useState('');
 
   const channel = channels?.find((c) => c.id === channelId) ?? null;
@@ -55,6 +56,8 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
     if (!channelId) { setEpisodes([]); return; }
     void listEpisodes(channelId).then(setEpisodes).catch(() => setEpisodes([]));
     setCtaDraft(channels?.find((c) => c.id === channelId)?.cta_url ?? '');
+    setCadenceOn(null);
+    void getChannelCadenceOrderId(channelId).then((id) => setCadenceOn(!!id)).catch(() => setCadenceOn(false));
   }, [channelId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // THE LOOP'S READ SIDE: join episodes → posts → synced metrics. Re-runs when episodes change.
@@ -263,6 +266,12 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
             {channel.niche} · posts to {channel.platforms.join(', ') || '—'} · voice "{channel.voice}"
             {perf?.baseline !== null && perf?.baseline !== undefined && <> · baseline {Math.round(perf.baseline).toLocaleString()} views/episode</>}
             {perf?.intel.winningHooks.length ? <> · {perf.intel.winningHooks.length} winning hook{perf.intel.winningHooks.length === 1 ? '' : 's'} feeding new drafts</> : null}
+            {cadenceOn !== null && (
+              <button onClick={() => { const next = !cadenceOn; setCadenceOn(next); void setChannelCadence(channel, next).then(() => onToast('success', next ? 'Daily auto-draft ON — a cited script lands here every day; you review, produce, and approve.' : 'Daily auto-draft off.')).catch((e) => { setCadenceOn(!next); onToast('error', e instanceof Error ? e.message : 'Could not change the cadence.'); }); }}
+                className={cn('ml-2 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide transition-colors', cadenceOn ? 'border-forge-ok/50 text-forge-ok' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                auto-draft daily: {cadenceOn ? 'on' : 'off'}
+              </button>
+            )}
           </p>
           {/* THE MONEY ROUTE — one destination per channel; every caption carries it, src-stamped
               so your own sites answer "which channel sold this" through site_events. */}

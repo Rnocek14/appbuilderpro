@@ -20,6 +20,8 @@
 // Deploy: supabase functions deploy standing-worker --no-verify-jwt
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { episodePerf, hookIntel, type EpisodeMetricRow } from '../../../src/lib/garvis/growthLoop.ts';
+import { FACT_SCRIPT_SYSTEM, buildFactScriptUser } from '../_shared/factScriptCore.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
@@ -1156,6 +1158,86 @@ Deno.serve(async (req) => {
         await admin.from('standing_orders').update({
           last_run_at: nowIso,
           last_result: { status: 'unreachable', line: `Idea run skipped: ${msg}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
+
+    // ---- episode_draft: one cited fact-script per tick for a growth channel (app_0126) --------
+    // DRAFT-ONLY (standing-order honesty rule): spends model credits like idea_stream, never
+    // illustrates/renders/posts. The loop feeds in — hooks that won/died steer the mechanisms.
+    if (order.kind === 'episode_draft') {
+      try {
+        const cfg = order.config as { channel_id?: string };
+        if (!cfg.channel_id) throw new Error('no channel bound (config.channel_id missing)');
+        await checkCredits(admin, order.owner_id, 'short_script');
+        const { data: ch } = await admin.from('growth_channels')
+          .select('id, name, niche, persona, cluster_id').eq('id', cfg.channel_id).maybeSingle();
+        if (!ch) throw new Error('the channel no longer exists');
+        const { data: eps } = await admin.from('channel_episodes')
+          .select('id, title, hook_index, script, post_id')
+          .eq('channel_id', ch.id).order('created_at', { ascending: false }).limit(20);
+        type EpRow = { id: string; title: string; hook_index: number; script: { hooks?: string[] } | null; post_id: string | null };
+        const episodes = (eps ?? []) as EpRow[];
+        const withPost = episodes.filter((e) => e.post_id);
+        let winningHooks: string[] | undefined;
+        let quietHooks: string[] | undefined;
+        if (withPost.length) {
+          const { data: mets } = await admin.from('social_post_metrics')
+            .select('post_id, likes, comments, shares, impressions, video_views, saves, clicks, engagement, avg_watch_seconds, full_watch_rate, avg_view_pct')
+            .in('post_id', withPost.map((e) => e.post_id as string)).limit(500);
+          const byPost = new Map<string, EpisodeMetricRow[]>();
+          for (const mrow of (mets ?? []) as ({ post_id: string } & EpisodeMetricRow)[]) {
+            const arr = byPost.get(mrow.post_id) ?? []; arr.push(mrow); byPost.set(mrow.post_id, arr);
+          }
+          const perfs = withPost.map((e) => episodePerf(
+            e.id, e.title, e.script?.hooks?.[e.hook_index] ?? e.script?.hooks?.[0] ?? '',
+            byPost.get(e.post_id as string) ?? []));
+          const intel = hookIntel(perfs);
+          winningHooks = intel.winningHooks.length ? intel.winningHooks : undefined;
+          quietHooks = intel.quietHooks.length ? intel.quietHooks : undefined;
+        }
+        const m = modelForPlan(await getUserPlan(admin, order.owner_id));
+        const result = await complete([
+          { role: 'system', content: FACT_SCRIPT_SYSTEM },
+          { role: 'user', content: buildFactScriptUser({
+            niche: (ch.niche as string) || (ch.name as string), persona: (ch.persona as string) || undefined,
+            targetSeconds: 75, avoidTitles: episodes.map((e) => e.title).filter(Boolean),
+            winningHooks, quietHooks,
+          }) },
+        ], { provider: m.provider, model: m.model, maxTokens: 3000 });
+        await spendCredits(admin, order.owner_id, { costUsd: result.costUsd, kind: 'short_script', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+        let script: { title?: string; hooks?: unknown[]; scenes?: unknown[] } | null = null;
+        try { script = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* refusal below */ }
+        if (!script || !Array.isArray(script.hooks) || !script.hooks.length || !Array.isArray(script.scenes) || !script.scenes.length) {
+          throw new Error('the model returned no usable script');
+        }
+        const title = String(script.title ?? 'Untitled episode').slice(0, 90);
+        await admin.from('channel_episodes').insert({
+          owner_id: order.owner_id, channel_id: ch.id, cluster_id: ch.cluster_id ?? null,
+          title, topic: '', script,
+        });
+        ran++; changed++;
+        const line = `Drafted "${title}" for ${ch.name} — review the sources, produce, and queue.`;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'changed', line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id);
+        await admin.from('mind_events').insert({
+          owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+          subject: line.slice(0, 300),
+          payload: { key: `episode-draft:${order.id}:${nowIso.slice(0, 10)}`, order_id: order.id, kind: order.kind, channel_id: ch.id },
+        }).then(() => {}, () => {});
+      } catch (e) {
+        failed++;
+        const msg = e instanceof Error ? e.message.slice(0, 160) : 'unknown error';
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Episode draft skipped: ${msg}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
           next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
           updated_at: nowIso,
         }).eq('id', order.id).then(() => {}, () => {});

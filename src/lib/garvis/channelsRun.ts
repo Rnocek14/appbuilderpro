@@ -11,6 +11,7 @@ import { episodePerf, channelBaseline, hookIntel, type EpisodePerf, type Episode
 import { queueSocialPost } from './socialRun';
 import { invokeFailure } from './videoRun';
 import { withDisclosure, type AiProvenance } from './mediaProvenance';
+import { createOrder, deleteOrder, listOrders } from './standingRun';
 
 export interface GrowthChannel {
   id: string; world_id: string | null; cluster_id: string | null;
@@ -59,6 +60,26 @@ export async function createChannel(input: {
   }).select(CHANNEL_COLS).single();
   if (error || !data) throw new Error(`Could not create the channel: ${error?.message ?? 'unknown'}`);
   return data as unknown as GrowthChannel;
+}
+
+/** THE CHANNEL CLOCK (app_0126): a daily episode_draft standing order — the worker drafts one
+ *  cited script per day from the channel's own hook intel; the operator reviews → produces →
+ *  approves. Draft-only by the standing-order honesty rule. */
+export async function getChannelCadenceOrderId(channelId: string): Promise<string | null> {
+  const orders = await listOrders().catch(() => []);
+  const hit = orders.find((o) => o.kind === 'episode_draft' && (o.config as { channel_id?: string })?.channel_id === channelId);
+  return hit?.id ?? null;
+}
+
+export async function setChannelCadence(channel: GrowthChannel, on: boolean): Promise<void> {
+  const existing = await getChannelCadenceOrderId(channel.id);
+  if (on && !existing) {
+    await createOrder({
+      worldId: channel.world_id, kind: 'episode_draft', label: `${channel.name} — daily episode draft`,
+      cadence: 'daily', config: { channel_id: channel.id },
+    });
+  }
+  if (!on && existing) await deleteOrder(existing);
 }
 
 /** Point the channel's attention at a destination — the app, shop, or page every caption links to. */
