@@ -218,6 +218,13 @@ export const CHANNEL_PRESETS: { id: string; label: string; niche: string; person
     voice: 'marin',
   },
   {
+    id: 'caregiver_health', label: 'Caregiver / health', niche: 'stroke recovery and aphasia education for family caregivers',
+    persona: 'A licensed-SLP-informed educator speaking TO the caregiver, never over them: one idea at a time, plain 8th-grade language, jargon instantly translated. Names the real moments (discharge-day panic, dinner-table silence, guilt) before teaching. Hope with realism — recovery continues for years, practice compounds, intelligence is intact in aphasia. Education only, never medical advice; survivors are intelligent adults, never patients or burdens. REAL HUMAN ON CAMERA for expert content — AI visuals only for diagram/explainer beats, always labeled.',
+    visualStyle: 'warm hand-drawn overlay illustration, soft domestic textures, large friendly shapes; palette: cream background with warm terracotta, sage green and deep charcoal accents only — literal colors, no gradients; gentle natural light. Aphasia-friendly: one clear focal idea, high contrast, nothing busy',
+    mood: 'warm',
+    voice: 'sage',
+  },
+  {
     id: 'maker_channel', label: 'Maker / handmade', niche: 'handmade craft, studio process and product stories',
     persona: 'First-person maker voice: process, materials, the why behind each piece. Real footage first — AI only for diagrams.',
     visualStyle: 'soft natural-light studio photography feel, shallow depth of field, craft textures — linen, raw wood, unglazed clay; palette: warm neutrals with one muted sage accent — literal colors, no gradients',
