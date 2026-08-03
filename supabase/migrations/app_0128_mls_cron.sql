@@ -1,4 +1,4 @@
--- app_0117_mls_cron.sql — MLS SYNC ON THE CLOCK. The real-estate audit's named seam (doc 03 §2:
+-- app_0128_mls_cron.sql — MLS SYNC ON THE CLOCK. The real-estate audit's named seam (doc 03 §2:
 -- "the MLS feed never turns itself — manual button, no cron"): mls-sync now accepts the heartbeat
 -- (x-worker-secret, same contract as social-sync) and fans the incremental sync out across every
 -- owner with a saved feed. This migration redefines the arm with the 13th job — twice daily at

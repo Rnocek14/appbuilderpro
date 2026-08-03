@@ -16,12 +16,13 @@ export interface SystemStatus {
   heartbeat: HeartbeatStamp[];
 }
 
-/** The jobs garvis_arm_heartbeat schedules (app_0096) — the panel shows scheduled-vs-missing against this. */
+/** The jobs garvis_arm_heartbeat schedules (app_0096, + mls-sync since app_0128) — the panel shows
+ *  scheduled-vs-missing against this. verify:migrations asserts this list matches the arm schedule. */
 export const EXPECTED_JOBS = [
   'garvis-pulse-hourly', 'garvis-worker-tick', 'garvis-standing-tick', 'garvis-followups-daily',
   'garvis-inbox-draft-daily', 'garvis-ads-watch-daily', 'garvis-invoice-chase-daily',
   'garvis-scorecard-weekly', 'garvis-reactivate-monthly', 'garvis-consolidate-weekly',
-  'garvis-social-sync', 'garvis-canary-nightly',
+  'garvis-social-sync', 'garvis-canary-nightly', 'garvis-mls-sync',
 ] as const;
 
 export async function fetchSystemStatus(): Promise<SystemStatus> {
