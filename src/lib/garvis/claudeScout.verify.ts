@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/claudeScout.verify.ts
-import { buildScoutPrompt, citationHosts, groundScoutLeads, SCOUT_SYSTEM } from './claudeScout';
+import { buildScoutPrompt, citationHosts, groundScoutLeads, splitCityState, SCOUT_SYSTEM } from './claudeScout';
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -57,6 +57,19 @@ check('fenced ```json``` is parsed', fenced.grounded === 1);
 // ── "null"-as-string and blanks are treated as absent ──────────────────────
 const nully = groundScoutLeads('[{"name":"Joe Plumbing","website":"null","phone":"N/A","source":"https://www.yelp.com/biz/dallas"}]', SRC, 'plumber', 'Dallas', 'TX');
 check('"null"/"N/A" string values normalize to null', nully.grounded === 1 && nully.leads[0].website === null && nully.leads[0].phone === null && nully.leads[0].has_website === false);
+
+// ── splitCityState: the free-typed area → the scout's {city, state} ────────
+{
+  const cs = splitCityState('Lake Geneva, WI');
+  check('"Lake Geneva, WI" splits into city + state', cs.city === 'Lake Geneva' && cs.state === 'WI');
+  check('lowercase state uppercases', splitCityState('elkhorn, wi').state === 'WI');
+  const noState = splitCityState('Green Bay');
+  check('no comma ⇒ the whole string is the city, state empty', noState.city === 'Green Bay' && noState.state === '');
+  const longForm = splitCityState('Walworth County, Wisconsin');
+  check('a long-form state is NOT truncated into a guessed code', longForm.city === 'Walworth County, Wisconsin' && longForm.state === '');
+  check('whitespace trims', splitCityState('  Delavan ,  WI ').city === 'Delavan' && splitCityState('  Delavan ,  WI ').state === 'WI');
+  check('empty input stays empty, never throws', splitCityState('').city === '' && splitCityState('').state === '');
+}
 
 console.log(`\nclaudeScout.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} claudeScout check(s) failed`);

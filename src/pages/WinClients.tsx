@@ -11,7 +11,7 @@ import { Search, Loader2, Globe, ExternalLink, Sparkles, CheckCircle2, AlertTria
 import { AppShell } from '../components/layout/AppShell';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
-import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, sweepNation, type FoundBusiness } from '../lib/garvis/clientHuntRun';
+import { findBusinesses, scrapeAndAudit, recordProspectAudit, findContactEmail, sweepNation, type FoundBusiness, type DiscoveryEngine } from '../lib/garvis/clientHuntRun';
 import { US_CITIES, US_STATES, citiesFor, type SweepScope } from '../lib/garvis/usCities';
 import { sweepCostLine } from '../lib/garvis/nationalSweepCore';
 import { huntSummary, type HuntConfig } from '../lib/garvis/clientHuntSchedule';
@@ -54,6 +54,10 @@ export default function WinClients() {
   const navigate = useNavigate();
   const [niche, setNiche] = useState('');
   const [area, setArea] = useState('');
+  // Which backend answers a search. Auto = Places when the server has a key, Claude scout when it
+  // doesn't — so discovery works with either key configured. Forcing 'claude' is the free-of-Google
+  // path; it returns fewer, citation-grounded finds and no Google ratings.
+  const [engine, setEngine] = useState<DiscoveryEngine>('auto');
   const [scanUrl, setScanUrl] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scope, setScope] = useState('top50');
@@ -83,7 +87,7 @@ export default function WinClients() {
   const find = async () => {
     setFinding(true); setSearched(true); setRows([]);
     try {
-      const found = await findBusinesses(niche, area);
+      const found = await findBusinesses(niche, area, undefined, engine);
       setRows(found);
       // Look at each site and audit it honestly (small concurrency pool so we don't hammer).
       let i = 0;
@@ -231,7 +235,7 @@ export default function WinClients() {
     try {
       const { sweepArea } = await import('../lib/garvis/prospects/areaSweep');
       const res = await sweepArea({
-        ownerId: uid, niche: n, areaLabel, towns, concurrency: 2,
+        ownerId: uid, niche: n, areaLabel, towns, engine, concurrency: 2,
         onFound: (b) => setRows((r) => (r.length >= 400 ? r : [...r, b])),
         // Audits attach to the same row objects during the audit phase — refresh refs so badges appear.
         onProgress: (p) => { setSweepProg({ done: p.queriesDone, total: p.queriesTotal, found: p.found, failed: p.failed, city: p.current }); setRows((r) => [...r]); },
@@ -373,6 +377,13 @@ export default function WinClients() {
             <input value={area} onChange={(e) => setArea(e.target.value)} placeholder="Town or area — e.g. Lake Geneva, WI"
               onKeyDown={(e) => { if (e.key === 'Enter') void find(); }}
               className="flex-1 rounded-lg border border-forge-border bg-forge-bg px-3 py-2 text-sm text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
+            <select value={engine} onChange={(e) => setEngine(e.target.value as DiscoveryEngine)}
+              aria-label="Discovery engine" title="Auto uses Google Places when its key is set and falls back to the Claude web-search scout when it isn't."
+              className="rounded-lg border border-forge-border bg-forge-bg px-2.5 py-2 text-sm text-forge-ink focus:border-forge-ember/60 focus:outline-none">
+              <option value="auto">Engine: auto</option>
+              <option value="places">Google Places</option>
+              <option value="claude">Claude scout</option>
+            </select>
             <Button variant="primary" size="md" onClick={() => void find()} disabled={finding || !niche.trim()}>
               {finding ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Find businesses
             </Button>

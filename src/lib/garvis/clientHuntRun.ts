@@ -5,6 +5,7 @@
 
 import { supabase } from '../supabase';
 import { parsePlace, type PlaceRaw } from './placesDiscovery';
+import { splitCityState, type ScoutLead } from './claudeScout.ts';
 import { deriveSignals, proposeFromSignals } from './automation/detect';
 import { auditSite, type SiteAudit, type AuditSignal, type Verdict } from './siteAudit';
 import type { DeepScan } from '../../../supabase/functions/_shared/scanTypes.ts';
@@ -50,16 +51,55 @@ async function realInvokeError(error: unknown, fallback: string): Promise<string
  *  cap that matches what pagination can actually deliver (3 pages × 20). */
 export const FIND_LIMIT_DEFAULT = 60;
 
-export async function findBusinesses(niche: string, area: string, limit = FIND_LIMIT_DEFAULT): Promise<FoundBusiness[]> {
+/** Which discovery backend answers a search. 'auto' (the default everywhere) uses Places when the
+ *  server has a key and falls back to the Claude web-search scout when it doesn't — so Find and the
+ *  county sweep work with EITHER key configured, and configuring neither fails with a message that
+ *  names both. 'places'/'claude' force one engine (the Win Clients selector). */
+export type DiscoveryEngine = 'auto' | 'places' | 'claude';
+
+/** The Claude scout as an interactive engine: one targeted discover-run call. Same grounding rule
+ *  as the background hunt (a lead survives only with a real citation), and the server inserts every
+ *  find into the lead pool as a side effect. No Google ratings here — the scout doesn't have them,
+ *  and we display nothing we didn't get. */
+async function findViaScout(niche: string, area: string, limit: number): Promise<FoundBusiness[]> {
+  const { city, state } = splitCityState(area);
+  const { data, error } = await supabase.functions.invoke('discover-run', {
+    body: { keyword: niche.trim(), city, state },
+  });
+  if (error) throw new Error(await realInvokeError(error, 'The scout call failed — check /garvis/health and that discover-run is deployed.'));
+  const payload = data as { leads?: ScoutLead[]; apiError?: string | null; error?: string };
+  if (payload?.error) throw new Error(payload.error);
+  if (payload?.apiError && !(payload.leads ?? []).length) throw new Error(payload.apiError);
+
+  const seen = new Set<string>();
+  const out: FoundBusiness[] = [];
+  for (const lead of payload.leads ?? []) {
+    const key = (lead.website_normalized ?? lead.company_name).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const snippet = [lead.address ?? [lead.city, lead.state].filter(Boolean).join(', '), lead.category]
+      .filter(Boolean).join(' · ');
+    out.push({ name: lead.company_name, url: lead.website, snippet, audit: null, rating: null, ratingCount: null });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export async function findBusinesses(niche: string, area: string, limit = FIND_LIMIT_DEFAULT, engine: DiscoveryEngine = 'auto'): Promise<FoundBusiness[]> {
   const q = [niche.trim(), area.trim()].filter(Boolean).join(' in ');
   if (!q) throw new Error('Add a niche and an area first.');
+  if (engine === 'claude') return findViaScout(niche, area, limit);
   const { data, error } = await supabase.functions.invoke('discover-media', {
     body: { provider: 'places', q },
   });
   if (error) throw new Error(await realInvokeError(error, 'The search call failed — check /garvis/health and that discover-media is deployed.'));
   const payload = data as { available?: boolean; data?: { places?: PlaceRaw[] }; error?: string };
   if (payload?.error) throw new Error(payload.error);
-  if (!payload?.available) throw new Error('Search isn’t set up on the server yet (GOOGLE_PLACES_API_KEY missing).');
+  if (!payload?.available) {
+    // No Places key on the server. 'auto' means the search still happens — through the scout.
+    if (engine === 'auto') return findViaScout(niche, area, limit);
+    throw new Error('Search isn’t set up on the server yet (GOOGLE_PLACES_API_KEY missing).');
+  }
 
   const seen = new Set<string>();
   const out: FoundBusiness[] = [];

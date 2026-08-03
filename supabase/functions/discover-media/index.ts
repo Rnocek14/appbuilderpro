@@ -12,7 +12,10 @@ import { PLACES_FIELD_MASK } from '../../../src/lib/garvis/placesDiscovery.ts';
 // Flat cost estimates per call (these providers don't return token cost); keeps metering honest-ish.
 const PERPLEXITY_COST = 0.006;
 const SERPER_COST = 0.002;
-const PLACES_COST = 0.003; // Places Text Search (New) ~ $0.032/1k; a call returns up to 20 places
+// Our field mask includes websiteUri + phone numbers, which puts every searchText call in the
+// Enterprise SKU: $35/1,000 calls (1,000 free/month) as of Google's 2025 per-SKU pricing. The
+// old 0.003 here understated real spend ~12x, which quietly defeats the spending guard.
+const PLACES_COST = 0.035; // per page; a page returns up to 20 places, a query bills up to 3 pages
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });

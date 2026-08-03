@@ -31,7 +31,7 @@
 // between queries so the operator can bail without losing what's already recorded — every audit and
 // membership is persisted the moment it happens, so a stopped sweep is a smaller study, not a lost one.
 
-import { findBusinesses, scrapeAndAudit, recordProspectAudit, type FoundBusiness } from '../clientHuntRun';
+import { findBusinesses, scrapeAndAudit, recordProspectAudit, type FoundBusiness, type DiscoveryEngine } from '../clientHuntRun';
 export { TRADE_SYNONYMS, synonymsFor, areaSweepPlan, frameSentence, frameNounFor, parseTownList, type AreaQuery } from './areaSweepCore.ts';
 import { areaSweepPlan, frameSentence, frameNounFor } from './areaSweepCore.ts';
 import { registerDomain } from '../nationalSweepCore';
@@ -72,6 +72,7 @@ export async function sweepArea(args: {
   areaLabel: string;                     // 'Walworth County, WI' — appears verbatim in the study + pitch
   towns: string[];
   worldId?: string | null;
+  engine?: DiscoveryEngine;              // 'auto' (default): Places when keyed, Claude scout otherwise
   concurrency?: number;                  // search/audit pool, 1-4; default 2 — a county is not a race
   onFound?: (b: FoundBusiness) => void;  // stream each NEW business as it lands (display; the run persists regardless)
   onProgress?: (p: AreaSweepProgress) => void;
@@ -109,7 +110,7 @@ export async function sweepArea(args: {
       const q = plan[qi++];
       progress.current = q.town; emit();
       try {
-        for (const b of await findBusinesses(q.niche, q.town)) {
+        for (const b of await findBusinesses(q.niche, q.town, undefined, args.engine ?? 'auto')) {
           if (b.url) { if (!registerDomain(seenDomains, b.url)) continue; }
           else {
             const key = b.name.toLowerCase().replace(/\s+/g, ' ').trim();

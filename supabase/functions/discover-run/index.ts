@@ -21,7 +21,7 @@ import { completeWithWebSearch } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 import { LOCAL_NICHES } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { bigMetroCities } from '../../../src/lib/garvis/bigCities.ts';
-import { parsePlace, buildDiscoveryQueries, exhaustionUpdate, PLACES_FIELD_MASK, type PlaceRaw } from '../../../src/lib/garvis/placesDiscovery.ts';
+import { parsePlace, buildDiscoveryQueries, exhaustionUpdate, placesQueryText, PLACES_FIELD_MASK, type PlaceRaw } from '../../../src/lib/garvis/placesDiscovery.ts';
 import { SCOUT_SYSTEM, buildScoutPrompt, groundScoutLeads, type ScoutLead } from '../../../src/lib/garvis/claudeScout.ts';
 
 const cors = {
@@ -136,8 +136,15 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: 'Unauthorized' }, 401);
     const ownerId = user.id;
 
-    const { batch: rawBatch, source: rawSource } = (await req.json().catch(() => ({}))) as { batch?: number; source?: string };
+    const { batch: rawBatch, source: rawSource, keyword: rawKeyword, city: rawCity, state: rawState } =
+      (await req.json().catch(() => ({}))) as { batch?: number; source?: string; keyword?: string; city?: string; state?: string };
     const source: 'claude' | 'places' = rawSource === 'places' ? 'places' : 'claude';
+
+    // TARGETED MODE — {keyword, city[, state]} runs ONE caller-named combo through the Claude scout
+    // and returns the grounded leads, instead of walking the pre-seeded metro grid. This is the
+    // bridge that lets the interactive Find / county sweep discover WITHOUT a Places key: same
+    // grounding rules, same pool inserts (the lead pool grows either way), same per-call metering.
+    const targeted = typeof rawKeyword === 'string' && rawKeyword.trim().length > 0;
 
     // Each engine needs its own key. Claude web-search only needs the Anthropic key the app already
     // uses — no Google Cloud setup.
@@ -150,6 +157,43 @@ Deno.serve(async (req) => {
     const batch = Math.max(1, Math.min(Math.floor(rawBatch ?? (source === 'claude' ? 2 : 4)), maxBatch));
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+    if (targeted) {
+      // Targeted runs are always the Claude scout — a targeted Places search already exists
+      // (discover-media), so routing it here would just be a second door to the same room.
+      if (!Deno.env.get('ANTHROPIC_API_KEY')) return json({ error: 'ANTHROPIC_API_KEY is not set — add it in Supabase secrets.' }, 400);
+      const keyword = rawKeyword!.trim();
+      const city = (rawCity ?? '').trim();
+      const state = (rawState ?? '').trim();
+      if (!city) return json({ error: 'Targeted discovery needs a city.' }, 400);
+      // Interactive caller ⇒ a hard, honest 402 — the grid's soft-skip would read as "found nothing".
+      try { await checkCredits(admin, ownerId, 'discover'); }
+      catch (e) {
+        if (!(e instanceof InsufficientCreditsError)) throw e;
+        return json({ error: 'Out of credits — Claude scouting needs credits. Upgrade or wait for your monthly refill.' }, 402);
+      }
+      // The combo joins the grid (unique owner_id,query_text makes re-runs converge on one row), so
+      // targeted searches get the same bookkeeping + exhaustion memory as the background hunt.
+      const query_text = placesQueryText(keyword, city, state);
+      await admin.from('discovery_queries').upsert(
+        { owner_id: ownerId, keyword, city, state: state || null, query_text },
+        { onConflict: 'owner_id,query_text', ignoreDuplicates: true });
+      const { data: qRow } = await admin.from('discovery_queries')
+        .select('id, query_text, keyword, city, state, last_run_at, total_inserted, run_count, consecutive_zero_runs')
+        .eq('owner_id', ownerId).eq('query_text', query_text).maybeSingle();
+
+      const { leads, apiError } = await scout(admin, ownerId, keyword, city, state);
+      let newLeads = 0; let dupes = 0;
+      if (qRow) {
+        for (const lead of leads) { if (await insertScout(admin, ownerId, lead, (qRow as QRow).id)) { newLeads++; } else { dupes++; } }
+        const upd = exhaustionUpdate(qRow as QRow, newLeads);
+        await admin.from('discovery_queries').update({
+          last_run_at: new Date().toISOString(), last_inserted: upd.last_inserted, total_inserted: upd.total_inserted,
+          run_count: upd.run_count, consecutive_zero_runs: upd.consecutive_zero_runs, exhausted: upd.exhausted,
+        }).eq('id', (qRow as QRow).id);
+      }
+      return json({ ok: true, source: 'claude', targeted: true, combosRun: 1, newLeads, dupes, apiError, leads });
+    }
 
     // Seed the WHOLE grid on the owner's first run: every local-business type × every big metro. The
     // unique(owner_id, query_text) index makes a re-seed a no-op.
