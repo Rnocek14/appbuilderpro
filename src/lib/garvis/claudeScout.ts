@@ -44,6 +44,16 @@ has none), phone and address if you find them, and an honest one-phrase verdict 
 independent local businesses — the ones most likely to have a weak or missing website. Return the JSON.`;
 }
 
+/** Split a free-typed area ("Lake Geneva, WI") into the {city, state} pair the scout prompt wants.
+ *  Only a trailing 2-letter token after a comma is treated as a state — "Green Bay" stays a city,
+ *  and a full "Walworth County, Wisconsin" keeps the long form in city rather than inventing "WI". */
+export function splitCityState(area: string): { city: string; state: string } {
+  const t = (area ?? '').trim();
+  const m = t.match(/^(.+?),\s*([A-Za-z]{2})\.?$/);
+  if (m) return { city: m[1].trim(), state: m[2].toUpperCase() };
+  return { city: t, state: '' };
+}
+
 /** One grounded lead the scout kept — shaped for a discovered_businesses insert (place_id is null:
  *  these come from the open web, not Places). `category` carries Claude's site verdict so the "bad
  *  site" judgment is persisted, not just "has a site / doesn't". */
