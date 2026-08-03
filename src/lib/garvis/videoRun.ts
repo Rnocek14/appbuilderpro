@@ -107,6 +107,25 @@ export async function startRender(sb: Storyboard, opts?: EditOpts): Promise<Rend
   return data as RenderStart;
 }
 
+/** Render an arbitrary edit JSON (the ugcEdit path) through the same metered seam. */
+export async function startRenderEdit(edit: Record<string, unknown>): Promise<RenderStart> {
+  const { data, error } = await supabase.functions.invoke('render-video', { body: { mode: 'render', edit } });
+  if (error) throw await invokeFailure(error, 'The render engine (render-video)');
+  return data as RenderStart;
+}
+
+/** Upload a real footage take into the vault; returns its public URL (the render provider fetches it). */
+export async function uploadTake(clusterId: string, file: File): Promise<string> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const clean = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  const path = `${uid}/studio/${clusterId}/take-${Date.now()}-${clean}`;
+  const { error } = await supabase.storage.from('project-assets').upload(path, file, { contentType: file.type || 'video/mp4' });
+  if (error) throw new Error(`Could not upload the take: ${error.message}`);
+  return supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
+}
+
 /** Poll a render. With `clusterId`, a finished render is FINALIZED server-side: copied into durable
  *  storage (Shotstack URLs die in 24h) and recorded as a vault video row — with the AI-provenance
  *  stamp when the storyboard carried AI media, so the publish disclosure gate holds downstream. */

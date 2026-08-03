@@ -473,6 +473,27 @@ Phase 2's AI clip engine (`generate-clip` with the Veo + aggregator seam over
 `reel_jobs`/`reel_clips`); a direct YouTube Analytics API integration (the only API exposing the
 full 100-point retention curve).
 
+**Round 5 (Aug 3) — the own-footage lane (UGC Studio):**
+
+The missing third lane between "fully faceless" and "hire an editor": the operator films real
+takes and the machine applies the researched native edit. Two research sweeps (the 2026 UGC edit
+grammar; the hybrid real+AI doctrine) encoded as:
+
+- **`ugcEdit.ts` pure core** (21 verified checks): real takes → Shotstack edit with HARD CUTS
+  only, alternating full-frame ↔ ~115% punch-ins with a 6% slow push (the retention device),
+  word-karaoke captions transcribed from the footage's OWN audio (`alias://aroll`), a ≤1.5s
+  frame-one hook card, b-roll as a MUTED 1-8s layer over continuous voice, music at 0.15 under
+  speech, `transcode: true` for phone rotation/VFR.
+- **`scriptToShotList()`** — a drafted episode becomes a station-grouped filming sheet: verbatim
+  lines, framing + delivery notes, POST slots for the hook card and stylized AI cutaways
+  (locked prompts, never photoreal). One-click download on every episode card.
+- **The UGC Studio** in every `content_growth` area: upload takes (vault storage) → hook card →
+  optional AI diagram cutaways → render → queue through the same approval-gated publisher.
+- **The hybrid doctrine, enforced honestly**: the human testifies (hook, claims, CTA on camera —
+  the host's face/voice are never AI-altered); AI illustrates (stylized, provenance-stamped
+  cutaways + "Illustrations AI-assisted." in the caption). A cut with NO AI elements carries no
+  provenance and no AI mark — the honest inverse.
+
 ## 10. Why this wins
 
 1. **The rails already exist here** — approval spine, publishing, metrics sync, credits, breaker,

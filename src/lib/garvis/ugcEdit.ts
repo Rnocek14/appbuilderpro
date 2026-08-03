@@ -17,6 +17,8 @@
 // clearly-provenance-stamped b-roll inserts (the hybrid lane), and phone-source quirks are fixed
 // with transcode, not faked. Deterministic — same inputs, same edit JSON.
 
+import type { FactScript } from './factChannel';
+
 export interface UgcTake {
   url: string;          // the uploaded clip's public URL (Shotstack fetches it)
   trimS?: number;       // seconds to skip from the take's start
@@ -137,4 +139,34 @@ export function describeUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): strin
   if (opts.broll?.length) parts.push(`${opts.broll.length} b-roll insert${opts.broll.length === 1 ? '' : 's'} over continuous voice`);
   if (opts.musicUrl?.trim()) parts.push('music bed ducked under speech');
   return parts.join(' · ');
+}
+
+/** THE SHOT LIST — a drafted episode becomes the operator's filming sheet: station-grouped rows
+ *  (film everything at one setup before moving), verbatim lines, framing + delivery notes, and the
+ *  POST slots (hook card, AI illustration cutaways with locked prompts). Encodes the hybrid
+ *  doctrine: the human testifies (hook, claims, CTA on camera); AI illustrates (2-4s stylized
+ *  cutaways, never photoreal, never the claim). Deterministic. */
+export function scriptToShotList(script: FactScript, hookIndex: number): string {
+  const hi = Math.min(Math.max(0, Math.trunc(hookIndex)), script.hooks.length - 1);
+  const rows: string[] = [
+    `EPISODE: ${script.title}`,
+    '',
+    'STATION A — one setup (kitchen table / desk), phone vertical on tripod, eyes on the',
+    'top-third line, quiet room. Film every row below before moving. 2-3 takes each.',
+    '',
+    `A1  TH-HOOK   medium     "${script.hooks[hi]}"`,
+    '               (urgent, lean in — this line IS the video\'s first second)',
+  ];
+  script.scenes.forEach((sc, i) => {
+    rows.push(`A${i + 2}  TH-SPINE  ${i === script.scenes.length - 1 ? 'close-up ' : 'medium   '} "${sc.voiceover}"`);
+  });
+  if (script.cta) rows.push(`A${script.scenes.length + 2}  TH-CTA    medium     "${script.cta}"`, '               (warm, smile)');
+  rows.push('', 'POST SLOTS (not filmed — added in the studio):', 'P1  HOOK CARD  text: "' + script.hooks[hi].slice(0, 60) + '"');
+  script.scenes.forEach((sc, i) => {
+    if (sc.imagePrompt) rows.push(`P${i + 2}  AI-CUTAWAY after A${i + 2}: stylized illustration — "${sc.imagePrompt}" (2-4s, channel palette, tag "Illustration", NEVER photoreal)`);
+  });
+  rows.push('', 'DOCTRINE: the human testifies, AI illustrates. Claims and the CTA stay ON CAMERA.',
+    'Stylized cutaways need no platform AI label; anything photoreal would. Caption line:',
+    '"Illustrations AI-assisted." Educational disclaimers per the channel\'s rules.');
+  return rows.join('\n');
 }

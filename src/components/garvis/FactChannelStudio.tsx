@@ -9,7 +9,7 @@
 // owner's approval in the Queue.
 
 import { useEffect, useState } from 'react';
-import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle } from 'lucide-react';
+import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle, Clapperboard } from 'lucide-react';
 import {
   parseFactScript, scriptToScenes, scriptTotalSeconds, bandCheck, illustrationPrompt, composeCaption,
   ctaLink, deliveryInstructions, CHANNEL_PRESETS, type FactScript,
@@ -20,6 +20,7 @@ import {
   type GrowthChannel, type ChannelEpisode, type ChannelPerf,
 } from '../../lib/garvis/channelsRun';
 import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
+import { scriptToShotList } from '../../lib/garvis/ugcEdit';
 import { buildStoryboard } from '../../lib/garvis/storyboard';
 import { generateVoiceover, saveSrtAsset, startRender, pollRender, saveRenderedVideo } from '../../lib/garvis/videoRun';
 import { volumeForMusic } from '../../lib/garvis/musicBed';
@@ -29,6 +30,18 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 
 const VIDEO_PLATFORMS: Platform[] = ['tiktok', 'youtube', 'instagram', 'facebook'];
+
+// The drafted script doubles as an on-camera filming sheet (the UGC lane) — downloaded as a .txt
+// the operator takes to the kitchen table.
+function downloadShotList(ep: ChannelEpisode, script: FactScript): void {
+  const blob = new Blob([scriptToShotList(script, ep.hook_index)], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `shot-list-${(ep.title || 'episode').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'episode'}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function FactChannelStudio({ worldId, clusterId, onToast }: {
   worldId: string; clusterId: string; onToast: (k: 'success' | 'error' | 'info', m: string) => void;
@@ -395,6 +408,14 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                             B-cut with hook {i + 1}
                           </button>
                         ))}
+                        {/* THE ON-CAMERA FORK: same script, filmed by a human instead of narrated by
+                            TTS — the sheet groups every line by station, then the takes come back
+                            through the UGC Studio below. Faces beat slides on retention. */}
+                        <button onClick={() => downloadShotList(ep, script)}
+                          title="Film this episode yourself: a station-grouped filming sheet with your lines verbatim. Cut the takes in the UGC Studio below."
+                          className="flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40">
+                          <Clapperboard size={12} /> Shot list (film it yourself)
+                        </button>
                       </div>
                     </div>
                   )}

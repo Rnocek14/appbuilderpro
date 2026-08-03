@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/ugcEdit.verify.ts
-import { buildUgcEdit, describeUgcEdit, type UgcTake } from './ugcEdit';
+import { buildUgcEdit, describeUgcEdit, scriptToShotList, type UgcTake } from './ugcEdit';
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -51,6 +51,20 @@ type Edit = { timeline: { tracks: { clips: Clip[] }[] }; output: Record<string, 
   check('describe line is honest about what the edit contains',
     describeUgcEdit(takes, { hookText: 'x', broll: [{ url: 'u', kind: 'image', atS: 1, lengthS: 2 }] }).includes('3 real takes')
     && describeUgcEdit([{ url: 'u' }]).includes('1 real take,'));
+}
+
+{
+  const script = { title: 'Sundowning, explained', hooks: ['The 6pm meltdown is not random.', 'Alt hook'],
+    scenes: [{ voiceover: 'Light is the lever, not arguing.', onScreen: 'Light', imagePrompt: 'a lamp and a body clock', seconds: 5 }],
+    caption: '', cta: 'Follow for the evening routine.', hashtags: [], sources: [], confidence: null, needsReview: true };
+  const sheet = scriptToShotList(script as never, 0);
+  check('shot list: station-grouped, verbatim lines, CTA on camera',
+    sheet.includes('STATION A') && sheet.includes('"The 6pm meltdown is not random."') && sheet.includes('TH-CTA'));
+  check('shot list: AI cutaways are POST slots with locked stylized prompts, never photoreal',
+    sheet.includes('AI-CUTAWAY') && sheet.includes('a lamp and a body clock') && sheet.includes('NEVER photoreal'));
+  check('shot list carries the doctrine: the human testifies, AI illustrates',
+    sheet.includes('the human testifies, AI illustrates'));
+  check('shot list is deterministic', scriptToShotList(script as never, 0) === sheet);
 }
 
 console.log(`\nugcEdit.verify: ${passed} passed, ${failed} failed`);
