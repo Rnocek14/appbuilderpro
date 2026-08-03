@@ -37,7 +37,7 @@ type Edit = { timeline: { tracks: { clips: Clip[] }[] }; output: Record<string, 
   check('the light boost grade rides every take by default; grade:false removes it',
     aroll.clips.every((c) => (c as { filter?: string }).filter === 'boost')
     && (buildUgcEdit(takes, { grade: false }) as Edit).timeline.tracks[1].clips.every((c) => (c as { filter?: string }).filter === undefined));
-  check('hook card dies by 1.5s (after 1s half the scroll is gone)', hook.clips[0].length === 1.5);
+  check('hook card holds 2s (the readable-in-one-glance floor), then fades', hook.clips[0].length === 2);
   check('b-roll is a MUTED layer over continuous voice at its chosen moment', broll.clips[0].start === 8 && broll.clips[0].length === 3);
   check('music rides quiet under speech (0.15) and fades out',
     music.clips[0].asset.volume === 0.15 && music.clips[0].asset.effect === 'fadeOut');

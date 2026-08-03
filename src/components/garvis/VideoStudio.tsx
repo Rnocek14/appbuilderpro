@@ -9,7 +9,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Play, Pause, Save, Film, Download, Clapperboard, Send, Mic } from 'lucide-react';
-import { buildStoryboard, VIDEO_CONCEPTS, type Aspect, type EditOpts, type Storyboard, type VideoConcept } from '../../lib/garvis/storyboard';
+import { buildStoryboard, buildTimedCaptionsSrt, VIDEO_CONCEPTS, type Aspect, type EditOpts, type Storyboard, type VideoConcept, type WordTiming } from '../../lib/garvis/storyboard';
+import { planEmphasis } from '../../lib/garvis/editPlan';
 import {
   loadVideoMaterials, defaultStoryboardFor, saveStoryboard, startRender, pollRender, saveRenderedVideo,
   saveSrtAsset, generateVoiceover,
@@ -151,7 +152,10 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
         if (!vo.ok || !vo.clips?.length) { setRenderMsg(null); onToast('error', vo.error ?? 'The voiceover failed.'); return; }
         opts.voClips = vo.clips;
         provenance = vo.provenance ?? null;
-        opts.srtUrl = (await saveSrtAsset(clusterId, sb).catch(() => null)) ?? undefined;
+        // Word-EXACT captions when the provider returned timing; proportional otherwise.
+        const timings: (WordTiming[] | null)[] = [];
+        for (const c of vo.clips) timings[c.sceneIndex] = c.words ?? null;
+        opts.srtUrl = (await saveSrtAsset(clusterId, sb, buildTimedCaptionsSrt(sb.scenes, timings)).catch(() => null)) ?? undefined;
       }
       if (musicUrl.trim()) {
         opts.musicUrl = musicUrl.trim();
@@ -159,6 +163,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
       }
       opts.lane = lane;
       if (sfxKitCount(sfx)) opts.sfx = sfx;
+      opts.emphasisIndices = planEmphasis(sb.scenes);
 
       const start = await startRender(sb, opts);
       if (start.available === false) { setRenderMsg(null); onToast('info', 'Video rendering isn\'t configured on the server yet — the preview above is fully usable. (Add a render key: see the system health page.)'); return; }

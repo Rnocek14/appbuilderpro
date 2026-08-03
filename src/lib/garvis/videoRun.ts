@@ -166,22 +166,27 @@ export async function pollRender(id: string, finalize?: { clusterId: string; aiP
 }
 
 /** Upload the storyboard's SRT captions as a small text asset so the render provider can fetch it.
- *  Returns the public URL, or null when the board has no captions. */
-export async function saveSrtAsset(clusterId: string, sb: Storyboard): Promise<string | null> {
-  if (!sb.captionsSrt) return null;
+ *  Returns the public URL, or null when the board has no captions. `srtOverride` carries the
+ *  word-timed SRT (buildTimedCaptionsSrt) when TTS timings exist. */
+export async function saveSrtAsset(clusterId: string, sb: Storyboard, srtOverride?: string): Promise<string | null> {
+  const srt = srtOverride ?? sb.captionsSrt;
+  if (!srt) return null;
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
   const path = `${uid}/studio/${clusterId}/captions-${crypto.randomUUID()}.srt`;
   const { error } = await supabase.storage.from('project-assets')
-    .upload(path, new Blob([sb.captionsSrt], { type: 'text/plain' }), { upsert: false });
+    .upload(path, new Blob([srt], { type: 'text/plain' }), { upsert: false });
   if (error) throw new Error(`Could not host the captions: ${error.message}`);
   return supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
 }
 
 export interface VoiceoverResult {
   available: boolean; ok?: boolean; error?: string; setup?: string[];
-  clips?: { sceneIndex: number; url: string }[];
+  /** `words` carries per-word timing (ElevenLabs character alignment) — word-EXACT caption cues
+   *  downstream. null/absent on the OpenAI path (it returns no timing): captions fall back to
+   *  proportional chunking, honestly. */
+  clips?: { sceneIndex: number; url: string; words?: { w: string; s: number; e: number }[] | null }[];
   provenance?: AiProvenance;
 }
 

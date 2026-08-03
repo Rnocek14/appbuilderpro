@@ -23,7 +23,8 @@ import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
 import { scriptToShotList, type SfxKit } from '../../lib/garvis/ugcEdit';
 import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
 import { SoundKitFields } from './SoundKitFields';
-import { buildStoryboard } from '../../lib/garvis/storyboard';
+import { buildStoryboard, buildTimedCaptionsSrt, type WordTiming } from '../../lib/garvis/storyboard';
+import { planEmphasis } from '../../lib/garvis/editPlan';
 import { generateVoiceover, saveSrtAsset, startRender, pollRender, saveRenderedVideo } from '../../lib/garvis/videoRun';
 import { volumeForMusic } from '../../lib/garvis/musicBed';
 import { aiProvenance } from '../../lib/garvis/mediaProvenance';
@@ -160,7 +161,10 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       const vo = await generateVoiceover(sb, clusterId, { voice: channel.voice, instructions: deliveryInstructions(channel.persona) });
       if (vo.available === false) { onToast('info', 'Voiceover isn\'t configured — set OPENAI_API_KEY in the edge secrets first.'); return; }
       if (!vo.ok || !vo.clips?.length) { onToast('error', vo.error ?? 'The voiceover failed.'); return; }
-      const srtUrl = await saveSrtAsset(clusterId, sb).catch(() => null);
+      // Word-EXACT captions when the provider returned timing (ElevenLabs); proportional otherwise.
+      const timings: (WordTiming[] | null)[] = [];
+      for (const c of vo.clips) timings[c.sceneIndex] = c.words ?? null;
+      const srtUrl = await saveSrtAsset(clusterId, sb, buildTimedCaptionsSrt(sb.scenes, timings)).catch(() => null);
 
       setProgress('Rendering the mp4…');
       // The whole episode is AI-made (script, art, voice) — stamped as such, disclosed at publish.
@@ -169,6 +173,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
         voClips: vo.clips, srtUrl: srtUrl ?? undefined,
         ...(musicUrl.trim() ? { musicUrl: musicUrl.trim(), musicVolume: volumeForMusic(true) } : {}),
         lane, ...(sfxKitCount(sfx) ? { sfx } : {}),
+        emphasisIndices: planEmphasis(sb.scenes),
       });
       if (start.available === false) { onToast('info', 'Rendering isn\'t configured — add SHOTSTACK_API_KEY (see System health).'); return; }
       if (!start.ok || !start.id) { onToast('error', start.error ?? 'The render could not start.'); return; }

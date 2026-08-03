@@ -91,7 +91,42 @@ export function buildStoryboard(input: {
   };
 }
 
-/** SRT caption track from the voiceover lines + cumulative scene timings. Empty when no VO. */
+/** Split a narration line into caption chunks: ≤maxWords per screen (the measured short-form spec
+ *  is 3-7 words — a full sentence on screen reads as a subtitle slab, not a caption), splitting at
+ *  phrase punctuation FIRST so chunks break where comprehension breaks, then by word count. */
+export function chunkCaptionLine(line: string, maxWords = 4): string[] {
+  const words = line.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  // Phrase boundaries: a word ending in phrase punctuation closes its chunk.
+  const phrases: string[][] = [[]];
+  for (const w of words) {
+    phrases[phrases.length - 1].push(w);
+    if (/[,;:.!?…—–]["')\]]?$/.test(w)) phrases.push([]);
+  }
+  // A chunk must not END on a dangling function word (article/preposition/conjunction) — the
+  // subtitling readability rule: never make the reader hold an incomplete grammatical unit.
+  const DANGLERS = new Set(['a', 'an', 'the', 'of', 'to', 'in', 'for', 'and', 'or', 'but', 'with', 'at', 'on', 'as', 'by', 'is', 'are', 'was']);
+  const chunks: string[] = [];
+  for (const p of phrases.filter((x) => x.length)) {
+    // Balanced split: 7 words → 4+3, never 4+3+0 or a 1-word orphan when avoidable.
+    const parts = Math.ceil(p.length / maxWords);
+    const per = Math.ceil(p.length / parts);
+    const split: string[][] = [];
+    for (let i = 0; i < p.length; i += per) split.push(p.slice(i, i + per));
+    for (let i = 0; i < split.length - 1; i++) {
+      while (split[i].length > 1 && DANGLERS.has(split[i][split[i].length - 1].toLowerCase())) {
+        split[i + 1].unshift(split[i].pop()!);
+      }
+    }
+    chunks.push(...split.filter((x) => x.length).map((x) => x.join(' ')));
+  }
+  return chunks;
+}
+
+/** SRT caption track from the voiceover lines + cumulative scene timings, CHUNKED to the
+ *  short-form spec: one small phrase per cue, timed proportionally by word count across the
+ *  scene (TTS paces steadily, so proportional ≈ spoken). The word-karaoke animation then
+ *  interpolates inside each cue. Empty when no VO. */
 export function buildCaptionsSrt(scenes: StoryScene[]): string {
   const fmt = (t: number) => {
     const ms = Math.round((t % 1) * 1000);
@@ -106,7 +141,67 @@ export function buildCaptionsSrt(scenes: StoryScene[]): string {
   let n = 1;
   for (const s of scenes) {
     if (s.voiceover) {
-      out.push(String(n++), `${fmt(at)} --> ${fmt(at + s.durationS)}`, s.voiceover, '');
+      const chunks = chunkCaptionLine(s.voiceover);
+      const totalWords = chunks.reduce((a, c) => a + c.split(' ').length, 0);
+      let t = at;
+      for (let i = 0; i < chunks.length; i++) {
+        // Last chunk closes exactly on the scene boundary — rounding never drifts across scenes.
+        const end = i === chunks.length - 1 ? at + s.durationS
+          : t + (s.durationS * chunks[i].split(' ').length) / totalWords;
+        out.push(String(n++), `${fmt(t)} --> ${fmt(end)}`, chunks[i], '');
+        t = end;
+      }
+    }
+    at += s.durationS;
+  }
+  return out.join('\n').trim();
+}
+
+export interface WordTiming { w: string; s: number; e: number }
+
+/** WORD-EXACT SRT from TTS timestamps (the ElevenLabs alignment path) — every cue starts and ends
+ *  when the words are actually SPOKEN, the precision no transcription-first tool matches (their #1
+ *  complaint is caption errors; ours is the script, verbatim). `timings` is indexed by scene;
+ *  word times are relative to each scene's clip and offset to the timeline here. Scenes without
+ *  timings (or with a token-count mismatch — e.g. the provider normalized numbers) fall back to
+ *  proportional chunking for THAT scene, honestly. */
+export function buildTimedCaptionsSrt(scenes: StoryScene[], timings: (WordTiming[] | null | undefined)[]): string {
+  const fmt = (t: number) => {
+    const ms = Math.round((t % 1) * 1000);
+    const s = Math.floor(t) % 60;
+    const m = Math.floor(t / 60) % 60;
+    const h = Math.floor(t / 3600);
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    return `${p2(h)}:${p2(m)}:${p2(s)},${String(ms).padStart(3, '0')}`;
+  };
+  const out: string[] = [];
+  let at = 0;
+  let n = 1;
+  for (let si = 0; si < scenes.length; si++) {
+    const s = scenes[si];
+    if (s.voiceover) {
+      const chunks = chunkCaptionLine(s.voiceover);
+      const tokens = s.voiceover.trim().split(/\s+/).filter(Boolean);
+      const words = timings[si];
+      if (words && words.length === tokens.length) {
+        let k = 0;
+        for (const c of chunks) {
+          const nWords = c.split(' ').length;
+          const start = at + words[k].s;
+          const end = Math.min(at + words[k + nWords - 1].e, at + s.durationS);
+          out.push(String(n++), `${fmt(start)} --> ${fmt(Math.max(end, start + 0.2))}`, c, '');
+          k += nWords;
+        }
+      } else {
+        const totalWords = chunks.reduce((a, c) => a + c.split(' ').length, 0);
+        let t = at;
+        for (let i = 0; i < chunks.length; i++) {
+          const end = i === chunks.length - 1 ? at + s.durationS
+            : t + (s.durationS * chunks[i].split(' ').length) / totalWords;
+          out.push(String(n++), `${fmt(t)} --> ${fmt(end)}`, chunks[i], '');
+          t = end;
+        }
+      }
     }
     at += s.durationS;
   }
@@ -128,6 +223,9 @@ export interface EditOpts {
    *  energetic = per-word pop captions, dense cues, riser under the hook. */
   lane?: 'calm' | 'energetic';
   sfx?: SfxKit;           // the CC0-attested kit; only what the operator supplied is placed
+  /** editPlan.planEmphasis output: WHICH scenes are the turning points. Those scenes zoom hard
+   *  (zoomInFast) and the whooshes ride THEIR cuts — meaning-driven placement, not cadence. */
+  emphasisIndices?: number[];
 }
 
 /** Compile the storyboard into a Shotstack Edit JSON (the render provider we target). Image clips
@@ -151,7 +249,10 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
     const base: Record<string, unknown> = { start: Math.round(at * 100) / 100, length: s.durationS };
     if (i === 0) base.transition = { in: 'fade' };
     if (s.imageUrl) {
-      imageClips.push({ ...base, asset: { type: 'image', src: s.imageUrl }, effect: effectFor[s.motion], fit: 'cover' });
+      // Emphasis scenes (the script's turning points — editPlan) zoom HARD; everything else keeps
+      // the gentle alternating drift. Aggressive motion is a scarce resource, spent on meaning.
+      const effect = opts?.emphasisIndices?.includes(i) ? 'zoomInFast' : effectFor[s.motion];
+      imageClips.push({ ...base, asset: { type: 'image', src: s.imageUrl }, effect, fit: 'cover' });
     } else {
       // No photo → an honest dark card carrying the shoot direction (rich-text: the legacy title
       // asset is deprecated in the current schema).
@@ -235,10 +336,14 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
   }
 
   // THE SFX LAYER (the shared sound-design core): whooshes riding the scene cuts, pop on the hook,
-  // riser on the energetic lane. Scene boundaries are always explicit here, so cues land precisely.
+  // riser on the energetic lane. Scene boundaries are always explicit here, so cues land precisely
+  // — and when an emphasis plan exists, the whooshes ride the TURNING-POINT cuts, not a spread.
   if (opts?.sfx) {
-    const boundaries = sb.scenes.slice(0, -1).map((_, i) => sceneStart(i + 1));
-    const sfx = sfxCueClips(boundaries, { lane: opts.lane, sfx: opts.sfx, hook: !!sb.scenes[0]?.onScreen });
+    const emphasisCuts = (opts.emphasisIndices ?? [])
+      .filter((i) => i >= 1 && i < sb.scenes.length)
+      .map((i) => sceneStart(i));
+    const cuts = emphasisCuts.length ? emphasisCuts : sb.scenes.slice(0, -1).map((_, i) => sceneStart(i + 1));
+    const sfx = sfxCueClips(cuts, { lane: opts.lane, sfx: opts.sfx, hook: !!sb.scenes[0]?.onScreen });
     if (sfx.length) tracks.push({ clips: sfx });
   }
 

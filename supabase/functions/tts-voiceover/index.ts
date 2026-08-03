@@ -83,12 +83,34 @@ Deno.serve(async (req) => {
     const totalChars = scenes.reduce((n, s) => n + s.text.length, 0);
 
     const instructions = (body.instructions ?? '').trim().slice(0, MAX_INSTRUCTIONS_CHARS);
-    const synth = async (text: string): Promise<Uint8Array> => {
+
+    // ElevenLabs character alignment → word timings (seconds, relative to the clip). Words are
+    // whitespace-delimited runs of the ORIGINAL text (the `alignment` field — normalized_alignment
+    // respells numbers and would break token matching downstream).
+    type WordTiming = { w: string; s: number; e: number };
+    const alignmentToWords = (a: { characters?: string[]; character_start_times_seconds?: number[]; character_end_times_seconds?: number[] } | null | undefined): WordTiming[] | null => {
+      const chars = a?.characters; const starts = a?.character_start_times_seconds; const ends = a?.character_end_times_seconds;
+      if (!chars?.length || !starts || !ends || starts.length !== chars.length || ends.length !== chars.length) return null;
+      const words: WordTiming[] = [];
+      let cur = ''; let s0 = 0;
+      for (let i = 0; i < chars.length; i++) {
+        if (/\s/.test(chars[i])) { if (cur) { words.push({ w: cur, s: s0, e: ends[i - 1] }); cur = ''; } continue; }
+        if (!cur) s0 = starts[i];
+        cur += chars[i];
+        if (i === chars.length - 1) words.push({ w: cur, s: s0, e: ends[i] });
+      }
+      const r3 = (n: number) => Math.round(n * 1000) / 1000;
+      return words.map((w) => ({ w: w.w, s: r3(w.s), e: r3(w.e) }));
+    };
+
+    const synth = async (text: string): Promise<{ bytes: Uint8Array; words: WordTiming[] | null }> => {
       if (useEleven) {
         const voiceId = (body.voice ?? '').trim() || 'JBFqnCBsd6RMkjVDRZzb'; // ElevenLabs' stock "George"
+        // with-timestamps returns base64 audio + character alignment — WORD-EXACT caption cues
+        // downstream, no transcription round-trip (the errors that plague every ASR-first tool).
         // The community-tested energetic-shorts settings; if the model rejects any of them (4xx),
         // retry once with defaults rather than failing the whole episode.
-        const call = (withSettings: boolean) => fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        const call = (withSettings: boolean) => fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`, {
           method: 'POST',
           headers: { 'xi-api-key': elevenKey!, 'content-type': 'application/json' },
           body: JSON.stringify({
@@ -100,11 +122,14 @@ Deno.serve(async (req) => {
         let res = await call(true);
         if (!res.ok && res.status >= 400 && res.status < 500) res = await call(false);
         if (!res.ok) throw new Error(`ElevenLabs returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
-        return new Uint8Array(await res.arrayBuffer());
+        const data = await res.json() as { audio_base64?: string; alignment?: Parameters<typeof alignmentToWords>[0] };
+        if (!data.audio_base64) throw new Error('ElevenLabs returned no audio.');
+        return { bytes: Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0)), words: alignmentToWords(data.alignment) };
       }
       const voice = OPENAI_VOICES.has((body.voice ?? '').trim()) ? (body.voice as string).trim() : 'marin';
       // gpt-4o-mini-tts steers on `instructions` (its `speed` param is ignored) — the delivery
-      // direction is where the energy/pacing lives, not a rate multiplier.
+      // direction is where the energy/pacing lives, not a rate multiplier. It returns NO timing
+      // (verified absent) — captions fall back to proportional chunking, honestly.
       const res = await fetch('https://api.openai.com/v1/audio/speech', {
         method: 'POST',
         headers: { Authorization: `Bearer ${openaiKey}`, 'content-type': 'application/json' },
@@ -118,7 +143,7 @@ Deno.serve(async (req) => {
         const data = await res.json().catch(() => ({} as { error?: { message?: string } }));
         throw new Error(data?.error?.message ?? `TTS provider returned ${res.status}`);
       }
-      return new Uint8Array(await res.arrayBuffer());
+      return { bytes: new Uint8Array(await res.arrayBuffer()), words: null };
     };
 
     // Partial failure still spends for what was actually synthesized (review finding: the early
@@ -131,17 +156,17 @@ Deno.serve(async (req) => {
           model: useEleven ? 'eleven_flash_v2_5' : 'gpt-4o-mini-tts',
         })
       : Promise.resolve(0);
-    const clips: { sceneIndex: number; url: string }[] = [];
+    const clips: { sceneIndex: number; url: string; words: { w: string; s: number; e: number }[] | null }[] = [];
     for (const s of scenes) {
-      let bytes: Uint8Array;
-      try { bytes = await synth(s.text); }
+      let out: { bytes: Uint8Array; words: { w: string; s: number; e: number }[] | null };
+      try { out = await synth(s.text); }
       catch (e) { await spendSoFar(); return json({ available: true, ok: false, error: e instanceof Error ? e.message : String(e), clips }); }
       spentChars += s.text.length;
       const path = `${user.id}/studio/${folder}/vo-${crypto.randomUUID()}.mp3`;
-      const up = await admin.storage.from('project-assets').upload(path, bytes, { contentType: 'audio/mpeg', upsert: false });
+      const up = await admin.storage.from('project-assets').upload(path, out.bytes, { contentType: 'audio/mpeg', upsert: false });
       if (up.error) { await spendSoFar(); return json({ available: true, ok: false, error: `Could not store scene ${s.index + 1}'s audio: ${up.error.message}`, clips }); }
       const { data: pub } = admin.storage.from('project-assets').getPublicUrl(path);
-      clips.push({ sceneIndex: s.index, url: pub.publicUrl });
+      clips.push({ sceneIndex: s.index, url: pub.publicUrl, words: out.words });
     }
 
     // Real cost: OpenAI gpt-4o-mini-tts ≈ $0.015/min ≈ 900 chars/min; ElevenLabs Flash $0.05/1k chars.

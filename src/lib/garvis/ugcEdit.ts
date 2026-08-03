@@ -144,11 +144,12 @@ export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<s
 
   const tracks: Record<string, unknown>[] = [];
 
-  // HOOK CARD — frame one IS the thumbnail in a vertical feed. Top third, bold, gone by 1.5s.
+  // HOOK CARD — frame one IS the thumbnail in a vertical feed. Top third, bold, on screen 2s
+  // (the researched floor: less than ~2s can't be read in one glance; entrance ≤0.5s).
   if (opts.hookText?.trim()) {
     tracks.push({
       clips: [{
-        start: 0, length: 1.5, transition: { out: 'fade' },
+        start: 0, length: 2, transition: { out: 'fade' },
         asset: {
           type: 'rich-text', text: opts.hookText.trim().slice(0, 60),
           font: { family: 'Montserrat ExtraBold', color: '#ffffff', size: 88, lineHeight: 1.1 },

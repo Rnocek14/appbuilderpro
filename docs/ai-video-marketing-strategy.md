@@ -535,6 +535,38 @@ and VideoStudio marketing reels:
 - Schema-correct rich-text animation (preset/duration — the old style-only shape was invalid)
   fixed in the UGC hook card too. 87 checks across the three video suites.
 
+**Round 7 (Aug 3) — the evidence pass: what editing actually buys, and the automation verdict:**
+
+Three deep sweeps (retention evidence hierarchy; teardown of every leading auto-editor; the
+editor decision-rule anatomy) answered "can automated production reach the level we need":
+
+- **The evidence hierarchy (what moves retention, ranked)**: hook/first-3s (up to ~half of a
+  video's measured value) > topic/format > script + length discipline > editing HYGIENE
+  (captions +12% view time, scene change every 3-5s = 58%-vs-41% retention, dead-air removal,
+  clean audio) > delivery >> edit POLISH (no positive evidence at any tier for
+  educational/talking-head; 6.9M-session study: informal beats studio; polish reads as
+  out-of-place to 59% of TikTok users). Conclusion: the level we need IS the automatable level —
+  hygiene + hook + script, which is what this platform concentrates on.
+- **Auto-editor state of the art**: no shipping tool achieves full-auto professional level
+  (consensus: 60-80% rough cut + human finish). Publishable-as-is slices — word-timed captions,
+  silence removal, reframe — are exactly what we built. NOTHING shipping places emphasis by
+  meaning (all zoom on cadence); that whitespace is ours because the script exists BEFORE the
+  footage.
+- **What shipped from it**: `editPlan.ts` (14 checks) — the emphasis engine: numbers/turn-words/
+  absolutes/questions score each line, turning points get the hard zoom + the whoosh rides THEIR
+  cut, capped ~1/15s, never adjacent, never the hook or CTA (face stays steady — the trust rule).
+  Caption chunking to the 3-7-word spec with phrase-boundary splits and the no-dangling-word
+  subtitling rule. ElevenLabs `with-timestamps` → WORD-EXACT caption cues (no ASR errors — the
+  #1 complaint against every transcription-first tool); OpenAI path falls back proportional,
+  honestly. Hook cards hold 2s (the readable-in-one-glance floor).
+- **Policy alignment**: July 2025 originality crackdowns (YouTube "inauthentic content", Meta)
+  demote templated mass-production — per-video human value (cited scripts, real voice/face,
+  varied emphasis) is the protection. The 3-5-channel disclosed strategy sits on the right side.
+- **Caregiver lane reality check**: realistic targets 50-65% avg-view, ≥70-80% first-3s hold;
+  the niche's engagement driver is personal reality + authenticity, and over-editing measurably
+  fatigues older audiences — the calm lane's restraint is the evidence-backed choice, not a
+  compromise.
+
 ## 10. Why this wins
 
 1. **The rails already exist here** — approval spine, publishing, metrics sync, credits, breaker,
