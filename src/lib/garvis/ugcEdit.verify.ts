@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/ugcEdit.verify.ts
-import { buildUgcEdit, describeUgcEdit, scriptToShotList, type UgcTake } from './ugcEdit';
+import { buildUgcEdit, cutTimesS, describeUgcEdit, scriptToShotList, type UgcTake } from './ugcEdit';
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -31,6 +31,12 @@ type Edit = { timeline: { tracks: { clips: Clip[] }[] }; output: Record<string, 
     aroll.clips.every((c) => c.asset.transcode === true && c.asset.volume === 1));
   check('captions transcribe the footage itself (alias://aroll), karaoke style, first take aliased',
     caps.clips[0].asset.src === 'alias://aroll' && (caps.clips[0].asset.animation as { style: string }).style === 'karaoke' && aroll.clips[0].alias === 'aroll');
+  check('captions sit LOWER-middle (Shotstack +y is UP, so the offset is negative) in a wrap pill',
+    (caps.clips[0] as { offset?: { y: number } }).offset!.y === -0.2
+    && (caps.clips[0].asset.background as { wrap: boolean }).wrap === true);
+  check('the light boost grade rides every take by default; grade:false removes it',
+    aroll.clips.every((c) => (c as { filter?: string }).filter === 'boost')
+    && (buildUgcEdit(takes, { grade: false }) as Edit).timeline.tracks[1].clips.every((c) => (c as { filter?: string }).filter === undefined));
   check('hook card dies by 1.5s (after 1s half the scroll is gone)', hook.clips[0].length === 1.5);
   check('b-roll is a MUTED layer over continuous voice at its chosen moment', broll.clips[0].start === 8 && broll.clips[0].length === 3);
   check('music rides quiet under speech (0.15) and fades out',
@@ -51,6 +57,57 @@ type Edit = { timeline: { tracks: { clips: Clip[] }[] }; output: Record<string, 
   check('describe line is honest about what the edit contains',
     describeUgcEdit(takes, { hookText: 'x', broll: [{ url: 'u', kind: 'image', atS: 1, lengthS: 2 }] }).includes('3 real takes')
     && describeUgcEdit([{ url: 'u' }]).includes('1 real take,'));
+}
+
+{
+  // THE SOUND LAYER + LANES. Explicit lengths (the auto-cut path) make cut times computable.
+  const timed: UgcTake[] = [
+    { url: 'https://cdn/x/a.mp4', lengthS: 2.15 },
+    { url: 'https://cdn/x/a.mp4', trimS: 2.91, lengthS: 2.24 },
+    { url: 'https://cdn/x/a.mp4', trimS: 6, lengthS: 3 },
+  ];
+  check('cut boundaries computed from explicit lengths; unknowable with any auto take',
+    JSON.stringify(cutTimesS(timed)) === JSON.stringify([2.15, 4.39])
+    && cutTimesS([{ url: 'u' }, { url: 'u', lengthS: 2 }]) === null);
+
+  const kit = { whooshUrl: 'https://cdn/sfx/whoosh.mp3', popUrl: 'https://cdn/sfx/pop.mp3', riserUrl: 'https://cdn/sfx/riser.mp3' };
+  const hot = buildUgcEdit(timed, { hookText: 'x', sfx: kit, lane: 'energetic' }) as Edit;
+  const hotSfx = hot.timeline.tracks[hot.timeline.tracks.length - 1].clips;
+  const vol = (c: Clip) => (c.asset as { volume: number }).volume;
+  const src = (c: Clip) => (c.asset as { src: string }).src;
+  check('energetic sound design: riser under the hook, pop on the card, a whoosh per cut',
+    hotSfx.length === 4 && src(hotSfx[0]).includes('riser') && src(hotSfx[1]).includes('pop')
+    && hotSfx.filter((c) => src(c).includes('whoosh')).length === 2);
+  check('SFX levels encode the measured convention: riser 0.06, pop 0.2, whoosh 0.12 vs voice at 1',
+    vol(hotSfx[0]) === 0.06 && vol(hotSfx[1]) === 0.2 && vol(hotSfx[2]) === 0.12);
+  check('the whoosh LEADS its cut by ~3 frames (2.15s cut → 2.05s start)',
+    hotSfx[2].start === 2.05 && hotSfx[3].start === 4.29);
+  check('energetic lane: pop captions + a hard shake on the first punch-in only',
+    ((hot.timeline.tracks[1].clips[0].asset.animation as { style: string }).style === 'pop')
+    && Array.isArray((hot.timeline.tracks[2].clips[1] as { offset?: { x: unknown } }).offset?.x)
+    && (hot.timeline.tracks[2].clips[0] as { offset?: unknown }).offset === undefined
+    && (hot.timeline.tracks[2].clips[2] as { offset?: unknown }).offset === undefined);
+
+  const calm = buildUgcEdit(timed, { hookText: 'x', sfx: kit }) as Edit;
+  const calmSfx = calm.timeline.tracks[calm.timeline.tracks.length - 1].clips;
+  check('calm lane (the default): no riser, no shake, karaoke captions, sparse whooshes',
+    !calmSfx.some((c) => src(c).includes('riser'))
+    && ((calm.timeline.tracks[1].clips[0].asset.animation as { style: string }).style === 'karaoke')
+    && calm.timeline.tracks[2].clips.every((c) => (c as { offset?: unknown }).offset === undefined));
+  const manyCuts: UgcTake[] = Array.from({ length: 9 }, (_, i) => ({ url: 'u', trimS: i * 2, lengthS: 2 }));
+  const sparse = buildUgcEdit(manyCuts, { sfx: { whooshUrl: kit.whooshUrl } }) as Edit;
+  check('calm whooshes cap at 3 across many cuts (the educational restraint rule)',
+    sparse.timeline.tracks[sparse.timeline.tracks.length - 1].clips.length === 3);
+
+  const blind = buildUgcEdit([{ url: 'u' }, { url: 'u' }], { sfx: { whooshUrl: kit.whooshUrl } }) as Edit;
+  check('unknown cut times place NO whooshes — never a blind guess (and no empty sfx track)',
+    blind.timeline.tracks.length === 2);
+  check('sound design is deterministic',
+    JSON.stringify(buildUgcEdit(timed, { hookText: 'x', sfx: kit, lane: 'energetic' })) === JSON.stringify(hot));
+  check('describe line counts the sound cues and the grade honestly',
+    describeUgcEdit(timed, { hookText: 'x', sfx: kit, lane: 'energetic' }).includes('4 sound cues')
+    && describeUgcEdit(timed, {}).includes('light color boost')
+    && !describeUgcEdit(timed, { grade: false }).includes('light color boost'));
 }
 
 {

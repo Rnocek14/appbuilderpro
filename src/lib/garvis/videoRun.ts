@@ -126,6 +126,34 @@ export async function uploadTake(clusterId: string, file: File): Promise<string>
   return supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
 }
 
+/** Decode an uploaded take's audio in the browser and reduce it to a window-RMS envelope — the
+ *  input to the pure auto-cut core (detectSpeech). Returns null when the audio can't be decoded
+ *  (odd container, no audio track): the caller keeps the take WHOLE — analysis failure never
+ *  discards footage. */
+export async function analyzeTakeAudio(file: File): Promise<{ envelope: number[]; windowS: number; durationS: number } | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const Ctx = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return null;
+    const ctx = new Ctx();
+    try {
+      const audio = await ctx.decodeAudioData(buf);
+      const windowS = 0.05;
+      const win = Math.max(1, Math.round(audio.sampleRate * windowS));
+      const ch0 = audio.getChannelData(0);
+      const ch1 = audio.numberOfChannels > 1 ? audio.getChannelData(1) : null;
+      const envelope: number[] = [];
+      for (let i = 0; i < ch0.length; i += win) {
+        const end = Math.min(i + win, ch0.length);
+        let sum = 0;
+        for (let j = i; j < end; j++) { const s = ch1 ? (ch0[j] + ch1[j]) / 2 : ch0[j]; sum += s * s; }
+        envelope.push(Math.sqrt(sum / (end - i)));
+      }
+      return { envelope, windowS, durationS: audio.duration };
+    } finally { void ctx.close(); }
+  } catch { return null; }
+}
+
 /** Poll a render. With `clusterId`, a finished render is FINALIZED server-side: copied into durable
  *  storage (Shotstack URLs die in 24h) and recorded as a vault video row — with the AI-provenance
  *  stamp when the storyboard carried AI media, so the publish disclosure gate holds downstream. */

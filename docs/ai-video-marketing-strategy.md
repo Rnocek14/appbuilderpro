@@ -494,6 +494,30 @@ grammar; the hybrid real+AI doctrine) encoded as:
   cutaways + "Illustrations AI-assisted." in the caption). A cut with NO AI elements carries no
   provenance and no AI mark — the honest inverse.
 
+**Round 6 (Aug 3) — CapCut parity, researched and encoded:**
+
+Two sweeps (the CapCut-grade edit anatomy with measured numbers; the Shotstack v1.14.1 schema
+verified from the official OAS repo) closed the gap between "an edit" and "a CapCut-grade edit":
+
+- **AUTO JUMP-CUT** (`autoCut.ts`, 15 checks): browser-side audio decode → window-RMS envelope →
+  adaptive speech detection → pauses >0.5s (0.3s energetic) become jump cuts with the pro padding
+  (0.09s front / 0.15s tail — the TimeBolt/Descript convention). Analysis failure keeps the take
+  WHOLE — never a silent discard. Silence removal supplies the winning 2-4s cut cadence
+  automatically, and the punch alternation disguises every cut it makes.
+- **THE SFX LAYER**: whooshes riding the cuts (−18dB, leading by ~3 frames), pop on the hook
+  card (−14dB), riser under an energetic hook (−24dB). Sparse (≤3) on the calm lane, dense (≤12)
+  energetic. CC0-attested kit only (the musicBed rule); unknown cut times place NOTHING — auto-cut
+  makes the timeline computable, which is what unlocks precise cues.
+- **LANES**: calm (caregiver/educational — karaoke captions, restraint, no shake: the 2026
+  "dynamic minimalism" read) vs energetic (UGC-ad — pop captions, tighter cuts, a CapCut hard-shake
+  on the first punch-in via rapid X-offset keyframes).
+- **Fixes from the schema verification**: captions were positioned ABOVE center (Shotstack +y
+  moves UP — real bug); now lower-middle (-0.2) in a wrap:true pill with a 3px stroke; light
+  'boost' grade on every take (correct, don't grade); active-word yellow #f7c204.
+- Known ceiling, documented honestly: no audio ducking/sidechain, no emoji in rich captions, no
+  speed ramps (single scalar only), no server-side silence detection — all verified absent from
+  the Edit API as of v1.14.1.
+
 ## 10. Why this wins
 
 1. **The rails already exist here** — approval spine, publishing, metrics sync, credits, breaker,

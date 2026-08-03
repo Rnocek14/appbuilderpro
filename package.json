@@ -16,6 +16,7 @@
     "verify:factchannel": "tsx src/lib/garvis/factChannel.verify.ts",
     "verify:growthloop": "tsx src/lib/garvis/growthLoop.verify.ts",
     "verify:ugcedit": "tsx src/lib/garvis/ugcEdit.verify.ts",
+    "verify:autocut": "tsx src/lib/garvis/autoCut.verify.ts",
     "verify:objective": "tsx src/lib/garvis/objective.verify.ts",
     "verify:profiles": "tsx src/lib/garvis/profiles.verify.ts",
     "verify:liveness": "tsx src/lib/garvis/liveness.verify.ts",

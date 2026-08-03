@@ -13,6 +13,11 @@
 //   - B-ROLL AS A LAYER over continuous A-roll audio (muted overlay track, 2-5s inserts),
 //     never a cut that interrupts the voice.
 //   - MUSIC UNDER SPEECH at ~0.15 volume (platforms normalize to -14 LUFS; hot mixes get squashed).
+//   - SFX ON THE CUTS (whoosh −18dB leading the cut by ~3 frames, pop on the hook card, riser
+//     under the hook) — the most-cited amateur/pro divider after pacing; sparse for the calm lane,
+//     dense for energetic. Cue times come from explicit take lengths (the auto-cut path).
+//   - LIGHT GRADE ('boost' filter — contrast+saturation lift, never a LUT) + a hard-shake on the
+//     energetic lane's first punch-in (rapid ±1% X-offset keyframes, edges hidden by the overscale).
 // The honesty spine: real footage is the SPINE and is never fabricated; AI elements enter only as
 // clearly-provenance-stamped b-roll inserts (the hybrid lane), and phone-source quirks are fixed
 // with transcode, not faked. Deterministic — same inputs, same edit JSON.
@@ -32,32 +37,105 @@ export interface UgcBroll {
   lengthS: number;      // 2-5s is the native band; clamped to 1-8
 }
 
+/** The CC0-attested sound kit (the musicBed rule applied to SFX): only URLs the operator supplies
+ *  ride a render — no invented sounds. Whatever is missing is simply skipped, honestly. */
+export interface SfxKit {
+  whooshUrl?: string;       // rides the cuts (placed ~0.1s EARLY — the transient peaks before the visual change)
+  popUrl?: string;          // the hook card landing
+  riserUrl?: string;        // under the hook's first seconds (energetic lane only)
+}
+
 export interface UgcEditOpts {
   hookText?: string;        // the frame-one card; clipped to 60 chars
-  accent?: string;          // brand color for the active caption word + hook underline
+  accent?: string;          // active caption word color (default #f7c204 — the researched caption yellow)
   musicUrl?: string;        // CC0 bed; rides at duckedVolume under speech
   broll?: UgcBroll[];
   punchScale?: number;      // alternation punch (default 1.15; clamped 1.05-1.3 — past ~135% goes soft)
   captions?: boolean;       // default true
+  /** calm = educational/caregiver (sparse SFX, karaoke captions, no shake — the 2026 "dynamic
+   *  minimalism" read); energetic = UGC-ad (dense SFX, pop captions, a shake on the first punch).
+   *  Default calm. */
+  lane?: 'calm' | 'energetic';
+  captionStyle?: 'karaoke' | 'pop' | 'highlight';  // default: karaoke (calm) / pop (energetic)
+  sfx?: SfxKit;
+  grade?: boolean;          // default true: the light-touch 'boost' filter (contrast+saturation lift, no LUT)
 }
 
 const clip01 = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Interior cut boundaries on the timeline — computable ONLY when every take carries an explicit
+ *  length (the auto-cut path guarantees it). Returns null when any take is 'auto': placing sound
+ *  cues blind would be a guess, and this edit never guesses. */
+export function cutTimesS(takes: UgcTake[]): number[] | null {
+  if (takes.some((t) => t.lengthS === undefined)) return null;
+  const times: number[] = [];
+  let t = 0;
+  for (let i = 0; i < takes.length - 1; i++) { t += takes[i].lengthS!; times.push(r2(t)); }
+  return times;
+}
+
+/** Deterministic even spread: at most `max` of `xs`, keeping the overall spacing. */
+const spread = (xs: number[], max: number): number[] =>
+  xs.length <= max ? xs : Array.from({ length: max }, (_, i) => xs[Math.floor((i * xs.length) / max)]);
+
+// SFX levels vs voice at 1.0, from the measured convention: whooshes −18dB (≈0.12), impacts/pops
+// −14dB (≈0.2), risers −24dB (≈0.06). The whoosh leads its cut by ~3 frames.
+const SFX_VOLUME = { whoosh: 0.12, pop: 0.2, riser: 0.06 } as const;
+const WHOOSH_LEAD_S = 0.1;
+
+/** The sound-design layer: riser under the hook (energetic), pop on the hook card, whooshes riding
+ *  the cuts — sparse for the calm lane (≤3, the educational convention), dense for energetic (≤12).
+ *  Only sounds the operator attested (SfxKit) are placed; unknown cut times place nothing. */
+function sfxClips(takes: UgcTake[], opts: UgcEditOpts): Record<string, unknown>[] {
+  const kit = opts.sfx;
+  if (!kit) return [];
+  const lane = opts.lane ?? 'calm';
+  const clips: Record<string, unknown>[] = [];
+  if (kit.riserUrl?.trim() && lane === 'energetic') {
+    clips.push({ start: 0, length: 3, asset: { type: 'audio', src: kit.riserUrl.trim(), volume: SFX_VOLUME.riser, effect: 'fadeOut' } });
+  }
+  if (kit.popUrl?.trim() && opts.hookText?.trim()) {
+    clips.push({ start: 0, length: 1.5, asset: { type: 'audio', src: kit.popUrl.trim(), volume: SFX_VOLUME.pop } });
+  }
+  const cuts = cutTimesS(takes);
+  if (kit.whooshUrl?.trim() && cuts?.length) {
+    for (const c of spread(cuts, lane === 'energetic' ? 12 : 3)) {
+      clips.push({ start: Math.max(0, r2(c - WHOOSH_LEAD_S)), length: 1, asset: { type: 'audio', src: kit.whooshUrl.trim(), volume: SFX_VOLUME.whoosh } });
+    }
+  }
+  return clips;
+}
+
+// The CapCut "hard shake", mechanically: rapid small X-offset keyframes (±1% of frame width over
+// ~0.3s) on the first punched take — the hook landing. The punch's 115% overscale hides the edges.
+const SHAKE_X = [
+  { from: 0, to: 0.01, start: 0, length: 0.07, interpolation: 'linear' },
+  { from: 0.01, to: -0.008, start: 0.07, length: 0.07, interpolation: 'linear' },
+  { from: -0.008, to: 0.005, start: 0.14, length: 0.07, interpolation: 'linear' },
+  { from: 0.005, to: 0, start: 0.21, length: 0.07, interpolation: 'linear' },
+];
 
 /** Compile real takes + options into a Shotstack edit. Track order (top→bottom): hook card,
  *  captions, b-roll overlay, A-roll, music. Pure + deterministic. */
 export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<string, unknown> {
   const punch = clip01(opts.punchScale ?? 1.15, 1.05, 1.3);
-  const accent = opts.accent || '#FFD166';
+  const accent = opts.accent || '#f7c204';
+  const lane = opts.lane ?? 'calm';
 
   // A-ROLL: consecutive smart clips (start 'auto' sequences them; length 'auto' = natural take
   // length) with alternating punch. Every take carries a gentle slow push on top of its base
-  // framing; transcode fixes phone rotation/VFR sync. The first take is aliased for captions.
+  // framing; transcode fixes phone rotation/VFR sync; a light 'boost' grade lifts contrast +
+  // saturation without a LUT (the UGC norm: correct, don't grade). The first take is aliased for
+  // captions; the energetic lane shakes the first punch-in — the hook landing.
   const aroll = takes.map((t, i) => {
     const base = i % 2 === 1 ? punch : 1.0;
     return {
       start: i === 0 ? 0 : 'auto', length: t.lengthS ?? 'auto',
       fit: 'crop',
       scale: [{ from: base, to: Math.round(base * 1.06 * 100) / 100, start: 0, length: t.lengthS ?? 8, interpolation: 'bezier', easing: 'easeInOut' }],
+      ...(opts.grade !== false ? { filter: 'boost' } : {}),
+      ...(lane === 'energetic' && i === 1 ? { offset: { x: SHAKE_X } } : {}),
       asset: { type: 'video', src: t.url, transcode: true, volume: 1, ...(t.trimS ? { trim: t.trimS } : {}) },
       ...(i === 0 ? { alias: 'aroll' } : {}),
     };
@@ -85,7 +163,11 @@ export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<s
     });
   }
 
-  // WORD-KARAOKE CAPTIONS from the A-roll's own audio — lower-middle, inside the safe zone.
+  // WORD-ANIMATED CAPTIONS from the A-roll's own audio — karaoke fill for the calm lane, per-word
+  // pop for energetic; active word in caption yellow; a wrap:true pill (the CapCut badge look, not
+  // a full-width slab); 3px stroke (load-bearing on bright footage). Positive offset.y moves UP in
+  // Shotstack, so lower-middle is NEGATIVE: -0.2 puts the block ~30% from the bottom, above the
+  // platforms' bottom-UI dead zone.
   if (opts.captions !== false) {
     tracks.push({
       clips: [{
@@ -93,12 +175,12 @@ export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<s
         asset: {
           type: 'rich-caption', src: 'alias://aroll',
           font: { family: 'Montserrat ExtraBold', color: '#ffffff', size: 76, lineHeight: 1.15 },
-          stroke: { color: '#000000', width: 2 },
-          background: { color: '#000000', opacity: 0.5, padding: 20, borderRadius: 16 },
+          stroke: { color: '#000000', width: 3 },
+          background: { color: '#000000', opacity: 0.5, padding: 20, borderRadius: 16, wrap: true },
           active: { font: { color: accent } },
-          animation: { style: 'karaoke' },
+          animation: { style: opts.captionStyle ?? (lane === 'energetic' ? 'pop' : 'karaoke') },
         },
-        offset: { y: 0.14 },
+        offset: { y: -0.2 },
       }],
     });
   }
@@ -125,6 +207,11 @@ export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<s
     });
   }
 
+  // THE SFX LAYER — the most-cited amateur/pro divider after pacing. All clips mix; z-order is
+  // meaningless for audio, so it rides at the bottom.
+  const sfx = sfxClips(takes, opts);
+  if (sfx.length) tracks.push({ clips: sfx });
+
   return {
     timeline: { background: '#000000', tracks },
     output: { format: 'mp4', resolution: 'hd', aspectRatio: '9:16', fps: 30 },
@@ -134,10 +221,13 @@ export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<s
 /** One honest line describing the edit — for the artifact record and the approval preview. */
 export function describeUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): string {
   const parts = [`${takes.length} real take${takes.length === 1 ? '' : 's'}, hard cuts, alternating punch-ins`];
-  if (opts.captions !== false) parts.push('word-karaoke captions from the footage\'s own audio');
+  if (opts.captions !== false) parts.push('word-animated captions from the footage\'s own audio');
   if (opts.hookText?.trim()) parts.push('frame-one hook card');
   if (opts.broll?.length) parts.push(`${opts.broll.length} b-roll insert${opts.broll.length === 1 ? '' : 's'} over continuous voice`);
   if (opts.musicUrl?.trim()) parts.push('music bed ducked under speech');
+  const cues = sfxClips(takes, opts).length;
+  if (cues) parts.push(`${cues} sound cue${cues === 1 ? '' : 's'}`);
+  if (opts.grade !== false) parts.push('light color boost');
   return parts.join(' · ');
 }
 

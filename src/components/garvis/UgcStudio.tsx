@@ -8,9 +8,10 @@
 // "Illustrations AI-assisted"; a video with NO AI elements carries no provenance — honestly.
 
 import { useState } from 'react';
-import { Loader2, Upload, Film, Send, Sparkles } from 'lucide-react';
-import { buildUgcEdit, describeUgcEdit, type UgcBroll, type UgcTake } from '../../lib/garvis/ugcEdit';
-import { startRenderEdit, pollRender, uploadTake, saveRenderedVideo } from '../../lib/garvis/videoRun';
+import { Loader2, Upload, Film, Send, Sparkles, Scissors, Volume2 } from 'lucide-react';
+import { buildUgcEdit, describeUgcEdit, type SfxKit, type UgcBroll, type UgcTake } from '../../lib/garvis/ugcEdit';
+import { detectSpeech, segmentsToTakes, cutSummary } from '../../lib/garvis/autoCut';
+import { startRenderEdit, pollRender, uploadTake, saveRenderedVideo, analyzeTakeAudio } from '../../lib/garvis/videoRun';
 import { generateSceneImage } from '../../lib/garvis/channelsRun';
 import { illustrationPrompt } from '../../lib/garvis/factChannel';
 import { aiProvenance, withDisclosure, type AiProvenance } from '../../lib/garvis/mediaProvenance';
@@ -20,6 +21,10 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 
 const PLATFORMS: Platform[] = ['tiktok', 'youtube', 'instagram', 'facebook'];
+
+// The operator's CC0 sound kit survives reloads — attested once, used on every cut after.
+const SFX_STORE = 'garvis-ugc-sfx';
+const loadSfx = (): SfxKit => { try { return JSON.parse(localStorage.getItem(SFX_STORE) || '{}') as SfxKit; } catch { return {}; } };
 
 export function UgcStudio({ worldId, clusterId, onToast }: {
   worldId: string; clusterId: string; onToast: (k: 'success' | 'error' | 'info', m: string) => void;
@@ -33,7 +38,22 @@ export function UgcStudio({ worldId, clusterId, onToast }: {
   const [done, setDone] = useState<{ url: string; provenance: AiProvenance | null } | null>(null);
   const [platforms, setPlatforms] = useState<Platform[]>(['tiktok', 'youtube', 'instagram']);
   const [caption, setCaption] = useState('');
+  const [autoCut, setAutoCut] = useState(true);
+  const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
+  const [sfx, setSfx] = useState<SfxKit>(loadSfx);
+  const [sfxOpen, setSfxOpen] = useState(false);
 
+  const sfxCount = [sfx.whooshUrl, sfx.popUrl, sfx.riserUrl].filter((u) => u?.trim()).length;
+  const editOpts = () => ({ hookText: hook, broll, lane, ...(sfxCount ? { sfx } : {}) });
+  const saveSfx = (patch: Partial<SfxKit>) => {
+    const next = { ...sfx, ...patch };
+    setSfx(next);
+    try { localStorage.setItem(SFX_STORE, JSON.stringify(next)); } catch { /* private mode — kit lives for the session */ }
+  };
+
+  // Upload, then AUTO-CUT: decode the take's audio in the browser, find the speech, and split the
+  // take into precisely-trimmed sub-clips — every pause >0.5s (0.3s on the energetic lane) becomes
+  // a jump cut the punch alternation then disguises. Undecodable audio keeps the take whole.
   const doUpload = async (files: FileList | null) => {
     if (!files?.length) return;
     setBusy('Uploading takes…');
@@ -41,7 +61,15 @@ export function UgcStudio({ worldId, clusterId, onToast }: {
       for (const f of Array.from(files)) {
         if (!f.type.startsWith('video/')) { onToast('info', `${f.name} isn't a video — skipped.`); continue; }
         const url = await uploadTake(clusterId, f);
-        setTakes((cur) => [...cur, { url }]);
+        const audio = autoCut ? await analyzeTakeAudio(f) : null;
+        if (audio) {
+          const segs = detectSpeech(audio.envelope, audio.windowS, audio.durationS, lane === 'energetic' ? { cutGapS: 0.3 } : undefined);
+          setTakes((cur) => [...cur, ...segmentsToTakes(url, segs)]);
+          onToast('info', `${f.name}: ${cutSummary(segs, audio.durationS)}.`);
+        } else {
+          if (autoCut) onToast('info', `${f.name}: couldn't read the audio — keeping the take whole.`);
+          setTakes((cur) => [...cur, { url }]);
+        }
       }
       onToast('success', 'Takes uploaded — order is the cut order.');
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Upload failed.'); }
@@ -67,7 +95,7 @@ export function UgcStudio({ worldId, clusterId, onToast }: {
     setBusy('Rendering the edit…'); setDone(null);
     try {
       const provenance = broll.length ? aiProvenance('image', 'ugc-cutaways', Date.now()) : null;
-      const start = await startRenderEdit(buildUgcEdit(takes, { hookText: hook, broll }));
+      const start = await startRenderEdit(buildUgcEdit(takes, editOpts()));
       if (start.available === false) { onToast('info', 'Rendering isn\'t configured — add SHOTSTACK_API_KEY (System health).'); return; }
       if (!start.ok || !start.id) { onToast('error', start.error ?? 'The render could not start.'); return; }
       for (let i = 0; i < 45; i++) {
@@ -78,7 +106,7 @@ export function UgcStudio({ worldId, clusterId, onToast }: {
           await saveRenderedVideo(clusterId, hook || 'UGC cut', st.url, start.id);
           setDone({ url: st.url, provenance });
           setCaption((c) => c || hook);
-          onToast('success', `Cut rendered — ${describeUgcEdit(takes, { hookText: hook, broll })}.`);
+          onToast('success', `Cut rendered — ${describeUgcEdit(takes, editOpts())}.`);
           return;
         }
         if (st.status === 'failed') { onToast('error', 'The render failed on the provider.'); return; }
@@ -114,9 +142,37 @@ export function UgcStudio({ worldId, clusterId, onToast }: {
           <Upload size={14} /> Upload takes
           <input type="file" accept="video/*" multiple className="hidden" onChange={(e) => void doUpload(e.target.files)} />
         </label>
-        <span className="text-[11px] text-forge-dim">{takes.length ? `${takes.length} take${takes.length === 1 ? '' : 's'} — cut in upload order` : 'film per the episode shot list, then drop the takes here'}</span>
+        <span className="text-[11px] text-forge-dim">{takes.length ? `${takes.length} clip${takes.length === 1 ? '' : 's'} — cut in upload order` : 'film per the episode shot list, then drop the takes here'}</span>
         {takes.length > 0 && <button onClick={() => { setTakes([]); setBroll([]); setDone(null); }} className="text-[11px] text-forge-dim hover:text-forge-ink">clear</button>}
       </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+        <button onClick={() => setAutoCut(!autoCut)} title="Silence removal: every pause becomes a jump cut, the CapCut-grade pacing device. Applied as takes are uploaded."
+          className={cn('flex items-center gap-1 rounded-lg border px-2 py-1', autoCut ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+          <Scissors size={11} /> Auto-cut pauses
+        </button>
+        <span className="text-forge-dim">lane:</span>
+        {(['calm', 'energetic'] as const).map((l) => (
+          <button key={l} onClick={() => setLane(l)}
+            title={l === 'calm' ? 'Educational/caregiver: karaoke captions, sparse sound cues, no shake' : 'UGC-ad: pop captions, tighter cuts, dense sound cues, a shake on the first punch-in'}
+            className={cn('rounded-lg border px-2 py-1', lane === l ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+            {l}
+          </button>
+        ))}
+        <button onClick={() => setSfxOpen(!sfxOpen)}
+          className={cn('flex items-center gap-1 rounded-lg border px-2 py-1', sfxCount ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+          <Volume2 size={11} /> Sound kit{sfxCount ? ` (${sfxCount})` : ''}
+        </button>
+      </div>
+      {sfxOpen && (
+        <div className="mt-2 space-y-1.5 rounded-xl border border-forge-border p-2.5">
+          <p className="text-[11px] text-forge-dim">CC0 sounds only (Mixkit, Pixabay) — paste hosted mp3 URLs. Only what you add rides the cuts; whooshes lead each cut, the pop lands the hook card, the riser runs under an energetic hook.</p>
+          {([['whooshUrl', 'whoosh (on the cuts)'], ['popUrl', 'pop (hook card)'], ['riserUrl', 'riser (energetic hook)']] as const).map(([k, label]) => (
+            <input key={k} value={sfx[k] ?? ''} onChange={(e) => saveSfx({ [k]: e.target.value })} placeholder={label}
+              className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
+          ))}
+        </div>
+      )}
 
       <div className="mt-2 flex flex-wrap gap-2">
         <input value={hook} onChange={(e) => setHook(e.target.value)} placeholder="frame-one hook card (5-8 words)"
