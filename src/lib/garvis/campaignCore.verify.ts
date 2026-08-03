@@ -104,5 +104,29 @@ const emptyGeneric = composeCampaign({ type: 'announce' } as CampaignInput);
 ok('generic empty: warns to say what you\'re announcing', emptyGeneric.warnings.some((w) => /announc/i.test(w)));
 ok('generic empty: surfaces an [EDIT] hole', JSON.stringify(emptyGeneric).includes('[EDIT'));
 
+// ---- long address: the front headline degrades the ADDRESS, never the price (48-char print gate) ----
+const long = composeCampaign({
+  type: 'just_listed', agentName: 'Jane Doe', address: '123 Shore Dr, Lake Geneva, WI', price: '$1,150,000',
+  beds: '4', baths: '3', highlight: 'Private pier', area: 'Lake Geneva', photoUrl: 'https://example.com/h.jpg',
+} as CampaignInput);
+ok('long listed: front headline fits the 48-char print gate', long.postcard.front.headline.length <= 48);
+ok('long listed: the price survives on the front', long.postcard.front.headline.includes('$1,150,000'));
+ok('long listed: degrades to the street, not gibberish', long.postcard.front.headline.includes('123 Shore Dr'));
+ok('long listed: full headline stays complete for the campaign title', long.headline.includes('Lake Geneva, WI') && long.headline.includes('$1,150,000'));
+
+// ---- listing-true back: property facts, not the generic trades copy ----
+ok('listed back: headline is the address', listed.postcard.back.headline === '123 Maple St');
+ok('listed back: states price + specs', listed.postcard.back.body.includes('Offered at $450,000') && listed.postcard.back.body.includes('4 bd · 3 ba'));
+ok('listed back: carries the highlight', listed.postcard.back.body.includes('Remodeled kitchen'));
+ok('listed back: no trades copy ("our real work")', !/real work/i.test(JSON.stringify(listed.postcard.back)));
+const sold = composeCampaign({ type: 'just_sold', address: '9 Oak St, Lake Geneva, WI', price: '$800,000', agentName: 'Jane' } as CampaignInput);
+ok('sold back: says Sold at the price', sold.postcard.back.body.includes('Sold at $800,000'));
+ok('sold back: no trades copy', !/real work/i.test(JSON.stringify(sold.postcard.back)));
+const oh = composeCampaign({ type: 'open_house', address: '9 Oak St', openWhen: 'Sat 1–3pm', agentName: 'Jane' } as CampaignInput);
+ok('open house back: names the time', oh.postcard.back.body.includes('Sat 1–3pm'));
+ok('open house back: no forced price hole (price is optional at an open house)', !oh.postcard.back.body.includes('[EDIT: price'));
+ok('open house back: offer is the invite, not a repeat of address+time', oh.postcard.back.offer === 'Come see it in person.');
+ok('farm (find_sellers) keeps the concept back, not listing facts', !farm.postcard.back.body.includes('Offered at'));
+
 console.log(`\ncampaignCore.verify: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

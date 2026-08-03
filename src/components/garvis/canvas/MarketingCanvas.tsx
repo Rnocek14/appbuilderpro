@@ -32,6 +32,7 @@ import {
 } from '../../../lib/garvis/farmRun';
 import { parseFarmCsv, partitionMailable, farmMath, farmCsv, type FarmRecipient, type FarmParseResult } from '../../../lib/garvis/farm';
 import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
+import { listingChoices, listingFill, choiceLabel } from '../../../lib/garvis/mlsToCampaign';
 import { supabase } from '../../../lib/supabase';
 import { EmailBoard } from './EmailBoard';
 import { BrandBoard } from './BrandBoard';
@@ -154,7 +155,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
 
       {open === 'center' && (
         <DetailsSheet
-          realEstate={realEstate} initial={details} agent={agent} phone={phone} brand={brand}
+          realEstate={realEstate} worldId={worldId} initial={details} agent={agent} phone={phone} brand={brand}
           targetCluster={targetCluster} onToast={onToast}
           onClose={() => setOpen(null)}
           onSave={(d) => {
@@ -212,8 +213,8 @@ function Sheet({ emoji, title, lead, onClose, children }: { emoji: string; title
 }
 
 // ---------- Details ----------
-function DetailsSheet({ realEstate, initial, agent, phone, brand, targetCluster, onToast, onClose, onSave }: {
-  realEstate: boolean; initial: CampaignInput | null; agent: string; phone: string; brand: MailerBrand | null;
+function DetailsSheet({ realEstate, worldId, initial, agent, phone, brand, targetCluster, onToast, onClose, onSave }: {
+  realEstate: boolean; worldId: string; initial: CampaignInput | null; agent: string; phone: string; brand: MailerBrand | null;
   targetCluster: string | null; onToast: Toast; onClose: () => void; onSave: (d: CampaignInput) => void;
 }) {
   const types = campaignsFor(realEstate);
@@ -232,6 +233,42 @@ function DetailsSheet({ realEstate, initial, agent, phone, brand, targetCluster,
   const [photoUrl, setPhotoUrl] = useState(initial?.photoUrl ?? null);
   const [uploading, setUploading] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
+
+  // The MLS→composer seam: her synced listings offered as one-tap fill, so price/beds/baths the
+  // database already holds never get retyped. No feed or no matching rows → nothing renders
+  // (honest empty state). Same world-scoped read as MarketDataPanel (plus legacy unscoped rows).
+  const [mlsRows, setMlsRows] = useState<MlsRow[]>([]);
+  const [mlsPicked, setMlsPicked] = useState<string | null>(null);
+  useEffect(() => {
+    if (!realEstate) return;
+    let live = true;
+    let q = supabase.from('mls_listings')
+      .select('listing_key, status, list_price, close_price, address1, city, zip, property_type, beds, baths, sqft, list_date, close_date, dom')
+      .order('modified_at', { ascending: false });
+    if (worldId) q = q.or(`world_id.eq.${worldId},world_id.is.null`);
+    q.limit(400).then(({ data, error }) => {
+      if (live && !error) setMlsRows((data ?? []) as MlsRow[]);
+    });
+    return () => { live = false; };
+  }, [realEstate, worldId]);
+  const nowIso = useMemo(() => new Date().toISOString(), []);
+  const mlsChoices = useMemo(
+    () => (realEstate && type ? listingChoices(mlsRows, type, nowIso) : []),
+    [realEstate, type, mlsRows, nowIso],
+  );
+  const fillFromListing = (row: MlsRow) => {
+    if (!type) return;
+    const fill = listingFill(row, type);
+    // Non-empty feed values land in the fields; what the feed didn't say leaves the field alone
+    // (the composer's warnings/[EDIT] holes cover it — never a cleared field, never a guess).
+    if (fill.address) setAddress(fill.address);
+    if (fill.price) setPrice(fill.price);
+    if (fill.area) setArea(fill.area);
+    if (fill.beds) setBeds(fill.beds);
+    if (fill.baths) setBaths(fill.baths);
+    setMlsPicked(row.listing_key);
+    onToast('success', 'Filled from your MLS — add the highlight line and the real photo.');
+  };
   const addPhoto = async (file: File) => {
     if (!file.type.startsWith('image/')) { onToast('error', 'Pick an image (JPG or PNG).'); return; }
     if (!targetCluster) { onToast('info', 'Photo upload needs a saved business; the card still works without one.'); return; }
@@ -276,6 +313,22 @@ function DetailsSheet({ realEstate, initial, agent, phone, brand, targetCluster,
           </button>
         ))}
       </div>
+      {mlsChoices.length > 0 && (
+        <div style={{ marginBottom: 10 }}>
+          <div className="mkc-vlabel">{type === 'just_sold' ? 'Fill from your MLS — recent closes' : 'Fill from your MLS — active listings'}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {mlsChoices.map((r) => (
+              <button key={r.listing_key} type="button" onClick={() => fillFromListing(r)}
+                className={cn('mkc-vchip', mlsPicked === r.listing_key && 'on')}>
+                {choiceLabel(r, type!)}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--gv-paper-faint)', marginTop: 5 }}>
+            Facts fill from the synced feed — you still add the photo and the highlight, and every field stays editable.
+          </div>
+        </div>
+      )}
       <div className="mkc-form">
         {!realEstate ? (
           <>

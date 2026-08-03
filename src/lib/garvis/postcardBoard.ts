@@ -7,7 +7,7 @@
 // verified by postcardBoard.verify.ts. The impure half (load materials, call the image model, persist,
 // export) lives in postcardBoardRun.ts.
 
-import { compileMailer, type MailerSpec, type MailerConcept, type MailerBrand } from './mailer';
+import { compileMailer, FRONT_VARIANTS, type MailerSpec, type MailerConcept, type MailerBrand } from './mailer';
 import { canGenerateImage, buildImagePrompt, type ImagePromptResult } from './imagegen';
 import type { CampaignType } from './campaignCore';
 import type { BusinessContext } from './genesis';
@@ -15,7 +15,7 @@ import type { BusinessContext } from './genesis';
 /** A postcard tile's content: the compiled card, its look variant, and how its image was sourced. */
 export interface PostcardContent {
   spec: MailerSpec;
-  variant: number;                       // 0..2 — a genuinely different LOOK from the same materials
+  variant: number;                       // 0..FRONT_VARIANTS-1 — a genuinely different LOOK from the same materials
   kindId: string;
   campaignType: CampaignType;
   imageMode: 'photo' | 'brand' | 'ai';   // real photo · designed brand card · AI illustration
@@ -153,7 +153,7 @@ export interface RenditionResult {
  *  flags a visual change for the image model. Pure — the impure image regen happens in the run. */
 export function applyRendition(parent: PostcardContent, instruction: string): RenditionResult {
   const instr = (instruction ?? '').trim();
-  const variant = ((parent.variant + 1) % 3 + 3) % 3;
+  const variant = ((parent.variant + 1) % FRONT_VARIANTS + FRONT_VARIANTS) % FRONT_VARIANTS;
   const hm = HEADLINE_RE.exec(instr);
 
   if (hm) {

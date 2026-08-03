@@ -1,20 +1,27 @@
 // supabase/functions/mls-sync/index.ts
 // THE MLS DATA RAIL — a RESO Web API (OData) client, rebuilt in house style from the lakegen
 // harvest (its client was real; nothing ever called it and nowhere accepted credentials).
-// Actions (owner JWT only; the feed token is SEALED here — the browser never sees it):
+// Actions (owner JWT; the feed token is SEALED here — the browser never sees it):
 //   save   {base_url, token}  → probe the feed with ONE $top=1 query, store in provider_connections
 //   sync   {}                 → pull changed listings since the newest modified_at we hold (paged),
 //                               upsert into mls_listings, return HONEST counts
 //   status {}                 → connection + row counts (no secrets returned)
+// Plus the HEARTBEAT path (x-worker-secret, same contract as social-sync): twice a day the clock
+// fans the same incremental sync out across every owner with a saved feed, so market stats and
+// the composer's listing picker stay fresh without anyone pressing the button. One owner's dead
+// feed never blocks the rest. Cron syncs are owner-global (world_id null): the world stamp is a
+// per-call choice the operator makes; unscoped rows stay visible to every world's panels.
 // Honesty: a failed probe refuses to save; a partial sync says how far it got; field mapping uses
 // RESO standard names and stores what the feed SAID (status text as-is), never normalized guesses.
 //
 // Deploy: in package.json functions:deploy. No new global secrets — credentials are per-user.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { getConnection, upsertConnection } from '../_shared/connections.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
+import { stampHeartbeat } from '../_shared/heartbeat.ts';
 
 const PAGE = 200;
 const MAX_PAGES = 5; // one sync call moves at most 1000 listings — run it again to continue (said in the result)
@@ -52,6 +59,64 @@ function mapRow(uid: string, p: ResoProperty, worldId: string | null) {
   };
 }
 
+// The incremental sync, shared by the owner button and the heartbeat fan-out. Returns a plain
+// result (never a Response): ok=false carries the same honest message either caller relays.
+interface SyncResult { ok: boolean; error?: string; status?: number; fetched: number; upserted: number; pages: number; more?: boolean; note?: string }
+
+async function runSync(admin: SupabaseClient, uid: string, worldId: string | null): Promise<SyncResult> {
+  const conn = await getConnection(admin, uid, 'mls_reso');
+  const base = (conn?.metadata as { base_url?: string } | null)?.base_url;
+  if (!conn?.access_token || !base) {
+    return { ok: false, error: 'No MLS feed configured — save one first.', status: 400, fetched: 0, upserted: 0, pages: 0 };
+  }
+
+  // Cursor: the newest ModificationTimestamp we already hold (never a guessed date). A
+  // world-scoped sync cursors within that world only, so pointing the feed at a business for
+  // the first time replays the whole feed into it (1000/call, honest "more remain").
+  let newestQ = admin.from('mls_listings')
+    .select('modified_at').eq('owner_id', uid).not('modified_at', 'is', null);
+  if (worldId) newestQ = newestQ.eq('world_id', worldId);
+  const { data: newest } = await newestQ
+    .order('modified_at', { ascending: false }).limit(1).maybeSingle();
+  const since = (newest?.modified_at as string | undefined) ?? '1970-01-01T00:00:00Z';
+
+  let fetched = 0; let upserted = 0; let pages = 0; let hitCap = false;
+  let cursor = since;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = `${base}/Property?$filter=${encodeURIComponent(`ModificationTimestamp gt ${cursor}`)}&$orderby=${encodeURIComponent('ModificationTimestamp asc')}&$top=${PAGE}`;
+    const r = await safeFetch(url, { headers: { Authorization: `Bearer ${conn.access_token}`, Accept: 'application/json' } });
+    if (!r.ok) {
+      const txt = await r.text().catch(() => '');
+      return { ok: false, status: 502, fetched, upserted, pages,
+        error: `Feed error on page ${page + 1} (HTTP ${r.status}): ${txt.slice(0, 200)}. Synced ${upserted} rows before failing — they are kept.` };
+    }
+    const out = await r.json() as { value?: ResoProperty[] };
+    const items = (out.value ?? []).filter((p) => p.ListingKey);
+    pages++;
+    fetched += items.length;
+    if (items.length === 0) break;
+    const rows = items.map((p) => mapRow(uid, p, worldId));
+    const { error: upErr } = await admin.from('mls_listings')
+      .upsert(rows, { onConflict: 'owner_id,listing_key' });
+    if (upErr) return { ok: false, status: 500, fetched, upserted, pages, error: `Could not store page ${page + 1}: ${upErr.message}` };
+    upserted += rows.length;
+    const last = items[items.length - 1]?.ModificationTimestamp;
+    if (!last || last === cursor) break; // no forward progress — stop rather than loop
+    cursor = last;
+    if (items.length < PAGE) break;
+    if (page === MAX_PAGES - 1) hitCap = true;
+  }
+
+  await admin.from('mind_events').insert({
+    owner_id: uid, event_type: 'note', source: 'execution',
+    subject: `MLS sync: ${upserted} listing${upserted === 1 ? '' : 's'} updated${hitCap ? ' (more remain — run sync again)' : ''}`,
+    payload: { key: `mls-sync:${new Date().toISOString().slice(0, 13)}`, fetched, upserted, pages },
+  }).then(() => {}, () => {});
+
+  return { ok: true, fetched, upserted, pages, more: hitCap,
+    note: hitCap ? `Moved ${upserted} listings (cap ${MAX_PAGES * PAGE}/call) — run sync again to continue.` : `Up to date: ${upserted} listings updated.` };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   const json = (b: unknown, status = 200) =>
@@ -59,6 +124,25 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
   try {
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+    // Heartbeat path: fan the incremental sync out across every owner with a saved feed.
+    const workerSecret = Deno.env.get('WORKER_SECRET');
+    if (!!workerSecret && req.headers.get('x-worker-secret') === workerSecret) {
+      await stampHeartbeat(admin, 'mls-sync');
+      const { data: conns } = await admin.from('provider_connections')
+        .select('user_id').eq('provider', 'mls_reso').limit(500);
+      const owners = [...new Set(((conns ?? []) as { user_id: string }[]).map((c) => c.user_id))];
+      let upserted = 0; let failed = 0;
+      for (const uid of owners) {
+        try {
+          const r = await runSync(admin, uid, null);
+          if (r.ok) upserted += r.upserted; else failed++;
+        } catch { failed++; /* next owner — one dead feed never blocks the rest */ }
+      }
+      return json({ ok: true, owners: owners.length, upserted, failed });
+    }
+
     const authClient = createClient(
       Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
@@ -66,7 +150,6 @@ Deno.serve(async (req) => {
     const { data: { user } } = await authClient.auth.getUser();
     if (!user) return json({ error: 'Unauthorized' }, 401);
     const uid = user.id;
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
     const body = (await req.json().catch(() => ({}))) as { action?: string; base_url?: string; token?: string; world_id?: string };
     // A world-scoped sync stamps rows to that business — verify the world is really the caller's.
@@ -103,54 +186,9 @@ Deno.serve(async (req) => {
     }
 
     if (body.action === 'sync') {
-      const conn = await getConnection(admin, uid, 'mls_reso');
-      const base = (conn?.metadata as { base_url?: string } | null)?.base_url;
-      if (!conn?.access_token || !base) return json({ error: 'No MLS feed configured — save one first.' }, 400);
-
-      // Cursor: the newest ModificationTimestamp we already hold (never a guessed date). A
-      // world-scoped sync cursors within that world only, so pointing the feed at a business for
-      // the first time replays the whole feed into it (1000/call, honest "more remain").
-      let newestQ = admin.from('mls_listings')
-        .select('modified_at').eq('owner_id', uid).not('modified_at', 'is', null);
-      if (worldId) newestQ = newestQ.eq('world_id', worldId);
-      const { data: newest } = await newestQ
-        .order('modified_at', { ascending: false }).limit(1).maybeSingle();
-      const since = (newest?.modified_at as string | undefined) ?? '1970-01-01T00:00:00Z';
-
-      let fetched = 0; let upserted = 0; let pages = 0; let hitCap = false;
-      let cursor = since;
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const url = `${base}/Property?$filter=${encodeURIComponent(`ModificationTimestamp gt ${cursor}`)}&$orderby=${encodeURIComponent('ModificationTimestamp asc')}&$top=${PAGE}`;
-        const r = await safeFetch(url, { headers: { Authorization: `Bearer ${conn.access_token}`, Accept: 'application/json' } });
-        if (!r.ok) {
-          const txt = await r.text().catch(() => '');
-          return json({ error: `Feed error on page ${page + 1} (HTTP ${r.status}): ${txt.slice(0, 200)}. Synced ${upserted} rows before failing — they are kept.`, fetched, upserted }, 502);
-        }
-        const out = await r.json() as { value?: ResoProperty[] };
-        const items = (out.value ?? []).filter((p) => p.ListingKey);
-        pages++;
-        fetched += items.length;
-        if (items.length === 0) break;
-        const rows = items.map((p) => mapRow(uid, p, worldId));
-        const { error: upErr } = await admin.from('mls_listings')
-          .upsert(rows, { onConflict: 'owner_id,listing_key' });
-        if (upErr) return json({ error: `Could not store page ${page + 1}: ${upErr.message}`, fetched, upserted }, 500);
-        upserted += rows.length;
-        const last = items[items.length - 1]?.ModificationTimestamp;
-        if (!last || last === cursor) break; // no forward progress — stop rather than loop
-        cursor = last;
-        if (items.length < PAGE) break;
-        if (page === MAX_PAGES - 1) hitCap = true;
-      }
-
-      await admin.from('mind_events').insert({
-        owner_id: uid, event_type: 'note', source: 'execution',
-        subject: `MLS sync: ${upserted} listing${upserted === 1 ? '' : 's'} updated${hitCap ? ' (more remain — run sync again)' : ''}`,
-        payload: { key: `mls-sync:${new Date().toISOString().slice(0, 13)}`, fetched, upserted, pages },
-      }).then(() => {}, () => {});
-
-      return json({ ok: true, fetched, upserted, pages, more: hitCap,
-        note: hitCap ? `Moved ${upserted} listings (cap ${MAX_PAGES * PAGE}/call) — run sync again to continue.` : `Up to date: ${upserted} listings updated.` });
+      const r = await runSync(admin, uid, worldId);
+      if (!r.ok) return json({ error: r.error, fetched: r.fetched, upserted: r.upserted }, r.status ?? 500);
+      return json({ ok: true, fetched: r.fetched, upserted: r.upserted, pages: r.pages, more: r.more, note: r.note });
     }
 
     return json({ error: `Unknown action "${body.action}".` }, 400);
