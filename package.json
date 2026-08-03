@@ -111,6 +111,7 @@
     "verify:brandboard": "tsx src/lib/garvis/brandBoard.verify.ts",
     "verify:briefdoc": "tsx src/lib/garvis/briefDoc.verify.ts",
     "verify:campaigncore": "tsx src/lib/garvis/campaignCore.verify.ts",
+    "verify:mlstocampaign": "tsx src/lib/garvis/mlsToCampaign.verify.ts",
     "verify:clienthuntbuild": "tsx src/lib/garvis/clientHuntBuild.verify.ts",
     "verify:clienthuntschedule": "tsx src/lib/garvis/clientHuntSchedule.verify.ts",
     "verify:creativeboard": "tsx src/lib/garvis/creativeBoard.verify.ts",

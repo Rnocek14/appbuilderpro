@@ -6,8 +6,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { Loader2, Printer, Save, Image as ImageIcon, Mail, Upload } from 'lucide-react';
-import { compileMailer, type MailerConcept, type MailerSpec } from '../../lib/garvis/mailer';
+import { Loader2, Printer, Save, Image as ImageIcon, Mail, Upload, Palette } from 'lucide-react';
+import { compileMailer, FRONT_VARIANTS, type MailerConcept, type MailerSpec } from '../../lib/garvis/mailer';
 import {
   loadMailerMaterials, saveMailerDesign, logMailBatch, listMailBatches,
   type MailerMaterials, type MailBatchRow,
@@ -35,6 +35,7 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
 }) {
   const [materials, setMaterials] = useState<MailerMaterials | null>(null);
   const [concept, setConcept] = useState<MailerConcept>('proof');
+  const [look, setLook] = useState(0); // front LOOK 0..FRONT_VARIANTS-1 — pure presentation, same materials
   const [imageIx, setImageIx] = useState(0);
   const [headline, setHeadline] = useState('');
   const [offer, setOffer] = useState('');
@@ -144,6 +145,7 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
           body * { visibility: hidden !important; }
           .mailer-print, .mailer-print * { visibility: visible !important; }
           .mailer-print { position: absolute; left: 0; top: 0; }
+          .mailer-print .print-hide { display: none !important; visibility: hidden !important; }
           .mailer-card { page-break-after: always; box-shadow: none !important; }
           @page { size: 9.25in 6.25in; margin: 0; }
         }
@@ -220,11 +222,16 @@ export function MailerDesigner({ worldId, clusterId, onToast }: {
           </div>
         </div>
 
-        {/* Live preview — front + back at 6:9 aspect */}
+        {/* Live preview — front + back at 6:9 aspect. "Look" cycles the front's layout only —
+            same real materials, a genuinely different design each tap. */}
         <div className="mailer-print space-y-4">
           {spec && (
             <>
-              <PostcardFront spec={spec} accent={accent} />
+              <button onClick={() => setLook((l) => (l + 1) % FRONT_VARIANTS)}
+                className="print-hide inline-flex items-center gap-1.5 rounded-lg border border-forge-border px-2.5 py-1 text-[11px] text-forge-dim hover:border-forge-ember/50 hover:text-forge-ink">
+                <Palette size={12} /> Look {((look % FRONT_VARIANTS) + FRONT_VARIANTS) % FRONT_VARIANTS + 1}/{FRONT_VARIANTS}
+              </button>
+              <PostcardFront spec={spec} accent={accent} variant={look} />
               <PostcardBack spec={spec} accent={accent} qr={qr} />
             </>
           )}
