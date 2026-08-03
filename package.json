@@ -18,6 +18,7 @@
     "verify:ugcedit": "tsx src/lib/garvis/ugcEdit.verify.ts",
     "verify:autocut": "tsx src/lib/garvis/autoCut.verify.ts",
     "verify:editplan": "tsx src/lib/garvis/editPlan.verify.ts",
+    "verify:channelpulse": "tsx src/lib/garvis/channelPulse.verify.ts",
     "verify:objective": "tsx src/lib/garvis/objective.verify.ts",
     "verify:profiles": "tsx src/lib/garvis/profiles.verify.ts",
     "verify:liveness": "tsx src/lib/garvis/liveness.verify.ts",

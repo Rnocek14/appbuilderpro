@@ -8,7 +8,7 @@
 // disclosure and the server-side publish gate enforces it fail-closed; nothing posts without the
 // owner's approval in the Queue.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle, Clapperboard } from 'lucide-react';
 import {
   parseFactScript, scriptToScenes, scriptTotalSeconds, bandCheck, illustrationPrompt, composeCaption,
@@ -20,6 +20,7 @@ import {
   type GrowthChannel, type ChannelEpisode, type ChannelPerf,
 } from '../../lib/garvis/channelsRun';
 import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
+import { channelPulse } from '../../lib/garvis/channelPulse';
 import { scriptToShotList, type SfxKit } from '../../lib/garvis/ugcEdit';
 import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
 import { SoundKitFields } from './SoundKitFields';
@@ -64,8 +65,20 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
   const [sfx, setSfx] = useState<SfxKit>(loadSfxKit);
   const [sfxOpen, setSfxOpen] = useState(false);
+  const [epFilter, setEpFilter] = useState<'all' | 'needs_action' | 'posted'>('all');
 
   const channel = channels?.find((c) => c.id === channelId) ?? null;
+
+  // THE PULSE — where this channel is in the multi-month arc (day N, streak, trend, the coach
+  // read). Computed from the posts' REAL posted_at dates; the pure core stays deterministic.
+  const pulse = useMemo(() => channel ? channelPulse(
+    channel.created_at,
+    episodes.map((ep) => ({
+      postedAt: perf?.postedAt.get(ep.id) ?? null,
+      views: perf?.byEpisode.get(ep.id)?.reach ?? null,
+    })),
+    new Date().toISOString(),
+  ) : null, [channel, episodes, perf]);
 
   const reloadChannels = () => listChannels(worldId)
     .then((cs) => { setChannels(cs); setChannelId((cur) => cur ?? cs[0]?.id ?? null); })
@@ -297,6 +310,24 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
               </button>
             )}
           </p>
+          {/* THE PULSE — the multi-month instrument: day N against the 45-75 inflection window,
+              the posting streak (consistency is the input that compounds), the honest trend. */}
+          {pulse && (
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 rounded-lg border border-forge-border bg-forge-bg/60 px-2.5 py-1.5 text-[11px] text-forge-ink">
+              <span className="font-semibold">{pulse.stats}</span>
+              {pulse.spark.length >= 3 && (
+                <svg width="64" height="14" viewBox="0 0 64 14" className="inline-block" aria-label="recent views">
+                  <polyline fill="none" stroke="currentColor" strokeWidth="1.5" className="text-forge-ember" points={
+                    pulse.spark.map((v, i) => {
+                      const max = Math.max(...pulse.spark, 1);
+                      const x = pulse.spark.length === 1 ? 32 : (i / (pulse.spark.length - 1)) * 60 + 2;
+                      return `${x.toFixed(1)},${(12 - (v / max) * 10).toFixed(1)}`;
+                    }).join(' ')} />
+                </svg>
+              )}
+              <span className="text-forge-dim">— {pulse.read}</span>
+            </p>
+          )}
           {/* THE MONEY ROUTE — one destination per channel; every caption carries it, src-stamped
               so your own sites answer "which channel sold this" through site_events. */}
           <div className="mt-2 flex flex-wrap gap-2">
@@ -336,8 +367,25 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
           {sfxOpen && <SoundKitFields sfx={sfx} onChange={setSfx} />}
           {progress && <p className="mt-2 flex items-center gap-1.5 text-xs text-forge-dim"><Loader2 size={12} className="animate-spin" /> {progress}</p>}
 
+          {/* Month-scale triage: the list shows the recent 20; these chips answer "what needs me"
+              without scrolling past what's already out. */}
+          {episodes.length > 3 && (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+              {([['all', 'All'], ['needs_action', 'Needs me'], ['posted', 'Posted']] as const).map(([id, label]) => (
+                <button key={id} onClick={() => setEpFilter(id)}
+                  className={cn('rounded-lg border px-2 py-1', epFilter === id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="mt-3 space-y-2">
-            {episodes.map((ep) => {
+            {episodes.filter((ep) => {
+              if (epFilter === 'all') return true;
+              const live = perf?.liveStatus.get(ep.id);
+              const st = live === 'posted' ? 'posted' : live === 'failed' ? 'failed' : ep.status;
+              return epFilter === 'posted' ? st === 'posted' : st !== 'posted' && st !== 'queued';
+            }).map((ep) => {
               const parsed = ep.script ? parseFactScript(ep.script) : null;
               const script: FactScript | null = parsed?.ok ? parsed.script : null;
               const open = openEpisode === ep.id;
