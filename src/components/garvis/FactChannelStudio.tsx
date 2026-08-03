@@ -20,7 +20,9 @@ import {
   type GrowthChannel, type ChannelEpisode, type ChannelPerf,
 } from '../../lib/garvis/channelsRun';
 import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
-import { scriptToShotList } from '../../lib/garvis/ugcEdit';
+import { scriptToShotList, type SfxKit } from '../../lib/garvis/ugcEdit';
+import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
+import { SoundKitFields } from './SoundKitFields';
 import { buildStoryboard } from '../../lib/garvis/storyboard';
 import { generateVoiceover, saveSrtAsset, startRender, pollRender, saveRenderedVideo } from '../../lib/garvis/videoRun';
 import { volumeForMusic } from '../../lib/garvis/musicBed';
@@ -58,6 +60,9 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [perf, setPerf] = useState<ChannelPerf | null>(null);
   const [cadenceOn, setCadenceOn] = useState<boolean | null>(null);
   const [ctaDraft, setCtaDraft] = useState('');
+  const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
+  const [sfx, setSfx] = useState<SfxKit>(loadSfxKit);
+  const [sfxOpen, setSfxOpen] = useState(false);
 
   const channel = channels?.find((c) => c.id === channelId) ?? null;
 
@@ -163,6 +168,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       const start = await startRender(sb, {
         voClips: vo.clips, srtUrl: srtUrl ?? undefined,
         ...(musicUrl.trim() ? { musicUrl: musicUrl.trim(), musicVolume: volumeForMusic(true) } : {}),
+        lane, ...(sfxKitCount(sfx) ? { sfx } : {}),
       });
       if (start.available === false) { onToast('info', 'Rendering isn\'t configured — add SHOTSTACK_API_KEY (see System health).'); return; }
       if (!start.ok || !start.id) { onToast('error', start.error ?? 'The render could not start.'); return; }
@@ -307,6 +313,22 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
               {busy && progress?.startsWith('Drafting') ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Draft a cited episode
             </Button>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="text-forge-dim">edit lane:</span>
+            {(['calm', 'energetic'] as const).map((l) => (
+              <button key={l} onClick={() => setLane(l)}
+                title={l === 'calm' ? 'Educational: karaoke captions, sparse sound cues (the caregiver default)' : 'High-energy: per-word pop captions, dense sound cues, riser under the hook'}
+                className={cn('rounded-lg border px-2 py-1', lane === l ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                {l}
+              </button>
+            ))}
+            <button onClick={() => setSfxOpen(!sfxOpen)}
+              className={cn('rounded-lg border px-2 py-1', sfxKitCount(sfx) ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+              Sound kit{sfxKitCount(sfx) ? ` (${sfxKitCount(sfx)})` : ''}
+            </button>
+            <span className="text-forge-dim">— whooshes ride the scene cuts on the next Produce</span>
+          </div>
+          {sfxOpen && <SoundKitFields sfx={sfx} onChange={setSfx} />}
           {progress && <p className="mt-2 flex items-center gap-1.5 text-xs text-forge-dim"><Loader2 size={12} className="animate-spin" /> {progress}</p>}
 
           <div className="mt-3 space-y-2">

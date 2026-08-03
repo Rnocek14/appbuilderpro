@@ -11,6 +11,8 @@ import { useState } from 'react';
 import { Loader2, Upload, Film, Send, Sparkles, Scissors, Volume2 } from 'lucide-react';
 import { buildUgcEdit, describeUgcEdit, type SfxKit, type UgcBroll, type UgcTake } from '../../lib/garvis/ugcEdit';
 import { detectSpeech, segmentsToTakes, cutSummary } from '../../lib/garvis/autoCut';
+import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
+import { SoundKitFields } from './SoundKitFields';
 import { startRenderEdit, pollRender, uploadTake, saveRenderedVideo, analyzeTakeAudio } from '../../lib/garvis/videoRun';
 import { generateSceneImage } from '../../lib/garvis/channelsRun';
 import { illustrationPrompt } from '../../lib/garvis/factChannel';
@@ -21,10 +23,6 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 
 const PLATFORMS: Platform[] = ['tiktok', 'youtube', 'instagram', 'facebook'];
-
-// The operator's CC0 sound kit survives reloads — attested once, used on every cut after.
-const SFX_STORE = 'garvis-ugc-sfx';
-const loadSfx = (): SfxKit => { try { return JSON.parse(localStorage.getItem(SFX_STORE) || '{}') as SfxKit; } catch { return {}; } };
 
 export function UgcStudio({ worldId, clusterId, onToast }: {
   worldId: string; clusterId: string; onToast: (k: 'success' | 'error' | 'info', m: string) => void;
@@ -40,16 +38,11 @@ export function UgcStudio({ worldId, clusterId, onToast }: {
   const [caption, setCaption] = useState('');
   const [autoCut, setAutoCut] = useState(true);
   const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
-  const [sfx, setSfx] = useState<SfxKit>(loadSfx);
+  const [sfx, setSfx] = useState<SfxKit>(loadSfxKit);
   const [sfxOpen, setSfxOpen] = useState(false);
 
-  const sfxCount = [sfx.whooshUrl, sfx.popUrl, sfx.riserUrl].filter((u) => u?.trim()).length;
+  const sfxCount = sfxKitCount(sfx);
   const editOpts = () => ({ hookText: hook, broll, lane, ...(sfxCount ? { sfx } : {}) });
-  const saveSfx = (patch: Partial<SfxKit>) => {
-    const next = { ...sfx, ...patch };
-    setSfx(next);
-    try { localStorage.setItem(SFX_STORE, JSON.stringify(next)); } catch { /* private mode — kit lives for the session */ }
-  };
 
   // Upload, then AUTO-CUT: decode the take's audio in the browser, find the speech, and split the
   // take into precisely-trimmed sub-clips — every pause >0.5s (0.3s on the energetic lane) becomes
@@ -164,15 +157,7 @@ export function UgcStudio({ worldId, clusterId, onToast }: {
           <Volume2 size={11} /> Sound kit{sfxCount ? ` (${sfxCount})` : ''}
         </button>
       </div>
-      {sfxOpen && (
-        <div className="mt-2 space-y-1.5 rounded-xl border border-forge-border p-2.5">
-          <p className="text-[11px] text-forge-dim">CC0 sounds only (Mixkit, Pixabay) — paste hosted mp3 URLs. Only what you add rides the cuts; whooshes lead each cut, the pop lands the hook card, the riser runs under an energetic hook.</p>
-          {([['whooshUrl', 'whoosh (on the cuts)'], ['popUrl', 'pop (hook card)'], ['riserUrl', 'riser (energetic hook)']] as const).map(([k, label]) => (
-            <input key={k} value={sfx[k] ?? ''} onChange={(e) => saveSfx({ [k]: e.target.value })} placeholder={label}
-              className="w-full rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
-          ))}
-        </div>
-      )}
+      {sfxOpen && <SoundKitFields sfx={sfx} onChange={setSfx} />}
 
       <div className="mt-2 flex flex-wrap gap-2">
         <input value={hook} onChange={(e) => setHook(e.target.value)} placeholder="frame-one hook card (5-8 words)"

@@ -518,6 +518,23 @@ verified from the official OAS repo) closed the gap between "an edit" and "a Cap
   speed ramps (single scalar only), no server-side silence detection — all verified absent from
   the Edit API as of v1.14.1.
 
+**Round 6b (same day) — the grammar applied EVERYWHERE it's useful:**
+
+The CapCut-grade layer moved from the UGC lane into the shared storyboard compiler, so every
+video the platform renders speaks it — Fact Channel episodes, B-cuts, standing-order episodes,
+and VideoStudio marketing reels:
+
+- `toShotstackEdit` upgraded: word-animated RICH captions (karaoke calm / pop energetic, wrap
+  pill, 3px stroke, yellow active word, lower-middle) replacing the legacy caption asset;
+  on-screen overlays + shoot cards moved off the DEPRECATED title asset onto rich-text (white
+  pill, fade-in per beat, top third); the shared `sfxCueClips` layer rides the scene cuts —
+  boundaries are explicit in a storyboard, so cues land precisely.
+- One CC0 sound kit (`sfxStore`), set once, shared by all three studios; `lane` selector
+  (calm/energetic) in each studio; the fact-channel produce path and VideoStudio renders pass
+  both straight through `EditOpts`.
+- Schema-correct rich-text animation (preset/duration — the old style-only shape was invalid)
+  fixed in the UGC hook card too. 87 checks across the three video suites.
+
 ## 10. Why this wins
 
 1. **The rails already exist here** — approval spine, publishing, metrics sync, credits, breaker,

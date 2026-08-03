@@ -9,6 +9,8 @@
 // setup), and (2) render-video, which sends toShotstackEdit(sb) to a cloud render provider to
 // produce an actual mp4 when a render key exists.
 
+import { sfxCueClips, type SfxKit } from './ugcEdit';
+
 export type Aspect = '9:16' | '1:1' | '16:9';
 
 export interface StoryScene {
@@ -114,13 +116,18 @@ export function buildCaptionsSrt(scenes: StoryScene[]): string {
 const RESOLUTION: Record<Aspect, string> = { '9:16': 'hd', '1:1': 'hd', '16:9': 'hd' };
 
 /** Optional media layers for the render: per-scene voiceover clips (from tts-voiceover), a hosted
- *  .srt caption track, and a music bed. All optional — an edit with no opts is byte-identical to
- *  before these existed (regression-checked), so the zero-setup path never changes shape. */
+ *  .srt caption track, a music bed, and the shared sound-design layer (sfxCueClips — scene
+ *  boundaries are always explicit here, so cues land precisely). All optional; the no-opts edit is
+ *  identical to the undefined-opts edit (regression-checked), so the zero-setup path always works. */
 export interface EditOpts {
   voClips?: { sceneIndex: number; url: string }[];
   srtUrl?: string;
   musicUrl?: string;
   musicVolume?: number;   // musicBed.volumeForMusic decides: ducked under VO, fuller without
+  /** calm (default) = educational restraint: karaoke captions, ≤3 whooshes, no riser.
+   *  energetic = per-word pop captions, dense cues, riser under the hook. */
+  lane?: 'calm' | 'energetic';
+  sfx?: SfxKit;           // the CC0-attested kit; only what the operator supplied is placed
 }
 
 /** Compile the storyboard into a Shotstack Edit JSON (the render provider we target). Image clips
@@ -146,14 +153,37 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
     if (s.imageUrl) {
       imageClips.push({ ...base, asset: { type: 'image', src: s.imageUrl }, effect: effectFor[s.motion], fit: 'cover' });
     } else {
-      // No photo → an honest colored card with the shoot direction as its title.
-      imageClips.push({ ...base, asset: { type: 'title', text: s.shoot ?? '', style: 'minimal', size: 'small', background: '#0C0E13' } });
+      // No photo → an honest dark card carrying the shoot direction (rich-text: the legacy title
+      // asset is deprecated in the current schema).
+      imageClips.push({
+        ...base,
+        asset: {
+          type: 'rich-text', text: s.shoot ?? '',
+          font: { family: 'Montserrat ExtraBold', color: '#8B93A7', size: 44, lineHeight: 1.3 },
+          background: { color: '#0C0E13', opacity: 1, padding: 40 },
+          align: { horizontal: 'center', vertical: 'center' },
+          width: 940, height: 1600,
+        },
+      });
     }
     if (s.onScreen) {
       // Overlay text rides the TOP third — the bottom ~300-400px is the platforms' UI dead zone
-      // and the lower-middle belongs to the burned captions. The hook line on frame one IS the
-      // thumbnail in a vertical feed; it must read muted, instantly.
-      textClips.push({ ...base, asset: { type: 'title', text: s.onScreen, style: 'subtitle', color: sb.accent, size: 'medium', position: 'top' } });
+      // and the lower-middle belongs to the burned captions. White-on-pill with a stroke (the
+      // readability spec — accent color stays in the artwork); a quick fade-in per beat. The hook
+      // line on frame one IS the thumbnail in a vertical feed; it must read muted, instantly.
+      textClips.push({
+        ...base,
+        asset: {
+          type: 'rich-text', text: s.onScreen,
+          font: { family: 'Montserrat ExtraBold', color: '#ffffff', size: 64, lineHeight: 1.15 },
+          stroke: { color: '#000000', width: 2 },
+          background: { color: '#000000', opacity: 0.35, borderRadius: 18, wrap: true, padding: 22 },
+          align: { horizontal: 'center', vertical: 'center' },
+          animation: { preset: 'fadeIn', duration: 0.4 },
+          width: 920, height: 360,
+        },
+        offset: { y: 0.26 },
+      });
     }
     at += s.durationS;
   }
@@ -166,21 +196,25 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
   };
 
   const tracks: Record<string, unknown>[] = [];
-  // Caption track on top when a hosted SRT exists (Shotstack CaptionAsset takes the SRT URL).
-  // Styled to the current short-form meta: big bold white with a black stroke on a soft rounded
-  // 60%-black box, sitting LOWER-MIDDLE (margin.top ≈ 0.63) — above the platforms' bottom UI dead
-  // zone, below the subject. Captions lift completion materially (~80% of viewers watch muted at
-  // least sometimes); they are half the perceived motion on a stills-based video.
+  // Caption track on top when a hosted SRT exists — RICH captions (word-animated: karaoke fill on
+  // the calm lane, per-word pop on energetic; the legacy caption asset is superseded), big bold
+  // white with a 3px stroke in a wrap pill, active word in caption yellow, sitting LOWER-MIDDLE
+  // (offset.y -0.2 — Shotstack +y is UP) above the platforms' bottom UI dead zone. Captions lift
+  // completion materially (~80% watch muted at least sometimes); they are half the perceived
+  // motion on a stills-based video.
   if (opts?.srtUrl) {
     tracks.push({
       clips: [{
         start: 0, length: sb.totalDurationS,
         asset: {
-          type: 'caption', src: opts.srtUrl,
-          font: { family: 'Montserrat ExtraBold', color: '#ffffff', size: 80, lineHeight: 1.2, stroke: '#000000', strokeWidth: 2 },
-          background: { color: '#000000', opacity: 0.6, padding: 24, borderRadius: 18 },
-          margin: { top: 0.63, left: 0.1, right: 0.1 },
+          type: 'rich-caption', src: opts.srtUrl,
+          font: { family: 'Montserrat ExtraBold', color: '#ffffff', size: 76, lineHeight: 1.15 },
+          stroke: { color: '#000000', width: 3 },
+          background: { color: '#000000', opacity: 0.5, padding: 20, borderRadius: 16, wrap: true },
+          active: { font: { color: '#f7c204' } },
+          animation: { style: (opts.lane ?? 'calm') === 'energetic' ? 'pop' : 'karaoke' },
         },
+        offset: { y: -0.2 },
       }],
     });
   }
@@ -198,6 +232,14 @@ export function toShotstackEdit(sb: Storyboard, opts?: EditOpts): Record<string,
         asset: { type: 'audio', src: c.url },
       })),
     });
+  }
+
+  // THE SFX LAYER (the shared sound-design core): whooshes riding the scene cuts, pop on the hook,
+  // riser on the energetic lane. Scene boundaries are always explicit here, so cues land precisely.
+  if (opts?.sfx) {
+    const boundaries = sb.scenes.slice(0, -1).map((_, i) => sceneStart(i + 1));
+    const sfx = sfxCueClips(boundaries, { lane: opts.lane, sfx: opts.sfx, hook: !!sb.scenes[0]?.onScreen });
+    if (sfx.length) tracks.push({ clips: sfx });
   }
 
   const timeline: Record<string, unknown> = { background: '#000000', tracks };

@@ -50,10 +50,12 @@ console.log('storyboard.verify');
   const edit = toShotstackEdit(sb) as { timeline: { tracks: { clips: Record<string, unknown>[] }[] }; output: { aspectRatio: string; format: string } };
   check('render JSON carries aspect + mp4 output', edit.output.aspectRatio === '1:1' && edit.output.format === 'mp4');
   check('image scene → an image asset clip', edit.timeline.tracks[1].clips.some((c) => (c.asset as { type: string }).type === 'image'));
-  check('photo-less scene → an honest title card (never a fake frame)', edit.timeline.tracks[1].clips.some((c) => (c.asset as { type: string; text?: string }).type === 'title' && String((c.asset as { text?: string }).text).includes('pier')));
-  check('onScreen text becomes a title clip on the text track', edit.timeline.tracks[0].clips.length === 2);
-  check('overlay titles sit in the top third (never the bottom UI dead zone)',
-    edit.timeline.tracks[0].clips.every((c) => (c.asset as { position?: string }).position === 'top'));
+  check('photo-less scene → an honest rich-text card (never a fake frame; title asset is deprecated)',
+    edit.timeline.tracks[1].clips.some((c) => (c.asset as { type: string; text?: string }).type === 'rich-text' && String((c.asset as { text?: string }).text).includes('pier')));
+  check('onScreen text becomes a rich-text clip on the text track', edit.timeline.tracks[0].clips.length === 2
+    && edit.timeline.tracks[0].clips.every((c) => (c.asset as { type: string }).type === 'rich-text'));
+  check('overlay text sits in the top third (+y is UP; never the bottom UI dead zone)',
+    edit.timeline.tracks[0].clips.every((c) => (c as { offset?: { y: number } }).offset?.y === 0.26));
 }
 {
   const scenes = defaultScenes({ businessName: 'Nocek Studio', craft: 'murals', audience: 'designers', offer: 'Book a commission', photos: [{ url: 'https://x/a.jpg', caption: 'lobby mural' }] });
@@ -82,11 +84,18 @@ console.log('storyboard.verify');
   }) as Edit;
   const capTrack = full.timeline.tracks[0];
   check('caption track rides on top and spans the whole video',
-    (capTrack.clips[0].asset as { type?: string }).type === 'caption' && capTrack.clips[0].length === sb.totalDurationS);
-  const capAsset = capTrack.clips[0].asset as { font?: { family?: string; size?: number; stroke?: string }; margin?: { top?: number } };
-  check('captions are big bold white-on-box in the LOWER-MIDDLE (not the platform UI dead zone)',
-    capAsset.font?.family === 'Montserrat ExtraBold' && (capAsset.font?.size ?? 0) >= 70 &&
-    capAsset.font?.stroke === '#000000' && capAsset.margin?.top === 0.63);
+    (capTrack.clips[0].asset as { type?: string }).type === 'rich-caption' && capTrack.clips[0].length === sb.totalDurationS);
+  const capAsset = capTrack.clips[0].asset as {
+    font?: { family?: string; size?: number }; stroke?: { color?: string; width?: number };
+    background?: { wrap?: boolean }; active?: { font?: { color?: string } }; animation?: { style?: string };
+  };
+  check('captions: word-karaoke, big bold, 3px stroke, wrap pill, yellow active word',
+    capAsset.font?.family === 'Montserrat ExtraBold' && (capAsset.font?.size ?? 0) >= 70
+    && capAsset.stroke?.color === '#000000' && capAsset.stroke?.width === 3
+    && capAsset.background?.wrap === true && capAsset.active?.font?.color === '#f7c204'
+    && capAsset.animation?.style === 'karaoke');
+  check('captions sit LOWER-middle (Shotstack +y is UP → negative offset)',
+    (capTrack.clips[0] as { offset?: { y: number } }).offset?.y === -0.2);
   const audio = full.timeline.tracks[full.timeline.tracks.length - 1].clips;
   check('voiceover clips land at their scene\'s cumulative start, sorted, out-of-range dropped',
     audio.length === 2 && audio[0].start === 0 && audio[1].start === 7 && audio[1].length === 5);
@@ -100,8 +109,24 @@ console.log('storyboard.verify');
   // text in the top third (bottom = platform UI graveyard; lower-middle = captions).
   const images = plain.timeline.tracks[1].clips as ({ transition?: unknown })[];
   check('only the first clip fades in — every other cut is HARD', images[0].transition !== undefined && images.slice(1).every((c) => c.transition === undefined));
-  const titles = plain.timeline.tracks[0].clips as ({ asset: { position?: string } })[];
-  check('on-screen text rides the top third, clear of captions and platform UI', titles.every((t) => t.asset.position === 'top'));
+  const titles = plain.timeline.tracks[0].clips as ({ offset?: { y?: number } })[];
+  check('on-screen text rides the top third, clear of captions and platform UI', titles.every((t) => t.offset?.y === 0.26));
+
+  // THE SHARED SOUND LAYER on the storyboard lane: scene boundaries are explicit → precise cues.
+  const kit = { whooshUrl: 'https://cdn/sfx/whoosh.mp3', popUrl: 'https://cdn/sfx/pop.mp3', riserUrl: 'https://cdn/sfx/riser.mp3' };
+  const withSfx = toShotstackEdit(sb, { sfx: kit }) as Edit;
+  const sfxClips = withSfx.timeline.tracks[withSfx.timeline.tracks.length - 1].clips;
+  const srcOf = (c: { asset: Record<string, unknown> }) => String((c.asset as { src: string }).src);
+  check('calm lane (default): whooshes lead the scene cuts by ~3 frames, no riser',
+    sfxClips.length === 2 && sfxClips.every((c) => srcOf(c).includes('whoosh'))
+    && sfxClips[0].start === 2.9 && sfxClips[1].start === 6.9);
+  const hot = toShotstackEdit(sb, { sfx: kit, lane: 'energetic', srtUrl: 'https://x/caps.srt' }) as Edit;
+  const hotSfx = hot.timeline.tracks[hot.timeline.tracks.length - 1].clips;
+  check('energetic lane: riser rides the open, captions switch to per-word pop',
+    hotSfx.some((c) => srcOf(c).includes('riser'))
+    && ((hot.timeline.tracks[0].clips[0].asset as { animation?: { style?: string } }).animation?.style === 'pop'));
+  check('no kit → no sfx track (and the no-opts regression above stays true)',
+    JSON.stringify(toShotstackEdit(sb)) === JSON.stringify(plain));
 }
 
 // ---- the three cuts: same real photos, different mechanism, deterministic ----

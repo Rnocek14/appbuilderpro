@@ -84,10 +84,12 @@ const spread = (xs: number[], max: number): number[] =>
 const SFX_VOLUME = { whoosh: 0.12, pop: 0.2, riser: 0.06 } as const;
 const WHOOSH_LEAD_S = 0.1;
 
-/** The sound-design layer: riser under the hook (energetic), pop on the hook card, whooshes riding
- *  the cuts — sparse for the calm lane (≤3, the educational convention), dense for energetic (≤12).
- *  Only sounds the operator attested (SfxKit) are placed; unknown cut times place nothing. */
-function sfxClips(takes: UgcTake[], opts: UgcEditOpts): Record<string, unknown>[] {
+/** The sound-design layer, shared by EVERY video lane (ugc + the storyboard pipeline): riser under
+ *  the hook (energetic), pop on the hook's landing, whooshes riding the cuts — sparse for the calm
+ *  lane (≤3, the educational convention), dense for energetic (≤12). Only sounds the operator
+ *  attested (SfxKit — the musicBed rule) are placed; null cut times place no whooshes: placing
+ *  cues blind would be a guess, and this edit never guesses. */
+export function sfxCueClips(cuts: number[] | null, opts: { lane?: 'calm' | 'energetic'; sfx?: SfxKit; hook?: boolean }): Record<string, unknown>[] {
   const kit = opts.sfx;
   if (!kit) return [];
   const lane = opts.lane ?? 'calm';
@@ -95,10 +97,9 @@ function sfxClips(takes: UgcTake[], opts: UgcEditOpts): Record<string, unknown>[
   if (kit.riserUrl?.trim() && lane === 'energetic') {
     clips.push({ start: 0, length: 3, asset: { type: 'audio', src: kit.riserUrl.trim(), volume: SFX_VOLUME.riser, effect: 'fadeOut' } });
   }
-  if (kit.popUrl?.trim() && opts.hookText?.trim()) {
+  if (kit.popUrl?.trim() && opts.hook) {
     clips.push({ start: 0, length: 1.5, asset: { type: 'audio', src: kit.popUrl.trim(), volume: SFX_VOLUME.pop } });
   }
-  const cuts = cutTimesS(takes);
   if (kit.whooshUrl?.trim() && cuts?.length) {
     for (const c of spread(cuts, lane === 'energetic' ? 12 : 3)) {
       clips.push({ start: Math.max(0, r2(c - WHOOSH_LEAD_S)), length: 1, asset: { type: 'audio', src: kit.whooshUrl.trim(), volume: SFX_VOLUME.whoosh } });
@@ -155,7 +156,9 @@ export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<s
           stroke: { color: '#000000', width: 3 },
           background: { color: '#000000', opacity: 0.35, padding: 28, borderRadius: 20 },
           align: { horizontal: 'center', vertical: 'top' },
-          animation: { style: 'typewriter' },
+          // rich-text animates via PRESET (style names only exist on rich-caption) — the schema
+          // verification caught the old `style: 'typewriter'` shape as invalid.
+          animation: { preset: 'typewriter', duration: 0.8, style: 'word' },
           width: 900, height: 500,
         },
         offset: { y: -0.28 },
@@ -209,7 +212,7 @@ export function buildUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): Record<s
 
   // THE SFX LAYER — the most-cited amateur/pro divider after pacing. All clips mix; z-order is
   // meaningless for audio, so it rides at the bottom.
-  const sfx = sfxClips(takes, opts);
+  const sfx = sfxCueClips(cutTimesS(takes), { lane, sfx: opts.sfx, hook: !!opts.hookText?.trim() });
   if (sfx.length) tracks.push({ clips: sfx });
 
   return {
@@ -225,7 +228,7 @@ export function describeUgcEdit(takes: UgcTake[], opts: UgcEditOpts = {}): strin
   if (opts.hookText?.trim()) parts.push('frame-one hook card');
   if (opts.broll?.length) parts.push(`${opts.broll.length} b-roll insert${opts.broll.length === 1 ? '' : 's'} over continuous voice`);
   if (opts.musicUrl?.trim()) parts.push('music bed ducked under speech');
-  const cues = sfxClips(takes, opts).length;
+  const cues = sfxCueClips(cutTimesS(takes), { lane: opts.lane, sfx: opts.sfx, hook: !!opts.hookText?.trim() }).length;
   if (cues) parts.push(`${cues} sound cue${cues === 1 ? '' : 's'}`);
   if (opts.grade !== false) parts.push('light color boost');
   return parts.join(' · ');
