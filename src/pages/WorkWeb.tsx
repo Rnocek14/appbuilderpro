@@ -392,7 +392,7 @@ export default function WorkWeb() {
 
         {/* FIRST-RUN ORIENTATION — three concrete steps to the first real marketing. Only shows
             when this world has produced no EARNED work yet; vanishes the moment it has. */}
-        <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} />
+        <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} growthDesk={growthDesk} />
 
         {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
         <div className="mb-4">
@@ -417,6 +417,8 @@ export default function WorkWeb() {
             ? `Ask about ${web.title} — "what do I know about Jane?", "what did I log about June?"`
             : productLab
             ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
+            : growthDesk
+            ? `Ask about ${web.title} — "which hooks won this month?", "what should the channel cover next?"`
             : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
         </div>
 
@@ -878,26 +880,23 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <PanelBoundary name="copy studio"><IdeaStudio spec={COPY_SPEC} worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
       )}
 
-      {/* REEL STUDIO — a real three-stage pipeline for a faceless content account: ideate an angle →
-          script the beats (Hook→Value→CTA) → storyboard every shot. Saved as a draft; rendering to
-          video needs a connected video model. Modeled on the traction-engine repo's flow. */}
-      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
-        <PanelBoundary name="reel studio"><ReelStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
-      )}
-
-      {/* FACT CHANNEL STUDIO — the faceless-channel production line: cited script → illustrated
-          beats → TTS narration → rendered 9:16 mp4 → approval-gated publish to the channel's
-          platforms. The growth engine's first full circuit. */}
+      {/* THE GROWTH PAGE READS TOP-TO-BOTTOM AS THE WORKFLOW (visual walkthrough finding: the page
+          used to LEAD with the reel workshop — the drafting toy — and buried the production line):
+          1. FACT CHANNEL STUDIO — the production line: cited script → illustrated beats → TTS
+             narration → rendered 9:16 mp4 → approval-gated publish. Start here.
+          2. UGC STUDIO — the own-footage lane: film the episode's shot list, upload, the machine
+             applies the native edit, renders, queues through the same publisher.
+          3. REEL STUDIO — the format-brainstorm workshop (storyboard drafts only), last. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
         <PanelBoundary name="fact channel studio"><FactChannelStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
-      {/* UGC STUDIO — the own-footage lane: film the episode's shot list (or any real takes),
-          upload, and the machine applies the native edit — hard cuts, punch-ins, word-karaoke
-          captions from the footage's own audio, optional provenance-stamped AI cutaways — then
-          renders and queues through the same approval-gated publisher. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
         <PanelBoundary name="ugc studio"><UgcStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+      )}
+
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
+        <PanelBoundary name="reel studio"><ReelStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} onSaved={reload} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded

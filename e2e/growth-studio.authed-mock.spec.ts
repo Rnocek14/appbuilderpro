@@ -66,7 +66,8 @@ const EPISODES = [
   ep('2', 'The 50-30-20 lie', 'posted', { post: 'p2' }),
   ep('3', 'Credit scores decoded', 'posted', { post: 'p3' }),
 ];
-const POSTS = ['p1', 'p2', 'p3', 'p4', 'p5'].map((id) => ({ id, status: 'posted' }));
+const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+const POSTS = ['p1', 'p2', 'p3', 'p4', 'p5'].map((id, i) => ({ id, status: 'posted', posted_at: daysAgo(i + 1) }));
 const metric = (post_id: string, views: number, pct: number) => ({
   post_id, video_views: views, impressions: null, likes: 5, comments: 1, shares: 0, saves: 0,
   clicks: 1, engagement: null, avg_watch_seconds: 30, full_watch_rate: 0.2, avg_view_pct: pct,
@@ -131,11 +132,13 @@ test('a growth world leads with its studio, and the loop\'s verdicts render on r
   await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
 
   // The studio is the front page — NOT buried behind the marketing canvas's Advanced toggle.
-  await expect(page.getByText('Fact Channel Studio')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: 'Fact Channel Studio' })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('button', { name: 'Finance facts' })).toBeVisible();
 
   // The learning loop, visibly alive: median baseline + winner/quiet verdicts + retention reads.
   await expect(page.getByText(/baseline 100 views\/episode/)).toBeVisible();
+  // The pulse: day N + the posting streak from the posts' real dates.
+  await expect(page.getByText(/Day \d+ · posted \d of the last 7 days/)).toBeVisible();
   await expect(page.getByText('WINNER', { exact: true })).toBeVisible();
   await expect(page.getByText(/4x baseline — WINNER, double down/)).toBeVisible();
   await expect(page.getByText(/62% avg viewed — strong retention/)).toBeVisible();
@@ -149,7 +152,7 @@ test('rendered episodes offer the hook lab; uncited drafts wear the needs-review
   const errors = trackCrashes(page);
   await mockBackend(page);
   await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Fact Channel Studio')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: 'Fact Channel Studio' })).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole('button', { name: /How ATMs actually work/ }).first().click();
   await expect(page.getByRole('button', { name: /Queue to tiktok \+ youtube \+ instagram/ })).toBeVisible();
@@ -166,7 +169,7 @@ test('a dead edge function degrades to an honest message, never raw "non-2xx" pl
   const errors = trackCrashes(page);
   await mockBackend(page);
   await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Fact Channel Studio')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('heading', { name: 'Fact Channel Studio' })).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole('button', { name: /Draft a cited episode/ }).click();
   await expect(page.getByText(/The script writer \(fact-script\) isn't answering/)).toBeVisible({ timeout: 15_000 });

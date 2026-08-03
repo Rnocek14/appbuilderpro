@@ -47,7 +47,7 @@ const HERO: Partial<Record<Flavor, HeroConfig>> = {
   ads:         { icon: Megaphone,    makes: 'ready ad campaigns for Meta & Google — primary text, headlines, audiences, keywords — from a gallery of ideas. Use the ads studio below.', primaryTool: null, cta: '' },
   email:       { icon: Mail,         makes: 'ready-to-send emails from a gallery of ideas — pick one, spin the angle, edit, and save. Use the email studio below.', primaryTool: null, cta: '' },
   feature_lab: { icon: FlaskConical, makes: 'distinct, buildable product concepts — then a full spec for the one you pick.', primaryTool: 'gen-features',      cta: 'Generate feature concepts' },
-  content_growth: { icon: Clapperboard, makes: 'reels for a faceless AI-video account — pick a short-video format below, get a full storyboard (hook, scenes, captions, voiceover), edit it, and save. Use the reel studio below.', primaryTool: null, cta: '' },
+  content_growth: { icon: Clapperboard, makes: 'a real content channel — the Fact Channel Studio below drafts a cited episode, illustrates + narrates + renders it to a 9:16 mp4, and queues it for your approval. Film it yourself instead with the shot list + UGC Studio. The reel workshop at the bottom is for brainstorming formats.', primaryTool: null, cta: '' },
   // Dedicated-surface flavors: the panel below is the action; the hero just frames it.
   landing:     { icon: Globe,        makes: 'a campaign landing page built from this world’s brand and artwork.',  primaryTool: null, cta: '' },
   market:      { icon: LayoutGrid,   makes: 'honest market stats computed from your own MLS/RESO feed.',           primaryTool: null, cta: '' },

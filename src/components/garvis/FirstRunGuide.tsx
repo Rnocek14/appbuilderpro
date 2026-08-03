@@ -19,8 +19,10 @@ import { getBrandKit } from '../../lib/garvis/artifacts';
 
 const DISMISS_PREFIX = 'garvis.firstrun.dismissed.';
 
-export function FirstRunGuide({ worldId, hasEarnedWork }: {
+export function FirstRunGuide({ worldId, hasEarnedWork, growthDesk = false }: {
   worldId: string; hasEarnedWork: boolean;
+  /** A content-growth world's first steps are the CHANNEL workflow, not the outreach studios. */
+  growthDesk?: boolean;
 }) {
   const [dismissed, setDismissed] = useState(true); // default hidden until we read storage
   const [ai, setAi] = useState(() => resolveAI());
@@ -64,11 +66,19 @@ export function FirstRunGuide({ worldId, hasEarnedWork }: {
       ? <>The studios write in this voice.</>
       : <>Open the <span className="text-forge-ink">Vault</span> area on the left and add a name, tone, and colors. Skipping it just means a plainer first draft.</>,
   });
-  steps.push({
-    done: false, icon: Sparkles,
-    title: 'Open a studio and press Generate',
-    body: <>Pick any studio on the left (Seller Campaigns, Social Content, Direct Mail…) and hit the big <span className="text-forge-ink">Generate</span> button at the top. Its work lands on the shelf — nothing sends without your approval.</>,
-  });
+  if (growthDesk) {
+    steps.push({
+      done: false, icon: Sparkles,
+      title: 'Create a channel and draft the first episode',
+      body: <>In the <span className="text-forge-ink">Fact Channel Studio</span> below, pick a channel preset (or start your own), then press <span className="text-forge-ink">Draft a cited episode</span>. Produce it faceless, or download the shot list and film it yourself — either way it queues for your approval; nothing posts itself.</>,
+    });
+  } else {
+    steps.push({
+      done: false, icon: Sparkles,
+      title: 'Open a studio and press Generate',
+      body: <>Pick any studio on the left (Seller Campaigns, Social Content, Direct Mail…) and hit the big <span className="text-forge-ink">Generate</span> button at the top. Its work lands on the shelf — nothing sends without your approval.</>,
+    });
+  }
 
   return (
     <div className="mb-4 overflow-hidden rounded-2xl border border-forge-ember/30 bg-gradient-to-br from-forge-ember/10 to-forge-panel/30">
