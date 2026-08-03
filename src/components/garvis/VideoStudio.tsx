@@ -9,13 +9,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Play, Pause, Save, Film, Download, Clapperboard, Send, Mic } from 'lucide-react';
-import { buildStoryboard, VIDEO_CONCEPTS, type Aspect, type EditOpts, type Storyboard, type VideoConcept } from '../../lib/garvis/storyboard';
+import { buildStoryboard, buildTimedCaptionsSrt, VIDEO_CONCEPTS, type Aspect, type EditOpts, type Storyboard, type VideoConcept, type WordTiming } from '../../lib/garvis/storyboard';
+import { planEmphasis } from '../../lib/garvis/editPlan';
 import {
   loadVideoMaterials, defaultStoryboardFor, saveStoryboard, startRender, pollRender, saveRenderedVideo,
   saveSrtAsset, generateVoiceover,
   type VideoMaterials,
 } from '../../lib/garvis/videoRun';
 import { volumeForMusic } from '../../lib/garvis/musicBed';
+import { type SfxKit } from '../../lib/garvis/ugcEdit';
+import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
+import { SoundKitFields } from './SoundKitFields';
 import { withDisclosure, type AiProvenance } from '../../lib/garvis/mediaProvenance';
 import { PLATFORM_LABEL, type Platform } from '../../lib/garvis/social';
 import { queueSocialPost } from '../../lib/garvis/socialRun';
@@ -49,6 +53,9 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   const [renderMsg, setRenderMsg] = useState<string | null>(null);
   const [voiceoverOn, setVoiceoverOn] = useState(false);
   const [musicUrl, setMusicUrl] = useState('');
+  const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
+  const [sfx, setSfx] = useState<SfxKit>(loadSfxKit);
+  const [sfxOpen, setSfxOpen] = useState(false);
   const [lastRender, setLastRender] = useState<{ url: string; durable: boolean; provenance: AiProvenance | null } | null>(null);
   const [pendingRender, setPendingRender] = useState<{ id: string; provenance: AiProvenance | null } | null>(null);
   const [pubPlatforms, setPubPlatforms] = useState<Platform[]>(['tiktok', 'youtube', 'instagram']);
@@ -145,12 +152,18 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
         if (!vo.ok || !vo.clips?.length) { setRenderMsg(null); onToast('error', vo.error ?? 'The voiceover failed.'); return; }
         opts.voClips = vo.clips;
         provenance = vo.provenance ?? null;
-        opts.srtUrl = (await saveSrtAsset(clusterId, sb).catch(() => null)) ?? undefined;
+        // Word-EXACT captions when the provider returned timing; proportional otherwise.
+        const timings: (WordTiming[] | null)[] = [];
+        for (const c of vo.clips) timings[c.sceneIndex] = c.words ?? null;
+        opts.srtUrl = (await saveSrtAsset(clusterId, sb, buildTimedCaptionsSrt(sb.scenes, timings)).catch(() => null)) ?? undefined;
       }
       if (musicUrl.trim()) {
         opts.musicUrl = musicUrl.trim();
         opts.musicVolume = volumeForMusic(!!opts.voClips?.length);
       }
+      opts.lane = lane;
+      if (sfxKitCount(sfx)) opts.sfx = sfx;
+      opts.emphasisIndices = planEmphasis(sb.scenes);
 
       const start = await startRender(sb, opts);
       if (start.available === false) { setRenderMsg(null); onToast('info', 'Video rendering isn\'t configured on the server yet — the preview above is fully usable. (Add a render key: see the system health page.)'); return; }
@@ -296,7 +309,20 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
             </button>
             <input value={musicUrl} onChange={(e) => setMusicUrl(e.target.value)} placeholder="music bed URL (CC0 mp3 — FreePD/Mixkit), optional"
               className="min-w-[220px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
+            <span className="text-[11px] text-forge-dim">lane:</span>
+            {(['calm', 'energetic'] as const).map((l) => (
+              <button key={l} onClick={() => setLane(l)}
+                title={l === 'calm' ? 'Karaoke captions, sparse sound cues' : 'Per-word pop captions, dense sound cues, riser under the hook'}
+                className={cn('rounded-lg border px-2 py-1 text-[11px]', lane === l ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                {l}
+              </button>
+            ))}
+            <button onClick={() => setSfxOpen(!sfxOpen)}
+              className={cn('rounded-lg border px-2 py-1 text-[11px]', sfxKitCount(sfx) ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+              Sound kit{sfxKitCount(sfx) ? ` (${sfxKitCount(sfx)})` : ''}
+            </button>
           </div>
+          {sfxOpen && <SoundKitFields sfx={sfx} onChange={setSfx} />}
 
           <div className="flex flex-wrap gap-2">
             <Button variant='primary' size='md' onClick={() => void doRender()} disabled={busy}>

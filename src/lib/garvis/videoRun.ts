@@ -107,6 +107,53 @@ export async function startRender(sb: Storyboard, opts?: EditOpts): Promise<Rend
   return data as RenderStart;
 }
 
+/** Render an arbitrary edit JSON (the ugcEdit path) through the same metered seam. */
+export async function startRenderEdit(edit: Record<string, unknown>): Promise<RenderStart> {
+  const { data, error } = await supabase.functions.invoke('render-video', { body: { mode: 'render', edit } });
+  if (error) throw await invokeFailure(error, 'The render engine (render-video)');
+  return data as RenderStart;
+}
+
+/** Upload a real footage take into the vault; returns its public URL (the render provider fetches it). */
+export async function uploadTake(clusterId: string, file: File): Promise<string> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const clean = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  const path = `${uid}/studio/${clusterId}/take-${Date.now()}-${clean}`;
+  const { error } = await supabase.storage.from('project-assets').upload(path, file, { contentType: file.type || 'video/mp4' });
+  if (error) throw new Error(`Could not upload the take: ${error.message}`);
+  return supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
+}
+
+/** Decode an uploaded take's audio in the browser and reduce it to a window-RMS envelope — the
+ *  input to the pure auto-cut core (detectSpeech). Returns null when the audio can't be decoded
+ *  (odd container, no audio track): the caller keeps the take WHOLE — analysis failure never
+ *  discards footage. */
+export async function analyzeTakeAudio(file: File): Promise<{ envelope: number[]; windowS: number; durationS: number } | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const Ctx = window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return null;
+    const ctx = new Ctx();
+    try {
+      const audio = await ctx.decodeAudioData(buf);
+      const windowS = 0.05;
+      const win = Math.max(1, Math.round(audio.sampleRate * windowS));
+      const ch0 = audio.getChannelData(0);
+      const ch1 = audio.numberOfChannels > 1 ? audio.getChannelData(1) : null;
+      const envelope: number[] = [];
+      for (let i = 0; i < ch0.length; i += win) {
+        const end = Math.min(i + win, ch0.length);
+        let sum = 0;
+        for (let j = i; j < end; j++) { const s = ch1 ? (ch0[j] + ch1[j]) / 2 : ch0[j]; sum += s * s; }
+        envelope.push(Math.sqrt(sum / (end - i)));
+      }
+      return { envelope, windowS, durationS: audio.duration };
+    } finally { void ctx.close(); }
+  } catch { return null; }
+}
+
 /** Poll a render. With `clusterId`, a finished render is FINALIZED server-side: copied into durable
  *  storage (Shotstack URLs die in 24h) and recorded as a vault video row — with the AI-provenance
  *  stamp when the storyboard carried AI media, so the publish disclosure gate holds downstream. */
@@ -119,22 +166,27 @@ export async function pollRender(id: string, finalize?: { clusterId: string; aiP
 }
 
 /** Upload the storyboard's SRT captions as a small text asset so the render provider can fetch it.
- *  Returns the public URL, or null when the board has no captions. */
-export async function saveSrtAsset(clusterId: string, sb: Storyboard): Promise<string | null> {
-  if (!sb.captionsSrt) return null;
+ *  Returns the public URL, or null when the board has no captions. `srtOverride` carries the
+ *  word-timed SRT (buildTimedCaptionsSrt) when TTS timings exist. */
+export async function saveSrtAsset(clusterId: string, sb: Storyboard, srtOverride?: string): Promise<string | null> {
+  const srt = srtOverride ?? sb.captionsSrt;
+  if (!srt) return null;
   const { data: sess } = await supabase.auth.getUser();
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
   const path = `${uid}/studio/${clusterId}/captions-${crypto.randomUUID()}.srt`;
   const { error } = await supabase.storage.from('project-assets')
-    .upload(path, new Blob([sb.captionsSrt], { type: 'text/plain' }), { upsert: false });
+    .upload(path, new Blob([srt], { type: 'text/plain' }), { upsert: false });
   if (error) throw new Error(`Could not host the captions: ${error.message}`);
   return supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
 }
 
 export interface VoiceoverResult {
   available: boolean; ok?: boolean; error?: string; setup?: string[];
-  clips?: { sceneIndex: number; url: string }[];
+  /** `words` carries per-word timing (ElevenLabs character alignment) — word-EXACT caption cues
+   *  downstream. null/absent on the OpenAI path (it returns no timing): captions fall back to
+   *  proportional chunking, honestly. */
+  clips?: { sceneIndex: number; url: string; words?: { w: string; s: number; e: number }[] | null }[];
   provenance?: AiProvenance;
 }
 

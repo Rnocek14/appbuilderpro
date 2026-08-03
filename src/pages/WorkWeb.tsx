@@ -56,6 +56,7 @@ const SocialBoard = lazy(() => import('../components/garvis/canvas/SocialBoard')
 const IdeaStudio = lazy(() => import('../components/garvis/IdeaStudio').then((m) => ({ default: m.IdeaStudio })));
 const ReelStudio = lazy(() => import('../components/garvis/ReelStudio').then((m) => ({ default: m.ReelStudio })));
 const FactChannelStudio = lazy(() => import('../components/garvis/FactChannelStudio').then((m) => ({ default: m.FactChannelStudio })));
+const UgcStudio = lazy(() => import('../components/garvis/UgcStudio').then((m) => ({ default: m.UgcStudio })));
 const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
 const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').then((m) => ({ default: m.AnsweringDesk })));
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
@@ -889,6 +890,14 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           platforms. The growth engine's first full circuit. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
         <PanelBoundary name="fact channel studio"><FactChannelStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+      )}
+
+      {/* UGC STUDIO — the own-footage lane: film the episode's shot list (or any real takes),
+          upload, and the machine applies the native edit — hard cuts, punch-ins, word-karaoke
+          captions from the footage's own audio, optional provenance-stamped AI cutaways — then
+          renders and queues through the same approval-gated publisher. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
+        <PanelBoundary name="ugc studio"><UgcStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* OPERATOR ASSISTANT — the answering desk: paste an incoming message, get a reply grounded

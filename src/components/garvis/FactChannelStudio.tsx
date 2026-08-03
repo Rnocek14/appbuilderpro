@@ -9,7 +9,7 @@
 // owner's approval in the Queue.
 
 import { useEffect, useState } from 'react';
-import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle } from 'lucide-react';
+import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle, Clapperboard } from 'lucide-react';
 import {
   parseFactScript, scriptToScenes, scriptTotalSeconds, bandCheck, illustrationPrompt, composeCaption,
   ctaLink, deliveryInstructions, CHANNEL_PRESETS, type FactScript,
@@ -20,7 +20,11 @@ import {
   type GrowthChannel, type ChannelEpisode, type ChannelPerf,
 } from '../../lib/garvis/channelsRun';
 import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
-import { buildStoryboard } from '../../lib/garvis/storyboard';
+import { scriptToShotList, type SfxKit } from '../../lib/garvis/ugcEdit';
+import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
+import { SoundKitFields } from './SoundKitFields';
+import { buildStoryboard, buildTimedCaptionsSrt, type WordTiming } from '../../lib/garvis/storyboard';
+import { planEmphasis } from '../../lib/garvis/editPlan';
 import { generateVoiceover, saveSrtAsset, startRender, pollRender, saveRenderedVideo } from '../../lib/garvis/videoRun';
 import { volumeForMusic } from '../../lib/garvis/musicBed';
 import { aiProvenance } from '../../lib/garvis/mediaProvenance';
@@ -29,6 +33,18 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 
 const VIDEO_PLATFORMS: Platform[] = ['tiktok', 'youtube', 'instagram', 'facebook'];
+
+// The drafted script doubles as an on-camera filming sheet (the UGC lane) — downloaded as a .txt
+// the operator takes to the kitchen table.
+function downloadShotList(ep: ChannelEpisode, script: FactScript): void {
+  const blob = new Blob([scriptToShotList(script, ep.hook_index)], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `shot-list-${(ep.title || 'episode').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'episode'}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export function FactChannelStudio({ worldId, clusterId, onToast }: {
   worldId: string; clusterId: string; onToast: (k: 'success' | 'error' | 'info', m: string) => void;
@@ -45,6 +61,9 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [perf, setPerf] = useState<ChannelPerf | null>(null);
   const [cadenceOn, setCadenceOn] = useState<boolean | null>(null);
   const [ctaDraft, setCtaDraft] = useState('');
+  const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
+  const [sfx, setSfx] = useState<SfxKit>(loadSfxKit);
+  const [sfxOpen, setSfxOpen] = useState(false);
 
   const channel = channels?.find((c) => c.id === channelId) ?? null;
 
@@ -142,7 +161,10 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       const vo = await generateVoiceover(sb, clusterId, { voice: channel.voice, instructions: deliveryInstructions(channel.persona) });
       if (vo.available === false) { onToast('info', 'Voiceover isn\'t configured — set OPENAI_API_KEY in the edge secrets first.'); return; }
       if (!vo.ok || !vo.clips?.length) { onToast('error', vo.error ?? 'The voiceover failed.'); return; }
-      const srtUrl = await saveSrtAsset(clusterId, sb).catch(() => null);
+      // Word-EXACT captions when the provider returned timing (ElevenLabs); proportional otherwise.
+      const timings: (WordTiming[] | null)[] = [];
+      for (const c of vo.clips) timings[c.sceneIndex] = c.words ?? null;
+      const srtUrl = await saveSrtAsset(clusterId, sb, buildTimedCaptionsSrt(sb.scenes, timings)).catch(() => null);
 
       setProgress('Rendering the mp4…');
       // The whole episode is AI-made (script, art, voice) — stamped as such, disclosed at publish.
@@ -150,6 +172,8 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       const start = await startRender(sb, {
         voClips: vo.clips, srtUrl: srtUrl ?? undefined,
         ...(musicUrl.trim() ? { musicUrl: musicUrl.trim(), musicVolume: volumeForMusic(true) } : {}),
+        lane, ...(sfxKitCount(sfx) ? { sfx } : {}),
+        emphasisIndices: planEmphasis(sb.scenes),
       });
       if (start.available === false) { onToast('info', 'Rendering isn\'t configured — add SHOTSTACK_API_KEY (see System health).'); return; }
       if (!start.ok || !start.id) { onToast('error', start.error ?? 'The render could not start.'); return; }
@@ -294,6 +318,22 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
               {busy && progress?.startsWith('Drafting') ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Draft a cited episode
             </Button>
           </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+            <span className="text-forge-dim">edit lane:</span>
+            {(['calm', 'energetic'] as const).map((l) => (
+              <button key={l} onClick={() => setLane(l)}
+                title={l === 'calm' ? 'Educational: karaoke captions, sparse sound cues (the caregiver default)' : 'High-energy: per-word pop captions, dense sound cues, riser under the hook'}
+                className={cn('rounded-lg border px-2 py-1', lane === l ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                {l}
+              </button>
+            ))}
+            <button onClick={() => setSfxOpen(!sfxOpen)}
+              className={cn('rounded-lg border px-2 py-1', sfxKitCount(sfx) ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+              Sound kit{sfxKitCount(sfx) ? ` (${sfxKitCount(sfx)})` : ''}
+            </button>
+            <span className="text-forge-dim">— whooshes ride the scene cuts on the next Produce</span>
+          </div>
+          {sfxOpen && <SoundKitFields sfx={sfx} onChange={setSfx} />}
           {progress && <p className="mt-2 flex items-center gap-1.5 text-xs text-forge-dim"><Loader2 size={12} className="animate-spin" /> {progress}</p>}
 
           <div className="mt-3 space-y-2">
@@ -395,6 +435,14 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                             B-cut with hook {i + 1}
                           </button>
                         ))}
+                        {/* THE ON-CAMERA FORK: same script, filmed by a human instead of narrated by
+                            TTS — the sheet groups every line by station, then the takes come back
+                            through the UGC Studio below. Faces beat slides on retention. */}
+                        <button onClick={() => downloadShotList(ep, script)}
+                          title="Film this episode yourself: a station-grouped filming sheet with your lines verbatim. Cut the takes in the UGC Studio below."
+                          className="flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40">
+                          <Clapperboard size={12} /> Shot list (film it yourself)
+                        </button>
                       </div>
                     </div>
                   )}

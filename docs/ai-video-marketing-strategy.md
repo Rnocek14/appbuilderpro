@@ -473,6 +473,100 @@ Phase 2's AI clip engine (`generate-clip` with the Veo + aggregator seam over
 `reel_jobs`/`reel_clips`); a direct YouTube Analytics API integration (the only API exposing the
 full 100-point retention curve).
 
+**Round 5 (Aug 3) — the own-footage lane (UGC Studio):**
+
+The missing third lane between "fully faceless" and "hire an editor": the operator films real
+takes and the machine applies the researched native edit. Two research sweeps (the 2026 UGC edit
+grammar; the hybrid real+AI doctrine) encoded as:
+
+- **`ugcEdit.ts` pure core** (21 verified checks): real takes → Shotstack edit with HARD CUTS
+  only, alternating full-frame ↔ ~115% punch-ins with a 6% slow push (the retention device),
+  word-karaoke captions transcribed from the footage's OWN audio (`alias://aroll`), a ≤1.5s
+  frame-one hook card, b-roll as a MUTED 1-8s layer over continuous voice, music at 0.15 under
+  speech, `transcode: true` for phone rotation/VFR.
+- **`scriptToShotList()`** — a drafted episode becomes a station-grouped filming sheet: verbatim
+  lines, framing + delivery notes, POST slots for the hook card and stylized AI cutaways
+  (locked prompts, never photoreal). One-click download on every episode card.
+- **The UGC Studio** in every `content_growth` area: upload takes (vault storage) → hook card →
+  optional AI diagram cutaways → render → queue through the same approval-gated publisher.
+- **The hybrid doctrine, enforced honestly**: the human testifies (hook, claims, CTA on camera —
+  the host's face/voice are never AI-altered); AI illustrates (stylized, provenance-stamped
+  cutaways + "Illustrations AI-assisted." in the caption). A cut with NO AI elements carries no
+  provenance and no AI mark — the honest inverse.
+
+**Round 6 (Aug 3) — CapCut parity, researched and encoded:**
+
+Two sweeps (the CapCut-grade edit anatomy with measured numbers; the Shotstack v1.14.1 schema
+verified from the official OAS repo) closed the gap between "an edit" and "a CapCut-grade edit":
+
+- **AUTO JUMP-CUT** (`autoCut.ts`, 15 checks): browser-side audio decode → window-RMS envelope →
+  adaptive speech detection → pauses >0.5s (0.3s energetic) become jump cuts with the pro padding
+  (0.09s front / 0.15s tail — the TimeBolt/Descript convention). Analysis failure keeps the take
+  WHOLE — never a silent discard. Silence removal supplies the winning 2-4s cut cadence
+  automatically, and the punch alternation disguises every cut it makes.
+- **THE SFX LAYER**: whooshes riding the cuts (−18dB, leading by ~3 frames), pop on the hook
+  card (−14dB), riser under an energetic hook (−24dB). Sparse (≤3) on the calm lane, dense (≤12)
+  energetic. CC0-attested kit only (the musicBed rule); unknown cut times place NOTHING — auto-cut
+  makes the timeline computable, which is what unlocks precise cues.
+- **LANES**: calm (caregiver/educational — karaoke captions, restraint, no shake: the 2026
+  "dynamic minimalism" read) vs energetic (UGC-ad — pop captions, tighter cuts, a CapCut hard-shake
+  on the first punch-in via rapid X-offset keyframes).
+- **Fixes from the schema verification**: captions were positioned ABOVE center (Shotstack +y
+  moves UP — real bug); now lower-middle (-0.2) in a wrap:true pill with a 3px stroke; light
+  'boost' grade on every take (correct, don't grade); active-word yellow #f7c204.
+- Known ceiling, documented honestly: no audio ducking/sidechain, no emoji in rich captions, no
+  speed ramps (single scalar only), no server-side silence detection — all verified absent from
+  the Edit API as of v1.14.1.
+
+**Round 6b (same day) — the grammar applied EVERYWHERE it's useful:**
+
+The CapCut-grade layer moved from the UGC lane into the shared storyboard compiler, so every
+video the platform renders speaks it — Fact Channel episodes, B-cuts, standing-order episodes,
+and VideoStudio marketing reels:
+
+- `toShotstackEdit` upgraded: word-animated RICH captions (karaoke calm / pop energetic, wrap
+  pill, 3px stroke, yellow active word, lower-middle) replacing the legacy caption asset;
+  on-screen overlays + shoot cards moved off the DEPRECATED title asset onto rich-text (white
+  pill, fade-in per beat, top third); the shared `sfxCueClips` layer rides the scene cuts —
+  boundaries are explicit in a storyboard, so cues land precisely.
+- One CC0 sound kit (`sfxStore`), set once, shared by all three studios; `lane` selector
+  (calm/energetic) in each studio; the fact-channel produce path and VideoStudio renders pass
+  both straight through `EditOpts`.
+- Schema-correct rich-text animation (preset/duration — the old style-only shape was invalid)
+  fixed in the UGC hook card too. 87 checks across the three video suites.
+
+**Round 7 (Aug 3) — the evidence pass: what editing actually buys, and the automation verdict:**
+
+Three deep sweeps (retention evidence hierarchy; teardown of every leading auto-editor; the
+editor decision-rule anatomy) answered "can automated production reach the level we need":
+
+- **The evidence hierarchy (what moves retention, ranked)**: hook/first-3s (up to ~half of a
+  video's measured value) > topic/format > script + length discipline > editing HYGIENE
+  (captions +12% view time, scene change every 3-5s = 58%-vs-41% retention, dead-air removal,
+  clean audio) > delivery >> edit POLISH (no positive evidence at any tier for
+  educational/talking-head; 6.9M-session study: informal beats studio; polish reads as
+  out-of-place to 59% of TikTok users). Conclusion: the level we need IS the automatable level —
+  hygiene + hook + script, which is what this platform concentrates on.
+- **Auto-editor state of the art**: no shipping tool achieves full-auto professional level
+  (consensus: 60-80% rough cut + human finish). Publishable-as-is slices — word-timed captions,
+  silence removal, reframe — are exactly what we built. NOTHING shipping places emphasis by
+  meaning (all zoom on cadence); that whitespace is ours because the script exists BEFORE the
+  footage.
+- **What shipped from it**: `editPlan.ts` (14 checks) — the emphasis engine: numbers/turn-words/
+  absolutes/questions score each line, turning points get the hard zoom + the whoosh rides THEIR
+  cut, capped ~1/15s, never adjacent, never the hook or CTA (face stays steady — the trust rule).
+  Caption chunking to the 3-7-word spec with phrase-boundary splits and the no-dangling-word
+  subtitling rule. ElevenLabs `with-timestamps` → WORD-EXACT caption cues (no ASR errors — the
+  #1 complaint against every transcription-first tool); OpenAI path falls back proportional,
+  honestly. Hook cards hold 2s (the readable-in-one-glance floor).
+- **Policy alignment**: July 2025 originality crackdowns (YouTube "inauthentic content", Meta)
+  demote templated mass-production — per-video human value (cited scripts, real voice/face,
+  varied emphasis) is the protection. The 3-5-channel disclosed strategy sits on the right side.
+- **Caregiver lane reality check**: realistic targets 50-65% avg-view, ≥70-80% first-3s hold;
+  the niche's engagement driver is personal reality + authenticity, and over-editing measurably
+  fatigues older audiences — the calm lane's restraint is the evidence-backed choice, not a
+  compromise.
+
 ## 10. Why this wins
 
 1. **The rails already exist here** — approval spine, publishing, metrics sync, credits, breaker,
