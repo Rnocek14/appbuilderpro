@@ -131,7 +131,7 @@ test('a growth world leads with its studio, and the loop\'s verdicts render on r
   await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
 
   // The studio is the front page — NOT buried behind the marketing canvas's Advanced toggle.
-  await expect(page.getByText('Fact Channel Studio')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Fact Channel Studio', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole('button', { name: 'Finance facts' })).toBeVisible();
 
   // The learning loop, visibly alive: median baseline + winner/quiet verdicts + retention reads.
@@ -149,7 +149,7 @@ test('rendered episodes offer the hook lab; uncited drafts wear the needs-review
   const errors = trackCrashes(page);
   await mockBackend(page);
   await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Fact Channel Studio')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Fact Channel Studio', { exact: true })).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole('button', { name: /How ATMs actually work/ }).first().click();
   await expect(page.getByRole('button', { name: /Queue to tiktok \+ youtube \+ instagram/ })).toBeVisible();
@@ -166,7 +166,7 @@ test('a dead edge function degrades to an honest message, never raw "non-2xx" pl
   const errors = trackCrashes(page);
   await mockBackend(page);
   await page.goto(`/garvis/webs/${WORLD_ID}`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Fact Channel Studio')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Fact Channel Studio', { exact: true })).toBeVisible({ timeout: 20_000 });
 
   await page.getByRole('button', { name: /Draft a cited episode/ }).click();
   await expect(page.getByText(/The script writer \(fact-script\) isn't answering/)).toBeVisible({ timeout: 15_000 });
