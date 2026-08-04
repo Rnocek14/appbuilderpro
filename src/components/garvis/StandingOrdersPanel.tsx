@@ -5,9 +5,11 @@
 // anything — findings land in the waking moment and on the shelf; acting stays yours.
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlarmClock, Loader2, Play, Pause, Trash2, Plus, Eye, CalendarClock } from 'lucide-react';
+import { AlarmClock, Loader2, Play, Pause, Trash2, Plus, Eye, CalendarClock, HelpCircle } from 'lucide-react';
 import { listOrders, createOrder, setOrderStatus, deleteOrder, runOrderNow } from '../../lib/garvis/standingRun';
 import { orderStatusLine, type Cadence, type OrderKind, type StandingOrder } from '../../lib/garvis/standing';
+import { cardForOrderKind } from '../../lib/garvis/automationCards';
+import { AutomationCardView } from './AutomationCardView';
 import { ClockStatus } from './ClockStatus';
 import { Button } from '../ui';
 
@@ -18,6 +20,7 @@ export function StandingOrdersPanel({ worldId, onToast }: {
   // including world-less watches the Commander created — is visible, pausable, and deletable here.
   const global = !worldId;
   const [orders, setOrders] = useState<StandingOrder[]>([]);
+  const [infoFor, setInfoFor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [kind, setKind] = useState<OrderKind>('watch_url');
@@ -82,6 +85,9 @@ export function StandingOrdersPanel({ worldId, onToast }: {
               <button key={c} onClick={() => setCadence(c)} className={`rounded-full border px-2.5 py-1 text-[11px] ${cadence === c ? 'border-forge-cyan/50 text-forge-cyan' : 'border-forge-border text-forge-dim'}`}>{c}</button>
             ))}
           </div>
+          {/* The standing card for the chosen kind — what it does, its rung, and its boundary,
+              BEFORE the order exists (expectation-setting at activation, per the research). */}
+          <div className="mt-2"><AutomationCardView card={cardForOrderKind(kind)} /></div>
           <input
             value={label} onChange={(e) => setLabel(e.target.value)}
             placeholder={kind === 'watch_url' ? 'Name it — e.g. “Acme’s pricing page”' : 'Name it — e.g. “Weekly digest”'}
@@ -118,6 +124,10 @@ export function StandingOrdersPanel({ worldId, onToast }: {
                 <span className="shrink-0 rounded-full border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim">{o.cadence}</span>
                 {o.status === 'paused' && <span className="shrink-0 rounded-full bg-forge-warn/15 px-1.5 py-0.5 text-[10px] text-forge-warn">paused</span>}
                 <div className="flex shrink-0 items-center gap-1">
+                  <button title="What this does" onClick={() => setInfoFor(infoFor === o.id ? null : o.id)}
+                    className={`rounded border border-forge-border p-1 ${infoFor === o.id ? 'text-forge-ember' : 'text-forge-dim hover:text-forge-ink'}`}>
+                    <HelpCircle size={12} />
+                  </button>
                   <button title="Run now" onClick={() => void act(o.id, async () => { const r = await runOrderNow(o.id); if (r.ran === 0) onToast('error', 'Nothing ran — the order was not found (it may have been deleted).'); else onToast(r.failed > 0 ? 'error' : 'success', r.changed > 0 ? 'Ran — something changed; check your waking moment.' : r.failed > 0 ? 'Ran — the check failed; see its status line below.' : 'Ran — no change.'); })}
                     disabled={!!busy} className="rounded border border-forge-border p-1 text-forge-dim hover:text-forge-ink disabled:opacity-50">
                     {busy === o.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
@@ -136,6 +146,7 @@ export function StandingOrdersPanel({ worldId, onToast }: {
               <p className={`mt-1 text-[11px] ${o.lastResult?.status === 'changed' ? 'text-forge-ok' : o.lastResult?.status === 'unreachable' ? 'text-forge-warn' : 'text-forge-dim'}`}>
                 {orderStatusLine(o)}
               </p>
+              {infoFor === o.id && <div className="mt-2"><AutomationCardView card={cardForOrderKind(o.kind)} /></div>}
             </li>
           ))}
         </ul>
