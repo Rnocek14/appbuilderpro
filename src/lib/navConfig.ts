@@ -10,7 +10,7 @@ import {
   Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
   CreditCard, Settings, Activity, Wand2, Crosshair, BookUser,
-  Hammer, PhoneMissed, Target, Film, HeartPulse, CalendarClock, MailCheck, Radar,
+  Hammer, PhoneMissed, Target, Film, HeartPulse, CalendarClock, MailCheck, Radar, Clapperboard,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon }
@@ -38,7 +38,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Prospecting',
     items: [
       // The richer hunt/config front door (set up ongoing hunts, verticals, territory).
-      { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
+      { to: '/garvis/clients', label: 'Find clients', icon: Rocket },
       // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
       { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
       // Public records → ranked trade leads: markets on the hourly clock, approval-gated digests.
@@ -56,7 +56,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/orchestrate', label: 'Orchestrate', icon: Wand2 },
       { to: '/garvis/home', label: 'Canvas', icon: Compass },
       { to: '/garvis/webs', label: 'Businesses', icon: Waypoints },
-      { to: '/garvis/scenes', label: 'Scenes', icon: Film },
+      { to: '/garvis/scenes', label: 'Scenes', icon: Clapperboard },
     ],
   },
   {

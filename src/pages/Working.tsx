@@ -140,7 +140,7 @@ export default function Working() {
 
             <Section icon={<Compass size={15} />} title="Client discovery" linkTo="/garvis/leads" linkLabel="Browse the pool">
               {(!discovered || 'missing' in discovered) && (!queries || 'missing' in queries) ? (
-                <p className={dim}>The daily hunt isn’t set up yet — start it from Win clients and prospects accumulate here.</p>
+                <p className={dim}>The daily hunt isn’t set up yet — start it from Find clients and prospects accumulate here.</p>
               ) : (discovered && 'failed' in discovered) || (queries && 'failed' in queries) ? FAILED : (
                 <>
                   {discovered && 'ok' in discovered && (

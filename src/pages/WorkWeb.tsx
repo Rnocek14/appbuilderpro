@@ -142,7 +142,7 @@ export default function WorkWeb() {
         });
       }
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Could not load this web.');
+      toast('error', e instanceof Error ? e.message : 'Could not load this business.');
     } finally {
       setLoading(false);
     }
@@ -188,7 +188,7 @@ export default function WorkWeb() {
     setRunning(true);
     try {
       const r = await runPlay(worldId, templatePlay);
-      toast('success', `Ran the play — ${r.artifactCount} artifacts across the web.`);
+      toast('success', `Ran the play — ${r.artifactCount} artifacts across the business.`);
       await refresh();
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'The play failed.');
@@ -230,12 +230,12 @@ export default function WorkWeb() {
     }
   };
 
-  if (loading) return <AppShell><div className="p-8"><Spinner label="Opening the web…" /></div></AppShell>;
+  if (loading) return <AppShell><div className="p-8"><Spinner label="Opening the business…" /></div></AppShell>;
   if (!web) {
     return (
       <AppShell>
         <div className="mx-auto max-w-2xl px-4 py-16 text-center">
-          <p className="text-forge-dim">This web could not be loaded.</p>
+          <p className="text-forge-dim">This business could not be loaded.</p>
           <Link to="/garvis/webs" className="mt-3 inline-flex items-center gap-1 text-forge-ember"><ArrowLeft size={14} /> Back to Businesses</Link>
         </div>
       </AppShell>
@@ -723,7 +723,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         toast('success', `Added ${file.name}.`);
       } else {
         await uploadAndIngest(file, { worldId });
-        toast('success', `Added ${file.name} to this world’s knowledge — the studios can use it now.`);
+        toast('success', `Added ${file.name} to this business’s knowledge — the studios can use it now.`);
       }
       await reload();
     } catch (e) { toast('error', e instanceof Error ? e.message : 'Upload failed.'); }
@@ -803,7 +803,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
       ) : trackerDesk ? (
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This registry measures what's on record.</p>
-          <p>Entries you log accumulate as this world's memory — nothing is sent or automated from
+          <p>Entries you log accumulate as this business's memory — nothing is sent or automated from
           them. The honest measure here is coverage: when an answer comes back "nothing on record",
           that's the entry to log next.</p>
         </div>
@@ -818,7 +818,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
         <div className="mt-4 rounded-xl border border-forge-border bg-forge-panel/50 p-4 text-sm text-forge-dim">
           <p className="mb-1 font-medium text-forge-ink">This lab measures shipped thinking.</p>
           <p>Concepts and specs live on each studio's shelf; the progress ledger doc here tracks
-          explored → chosen → specced → pitched. If this world ever starts launching things
+          explored → chosen → specced → pitched. If this business ever starts launching things
           (outreach, a site), the channel results appear here automatically.</p>
         </div>
       ) : (
@@ -961,7 +961,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
             onClick={() => void buildFromWorld(worldId, cluster.id).then((route) => navigate(route)).catch((e) => toast('error', e instanceof Error ? e.message : 'Could not stage the build.'))}
             title="Compiles the world's DNA, brand kit, and website-labeled artwork into a build brief and opens the app builder"
           >
-            <Sparkles size={15} /> Build the website — with this world's artwork
+            <Sparkles size={15} /> Build the website — with this business's artwork
           </Button>
           {/* SITE RENDITIONS — pick the design mechanism before the generator runs; same real
               materials, a genuinely different site. Rebuild under another direction any time. */}
@@ -1023,7 +1023,7 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           </button>
         </div>
         {files.length === 0 ? (
-          <p className="text-xs text-forge-dim/60">No files. Images are stored for the studios to use; a dropped document, text file, or CSV is ingested into this world’s knowledge so the studios can ground on it.</p>
+          <p className="text-xs text-forge-dim/60">No files. Images are stored for the studios to use; a dropped document, text file, or CSV is ingested into this business’s knowledge so the studios can ground on it.</p>
         ) : (
           <div className="flex flex-wrap gap-1.5">
             {files.map((f) => (
@@ -1191,7 +1191,7 @@ function BrandKitPanel({ worldId, onSaved }: { worldId: string; onSaved: () => v
         </dl>
       ) : (
         <div>
-          <p className="mt-1 text-xs text-forge-dim">Give the studios a voice — until a kit exists, "brand vault is empty" blocks this world.</p>
+          <p className="mt-1 text-xs text-forge-dim">Give the studios a voice — until a kit exists, "brand vault is empty" blocks this business.</p>
           <label className={label}>Brand name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="@properties — Jane Nocek" className={field} /></label>
           <label className={label}>Tone<textarea value={tone} onChange={(e) => setTone(e.target.value)} rows={2} placeholder="Warm, local, confident. Lake Geneva expertise without the hard sell." className={field} /></label>
           <label className={label}>Palette (comma-separated hex)<input value={palette} onChange={(e) => setPalette(e.target.value)} placeholder="#123B5C, #C9A227, #F5F1E8" className={field} /></label>
@@ -1371,10 +1371,10 @@ function ProspectFinderPanel({ worldId }: { worldId: string }) {
     <div className="mt-4 rounded-xl border border-forge-border bg-forge-raised/40 p-4">
       <h3 className="text-sm font-semibold text-forge-ink">Lead finder — market intelligence</h3>
       {!plan?.categories.length ? (
-        <p className="mt-1 text-xs text-forge-dim">This world has no DNA yet (ideal customers unknown), so there is nothing honest to scan for. Genesis worlds get segments automatically.</p>
+        <p className="mt-1 text-xs text-forge-dim">This business has no DNA yet (ideal customers unknown), so there is nothing honest to scan for. Genesis businesses get segments automatically.</p>
       ) : (
         <>
-          <p className="mt-1 text-xs text-forge-dim">Segments reasoned from this world's DNA. Scans are read-only and metered; nothing is contacted without approvals.</p>
+          <p className="mt-1 text-xs text-forge-dim">Segments reasoned from this business's DNA. Scans are read-only and metered; nothing is contacted without approvals.</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {plan.categories.map((c) => (
               <button

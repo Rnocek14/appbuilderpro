@@ -36,7 +36,7 @@ export default function WorkWebs() {
       const [w, d] = await Promise.all([listWebs(), listDrafts().catch(() => [] as DraftRow[])]);
       setWebs(w); setDrafts(d);
     }
-    catch (e) { toast('error', e instanceof Error ? e.message : 'Could not load webs.'); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Could not load businesses.'); }
     finally { setLoading(false); }
   }, [toast]);
 
@@ -47,7 +47,7 @@ export default function WorkWebs() {
     setGenesisWarnings([]);
     try {
       const r = await generateDraft(intent);
-      if (!r.id) { toast('error', r.problems[0] ?? 'Genesis could not design that web.'); setGenesisWarnings(r.warnings); return; }
+      if (!r.id) { toast('error', r.problems[0] ?? 'Genesis could not design that business.'); setGenesisWarnings(r.warnings); return; }
       setIntent('');
       setGenesisWarnings(r.warnings);
       toast('success', `Drafted "${r.draft?.title}" — review it below. Nothing exists until you approve.`);
@@ -67,7 +67,7 @@ export default function WorkWebs() {
     try {
       if (refs.length === 1) {
         const r = await generateDraftFromRepo(refs[0]);
-        if (!r.id) { toast('error', r.problems[0] ?? 'Couldn’t spin up a world from that repo.'); setGenesisWarnings(r.warnings); return; }
+        if (!r.id) { toast('error', r.problems[0] ?? 'Couldn’t spin up a business from that repo.'); setGenesisWarnings(r.warnings); return; }
         setRepoUrl('');
         setGenesisWarnings(r.warnings);
         toast('success', `Read the repo and drafted "${r.draft?.title}" — review it below. Nothing exists until you approve.`);
@@ -96,7 +96,7 @@ export default function WorkWebs() {
       toast('success', `Created "${web.title}".`);
       navigate(`/garvis/webs/${web.worldId}`);
     } catch (e) {
-      toast('error', e instanceof Error ? e.message : 'Could not create the web.');
+      toast('error', e instanceof Error ? e.message : 'Could not create the business.');
       setCreating(null);
     }
   };
@@ -136,7 +136,7 @@ export default function WorkWebs() {
           <div className="flex items-center gap-2">
             <Sparkles size={16} className="text-forge-ember" />
             <h2 className="text-sm font-semibold text-forge-ink">Or start from intent</h2>
-            <span className="text-xs text-forge-dim">— describe the business or mission; Garvis designs the work web and shows you why (needs an AI key)</span>
+            <span className="text-xs text-forge-dim">— describe the business or mission; Garvis designs the business and shows you why (needs an AI key)</span>
           </div>
           {/* THE FRONT DOOR the reachability audit found missing: nothing advertised that a world can
               be a growth op, a product lab, an answering desk, a document studio, or a data workspace.
@@ -167,9 +167,9 @@ export default function WorkWebs() {
           />
           <div className="mt-2 flex items-center gap-2">
             <Button onClick={() => void draftIt()} loading={drafting} disabled={intent.trim().length < 12}>
-              {drafting ? 'Synthesizing…' : 'Draft the web'}
+              {drafting ? 'Synthesizing…' : 'Draft the business'}
             </Button>
-            <span className="text-[11px] text-forge-dim">Two passes: business DNA first, then the web — every area arrives with its reason.</span>
+            <span className="text-[11px] text-forge-dim">Two passes: business DNA first, then the business — every area arrives with its reason.</span>
           </div>
 
           {/* Or point Garvis at a GitHub repo: it reads the repo's real signal (README, the site
@@ -179,7 +179,7 @@ export default function WorkWebs() {
             <div className="flex items-center gap-2">
               <Building2 size={14} className="text-forge-ember" />
               <span className="text-xs font-medium text-forge-ink">Or spin up from your GitHub repos</span>
-              <span className="text-[11px] text-forge-dim">— Garvis reads each repo and drafts its marketing world; paste several to bring your whole portfolio in at once</span>
+              <span className="text-[11px] text-forge-dim">— Garvis reads each repo and drafts its marketing business; paste several to bring your whole portfolio in at once</span>
             </div>
             <div className="mt-2 flex items-center gap-2">
               <input
@@ -219,7 +219,7 @@ export default function WorkWebs() {
                 const web = await approveDraft(d.id);
                 toast('success', `Created "${web.title}".`);
                 navigate(`/garvis/webs/${web.worldId}`);
-              } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not create the world.'); }
+              } catch (e) { toast('error', e instanceof Error ? e.message : 'Could not create the business.'); }
             }}
             onDiscard={async () => { await discardDraft(d.id); toast('info', 'Draft discarded.'); await refresh(); }}
             onRemoveNode={async (slug) => { await removeDraftNode(d.id, slug); await refresh(); }}
@@ -228,7 +228,7 @@ export default function WorkWebs() {
 
         {/* Existing webs */}
         {loading ? (
-          <Spinner label="Loading your webs…" />
+          <Spinner label="Loading your businesses…" />
         ) : webs.length === 0 ? (
           <EmptyState icon={<Waypoints size={20} />} title="No businesses yet" body="Pick a template above to build the whole operation in one click — it works right now, no setup. Or describe your own in 'Start from intent' and Garvis designs it around your objective." />
         ) : (
