@@ -6,15 +6,16 @@
 // in the Money loop. Every lead links its public record. Nothing here sends anything.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Radar, Plus, Play, Pause, Send, ExternalLink, RefreshCw, Clock, CheckCircle2, Circle } from 'lucide-react';
+import { Radar, Plus, Play, Pause, Send, ExternalLink, RefreshCw, Clock, CheckCircle2, Circle, Users, Megaphone } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, Skeleton } from '../ui';
 import {
   listSources, createSource, setSourceActive, listLeads, setLeadStatus, runIngestNow,
   queueDigest, recordOutcome, leadScoreboard, getClockOrder, enableClock, setClockActive,
-  type LeadSourceRow, type LeadRow,
+  listCustomers, addCustomer, setCustomerStatus, queueSamplePitch,
+  type LeadSourceRow, type LeadRow, type LeadCustomerRow,
 } from '../../lib/garvis/leadEngine/leadEngineRun';
 import type { StandingOrder } from '../../lib/garvis/standing';
-import { TRADES } from '../../lib/garvis/leadEngine/leadEngine.ts';
+import { TRADES, TRADE_KEYS, type TradeKey } from '../../lib/garvis/leadEngine/leadEngine.ts';
 import { STARTER_SOURCES, starterById, type SourceKind } from '../../lib/garvis/leadEngine/adapters.ts';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
@@ -51,10 +52,18 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   const [wonValue, setWonValue] = useState('');
   const [wonBillTo, setWonBillTo] = useState('');
 
+  // Customers + the sales opener.
+  const [customers, setCustomers] = useState<LeadCustomerRow[] | null>(null);
+  const [custName, setCustName] = useState('');
+  const [custEmail, setCustEmail] = useState('');
+  const [custTrade, setCustTrade] = useState<TradeKey | 'all'>('all');
+  const [pitchEmail, setPitchEmail] = useState('');
+  const [pitchTrade, setPitchTrade] = useState<TradeKey>('security');
+
   const refresh = useCallback(async () => {
     try {
-      const [s, l, b, c] = await Promise.all([listSources(worldId), listLeads(worldId), leadScoreboard(worldId), getClockOrder(worldId)]);
-      setSources(s); setLeads(l); setBoard(b); setClock(c); setLoadFailed(false);
+      const [s, l, b, c, cu] = await Promise.all([listSources(worldId), listLeads(worldId), leadScoreboard(worldId), getClockOrder(worldId), listCustomers(worldId)]);
+      setSources(s); setLeads(l); setBoard(b); setClock(c); setCustomers(cu); setLoadFailed(false);
     } catch {
       setLoadFailed(true); // a failed load must never render as an empty market
     }
@@ -304,12 +313,81 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
         </div>
       )}
 
-      {/* Digest — ONE pending approval through the one send path. */}
+      {/* Customers — the market's subscribers. Their weekly digests draft AUTOMATICALLY on the
+          clock as pending approvals; this section just manages who's on the list. */}
+      <section className="rounded-xl border border-forge-border bg-forge-panel p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <Users size={14} className="text-forge-ember" />
+          <span className="text-sm font-medium text-forge-ink">Customers</span>
+          {customers && customers.length > 0 && <Badge tone="ok">{customers.filter((c) => c.status === 'active').length} active</Badge>}
+        </div>
+        {customers === null ? <Skeleton className="h-10" /> : customers.length === 0 ? (
+          <p className="text-xs text-forge-dim">Nobody yet. Add a customer and the clock drafts their trade's digest every week — each one waits in your Queue for approval.</p>
+        ) : (
+          <ul className="mb-2 space-y-1">
+            {customers.map((c) => (
+              <li key={c.id} className="flex items-center gap-2 text-xs">
+                <Badge tone={c.status === 'active' ? 'ok' : 'dim'}>{c.status}</Badge>
+                <span className="text-forge-ink">{c.name || c.email}</span>
+                <span className="text-forge-dim">{c.trade === 'all' ? 'all trades' : TRADES[c.trade as TradeKey]?.label ?? c.trade}</span>
+                <span className="ml-auto text-forge-dim">{c.last_digest_at ? `digest ${c.last_digest_at.slice(0, 10)}` : 'no digest yet'}</span>
+                <Button size="sm" variant="ghost" loading={busy === `cu-${c.id}`}
+                  onClick={() => act(`cu-${c.id}`, () => setCustomerStatus(c.id, c.status === 'active' ? 'paused' : 'active'))}>
+                  {c.status === 'active' ? <Pause size={12} /> : <Play size={12} />}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Input placeholder="Name" value={custName} onChange={(e) => setCustName(e.target.value)} className="w-36" />
+          <Input placeholder="customer@example.com" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} className="w-56" />
+          <select value={custTrade} onChange={(e) => setCustTrade(e.target.value as TradeKey | 'all')}
+            className="rounded-lg border border-forge-border bg-forge-panel px-2 py-2 text-xs text-forge-ink">
+            <option value="all">All trades</option>
+            {TRADE_KEYS.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
+          </select>
+          <Button size="sm" loading={busy === 'add-cust'}
+            onClick={() => act('add-cust', async () => {
+              await addCustomer({ worldId, name: custName, email: custEmail, trade: custTrade });
+              setCustName(''); setCustEmail('');
+            }, 'Customer added — their first digest drafts on the next weekly cycle.')}>
+            <Plus size={13} /> Add
+          </Button>
+        </div>
+      </section>
+
+      {/* The sales opener — a sample pitch with REAL leads embedded, queued for approval. */}
+      <section className="rounded-xl border border-forge-border bg-forge-panel p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <Megaphone size={14} className="text-forge-ember" />
+          <span className="text-sm font-medium text-forge-ink">Sell this market</span>
+        </div>
+        <p className="mb-2 text-xs text-forge-dim">Pitch a contractor with 2–3 real leads from this market — public-record links included, so the sample is the proof. It waits in your Queue like everything else.</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input placeholder="prospect@contractor.com" value={pitchEmail} onChange={(e) => setPitchEmail(e.target.value)} className="w-56" />
+          <select value={pitchTrade} onChange={(e) => setPitchTrade(e.target.value as TradeKey)}
+            className="rounded-lg border border-forge-border bg-forge-panel px-2 py-2 text-xs text-forge-ink">
+            {TRADE_KEYS.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
+          </select>
+          <Button size="sm" loading={busy === 'pitch'}
+            onClick={() => act('pitch', async () => {
+              const region = sources?.[0]?.region ?? worldLabel;
+              await queueSamplePitch({ worldId, region, toEmail: pitchEmail, trade: pitchTrade });
+              setPitchEmail('');
+            }, 'Sample pitch drafted — review and approve it in your Queue.')}>
+            Draft the pitch
+          </Button>
+        </div>
+      </section>
+
+      {/* Ad-hoc digest — ONE pending approval through the one send path. (Customers above get
+          theirs automatically on the weekly cycle.) */}
       <section className="rounded-xl border border-forge-border bg-forge-panel p-3">
         <div className="flex flex-wrap items-center gap-2">
           <Send size={14} className="text-forge-ember" />
-          <span className="text-sm font-medium text-forge-ink">Queue the digest</span>
-          <Input placeholder="customer@example.com" value={digestTo} onChange={(e) => setDigestTo(e.target.value)} className="w-64" />
+          <span className="text-sm font-medium text-forge-ink">One-off digest</span>
+          <Input placeholder="someone@example.com" value={digestTo} onChange={(e) => setDigestTo(e.target.value)} className="w-64" />
           <Button size="sm" loading={busy === 'digest'} disabled={fresh.length === 0}
             onClick={() => act('digest', async () => {
               const r = await queueDigest({ worldId, worldLabel, toEmail: digestTo });

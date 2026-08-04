@@ -18,12 +18,13 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch } from '../_shared/safeFetch.ts';
+import { hashPayload } from '../_shared/payloadHash.ts';
 import {
-  scoreLead, pickContact, whyNow, ingestLine, parseLeadEngineConfig,
-  type LeadEventLike, type TradeKey,
+  scoreLead, pickContact, whyNow, ingestLine, parseLeadEngineConfig, digestFor, digestDue, isTradeKey,
+  type LeadEventLike, type TradeKey, type DigestLead,
 } from '../../../src/lib/garvis/leadEngine/leadEngine.ts';
 import {
-  buildFetchUrl, parseRows, normalizeEvent, nextCursor,
+  buildFetchUrl, parseRows, sourceFormat, normalizeEvent, nextCursor,
   type SourceLike, type CandidateEvent,
 } from '../../../src/lib/garvis/leadEngine/adapters.ts';
 
@@ -60,16 +61,29 @@ async function appendContacts(
         method: 'POST', signal: AbortSignal.timeout(10_000),
         headers: {
           'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.displayName,places.nationalPhoneNumber,places.formattedAddress',
+          'X-Goog-FieldMask': 'places.displayName,places.nationalPhoneNumber,places.websiteUri,places.formattedAddress',
         },
         body: JSON.stringify({ textQuery, maxResultCount: 1, regionCode: 'US' }),
       });
       if (!res.ok) continue;
-      const json = (await res.json().catch(() => ({}))) as { places?: { displayName?: { text?: string }; nationalPhoneNumber?: string }[] };
+      const json = (await res.json().catch(() => ({}))) as { places?: { displayName?: { text?: string }; nationalPhoneNumber?: string; websiteUri?: string }[] };
       const hit = json.places?.[0];
       const phone = (hit?.nationalPhoneNumber ?? '').trim();
-      if (!phone) continue;
-      const patch: Record<string, unknown> = { contact_phone: phone, updated_at: new Date().toISOString() };
+      // Wave-1b: when the matched business has a website, read its contact page for an email —
+      // through the hardened fetch, best-effort, verbatim (the first plausible address, no guessing).
+      let email: string | null = null;
+      if (hit?.websiteUri) {
+        try {
+          const site = await safeFetch(hit.websiteUri);
+          const html = (await site.text()).slice(0, 300_000);
+          const m = html.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? [];
+          email = m.find((e) => !/\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(e) && !/example\.|sentry|wixpress|godaddy/i.test(e)) ?? null;
+        } catch { /* a site that won't read costs nothing */ }
+      }
+      if (!phone && !email) continue;
+      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if (phone) patch.contact_phone = phone;
+      if (email) patch.contact_email = email.toLowerCase();
       if (!l.contact_company && !l.contact_name && hit?.displayName?.text) patch.contact_company = hit.displayName.text.slice(0, 120);
       await admin.from('le_leads').update(patch).eq('id', l.id);
       appended++;
@@ -133,7 +147,7 @@ Deno.serve(async (req) => {
       const res = await safeFetch(buildFetchUrl(src));
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = (await res.text()).slice(0, MAX_BODY);
-      const rows = parseRows(src.kind, text);
+      const rows = parseRows(src.kind, text, sourceFormat(src));
       fetchOk = true;
       candidates = rows.map((r) => normalizeEvent(src, r)).filter((e): e is CandidateEvent => e !== null);
     } catch (e) {
@@ -226,7 +240,67 @@ Deno.serve(async (req) => {
   // Wave-1 contact append — best-effort, bounded, score-gated; never affects the ingest result.
   const appended = await appendContacts(admin, newLeadRecords).catch(() => 0);
 
+  // WEEKLY AUTO-DIGEST (worker path only — the clock composes, the owner approves): each active
+  // customer due their digest gets one PENDING approval, trade-filtered, composed by the pure
+  // core from real rows. The invoice-chase pattern exactly — nothing sends itself, and a quiet
+  // week drafts nothing. last_digest_at advances at QUEUE time so a rejected draft waits a week.
+  let digestsDrafted = 0;
+  if (isWorker && body.world_id) {
+    try {
+      const { data: due } = await admin.from('le_customers')
+        .select('id, world_id, contact_id, name, email, trade, last_digest_at')
+        .eq('owner_id', owner).eq('world_id', body.world_id).eq('status', 'active').limit(50);
+      const dueCustomers = ((due ?? []) as { id: string; contact_id: string | null; name: string; email: string; trade: string; last_digest_at: string | null }[])
+        .filter((c) => digestDue(c.last_digest_at, nowIso));
+      if (dueCustomers.length) {
+        const { data: freshRows } = await admin.from('le_leads')
+          .select('id, trade, score, why_now, contact_name, contact_company, le_events(title, source_url)')
+          .eq('world_id', body.world_id).eq('status', 'new').order('score', { ascending: false }).limit(100);
+        const fresh = (freshRows ?? []) as unknown as { id: string; trade: string; score: number; why_now: string; contact_name: string | null; contact_company: string | null; le_events: { title: string; source_url: string } | null }[];
+        const { data: world } = await admin.from('knowledge_worlds').select('title').eq('id', body.world_id).maybeSingle();
+        const worldTitle = ((world as { title?: string } | null)?.title ?? 'Lead market').trim();
+        const deliveredIds = new Set<string>();
+        for (const cust of dueCustomers) {
+          const scoped = fresh.filter((l) => (cust.trade === 'all' || l.trade === cust.trade) && isTradeKey(l.trade));
+          const digestLeads: DigestLead[] = scoped.map((l) => ({
+            trade: l.trade as TradeKey, score: l.score, why_now: l.why_now,
+            contact_name: l.contact_name, contact_company: l.contact_company,
+            source_url: l.le_events?.source_url ?? '', title: l.le_events?.title ?? l.why_now,
+          }));
+          const dig = digestFor(worldTitle, digestLeads);
+          if (dig.included === 0) continue; // a quiet week is not a digest
+          const { data: camp } = await admin.from('outreach_campaigns').insert({
+            owner_id: owner, contact_id: cust.contact_id, kind: 'lead_digest', state: 'pending_approval',
+          }).select('id').single();
+          if (!camp) continue;
+          const { data: msg } = await admin.from('outreach_messages').insert({
+            owner_id: owner, campaign_id: (camp as { id: string }).id, contact_id: cust.contact_id,
+            sequence_step: 0, subject: dig.subject, body_text: dig.body, to_address: cust.email, status: 'draft',
+          }).select('id').single();
+          if (!msg) continue;
+          const leadIds = scoped.slice(0, dig.included).map((l) => l.id);
+          const apPayload = { message_id: (msg as { id: string }).id, world_id: body.world_id, le_customer_id: cust.id, lead_ids: leadIds };
+          await admin.from('approvals').insert({
+            owner_id: owner, kind: 'send_email', status: 'pending', requested_by: 'worker',
+            title: `Weekly digest → ${cust.email} (${dig.included} lead${dig.included === 1 ? '' : 's'})`,
+            preview: `${dig.subject}\n\n${dig.body.slice(0, 400)}`,
+            payload: apPayload, payload_hash: await hashPayload(apPayload),
+          });
+          await admin.from('le_customers').update({ last_digest_at: nowIso, updated_at: nowIso }).eq('id', cust.id);
+          leadIds.forEach((id) => deliveredIds.add(id));
+          digestsDrafted++;
+        }
+        if (deliveredIds.size) {
+          await admin.from('le_leads')
+            .update({ status: 'delivered', delivered_at: nowIso, updated_at: nowIso })
+            .in('id', [...deliveredIds]);
+        }
+      }
+    } catch { /* digest drafting must never wedge the ingest */ }
+  }
+
   let line = ingestLine(checked, unreachable, eventsNew, leadsNew);
-  if (appended > 0) line += ` ${appended} phone${appended === 1 ? '' : 's'} appended from Places.`;
-  return json({ ok: true, line, sources_checked: checked, sources_unreachable: unreachable, events_new: eventsNew, leads_new: leadsNew, contacts_appended: appended });
+  if (appended > 0) line += ` ${appended} contact${appended === 1 ? '' : 's'} appended.`;
+  if (digestsDrafted > 0) line += ` ${digestsDrafted} weekly digest${digestsDrafted === 1 ? '' : 's'} drafted for approval.`;
+  return json({ ok: true, line, sources_checked: checked, sources_unreachable: unreachable, events_new: eventsNew, leads_new: leadsNew, contacts_appended: appended, digests_drafted: digestsDrafted });
 });
