@@ -143,6 +143,7 @@ export default function WorkWebs() {
               One chip per shape prefills a well-formed intent — the user edits the specifics and drafts. */}
           <div className="mt-3 flex flex-wrap gap-1.5">
             {[
+              { label: 'Start a content channel', intent: 'Start a short-video content channel to grow an audience and route it to my product. The niche is ' },
               { label: 'Grow a business', intent: 'Grow my business — I sell ' },
               { label: 'Answer my messages', intent: 'Set up a desk that answers my incoming emails from a knowledge base of my saved answers and policies. The messages are about ' },
               { label: 'Produce documents', intent: 'Set me up to produce documents I hand to people — proposals and reports for my clients. My work is ' },

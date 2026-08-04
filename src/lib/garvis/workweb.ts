@@ -240,7 +240,24 @@ export const APP_LAUNCH_TEMPLATE: WebTemplate = {
   ],
 };
 
-export const WEB_TEMPLATES: WebTemplate[] = [MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE];
+/** Content Channel — the growth engine's one-click front door. The visual walkthrough found the
+ *  flagship use case had NO named entry anywhere: no template, no intent chip, no nav item — it
+ *  could only be born through the AI genesis box with the right sentence. This template creates a
+ *  channel operation ready on open: the studio area IS the page (Fact Channel Studio → UGC Studio
+ *  → Reel workshop), no launch/audience areas so the world leads with the studio (growthDesk). */
+export const CONTENT_CHANNEL_TEMPLATE: WebTemplate = {
+  id: 'content-channel',
+  title: 'Content Channel',
+  description: 'A short-video channel operation: cited episodes → illustrated, narrated, rendered 9:16 → approval-gated posting to TikTok/Shorts/Reels. Film it yourself or run it faceless; the learning loop reads the numbers back.',
+  playIds: [],
+  nodes: [
+    N('growth-studio', 'Channel Studio', 'The production line: draft a cited episode, produce it faceless or film the shot list, queue for approval. The channel pulse and learning loop live here.', 'studio', 'content_growth'),
+    N('channel-brand', 'Channel Brand', 'The channel identity: name, tone, palette, voice — the studios write and illustrate in it.', 'vault', 'brand'),
+    N('channel-results', 'Results', 'Posted episodes, views, winners — what the loop reads back into new drafts.', 'ledger', 'generic'),
+  ],
+};
+
+export const WEB_TEMPLATES: WebTemplate[] = [CONTENT_CHANNEL_TEMPLATE, MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE];
 
 export function templateById(id: string): WebTemplate | null {
   return WEB_TEMPLATES.find((t) => t.id === id) ?? null;

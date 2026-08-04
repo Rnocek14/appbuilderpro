@@ -51,6 +51,7 @@ const Working = lazy(() => import('./pages/Working'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
 const Workshops = lazy(() => import('./pages/Workshops'));
 const WorkWebs = lazy(() => import('./pages/WorkWebs'));
+const Channels = lazy(() => import('./pages/Channels'));
 const WorkWeb = lazy(() => import('./pages/WorkWeb'));
 const SystemAltitude = lazy(() => import('./pages/SystemAltitude'));
 const Universe3D = lazy(() => import('./pages/Universe3D'));
@@ -144,6 +145,7 @@ function AppRoutes() {
           <Route path="/garvis/approvals" element={<Navigate to="/garvis/queue" replace />} />
           <Route path="/garvis/workshops" element={<Protected><Workshops /></Protected>} />
           <Route path="/garvis/studios" element={<Navigate to="/garvis/workshops" replace />} />
+          <Route path="/garvis/channels" element={<Protected><Channels /></Protected>} />
           <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
           <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />
           <Route path="/garvis/system/:worldId" element={<Protected><SystemAltitude /></Protected>} />
