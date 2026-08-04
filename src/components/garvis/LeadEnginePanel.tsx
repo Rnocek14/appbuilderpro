@@ -6,7 +6,7 @@
 // in the Money loop. Every lead links its public record. Nothing here sends anything.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Radar, Plus, Play, Pause, Send, ExternalLink, RefreshCw, Clock } from 'lucide-react';
+import { Radar, Plus, Play, Pause, Send, ExternalLink, RefreshCw, Clock, CheckCircle2, Circle } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, Skeleton } from '../ui';
 import {
   listSources, createSource, setSourceActive, listLeads, setLeadStatus, runIngestNow,
@@ -89,8 +89,39 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
     );
   }
 
+  // The turnkey checklist — computed from real rows, always shows the next step. Collapses to one
+  // quiet line once the market is fully operating.
+  const steps: { label: string; done: boolean; hint: string }[] = [
+    { label: 'On the clock', done: !!clock && clock.status === 'active', hint: 'Turn on the hourly clock below.' },
+    { label: 'Source wired', done: (sources?.length ?? 0) > 0, hint: 'Add a permit portal or license board (preset or custom).' },
+    { label: 'First check', done: (sources ?? []).some((s) => !!s.last_fetch_at), hint: 'Hit "Check now" — or wait for the next tick.' },
+    { label: 'Leads arriving', done: (leads?.length ?? 0) > 0, hint: 'Leads land here as sources turn up qualifying records.' },
+    { label: 'Digest sent', done: (board?.delivered ?? 0) > 0, hint: 'Queue the digest below — it waits for your approval.' },
+    { label: 'Outcome recorded', done: (board?.quoted ?? 0) + (board?.won ?? 0) > 0, hint: 'Mark quoted/won/lost on delivered leads — this data is the moat.' },
+  ];
+  const nextStep = steps.find((s) => !s.done);
+  const setupDone = !nextStep;
+
   return (
     <div className="mt-4 space-y-5">
+      {/* Setup checklist — the turnkey rail. */}
+      {sources !== null && leads !== null && !setupDone && (
+        <div className="rounded-xl border border-forge-border bg-forge-panel p-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {steps.map((s) => (
+              <span key={s.label} className={`inline-flex items-center gap-1 text-xs ${s.done ? 'text-forge-ok' : s === nextStep ? 'text-forge-ink font-medium' : 'text-forge-dim'}`}>
+                {s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}{s.label}
+              </span>
+            ))}
+          </div>
+          {nextStep && <p className="mt-2 text-xs text-forge-dim"><span className="text-forge-ember">Next:</span> {nextStep.hint}</p>}
+          <p className="mt-1 text-xs text-forge-dim">How it works: the clock checks your sources every hour → new public records become ranked leads with stated reasons → the digest waits in your Queue until you say yes.</p>
+        </div>
+      )}
+      {setupDone && (
+        <p className="text-xs text-forge-ok">Fully operating — sources on the clock, leads flowing, outcomes tracked.</p>
+      )}
+
       {/* The clock — is this market checking itself? (One lead_engine standing order per world.) */}
       {clock !== undefined && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-forge-border bg-forge-panel px-3 py-2">

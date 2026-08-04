@@ -147,8 +147,8 @@ function AppRoutes() {
           <Route path="/garvis/workshops" element={<Protected><Workshops /></Protected>} />
           <Route path="/garvis/studios" element={<Navigate to="/garvis/workshops" replace />} />
           <Route path="/garvis/channels" element={<Protected><Channels /></Protected>} />
-          {/* Lead Markets — routed but deliberately absent from navConfig until the pilot gate
-              passes (docs/lead-engine-master-plan.md §7: ship dark). Deep-linkable + e2e-covered. */}
+          {/* Lead Markets — public records → ranked trade leads (docs/lead-engine-master-plan.md).
+              In the Prospecting nav section; turnkey city start lives on the page itself. */}
           <Route path="/garvis/lead-engine" element={<Protected><LeadEngine /></Protected>} />
           <Route path="/garvis/webs" element={<Protected><WorkWebs /></Protected>} />
           <Route path="/garvis/webs/:worldId" element={<Protected><WorkWeb /></Protected>} />

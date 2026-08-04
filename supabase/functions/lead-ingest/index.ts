@@ -31,6 +31,52 @@ const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const MAX_SOURCES_PER_RUN = 10;   // a big market drains over ticks, never in one stampede
 const PAUSE_AFTER_FAILURES = 5;   // the app_0113 reliability pattern: pause loudly, retry on resume
 const MAX_BODY = 2_000_000;       // 2 MB of JSON per source per tick is plenty
+const MAX_PLACES_PER_RUN = 8;     // contact append (Wave 1): bounded per tick, best-effort
+const APPEND_MIN_SCORE = 60;      // score-gated enrichment — junk spends nothing
+
+/** WAVE-1 CONTACT APPEND (docs/lead-engine-data-plan.md §Layer 2): the highest-leverage
+ *  enrichment is a phone number. For a bounded set of NEW high-score leads, ask Google Places
+ *  for the business at the record's address (the same endpoint discover-run uses). Verbatim
+ *  rule holds: we store what Places returned (phone, and the matched business name only when
+ *  the record named nobody), and the lead's reasons say the contact came from a Places match.
+ *  Best-effort throughout — a Places failure never affects the ingest result. */
+async function appendContacts(
+  // deno-lint-ignore no-explicit-any
+  admin: any,
+  leads: { id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[],
+): Promise<number> {
+  const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
+  if (!apiKey) return 0;
+  const targets = leads
+    .filter((l) => !l.contact_phone && l.score >= APPEND_MIN_SCORE && (l.address || l.contact_company))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_PLACES_PER_RUN);
+  let appended = 0;
+  for (const l of targets) {
+    try {
+      const textQuery = `${(l.contact_company ?? l.title).slice(0, 80)} ${(l.address ?? l.region).slice(0, 80)}`.trim();
+      if (textQuery.length < 6) continue;
+      const res = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST', signal: AbortSignal.timeout(10_000),
+        headers: {
+          'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask': 'places.displayName,places.nationalPhoneNumber,places.formattedAddress',
+        },
+        body: JSON.stringify({ textQuery, maxResultCount: 1, regionCode: 'US' }),
+      });
+      if (!res.ok) continue;
+      const json = (await res.json().catch(() => ({}))) as { places?: { displayName?: { text?: string }; nationalPhoneNumber?: string }[] };
+      const hit = json.places?.[0];
+      const phone = (hit?.nationalPhoneNumber ?? '').trim();
+      if (!phone) continue;
+      const patch: Record<string, unknown> = { contact_phone: phone, updated_at: new Date().toISOString() };
+      if (!l.contact_company && !l.contact_name && hit?.displayName?.text) patch.contact_company = hit.displayName.text.slice(0, 120);
+      await admin.from('le_leads').update(patch).eq('id', l.id);
+      appended++;
+    } catch { /* one lookup's failure never blocks the rest */ }
+  }
+  return appended;
+}
 
 interface SourceRow extends SourceLike {
   id: string; owner_id: string; world_id: string; name: string; active: boolean;
@@ -77,6 +123,7 @@ Deno.serve(async (req) => {
   if (error) return json({ error: error.message }, 500);
 
   let checked = 0, unreachable = 0, eventsNew = 0, leadsNew = 0;
+  const newLeadRecords: { id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[] = [];
 
   for (const src of (sources ?? []) as SourceRow[]) {
     checked++;
@@ -151,9 +198,19 @@ Deno.serve(async (req) => {
         }
       }
       if (leadRows.length) {
+        const eventMeta = new Map(newEvents.map((ev) => {
+          const c = byKey.get(ev.dedupe_key);
+          return [ev.id, { title: c?.title ?? '', address: c?.address ?? null, region: c?.region ?? src.region }] as const;
+        }));
         const { data: ins } = await admin.from('le_leads')
-          .upsert(leadRows, { onConflict: 'owner_id,event_id,trade', ignoreDuplicates: true }).select('id');
-        leadsNew += (ins ?? []).length;
+          .upsert(leadRows, { onConflict: 'owner_id,event_id,trade', ignoreDuplicates: true })
+          .select('id, event_id, score, contact_phone, contact_company, contact_name');
+        const inserted = (ins ?? []) as { id: string; event_id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null }[];
+        leadsNew += inserted.length;
+        for (const row of inserted) {
+          const meta = eventMeta.get(row.event_id);
+          if (meta) newLeadRecords.push({ ...row, ...meta });
+        }
       }
     }
 
@@ -166,6 +223,10 @@ Deno.serve(async (req) => {
     }
   }
 
-  const line = ingestLine(checked, unreachable, eventsNew, leadsNew);
-  return json({ ok: true, line, sources_checked: checked, sources_unreachable: unreachable, events_new: eventsNew, leads_new: leadsNew });
+  // Wave-1 contact append — best-effort, bounded, score-gated; never affects the ingest result.
+  const appended = await appendContacts(admin, newLeadRecords).catch(() => 0);
+
+  let line = ingestLine(checked, unreachable, eventsNew, leadsNew);
+  if (appended > 0) line += ` ${appended} phone${appended === 1 ? '' : 's'} appended from Places.`;
+  return json({ ok: true, line, sources_checked: checked, sources_unreachable: unreachable, events_new: eventsNew, leads_new: leadsNew, contacts_appended: appended });
 });

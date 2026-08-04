@@ -41,6 +41,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/garvis/clients', label: 'Win clients', icon: Rocket },
       // Where the opportunity hunts' catches land (jobs/RFPs/grants/commissions) for triage.
       { to: '/garvis/opportunity-feed', label: 'Opportunities', icon: Crosshair },
+      // Public records → ranked trade leads: markets on the hourly clock, approval-gated digests.
+      { to: '/garvis/lead-engine', label: 'Lead Markets', icon: Radar },
       { to: '/garvis/studies', label: 'Studies', icon: BookOpen },
       { to: '/business-preview-engine', label: 'Preview Engine', icon: Globe },
     ],

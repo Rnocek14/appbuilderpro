@@ -9,12 +9,13 @@ import { supabase } from '../../supabase';
 import { enqueueApproval } from '../execution';
 import { createInvoice } from '../moneyRun';
 import { createOrder, listOrders, setOrderStatus } from '../standingRun';
+import { instantiateWeb } from '../workwebRun';
 import type { StandingOrder } from '../standing';
 import {
   digestFor, commissionFor, TRADES, isTradeKey,
   type DigestLead, type TradeKey, type LeadStatus,
 } from './leadEngine.ts';
-import type { SourceKind } from './adapters.ts';
+import type { SourceKind, StarterSource } from './adapters.ts';
 
 export interface LeadSourceRow {
   id: string; world_id: string; name: string; kind: SourceKind; base_url: string;
@@ -91,6 +92,28 @@ export async function setLeadStatus(leadId: string, status: LeadStatus): Promise
   const { error } = await supabase.from('le_leads')
     .update({ status, updated_at: new Date().toISOString() }).eq('id', leadId);
   if (error) throw new Error(error.message);
+}
+
+/** TURNKEY START: one call takes a city preset (or nothing) to a working market — world created,
+ *  named for the city, put on the hourly clock, its source wired, and the first check fired.
+ *  Every step past world-creation is fail-soft: the panel's checklist shows the true state and
+ *  offers the missing step, so a partial start is visible, never silent. */
+export async function quickStartMarket(preset?: StarterSource | null): Promise<{ worldId: string; title: string }> {
+  const web = await instantiateWeb('lead-market');
+  const title = preset ? `Lead Market — ${preset.region}` : web.title;
+  if (preset) {
+    await supabase.from('knowledge_worlds').update({ title }).eq('id', web.worldId);
+  }
+  await enableClock(web.worldId, title).catch(() => {});
+  if (preset) {
+    await createSource({
+      worldId: web.worldId, name: preset.label, kind: preset.kind,
+      baseUrl: preset.base_url, region: preset.region, queryConfig: preset.query_config,
+    }).catch(() => {});
+    // First check now — instant first results instead of waiting for the next tick.
+    await supabase.functions.invoke('lead-ingest', { body: { world_id: web.worldId } }).catch(() => {});
+  }
+  return { worldId: web.worldId, title };
 }
 
 /** THE CLOCK: is this market on the standing schedule? One lead_engine order per world — the
