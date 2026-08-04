@@ -22,6 +22,8 @@ import { listClientSubs, type ClientSubRow } from '../lib/garvis/billing/clientB
 import { loadAutomationMonth, automationMonthLine, type AutomationMonth } from '../lib/garvis/automation/report';
 import { runTriggersForOwner, type TriggerRunSummary } from '../lib/garvis/automation/triggersRun';
 import { ClockStatus } from '../components/garvis/ClockStatus';
+import { CAPABILITY_RUNG } from '../lib/garvis/automationCards';
+import { RungChip } from '../components/garvis/AutomationCardView';
 
 // Only capabilities that carry a triggerDefault (the date/interval ones) can become a trigger.
 const TRIGGERABLE = CAPABILITIES.filter((c) => c.triggerDefault && c.status !== 'not_built');
@@ -291,9 +293,10 @@ export default function Automations() {
               {TRIGGERABLE.map((c) => (
                 <button key={c.id} onClick={() => void addTrigger(c.id)}
                   className="group rounded-xl border border-forge-border bg-forge-panel/40 p-3 text-left hover:border-forge-ember/50">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-medium text-forge-ink">{c.title}</span>
                     <span className="rounded-full bg-forge-raised px-1.5 py-0.5 text-[10px] uppercase text-forge-dim">{c.status}</span>
+                    {CAPABILITY_RUNG[c.id] && <RungChip rung={CAPABILITY_RUNG[c.id]} />}
                     <Plus size={14} className="ml-auto text-forge-dim group-hover:text-forge-ember" />
                   </div>
                   <p className="mt-1 text-[12px] text-forge-dim">{c.pitch}</p>

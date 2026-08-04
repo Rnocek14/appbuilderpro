@@ -22,6 +22,8 @@ import {
 import { classifyEpisode, perfLine } from '../../lib/garvis/growthLoop';
 import { channelPulse } from '../../lib/garvis/channelPulse';
 import { scriptToShotList, type SfxKit } from '../../lib/garvis/ugcEdit';
+import { cardForOrderKind } from '../../lib/garvis/automationCards';
+import { AutomationCardView } from './AutomationCardView';
 import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
 import { SoundKitFields } from './SoundKitFields';
 import { buildStoryboard, buildTimedCaptionsSrt, type WordTiming } from '../../lib/garvis/storyboard';
@@ -61,6 +63,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [queueingId, setQueueingId] = useState<string | null>(null);
   const [perf, setPerf] = useState<ChannelPerf | null>(null);
   const [cadenceOn, setCadenceOn] = useState<boolean | null>(null);
+  const [cadenceInfo, setCadenceInfo] = useState(false);
   const [ctaDraft, setCtaDraft] = useState('');
   const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
   const [sfx, setSfx] = useState<SfxKit>(loadSfxKit);
@@ -309,7 +312,10 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                 auto-draft daily: {cadenceOn ? 'on' : 'off'}
               </button>
             )}
+            <button onClick={() => setCadenceInfo(!cadenceInfo)} title="What the auto-draft does — and does not do"
+              className={cn('ml-1 rounded-full border px-1.5 py-0.5 text-[10px]', cadenceInfo ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>?</button>
           </p>
+          {cadenceInfo && <div className="mt-2"><AutomationCardView card={cardForOrderKind('episode_draft')} /></div>}
           {/* THE PULSE — the multi-month instrument: day N against the 45-75 inflection window,
               the posting streak (consistency is the input that compounds), the honest trend. */}
           {pulse && (

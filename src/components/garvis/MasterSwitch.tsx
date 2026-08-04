@@ -10,6 +10,8 @@ import { Loader2, Power, Check, X, Zap } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button, Input } from '../ui';
 import { useToast } from '../../context/ToastContext';
+import { cardForJob } from '../../lib/garvis/automationCards';
+import { AutomationCardView } from './AutomationCardView';
 import {
   fetchSystemStatus, armHeartbeat, defaultFunctionsBase, EXPECTED_JOBS,
   type SystemStatus,
@@ -36,6 +38,7 @@ export function MasterSwitch() {
   }, [attempt]);
 
   const scheduled = new Set((status?.cron ?? []).filter((j) => j.active).map((j) => j.jobname));
+  const [jobInfo, setJobInfo] = useState<string | null>(null);
   const missing = EXPECTED_JOBS.filter((j) => !scheduled.has(j));
   const armed = status && !status.cronError && missing.length === 0;
   const pillars = status ? [...new Set(status.secrets.map((s) => s.pillar))] : [];
@@ -82,9 +85,13 @@ export function MasterSwitch() {
             <p className="text-[10px] uppercase tracking-wide text-forge-dim">Scheduled jobs {status.cronError && <span className="text-forge-warn">({status.cronError})</span>}</p>
             <ul className="mt-1.5 grid gap-x-4 gap-y-1 sm:grid-cols-2">
               {EXPECTED_JOBS.map((j) => (
-                <li key={j} className="flex items-center gap-2 text-xs">
-                  {scheduled.has(j) ? <Check size={12} className="shrink-0 text-forge-ok" /> : <X size={12} className="shrink-0 text-forge-err" />}
-                  <span className="truncate font-mono text-[11px] text-forge-ink/80">{j}</span>
+                <li key={j} className="text-xs">
+                  <button onClick={() => setJobInfo(jobInfo === j ? null : j)} title="What this job does"
+                    className="flex w-full items-center gap-2 text-left hover:text-forge-ink">
+                    {scheduled.has(j) ? <Check size={12} className="shrink-0 text-forge-ok" /> : <X size={12} className="shrink-0 text-forge-err" />}
+                    <span className="truncate font-mono text-[11px] text-forge-ink/80">{j}</span>
+                  </button>
+                  {jobInfo === j && cardForJob(j) && <div className="mt-1"><AutomationCardView card={cardForJob(j)!} /></div>}
                 </li>
               ))}
             </ul>
