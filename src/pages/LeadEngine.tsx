@@ -13,6 +13,7 @@ import { Button, Card } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
 import { instantiateWeb } from '../lib/garvis/workwebRun';
+import { enableClock } from '../lib/garvis/leadEngine/leadEngineRun';
 
 interface MarketWorld { worldId: string; title: string; sources: number; newLeads: number; lastStatus: string | null }
 
@@ -62,7 +63,10 @@ export function LeadEngine() {
     setCreating(true);
     try {
       const web = await instantiateWeb('lead-market');
-      toast('success', 'Lead market created — wire up its first source inside.');
+      // Born operational: the market goes on the standing clock at creation. Fail-soft — the
+      // panel shows the clock's true state and offers the button if this didn't land.
+      await enableClock(web.worldId, web.title).catch(() => {});
+      toast('success', 'Lead market created and on the clock — wire up its first source inside.');
       navigate(`/garvis/webs/${web.worldId}`);
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not create it.');

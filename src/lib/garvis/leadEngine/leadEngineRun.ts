@@ -8,6 +8,8 @@
 import { supabase } from '../../supabase';
 import { enqueueApproval } from '../execution';
 import { createInvoice } from '../moneyRun';
+import { createOrder, listOrders, setOrderStatus } from '../standingRun';
+import type { StandingOrder } from '../standing';
 import {
   digestFor, commissionFor, TRADES, isTradeKey,
   type DigestLead, type TradeKey, type LeadStatus,
@@ -89,6 +91,31 @@ export async function setLeadStatus(leadId: string, status: LeadStatus): Promise
   const { error } = await supabase.from('le_leads')
     .update({ status, updated_at: new Date().toISOString() }).eq('id', leadId);
   if (error) throw new Error(error.message);
+}
+
+/** THE CLOCK: is this market on the standing schedule? One lead_engine order per world — the
+ *  15-minute heartbeat tick runs it hourly, so leads accrue with the laptop closed. */
+export async function getClockOrder(worldId: string): Promise<StandingOrder | null> {
+  const orders = await listOrders(worldId);
+  return orders.find((o) => o.kind === 'lead_engine') ?? null;
+}
+
+/** Put the market on the clock (idempotent — returns the existing order if one exists). */
+export async function enableClock(worldId: string, worldLabel: string): Promise<StandingOrder> {
+  const existing = await getClockOrder(worldId);
+  if (existing) {
+    if (existing.status === 'paused') await setOrderStatus(existing.id, 'active');
+    return existing;
+  }
+  return createOrder({
+    worldId, kind: 'lead_engine', cadence: 'hourly',
+    label: `Lead market: ${worldLabel}`,
+    config: {},   // trades default to ALL in the worker (parseLeadEngineConfig); narrow later if wanted
+  });
+}
+
+export async function setClockActive(orderId: string, active: boolean): Promise<void> {
+  await setOrderStatus(orderId, active ? 'active' : 'paused');
 }
 
 /** Run one market's ingest now (the panel's "Check sources now" button). The edge function does

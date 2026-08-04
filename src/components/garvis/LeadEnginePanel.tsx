@@ -6,15 +6,16 @@
 // in the Money loop. Every lead links its public record. Nothing here sends anything.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Radar, Plus, Play, Pause, Send, ExternalLink, RefreshCw } from 'lucide-react';
+import { Radar, Plus, Play, Pause, Send, ExternalLink, RefreshCw, Clock } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, Skeleton } from '../ui';
 import {
   listSources, createSource, setSourceActive, listLeads, setLeadStatus, runIngestNow,
-  queueDigest, recordOutcome, leadScoreboard,
+  queueDigest, recordOutcome, leadScoreboard, getClockOrder, enableClock, setClockActive,
   type LeadSourceRow, type LeadRow,
 } from '../../lib/garvis/leadEngine/leadEngineRun';
+import type { StandingOrder } from '../../lib/garvis/standing';
 import { TRADES } from '../../lib/garvis/leadEngine/leadEngine.ts';
-import type { SourceKind } from '../../lib/garvis/leadEngine/adapters.ts';
+import { STARTER_SOURCES, starterById, type SourceKind } from '../../lib/garvis/leadEngine/adapters.ts';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
   { value: 'socrata', label: 'Permit portal (Socrata JSON)' },
@@ -32,6 +33,7 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   const [sources, setSources] = useState<LeadSourceRow[] | null>(null);
   const [leads, setLeads] = useState<LeadRow[] | null>(null);
   const [board, setBoard] = useState<Awaited<ReturnType<typeof leadScoreboard>> | null>(null);
+  const [clock, setClock] = useState<StandingOrder | null | undefined>(undefined); // undefined = loading
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -51,8 +53,8 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
 
   const refresh = useCallback(async () => {
     try {
-      const [s, l, b] = await Promise.all([listSources(worldId), listLeads(worldId), leadScoreboard(worldId)]);
-      setSources(s); setLeads(l); setBoard(b); setLoadFailed(false);
+      const [s, l, b, c] = await Promise.all([listSources(worldId), listLeads(worldId), leadScoreboard(worldId), getClockOrder(worldId)]);
+      setSources(s); setLeads(l); setBoard(b); setClock(c); setLoadFailed(false);
     } catch {
       setLoadFailed(true); // a failed load must never render as an empty market
     }
@@ -89,6 +91,31 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
 
   return (
     <div className="mt-4 space-y-5">
+      {/* The clock — is this market checking itself? (One lead_engine standing order per world.) */}
+      {clock !== undefined && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-forge-border bg-forge-panel px-3 py-2">
+          <Clock size={14} className={clock && clock.status === 'active' ? 'text-forge-ok' : 'text-forge-dim'} />
+          <span className="text-sm text-forge-ink">
+            {clock === null ? 'Not on the clock — sources only run when you click "Check now".'
+              : clock.status === 'active' ? 'On the clock — sources are checked hourly by the standing worker.'
+              : 'Clock paused — resume to check sources hourly.'}
+          </span>
+          <div className="ml-auto">
+            {clock === null ? (
+              <Button size="sm" loading={busy === 'clock'}
+                onClick={() => act('clock', async () => { await enableClock(worldId, worldLabel); }, 'On the clock — first check within the hour.')}>
+                Put it on the clock
+              </Button>
+            ) : (
+              <Button size="sm" variant="ghost" loading={busy === 'clock'}
+                onClick={() => act('clock', () => setClockActive(clock.id, clock.status !== 'active'))}>
+                {clock.status === 'active' ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Scoreboard — counted from real rows, never composed. */}
       {board && (
         <div className="flex flex-wrap gap-2 text-xs">
@@ -115,6 +142,19 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
         </div>
         {adding && (
           <div className="mb-3 space-y-2 rounded-xl border border-forge-border bg-forge-panel p-3">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                const p = starterById(e.target.value);
+                if (!p) return;
+                setSrcName(p.label); setSrcKind(p.kind); setSrcUrl(p.base_url);
+                setSrcRegion(p.region); setSrcConfig(JSON.stringify(p.query_config));
+              }}
+              className="w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink"
+            >
+              <option value="">Start from a preset… (well-known public datasets — the first check verifies them live)</option>
+              {STARTER_SOURCES.map((p) => <option key={p.id} value={p.id}>{p.label} — {p.region}</option>)}
+            </select>
             <div className="grid gap-2 sm:grid-cols-2">
               <Input placeholder='Name — e.g. "Denver building permits"' value={srcName} onChange={(e) => setSrcName(e.target.value)} />
               <select value={srcKind} onChange={(e) => setSrcKind(e.target.value as SourceKind)}

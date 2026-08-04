@@ -158,3 +158,67 @@ export function nextCursor(source: SourceLike, events: CandidateEvent[]): Source
   const max = dates[dates.length - 1];
   return max ? { ...source.cursor, last_date: max } : { ...source.cursor };
 }
+
+// ---------------------------------------------------------------------------
+// Starter presets — well-known public permit datasets, so wiring a market is a
+// pick, not a research project. HONESTY NOTE: dataset URLs and column names are
+// as last known (portals do move); the FIRST CHECK verifies each one live and a
+// miss reports as unreachable with its reason — never silently. Everything is
+// editable before saving.
+// ---------------------------------------------------------------------------
+
+export interface StarterSource {
+  id: string;
+  label: string;
+  region: string;
+  kind: SourceKind;
+  base_url: string;
+  query_config: SourceLike['query_config'];
+}
+
+export const STARTER_SOURCES: StarterSource[] = [
+  {
+    id: 'chicago-permits', label: 'Chicago building permits', region: 'Chicago, IL', kind: 'socrata',
+    base_url: 'https://data.cityofchicago.org/resource/ydr8-5enu.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issue_date',
+      field_map: { title: 'work_description', address: 'street_name', valuation: 'reported_cost', date: 'issue_date', contact_name: 'contact_1_name' },
+    },
+  },
+  {
+    id: 'nyc-dob-permits', label: 'NYC DOB permit issuance', region: 'New York, NY', kind: 'socrata',
+    base_url: 'https://data.cityofnewyork.us/resource/ipu4-2q9a.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issuance_date',
+      field_map: { title: 'job_type', address: 'street_name', date: 'issuance_date', contact_company: 'permittee_s_business_name' },
+    },
+  },
+  {
+    id: 'sf-building-permits', label: 'San Francisco building permits', region: 'San Francisco, CA', kind: 'socrata',
+    base_url: 'https://data.sfgov.org/resource/i98e-djp9.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issued_date',
+      field_map: { title: 'description', address: 'street_name', valuation: 'estimated_cost', date: 'issued_date' },
+    },
+  },
+  {
+    id: 'austin-permits', label: 'Austin building permits', region: 'Austin, TX', kind: 'socrata',
+    base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issued_date',
+      field_map: { title: 'description', address: 'original_address1', valuation: 'total_job_valuation', date: 'issued_date', contact_name: 'applicant_full_name' },
+    },
+  },
+  {
+    id: 'seattle-permits', label: 'Seattle building permits', region: 'Seattle, WA', kind: 'socrata',
+    base_url: 'https://data.seattle.gov/resource/76t8-zvzf.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issueddate',
+      field_map: { title: 'description', address: 'originaladdress1', valuation: 'estprojectcost', date: 'issueddate', contact_name: 'applicantname' },
+    },
+  },
+];
+
+export function starterById(id: string): StarterSource | null {
+  return STARTER_SOURCES.find((s) => s.id === id) ?? null;
+}

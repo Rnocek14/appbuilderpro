@@ -7,7 +7,7 @@ import {
   digestFor, commissionFor, parseLeadEngineConfig, ingestLine, DEFAULT_COMMISSION_PCT,
   type LeadEventLike,
 } from './leadEngine.ts';
-import { buildFetchUrl, parseRows, normalizeEvent, nextCursor, toIso, FETCH_LIMIT, type SourceLike } from './adapters.ts';
+import { buildFetchUrl, parseRows, normalizeEvent, nextCursor, toIso, FETCH_LIMIT, STARTER_SOURCES, starterById, type SourceLike } from './adapters.ts';
 
 let passed = 0; let failed = 0;
 function check(name: string, cond: boolean) {
@@ -127,6 +127,17 @@ check('liquor sources default to liquor_license events', (() => {
 })());
 check('arcgis epoch-millis dates parse to ISO', (toIso(1785715200000) ?? '').startsWith('2026-08-0'));
 check('junk dates are null, not Invalid Date', toIso('not a date') === null && toIso('') === null);
+
+// ── starter presets — every one must be a valid, buildable source ─────────
+check('every starter preset is https with a region, a date_field, and a title or address mapping',
+  STARTER_SOURCES.every((p) => /^https:\/\//.test(p.base_url) && p.region.includes(',')
+    && !!p.query_config.date_field && !!(p.query_config.field_map?.title || p.query_config.field_map?.address)));
+check('every starter preset builds a fetch URL without throwing', STARTER_SOURCES.every((p) => {
+  const url = buildFetchUrl({ kind: p.kind, base_url: p.base_url, region: p.region, query_config: p.query_config, cursor: {} });
+  return url.startsWith('https://') && url.includes('%24limit=');
+}));
+check('starter preset ids are unique and resolvable', new Set(STARTER_SOURCES.map((p) => p.id)).size === STARTER_SOURCES.length
+  && starterById('chicago-permits') !== null && starterById('nope') === null);
 
 // ── adapters: cursor stepping ──────────────────────────────────────────────
 const evs = [ev!, { ...ev!, occurred_at: '2026-08-03T00:00:00.000Z' }];
