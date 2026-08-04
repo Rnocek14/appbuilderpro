@@ -27,7 +27,8 @@ export type Flavor =
   | 'deliver'     // DELIVERABLE GENERATOR: a document studio — produce a portable, exportable proposal/report/one-pager
   | 'data'        // DATA & NUMBERS: an analysis workspace — a CSV becomes a typed table, real stats, honest charts
   | 'tracker'     // PERSONAL/INTERNAL REGISTRY: log entries about clients/expenses/anything — each becomes queryable memory
-  | 'content_growth'; // FACELESS AI-VIDEO GROWTH: a reel factory — a niche idea becomes a multi-scene vertical storyboard (shot prompts + captions + VO), the seed the clip engine fills. Generation-first, the deliberate inverse of `video` (which never fabricates real footage).
+  | 'content_growth' // FACELESS AI-VIDEO GROWTH: a reel factory — a niche idea becomes a multi-scene vertical storyboard (shot prompts + captions + VO), the seed the clip engine fills. Generation-first, the deliberate inverse of `video` (which never fabricates real footage).
+  | 'lead_engine'; // COMMERCIAL LEAD MARKET: public signals (permits, licenses, registrations) scored into ranked trade leads on the standing clock — sources, leads, outcomes, commission tracking. Digests go out only through Approvals.
 export type CharterStatus = 'dormant' | 'active' | 'waiting' | 'done';
 
 export interface CharterRef { type: string; id: string; label?: string }
@@ -57,7 +58,7 @@ export function parseCharter(raw: unknown): Charter | null {
 }
 
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker', 'content_growth',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker', 'content_growth', 'lead_engine',
 ];
 
 export interface ArchetypeMeta {
@@ -98,7 +99,7 @@ export const TOOL_IDS = [
   'research', 'gen-angle', 'gen-postcard', 'gen-social', 'gen-video-script', 'gen-landing',
   'gen-email-seq', 'gen-copy', 'gen-ads', 'gen-ideas', 'gen-plan', 'gen-features', 'gen-spec', 'gen-reel',
   'upload-list', 'view-contacts', 'queue-sequence', 'open-approvals',
-  'import-docs', 'view-results', 'open-answering', 'open-documents', 'open-data', 'open-tracker',
+  'import-docs', 'view-results', 'open-answering', 'open-documents', 'open-data', 'open-tracker', 'open-lead-engine',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 
@@ -125,6 +126,9 @@ const STUDIO_BY_FLAVOR: Partial<Record<Flavor, WorkTool[]>> = {
   ],
   tracker: [
     T('open-tracker', 'Open the registry', 'Log an entry — a client note, an expense, a decision. Every entry becomes part of this world\'s queryable memory: ask "what do I know about Jane?" and the answer cites your own records.', 'view'),
+  ],
+  lead_engine: [
+    T('open-lead-engine', 'Open the lead market', 'Sources, ranked leads with stated reasons, outcome tracking, and the digest queue. Every lead traces to its public record; the digest goes out only through Approvals.', 'view'),
   ],
 };
 
@@ -257,7 +261,23 @@ export const CONTENT_CHANNEL_TEMPLATE: WebTemplate = {
   ],
 };
 
-export const WEB_TEMPLATES: WebTemplate[] = [CONTENT_CHANNEL_TEMPLATE, MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE];
+/** Lead Market — the Lead Engine's one-click front door (docs/lead-engine-master-plan.md). One
+ *  world per metro+trade market. Three nodes on the content-channel pattern: the studio IS the
+ *  page (sources → ranked leads → outcomes), the vault holds the market's records, the ledger
+ *  reads results back. No launch/audience areas — the digest goes out through Approvals. */
+export const LEAD_ENGINE_TEMPLATE: WebTemplate = {
+  id: 'lead-market',
+  title: 'Lead Market',
+  description: 'A commercial lead market: permit portals, license boards, and registries checked on the clock, scored into ranked trade leads with stated reasons, delivered as an approval-gated digest — outcomes and commissions tracked against real records.',
+  playIds: [],
+  nodes: [
+    N('lead-market-studio', 'Lead Market', 'The engine room: sources, ranked leads with why-now and score reasons, the digest queue, and outcome recording.', 'studio', 'lead_engine'),
+    N('lead-market-vault', 'Market Records', 'Source configs, agreements (the written commission terms), and market documents.', 'vault', 'generic'),
+    N('lead-market-results', 'Results', 'Delivered → quoted → won, close rate, and commission invoices — counted from real rows.', 'ledger', 'generic'),
+  ],
+};
+
+export const WEB_TEMPLATES: WebTemplate[] = [CONTENT_CHANNEL_TEMPLATE, MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, LEAD_ENGINE_TEMPLATE];
 
 export function templateById(id: string): WebTemplate | null {
   return WEB_TEMPLATES.find((t) => t.id === id) ?? null;

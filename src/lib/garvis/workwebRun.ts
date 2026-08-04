@@ -653,6 +653,7 @@ export async function runTool(
     case 'open-approvals':
     case 'import-docs':
     case 'view-results':
+    case 'open-lead-engine':
       // View tools are handled by the UI (navigation / modal) — reaching the executor is a no-op.
       return { ok: true, message: '' };
 

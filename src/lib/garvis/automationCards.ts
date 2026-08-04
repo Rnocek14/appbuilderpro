@@ -267,6 +267,16 @@ export const ORDER_CARDS: Record<OrderKind, AutomationCard> = {
     sop: ['Read the channel\'s winning and quiet hooks', 'Draft a cited script avoiding recent topics', 'Flag uncited claims for review', 'Save as a draft episode → production and posting wait for you'],
     killSwitch: 'The auto-draft chip on the channel, or pause the order', doneBy: 'standing-worker',
   },
+  lead_engine: {
+    id: 'lead_engine', name: 'Lead source watcher', when: 'On the cadence you set',
+    does: 'Checks this market\'s public sources — permit portals, license boards, registries — and scores what\'s new into ranked leads with stated reasons.',
+    replaces: 'Trawling permit portals and license boards record by record.',
+    rung: 'runs',
+    human: 'You review the leads and queue the digest; every field traces to its public record.',
+    never: 'Never sends anything to a lead or a customer — the digest goes out only through your approval queue.',
+    sop: ['Fetch each active source since its last position', 'Keep only verbatim fields; drop nothing silently', 'Score new events per trade, reasons attached', 'Record the honest run line — unreachable sources are counted, and a repeatedly failing source pauses loudly'],
+    killSwitch: 'Pause on the order\'s row, or pause any single source in the market panel', doneBy: 'standing-worker',
+  },
 };
 
 /** The capability rungs (Automations page): explicit per-capability, because the rail alone

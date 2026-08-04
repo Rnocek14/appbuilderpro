@@ -30,8 +30,9 @@ export async function listInvoices(status?: 'draft' | 'sent' | 'paid' | 'void', 
 export async function createInvoice(input: {
   title: string; toEmail: string; lineItems: LineItem[];
   dueDate?: string | null; paymentUrl?: string | null; worldId?: string | null;
-  /** Provenance (app_0086): which door the money came through. Defaults to 'manual' (the form). */
-  source?: 'manual' | 'garvis_tool' | 'won_deal';
+  /** Provenance (app_0086): which door the money came through. Defaults to 'manual' (the form).
+   *  'commission' = a Lead Engine won-outcome referral fee (leadEngineRun.recordOutcome). */
+  source?: 'manual' | 'garvis_tool' | 'won_deal' | 'commission';
   leadId?: string | null; campaignId?: string | null; clientSubscriptionId?: string | null;
 }): Promise<InvoiceRow> {
   const { data: sess } = await supabase.auth.getUser();

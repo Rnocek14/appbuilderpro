@@ -852,6 +852,55 @@ Deno.serve(async (req) => {
     // A forced run may target a paused/not-yet-due order (the owner asked); the scan only sees due ones.
     if (!body.order_id && !isDue({ status: order.status as 'active' | 'paused', nextRunAt: order.next_run_at }, nowIso)) continue;
 
+    // ---- lead_engine: the Lead Engine's clock (app_0129) — a THIN branch on purpose ------------
+    // All fetching/normalizing/scoring lives in the lead-ingest function + the verified pure core
+    // (src/lib/garvis/leadEngine/). This branch only asks for a run and records the honest line.
+    // READ + RECORD: new leads land as rows + one mind_event; the digest goes out via Approvals.
+    if (order.kind === 'lead_engine') {
+      try {
+        const cfg = (order.config ?? {}) as { trades?: unknown; commissionPct?: unknown };
+        const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/lead-ingest`, {
+          method: 'POST', signal: AbortSignal.timeout(60_000),
+          headers: {
+            'content-type': 'application/json',
+            'x-worker-secret': Deno.env.get('WORKER_SECRET') ?? '',
+            Authorization: `Bearer ${serviceKey}`,
+          },
+          body: JSON.stringify({ owner_id: order.owner_id, world_id: order.world_id, trades: cfg.trades, commissionPct: cfg.commissionPct }),
+        });
+        const out = (await res.json().catch(() => ({}))) as { ok?: boolean; line?: string; leads_new?: number; error?: string };
+        if (!res.ok || !out.ok) throw new Error(out.error ?? `lead-ingest HTTP ${res.status}`);
+        const leadsNew = Number(out.leads_new) || 0;
+        const line = out.line ?? 'Ingest ran.';
+        ran++;
+        if (leadsNew > 0) changed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: leadsNew > 0 ? 'changed' : 'unchanged', line, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id);
+        if (leadsNew > 0) {
+          await admin.from('mind_events').insert({
+            owner_id: order.owner_id, event_type: 'note', source: 'standing-order',
+            subject: line.slice(0, 300),
+            payload: { key: `lead-engine:${order.id}:${nowIso.slice(0, 10)}`, order_id: order.id, kind: order.kind, leads_new: leadsNew },
+          }).then(() => {}, () => {});
+          const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', order.owner_id).maybeSingle();
+          await notifyText((prof as { webhook_url?: string } | null)?.webhook_url, line).catch(() => {});
+        }
+      } catch (e) {
+        failed++;
+        await admin.from('standing_orders').update({
+          last_run_at: nowIso,
+          last_result: { status: 'unreachable', line: `Lead ingest failed: ${e instanceof Error ? e.message.slice(0, 160) : 'unknown error'}. Will retry on schedule.`, hash: null, excerpt: null, checkedAt: nowIso },
+          next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
+          updated_at: nowIso,
+        }).eq('id', order.id).then(() => {}, () => {});
+      }
+      continue;
+    }
+
     // ---- opportunity_hunt: scheduled search sweeps → fetched pages → honest extraction --------
     // The Opportunity Engine's unattended half: Serper queries (config.queries, derived from the
     // operator's focus) → fetch the organic results (static HTML; unreadable pages are COUNTED

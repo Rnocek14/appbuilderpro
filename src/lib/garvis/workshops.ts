@@ -138,6 +138,12 @@ const FLAVOR_WORKSHOPS: Record<Flavor, WorkshopDefinition> = {
     description: 'Develop the angle, script the beats, and storyboard the short before sending it to a clip engine.',
     group: 'grow', tone: 'violet', steps: ['Find the hook', 'Script the beats', 'Build the storyboard'],
   },
+  lead_engine: {
+    name: 'Lead Market Workshop', kicker: 'Watch the public record',
+    outcome: 'Ranked commercial leads from permits, licenses, and registrations — every one traceable to its source.',
+    description: 'Wire up the market\'s public sources, let the clock score what\'s new per trade, and queue the digest for approval.',
+    group: 'grow', tone: 'ok', steps: ['Wire the sources', 'Review the ranked leads', 'Queue the digest'],
+  },
 };
 
 const ARCHETYPE_WORKSHOPS: Record<Archetype, WorkshopDefinition> = {

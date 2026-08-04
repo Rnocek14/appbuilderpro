@@ -502,6 +502,32 @@ When an Ask comes back "nothing on record" — that's the next entry to log.${NO
   },
 ];
 
+const LEAD_ENGINE_PACK: SeedArtifact[] = [
+  {
+    slug: 'lead-market-craft', kind: 'doc', title: 'How this lead market works',
+    detail: `${H('Public records → ranked leads — {{business_name}}')}
+THE CHAIN: something happens (a tenant-improvement permit, a liquor license, a new registration) →
+the standing clock reads the source → the engine scores it per trade WITH ITS REASONS → you review,
+queue the digest, and record what closed. Every lead links its public record; nothing is invented.
+WIRE SOURCES FIRST: a permit portal (most cities publish a Socrata or ArcGIS feed — search
+"<city> open data building permits"), the state liquor board, the Secretary of State registry.
+One market = one metro. Add the field map so titles/addresses/valuations come through verbatim.
+OUTCOMES ARE THE MOAT: record quoted/won/lost on every delivered lead. Close-rate-by-event-type is
+the data nobody else has — it prices the next customer and proves the pilot.
+THE DIGEST NEVER SENDS ITSELF: it is one pending approval in your queue, every time.${NOTE}`,
+  },
+  {
+    slug: 'lead-market-starter', kind: 'doc', title: 'The 90-day pilot checklist',
+    detail: `${H('Prove close-rate before scaling anything')}
+□ Written referral agreement signed (10% of contract value on closed jobs, 12-month attribution).
+□ 2-3 sources wired and green (permits + liquor licenses cover most trades to start).
+□ Digest queued weekly to ONE customer; every delivered lead tracked to quoted/won/lost.
+□ Day-90 gate: ≥30% of delivered leads quoted and ≥2 attributable closed jobs — otherwise fix
+  lead quality (sources, field maps, trade weights) before adding customers or metros.
+The plan behind this market: docs/lead-engine-master-plan.md.${NOTE}`,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // The registry
 // ---------------------------------------------------------------------------
@@ -510,7 +536,7 @@ const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
   feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK, data: DATA_PACK,
-  tracker: TRACKER_PACK, content_growth: CONTENT_GROWTH_PACK,
+  tracker: TRACKER_PACK, content_growth: CONTENT_GROWTH_PACK, lead_engine: LEAD_ENGINE_PACK,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */

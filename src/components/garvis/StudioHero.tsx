@@ -56,6 +56,7 @@ const HERO: Partial<Record<Flavor, HeroConfig>> = {
   deliver:     { icon: PenLine,      makes: 'finished, exportable documents — proposals, reports, one-pagers.',    primaryTool: null, cta: '' },
   data:        { icon: LayoutGrid,   makes: 'typed tables, honest per-column stats, and charts from your CSVs.',   primaryTool: null, cta: '' },
   tracker:     { icon: LayoutGrid,   makes: 'a queryable log — client notes, expenses, decisions become memory.',  primaryTool: null, cta: '' },
+  lead_engine: { icon: LayoutGrid,   makes: 'ranked commercial leads from public records — sources on the clock, scores with reasons, an approval-gated digest.', primaryTool: null, cta: '' },
 };
 
 /**
