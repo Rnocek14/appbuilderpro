@@ -1,12 +1,11 @@
 // src/components/garvis/LeadEnginePanel.tsx
-// THE LEAD MARKET — the `lead_engine` studio's workspace. Sources (permit portals, license
-// boards, registries) checked on the standing clock; new events scored into ranked leads with
-// STATED reasons; the weekly digest queued as ONE pending approval through the one send path;
-// outcomes recorded against real records — a won outcome with a value mints a commission invoice
-// in the Money loop. Every lead links its public record. Nothing here sends anything.
+// THE LEAD MARKET — the `lead_engine` studio's workspace, organized by the operator's questions
+// in order: Is it running? (one status surface) → What's new? (leads, the hero) → Who's buying?
+// (one selling surface) → Setup (folded away until something needs attention). One primary action
+// per state; everything outbound waits in the approval queue. Every lead links its public record.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Radar, Plus, Play, Pause, Send, ExternalLink, RefreshCw, Clock, CheckCircle2, Circle, Users, Megaphone } from 'lucide-react';
+import { Radar, Plus, Play, Pause, ExternalLink, RefreshCw, CheckCircle2, Circle, Users, Settings2, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, Skeleton } from '../ui';
 import {
   listSources, createSource, setSourceActive, listLeads, setLeadStatus, runIngestNow,
@@ -28,6 +27,8 @@ const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
   { value: 'rss', label: 'News / RSS' },
 ];
 
+const selectCls = 'rounded-lg border border-forge-border bg-forge-panel px-2 py-2 text-xs text-forge-ink';
+
 export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   worldId: string; worldLabel: string; onToast: (kind: 'success' | 'error', msg: string) => void;
 }) {
@@ -35,10 +36,12 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   const [leads, setLeads] = useState<LeadRow[] | null>(null);
   const [board, setBoard] = useState<Awaited<ReturnType<typeof leadScoreboard>> | null>(null);
   const [clock, setClock] = useState<StandingOrder | null | undefined>(undefined); // undefined = loading
+  const [customers, setCustomers] = useState<LeadCustomerRow[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  // Add-source form (kept deliberately small; query_config JSON is the advanced field).
+  // Setup disclosure — opens itself only when something needs attention.
+  const [setupOpen, setSetupOpen] = useState<boolean | null>(null); // null = follow the data
   const [adding, setAdding] = useState(false);
   const [srcName, setSrcName] = useState('');
   const [srcKind, setSrcKind] = useState<SourceKind>('socrata');
@@ -46,19 +49,19 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   const [srcRegion, setSrcRegion] = useState('');
   const [srcConfig, setSrcConfig] = useState('');
 
-  // Digest + outcome inputs.
-  const [digestTo, setDigestTo] = useState('');
-  const [wonFor, setWonFor] = useState<LeadRow | null>(null);
-  const [wonValue, setWonValue] = useState('');
-  const [wonBillTo, setWonBillTo] = useState('');
-
-  // Customers + the sales opener.
-  const [customers, setCustomers] = useState<LeadCustomerRow[] | null>(null);
+  // Selling inputs.
   const [custName, setCustName] = useState('');
   const [custEmail, setCustEmail] = useState('');
   const [custTrade, setCustTrade] = useState<TradeKey | 'all'>('all');
   const [pitchEmail, setPitchEmail] = useState('');
   const [pitchTrade, setPitchTrade] = useState<TradeKey>('security');
+  const [digestTo, setDigestTo] = useState('');
+  const [oneOffOpen, setOneOffOpen] = useState(false);
+
+  // Win recording — inline in the lead's own card, never a floating form.
+  const [wonFor, setWonFor] = useState<string | null>(null); // lead id
+  const [wonValue, setWonValue] = useState('');
+  const [wonBillTo, setWonBillTo] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -78,18 +81,6 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
     finally { setBusy(null); }
   };
 
-  const addSource = () => act('add-source', async () => {
-    let queryConfig: Record<string, unknown> | undefined;
-    if (srcConfig.trim()) {
-      try { queryConfig = JSON.parse(srcConfig) as Record<string, unknown>; }
-      catch { throw new Error('The field map must be valid JSON.'); }
-    }
-    await createSource({ worldId, name: srcName, kind: srcKind, baseUrl: srcUrl, region: srcRegion, queryConfig });
-    setAdding(false); setSrcName(''); setSrcUrl(''); setSrcRegion(''); setSrcConfig('');
-  }, 'Source added — it runs on the standing clock, or check it now.');
-
-  const fresh = (leads ?? []).filter((l) => l.status === 'new');
-
   if (loadFailed) {
     return (
       <div className="mt-4 rounded-xl border border-forge-err/40 bg-forge-panel p-4 text-sm text-forge-dim">
@@ -97,153 +88,82 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
       </div>
     );
   }
+  if (sources === null || leads === null) {
+    return <div className="mt-4 space-y-3"><Skeleton className="h-12" /><Skeleton className="h-24" /></div>;
+  }
 
-  // The turnkey checklist — computed from real rows, always shows the next step. Collapses to one
-  // quiet line once the market is fully operating.
+  const fresh = leads.filter((l) => l.status === 'new');
+  const clockOn = !!clock && clock.status === 'active';
+  const activeSources = sources.filter((s) => s.active);
+  const failingSources = sources.filter((s) => s.consecutive_failures > 0 || (!s.active && s.consecutive_failures >= 5));
+  const activeCustomers = (customers ?? []).filter((c) => c.status === 'active');
+
+  // The one setup truth: complete = the machine runs itself. Attention = open the setup drawer.
   const steps: { label: string; done: boolean; hint: string }[] = [
-    { label: 'On the clock', done: !!clock && clock.status === 'active', hint: 'Turn on the hourly clock below.' },
-    { label: 'Source wired', done: (sources?.length ?? 0) > 0, hint: 'Add a permit portal or license board (preset or custom).' },
-    { label: 'First check', done: (sources ?? []).some((s) => !!s.last_fetch_at), hint: 'Hit "Check now" — or wait for the next tick.' },
-    { label: 'Leads arriving', done: (leads?.length ?? 0) > 0, hint: 'Leads land here as sources turn up qualifying records.' },
-    { label: 'Digest sent', done: (board?.delivered ?? 0) > 0, hint: 'Queue the digest below — it waits for your approval.' },
+    { label: 'On the clock', done: clockOn, hint: 'Turn on the hourly clock in Setup below.' },
+    { label: 'Source wired', done: sources.length > 0, hint: 'Add a permit portal or license board in Setup below.' },
+    { label: 'First check', done: sources.some((s) => !!s.last_fetch_at), hint: 'Hit "Check now" — or wait for the next tick.' },
+    { label: 'Leads arriving', done: leads.length > 0, hint: 'Leads land here as sources turn up qualifying records.' },
+    { label: 'First send', done: (board?.delivered ?? 0) > 0, hint: 'Pitch a prospect or add a customer in Selling below.' },
     { label: 'Outcome recorded', done: (board?.quoted ?? 0) + (board?.won ?? 0) > 0, hint: 'Mark quoted/won/lost on delivered leads — this data is the moat.' },
   ];
   const nextStep = steps.find((s) => !s.done);
-  const setupDone = !nextStep;
+  const needsAttention = !clockOn || sources.length === 0 || failingSources.length > 0;
+  const showSetup = setupOpen ?? needsAttention;
 
   return (
     <div className="mt-4 space-y-5">
-      {/* Setup checklist — the turnkey rail. */}
-      {sources !== null && leads !== null && !setupDone && (
-        <div className="rounded-xl border border-forge-border bg-forge-panel p-3">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {steps.map((s) => (
-              <span key={s.label} className={`inline-flex items-center gap-1 text-xs ${s.done ? 'text-forge-ok' : s === nextStep ? 'text-forge-ink font-medium' : 'text-forge-dim'}`}>
-                {s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}{s.label}
-              </span>
-            ))}
+
+      {/* ── STATUS — the one surface that answers "is it running?" ──────────── */}
+      <div className="rounded-xl border border-forge-border bg-forge-panel p-3">
+        {nextStep ? (
+          <>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {steps.map((s) => (
+                <span key={s.label} className={`inline-flex items-center gap-1 text-xs ${s.done ? 'text-forge-ok' : s === nextStep ? 'font-medium text-forge-ink' : 'text-forge-dim'}`}>
+                  {s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}{s.label}
+                </span>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-forge-dim"><span className="text-forge-ember">Next:</span> {nextStep.hint}</p>
+          </>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-forge-ink">
+            <CheckCircle2 size={15} className="text-forge-ok" />
+            <span>
+              Checking {activeSources.length} source{activeSources.length === 1 ? '' : 's'} hourly
+              · {fresh.length} new lead{fresh.length === 1 ? '' : 's'}
+              · {activeCustomers.length} customer{activeCustomers.length === 1 ? '' : 's'} on weekly digests
+            </span>
           </div>
-          {nextStep && <p className="mt-2 text-xs text-forge-dim"><span className="text-forge-ember">Next:</span> {nextStep.hint}</p>}
-          <p className="mt-1 text-xs text-forge-dim">How it works: the clock checks your sources every hour → new public records become ranked leads with stated reasons → the digest waits in your Queue until you say yes.</p>
-        </div>
-      )}
-      {setupDone && (
-        <p className="text-xs text-forge-ok">Fully operating — sources on the clock, leads flowing, outcomes tracked.</p>
-      )}
-
-      {/* The clock — is this market checking itself? (One lead_engine standing order per world.) */}
-      {clock !== undefined && (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-forge-border bg-forge-panel px-3 py-2">
-          <Clock size={14} className={clock && clock.status === 'active' ? 'text-forge-ok' : 'text-forge-dim'} />
-          <span className="text-sm text-forge-ink">
-            {clock === null ? 'Not on the clock — sources only run when you click "Check now".'
-              : clock.status === 'active' ? 'On the clock — sources are checked hourly by the standing worker.'
-              : 'Clock paused — resume to check sources hourly.'}
-          </span>
-          <div className="ml-auto">
-            {clock === null ? (
-              <Button size="sm" loading={busy === 'clock'}
-                onClick={() => act('clock', async () => { await enableClock(worldId, worldLabel); }, 'On the clock — first check within the hour.')}>
-                Put it on the clock
-              </Button>
-            ) : (
-              <Button size="sm" variant="ghost" loading={busy === 'clock'}
-                onClick={() => act('clock', () => setClockActive(clock.id, clock.status !== 'active'))}>
-                {clock.status === 'active' ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Scoreboard — counted from real rows, never composed. */}
-      {board && (
-        <div className="flex flex-wrap gap-2 text-xs">
-          <Badge tone="dim">{board.delivered} delivered</Badge>
-          <Badge tone="warn">{board.quoted} quoted</Badge>
-          <Badge tone="ok">{board.won} won</Badge>
-          {board.closeRatePct !== null && <Badge tone="ember">{board.closeRatePct}% close</Badge>}
-          {board.commissionUsd > 0 && <Badge tone="ok">${board.commissionUsd.toLocaleString('en-US')} commission</Badge>}
-        </div>
-      )}
-
-      {/* Sources */}
-      <section>
-        <div className="mb-2 flex items-center gap-2">
-          <Radar size={15} className="text-forge-ember" />
-          <h3 className="text-sm font-semibold text-forge-ink">Sources</h3>
+        )}
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {board && (board.delivered > 0 || board.won > 0) && (
+            <span className="flex flex-wrap gap-2 text-xs">
+              <Badge tone="dim">{board.delivered} delivered</Badge>
+              <Badge tone="warn">{board.quoted} quoted</Badge>
+              <Badge tone="ok">{board.won} won</Badge>
+              {board.closeRatePct !== null && <Badge tone="ember">{board.closeRatePct}% close</Badge>}
+              {board.commissionUsd > 0 && <Badge tone="ok">${board.commissionUsd.toLocaleString('en-US')} commission</Badge>}
+            </span>
+          )}
           <div className="ml-auto flex gap-2">
             <Button size="sm" variant="ghost" loading={busy === 'ingest'}
               onClick={() => act('ingest', async () => { const r = await runIngestNow(worldId); onToast('success', r.line); })}>
               <RefreshCw size={13} /> Check now
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}><Plus size={13} /> Add source</Button>
           </div>
         </div>
-        {adding && (
-          <div className="mb-3 space-y-2 rounded-xl border border-forge-border bg-forge-panel p-3">
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                const p = starterById(e.target.value);
-                if (!p) return;
-                setSrcName(p.label); setSrcKind(p.kind); setSrcUrl(p.base_url);
-                setSrcRegion(p.region); setSrcConfig(JSON.stringify(p.query_config));
-              }}
-              className="w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink"
-            >
-              <option value="">Start from a preset… (well-known public datasets — the first check verifies them live)</option>
-              {STARTER_SOURCES.map((p) => <option key={p.id} value={p.id}>{p.label} — {p.region}</option>)}
-            </select>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Input placeholder='Name — e.g. "Denver building permits"' value={srcName} onChange={(e) => setSrcName(e.target.value)} />
-              <select value={srcKind} onChange={(e) => setSrcKind(e.target.value as SourceKind)}
-                className="rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink">
-                {SOURCE_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
-              </select>
-              <Input placeholder="https://data.example.gov/resource/xxxx.json" value={srcUrl} onChange={(e) => setSrcUrl(e.target.value)} />
-              <Input placeholder='Region — e.g. "Denver, CO"' value={srcRegion} onChange={(e) => setSrcRegion(e.target.value)} />
-            </div>
-            <textarea
-              value={srcConfig} onChange={(e) => setSrcConfig(e.target.value)} rows={3}
-              placeholder='Field map (JSON, optional) — e.g. {"date_field":"issued_date","field_map":{"title":"description","address":"full_address","valuation":"valuation","contact_name":"applicant_name"}}'
-              className="w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 font-mono text-xs text-forge-ink placeholder:text-forge-dim"
-            />
-            <Button size="sm" loading={busy === 'add-source'} onClick={addSource}>Save source</Button>
-          </div>
-        )}
-        {sources === null ? <Skeleton className="h-16" /> : sources.length === 0 ? (
-          <EmptyState icon={<Radar size={20} />} title="No sources yet" body="Wire up a permit portal or license board — the standing clock checks it and scores what's new." />
-        ) : (
-          <ul className="space-y-2">
-            {sources.map((s) => (
-              <li key={s.id} className="flex items-start gap-3 rounded-xl border border-forge-border bg-forge-panel px-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-forge-ink">{s.name}</span>
-                    <Badge tone={s.active ? 'ok' : 'dim'}>{s.active ? 'active' : 'paused'}</Badge>
-                    <span className="text-xs text-forge-dim">{s.region}</span>
-                  </div>
-                  <p className="mt-0.5 truncate text-xs text-forge-dim">{s.last_status ?? 'Hasn’t run yet — it will on the next tick.'}</p>
-                </div>
-                <Button size="sm" variant="ghost" loading={busy === `src-${s.id}`}
-                  onClick={() => act(`src-${s.id}`, () => setSourceActive(s.id, !s.active))}>
-                  {s.active ? <Pause size={13} /> : <Play size={13} />}
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      </div>
 
-      {/* Leads */}
+      {/* ── LEADS — the hero: what the machine found ────────────────────────── */}
       <section>
         <div className="mb-2 flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-forge-ink">Ranked leads</h3>
+          <h3 className="text-sm font-semibold text-forge-ink">Leads</h3>
           {fresh.length > 0 && <Badge tone="ember">{fresh.length} new</Badge>}
         </div>
-        {leads === null ? <Skeleton className="h-24" /> : leads.length === 0 ? (
-          <EmptyState icon={<Radar size={20} />} title="No leads yet" body="When a source turns up a qualifying public record, it lands here scored per trade — with its reasons." />
+        {leads.length === 0 ? (
+          <EmptyState icon={<Radar size={20} />} title="Nothing yet" body="When a source turns up a qualifying public record, it lands here — scored per trade, reasons stated, record linked." />
         ) : (
           <ul className="space-y-2">
             {leads.slice(0, 25).map((l) => (
@@ -259,8 +179,13 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
                   )}
                 </div>
                 <p className="mt-1 text-sm text-forge-ink">{l.le_events?.title ?? l.why_now}</p>
-                <p className="mt-0.5 text-xs text-forge-dim">{l.why_now}{l.contact_name || l.contact_company ? ` Named: ${l.contact_name ?? l.contact_company}.` : ''}</p>
-                {(l.status === 'delivered' || l.status === 'contacted' || l.status === 'quoted') && (
+                <p className="mt-0.5 text-xs text-forge-dim">
+                  {l.why_now}
+                  {(l.contact_name || l.contact_company) && ` ${l.contact_name ?? l.contact_company}`}
+                  {l.contact_phone && ` · ${l.contact_phone}`}
+                  {l.contact_email && ` · ${l.contact_email}`}
+                </p>
+                {(l.status === 'delivered' || l.status === 'contacted' || l.status === 'quoted') && wonFor !== l.id && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {l.status !== 'quoted' && (
                       <Button size="sm" variant="ghost" loading={busy === `q-${l.id}`}
@@ -268,11 +193,33 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
                         Quoted
                       </Button>
                     )}
-                    <Button size="sm" variant="ghost" onClick={() => { setWonFor(l); setWonValue(''); setWonBillTo(digestTo); }}>Won…</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setWonFor(l.id); setWonValue(''); setWonBillTo(''); }}>Won…</Button>
                     <Button size="sm" variant="ghost" loading={busy === `l-${l.id}`}
                       onClick={() => act(`l-${l.id}`, () => recordOutcome({ lead: l, worldId, result: 'lost' }).then(() => {}), 'Recorded: lost.')}>
                       Lost
                     </Button>
+                  </div>
+                )}
+                {wonFor === l.id && (
+                  <div className="mt-2 rounded-lg border border-forge-ember/40 p-2">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Input placeholder="Contract value USD (e.g. 12000)" value={wonValue} onChange={(e) => setWonValue(e.target.value)} />
+                      <Input placeholder="Bill commission to (email)" value={wonBillTo} onChange={(e) => setWonBillTo(e.target.value)} />
+                    </div>
+                    <div className="mt-2 flex gap-2">
+                      <Button size="sm" loading={busy === 'won'} onClick={() => act('won', async () => {
+                        const value = Number(wonValue.replace(/[$,]/g, ''));
+                        const r = await recordOutcome({
+                          lead: l, worldId, result: 'won',
+                          contractValueUsd: Number.isFinite(value) && value > 0 ? value : null,
+                          billToEmail: wonBillTo.trim() || null,
+                        });
+                        setWonFor(null);
+                        onToast('success', r.commissionUsd ? `Won recorded — $${r.commissionUsd.toLocaleString('en-US')} commission invoice drafted.` : 'Won recorded.');
+                      })}>Record win</Button>
+                      <Button size="sm" variant="ghost" onClick={() => setWonFor(null)}>Cancel</Button>
+                    </div>
+                    <p className="mt-1 text-xs text-forge-dim">A value + billing email drafts the commission invoice; sending it stays approval-gated.</p>
                   </div>
                 )}
                 {l.status === 'new' && (
@@ -289,43 +236,35 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
         )}
       </section>
 
-      {/* Won → commission (inline, only when recording a win) */}
-      {wonFor && (
-        <div className="rounded-xl border border-forge-ember/40 bg-forge-panel p-3">
-          <p className="text-sm text-forge-ink">Record the win — a contract value + billing email mints the commission invoice (draft; sending stays approval-gated).</p>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <Input placeholder="Contract value USD (e.g. 12000)" value={wonValue} onChange={(e) => setWonValue(e.target.value)} />
-            <Input placeholder="Bill commission to (email)" value={wonBillTo} onChange={(e) => setWonBillTo(e.target.value)} />
-          </div>
-          <div className="mt-2 flex gap-2">
-            <Button size="sm" loading={busy === 'won'} onClick={() => act('won', async () => {
-              const value = Number(wonValue.replace(/[$,]/g, ''));
-              const r = await recordOutcome({
-                lead: wonFor, worldId, result: 'won',
-                contractValueUsd: Number.isFinite(value) && value > 0 ? value : null,
-                billToEmail: wonBillTo.trim() || null,
-              });
-              setWonFor(null);
-              onToast('success', r.commissionUsd ? `Won recorded — $${r.commissionUsd.toLocaleString('en-US')} commission invoice drafted.` : 'Won recorded.');
-            })}>Record win</Button>
-            <Button size="sm" variant="ghost" onClick={() => setWonFor(null)}>Cancel</Button>
-          </div>
-        </div>
-      )}
-
-      {/* Customers — the market's subscribers. Their weekly digests draft AUTOMATICALLY on the
-          clock as pending approvals; this section just manages who's on the list. */}
+      {/* ── SELLING — one surface: pitch prospects, manage customers ────────── */}
       <section className="rounded-xl border border-forge-border bg-forge-panel p-3">
         <div className="mb-2 flex items-center gap-2">
           <Users size={14} className="text-forge-ember" />
-          <span className="text-sm font-medium text-forge-ink">Customers</span>
-          {customers && customers.length > 0 && <Badge tone="ok">{customers.filter((c) => c.status === 'active').length} active</Badge>}
+          <h3 className="text-sm font-semibold text-forge-ink">Selling</h3>
+          {activeCustomers.length > 0 && <Badge tone="ok">{activeCustomers.length} customer{activeCustomers.length === 1 ? '' : 's'}</Badge>}
         </div>
-        {customers === null ? <Skeleton className="h-10" /> : customers.length === 0 ? (
-          <p className="text-xs text-forge-dim">Nobody yet. Add a customer and the clock drafts their trade's digest every week — each one waits in your Queue for approval.</p>
-        ) : (
-          <ul className="mb-2 space-y-1">
-            {customers.map((c) => (
+
+        {/* The opener: a sample pitch built from real leads. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Input placeholder="prospect@contractor.com" value={pitchEmail} onChange={(e) => setPitchEmail(e.target.value)} className="w-56" />
+          <select value={pitchTrade} onChange={(e) => setPitchTrade(e.target.value as TradeKey)} className={selectCls}>
+            {TRADE_KEYS.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
+          </select>
+          <Button size="sm" loading={busy === 'pitch'}
+            onClick={() => act('pitch', async () => {
+              const region = sources[0]?.region ?? worldLabel;
+              await queueSamplePitch({ worldId, region, toEmail: pitchEmail, trade: pitchTrade });
+              setPitchEmail('');
+            }, 'Sample pitch drafted — review and approve it in your Queue.')}>
+            Draft sample pitch
+          </Button>
+        </div>
+        <p className="mt-1 text-xs text-forge-dim">Embeds their trade's 2–3 best real leads, public-record links included — the sample is the proof. Waits in your Queue.</p>
+
+        {/* Customers: their weekly digests draft automatically. */}
+        {(customers ?? []).length > 0 && (
+          <ul className="mt-3 space-y-1 border-t border-forge-border pt-3">
+            {(customers ?? []).map((c) => (
               <li key={c.id} className="flex items-center gap-2 text-xs">
                 <Badge tone={c.status === 'active' ? 'ok' : 'dim'}>{c.status}</Badge>
                 <span className="text-forge-ink">{c.name || c.email}</span>
@@ -339,68 +278,153 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
             ))}
           </ul>
         )}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-forge-border pt-3">
           <Input placeholder="Name" value={custName} onChange={(e) => setCustName(e.target.value)} className="w-36" />
           <Input placeholder="customer@example.com" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} className="w-56" />
-          <select value={custTrade} onChange={(e) => setCustTrade(e.target.value as TradeKey | 'all')}
-            className="rounded-lg border border-forge-border bg-forge-panel px-2 py-2 text-xs text-forge-ink">
+          <select value={custTrade} onChange={(e) => setCustTrade(e.target.value as TradeKey | 'all')} className={selectCls}>
             <option value="all">All trades</option>
             {TRADE_KEYS.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
           </select>
-          <Button size="sm" loading={busy === 'add-cust'}
+          <Button size="sm" variant="outline" loading={busy === 'add-cust'}
             onClick={() => act('add-cust', async () => {
               await addCustomer({ worldId, name: custName, email: custEmail, trade: custTrade });
               setCustName(''); setCustEmail('');
-            }, 'Customer added — their first digest drafts on the next weekly cycle.')}>
-            <Plus size={13} /> Add
+            }, 'Customer added — their digest drafts automatically every week, waiting in your Queue.')}>
+            <Plus size={13} /> Add customer
           </Button>
         </div>
+
+        {/* One-off digest — tertiary, tucked behind a text toggle. */}
+        <button type="button" className="mt-3 inline-flex items-center gap-1 text-xs text-forge-dim hover:text-forge-ink"
+          onClick={() => setOneOffOpen((v) => !v)}>
+          {oneOffOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />} Send a one-off digest
+        </button>
+        {oneOffOpen && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Input placeholder="someone@example.com" value={digestTo} onChange={(e) => setDigestTo(e.target.value)} className="w-64" />
+            <Button size="sm" variant="outline" loading={busy === 'digest'} disabled={fresh.length === 0}
+              onClick={() => act('digest', async () => {
+                const r = await queueDigest({ worldId, worldLabel, toEmail: digestTo });
+                onToast('success', `Digest with ${r.included} lead${r.included === 1 ? '' : 's'} is waiting in your approval queue.`);
+              })}>
+              Queue for approval
+            </Button>
+            <span className="text-xs text-forge-dim">
+              {fresh.length === 0 ? 'No new leads right now — a quiet week is not a digest.' : `${fresh.length} new lead${fresh.length === 1 ? '' : 's'} ranked into one email.`}
+            </span>
+          </div>
+        )}
       </section>
 
-      {/* The sales opener — a sample pitch with REAL leads embedded, queued for approval. */}
+      {/* ── SETUP — folded away unless something needs attention ────────────── */}
       <section className="rounded-xl border border-forge-border bg-forge-panel p-3">
-        <div className="mb-2 flex items-center gap-2">
-          <Megaphone size={14} className="text-forge-ember" />
-          <span className="text-sm font-medium text-forge-ink">Sell this market</span>
-        </div>
-        <p className="mb-2 text-xs text-forge-dim">Pitch a contractor with 2–3 real leads from this market — public-record links included, so the sample is the proof. It waits in your Queue like everything else.</p>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input placeholder="prospect@contractor.com" value={pitchEmail} onChange={(e) => setPitchEmail(e.target.value)} className="w-56" />
-          <select value={pitchTrade} onChange={(e) => setPitchTrade(e.target.value as TradeKey)}
-            className="rounded-lg border border-forge-border bg-forge-panel px-2 py-2 text-xs text-forge-ink">
-            {TRADE_KEYS.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
-          </select>
-          <Button size="sm" loading={busy === 'pitch'}
-            onClick={() => act('pitch', async () => {
-              const region = sources?.[0]?.region ?? worldLabel;
-              await queueSamplePitch({ worldId, region, toEmail: pitchEmail, trade: pitchTrade });
-              setPitchEmail('');
-            }, 'Sample pitch drafted — review and approve it in your Queue.')}>
-            Draft the pitch
-          </Button>
-        </div>
-      </section>
+        <button type="button" className="flex w-full items-center gap-2 text-left"
+          onClick={() => setSetupOpen(!showSetup)}>
+          <Settings2 size={14} className={failingSources.length ? 'text-forge-err' : 'text-forge-dim'} />
+          <span className="text-sm font-medium text-forge-ink">Setup</span>
+          <span className="text-xs text-forge-dim">
+            {sources.length} source{sources.length === 1 ? '' : 's'}
+            {failingSources.length > 0 ? ` · ${failingSources.length} failing` : sources.length > 0 ? ' · healthy' : ''}
+            · clock {clockOn ? 'on' : clock === null ? 'off' : 'paused'}
+          </span>
+          <span className="ml-auto">{showSetup ? <ChevronDown size={14} className="text-forge-dim" /> : <ChevronRight size={14} className="text-forge-dim" />}</span>
+        </button>
 
-      {/* Ad-hoc digest — ONE pending approval through the one send path. (Customers above get
-          theirs automatically on the weekly cycle.) */}
-      <section className="rounded-xl border border-forge-border bg-forge-panel p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Send size={14} className="text-forge-ember" />
-          <span className="text-sm font-medium text-forge-ink">One-off digest</span>
-          <Input placeholder="someone@example.com" value={digestTo} onChange={(e) => setDigestTo(e.target.value)} className="w-64" />
-          <Button size="sm" loading={busy === 'digest'} disabled={fresh.length === 0}
-            onClick={() => act('digest', async () => {
-              const r = await queueDigest({ worldId, worldLabel, toEmail: digestTo });
-              onToast('success', `Digest with ${r.included} lead${r.included === 1 ? '' : 's'} is waiting in your approval queue.`);
-            })}>
-            Queue for approval
-          </Button>
-        </div>
-        <p className="mt-1 text-xs text-forge-dim">
-          {fresh.length === 0
-            ? 'No new leads right now — a quiet week is not a digest.'
-            : `${fresh.length} new lead${fresh.length === 1 ? '' : 's'} would be ranked into one email. Nothing sends until you approve it in the Queue.`}
-        </p>
+        {showSetup && (
+          <div className="mt-3 space-y-3 border-t border-forge-border pt-3">
+            {/* The clock */}
+            <div className="flex flex-wrap items-center gap-2 text-sm text-forge-ink">
+              <span>
+                {clock === null ? 'Not on the clock — sources only run when you click "Check now".'
+                  : clockOn ? 'On the clock — sources are checked hourly.'
+                  : 'Clock paused — resume to check sources hourly.'}
+              </span>
+              <div className="ml-auto">
+                {!clock ? (
+                  <Button size="sm" loading={busy === 'clock'}
+                    onClick={() => act('clock', async () => { await enableClock(worldId, worldLabel); }, 'On the clock — first check within the hour.')}>
+                    Put it on the clock
+                  </Button>
+                ) : (
+                  <Button size="sm" variant="ghost" loading={busy === 'clock'}
+                    onClick={() => act('clock', () => setClockActive(clock.id, clock.status !== 'active'))}>
+                    {clockOn ? <><Pause size={13} /> Pause</> : <><Play size={13} /> Resume</>}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Sources */}
+            {sources.length === 0 ? (
+              <p className="text-xs text-forge-dim">No sources yet — add a permit portal or license board below.</p>
+            ) : (
+              <ul className="space-y-2">
+                {sources.map((s) => (
+                  <li key={s.id} className="flex items-start gap-3 rounded-lg border border-forge-border px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-forge-ink">{s.name}</span>
+                        <Badge tone={s.active ? 'ok' : 'dim'}>{s.active ? 'active' : 'paused'}</Badge>
+                        <span className="text-xs text-forge-dim">{s.region}</span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-forge-dim">{s.last_status ?? 'Hasn’t run yet — it will on the next tick.'}</p>
+                    </div>
+                    <Button size="sm" variant="ghost" loading={busy === `src-${s.id}`}
+                      onClick={() => act(`src-${s.id}`, () => setSourceActive(s.id, !s.active))}>
+                      {s.active ? <Pause size={13} /> : <Play size={13} />}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {!adding ? (
+              <Button size="sm" variant="outline" onClick={() => setAdding(true)}><Plus size={13} /> Add source</Button>
+            ) : (
+              <div className="space-y-2 rounded-lg border border-forge-border p-3">
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const p = starterById(e.target.value);
+                    if (!p) return;
+                    setSrcName(p.label); setSrcKind(p.kind); setSrcUrl(p.base_url);
+                    setSrcRegion(p.region); setSrcConfig(JSON.stringify(p.query_config));
+                  }}
+                  className="w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink"
+                >
+                  <option value="">Start from a preset… (the first check verifies it live)</option>
+                  {STARTER_SOURCES.map((p) => <option key={p.id} value={p.id}>{p.label} — {p.region}</option>)}
+                </select>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input placeholder='Name — e.g. "Denver building permits"' value={srcName} onChange={(e) => setSrcName(e.target.value)} />
+                  <select value={srcKind} onChange={(e) => setSrcKind(e.target.value as SourceKind)}
+                    className="rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink">
+                    {SOURCE_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+                  </select>
+                  <Input placeholder="https://data.example.gov/resource/xxxx.json" value={srcUrl} onChange={(e) => setSrcUrl(e.target.value)} />
+                  <Input placeholder='Region — e.g. "Denver, CO"' value={srcRegion} onChange={(e) => setSrcRegion(e.target.value)} />
+                </div>
+                <textarea
+                  value={srcConfig} onChange={(e) => setSrcConfig(e.target.value)} rows={3}
+                  placeholder='Field map (JSON, optional) — e.g. {"date_field":"issued_date","field_map":{"title":"description","address":"full_address","valuation":"valuation","contact_name":"applicant_name"}}'
+                  className="w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 font-mono text-xs text-forge-ink placeholder:text-forge-dim"
+                />
+                <div className="flex gap-2">
+                  <Button size="sm" loading={busy === 'add-source'} onClick={() => act('add-source', async () => {
+                    let queryConfig: Record<string, unknown> | undefined;
+                    if (srcConfig.trim()) {
+                      try { queryConfig = JSON.parse(srcConfig) as Record<string, unknown>; }
+                      catch { throw new Error('The field map must be valid JSON.'); }
+                    }
+                    await createSource({ worldId, name: srcName, kind: srcKind, baseUrl: srcUrl, region: srcRegion, queryConfig });
+                    setAdding(false); setSrcName(''); setSrcUrl(''); setSrcRegion(''); setSrcConfig('');
+                  }, 'Source added — it runs on the standing clock, or check it now.')}>Save source</Button>
+                  <Button size="sm" variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
