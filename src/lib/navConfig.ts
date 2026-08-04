@@ -22,10 +22,12 @@ export interface NavSection { title: string; items: NavItem[] }
 // The whole "app feels too big" fix is here: regroup, don't delete. Nothing lost a route.
 export const NAV_SECTIONS: NavSection[] = [
   {
-    // THE CORE LOOP — what you touch every day. Keep this to ~4 items.
+    // THE CORE LOOP — what you touch every day. Keep this to ~5 items.
     title: 'Core',
     items: [
       { to: '/garvis/command', label: 'Home', icon: Sparkles },
+      // The content-channel daily loop: every growth world, its channels, and the one-click start.
+      { to: '/garvis/channels', label: 'Channels', icon: Film },
       // The swift-prep screen: the prospect list + one-click Build & send (and the Claude scrape).
       { to: '/garvis/leads', label: 'Prospects', icon: Target },
       { to: '/garvis/queue', label: 'Queue', icon: MessageSquare },
