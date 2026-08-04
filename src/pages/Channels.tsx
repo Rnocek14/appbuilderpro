@@ -118,7 +118,7 @@ export function Channels() {
 
         <div className="space-y-3">
           {worlds?.map((w) => (
-            <div key={w.worldId} className="cursor-pointer" onClick={() => navigate(`/garvis/webs/${w.worldId}`)}>
+            <button key={w.worldId} type="button" className="block w-full text-left" onClick={() => navigate(`/garvis/webs/${w.worldId}`)}>
             <Card interactive className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -135,7 +135,7 @@ export function Channels() {
                 <span className="shrink-0 text-xs text-forge-ember">open the studio →</span>
               </div>
             </Card>
-            </div>
+            </button>
           ))}
         </div>
       </div>
