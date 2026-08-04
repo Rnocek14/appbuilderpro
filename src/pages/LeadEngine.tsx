@@ -1,19 +1,18 @@
 // src/pages/LeadEngine.tsx
 // THE LEAD MARKETS DOOR — the named entry for the Lead Engine (docs/lead-engine-master-plan.md):
-// every world with a lead-market studio, its live pulse (sources, new leads, last check), and the
-// one-click start when there are none. Opening a world lands on the studio itself — this page is
-// a directory, not another workspace. SHIPPED DARK: routed but not in the nav until the pilot
-// gate passes (the master plan's Phase 2).
+// every market, its live pulse, and the TURNKEY start: pick a city and one click creates the
+// world, names it, puts it on the hourly clock, wires the permit feed, and fires the first check.
+// Opening a market lands on the studio itself — this page is a directory, not another workspace.
 
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Radar, Loader2, Plus } from 'lucide-react';
+import { Radar, Loader2, Plus, Building2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
-import { instantiateWeb } from '../lib/garvis/workwebRun';
-import { enableClock } from '../lib/garvis/leadEngine/leadEngineRun';
+import { quickStartMarket } from '../lib/garvis/leadEngine/leadEngineRun';
+import { STARTER_SOURCES, type StarterSource } from '../lib/garvis/leadEngine/adapters.ts';
 
 interface MarketWorld { worldId: string; title: string; sources: number; newLeads: number; lastStatus: string | null }
 
@@ -21,7 +20,7 @@ export function LeadEngine() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [worlds, setWorlds] = useState<MarketWorld[] | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [starting, setStarting] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -59,20 +58,33 @@ export function LeadEngine() {
     return () => { live = false; };
   }, []);
 
-  const startOne = async () => {
-    setCreating(true);
+  const start = async (preset?: StarterSource) => {
+    setStarting(preset?.id ?? 'blank');
     try {
-      const web = await instantiateWeb('lead-market');
-      // Born operational: the market goes on the standing clock at creation. Fail-soft — the
-      // panel shows the clock's true state and offers the button if this didn't land.
-      await enableClock(web.worldId, web.title).catch(() => {});
-      toast('success', 'Lead market created and on the clock — wire up its first source inside.');
-      navigate(`/garvis/webs/${web.worldId}`);
+      const market = await quickStartMarket(preset ?? null);
+      toast('success', preset
+        ? `${market.title} is live — permit feed wired, clock on, first check running.`
+        : 'Market created and on the clock — add its first source inside.');
+      navigate(`/garvis/webs/${market.worldId}`);
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not create it.');
-      setCreating(false);
+      setStarting(null);
     }
   };
+
+  const cityRow = (
+    <div className="flex flex-wrap gap-2">
+      {STARTER_SOURCES.map((p) => (
+        <Button key={p.id} size="sm" variant="outline" loading={starting === p.id} disabled={starting !== null}
+          onClick={() => void start(p)} title={`${p.label} — creates the market, wires this feed, first check runs now`}>
+          <Building2 size={13} /> {p.region}
+        </Button>
+      ))}
+      <Button size="sm" variant="ghost" loading={starting === 'blank'} disabled={starting !== null} onClick={() => void start()}>
+        <Plus size={13} /> Blank market
+      </Button>
+    </div>
+  );
 
   return (
     <AppShell>
@@ -83,27 +95,24 @@ export function LeadEngine() {
           </div>
           <div>
             <h1 className="text-xl font-semibold text-forge-ink">Lead Markets</h1>
-            <p className="text-sm text-forge-dim">Public records → ranked trade leads. One market per metro; the clock checks the sources, you approve every send.</p>
-          </div>
-          <div className="ml-auto">
-            <Button onClick={() => void startOne()} loading={creating}>
-              <Plus size={14} /> Start a market
-            </Button>
+            <p className="text-sm text-forge-dim">Public records → ranked trade leads. Pick a city; the engine does the rest — and nothing sends without your yes.</p>
           </div>
         </div>
+
+        <Card className="mb-6 p-4">
+          <p className="mb-2 text-sm font-medium text-forge-ink">Start a market — one click, fully wired</p>
+          <p className="mb-3 text-xs text-forge-dim">
+            Creates the market, names it for the city, puts it on the hourly clock, connects the permit feed, and runs the first check immediately. Presets carry each portal's field names; every source stays editable inside.
+          </p>
+          {cityRow}
+        </Card>
 
         {worlds === null && <p className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading…</p>}
 
         {worlds?.length === 0 && (
-          <Card className="p-6 text-center">
-            <p className="text-sm font-medium text-forge-ink">No lead market yet.</p>
-            <p className="mx-auto mt-1 max-w-md text-sm text-forge-dim">
-              One click sets up the engine: permit portals and license boards checked on the standing clock, new events scored into ranked leads per trade (reasons stated, every lead linking its public record), a weekly digest that goes out only through your approval queue, and outcome + commission tracking against real rows.
-            </p>
-            <div className="mt-4">
-              <Button onClick={() => void startOne()} loading={creating}><Plus size={14} /> Start a market</Button>
-            </div>
-          </Card>
+          <p className="text-sm text-forge-dim">
+            No markets yet — pick a city above. Inside each market: ranked leads with their reasons and public-record links, a setup checklist that always shows the next step, the weekly digest (goes out only through your approval queue), and outcome + commission tracking.
+          </p>
         )}
 
         <div className="space-y-3">

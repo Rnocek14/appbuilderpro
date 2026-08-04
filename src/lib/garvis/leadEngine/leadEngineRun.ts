@@ -9,12 +9,13 @@ import { supabase } from '../../supabase';
 import { enqueueApproval } from '../execution';
 import { createInvoice } from '../moneyRun';
 import { createOrder, listOrders, setOrderStatus } from '../standingRun';
+import { instantiateWeb } from '../workwebRun';
 import type { StandingOrder } from '../standing';
 import {
-  digestFor, commissionFor, TRADES, isTradeKey,
+  digestFor, commissionFor, TRADES, isTradeKey, pitchFor,
   type DigestLead, type TradeKey, type LeadStatus,
 } from './leadEngine.ts';
-import type { SourceKind } from './adapters.ts';
+import type { SourceKind, StarterSource } from './adapters.ts';
 
 export interface LeadSourceRow {
   id: string; world_id: string; name: string; kind: SourceKind; base_url: string;
@@ -91,6 +92,28 @@ export async function setLeadStatus(leadId: string, status: LeadStatus): Promise
   const { error } = await supabase.from('le_leads')
     .update({ status, updated_at: new Date().toISOString() }).eq('id', leadId);
   if (error) throw new Error(error.message);
+}
+
+/** TURNKEY START: one call takes a city preset (or nothing) to a working market — world created,
+ *  named for the city, put on the hourly clock, its source wired, and the first check fired.
+ *  Every step past world-creation is fail-soft: the panel's checklist shows the true state and
+ *  offers the missing step, so a partial start is visible, never silent. */
+export async function quickStartMarket(preset?: StarterSource | null): Promise<{ worldId: string; title: string }> {
+  const web = await instantiateWeb('lead-market');
+  const title = preset ? `Lead Market — ${preset.region}` : web.title;
+  if (preset) {
+    await supabase.from('knowledge_worlds').update({ title }).eq('id', web.worldId);
+  }
+  await enableClock(web.worldId, title).catch(() => {});
+  if (preset) {
+    await createSource({
+      worldId: web.worldId, name: preset.label, kind: preset.kind,
+      baseUrl: preset.base_url, region: preset.region, queryConfig: preset.query_config,
+    }).catch(() => {});
+    // First check now — instant first results instead of waiting for the next tick.
+    await supabase.functions.invoke('lead-ingest', { body: { world_id: web.worldId } }).catch(() => {});
+  }
+  return { worldId: web.worldId, title };
 }
 
 /** THE CLOCK: is this market on the standing schedule? One lead_engine order per world — the
@@ -179,6 +202,97 @@ export async function queueDigest(input: {
   await supabase.from('le_leads')
     .update({ status: 'delivered', delivered_at: nowIso, updated_at: nowIso }).in('id', includedIds);
   return { included: dig.included };
+}
+
+// ---------------------------------------------------------------------------
+// Customers — the market's subscribers (app_0130). The weekly digest is drafted
+// for them automatically by the clock; everything still exits via Approvals.
+// ---------------------------------------------------------------------------
+
+export interface LeadCustomerRow {
+  id: string; world_id: string; name: string; email: string; trade: string;
+  status: 'active' | 'paused'; last_digest_at: string | null; created_at: string;
+}
+const CUSTOMER_COLS = 'id, world_id, name, email, trade, status, last_digest_at, created_at';
+
+export async function listCustomers(worldId: string): Promise<LeadCustomerRow[]> {
+  const { data, error } = await supabase.from('le_customers').select(CUSTOMER_COLS)
+    .eq('world_id', worldId).order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as LeadCustomerRow[];
+}
+
+export async function addCustomer(input: { worldId: string; name: string; email: string; trade: TradeKey | 'all' }): Promise<LeadCustomerRow> {
+  const owner = await uid();
+  const to = input.email.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) throw new Error('Enter a valid customer email.');
+  // Link-or-create the contact (select-first — email_status is sacred, never reset).
+  let contactId: string | null = null;
+  const { data: existing } = await supabase.from('contacts').select('id').eq('owner_id', owner).eq('email', to).maybeSingle();
+  if (existing) contactId = (existing as { id: string }).id;
+  else {
+    const { data: c } = await supabase.from('contacts')
+      .insert({ owner_id: owner, email: to, full_name: input.name.trim() || null, email_status: 'unknown', is_primary: false }).select('id').maybeSingle();
+    contactId = (c as { id: string } | null)?.id ?? null;
+  }
+  const { data, error } = await supabase.from('le_customers').insert({
+    owner_id: owner, world_id: input.worldId, contact_id: contactId,
+    name: input.name.trim(), email: to, trade: input.trade,
+  }).select(CUSTOMER_COLS).single();
+  if (error) throw new Error(error.code === '23505' ? 'That email is already a customer of this market.' : error.message);
+  return data as LeadCustomerRow;
+}
+
+export async function setCustomerStatus(customerId: string, status: 'active' | 'paused'): Promise<void> {
+  const { error } = await supabase.from('le_customers')
+    .update({ status, updated_at: new Date().toISOString() }).eq('id', customerId);
+  if (error) throw new Error(error.message);
+}
+
+/** THE SALES OPENER: a sample pitch with 2–3 REAL leads for the prospect's trade, queued as one
+ *  pending approval. Refuses honestly when the market has no leads for that trade — a sample
+ *  never bluffs. */
+export async function queueSamplePitch(input: {
+  worldId: string; region: string; toEmail: string; trade: TradeKey; fromName?: string;
+}): Promise<void> {
+  const owner = await uid();
+  const to = input.toEmail.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) throw new Error('Enter a valid prospect email.');
+  const all = await listLeads(input.worldId);
+  const digestLeads: DigestLead[] = all
+    .filter((l) => l.trade === input.trade && (l.status === 'new' || l.status === 'delivered'))
+    .map((l) => ({
+      trade: l.trade, score: l.score, why_now: l.why_now,
+      contact_name: l.contact_name, contact_company: l.contact_company,
+      source_url: l.le_events?.source_url ?? '', title: l.le_events?.title ?? l.why_now,
+    }));
+  const pitch = pitchFor(input.trade, input.region, digestLeads, input.fromName?.trim() || 'Riley');
+  if (!pitch) throw new Error(`No ${TRADES[input.trade].label} leads in this market yet — a sample pitch only sends real ones.`);
+
+  let contactId: string | null = null;
+  const { data: existing } = await supabase.from('contacts').select('id').eq('owner_id', owner).eq('email', to).maybeSingle();
+  if (existing) contactId = (existing as { id: string }).id;
+  else {
+    const { data: c } = await supabase.from('contacts')
+      .insert({ owner_id: owner, email: to, email_status: 'unknown', is_primary: false }).select('id').maybeSingle();
+    contactId = (c as { id: string } | null)?.id ?? null;
+  }
+  const { data: camp, error: campErr } = await supabase.from('outreach_campaigns')
+    .insert({ owner_id: owner, contact_id: contactId, kind: 'lead_pitch', state: 'pending_approval' }).select('id').single();
+  if (campErr || !camp) throw new Error(campErr?.message ?? 'Could not create the pitch campaign.');
+  const { data: msg, error: msgErr } = await supabase.from('outreach_messages').insert({
+    owner_id: owner, campaign_id: (camp as { id: string }).id, contact_id: contactId,
+    sequence_step: 0, subject: pitch.subject, body_text: pitch.body, to_address: to, status: 'draft',
+  }).select('id').single();
+  if (msgErr || !msg) throw new Error(msgErr?.message ?? 'Could not draft the pitch.');
+  await enqueueApproval({
+    kind: 'send_email',
+    title: `Sample pitch (${TRADES[input.trade].label}) → ${to}`,
+    preview: `${pitch.subject}\n\n${pitch.body.slice(0, 400)}`,
+    payload: { message_id: (msg as { id: string }).id, world_id: input.worldId, lead_pitch: true },
+    requestedBy: 'lead-engine',
+    worldId: input.worldId,
+  });
 }
 
 /** Record what actually happened to a lead — the moat data. A WON with a contract value and a

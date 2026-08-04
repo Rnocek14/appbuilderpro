@@ -52,11 +52,22 @@ const DEFAULT_TYPE: Record<SourceKind, LeadEventType> = {
 
 export const FETCH_LIMIT = 100; // per source per tick — a backlog drains over ticks, never in one stampede
 
+/** The wire format a source speaks: JSON (Socrata/ArcGIS/plain), CSV export, or an RSS/Atom feed.
+ *  Explicit via query_config.format; the rss kind defaults to 'rss', everything else to 'json'. */
+export type SourceFormat = 'json' | 'csv' | 'rss';
+export function sourceFormat(source: Pick<SourceLike, 'kind' | 'query_config'>): SourceFormat {
+  const f = source.query_config?.format;
+  if (f === 'csv' || f === 'rss' || f === 'json') return f;
+  return source.kind === 'rss' ? 'rss' : 'json';
+}
+
 /** Build the incremental fetch URL for a source. Socrata (SODA 2.x) and ArcGIS REST are the two
- *  Phase-0 dialects; accela/liquor/health/sos portals that speak plain JSON reuse 'socrata' via
- *  their kind's own default event_type. Cursoring is by the configured date field. */
+ *  JSON dialects; accela/liquor/health/sos portals that speak plain JSON reuse 'socrata' via
+ *  their kind's own default event_type. CSV and RSS sources fetch base_url as-is (whole-feed
+ *  reads — the dedupe key makes re-reads free). Cursoring is by the configured date field. */
 export function buildFetchUrl(source: SourceLike): string {
   const cfg = source.query_config ?? {};
+  if (sourceFormat(source) !== 'json') return source.base_url;
   const dateField = (cfg.date_field ?? '').trim();
   const since = (source.cursor?.last_date ?? '').trim();
   const base = source.base_url;
@@ -83,10 +94,70 @@ export function buildFetchUrl(source: SourceLike): string {
   return `${base}${base.includes('?') ? '&' : '?'}${p.toString()}`;
 }
 
-/** Extract the row array from a response body. Socrata: a JSON array. ArcGIS: features[].attributes.
- *  Anything else that is a JSON array passes through. Unparseable → [] (the caller counts the
- *  failure honestly; an unreadable source is UNREACHABLE, never "no change"). */
-export function parseRows(kind: SourceKind, body: string): Record<string, unknown>[] {
+/** Parse one CSV line respecting double-quoted fields (with "" escapes). Pure and small on
+ *  purpose — government CSV exports are simple; a feed this can't read reports as unreachable. */
+export function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') inQ = false;
+      else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/** CSV export → row objects keyed by the header row (the field_map then works exactly as for
+ *  JSON sources). Handles \r\n and quoted fields; rows shorter than the header are padded null. */
+export function parseCsv(body: string): Record<string, unknown>[] {
+  const lines = body.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]).map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const cells = parseCsvLine(line);
+    const row: Record<string, unknown> = {};
+    headers.forEach((h, i) => { row[h] = cells[i] ?? null; });
+    return row;
+  });
+}
+
+const stripCdata = (s: string) => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim();
+const tagText = (item: string, tag: string): string | null => {
+  const m = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i').exec(item);
+  return m ? stripCdata(m[1]).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || null : null;
+};
+
+/** RSS/Atom feed → row objects {title, link, pubDate, description}. Regex-based on purpose (no
+ *  DOM in the worker runtime); a feed it can't read yields [] and the source reports unreachable. */
+export function parseRss(body: string): Record<string, unknown>[] {
+  const items = body.match(/<(item|entry)[\s>][\s\S]*?<\/\1>/gi) ?? [];
+  return items.map((item) => {
+    // Atom links are attributes: <link href="…"/>. RSS links are element text.
+    const atomLink = /<link[^>]*href="([^"]+)"/i.exec(item)?.[1] ?? null;
+    return {
+      title: tagText(item, 'title'),
+      link: tagText(item, 'link') ?? atomLink,
+      pubDate: tagText(item, 'pubDate') ?? tagText(item, 'updated') ?? tagText(item, 'published'),
+      description: tagText(item, 'description') ?? tagText(item, 'summary'),
+    };
+  }).filter((r) => r.title || r.link);
+}
+
+/** Extract the row array from a response body, by the source's wire format. JSON: a Socrata-style
+ *  array or ArcGIS features[].attributes. CSV: header-keyed rows. RSS: item objects. Unparseable →
+ *  [] (the caller counts the failure honestly; an unreadable source is UNREACHABLE, never
+ *  "no change"). */
+export function parseRows(kind: SourceKind, body: string, format?: SourceFormat): Record<string, unknown>[] {
+  const fmt = format ?? (kind === 'rss' ? 'rss' : 'json');
+  if (fmt === 'csv') return parseCsv(body);
+  if (fmt === 'rss') return parseRss(body);
   try {
     const data = JSON.parse(body) as unknown;
     if (Array.isArray(data)) return data as Record<string, unknown>[];
@@ -124,9 +195,11 @@ export function toIso(v: unknown): string | null {
 
 /** Normalize one source row into a candidate event — verbatim fields only. Rows with no title
  *  AND no address are dropped (nothing identifiable to act on). */
+const RSS_DEFAULT_MAP = { title: 'title', permalink: 'link', date: 'pubDate', description: 'description' };
+
 export function normalizeEvent(source: SourceLike, row: Record<string, unknown>): CandidateEvent | null {
   const cfg = source.query_config ?? {};
-  const map = cfg.field_map ?? {};
+  const map = { ...(sourceFormat(source) === 'rss' ? RSS_DEFAULT_MAP : {}), ...(cfg.field_map ?? {}) };
   const title = str(row, map.title) ?? '';
   const address = str(row, map.address);
   if (!title && !address) return null;

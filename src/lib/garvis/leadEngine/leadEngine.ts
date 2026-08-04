@@ -37,7 +37,10 @@ export interface LeadEventLike {
 // Trades — which events feed which trade, and how strongly (0 = not relevant)
 // ---------------------------------------------------------------------------
 
-export type TradeKey = 'acoustics' | 'security' | 'janitorial' | 'fire_safety' | 'signage';
+export type TradeKey =
+  | 'acoustics' | 'security' | 'janitorial' | 'fire_safety' | 'signage'
+  | 'roofing' | 'hvac' | 'electrical' | 'plumbing' | 'flooring'
+  | 'pest_control' | 'landscaping';
 
 export interface TradeProfile {
   label: string;
@@ -73,7 +76,64 @@ export const TRADES: Record<TradeKey, TradeProfile> = {
     weights: { permit_issued: 25, permit_applied: 15, liquor_license: 35, health_permit: 30, business_registered: 25, news: 10 },
     buys: 'A new location needs signs before it opens — timing is everything.',
   },
+  roofing: {
+    label: 'Commercial roofing',
+    weights: { permit_issued: 30, permit_applied: 20, news: 10 },
+    buys: 'New builds and remodels need roofs; storm events (coming stream) make them urgent.',
+  },
+  hvac: {
+    label: 'Commercial HVAC',
+    weights: { permit_issued: 35, permit_applied: 25, liquor_license: 25, health_permit: 25, business_registered: 10, news: 5 },
+    buys: 'Every fit-out touches mechanical — and installs become maintenance contracts.',
+  },
+  electrical: {
+    label: 'Electrical',
+    weights: { permit_issued: 35, permit_applied: 25, liquor_license: 25, health_permit: 20, business_registered: 10, news: 5 },
+    buys: 'Fit-outs, equipment, and code work — electrical is on nearly every commercial permit.',
+  },
+  plumbing: {
+    label: 'Plumbing',
+    weights: { permit_issued: 30, permit_applied: 20, liquor_license: 30, health_permit: 30, news: 5 },
+    buys: 'Restaurants and health-permitted spaces are plumbing-heavy builds.',
+  },
+  flooring: {
+    label: 'Commercial flooring',
+    weights: { permit_issued: 25, permit_applied: 15, liquor_license: 25, health_permit: 20, business_registered: 15, news: 5 },
+    buys: 'Late-stage fit-out: floors go in as permits close out.',
+  },
+  pest_control: {
+    label: 'Pest control',
+    weights: { liquor_license: 30, health_permit: 35, business_registered: 20, permit_issued: 10, news: 5 },
+    buys: 'Food-service spaces sign recurring pest contracts at opening — health code demands it.',
+  },
+  landscaping: {
+    label: 'Landscaping & snow',
+    weights: { permit_issued: 20, business_registered: 20, liquor_license: 15, health_permit: 10, news: 5 },
+    buys: 'New commercial locations sign recurring grounds and snow contracts.',
+  },
 };
+
+/** Google Places primaryType → the trade that business sells. Used to auto-suggest which sample
+ *  pitch a discovered business should get. Unknown types → null (never guessed). */
+const PLACE_TYPE_TRADE: Record<string, TradeKey> = {
+  roofing_contractor: 'roofing',
+  electrician: 'electrical',
+  plumber: 'plumbing',
+  hvac_contractor: 'hvac',
+  pest_control_service: 'pest_control',
+  landscaper: 'landscaping',
+  security_system_supplier: 'security',
+  cleaning_service: 'janitorial',
+  janitorial_service: 'janitorial',
+  sign_shop: 'signage',
+  fire_protection_service: 'fire_safety',
+  flooring_contractor: 'flooring',
+  flooring_store: 'flooring',
+};
+
+export function tradeForPlaceType(primaryType: string | null | undefined): TradeKey | null {
+  return primaryType ? PLACE_TYPE_TRADE[primaryType] ?? null : null;
+}
 
 export const TRADE_KEYS = Object.keys(TRADES) as TradeKey[];
 
@@ -195,6 +255,51 @@ export function digestFor(worldLabel: string, leads: DigestLead[], max = 15): { 
   });
   const body = `Top leads for ${worldLabel}, ranked by the engine's stated reasons:\n\n${lines.join('\n\n')}\n\nEvery lead links its public record. Reply with what you quoted or won — outcomes make next week's ranking smarter.`;
   return { subject, body, included: ranked.length };
+}
+
+// ---------------------------------------------------------------------------
+// The sample pitch — the sales opener, composed from real rows only
+// ---------------------------------------------------------------------------
+
+/** The cold email that sells the feed: 2–3 REAL leads for the prospect's trade with public-record
+ *  links. No invented stats, no claims — the sample IS the proof. Pure composition; the caller
+ *  supplies the leads (top-scored, freshest first). */
+export function pitchFor(trade: TradeKey, region: string, leads: DigestLead[], fromName: string): { subject: string; body: string } | null {
+  const picks = [...leads].sort((a, b) => b.score - a.score).slice(0, 3);
+  if (picks.length === 0) return null; // no real leads → no pitch. A sample pitch never bluffs.
+  const label = TRADES[trade].label.toLowerCase();
+  const subject = `${picks.length} ${label} project${picks.length === 1 ? '' : 's'} in ${region} — from this month's public records`;
+  const lines = picks.map((l, i) => [
+    `${i + 1}. ${l.title}`,
+    `   ${l.why_now}`,
+    l.contact_name || l.contact_company ? `   Named on the record: ${l.contact_name ?? l.contact_company}` : null,
+    `   Public record: ${l.source_url}`,
+  ].filter(Boolean).join('\n'));
+  const body = [
+    `Hi,`,
+    ``,
+    `I read ${region}'s public records — permits, license filings, registrations — and turn them into ranked leads for ${label}. Here are ${picks.length} live ones from this month:`,
+    ``,
+    lines.join('\n\n'),
+    ``,
+    `Every lead links its public record, so you can verify each one yourself. ${TRADES[trade].buys}`,
+    ``,
+    `Want the full list for ${region} every week? Reply to this email and I'll set you up.`,
+    ``,
+    `— ${fromName}`,
+  ].join('\n');
+  return { subject, body };
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Is a customer due their weekly digest? Pure: never-digested → due; else due when ~a week has
+ *  passed (6.5 days, so a slightly-early tick doesn't slip the schedule by a full extra week). */
+export function digestDue(lastDigestAtIso: string | null, nowIso: string): boolean {
+  if (!lastDigestAtIso) return true;
+  const last = Date.parse(lastDigestAtIso);
+  if (!Number.isFinite(last)) return true;
+  return Date.parse(nowIso) - last >= WEEK_MS * 0.93;
 }
 
 // ---------------------------------------------------------------------------

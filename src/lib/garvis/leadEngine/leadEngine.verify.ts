@@ -5,9 +5,13 @@
 import {
   TRADES, TRADE_KEYS, isTradeKey, dedupeKey, normalizeKeyPart, scoreLead, pickContact, whyNow,
   digestFor, commissionFor, parseLeadEngineConfig, ingestLine, DEFAULT_COMMISSION_PCT,
+  pitchFor, digestDue, tradeForPlaceType,
   type LeadEventLike,
 } from './leadEngine.ts';
-import { buildFetchUrl, parseRows, normalizeEvent, nextCursor, toIso, FETCH_LIMIT, STARTER_SOURCES, starterById, type SourceLike } from './adapters.ts';
+import {
+  buildFetchUrl, parseRows, parseCsv, parseCsvLine, parseRss, sourceFormat, normalizeEvent,
+  nextCursor, toIso, FETCH_LIMIT, STARTER_SOURCES, starterById, type SourceLike,
+} from './adapters.ts';
 
 let passed = 0; let failed = 0;
 function check(name: string, cond: boolean) {
@@ -28,7 +32,7 @@ const permit: LeadEventLike = {
 // ── trades registry ────────────────────────────────────────────────────────
 check('every trade has a label, a buys line, and at least one weighted event type',
   TRADE_KEYS.every((t) => TRADES[t].label && TRADES[t].buys && Object.values(TRADES[t].weights).some((w) => (w ?? 0) > 0)));
-check('isTradeKey accepts real trades and rejects junk', isTradeKey('security') && !isTradeKey('plumbing') && !isTradeKey(42));
+check('isTradeKey accepts real trades and rejects junk', isTradeKey('security') && isTradeKey('plumbing') && !isTradeKey('astrology') && !isTradeKey(42));
 
 // ── dedupe identity ────────────────────────────────────────────────────────
 check('dedupeKey is deterministic', dedupeKey(permit) === dedupeKey({ ...permit }));
@@ -127,6 +131,47 @@ check('liquor sources default to liquor_license events', (() => {
 })());
 check('arcgis epoch-millis dates parse to ISO', (toIso(1785715200000) ?? '').startsWith('2026-08-0'));
 check('junk dates are null, not Invalid Date', toIso('not a date') === null && toIso('') === null);
+
+// ── the sample pitch: real leads or nothing ────────────────────────────────
+const pl = { trade: 'security' as const, score: 90, why_now: 'TI permit at 400 Main St, filed on 2026-08-01.', contact_name: 'Pat Jones', contact_company: null, source_url: 'https://data.example.gov/permits/123', title: 'Tenant improvement — 6,200 sq ft office' };
+const pitch = pitchFor('security', 'Denver, CO', [pl, { ...pl, score: 40, title: 'Second job' }], 'Riley');
+check('pitch embeds real leads with their public-record links', !!pitch && (pitch.body.match(/Public record: https:\/\//g) ?? []).length === 2);
+check('pitch subject names the trade, region, and count', !!pitch && /2 security & access control projects in Denver, CO/i.test(pitch.subject));
+check('pitch caps at 3 leads, highest score first', (() => {
+  const p = pitchFor('security', 'X', Array.from({ length: 6 }, (_, i) => ({ ...pl, score: 100 - i, title: `L${i}` })), 'R');
+  return !!p && (p.body.match(/Public record:/g) ?? []).length === 3 && p.body.indexOf('L0') < p.body.indexOf('L2');
+})());
+check('a pitch with zero leads is null — a sample never bluffs', pitchFor('security', 'X', [], 'R') === null);
+check('pitch invents no stats (no percent signs, no claimed close rates)', !!pitch && !/%|close rate/i.test(pitch.body));
+
+// ── weekly digest due math ─────────────────────────────────────────────────
+check('never-digested customers are due', digestDue(null, '2026-08-04T12:00:00Z'));
+check('digested 8 days ago is due; 3 days ago is not',
+  digestDue('2026-07-27T12:00:00Z', '2026-08-04T12:00:00Z') && !digestDue('2026-08-01T12:00:00Z', '2026-08-04T12:00:00Z'));
+
+// ── verticals + place-type mapping ─────────────────────────────────────────
+check('registry carries 12 trades, all fully described',
+  TRADE_KEYS.length === 12 && TRADE_KEYS.every((t) => TRADES[t].label && TRADES[t].buys));
+check('place types map to trades; unknown types map to null, never guessed',
+  tradeForPlaceType('roofing_contractor') === 'roofing' && tradeForPlaceType('electrician') === 'electrical'
+  && tradeForPlaceType('bakery') === null && tradeForPlaceType(null) === null);
+
+// ── CSV + RSS dialects ─────────────────────────────────────────────────────
+check('csv lines respect quoted commas and "" escapes', parseCsvLine('a,"b, c","d""e"').join('|') === 'a|b, c|d"e');
+const csvRows = parseCsv('permit,address,cost\r\nP1,"400 Main St, Denver","$85,000"\nP2,12 Oak Ave,5000');
+check('csv rows are keyed by the header', csvRows.length === 2 && csvRows[0].address === '400 Main St, Denver' && csvRows[1].permit === 'P2');
+const rssBody = '<rss><channel><item><title><![CDATA[New tavern license — Oak & Main]]></title><link>https://boards.example.gov/dockets/55</link><pubDate>Mon, 03 Aug 2026 10:00:00 GMT</pubDate><description>Application for on-premises license</description></item></channel></rss>';
+const rssRows = parseRss(rssBody);
+check('rss items parse with CDATA stripped and links kept',
+  rssRows.length === 1 && rssRows[0].title === 'New tavern license — Oak & Main' && rssRows[0].link === 'https://boards.example.gov/dockets/55');
+check('parseRows routes by format (rss kind reads XML now — the old stub is gone)',
+  parseRows('rss', rssBody).length === 1 && parseRows('liquor', 'a,b\n1,2', 'csv').length === 1);
+const rssSource: SourceLike = { kind: 'rss', base_url: 'https://boards.example.gov/feed', region: 'Denver, CO', query_config: {}, cursor: {} };
+const rssEv = normalizeEvent(rssSource, rssRows[0]);
+check('rss events normalize via the default map: link is the permalink, pubDate the date',
+  !!rssEv && rssEv.source_url === 'https://boards.example.gov/dockets/55' && (rssEv.occurred_at ?? '').startsWith('2026-08-03') && rssEv.event_type === 'news');
+check('csv/rss sources fetch base_url as-is (no SODA params)',
+  buildFetchUrl(rssSource) === rssSource.base_url && sourceFormat({ kind: 'liquor', query_config: { format: 'csv' } }) === 'csv');
 
 // ── starter presets — every one must be a valid, buildable source ─────────
 check('every starter preset is https with a region, a date_field, and a title or address mapping',
