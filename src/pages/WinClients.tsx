@@ -327,8 +327,8 @@ export default function WinClients() {
   const builtCount = rows.filter((r) => r.built).length;
   const queuedCount = rows.filter((r) => r.built?.queued).length;
   const pipeCenter = {
-    kicker: 'Win clients',
-    title: searched && (niche.trim() || area.trim()) ? [niche.trim(), area.trim()].filter(Boolean).join(' · ') : 'Win new clients',
+    kicker: 'Find clients',
+    title: searched && (niche.trim() || area.trim()) ? [niche.trim(), area.trim()].filter(Boolean).join(' · ') : 'Find new clients',
     sub: searched ? `${rows.length} found` : 'find businesses to pitch',
   };
   const pipeNodes: CanvasNode[] = [
@@ -348,7 +348,7 @@ export default function WinClients() {
         <div className="mx-auto max-w-4xl px-4 py-6">
           <div className="mb-1 flex items-center gap-2">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Globe size={18} /></span>
-            <h1 className="text-xl font-semibold text-forge-ink">Win new clients</h1>
+            <h1 className="text-xl font-semibold text-forge-ink">Find clients</h1>
           </div>
           <p className="mb-4 text-sm text-forge-dim">Your pipeline — tap a stage to work it. Nothing sends without your approval.</p>
           <CanvasScene center={pipeCenter} nodes={pipeNodes} onOpen={onHub} height="min(66vh,520px)" />
@@ -358,7 +358,7 @@ export default function WinClients() {
         <button onClick={() => setStage('hub')} className="mb-3 inline-flex items-center gap-1 text-xs text-forge-dim hover:text-forge-ember">← Pipeline</button>
         <div className="mb-1 flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-forge-ember/15 text-forge-ember"><Globe size={18} /></span>
-          <h1 className="text-xl font-semibold text-forge-ink">Win new clients</h1>
+          <h1 className="text-xl font-semibold text-forge-ink">Find clients</h1>
         </div>
         <p className="mb-4 text-sm text-forge-dim">
           Find local businesses, see whose website is weak, and build them a fresh one — the pitch lands in your Queue to approve before anything sends.

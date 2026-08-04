@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Play, Boxes, Maximize2, StopCircle, Hammer, ArrowRight } from 'lucide-react';
+import { Sparkles, Send, Play, Maximize2, StopCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { WakingMoment } from '../components/garvis/WakingMoment';
 import { RemindersCard } from '../components/garvis/RemindersCard';
@@ -23,14 +23,10 @@ const SCAN_THROTTLE_MS = 12 * 60 * 60 * 1000; // proactive scan at most twice a 
 
 // First-screen chips exist FOR the empty-thread user (they render only before the first message),
 // so every one must produce real value on a zero-data account — no chips that need an existing
-// portfolio. Every objective class gets a door here: venture, rabbit hole, build, and the three
-// single-purpose desks (answering / documents / data) that nothing else in the UI advertises.
+// portfolio. Deliberately just three broad doors (design a business, build something, orient) so
+// the composer stays the one first move; everything else lives in Workshops and Businesses.
 const SUGGESTIONS = [
   'Design a business for me — I\'ll describe the idea',
-  'Set up a desk that answers my emails from my saved answers',
-  'Set me up to write proposals for my clients',
-  'Help me analyze a spreadsheet of numbers',
-  'Take me down the rabbit hole on local lead generation',
   'Build me an app for tracking client appointments',
   'What can you do?',
 ];
@@ -150,27 +146,15 @@ export default function Command() {
               Renders itself only when there are zero ventures. */}
           {messages.length === 0 && <QuickStartRealEstate onToast={toast} />}
 
+          {/* Quiet suggestions: three broad chips, no panel, no CTA — the composer below is the
+              one first move on this page. */}
           {messages.length === 0 && (
-            <div className="rounded-xl border border-forge-border bg-forge-panel/40 p-5">
-              <button
-                onClick={() => navigate('/garvis/workshops')}
-                className="group mb-4 flex w-full items-center gap-3 rounded-xl border border-forge-ember/30 bg-gradient-to-r from-forge-ember/10 to-transparent p-3 text-left transition-colors hover:border-forge-ember/55 hover:from-forge-ember/15"
-              >
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-forge-ember/30 bg-forge-ember/10 text-forge-ember"><Hammer size={17} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-semibold text-forge-ink">Open a workshop</span>
-                  <span className="block text-[11px] text-forge-dim">Pick one outcome—video, campaign, research, app idea, document, data—and make it in a focused room.</span>
-                </span>
-                <ArrowRight size={15} className="text-forge-ember transition-transform group-hover:translate-x-1" />
-              </button>
-              <div className="mb-3 flex items-center gap-2 text-forge-dim"><Boxes size={16} className="text-forge-ember" /> <span className="text-sm">Or try one of these — or just say what's on your mind:</span></div>
-              <div className="flex flex-wrap gap-2">
-                {SUGGESTIONS.map((s) => (
-                  <button key={s} onClick={() => send(s)} className="rounded-full border border-forge-border px-3 py-1.5 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
-                    {s}
-                  </button>
-                ))}
-              </div>
+            <div className="flex flex-wrap gap-1.5">
+              {SUGGESTIONS.map((s) => (
+                <button key={s} onClick={() => send(s)} className="rounded-full border border-forge-border/70 px-2.5 py-1 text-xs text-forge-dim transition-colors hover:border-forge-ember/50 hover:text-forge-ink">
+                  {s}
+                </button>
+              ))}
             </div>
           )}
 
@@ -203,6 +187,13 @@ export default function Command() {
           />
           <Button onClick={submit} loading={thinking} disabled={!input.trim()}><Send size={15} /></Button>
         </div>
+        {/* The workshop door stays reachable, demoted to a whisper — one first move above it. */}
+        <button
+          onClick={() => navigate('/garvis/workshops')}
+          className="mt-2 self-start text-xs text-forge-dim transition-colors hover:text-forge-ink"
+        >
+          Or open a workshop →
+        </button>
       </div>
 
       {canvas && (
