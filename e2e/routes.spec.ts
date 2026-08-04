@@ -38,6 +38,7 @@ const PROTECTED_ROUTES = [
   '/garvis/missions', '/garvis/marketing', '/garvis/queue', '/garvis/clients',
   '/garvis/automations', '/garvis/client-billing', '/garvis/money', '/garvis/contacts',
   '/garvis/health', '/garvis/setup', '/garvis/webs', '/garvis/universe', '/garvis/working',
+  '/garvis/lead-engine',
 ];
 
 test('every public route renders without real errors', async ({ page }) => {

@@ -62,6 +62,7 @@ const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').th
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
 const DataWorkspace = lazy(() => import('../components/garvis/DataWorkspace').then((m) => ({ default: m.DataWorkspace })));
 const TrackerRegistry = lazy(() => import('../components/garvis/TrackerRegistry').then((m) => ({ default: m.TrackerRegistry })));
+const LeadEnginePanel = lazy(() => import('../components/garvis/LeadEnginePanel').then((m) => ({ default: m.LeadEnginePanel })));
 const MarketingCanvas = lazy(() => import('../components/garvis/canvas/MarketingCanvas').then((m) => ({ default: m.MarketingCanvas })));
 
 const STATUS_DOT: Record<CharterStatus, string> = {
@@ -210,6 +211,8 @@ export default function WorkWeb() {
     if (tool.id === 'open-data') { setSelected(cluster.slug); return; }
     // And the registry is inline for the tracker flavor — the tool focuses it.
     if (tool.id === 'open-tracker') { setSelected(cluster.slug); return; }
+    // And the lead market is inline for the lead_engine flavor — the tool focuses it.
+    if (tool.id === 'open-lead-engine') { setSelected(cluster.slug); return; }
     if (tool.id === 'upload-list') { setUploadFor(cluster); return; }
     if (tool.id === 'queue-sequence') { setQueueFor(cluster); return; }
 
@@ -940,6 +943,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           reminders — deadlines that ring, not rows that wait. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'tracker' && (
         <PanelBoundary name="transaction timelines"><TimelinePanel worldId={worldId} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+      )}
+
+      {/* THE LEAD MARKET (app_0129): public-record sources checked on the standing clock, ranked
+          trade leads with stated reasons, outcome + commission tracking. The digest is ONE pending
+          approval through the one send path — nothing here sends anything. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'lead_engine' && (
+        <PanelBoundary name="lead market"><LeadEnginePanel worldId={worldId} worldLabel={webTitle} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* G3 — the website bridge: this world's DNA, brand kit, and captioned artwork compile

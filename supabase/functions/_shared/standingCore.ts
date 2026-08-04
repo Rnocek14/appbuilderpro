@@ -25,7 +25,11 @@
 // social posts + 1 email — as ONE approval; the drain executes only after the approval verifies.
 // 'opportunity_hunt' is the OPPORTUNITY ENGINE: scheduled search sweeps → fetched pages → honest
 // extraction into the deduped opportunities feed (jobs/RFPs/grants/commissions).
-export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream' | 'content_week' | 'opportunity_hunt' | 'area_study' | 'episode_draft';
+// 'lead_engine' is THE LEAD ENGINE's clock (app_0129): each tick asks the lead-ingest function to
+// pull the market's public sources (permit portals, liquor boards, registries) and score what's
+// new with the verified core (src/lib/garvis/leadEngine/). READ + RECORD only, like every order —
+// the weekly digest is queued by the operator and goes out through Approvals.
+export type OrderKind = 'watch_url' | 'cadence_digest' | 'client_hunt' | 'idea_stream' | 'content_week' | 'opportunity_hunt' | 'area_study' | 'episode_draft' | 'lead_engine';
 export type Cadence = 'hourly' | 'daily' | 'weekly';
 export type WatchStatus = 'changed' | 'unchanged' | 'unreachable';
 
