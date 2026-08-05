@@ -30,7 +30,14 @@ import {
   type SourceLike, type CandidateEvent,
 } from '../../../src/lib/garvis/leadEngine/adapters.ts';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret, x-cron-secret' };
+// CORS: the browser client ALWAYS sends apikey + x-client-info. Omitting them fails the
+// preflight, and supabase-js reports it as 'Failed to send a request to the Edge Function' —
+// a message that looks like a network or project problem and is neither. Same header set as
+// every other browser-callable function in this repo.
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-worker-secret, x-cron-secret',
+};
 const MAX_SOURCES_PER_RUN = 10;   // a big market drains over ticks, never in one stampede
 const PAUSE_AFTER_FAILURES = 5;   // the app_0113 reliability pattern: pause loudly, retry on resume
 const MAX_BODY = 2_000_000;       // 2 MB of JSON per source per tick is plenty
