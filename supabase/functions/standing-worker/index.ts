@@ -74,7 +74,7 @@ import { composeBatchRecipients } from '../_shared/batchCore.ts';
 import { dueFires, renderTemplate, fireKey, type CustomerRec, type TriggerChannel } from '../../../src/lib/garvis/automation/triggers.ts';
 import { toE164, resolveSmsFrom } from '../../../src/lib/garvis/sms.ts';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, content-type, x-worker-secret' };
+const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-worker-secret' };
 const MAX_ORDERS_PER_TICK = 20;    // a runaway backlog drains over ticks, never in one stampede
 const MAX_BODY = 500_000;          // hash the first 500k chars — same cap every run, so deterministic
 const STORED_TEXT_CAP = 20_000;    // enough context for change excerpts without bloating the row
