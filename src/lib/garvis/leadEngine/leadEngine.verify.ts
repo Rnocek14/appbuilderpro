@@ -10,7 +10,8 @@ import {
   SCORE_VERSION, NO_DIRECT_LINK,
   tradesForSegment, tradeMatchesSegment, parseSegment, permittedTrade, isFollowOnTrade,
   FOLLOW_ON_BONUS, PERMITTED_TRADE_PENALTY,
-  type LeadEventLike,
+  sourceStatusLine, marketStartLine, fitFor, recordWords, recordIsSpecific, FIT_NAMED, FIT_USE, FIT_MISS,
+  type LeadEventLike, type TradeKey as TradeKeyT,
 } from './leadEngine.ts';
 import {
   buildFetchUrl, parseRows, parseRowsResult, parseCsv, parseCsvLine, parseRss, sourceFormat,
@@ -52,9 +53,11 @@ check('normalizeKeyPart strips punctuation and case', normalizeKeyPart('400 Main
 // ── scoring ────────────────────────────────────────────────────────────────
 const s = scoreLead(permit, 'security', NOW);
 check('a fresh, valued, named permit scores high for security', !!s && s.score >= 80);
-check('every score point is explained — reasons cover base, value, recency, contact', !!s && s.reasons.length === 4);
+check('every score point is explained — reasons cover base, fit, value, recency, contact',
+  !!s && s.reasons.length === 5 && s.reasons.every((r) => r.trim().length > 0));
 check('score is capped at 100', !!s && s.score <= 100);
-const bare = scoreLead({ ...permit, valuation_usd: null, named_parties: [], occurred_at: null }, 'security', NOW);
+// A record that STATES NOTHING gets no fit adjustment at all — silence is not evidence.
+const bare = scoreLead({ ...permit, valuation_usd: null, named_parties: [], occurred_at: null, title: 'Permit', description: null }, 'security', NOW);
 check('a bare permit still scores its base weight, with one reason', !!bare && bare.score === 35 && bare.reasons.length === 1);
 check('an older event scores lower than a fresh one',
   (scoreLead({ ...permit, occurred_at: '2026-05-01T00:00:00.000Z' }, 'security', NOW)?.score ?? 0) < (s?.score ?? 0));
@@ -782,6 +785,144 @@ check('END TO END: an Austin residential remodel row scores its follow-on trades
       && (by.get('painting') ?? 0) > (by.get('remodeling') ?? 0)
       && !by.has('fire_safety');                                           // no commercial-only trade
   })());
+
+// ── REGRESSION: THE DUPLICATE PARTY ────────────────────────────────────────
+// Every preset reads the same columns twice — the legacy field_map.contact_name/contact_company
+// path AND its declared query_config.parties[] entry. Austin's applicant, Chicago's contact_1 and
+// Seattle's contractor were each emitted TWICE per event: doubled in named_parties (so the scoring
+// core counted one person as two witnesses) and doubled as rows in le_event_parties.
+const dupSrc: SourceLike = {
+  kind: 'socrata', base_url: STARTER_SOURCES[3].base_url, region: 'Austin, TX',
+  jurisdiction: 'austin-tx', query_config: STARTER_SOURCES[3].query_config, cursor: {},
+};
+const dupRow = {
+  description: 'Restaurant finish-out', original_address1: '900 E 6TH ST', permit_number: 'C-2026-9',
+  issued_date: '2026-08-01T00:00:00.000', total_job_valuation: '385000',
+  applicant_full_name: 'Dana Ruiz', applicant_phone: '512-555-0100',
+  contractor_company_name: 'Ruiz Build Co', contractor_phone: '512-555-0142',
+};
+const dupEv = normalizeEvent(dupSrc, dupRow)!;
+const partyKey = (p: { name: string | null; company: string | null; phone: string | null }) =>
+  `${(p.name ?? '').toLowerCase()}|${(p.company ?? '').toLowerCase()}|${(p.phone ?? '').toLowerCase()}`;
+check('THE DUPLICATE PARTY: the legacy contact path and the declared parties[] entry fold into ONE party',
+  dupEv.parties.filter((p) => p.name === 'Dana Ruiz').length === 1
+  && dupEv.named_parties.filter((p) => p.name === 'Dana Ruiz').length === 1);
+check('no (name|company, phone) pair repeats inside one event\'s parties',
+  new Set(dupEv.parties.map(partyKey)).size === dupEv.parties.length);
+check('folding KEEPS the richer capture — the declared entry\'s phone survives the merge',
+  dupEv.parties.find((p) => p.name === 'Dana Ruiz')?.phone === '512-555-0100');
+check('folding keeps provenance: BOTH source columns are recorded on the surviving party',
+  /applicant_full_name/.test(dupEv.parties.find((p) => p.name === 'Dana Ruiz')?.source_field ?? '')
+  && /applicant_phone/.test(dupEv.parties.find((p) => p.name === 'Dana Ruiz')?.source_field ?? ''));
+check('ordinals stay contiguous from 0 after folding — le_event_parties rows are not sparse',
+  dupEv.parties.every((p, i) => p.ordinal === i));
+check('genuinely different parties are NOT folded together',
+  dupEv.parties.length === 2 && dupEv.parties.some((p) => p.company === 'Ruiz Build Co'));
+check('EVERY shipped preset folds its own double-read — this was not one city\'s bug',
+  STARTER_SOURCES.every((preset) => {
+    const src: SourceLike = {
+      kind: preset.kind, base_url: preset.base_url, region: preset.region,
+      jurisdiction: preset.jurisdiction, query_config: preset.query_config, cursor: {},
+    };
+    const fm = preset.query_config.field_map ?? {};
+    const row: Record<string, unknown> = { [fm.title ?? 'title']: 'Work', ...(fm.address ? { [fm.address]: '1 Main St' } : {}) };
+    for (const parts of [fm.address_parts ?? []]) parts.forEach((c, i) => { row[c] = String(i + 1); });
+    if (fm.contact_name) row[fm.contact_name] = 'Same Person';
+    if (fm.contact_company) row[fm.contact_company] = 'Same Company';
+    for (const pm of (preset.query_config.parties ?? [])) {
+      if (pm.name) row[pm.name] = 'Same Person';
+      if (pm.company) row[pm.company] = 'Same Company';
+    }
+    const e = normalizeEvent(src, row);
+    if (!e) return false;
+    return new Set(e.parties.map(partyKey)).size === e.parties.length;
+  }));
+
+// ── REGRESSION: THE FIT SIGNAL — one permit's leads must be a RANKING ──────
+// Base weight is per event type and the valuation/recency/contact terms are properties of the
+// RECORD, so every trade scored off one permit used to land within a few points of every other and
+// four of them tied exactly. The record's own words are the only trade-specific evidence a permit
+// row carries; they are what separates the trades now.
+const fitEvent: LeadEventLike = {
+  event_type: 'permit_issued', occurred_at: '2026-08-01T00:00:00.000Z',
+  address: '900 E 6th St, Austin, TX', region: 'Austin, TX', valuation_usd: 385_000,
+  title: 'Restaurant finish-out — new tenant', description: 'Interior finish out for restaurant',
+  named_parties: [{ role: 'contractor', name: 'Dana Ruiz', phone: '512-555-0100' }],
+  source_url: 'https://data.austintexas.gov/permits/C-2026-9',
+  work_class: 'Finish Out', permit_type: 'BP', permit_sub_type: 'Building Permit',
+};
+const fitScores = new Map(tradesForSegment('commercial')
+  .map((t) => [t, scoreLead(fitEvent, t, NOW, { segment: 'commercial' })])
+  .filter((x): x is [TradeKeyT, NonNullable<ReturnType<typeof scoreLead>>] => !!x[1]));
+const fitVals = [...fitScores.values()].map((v) => v.score);
+check('THE RANKING: one commercial permit no longer scores every trade within a few points',
+  Math.max(...fitVals) - Math.min(...fitVals) >= 30);
+check('…and the top of the list is not a four-way tie',
+  new Set(fitVals).size >= 5);
+check('a restaurant finish-out ranks the trades a restaurant buys ABOVE the ones it does not',
+  (['acoustics', 'janitorial', 'signage', 'fire_safety'] as const)
+    .every((t) => (fitScores.get(t)?.score ?? 0) > (fitScores.get('landscaping')?.score ?? 0)));
+check('the fit adjustment QUOTES the record\'s own word — a mechanism, never a probability',
+  (fitScores.get('fire_safety')?.reasons ?? []).some((r) => /the record names a space this trade sells into \("restaurant"\)/.test(r))
+  && (fitScores.get('landscaping')?.reasons ?? []).some((r) => r === `-${FIT_MISS}: the record's words name other trades' work, not ${TRADES.landscaping.label.toLowerCase()}`));
+check('naming the WORK outranks naming the space it happens in',
+  FIT_NAMED > FIT_USE
+  && (scoreLead({ ...fitEvent, title: 'Re-roof — TPO membrane', description: null }, 'roofing', NOW)?.score ?? 0)
+     > (scoreLead(fitEvent, 'roofing', NOW)?.score ?? 0));
+check('fitFor is pure and order-independent — the same words always give the same adjustment',
+  JSON.stringify(fitFor(recordWords(fitEvent), 'acoustics')) === JSON.stringify(fitFor(recordWords(fitEvent), 'acoustics')));
+check('a record that names NOTHING adjusts nobody — no invented spread',
+  fitFor(recordWords({ title: 'Permit', description: null, work_class: null, permit_type: null, permit_sub_type: null }), 'security') === null
+  && !recordIsSpecific(''));
+check('permit_sub_type is read as the record\'s words — the readable label names the trade',
+  fitFor(recordWords({ title: 'Permit', description: null, work_class: null, permit_type: 'MP', permit_sub_type: 'Mechanical Permit' }), 'hvac')?.delta === FIT_NAMED);
+check('the follow-on rule OWNS its trades — the two rules never contradict each other in one lead',
+  !scoreLead(homePermit, 'flooring', NOW, { segment: 'residential' })!.reasons.some((r) => /the record's words name other trades/.test(r))
+  && !scoreLead(homePermit, 'remodeling', NOW, { segment: 'residential' })!.reasons.some((r) => /the record names .* work \(/.test(r)));
+check('SCORE_VERSION was bumped with the arithmetic — a stored score stays interpretable',
+  SCORE_VERSION === 'le-2');
+
+// ── REGRESSION: THE HONEST ONE-LINERS ──────────────────────────────────────
+// A read that could not be STORED is not a check. It rendered as "Checked — 240 rows read, 0 new"
+// — indistinguishable from a quiet window — while the rows were dropped and the cursor moved past
+// them, which a rolling portal window makes permanent.
+check('a healthy run still reads exactly as it did',
+  sourceStatusLine({ rowsParsed: 12, rowsNew: 3, rowsChanged: 1, rowsDisqualified: 0, pages: 1, capped: false })
+  === 'Checked — 12 rows read, 3 new, 1 updated.');
+check('a capped run says the window is only part-read, and where it resumes',
+  sourceStatusLine({ rowsParsed: 1000, rowsNew: 900, rowsChanged: 0, rowsDisqualified: 0, pages: 10, capped: true, resumeOffset: 1000 })
+    .includes('over 10 pages') === true
+  && sourceStatusLine({ rowsParsed: 1000, rowsNew: 900, rowsChanged: 0, rowsDisqualified: 0, pages: 10, capped: true, resumeOffset: 1000 })
+    .includes('resuming at row 1000'));
+check('A PERSIST FAILURE IS NOT A CHECK: it says the rows were not stored, and that they are re-read',
+  (() => {
+    const l = sourceStatusLine({ rowsParsed: 240, rowsNew: 0, rowsChanged: 0, rowsDisqualified: 0, pages: 3, capped: false, persistError: 'column "x" does not exist' });
+    return !l.startsWith('Checked') && /COULD NOT STORE/.test(l) && /column "x" does not exist/.test(l) && /re-read next run/.test(l);
+  })());
+
+// One-click market creation used to print "permit feed wired, clock on, first check running"
+// unconditionally — including when the source insert and the first check had both thrown and been
+// swallowed by `.catch(() => {})`. The operator then went looking for leads that could not arrive.
+check('a fully-landed start reports success, and carries the ingest\'s own line',
+  (() => {
+    const r = marketStartLine({ title: 'Lead Market — Austin, TX (Commercial)', withPreset: true, clockOn: true, sourceWired: true, firstCheckLine: '1 source checked — 40 new events, 210 scored leads.', problems: [] });
+    return r.tone === 'success' && r.text.includes('permit feed wired, clock on') && r.text.includes('210 scored leads');
+  })());
+check('a blank market\'s line is unchanged',
+  marketStartLine({ title: 'X (Commercial)', withPreset: false, clockOn: true, sourceWired: false, problems: [] }).text
+  === 'Market created and on the clock — add its first source inside.');
+check('A HALF-BUILT MARKET SAYS SO — it never claims the step that failed',
+  (() => {
+    const r = marketStartLine({
+      title: 'Lead Market — Austin, TX (Commercial)', withPreset: true, clockOn: true, sourceWired: false,
+      firstCheckLine: null, problems: ['the Austin building permits feed could not be wired (permission denied).'],
+    });
+    return r.tone === 'error' && !r.text.includes('permit feed wired') && r.text.includes('clock on')
+      && r.text.includes('permission denied') && r.text.includes('Finish it in Setup');
+  })());
+check('every problem is surfaced, not just the first',
+  marketStartLine({ title: 'M', withPreset: true, clockOn: false, sourceWired: false, problems: ['a happened.', 'b happened.'] })
+    .text.includes('a happened. b happened.'));
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} lead-engine check(s) failed`);
