@@ -11,6 +11,8 @@ import {
   tradesForSegment, tradeMatchesSegment, parseSegment, permittedTrade, isFollowOnTrade,
   FOLLOW_ON_BONUS, PERMITTED_TRADE_PENALTY,
   sourceStatusLine, marketStartLine, fitFor, recordWords, recordIsSpecific, FIT_NAMED, FIT_USE, FIT_MISS,
+  companyKey, sameCompany, foldCompanies,
+  isMasterBuildingPermit, followOnWindow, followOnReason, FOLLOW_ON_WINDOWS, FOLLOW_ON_WINDOW_BONUS,
   type LeadEventLike, type TradeKey as TradeKeyT,
 } from './leadEngine.ts';
 import {
@@ -897,7 +899,7 @@ check('the follow-on rule OWNS its trades — the two rules never contradict eac
   !scoreLead(homePermit, 'flooring', NOW, { segment: 'residential' })!.reasons.some((r) => /the record's words name other trades/.test(r))
   && !scoreLead(homePermit, 'remodeling', NOW, { segment: 'residential' })!.reasons.some((r) => /the record names .* work \(/.test(r)));
 check('SCORE_VERSION was bumped with the arithmetic — a stored score stays interpretable',
-  SCORE_VERSION === 'le-2');
+  SCORE_VERSION === 'le-3');
 
 // ── REGRESSION: THE HONEST ONE-LINERS ──────────────────────────────────────
 // A read that could not be STORED is not a check. It rendered as "Checked — 240 rows read, 0 new"
@@ -1090,6 +1092,111 @@ check('staleness is decided on config, not on the cursor a source happens to hol
     base_url: starterById('seattle-permits')!.base_url, jurisdiction: 'seattle-wa',
     query_config: { ...starterById('seattle-permits')!.query_config, segment: 'commercial' },
   }));
+
+// ── ONE FIRM, ONE KEY ──────────────────────────────────────────────────────
+// Every pair below is two spellings of one company, taken verbatim from the live Austin feed.
+
+check('THE MEASURED CASE: IES Residential, Inc. and IES Residential Inc are one firm',
+  sameCompany('IES Residential, Inc.', 'IES Residential Inc'));
+check('THE MEASURED CASE: Radiant Plumbing & AC and Radiant Plumbing and Air Conditioning are NOT',
+  // & folds to "and", but "AC" and "Air Conditioning" are different words and we do not expand
+  // abbreviations — a wrong merge is unrecoverable once counted. Stated, not hidden.
+  !sameCompany('Radiant Plumbing & AC', 'Radiant Plumbing and Air Conditioning'));
+check('& folds to and — the same firm written both ways is one key',
+  sameCompany('Stan\'s Heating & Air', 'Stans Heating and Air'));
+check('a trailing legal form is not identity',
+  companyKey('Victory Plumbing Company') === companyKey('Victory Plumbing')
+  && companyKey('Jones GC LLC') === companyKey('Jones GC'));
+check('stacked legal forms all come off',
+  companyKey('Reed Architects Inc LLC') === 'reed architects');
+check('a legal word INSIDE the name survives — only the tail is stripped',
+  companyKey('Company Roofing LLC') === 'company roofing');
+check('a leading "The" is not identity', companyKey('The Home Depot') === 'home depot');
+check('accents fold', companyKey('Café Construction') === companyKey('Cafe Construction'));
+check('placeholders are not firms — they would be the head of the map',
+  companyKey('N/A') === null && companyKey('OWNER') === null && companyKey('') === null
+  && companyKey(null) === null && companyKey('  ') === null);
+check('DIFFERENT FIRMS STAY DIFFERENT — no stemming, no fuzzy match',
+  !sameCompany('Allied Electric', 'Allied Electrical Services')
+  && !sameCompany('Smith Roofing', 'Smith Plumbing'));
+check('companyKey is idempotent — folding a folded key changes nothing',
+  companyKey(companyKey('IES Residential, Inc.')) === companyKey('IES Residential, Inc.'));
+check('foldCompanies counts the firm, not the spelling, and shows the fullest label',
+  (() => {
+    const r = foldCompanies(['IES Residential, Inc.', 'IES Residential Inc', 'IES Residential, Inc.', 'Jones GC']);
+    return r.length === 2 && r[0].count === 3 && r[0].label === 'IES Residential, Inc.' && r[1].count === 1;
+  })());
+check('foldCompanies drops the placeholders rather than ranking them',
+  foldCompanies(['N/A', 'OWNER', null, '', 'Jones GC']).length === 1);
+check('foldCompanies is deterministic on ties',
+  JSON.stringify(foldCompanies(['B Co', 'A Co']).map((x) => x.key))
+  === JSON.stringify(foldCompanies(['A Co', 'B Co']).map((x) => x.key)));
+
+// ── THE MEASURED FOLLOW-ON WINDOW ──────────────────────────────────────────
+// Fires on the MASTER building permit — the first public evidence a job exists — for the three
+// trades whose lag was actually measured (Austin, 3,245 master BPs, 2025-08 → 2026-06).
+
+const masterBP: LeadEventLike = {
+  event_type: 'permit_issued', occurred_at: '2026-08-03T00:00:00.000Z',
+  address: '616 E 6TH ST', region: 'Austin, TX', valuation_usd: 450000,
+  title: 'CONSTRUCT NEW MULTIFAMILY COMPLEX - CARPORT', description: null,
+  named_parties: [], source_url: null,
+  permit_type: 'BP', permit_sub_type: 'Building Permit', work_class: 'New',
+};
+const electricalPermit: LeadEventLike = {
+  ...masterBP, title: 'Interior alteration', permit_type: 'EP', permit_sub_type: 'Electrical Permit',
+};
+
+check('a master Building Permit is recognised as the anchor',
+  isMasterBuildingPermit(masterBP));
+check('an ELECTRICAL permit is not the anchor — it is the thing the anchor predicts',
+  !isMasterBuildingPermit(electricalPermit));
+check('a liquor licence is not a building permit',
+  !isMasterBuildingPermit({ event_type: 'liquor_license', title: 'New license' } as never));
+check('the three measured trades have windows; nothing else claims one',
+  !!followOnWindow('electrical') && !!followOnWindow('plumbing') && !!followOnWindow('hvac')
+  && followOnWindow('acoustics') === null && followOnWindow('roofing') === null);
+check('the windows are the MEASURED figures, not round numbers someone liked',
+  FOLLOW_ON_WINDOWS.electrical!.rate === 0.45 && FOLLOW_ON_WINDOWS.electrical!.medianDays === 15
+  && FOLLOW_ON_WINDOWS.plumbing!.medianDays === 22 && FOLLOW_ON_WINDOWS.hvac!.medianDays === 19);
+check('THE REASON STATES THE SPREAD AND THE RATE — never a single confident day',
+  (() => {
+    const r = followOnReason('electrical', FOLLOW_ON_WINDOWS.electrical!);
+    return r.includes('45%') && r.includes('4–53 days') && r.includes('median 15')
+      && r.includes('Austin') && !/will need|on day 15/.test(r);
+  })());
+check('the window fires on a commercial master permit and says where the number came from',
+  (() => {
+    const s = scoreLead(masterBP, 'electrical', NOW, { segment: 'commercial' })!;
+    return s.reasons.some((r) => /45% of jobs like it pull one/.test(r))
+      && s.reasons.some((r) => /measured on Austin commercial permits/.test(r));
+  })());
+check('…and it does NOT fire on the electrical permit itself',
+  !scoreLead(electricalPermit, 'electrical', NOW, { segment: 'commercial' })!
+    .reasons.some((r) => /jobs like it pull one/.test(r)));
+check('the window OWNS the adjustment — no contradicting fit line in the same lead',
+  (() => {
+    const s = scoreLead(masterBP, 'electrical', NOW, { segment: 'commercial' })!;
+    return !s.reasons.some((r) => /the record's words name other trades/.test(r));
+  })());
+check('a trade with no measured window falls through to the ordinary fit signal',
+  (() => {
+    const s = scoreLead(masterBP, 'acoustics', NOW, { segment: 'commercial' })!;
+    return !s.reasons.some((r) => /jobs like it pull one/.test(r));
+  })());
+check('the window never fires on a RESIDENTIAL market — it was measured on commercial permits',
+  !scoreLead(masterBP, 'electrical', NOW, { segment: 'residential' })!
+    .reasons.some((r) => /jobs like it pull one/.test(r)));
+check('a master BP outranks the same job scored for a trade with no window',
+  scoreLead(masterBP, 'electrical', NOW, { segment: 'commercial' })!.score
+  > scoreLead(masterBP, 'janitorial', NOW, { segment: 'commercial' })!.score);
+check('the bonus is smaller than FIT_NAMED — a base rate is weaker evidence than the record\'s own words',
+  FOLLOW_ON_WINDOW_BONUS < FIT_NAMED);
+check('scores stay inside 0..100 with the new term',
+  [masterBP, electricalPermit].every((e) => TRADE_KEYS.every((t) => {
+    const s = scoreLead(e, t, NOW, { segment: 'commercial' });
+    return !s || (s.score >= 0 && s.score <= 100);
+  })));
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} lead-engine check(s) failed`);

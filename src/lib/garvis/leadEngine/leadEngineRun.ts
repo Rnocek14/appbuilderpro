@@ -12,7 +12,7 @@ import { createOrder, listOrders, setOrderStatus } from '../standingRun';
 import { instantiateWeb } from '../workwebRun';
 import type { StandingOrder } from '../standing';
 import {
-  digestFor, commissionFor, TRADES, isTradeKey, pitchFor,
+  digestFor, commissionFor, TRADES, isTradeKey, pitchFor, companyKey,
   type DigestLead, type TradeKey, type LeadStatus, type MarketSegment,
 } from './leadEngine.ts';
 import {
@@ -118,6 +118,79 @@ export async function repairSourceFromPreset(sourceId: string): Promise<{ name: 
 /** Which of a market's sources are still on a config their preset has since corrected. */
 export function staleSources(sources: readonly LeadSourceRow[]): LeadSourceRow[] {
   return sources.filter((s) => sourceIsStale(s));
+}
+
+export interface ContractorRow {
+  /** The grouping key — folded, never shown. */
+  key: string;
+  /** The fullest spelling the portals published. Verbatim. */
+  label: string;
+  permits: number;
+  /** Distinct raw spellings folded into this firm — the honest measure of how much the fold did. */
+  spellings: number;
+  phone: string | null;
+  email: string | null;
+  /** Trades this firm was named on, most frequent first. */
+  roles: string[];
+  lastSeen: string | null;
+}
+
+/** THE CONTRACTOR MAP (docs/lead-engine-productization.md §3C) — who actually does the work in
+ *  this market, ranked by permit count.
+ *
+ *  This is the product a materials manufacturer buys: not one lead, but "the forty firms doing
+ *  commercial fit-outs here, ranked, with contacts". It was unsellable until app_0135, because
+ *  the portals spell one company several ways and every count over the raw column was wrong —
+ *  `IES Residential, Inc.` (1,206 permits) and `IES Residential Inc` (472) are one firm.
+ *
+ *  Grouped on company_key, labelled with the longest spelling seen. Reads le_event_parties, which
+ *  is every named party on every event — not just the one contact promoted onto a lead. */
+export async function contractorMap(worldId: string, limit = 50): Promise<ContractorRow[]> {
+  // le_event_parties has no world_id: it hangs off the event. Two hops, both indexed.
+  const { data: evs, error: evErr } = await supabase.from('le_events')
+    .select('id').eq('world_id', worldId).order('occurred_at', { ascending: false }).limit(5000);
+  if (evErr) throw new Error(evErr.message);
+  const ids = (evs ?? []).map((e) => (e as { id: string }).id);
+  if (!ids.length) return [];
+
+  const parties: { company: string | null; company_key: string | null; phone: string | null; email: string | null; role_normalized: string | null; event_id: string }[] = [];
+  for (let i = 0; i < ids.length; i += 500) {
+    const { data, error } = await supabase.from('le_event_parties')
+      .select('company, company_key, phone, email, role_normalized, event_id')
+      .in('event_id', ids.slice(i, i + 500))
+      .not('company_key', 'is', null);
+    if (error) throw new Error(error.message);
+    parties.push(...(data ?? []) as typeof parties);
+  }
+
+  const acc = new Map<string, {
+    label: string; permits: number; spellings: Set<string>;
+    phone: string | null; email: string | null; roles: Map<string, number>;
+  }>();
+  for (const p of parties) {
+    // Recomputed rather than trusted: a row written before app_0135's backfill, or by an older
+    // deploy, would otherwise group under a key today's rules would not produce.
+    const k = p.company_key ?? companyKey(p.company);
+    if (!k) continue;
+    const label = (p.company ?? '').trim();
+    const cur = acc.get(k) ?? { label, permits: 0, spellings: new Set<string>(), phone: null, email: null, roles: new Map<string, number>() };
+    cur.permits++;
+    if (label) { cur.spellings.add(label); if (label.length > cur.label.length) cur.label = label; }
+    cur.phone ??= p.phone?.trim() || null;
+    cur.email ??= p.email?.trim() || null;
+    if (p.role_normalized) cur.roles.set(p.role_normalized, (cur.roles.get(p.role_normalized) ?? 0) + 1);
+    acc.set(k, cur);
+  }
+
+  return [...acc]
+    .map(([key, v]) => ({
+      key, label: v.label, permits: v.permits, spellings: v.spellings.size,
+      phone: v.phone, email: v.email,
+      roles: [...v.roles].sort((a, b) => b[1] - a[1]).map(([r]) => r).slice(0, 3),
+      lastSeen: null,
+    }))
+    .sort((a, b) => b.permits - a.permits || a.key.localeCompare(b.key))
+    .slice(0, limit);
 }
 
 /** Pause/resume. Resuming also forgives the failure streak — the operator said try again. */
