@@ -729,9 +729,9 @@ Before any `field_map` in this document is committed, confirm against
 
 ## 14. Implementation record — what P0 actually shipped
 
-Migrations `app_0131_lead_capture.sql` + `app_0132_lead_source_url_nullable.sql`; code in
-`src/lib/garvis/leadEngine/{leadEngine,adapters}.ts` and `supabase/functions/lead-ingest/index.ts`;
-150 checks in `leadEngine.verify.ts`.
+Migrations `app_0131_lead_capture.sql` + `app_0132_lead_source_url_nullable.sql` +
+`app_0133_lead_ingest_paging.sql`; code in `src/lib/garvis/leadEngine/{leadEngine,adapters}.ts` and
+`supabase/functions/lead-ingest/index.ts`; 169 checks in `leadEngine.verify.ts`.
 
 **Shipped (CAPTURE-NOW only).**
 
@@ -792,10 +792,16 @@ preset now points there and is re-mapped against that dataset's published column
   `trade_tags` rule engine, no absence queries. The `trade_tags` column exists and stays empty.
 - **No scoring changes** (§8) and no new sources (§7). `status_normalized` is captured and stamped
   onto the lead as `stage`, but nothing scores on it yet.
-- **The cursor skip (§6.6.2) is still open** — `$limit` with no `$offset` still means a day with
-  more than 100 qualifying records advances the cursor past the remainder. The dedupe fix makes
-  this *safe to retry* (a re-fetched record now resolves to the same row instead of a duplicate),
-  but paging itself is unbuilt.
+- **The cursor skip (§6.6.2) — NOW CLOSED.** `buildFetchUrl(source, offset)` emits `$offset`
+  (SODA) / `resultOffset` (ArcGIS), the ingest pages within a tick up to `MAX_PAGES_PER_TICK`
+  (10 × `FETCH_LIMIT` = 1,000 rows), and the cursor gained a `page_offset` on the existing
+  free-form jsonb. The advance rule is pure and verified in `adapters.nextCursor`: a **drained**
+  tick (last page short of the limit) advances `last_date` to the max date read and clears the
+  offset; a **capped** tick keeps `last_date` exactly where it was and stores the rows consumed,
+  so the next tick resumes mid-day. A partially-consumed day never has its watermark advanced
+  past it. `le_ingest_runs.pages_fetched` / `.capped` record which of the two happened
+  (`app_0133`), and the source line says so: *"…read over 3 pages… More remain — resuming at row
+  1,000 next run."* CSV/RSS sources are whole-feed reads and still ignore paging.
 
 **Still unverified against a live portal.** The egress proxy blocks every data portal from this
 environment (§0), so apart from Seattle's dataset id every column name below remains

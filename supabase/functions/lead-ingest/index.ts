@@ -26,6 +26,7 @@ import {
 } from '../../../src/lib/garvis/leadEngine/leadEngine.ts';
 import {
   buildFetchUrl, parseRowsResult, sourceFormat, normalizeEvent, nextCursor, configHash,
+  fetchOffset, FETCH_LIMIT, MAX_PAGES_PER_TICK,
   type SourceLike, type CandidateEvent,
 } from '../../../src/lib/garvis/leadEngine/adapters.ts';
 
@@ -181,35 +182,228 @@ Deno.serve(async (req) => {
     // run actually saw — read, disqualified, new, changed, and the cursor either side — cannot be
     // reconstructed after the fact from a single overwritten last_status field.
     const cfgHash = configHash(src);
+    // Where this tick starts reading: the top of the window, or the row the LAST tick stopped on
+    // when it ran out of pages mid-window (capture spec §6.6.2).
+    const startOffset = fetchOffset(src);
     const run = {
       owner_id: src.owner_id, source_id: src.id, started_at: nowIso,
       request_url: null as string | null, http_status: null as number | null,
       body_bytes: 0, body_truncated: false,
       rows_parsed: 0, rows_disqualified: 0, rows_new: 0, rows_changed: 0,
+      // The paging truth (app_0133): how many pages this tick actually read, and whether it
+      // stopped because the window drained or because it hit the cap with more still behind it.
+      pages_fetched: 0, capped: false,
       cursor_before: (src.cursor ?? {}) as Record<string, unknown>,
       cursor_after: (src.cursor ?? {}) as Record<string, unknown>,
       config_hash: cfgHash, error: null as string | null,
       finished_at: null as string | null,
     };
 
-    let candidates: CandidateEvent[] = [];
+    // ── the capture pipeline, PER PAGE ──────────────────────────────────────
+    // Everything app_0131 does runs on every page exactly as it did when a tick was a single
+    // page: read what we already hold, upsert-on-change, version the transitions, replace the
+    // parties, score the new qualified rows. Paging changes how much we read, never how we
+    // treat what we read.
+    const processPage = async (candidates: CandidateEvent[]) => {
+      // ── What do we already hold? ──────────────────────────────────────────
+      // Read the rows these candidates would collide with, so a portal-side EDIT is visible.
+      // ignoreDuplicates used to mean a corrected status, valuation or contractor was frozen at
+      // our first-seen version forever (capture spec §3.8).
+      const existing = new Map<string, Record<string, unknown> & { id: string; content_hash: string | null; seen_count: number }>();
+      for (const keys of chunk(candidates.map((c) => c.dedupe_key), 100)) {
+        const { data: rows } = await admin.from('le_events').select(EXISTING_COLS)
+          .eq('owner_id', src.owner_id).in('dedupe_key', keys);
+        for (const r of (rows ?? []) as unknown as (Record<string, unknown> & { id: string; dedupe_key: string; content_hash: string | null; seen_count: number })[]) {
+          existing.set(r.dedupe_key, r);
+        }
+      }
+
+      const fresh = candidates.filter((c) => !existing.has(c.dedupe_key));
+      const changed = candidates.filter((c) => {
+        const prev = existing.get(c.dedupe_key);
+        return !!prev && prev.content_hash !== c.content_hash;
+      });
+      run.rows_new += fresh.length;
+      run.rows_changed += changed.length;
+      eventsNew += fresh.length;
+      eventsChanged += changed.length;
+
+      const idByKey = new Map<string, string>();
+      for (const [k, v] of existing) idByKey.set(k, v.id);
+
+      if (candidates.length) {
+        // ON CONFLICT DO UPDATE (not DO NOTHING): every observation bumps seen_count and
+        // last_seen_at, and a changed row is actually updated. Columns absent from the payload —
+        // found_at above all — are left untouched, so first-seen stays first-seen.
+        const rows = candidates.map((c) => ({
+          owner_id: src.owner_id, world_id: src.world_id, source_id: src.id,
+          event_type: c.event_type, occurred_at: c.occurred_at, occurred_kind: c.occurred_kind,
+          address: c.address, region: c.region, jurisdiction: c.jurisdiction,
+          valuation_usd: c.valuation_usd, title: c.title.slice(0, 300), description: c.description,
+          named_parties: c.named_parties, raw: c.raw, source_url: c.source_url, dedupe_key: c.dedupe_key,
+          source_record_id: c.source_record_id, parent_record_id: c.parent_record_id,
+          content_hash: c.content_hash, source_config_hash: cfgHash,
+          record_status: c.record_status, status_normalized: c.status_normalized, status_date: c.status_date,
+          applied_at: c.applied_at, issued_at: c.issued_at, approved_at: c.approved_at,
+          completed_at: c.completed_at, expires_at: c.expires_at,
+          lat: c.lat, lon: c.lon, parcel_id: c.parcel_id, city: c.city, state: c.state,
+          postal_code: c.postal_code, unit: c.unit,
+          property_class: c.property_class, work_class: c.work_class,
+          permit_type: c.permit_type, permit_sub_type: c.permit_sub_type,
+          use_type: c.use_type, proposed_use: c.proposed_use,
+          sqft_total: c.sqft_total, sqft_new: c.sqft_new, sqft_remodel: c.sqft_remodel,
+          stories: c.stories, units: c.units, year_built: c.year_built, fees_usd: c.fees_usd,
+          // STORED, NOT DROPPED: a sub-floor row persists with its reason. A portal's rolling
+          // window makes a discarded row unrecoverable, and you cannot prove absence from a
+          // value-filtered subset (spec §3.9). Leads are minted for qualified rows only.
+          qualified: c.qualified, disqualified_reason: c.disqualified_reason,
+          last_seen_at: nowIso,
+          seen_count: (existing.get(c.dedupe_key)?.seen_count ?? 0) + 1,
+        }));
+        const { data: upserted, error: upErr } = await admin.from('le_events')
+          .upsert(rows, { onConflict: 'owner_id,dedupe_key' }).select('id, dedupe_key');
+        if (upErr) {
+          run.error = `persist failed — ${upErr.message.slice(0, 300)}`;
+          eventsNew -= fresh.length; eventsChanged -= changed.length;
+          run.rows_new -= fresh.length; run.rows_changed -= changed.length;
+        }
+        for (const r of (upserted ?? []) as { id: string; dedupe_key: string }[]) idByKey.set(r.dedupe_key, r.id);
+
+        // The append-only observation history. Every transition the portal makes between our
+        // observations is destroyed upstream — this is the only place it survives.
+        if (!upErr && changed.length) {
+          const versions = changed.map((c) => {
+            const prev = existing.get(c.dedupe_key)!;
+            const after: Record<string, unknown> = {};
+            for (const k of VERSIONED_COLS) after[k] = (c as unknown as Record<string, unknown>)[k];
+            return {
+              owner_id: src.owner_id, event_id: idByKey.get(c.dedupe_key),
+              observed_at: nowIso, record_status: c.record_status,
+              status_normalized: c.status_normalized, valuation_usd: c.valuation_usd,
+              content_hash: c.content_hash,
+              changed_fields: changedFields(prev as Record<string, unknown>, after),
+              raw: c.raw,
+            };
+          }).filter((v) => !!v.event_id);
+          if (versions.length) await admin.from('le_event_versions').insert(versions).then(() => {}, () => {});
+        }
+
+        // Parties, with provenance. Replaced wholesale on a changed record — portals correct
+        // contact data, and a stale contact is worse than none.
+        if (!upErr) {
+          const touched = [...fresh, ...changed];
+          const changedIds = changed.map((c) => idByKey.get(c.dedupe_key)).filter((x): x is string => !!x);
+          for (const ids of chunk(changedIds, 100)) {
+            await admin.from('le_event_parties').delete().in('event_id', ids).then(() => {}, () => {});
+          }
+          const partyRows = touched.flatMap((c) => {
+            const eventId = idByKey.get(c.dedupe_key);
+            if (!eventId) return [];
+            return c.parties.map((p) => ({
+              owner_id: src.owner_id, event_id: eventId, ordinal: p.ordinal,
+              role: p.role, role_normalized: p.role_normalized,
+              name: p.name, company: p.company, phone: p.phone, email: p.email,
+              license_no: p.license_no, source_field: p.source_field,
+            }));
+          });
+          for (const batch of chunk(partyRows, 200)) {
+            await admin.from('le_event_parties').insert(batch).then(() => {}, () => {});
+          }
+        }
+      }
+
+      // Score each NEW, QUALIFIED event for each configured trade with the verified core. A null
+      // score is a zero-relevance pairing — it never becomes a row. A disqualified event is stored
+      // but never sold.
+      const scorable = fresh.filter((c) => c.qualified && idByKey.has(c.dedupe_key));
+      if (scorable.length) {
+        const leadRows: Record<string, unknown>[] = [];
+        for (const c of scorable) {
+          const eventId = idByKey.get(c.dedupe_key)!;
+          const eventLike: LeadEventLike = {
+            event_type: c.event_type, occurred_at: c.occurred_at, address: c.address, region: c.region,
+            valuation_usd: c.valuation_usd, title: c.title, description: c.description,
+            named_parties: c.named_parties, source_url: c.source_url,
+          };
+          const contact = pickLeadContact(c.named_parties);
+          for (const trade of cfg.trades as TradeKey[]) {
+            const s = scoreLead(eventLike, trade, nowIso);
+            if (!s) continue;
+            leadRows.push({
+              owner_id: src.owner_id, world_id: src.world_id, event_id: eventId, trade,
+              score: s.score, score_reasons: s.reasons,
+              contact_name: contact?.name ?? null, contact_company: contact?.company ?? null,
+              contact_phone: contact?.phone ?? null, contact_email: contact?.email ?? null,
+              // Provenance: a phone the PERMIT published and a phone Google Places guessed at are
+              // not the same asset, and used to be the same column with no way to tell them apart.
+              contact_source: contact ? 'record' : null,
+              contact_role: contact?.role_normalized ?? null,
+              stage: c.status_normalized, score_version: SCORE_VERSION,
+              why_now: whyNow(eventLike).slice(0, 400), status: 'new',
+            });
+          }
+        }
+        if (leadRows.length) {
+          const eventMeta = new Map(scorable.map((c) => [idByKey.get(c.dedupe_key)!, {
+            title: c.title, address: c.address, region: c.region,
+          }] as const));
+          const { data: ins } = await admin.from('le_leads')
+            .upsert(leadRows, { onConflict: 'owner_id,event_id,trade', ignoreDuplicates: true })
+            .select('id, event_id, score, contact_phone, contact_company, contact_name');
+          const inserted = (ins ?? []) as { id: string; event_id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null }[];
+          leadsNew += inserted.length;
+          for (const row of inserted) {
+            const meta = eventMeta.get(row.event_id);
+            if (meta) newLeadRecords.push({ ...row, ...meta });
+          }
+        }
+      }
+    };
+
+    // ── THE PAGING LOOP (capture spec §6.6.2) ───────────────────────────────
+    // One page used to BE the tick: $limit with no $offset, then the cursor jumped to the max
+    // date read. A day with more than FETCH_LIMIT qualifying rows — routine for NYC and Chicago —
+    // therefore had its remainder stepped over and never fetched again. Now we walk the window
+    // page by page, bounded by MAX_PAGES_PER_TICK, and what we do not reach this tick is recorded
+    // as a resume point rather than abandoned.
     let fetchOk = false;
+    let pages = 0;
+    let rowsThisTick = 0;
+    let drained = false;
+    // Only the dates matter to the advance decision, so the tick holds these instead of every
+    // page's rows.
+    const dateSamples: { occurred_at: string | null }[] = [];
     try {
-      run.request_url = buildFetchUrl(src).slice(0, 2000);
-      const res = await safeFetch(buildFetchUrl(src));
-      run.http_status = res.status;
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const full = await res.text();
-      run.body_bytes = full.length;
-      run.body_truncated = full.length > MAX_BODY;   // the 2MB slice, made visible
-      const parsed = parseRowsResult(src.kind, full.slice(0, MAX_BODY), sourceFormat(src));
-      // An UNREADABLE source is unreachable, never "no change" — a truncated body, a changed
-      // response shape or a WAF page used to report as a healthy "0 rows read" (spec §6.6).
-      if (!parsed.ok) throw new Error(parsed.error ?? 'Response could not be read');
-      fetchOk = true;
-      run.rows_parsed = parsed.rows.length;
-      candidates = byLastKey(parsed.rows.map((r) => normalizeEvent(src, r)).filter((e): e is CandidateEvent => e !== null));
-      run.rows_disqualified = candidates.filter((c) => !c.qualified).length;
+      let offset = startOffset;
+      while (pages < MAX_PAGES_PER_TICK) {
+        const url = buildFetchUrl(src, offset);
+        run.request_url = url.slice(0, 2000);   // the page in hand: on failure, the one that failed
+        const res = await safeFetch(url);
+        run.http_status = res.status;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const full = await res.text();
+        run.body_bytes += full.length;
+        if (full.length > MAX_BODY) run.body_truncated = true;   // the 2MB slice, made visible
+        const parsed = parseRowsResult(src.kind, full.slice(0, MAX_BODY), sourceFormat(src));
+        // An UNREADABLE source is unreachable, never "no change" — a truncated body, a changed
+        // response shape or a WAF page used to report as a healthy "0 rows read" (spec §6.6).
+        if (!parsed.ok) throw new Error(parsed.error ?? 'Response could not be read');
+        fetchOk = true;
+        pages++;
+        run.pages_fetched = pages;
+        run.rows_parsed += parsed.rows.length;
+        rowsThisTick += parsed.rows.length;
+        const candidates = byLastKey(parsed.rows.map((r) => normalizeEvent(src, r)).filter((e): e is CandidateEvent => e !== null));
+        run.rows_disqualified += candidates.filter((c) => !c.qualified).length;
+        for (const c of candidates) dateSamples.push({ occurred_at: c.occurred_at });
+        await processPage(candidates);
+        // A SHORT page means the window is exhausted — that is the only honest "drained" signal.
+        // CSV and RSS sources have nothing to page: one read is the whole feed.
+        if (parsed.rows.length < FETCH_LIMIT || sourceFormat(src) !== 'json') { drained = true; break; }
+        offset += FETCH_LIMIT;
+      }
+      // Stopped at the cap with a full page still in hand: there is provably more behind it.
+      run.capped = !drained;
     } catch (e) {
       unreachable++;
       run.error = e instanceof Error ? e.message.slice(0, 400) : 'fetch failed';
@@ -232,168 +426,20 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    // ── What do we already hold? ────────────────────────────────────────────
-    // Read the rows these candidates would collide with, so a portal-side EDIT is visible.
-    // ignoreDuplicates used to mean a corrected status, valuation or contractor was frozen at
-    // our first-seen version forever (capture spec §3.8).
-    const existing = new Map<string, Record<string, unknown> & { id: string; content_hash: string | null; seen_count: number }>();
-    for (const keys of chunk(candidates.map((c) => c.dedupe_key), 100)) {
-      const { data: rows } = await admin.from('le_events').select(EXISTING_COLS)
-        .eq('owner_id', src.owner_id).in('dedupe_key', keys);
-      for (const r of (rows ?? []) as unknown as (Record<string, unknown> & { id: string; dedupe_key: string; content_hash: string | null; seen_count: number })[]) {
-        existing.set(r.dedupe_key, r);
-      }
-    }
-
-    const fresh = candidates.filter((c) => !existing.has(c.dedupe_key));
-    const changed = candidates.filter((c) => {
-      const prev = existing.get(c.dedupe_key);
-      return !!prev && prev.content_hash !== c.content_hash;
-    });
-    run.rows_new = fresh.length;
-    run.rows_changed = changed.length;
-    eventsNew += fresh.length;
-    eventsChanged += changed.length;
-
-    const idByKey = new Map<string, string>();
-    for (const [k, v] of existing) idByKey.set(k, v.id);
-
-    if (candidates.length) {
-      // ON CONFLICT DO UPDATE (not DO NOTHING): every observation bumps seen_count and
-      // last_seen_at, and a changed row is actually updated. Columns absent from the payload —
-      // found_at above all — are left untouched, so first-seen stays first-seen.
-      const rows = candidates.map((c) => ({
-        owner_id: src.owner_id, world_id: src.world_id, source_id: src.id,
-        event_type: c.event_type, occurred_at: c.occurred_at, occurred_kind: c.occurred_kind,
-        address: c.address, region: c.region, jurisdiction: c.jurisdiction,
-        valuation_usd: c.valuation_usd, title: c.title.slice(0, 300), description: c.description,
-        named_parties: c.named_parties, raw: c.raw, source_url: c.source_url, dedupe_key: c.dedupe_key,
-        source_record_id: c.source_record_id, parent_record_id: c.parent_record_id,
-        content_hash: c.content_hash, source_config_hash: cfgHash,
-        record_status: c.record_status, status_normalized: c.status_normalized, status_date: c.status_date,
-        applied_at: c.applied_at, issued_at: c.issued_at, approved_at: c.approved_at,
-        completed_at: c.completed_at, expires_at: c.expires_at,
-        lat: c.lat, lon: c.lon, parcel_id: c.parcel_id, city: c.city, state: c.state,
-        postal_code: c.postal_code, unit: c.unit,
-        property_class: c.property_class, work_class: c.work_class,
-        permit_type: c.permit_type, permit_sub_type: c.permit_sub_type,
-        use_type: c.use_type, proposed_use: c.proposed_use,
-        sqft_total: c.sqft_total, sqft_new: c.sqft_new, sqft_remodel: c.sqft_remodel,
-        stories: c.stories, units: c.units, year_built: c.year_built, fees_usd: c.fees_usd,
-        // STORED, NOT DROPPED: a sub-floor row persists with its reason. A portal's rolling
-        // window makes a discarded row unrecoverable, and you cannot prove absence from a
-        // value-filtered subset (spec §3.9). Leads are minted for qualified rows only.
-        qualified: c.qualified, disqualified_reason: c.disqualified_reason,
-        last_seen_at: nowIso,
-        seen_count: (existing.get(c.dedupe_key)?.seen_count ?? 0) + 1,
-      }));
-      const { data: upserted, error: upErr } = await admin.from('le_events')
-        .upsert(rows, { onConflict: 'owner_id,dedupe_key' }).select('id, dedupe_key');
-      if (upErr) {
-        run.error = `persist failed — ${upErr.message.slice(0, 300)}`;
-        eventsNew -= fresh.length; eventsChanged -= changed.length;
-        run.rows_new = 0; run.rows_changed = 0;
-      }
-      for (const r of (upserted ?? []) as { id: string; dedupe_key: string }[]) idByKey.set(r.dedupe_key, r.id);
-
-      // The append-only observation history. Every transition the portal makes between our
-      // observations is destroyed upstream — this is the only place it survives.
-      if (!upErr && changed.length) {
-        const versions = changed.map((c) => {
-          const prev = existing.get(c.dedupe_key)!;
-          const after: Record<string, unknown> = {};
-          for (const k of VERSIONED_COLS) after[k] = (c as unknown as Record<string, unknown>)[k];
-          return {
-            owner_id: src.owner_id, event_id: idByKey.get(c.dedupe_key),
-            observed_at: nowIso, record_status: c.record_status,
-            status_normalized: c.status_normalized, valuation_usd: c.valuation_usd,
-            content_hash: c.content_hash,
-            changed_fields: changedFields(prev as Record<string, unknown>, after),
-            raw: c.raw,
-          };
-        }).filter((v) => !!v.event_id);
-        if (versions.length) await admin.from('le_event_versions').insert(versions).then(() => {}, () => {});
-      }
-
-      // Parties, with provenance. Replaced wholesale on a changed record — portals correct
-      // contact data, and a stale contact is worse than none.
-      if (!upErr) {
-        const touched = [...fresh, ...changed];
-        const changedIds = changed.map((c) => idByKey.get(c.dedupe_key)).filter((x): x is string => !!x);
-        for (const ids of chunk(changedIds, 100)) {
-          await admin.from('le_event_parties').delete().in('event_id', ids).then(() => {}, () => {});
-        }
-        const partyRows = touched.flatMap((c) => {
-          const eventId = idByKey.get(c.dedupe_key);
-          if (!eventId) return [];
-          return c.parties.map((p) => ({
-            owner_id: src.owner_id, event_id: eventId, ordinal: p.ordinal,
-            role: p.role, role_normalized: p.role_normalized,
-            name: p.name, company: p.company, phone: p.phone, email: p.email,
-            license_no: p.license_no, source_field: p.source_field,
-          }));
-        });
-        for (const batch of chunk(partyRows, 200)) {
-          await admin.from('le_event_parties').insert(batch).then(() => {}, () => {});
-        }
-      }
-    }
-
-    // Score each NEW, QUALIFIED event for each configured trade with the verified core. A null
-    // score is a zero-relevance pairing — it never becomes a row. A disqualified event is stored
-    // but never sold.
-    const scorable = fresh.filter((c) => c.qualified && idByKey.has(c.dedupe_key));
-    if (scorable.length) {
-      const leadRows: Record<string, unknown>[] = [];
-      for (const c of scorable) {
-        const eventId = idByKey.get(c.dedupe_key)!;
-        const eventLike: LeadEventLike = {
-          event_type: c.event_type, occurred_at: c.occurred_at, address: c.address, region: c.region,
-          valuation_usd: c.valuation_usd, title: c.title, description: c.description,
-          named_parties: c.named_parties, source_url: c.source_url,
-        };
-        const contact = pickLeadContact(c.named_parties);
-        for (const trade of cfg.trades as TradeKey[]) {
-          const s = scoreLead(eventLike, trade, nowIso);
-          if (!s) continue;
-          leadRows.push({
-            owner_id: src.owner_id, world_id: src.world_id, event_id: eventId, trade,
-            score: s.score, score_reasons: s.reasons,
-            contact_name: contact?.name ?? null, contact_company: contact?.company ?? null,
-            contact_phone: contact?.phone ?? null, contact_email: contact?.email ?? null,
-            // Provenance: a phone the PERMIT published and a phone Google Places guessed at are
-            // not the same asset, and used to be the same column with no way to tell them apart.
-            contact_source: contact ? 'record' : null,
-            contact_role: contact?.role_normalized ?? null,
-            stage: c.status_normalized, score_version: SCORE_VERSION,
-            why_now: whyNow(eventLike).slice(0, 400), status: 'new',
-          });
-        }
-      }
-      if (leadRows.length) {
-        const eventMeta = new Map(scorable.map((c) => [idByKey.get(c.dedupe_key)!, {
-          title: c.title, address: c.address, region: c.region,
-        }] as const));
-        const { data: ins } = await admin.from('le_leads')
-          .upsert(leadRows, { onConflict: 'owner_id,event_id,trade', ignoreDuplicates: true })
-          .select('id, event_id, score, contact_phone, contact_company, contact_name');
-        const inserted = (ins ?? []) as { id: string; event_id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null }[];
-        leadsNew += inserted.length;
-        for (const row of inserted) {
-          const meta = eventMeta.get(row.event_id);
-          if (meta) newLeadRecords.push({ ...row, ...meta });
-        }
-      }
-    }
-
     if (fetchOk) {
-      const cursorAfter = nextCursor(src, candidates);
+      // THE ADVANCE DECISION lives in the pure core (adapters.nextCursor), verified there:
+      // drained → the watermark moves to the max date read and the offset is cleared; capped →
+      // the watermark stays exactly where it was and the offset records how far in we got.
+      const cursorAfter = nextCursor(src, dateSamples, { rows: rowsThisTick, startOffset, drained });
       run.cursor_after = cursorAfter as Record<string, unknown>;
       const dq = run.rows_disqualified ? `, ${run.rows_disqualified} below the floor (kept, flagged)` : '';
+      const pageNote = pages > 1 ? ` over ${pages} pages` : '';
+      // Say it plainly when a window is only part-read — a capped run is not a finished one.
+      const more = run.capped ? ` More remain — resuming at row ${cursorAfter.page_offset} next run.` : '';
       await admin.from('le_sources').update({
         consecutive_failures: 0, last_fetch_at: nowIso, updated_at: nowIso,
         cursor: cursorAfter, config_hash: cfgHash,
-        last_status: `Checked — ${run.rows_parsed} row${run.rows_parsed === 1 ? '' : 's'} read, ${run.rows_new} new, ${run.rows_changed} updated${dq}.`,
+        last_status: `Checked — ${run.rows_parsed} row${run.rows_parsed === 1 ? '' : 's'} read${pageNote}, ${run.rows_new} new, ${run.rows_changed} updated${dq}.${more}`,
       }).eq('id', src.id);
     }
     await admin.from('le_ingest_runs').insert({ ...run, finished_at: new Date().toISOString() })
