@@ -24,8 +24,16 @@ export interface SourceLike {
     field_map?: {
       title?: string; address?: string; valuation?: string; description?: string;
       date?: string; contact_name?: string; contact_company?: string; permalink?: string;
+      /** Most permit feeds split an address across columns (street_number + direction + name +
+       *  suffix). Joining them is REQUIRED for a usable lead — and for dedupe: without the house
+       *  number every permit on one street in one month collapses into a single event. */
+      address_parts?: string[];
     };
     where?: string;
+    /** Residential-junk floor: a record whose stated value is BELOW this never becomes a lead
+     *  (a $3k deck permit is not a commercial project). Records with no stated value are kept —
+     *  we don't drop what we can't judge. */
+    min_valuation_usd?: number;
     [k: string]: unknown;
   };
   cursor: { last_date?: string; [k: string]: unknown };
@@ -201,7 +209,9 @@ export function normalizeEvent(source: SourceLike, row: Record<string, unknown>)
   const cfg = source.query_config ?? {};
   const map = { ...(sourceFormat(source) === 'rss' ? RSS_DEFAULT_MAP : {}), ...(cfg.field_map ?? {}) };
   const title = str(row, map.title) ?? '';
-  const address = str(row, map.address);
+  const address = map.address_parts?.length
+    ? (map.address_parts.map((k) => str(row, k)).filter(Boolean).join(' ').trim() || null)
+    : str(row, map.address);
   if (!title && !address) return null;
 
   const name = str(row, map.contact_name);
@@ -209,12 +219,19 @@ export function normalizeEvent(source: SourceLike, row: Record<string, unknown>)
   const parties: NamedParty[] = [];
   if (name || company) parties.push({ role: 'applicant', ...(name ? { name } : {}), ...(company ? { company } : {}) });
 
+  const valuation = num(row, map.valuation);
+  // THE JUNK FLOOR: a city permit feed is mostly residential (a deck, a water heater). A record
+  // that STATES a value below the floor is not a commercial project — drop it. A record with no
+  // stated value is kept: we never drop what we can't judge.
+  const floor = Number(cfg.min_valuation_usd);
+  if (Number.isFinite(floor) && floor > 0 && valuation !== null && valuation < floor) return null;
+
   const event = {
     event_type: cfg.event_type ?? DEFAULT_TYPE[source.kind],
     occurred_at: toIso(map.date ? row[map.date] : (cfg.date_field ? row[cfg.date_field] : null)),
     address,
     region: source.region,
-    valuation_usd: num(row, map.valuation),
+    valuation_usd: valuation,
     title: title || (address as string),
     description: str(row, map.description),
     named_parties: parties,
@@ -254,31 +271,46 @@ export const STARTER_SOURCES: StarterSource[] = [
     id: 'chicago-permits', label: 'Chicago building permits', region: 'Chicago, IL', kind: 'socrata',
     base_url: 'https://data.cityofchicago.org/resource/ydr8-5enu.json',
     query_config: {
-      event_type: 'permit_issued', date_field: 'issue_date',
-      field_map: { title: 'work_description', address: 'street_name', valuation: 'reported_cost', date: 'issue_date', contact_name: 'contact_1_name' },
+      event_type: 'permit_issued', date_field: 'issue_date', min_valuation_usd: 25000,
+      where: 'reported_cost > 25000',
+      field_map: {
+        title: 'work_description', valuation: 'reported_cost', date: 'issue_date', contact_name: 'contact_1_name',
+        address_parts: ['street_number', 'street_direction', 'street_name', 'suffix'],
+      },
     },
   },
   {
     id: 'nyc-dob-permits', label: 'NYC DOB permit issuance', region: 'New York, NY', kind: 'socrata',
     base_url: 'https://data.cityofnewyork.us/resource/ipu4-2q9a.json',
     query_config: {
+      // NYC's issuance feed carries no cost column; job_type A1 (major alteration) and NB (new
+      // building) are its substantial work — the rest is largely small/residential.
       event_type: 'permit_issued', date_field: 'issuance_date',
-      field_map: { title: 'job_type', address: 'street_name', date: 'issuance_date', contact_company: 'permittee_s_business_name' },
+      where: "job_type in ('A1','NB')",
+      field_map: {
+        title: 'job_type', date: 'issuance_date', contact_company: 'permittee_s_business_name',
+        address_parts: ['house__', 'street_name'],
+      },
     },
   },
   {
     id: 'sf-building-permits', label: 'San Francisco building permits', region: 'San Francisco, CA', kind: 'socrata',
     base_url: 'https://data.sfgov.org/resource/i98e-djp9.json',
     query_config: {
-      event_type: 'permit_issued', date_field: 'issued_date',
-      field_map: { title: 'description', address: 'street_name', valuation: 'estimated_cost', date: 'issued_date' },
+      event_type: 'permit_issued', date_field: 'issued_date', min_valuation_usd: 25000,
+      where: 'estimated_cost > 25000',
+      field_map: {
+        title: 'description', valuation: 'estimated_cost', date: 'issued_date',
+        address_parts: ['street_number', 'street_name', 'street_suffix'],
+      },
     },
   },
   {
     id: 'austin-permits', label: 'Austin building permits', region: 'Austin, TX', kind: 'socrata',
     base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json',
     query_config: {
-      event_type: 'permit_issued', date_field: 'issued_date',
+      event_type: 'permit_issued', date_field: 'issued_date', min_valuation_usd: 25000,
+      where: 'total_job_valuation > 25000',
       field_map: { title: 'description', address: 'original_address1', valuation: 'total_job_valuation', date: 'issued_date', contact_name: 'applicant_full_name' },
     },
   },
@@ -286,7 +318,8 @@ export const STARTER_SOURCES: StarterSource[] = [
     id: 'seattle-permits', label: 'Seattle building permits', region: 'Seattle, WA', kind: 'socrata',
     base_url: 'https://data.seattle.gov/resource/76t8-zvzf.json',
     query_config: {
-      event_type: 'permit_issued', date_field: 'issueddate',
+      event_type: 'permit_issued', date_field: 'issueddate', min_valuation_usd: 25000,
+      where: 'estprojectcost > 25000',
       field_map: { title: 'description', address: 'originaladdress1', valuation: 'estprojectcost', date: 'issueddate', contact_name: 'applicantname' },
     },
   },
