@@ -222,6 +222,14 @@ export default function Leads() {
                   {send?.phase === 'error' && <p className="mt-1 text-[11px] text-forge-err">{send.msg}</p>}
                   {send?.phase === 'sent' && send.note && <p className="mt-1 text-[11px] text-forge-dim">{send.note}</p>}
                 </div>
+                {/* A built demo is worth a glance before pitching — open it without leaving the list. */}
+                {r.previewSlug && (
+                  <a href={`/preview-site/${r.previewSlug}`} target="_blank" rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()} title="Open the demo site built for this business"
+                    className="mr-2 inline-flex shrink-0 items-center gap-1 rounded-lg border border-forge-border px-2 py-1.5 text-[11px] text-forge-dim transition-colors hover:text-forge-ink">
+                    <ExternalLink size={12} /> demo
+                  </a>
+                )}
                 {/* Quick action lives on the row for the buildable stages; everything else opens the drawer. */}
                 {canBuild ? (
                   send?.phase === 'sent' && !send.note ? (

@@ -21,6 +21,7 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
 import {
   scoreLead, pickContact, whyNow, ingestLine, parseLeadEngineConfig, digestFor, digestDue, isTradeKey,
+  pitchFor, tradeForPlaceType, TRADES,
   type LeadEventLike, type TradeKey, type DigestLead,
 } from '../../../src/lib/garvis/leadEngine/leadEngine.ts';
 import {
@@ -33,6 +34,8 @@ const MAX_SOURCES_PER_RUN = 10;   // a big market drains over ticks, never in on
 const PAUSE_AFTER_FAILURES = 5;   // the app_0113 reliability pattern: pause loudly, retry on resume
 const MAX_BODY = 2_000_000;       // 2 MB of JSON per source per tick is plenty
 const MAX_PLACES_PER_RUN = 8;     // contact append (Wave 1): bounded per tick, best-effort
+const PITCHES_PER_WEEK = 5;       // auto-pitch pacing: at most five new contractors a week
+const MAX_PITCH_CANDIDATES = 12;  // sites read per run — bounded like every other fetch loop
 const APPEND_MIN_SCORE = 60;      // score-gated enrichment — junk spends nothing
 
 /** WAVE-1 CONTACT APPEND (docs/lead-engine-data-plan.md §Layer 2): the highest-leverage
@@ -299,7 +302,141 @@ Deno.serve(async (req) => {
     } catch { /* digest drafting must never wedge the ingest */ }
   }
 
+  // WEEKLY AUTO-PITCH (worker path only): the market sells itself. Contractors the client hunt
+  // already discovered in this market's region, whose Places category maps to a trade we score,
+  // get a sample pitch built from REAL leads — plus their demo site when one exists (the bundle:
+  // leads open the door, the website raises the ticket). Every pitch is a PENDING approval; a
+  // business is pitched at most once, ever; at most PITCHES_PER_WEEK land per week.
+  let pitchesDrafted = 0;
+  if (isWorker && body.world_id) {
+    try {
+      // Pace: count this owner's lead-pitch campaigns in the last 7 days.
+      const weekAgo = new Date(Date.parse(nowIso) - 7 * 86_400_000).toISOString();
+      const { count: recent } = await admin.from('outreach_campaigns')
+        .select('id', { count: 'exact', head: true })
+        .eq('owner_id', owner).eq('kind', 'lead_pitch').gte('created_at', weekAgo);
+      const budget = Math.max(0, PITCHES_PER_WEEK - (recent ?? 0));
+
+      if (budget > 0) {
+        const { data: srcRows } = await admin.from('le_sources')
+          .select('region').eq('world_id', body.world_id).eq('active', true).limit(5);
+        const regions = [...new Set(((srcRows ?? []) as { region: string }[]).map((r) => r.region).filter(Boolean))];
+        const cities = regions.map((r) => r.split(',')[0].trim()).filter((c) => c.length > 1);
+
+        if (cities.length) {
+          // Candidate contractors: discovered in one of this market's cities, category maps to a
+          // trade, and reachable (a website we can read an address off, or one already stored).
+          const { data: bizRows } = await admin.from('discovered_businesses')
+            .select('id, company_name, website, category, city, state, preview_site_id')
+            .eq('owner_id', owner).in('city', cities).not('category', 'is', null)
+            .not('website', 'is', null).order('created_at', { ascending: false }).limit(60);
+          const candidates = ((bizRows ?? []) as { id: string; company_name: string; website: string | null; category: string | null; city: string | null; state: string | null; preview_site_id: string | null }[])
+            .map((b) => ({ ...b, trade: tradeForPlaceType(b.category) }))
+            .filter((b) => !!b.trade)
+            .slice(0, MAX_PITCH_CANDIDATES);
+
+          if (candidates.length) {
+            // The leads we can pitch, per trade (freshest, highest-scoring first).
+            const { data: leadRows } = await admin.from('le_leads')
+              .select('trade, score, why_now, contact_name, contact_company, le_events(title, source_url)')
+              .eq('world_id', body.world_id).in('status', ['new', 'delivered'])
+              .order('score', { ascending: false }).limit(120);
+            const byTrade = new Map<string, DigestLead[]>();
+            for (const l of ((leadRows ?? []) as unknown as { trade: string; score: number; why_now: string; contact_name: string | null; contact_company: string | null; le_events: { title: string; source_url: string } | null }[])) {
+              if (!isTradeKey(l.trade)) continue;
+              const arr = byTrade.get(l.trade) ?? [];
+              arr.push({
+                trade: l.trade as TradeKey, score: l.score, why_now: l.why_now,
+                contact_name: l.contact_name, contact_company: l.contact_company,
+                source_url: l.le_events?.source_url ?? '', title: l.le_events?.title ?? l.why_now,
+              });
+              byTrade.set(l.trade, arr);
+            }
+
+            const { data: os } = await admin.from('outreach_settings')
+              .select('from_name, company_name').eq('owner_id', owner).maybeSingle();
+            const fromName = ((os as { from_name?: string | null } | null)?.from_name ?? '').trim()
+              || ((os as { company_name?: string | null } | null)?.company_name ?? '').trim() || 'Me';
+            const appOrigin = (Deno.env.get('APP_ORIGIN') ?? '').replace(/\/+$/, '');
+
+            for (const biz of candidates) {
+              if (pitchesDrafted >= budget) break;
+              const trade = biz.trade as TradeKey;
+              const tradeLeads = byTrade.get(trade) ?? [];
+              if (tradeLeads.length === 0) continue;   // no real leads for their trade → no pitch
+
+              // An email address, read from their own site (verbatim; bounded; never guessed).
+              let email: string | null = null;
+              try {
+                const site = await safeFetch(biz.website!);
+                const html = (await site.text()).slice(0, 300_000);
+                const found = html.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? [];
+                email = found.find((e) => !/\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(e)
+                  && !/example\.|sentry|wixpress|godaddy|schema\.org/i.test(e)) ?? null;
+              } catch { /* an unreadable site simply isn't pitched */ }
+              if (!email) continue;
+              const to = email.toLowerCase();
+
+              // Never pitch the same inbox twice — ever.
+              const { data: prior } = await admin.from('contacts')
+                .select('id').eq('owner_id', owner).eq('email', to).maybeSingle();
+              let contactId = (prior as { id: string } | null)?.id ?? null;
+              if (contactId) {
+                const { count: already } = await admin.from('outreach_campaigns')
+                  .select('id', { count: 'exact', head: true })
+                  .eq('owner_id', owner).eq('kind', 'lead_pitch').eq('contact_id', contactId);
+                if ((already ?? 0) > 0) continue;
+              } else {
+                const { data: c } = await admin.from('contacts').insert({
+                  owner_id: owner, email: to, full_name: biz.company_name?.slice(0, 120) ?? null,
+                  email_status: 'unknown', is_primary: false,
+                }).select('id').maybeSingle();
+                contactId = (c as { id: string } | null)?.id ?? null;
+              }
+              if (!contactId) continue;
+
+              // The bundle: their already-built demo site, when one exists.
+              let siteUrl: string | null = null;
+              if (biz.preview_site_id && appOrigin) {
+                const { data: ps } = await admin.from('preview_sites')
+                  .select('slug').eq('id', biz.preview_site_id).maybeSingle();
+                const slug = (ps as { slug?: string } | null)?.slug;
+                if (slug) siteUrl = `${appOrigin}/preview-site/${slug}`;
+              }
+
+              const region = regions.find((r) => r.startsWith(biz.city ?? '')) ?? regions[0];
+              const pitch = pitchFor(trade, region, tradeLeads, fromName, { siteUrl });
+              if (!pitch) continue;
+
+              const { data: camp } = await admin.from('outreach_campaigns').insert({
+                owner_id: owner, contact_id: contactId, kind: 'lead_pitch', state: 'pending_approval',
+              }).select('id').single();
+              if (!camp) continue;
+              const { data: msg } = await admin.from('outreach_messages').insert({
+                owner_id: owner, campaign_id: (camp as { id: string }).id, contact_id: contactId,
+                sequence_step: 0, subject: pitch.subject, body_text: pitch.body, to_address: to, status: 'draft',
+              }).select('id').single();
+              if (!msg) continue;
+              const pPayload = {
+                message_id: (msg as { id: string }).id, world_id: body.world_id,
+                lead_pitch: true, discovered_business_id: biz.id,
+              };
+              await admin.from('approvals').insert({
+                owner_id: owner, kind: 'send_email', status: 'pending', requested_by: 'worker',
+                title: `Sample pitch (${TRADES[trade].label}) → ${biz.company_name || to}`,
+                preview: `${pitch.subject}\n\n${pitch.body.slice(0, 400)}`,
+                payload: pPayload, payload_hash: await hashPayload(pPayload),
+              });
+              pitchesDrafted++;
+            }
+          }
+        }
+      }
+    } catch { /* auto-pitching must never wedge the ingest */ }
+  }
+
   let line = ingestLine(checked, unreachable, eventsNew, leadsNew);
+  if (pitchesDrafted > 0) line += ` ${pitchesDrafted} sample pitch${pitchesDrafted === 1 ? '' : 'es'} drafted for approval.`;
   if (appended > 0) line += ` ${appended} contact${appended === 1 ? '' : 's'} appended.`;
   if (digestsDrafted > 0) line += ` ${digestsDrafted} weekly digest${digestsDrafted === 1 ? '' : 's'} drafted for approval.`;
   return json({ ok: true, line, sources_checked: checked, sources_unreachable: unreachable, events_new: eventsNew, leads_new: leadsNew, contacts_appended: appended, digests_drafted: digestsDrafted });
