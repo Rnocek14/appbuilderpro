@@ -13,7 +13,7 @@ import { instantiateWeb } from '../workwebRun';
 import type { StandingOrder } from '../standing';
 import {
   digestFor, commissionFor, TRADES, isTradeKey, pitchFor,
-  type DigestLead, type TradeKey, type LeadStatus,
+  type DigestLead, type TradeKey, type LeadStatus, type MarketSegment,
 } from './leadEngine.ts';
 import { slugJurisdiction, type SourceKind, type StarterSource } from './adapters.ts';
 
@@ -98,27 +98,40 @@ export async function setLeadStatus(leadId: string, status: LeadStatus): Promise
   if (error) throw new Error(error.message);
 }
 
+const SEGMENT_LABEL: Record<MarketSegment, string> = { commercial: 'Commercial', residential: 'Residential' };
+
 /** TURNKEY START: one call takes a city preset (or nothing) to a working market — world created,
- *  named for the city, put on the hourly clock, its source wired, and the first check fired.
- *  Every step past world-creation is fail-soft: the panel's checklist shows the true state and
- *  offers the missing step, so a partial start is visible, never silent. */
-export async function quickStartMarket(preset?: StarterSource | null): Promise<{ worldId: string; title: string }> {
+ *  named for the city AND its segment, put on the hourly clock with that segment in its standing
+ *  config, its source wired, and the first check fired. Every step past world-creation is
+ *  fail-soft: the panel's checklist shows the true state and offers the missing step, so a partial
+ *  start is visible, never silent.
+ *
+ *  The segment comes from the preset when there is one (a preset knows which buyer it serves) and
+ *  from the caller for a blank market; it defaults to 'commercial', which is what every market
+ *  created before segments existed is. It is written into the market's TITLE (so two Austin markets are
+ *  distinguishable at a glance) and into the standing order's config (so the worker scores the
+ *  right trades). */
+export async function quickStartMarket(
+  preset?: StarterSource | null, segment: MarketSegment = 'commercial',
+): Promise<{ worldId: string; title: string; segment: MarketSegment }> {
+  const seg = preset?.segment ?? segment;
   const web = await instantiateWeb('lead-market');
-  const title = preset ? `Lead Market — ${preset.region}` : web.title;
-  if (preset) {
-    await supabase.from('knowledge_worlds').update({ title }).eq('id', web.worldId);
-  }
-  await enableClock(web.worldId, title).catch(() => {});
+  const title = `${preset ? `Lead Market — ${preset.region}` : web.title} (${SEGMENT_LABEL[seg]})`;
+  await supabase.from('knowledge_worlds').update({ title }).eq('id', web.worldId);
+  await enableClock(web.worldId, title, seg).catch(() => {});
   if (preset) {
     await createSource({
       worldId: web.worldId, name: preset.label, kind: preset.kind,
-      baseUrl: preset.base_url, region: preset.region, queryConfig: preset.query_config,
+      baseUrl: preset.base_url, region: preset.region,
+      // The segment rides along on the source too, so a market whose clock was removed can still
+      // say honestly which buyer it serves (the panel reads it as a fallback).
+      queryConfig: { ...preset.query_config, segment: preset.segment },
       jurisdiction: preset.jurisdiction,
     }).catch(() => {});
     // First check now — instant first results instead of waiting for the next tick.
     await supabase.functions.invoke('lead-ingest', { body: { world_id: web.worldId } }).catch(() => {});
   }
-  return { worldId: web.worldId, title };
+  return { worldId: web.worldId, title, segment: seg };
 }
 
 /** THE CLOCK: is this market on the standing schedule? One lead_engine order per world — the
@@ -128,8 +141,12 @@ export async function getClockOrder(worldId: string): Promise<StandingOrder | nu
   return orders.find((o) => o.kind === 'lead_engine') ?? null;
 }
 
-/** Put the market on the clock (idempotent — returns the existing order if one exists). */
-export async function enableClock(worldId: string, worldLabel: string): Promise<StandingOrder> {
+/** Put the market on the clock (idempotent — returns the existing order if one exists). The
+ *  order's config carries the market's SEGMENT: the worker passes it to lead-ingest, which passes
+ *  it to scoreLead, which is where trades outside the segment stop being scored. */
+export async function enableClock(
+  worldId: string, worldLabel: string, segment: MarketSegment = 'commercial',
+): Promise<StandingOrder> {
   const existing = await getClockOrder(worldId);
   if (existing) {
     if (existing.status === 'paused') await setOrderStatus(existing.id, 'active');
@@ -138,7 +155,9 @@ export async function enableClock(worldId: string, worldLabel: string): Promise<
   return createOrder({
     worldId, kind: 'lead_engine', cadence: 'hourly',
     label: `Lead market: ${worldLabel}`,
-    config: {},   // trades default to ALL in the worker (parseLeadEngineConfig); narrow later if wanted
+    // trades default to ALL in the worker (parseLeadEngineConfig); the segment narrows what those
+    // trades can actually score. Narrow the trade list later if wanted.
+    config: { segment },
   });
 }
 

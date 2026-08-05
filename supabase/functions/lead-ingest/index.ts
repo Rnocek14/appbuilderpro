@@ -21,7 +21,7 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
 import {
   scoreLead, pickLeadContact, whyNow, ingestLine, parseLeadEngineConfig, digestFor, digestDue, isTradeKey,
-  pitchFor, tradeForPlaceType, changedFields, TRADES, SCORE_VERSION,
+  pitchFor, tradeForPlaceType, changedFields, tradeMatchesSegment, TRADES, SCORE_VERSION,
   type LeadEventLike, type TradeKey, type DigestLead,
 } from '../../../src/lib/garvis/leadEngine/leadEngine.ts';
 import {
@@ -149,6 +149,9 @@ Deno.serve(async (req) => {
   const isWorker = (!!workerSecret && req.headers.get('x-worker-secret') === workerSecret) || bearer === serviceKey;
   const body = (await req.json().catch(() => ({}))) as {
     owner_id?: string; world_id?: string; source_id?: string; trades?: unknown; commissionPct?: unknown;
+    /** The market's segment, forwarded from the standing order's config by standing-worker.
+     *  Absent (a direct call, or an order written before segments existed) → 'commercial'. */
+    segment?: unknown;
   };
   let owner: string;
   if (isWorker) {
@@ -161,7 +164,6 @@ Deno.serve(async (req) => {
     owner = u.user.id;
   }
 
-  const cfg = parseLeadEngineConfig({ trades: body.trades, commissionPct: body.commissionPct });
   const nowIso = new Date().toISOString();
 
   // The sources to check — always re-verified against the owner (defense in depth over RLS).
@@ -172,6 +174,25 @@ Deno.serve(async (req) => {
   if (body.world_id) q = q.eq('world_id', body.world_id);
   const { data: sources, error } = await q;
   if (error) return json({ error: error.message }, 500);
+
+  // ── THE MARKET'S SEGMENT ───────────────────────────────────────────────────
+  // Which buyer this market serves decides which trades an event may be scored for. It arrives
+  // three ways, in descending authority: the standing-worker forwards it from the order's config;
+  // a direct call ("Check sources now") has none, so the order is read here; and a market whose
+  // clock was removed still says so on its own sources. Absent everywhere → 'commercial', which is
+  // what every market created before segments existed is.
+  let segmentRaw: unknown = body.segment;
+  if (segmentRaw === undefined && body.world_id) {
+    const { data: ords } = await admin.from('standing_orders').select('config')
+      .eq('owner_id', owner).eq('world_id', body.world_id).eq('kind', 'lead_engine').limit(1);
+    segmentRaw = ((ords ?? [])[0] as { config?: Record<string, unknown> } | undefined)?.config?.segment;
+  }
+  if (segmentRaw === undefined) {
+    segmentRaw = ((sources ?? []) as SourceRow[])
+      .map((s) => (s.query_config ?? {}).segment)
+      .find((v) => v !== undefined);
+  }
+  const cfg = parseLeadEngineConfig({ trades: body.trades, commissionPct: body.commissionPct, segment: segmentRaw });
 
   let checked = 0, unreachable = 0, eventsNew = 0, eventsChanged = 0, leadsNew = 0;
   const newLeadRecords: { id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[] = [];
@@ -324,10 +345,15 @@ Deno.serve(async (req) => {
             event_type: c.event_type, occurred_at: c.occurred_at, address: c.address, region: c.region,
             valuation_usd: c.valuation_usd, title: c.title, description: c.description,
             named_parties: c.named_parties, source_url: c.source_url,
+            // The record's own classification words — what the residential follow-on rule reads
+            // to tell which trade the permit already names.
+            work_class: c.work_class, permit_type: c.permit_type,
           };
           const contact = pickLeadContact(c.named_parties);
           for (const trade of cfg.trades as TradeKey[]) {
-            const s = scoreLead(eventLike, trade, nowIso);
+            // The segment gate lives in scoreLead: a trade that does not sell into this market
+            // returns null and never becomes a row.
+            const s = scoreLead(eventLike, trade, nowIso, { segment: cfg.segment });
             if (!s) continue;
             leadRows.push({
               owner_id: src.owner_id, world_id: src.world_id, event_id: eventId, trade,
@@ -538,7 +564,9 @@ Deno.serve(async (req) => {
             .not('website', 'is', null).order('created_at', { ascending: false }).limit(60);
           const candidates = ((bizRows ?? []) as { id: string; company_name: string; website: string | null; category: string | null; city: string | null; state: string | null; preview_site_id: string | null }[])
             .map((b) => ({ ...b, trade: tradeForPlaceType(b.category) }))
-            .filter((b) => !!b.trade)
+            // A contractor is only pitched a market that sells their trade: a commercial market
+            // has no residential leads to prove itself with, and vice versa.
+            .filter((b) => !!b.trade && tradeMatchesSegment(b.trade, cfg.segment))
             .slice(0, MAX_PITCH_CANDIDATES);
 
           if (candidates.length) {

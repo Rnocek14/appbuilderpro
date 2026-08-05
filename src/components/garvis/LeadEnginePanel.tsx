@@ -14,7 +14,10 @@ import {
   type LeadSourceRow, type LeadRow, type LeadCustomerRow,
 } from '../../lib/garvis/leadEngine/leadEngineRun';
 import type { StandingOrder } from '../../lib/garvis/standing';
-import { TRADES, TRADE_KEYS, type TradeKey } from '../../lib/garvis/leadEngine/leadEngine.ts';
+import {
+  TRADES, parseLeadEngineConfig, parseSegment, tradesForSegment,
+  type TradeKey, type MarketSegment,
+} from '../../lib/garvis/leadEngine/leadEngine.ts';
 import { STARTER_SOURCES, starterById, type SourceKind } from '../../lib/garvis/leadEngine/adapters.ts';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
@@ -73,6 +76,23 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   }, [worldId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // ── THIS MARKET'S SEGMENT — the segment split ─────────────────────────────
+  // Which buyer this market serves: the standing order's config is the canonical home, and the
+  // market's own sources carry it as a fallback for a market whose clock was removed. Neither →
+  // 'commercial', which is what every market predating segments is. Everything the operator can
+  // pick a trade in is narrowed by it — offering a residential contractor "Fire & life safety"
+  // would be offering a lead this market will never produce.
+  const marketSegment: MarketSegment = clock
+    ? parseLeadEngineConfig(clock.config).segment
+    : parseSegment((sources ?? []).map((s) => (s.query_config ?? {}).segment).find((v) => v !== undefined));
+  const segmentTrades = tradesForSegment(marketSegment);
+  useEffect(() => {
+    setPitchTrade((t) => (segmentTrades.includes(t) ? t : segmentTrades[0]));
+    setCustTrade((t) => (t === 'all' || segmentTrades.includes(t) ? t : 'all'));
+    // segmentTrades is derived from marketSegment alone; re-running per render would fight the user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marketSegment]);
 
   const act = async (key: string, fn: () => Promise<void>, okMsg?: string) => {
     setBusy(key);
@@ -138,6 +158,8 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
           </div>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-2">
+          {/* Which buyer this market serves — it decides every trade list on this screen. */}
+          <Badge tone="dim">{marketSegment} market</Badge>
           {board && (board.delivered > 0 || board.won > 0) && (
             <span className="flex flex-wrap gap-2 text-xs">
               <Badge tone="dim">{board.delivered} delivered</Badge>
@@ -254,8 +276,9 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
         {/* The opener: a sample pitch built from real leads. */}
         <div className="flex flex-wrap items-center gap-2">
           <Input placeholder="prospect@contractor.com" value={pitchEmail} onChange={(e) => setPitchEmail(e.target.value)} className="w-56" />
+          {/* Only the trades this market's segment actually sells — see marketSegment above. */}
           <select value={pitchTrade} onChange={(e) => setPitchTrade(e.target.value as TradeKey)} className={selectCls}>
-            {TRADE_KEYS.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
+            {segmentTrades.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
           </select>
           <Button size="sm" loading={busy === 'pitch'}
             onClick={() => act('pitch', async () => {
@@ -290,7 +313,7 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
           <Input placeholder="customer@example.com" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} className="w-56" />
           <select value={custTrade} onChange={(e) => setCustTrade(e.target.value as TradeKey | 'all')} className={selectCls}>
             <option value="all">All trades</option>
-            {TRADE_KEYS.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
+            {segmentTrades.map((t) => <option key={t} value={t}>{TRADES[t].label}</option>)}
           </select>
           <Button size="sm" variant="outline" loading={busy === 'add-cust'}
             onClick={() => act('add-cust', async () => {
@@ -349,7 +372,7 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
               <div className="ml-auto">
                 {!clock ? (
                   <Button size="sm" loading={busy === 'clock'}
-                    onClick={() => act('clock', async () => { await enableClock(worldId, worldLabel); }, 'On the clock — first check within the hour.')}>
+                    onClick={() => act('clock', async () => { await enableClock(worldId, worldLabel, marketSegment); }, 'On the clock — first check within the hour.')}>
                     Put it on the clock
                   </Button>
                 ) : (
@@ -400,7 +423,7 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
                   className="w-full rounded-lg border border-forge-border bg-forge-panel px-3 py-2 text-sm text-forge-ink"
                 >
                   <option value="">Start from a preset… (the first check verifies it live)</option>
-                  {STARTER_SOURCES.map((p) => <option key={p.id} value={p.id}>{p.label} — {p.region}</option>)}
+                  {STARTER_SOURCES.map((p) => <option key={p.id} value={p.id}>{p.label} — {p.region} ({p.segment})</option>)}
                 </select>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <Input placeholder='Name — e.g. "Denver building permits"' value={srcName} onChange={(e) => setSrcName(e.target.value)} />

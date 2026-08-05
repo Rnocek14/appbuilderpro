@@ -858,7 +858,10 @@ Deno.serve(async (req) => {
     // READ + RECORD: new leads land as rows + one mind_event; the digest goes out via Approvals.
     if (order.kind === 'lead_engine') {
       try {
-        const cfg = (order.config ?? {}) as { trades?: unknown; commissionPct?: unknown };
+        // `segment` rides along with the trade list: it is what tells lead-ingest
+        // whether this market's events are scored for commercial or residential trades. An order
+        // written before segments existed has no key here, and reads as 'commercial'.
+        const cfg = (order.config ?? {}) as { trades?: unknown; commissionPct?: unknown; segment?: unknown };
         const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/lead-ingest`, {
           method: 'POST', signal: AbortSignal.timeout(60_000),
           headers: {
@@ -866,7 +869,7 @@ Deno.serve(async (req) => {
             'x-worker-secret': Deno.env.get('WORKER_SECRET') ?? '',
             Authorization: `Bearer ${serviceKey}`,
           },
-          body: JSON.stringify({ owner_id: order.owner_id, world_id: order.world_id, trades: cfg.trades, commissionPct: cfg.commissionPct }),
+          body: JSON.stringify({ owner_id: order.owner_id, world_id: order.world_id, trades: cfg.trades, commissionPct: cfg.commissionPct, segment: cfg.segment }),
         });
         const out = (await res.json().catch(() => ({}))) as { ok?: boolean; line?: string; leads_new?: number; error?: string };
         if (!res.ok || !out.ok) throw new Error(out.error ?? `lead-ingest HTTP ${res.status}`);

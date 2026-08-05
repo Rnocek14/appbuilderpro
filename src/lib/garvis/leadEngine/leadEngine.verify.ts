@@ -8,12 +8,15 @@ import {
   pitchFor, digestDue, tradeForPlaceType,
   pickLeadContact, normalizeRole, normalizeStatus, stableStringify, changedFields,
   SCORE_VERSION, NO_DIRECT_LINK,
+  tradesForSegment, tradeMatchesSegment, parseSegment, permittedTrade, isFollowOnTrade,
+  FOLLOW_ON_BONUS, PERMITTED_TRADE_PENALTY,
   type LeadEventLike,
 } from './leadEngine.ts';
 import {
   buildFetchUrl, parseRows, parseRowsResult, parseCsv, parseCsvLine, parseRss, sourceFormat,
   normalizeEvent, nextCursor, toIso, configHash, sourceJurisdiction, slugJurisdiction,
-  fetchOffset, FETCH_LIMIT, MAX_PAGES_PER_TICK, STARTER_SOURCES, starterById, type SourceLike,
+  fetchOffset, FETCH_LIMIT, MAX_PAGES_PER_TICK, STARTER_SOURCES, starterById,
+  startersForSegment, RESIDENTIAL_FLOOR_USD, type SourceLike,
 } from './adapters.ts';
 
 let passed = 0; let failed = 0;
@@ -159,8 +162,8 @@ check('digested 8 days ago is due; 3 days ago is not',
   digestDue('2026-07-27T12:00:00Z', '2026-08-04T12:00:00Z') && !digestDue('2026-08-01T12:00:00Z', '2026-08-04T12:00:00Z'));
 
 // ── verticals + place-type mapping ─────────────────────────────────────────
-check('registry carries 12 trades, all fully described',
-  TRADE_KEYS.length === 12 && TRADE_KEYS.every((t) => TRADES[t].label && TRADES[t].buys));
+check('registry carries 18 trades (12 commercial-or-both + 6 residential), all fully described',
+  TRADE_KEYS.length === 18 && TRADE_KEYS.every((t) => TRADES[t].label && TRADES[t].buys));
 check('place types map to trades; unknown types map to null, never guessed',
   tradeForPlaceType('roofing_contractor') === 'roofing' && tradeForPlaceType('electrician') === 'electrical'
   && tradeForPlaceType('bakery') === null && tradeForPlaceType(null) === null);
@@ -590,6 +593,195 @@ check('the page cap is bounded work per tick, not an unbounded stampede',
 
 // ── score provenance ─────────────────────────────────────────────────────
 check('a score version is stamped so historic scores stay interpretable', /^le-\d+$/.test(SCORE_VERSION));
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MARKET SEGMENTS (commercial | residential) + THE FOLLOW-ON RULE
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── the registry declares whose market each trade belongs in ─────────────
+check('every trade declares a segment, and only the three legal values',
+  TRADE_KEYS.every((t) => ['commercial', 'residential', 'both'].includes(TRADES[t].segment)));
+check('the original five commercial trades are still commercial',
+  (['acoustics', 'security', 'janitorial', 'fire_safety', 'signage'] as const).every((t) => TRADES[t].segment === 'commercial'));
+check('the seven cross-over trades are BOTH — the same work on either side of the line',
+  (['roofing', 'hvac', 'electrical', 'plumbing', 'flooring', 'landscaping', 'pest_control'] as const)
+    .every((t) => TRADES[t].segment === 'both'));
+check('the six new trades are residential and fully described',
+  (['carpentry', 'remodeling', 'painting', 'windows_doors', 'concrete', 'handyman'] as const)
+    .every((t) => TRADES[t].segment === 'residential' && !!TRADES[t].label && !!TRADES[t].buys
+      && Object.values(TRADES[t].weights).some((w) => (w ?? 0) > 0)));
+check('residential trades are permit-driven: a homeowner pulls no liquor licence and no health permit',
+  (['carpentry', 'remodeling', 'painting', 'windows_doors', 'concrete', 'handyman'] as const)
+    .every((t) => !(TRADES[t].weights.liquor_license ?? 0) && !(TRADES[t].weights.health_permit ?? 0)
+      && !(TRADES[t].weights.business_registered ?? 0)
+      && (TRADES[t].weights.permit_issued ?? 0) >= (TRADES[t].weights.news ?? 0)));
+check('tradesForSegment: commercial gets 12, residential gets 13, and BOTH trades are in each',
+  tradesForSegment('commercial').length === 12 && tradesForSegment('residential').length === 13
+  && tradesForSegment('commercial').includes('roofing') && tradesForSegment('residential').includes('roofing'));
+check('tradeMatchesSegment gates one-segment trades and always passes BOTH',
+  tradeMatchesSegment('fire_safety', 'commercial') && !tradeMatchesSegment('fire_safety', 'residential')
+  && tradeMatchesSegment('carpentry', 'residential') && !tradeMatchesSegment('carpentry', 'commercial')
+  && tradeMatchesSegment('electrical', 'commercial') && tradeMatchesSegment('electrical', 'residential'));
+
+// ── SEGMENT FILTERING: a market never produces the other market's leads ──
+const homePermit: LeadEventLike = {
+  event_type: 'permit_issued', occurred_at: '2026-08-01T00:00:00.000Z',
+  address: '18 Maple Ln, Austin, TX', region: 'Austin, TX', valuation_usd: 60_000,
+  title: 'Kitchen and bath remodel — single family', description: 'Interior remodel, no addition',
+  named_parties: [{ role: 'contractor', name: 'Sam Diaz', company: 'Diaz Remodeling' }],
+  source_url: 'https://data.austintexas.gov/permits/R-1',
+  work_class: 'Remodel', permit_type: 'RS',
+};
+check('a COMMERCIAL market never produces a residential-only lead',
+  (['carpentry', 'remodeling', 'painting', 'windows_doors', 'concrete', 'handyman'] as const)
+    .every((t) => scoreLead(homePermit, t, NOW, { segment: 'commercial' }) === null));
+check('a RESIDENTIAL market never produces a commercial-only lead',
+  (['acoustics', 'security', 'janitorial', 'fire_safety', 'signage'] as const)
+    .every((t) => scoreLead(permit, t, NOW, { segment: 'residential' }) === null));
+check('a BOTH trade scores in both markets — that is what "both" means',
+  !!scoreLead(permit, 'electrical', NOW, { segment: 'commercial' })
+  && !!scoreLead(homePermit, 'electrical', NOW, { segment: 'residential' }));
+check('the segment gate is a GATE, not a discount: a BOTH trade\'s commercial score is unchanged',
+  scoreLead(permit, 'electrical', NOW, { segment: 'commercial' })?.score === scoreLead(permit, 'electrical', NOW)?.score);
+check('every residential trade IS scorable in its own market (the gate cuts one way only)',
+  tradesForSegment('residential').every((t) => scoreLead(homePermit, t, NOW, { segment: 'residential' }) !== null));
+
+// ── THE FOLLOW-ON RULE — the residential insight ─────────────────────────
+// On a residential job the permitted scope is usually already contracted by the time the permit
+// exists; what is still open is the work that scope creates AFTERWARDS. So the permit's own trade
+// is marked down and its follow-on trades are marked up, and both say so in the reasons.
+const remodelFlooring = scoreLead(homePermit, 'flooring', NOW, { segment: 'residential' })!;
+const remodelPainting = scoreLead(homePermit, 'painting', NOW, { segment: 'residential' })!;
+const remodelItself = scoreLead(homePermit, 'remodeling', NOW, { segment: 'residential' })!;
+check('permittedTrade reads the trade out of the record\'s OWN words',
+  permittedTrade(homePermit) === 'remodeling'
+  && permittedTrade({ title: 'Reroof — 30 sq comp shingle', description: null, work_class: null, permit_type: null }) === 'roofing'
+  && permittedTrade({ title: 'New driveway approach', description: null, work_class: null, permit_type: null }) === 'concrete');
+check('permittedTrade names nothing when the record\'s words name nothing — never a guess',
+  permittedTrade({ title: 'Permit', description: null, work_class: null, permit_type: null }) === null
+  && permittedTrade({ title: '', description: null, work_class: null, permit_type: null }) === null);
+check('permittedTrade is deterministic and ordered: a remodel that mentions flooring is still a remodel',
+  permittedTrade({ title: 'Kitchen remodel — new flooring and paint', description: null, work_class: null, permit_type: null }) === 'remodeling');
+check('THE FOLLOW-ON RULE: a residential remodel permit scores FLOORING and PAINTING above REMODELING itself',
+  remodelFlooring.score > remodelItself.score && remodelPainting.score > remodelItself.score);
+check('…and the bonus states the rule in words the operator can argue with',
+  remodelFlooring.reasons.some((r) => /^\+\d+: permitted work is remodeling & general contracting; flooring typically follows$/.test(r))
+  && remodelPainting.reasons.some((r) => /permitted work is .*; painting typically follows/.test(r)));
+check('…and the permitted trade\'s markdown states WHY it is marked down',
+  remodelItself.reasons.some((r) => /^-\d+: the permit names remodeling & general contracting itself/.test(r)
+    && /usually contracted before the permit is pulled/.test(r)));
+check('the adjustment is exactly the declared constants, applied once',
+  remodelFlooring.score - (scoreLead({ ...homePermit, title: 'Permit', description: null, work_class: null, permit_type: null }, 'flooring', NOW, { segment: 'residential' })?.score ?? 0) === FOLLOW_ON_BONUS
+  && (scoreLead({ ...homePermit, title: 'Permit', description: null, work_class: null, permit_type: null }, 'remodeling', NOW, { segment: 'residential' })?.score ?? 0) - remodelItself.score === PERMITTED_TRADE_PENALTY);
+check('a trade that is neither the permitted scope nor a follow-on of it is left alone',
+  !scoreLead(homePermit, 'roofing', NOW, { segment: 'residential' })!.reasons.some((r) => /typically follows|permit names/.test(r)));
+check('isFollowOnTrade is a stated sequence, not a free-for-all',
+  isFollowOnTrade('remodeling', 'flooring') && isFollowOnTrade('concrete', 'carpentry')
+  && !isFollowOnTrade('remodeling', 'remodeling') && !isFollowOnTrade('flooring', 'remodeling'));
+check('THE RULE IS RESIDENTIAL-ONLY: a commercial permit naming its trade is never marked down',
+  (() => {
+    const commercialElectrical = scoreLead({ ...permit, title: 'Electrical service upgrade' }, 'electrical', NOW, { segment: 'commercial' })!;
+    return !commercialElectrical.reasons.some((r) => /permit names|typically follows/.test(r));
+  })());
+check('the rule only fires on PERMIT events — a news item names no permitted scope',
+  !scoreLead({ ...homePermit, event_type: 'news' }, 'flooring', NOW, { segment: 'residential' })?.reasons
+    .some((r) => /typically follows/.test(r)));
+check('the markdown can never drive a score below zero',
+  (scoreLead({ ...homePermit, valuation_usd: null, occurred_at: null, named_parties: [], title: 'Handyman repair', description: null, work_class: null, permit_type: null }, 'handyman', NOW, { segment: 'residential' })?.score ?? -1) >= 0);
+
+// ── config: segment defaults to commercial (back-compat for every existing market)
+check('BACK-COMPAT: a config with no segment is a COMMERCIAL market',
+  parseLeadEngineConfig({}).segment === 'commercial'
+  && parseLeadEngineConfig({ trades: ['security'] }).segment === 'commercial'
+  && parseLeadEngineConfig(null).segment === 'commercial');
+check('an explicit residential segment survives the parse; junk falls back to commercial',
+  parseLeadEngineConfig({ segment: 'residential' }).segment === 'residential'
+  && parseLeadEngineConfig({ segment: 'industrial' }).segment === 'commercial'
+  && parseSegment(undefined) === 'commercial' && parseSegment('residential') === 'residential');
+check('scoreLead with no segment option behaves exactly as it did before segments existed',
+  scoreLead(permit, 'security', NOW)?.score === scoreLead(permit, 'security', NOW, { segment: 'commercial' })?.score
+  && scoreLead(homePermit, 'carpentry', NOW) === null);
+
+// ── residential presets ──────────────────────────────────────────────────
+const resPresets = startersForSegment('residential');
+check('at least three cities ship a residential preset, each declaring its segment',
+  resPresets.length >= 3 && resPresets.every((p) => p.segment === 'residential')
+  && new Set(resPresets.map((p) => p.region)).size >= 3);
+check('every commercial preset still declares segment commercial (the five that shipped before)',
+  startersForSegment('commercial').length === 5
+  && startersForSegment('commercial').length + resPresets.length === STARTER_SOURCES.length);
+check('NO $25k FLOOR on a residential preset — that screen exists to keep residential work OUT',
+  resPresets.every((p) => (Number(p.query_config.min_valuation_usd) || 0) === RESIDENTIAL_FLOOR_USD
+    && RESIDENTIAL_FLOOR_USD < 25000));
+check('every residential preset is https, buildable, and carries a date field + a title mapping',
+  resPresets.every((p) => {
+    const url = buildFetchUrl({ kind: p.kind, base_url: p.base_url, region: p.region, jurisdiction: p.jurisdiction, query_config: p.query_config, cursor: {} });
+    return /^https:\/\//.test(p.base_url) && !!p.query_config.date_field && !!p.query_config.field_map?.title
+      && url.startsWith('https://') && url.includes('%24limit=');
+  }));
+check('a residential preset\'s jurisdiction slug is DISTINCT from its commercial twin — overlapping filters must not collide on one event row',
+  resPresets.every((p) => !STARTER_SOURCES.some((o) => o.id !== p.id && o.jurisdiction === p.jurisdiction))
+  && starterById('austin-permits-residential')!.jurisdiction !== starterById('austin-permits')!.jurisdiction);
+check('the residential presets that CAN filter server-side do, on the same column their commercial twin uses',
+  /Residential/.test(String(starterById('austin-permits-residential')!.query_config.where))
+  && /permit_class_mapped/.test(String(starterById('austin-permits-residential')!.query_config.where))
+  && /permitclassmapped/.test(String(starterById('seattle-permits-residential')!.query_config.where)));
+check('Chicago publishes no class marker, so its residential preset screens on cost — and says the number',
+  String(starterById('chicago-permits-residential')!.query_config.where) === `reported_cost > ${RESIDENTIAL_FLOOR_USD}`);
+check('a residential preset yields a per-record link and a FULL address, same discipline as the commercial ones',
+  resPresets.every((p) => {
+    const s: SourceLike = { kind: p.kind, base_url: p.base_url, region: p.region, jurisdiction: p.jurisdiction, query_config: p.query_config, cursor: {} };
+    const m = p.query_config.field_map ?? {};
+    const row: Record<string, unknown> = { [m.title ?? 'title']: 'Deck addition', ...(m.record_id ? { [m.record_id]: 'REC-1' } : {}) };
+    if (m.address) row[m.address] = '18 Maple Ln';
+    for (const k of m.address_parts ?? []) row[k] = 'X';
+    const e = normalizeEvent(s, row);
+    return !!e && !!e.source_url && e.source_url !== p.base_url && e.source_url.includes('REC-1') && !!e.address;
+  }));
+check('a $400 water-heater swap is FLAGGED against the small floor, stored with its reason — never dropped',
+  (() => {
+    const chi = starterById('chicago-permits-residential')!;
+    const e = normalizeEvent({ kind: chi.kind, base_url: chi.base_url, region: chi.region, jurisdiction: chi.jurisdiction, query_config: chi.query_config, cursor: {} },
+      { work_description: 'Water heater replacement', permit_: 'P-RES-1', street_number: '18', street_name: 'MAPLE', reported_cost: '400', issue_date: '2026-08-01' })!;
+    return e.qualified === false && /400/.test(e.disqualified_reason ?? '') && /1,000/.test(e.disqualified_reason ?? '')
+      && e.address === '18 MAPLE' && !!e.dedupe_key;
+  })());
+check('a $12,000 deck is KEPT — the residential floor screens junk, not the market',
+  (() => {
+    const chi = starterById('chicago-permits-residential')!;
+    const e = normalizeEvent({ kind: chi.kind, base_url: chi.base_url, region: chi.region, jurisdiction: chi.jurisdiction, query_config: chi.query_config, cursor: {} },
+      { work_description: 'New rear deck', permit_: 'P-RES-2', street_number: '18', street_name: 'MAPLE', reported_cost: '12000', issue_date: '2026-08-01' })!;
+    return e.qualified === true && e.disqualified_reason === null;
+  })());
+
+// ── end to end: one residential permit row → the leads a residential market gets
+check('END TO END: an Austin residential remodel row scores its follow-on trades above the permitted one',
+  (() => {
+    const p = starterById('austin-permits-residential')!;
+    const src: SourceLike = { kind: p.kind, base_url: p.base_url, region: p.region, jurisdiction: p.jurisdiction, query_config: p.query_config, cursor: {} };
+    const e = normalizeEvent(src, {
+      description: 'Addition and kitchen remodel', original_address1: '18 MAPLE LN', permit_number: 'R-2026-1',
+      total_job_valuation: '85000', issued_date: '2026-08-01T00:00:00.000',
+      permit_class_mapped: 'Residential', work_class: 'Addition and Remodel',
+      contractor_full_name: 'Sam Diaz', contractor_phone: '512-555-0177',
+    })!;
+    const ev: LeadEventLike = {
+      event_type: e.event_type, occurred_at: e.occurred_at, address: e.address, region: e.region,
+      valuation_usd: e.valuation_usd, title: e.title, description: e.description,
+      named_parties: e.named_parties, source_url: e.source_url,
+      work_class: e.work_class, permit_type: e.permit_type,
+    };
+    const scored = tradesForSegment('residential')
+      .map((t) => ({ t, s: scoreLead(ev, t, NOW, { segment: 'residential' }) }))
+      .filter((x): x is { t: typeof x.t; s: NonNullable<typeof x.s> } => !!x.s);
+    const by = new Map(scored.map((x) => [x.t, x.s.score]));
+    return e.qualified === true
+      && scored.length === tradesForSegment('residential').length
+      && scored.every((x) => x.s.reasons.length > 0)                       // reasons on EVERY score
+      && (by.get('flooring') ?? 0) > (by.get('remodeling') ?? 0)
+      && (by.get('painting') ?? 0) > (by.get('remodeling') ?? 0)
+      && !by.has('fire_safety');                                           // no commercial-only trade
+  })());
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} lead-engine check(s) failed`);

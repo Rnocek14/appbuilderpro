@@ -10,7 +10,7 @@
 
 import {
   contentHash, dedupeKey, normalizeKeyPart, normalizeRole, normalizeStatus,
-  type LeadEventType, type NamedParty, type RecordStatus,
+  type LeadEventType, type MarketSegment, type NamedParty, type RecordStatus,
 } from './leadEngine.ts';
 
 export type SourceKind = 'socrata' | 'arcgis' | 'accela' | 'liquor' | 'health' | 'sos' | 'rss';
@@ -675,6 +675,13 @@ export function nextCursor(
 // editable before saving.
 // ---------------------------------------------------------------------------
 
+/** The residential junk floor. NOT the commercial $25k screen — that number exists to keep
+ *  residential work out, and using it here would delete the market. $1,000 only drops the
+ *  one-line swaps (a water heater, a single fixture) that no residential contractor sells a
+ *  project off. As everywhere: a below-floor row is FLAGGED and stored with its reason, and a
+ *  record that states no value at all is never judged against a floor it cannot be measured by. */
+export const RESIDENTIAL_FLOOR_USD = 1000;
+
 export interface StarterSource {
   id: string;
   label: string;
@@ -683,6 +690,9 @@ export interface StarterSource {
   jurisdiction: string;
   kind: SourceKind;
   base_url: string;
+  /** Which market this preset is for. The UI groups by it; quickStartMarket names and configures
+   *  the market from it. */
+  segment: MarketSegment;
   query_config: SourceLike['query_config'];
 }
 
@@ -694,7 +704,7 @@ export const STARTER_SOURCES: StarterSource[] = [
     // Chicago deleted all 15 contractor phone columns in July 2019, which is exactly why the
     // names it still publishes are captured now rather than later.
     id: 'chicago-permits', label: 'Chicago building permits', region: 'Chicago, IL',
-    jurisdiction: 'chicago-il', kind: 'socrata',
+    jurisdiction: 'chicago-il', kind: 'socrata', segment: 'commercial',
     base_url: 'https://data.cityofchicago.org/resource/ydr8-5enu.json',
     query_config: {
       event_type: 'permit_issued', date_field: 'issue_date', min_valuation_usd: 25000,
@@ -723,7 +733,7 @@ export const STARTER_SOURCES: StarterSource[] = [
   },
   {
     id: 'nyc-dob-permits', label: 'NYC DOB permit issuance', region: 'New York, NY',
-    jurisdiction: 'new-york-ny', kind: 'socrata',
+    jurisdiction: 'new-york-ny', kind: 'socrata', segment: 'commercial',
     base_url: 'https://data.cityofnewyork.us/resource/ipu4-2q9a.json',
     query_config: {
       // NYC's issuance feed carries no cost column; job_type A1 (major alteration) and NB (new
@@ -767,7 +777,7 @@ export const STARTER_SOURCES: StarterSource[] = [
     // whole audit: when the two differ, the space is changing use and mechanical, plumbing,
     // electrical and fire subs are all pulled in at once.
     id: 'sf-building-permits', label: 'San Francisco building permits', region: 'San Francisco, CA',
-    jurisdiction: 'san-francisco-ca', kind: 'socrata',
+    jurisdiction: 'san-francisco-ca', kind: 'socrata', segment: 'commercial',
     base_url: 'https://data.sfgov.org/resource/i98e-djp9.json',
     query_config: {
       event_type: 'permit_issued', date_field: 'issued_date', min_valuation_usd: 25000,
@@ -796,7 +806,7 @@ export const STARTER_SOURCES: StarterSource[] = [
     // portal is unreachable from this environment (capture spec §0, §12.1). Mapping them is
     // safe under the verbatim rule: a column that does not exist reads as null, never invented.
     id: 'austin-permits', label: 'Austin building permits', region: 'Austin, TX',
-    jurisdiction: 'austin-tx', kind: 'socrata',
+    jurisdiction: 'austin-tx', kind: 'socrata', segment: 'commercial',
     base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json',
     query_config: {
       event_type: 'permit_issued', date_field: 'issued_date',
@@ -838,7 +848,7 @@ export const STARTER_SOURCES: StarterSource[] = [
     // It also carries a real `Link` permalink column and permitclassmapped, a server-side
     // commercial filter that replaces the value floor.
     id: 'seattle-permits', label: 'Seattle building permits', region: 'Seattle, WA',
-    jurisdiction: 'seattle-wa', kind: 'socrata',
+    jurisdiction: 'seattle-wa', kind: 'socrata', segment: 'commercial',
     base_url: 'https://data.seattle.gov/resource/76t5-zqzr.json',
     query_config: {
       event_type: 'permit_issued', date_field: 'issueddate',
@@ -862,8 +872,136 @@ export const STARTER_SOURCES: StarterSource[] = [
       parties: [{ role: 'contractor', company: 'contractorcompanyname' }],
     },
   },
+
+  // ── RESIDENTIAL PRESETS ───────────────────────────────────────────────────
+  // The same three portals, read for the OTHER buyer. Three deliberate differences from their
+  // commercial twins:
+  //
+  //  1. NO $25k FLOOR. That floor exists to keep residential work OUT; here it would delete the
+  //     entire market. A small floor (RESIDENTIAL_FLOOR_USD) stays, only to flag the trivial
+  //     one-line swaps — and, as always, a flagged row is STORED with its reason, never dropped,
+  //     and a record with no stated value is never judged (capture spec §3.9).
+  //  2. A RESIDENTIAL where-clause where the portal publishes a class marker, so the filter is
+  //     server-side and the junk never crosses the wire.
+  //  3. A DISTINCT jurisdiction slug (`…-res`). The slug is half of a record's identity, and a
+  //     residential and a commercial preset for one city can match the SAME permit wherever the
+  //     filters overlap (Chicago's do — its only screen is a value floor). Sharing a slug would
+  //     let one market's ingest overwrite the other's event row. Separate streams, separate slugs.
+  //
+  // Everything else is identical to the commercial preset for that city — same dataset, same
+  // address_parts, same record_id and permalink discipline — because those are already verified.
+  {
+    // FILTER PROVENANCE: `permit_class_mapped` and its 'Commercial' value are cited from committed
+    // third-party DDL (capture spec §7, and the commercial preset above). 'Residential' is that
+    // column's documented counterpart value — RESEARCH-SOURCED, not live-verified from this
+    // environment. If the value is wrong the source reports zero rows on its first check, which is
+    // visible in le_ingest_runs; it cannot silently mis-file anything.
+    id: 'austin-permits-residential', label: 'Austin residential permits', region: 'Austin, TX',
+    jurisdiction: 'austin-tx-res', kind: 'socrata', segment: 'residential',
+    base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issued_date',
+      where: "permit_class_mapped='Residential'",
+      min_valuation_usd: RESIDENTIAL_FLOOR_USD,
+      permalink_template: 'https://data.austintexas.gov/resource/3syk-w9eu.json?permit_number={record_id}',
+      field_map: {
+        title: 'description', address: 'original_address1', valuation: 'total_job_valuation',
+        date: 'issued_date', contact_name: 'applicant_full_name', permalink: 'link',
+        record_id: 'permit_number', parent_record_id: 'master_permit_num',
+        status: 'status_current', status_date: 'statusdate',
+        applied_date: 'applied_date', issued_date: 'issued_date',
+        completed_date: 'completed_date', expires_date: 'expiresdate',
+        property_class: 'permit_class_mapped', work_class: 'work_class',
+        permit_type: 'permit_type', permit_sub_type: 'permit_type_desc',
+        use_type: 'permit_class',
+        sqft_total: 'total_existing_bldg_sqft', sqft_new: 'total_new_add_sqft',
+        sqft_remodel: 'remodel_repair_sqft',
+        stories: 'number_of_floors', units: 'housing_units',
+        parcel_id: 'tcad_id', city: 'original_city', state: 'original_state',
+        postal_code: 'original_zip', lat: 'latitude', lon: 'longitude',
+      },
+      parties: [
+        // On a residential permit the homeowner is frequently the applicant, and the contractor
+        // named here is the one who already has the permitted scope — which is exactly what the
+        // follow-on rule is about.
+        {
+          role: 'contractor', name: 'contractor_full_name', company: 'contractor_company_name',
+          phone: 'contractor_phone', role_field: 'contractor_trade',
+        },
+        {
+          role: 'applicant', name: 'applicant_full_name', company: 'applicant_organization',
+          phone: 'applicant_phone',
+        },
+      ],
+    },
+  },
+  {
+    // Chicago publishes NO property-class marker at all (see the commercial preset), so there is
+    // no residential/commercial column to filter on — VERIFIED absent, not un-researched. The only
+    // server-side screen available is the same `reported_cost` the commercial preset uses, set
+    // here to the small junk floor instead of $25k. Consequence stated plainly: this source reads
+    // Chicago's whole permit stream above $1k, commercial rows included; the SEGMENT gate is what
+    // decides which trades those rows are scored for.
+    id: 'chicago-permits-residential', label: 'Chicago residential permits', region: 'Chicago, IL',
+    jurisdiction: 'chicago-il-res', kind: 'socrata', segment: 'residential',
+    base_url: 'https://data.cityofchicago.org/resource/ydr8-5enu.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issue_date',
+      min_valuation_usd: RESIDENTIAL_FLOOR_USD,
+      where: `reported_cost > ${RESIDENTIAL_FLOOR_USD}`,
+      permalink_template: 'https://data.cityofchicago.org/resource/ydr8-5enu.json?permit_={record_id}',
+      field_map: {
+        title: 'work_description', valuation: 'reported_cost', date: 'issue_date',
+        contact_name: 'contact_1_name',
+        address_parts: ['street_number', 'street_direction', 'street_name', 'suffix'],
+        record_id: 'permit_', status: 'permit_status',
+        applied_date: 'application_start_date', issued_date: 'issue_date',
+        permit_type: 'permit_type', permit_sub_type: 'review_type',
+        lat: 'latitude', lon: 'longitude', fees: 'total_fee',
+      },
+      parties: [
+        { role_field: 'contact_1_type', name: 'contact_1_name' },
+        { role_field: 'contact_2_type', name: 'contact_2_name' },
+        { role_field: 'contact_3_type', name: 'contact_3_name' },
+      ],
+    },
+  },
+  {
+    // FILTER PROVENANCE: `permitclassmapped` is the same VERIFIED column the commercial preset
+    // filters on with 'Non-Residential'; 'Residential' is its documented counterpart value —
+    // research-sourced, and the first live check is what confirms it (a miss reports as zero rows
+    // read, in the run log, never as silence).
+    id: 'seattle-permits-residential', label: 'Seattle residential permits', region: 'Seattle, WA',
+    jurisdiction: 'seattle-wa-res', kind: 'socrata', segment: 'residential',
+    base_url: 'https://data.seattle.gov/resource/76t5-zqzr.json',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issueddate',
+      where: "permitclassmapped='Residential'",
+      min_valuation_usd: RESIDENTIAL_FLOOR_USD,
+      permalink_template: 'https://data.seattle.gov/resource/76t5-zqzr.json?permitnum={record_id}',
+      field_map: {
+        title: 'description', address: 'originaladdress1', valuation: 'estprojectcost',
+        date: 'issueddate', contact_company: 'contractorcompanyname', permalink: 'link',
+        record_id: 'permitnum', parent_record_id: 'relatedmup',
+        status: 'statuscurrent',
+        applied_date: 'applieddate', issued_date: 'issueddate',
+        completed_date: 'completeddate', expires_date: 'expiresdate',
+        property_class: 'permitclassmapped', work_class: 'permitclass',
+        permit_type: 'permittypemapped', permit_sub_type: 'permittypedesc',
+        units: 'housingunits',
+        city: 'originalcity', state: 'originalstate', postal_code: 'originalzip',
+        lat: 'latitude', lon: 'longitude',
+      },
+      parties: [{ role: 'contractor', company: 'contractorcompanyname' }],
+    },
+  },
 ];
 
 export function starterById(id: string): StarterSource | null {
   return STARTER_SOURCES.find((s) => s.id === id) ?? null;
+}
+
+/** The presets for one market segment — what the Lead Markets door groups its city buttons by. */
+export function startersForSegment(segment: MarketSegment): StarterSource[] {
+  return STARTER_SOURCES.filter((s) => s.segment === segment);
 }
