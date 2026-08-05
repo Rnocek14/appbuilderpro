@@ -92,7 +92,11 @@ export interface SourceLike {
     min_valuation_usd?: number;
     [k: string]: unknown;
   };
-  cursor: { last_date?: string; [k: string]: unknown };
+  /** Free-form jsonb on le_sources. `last_date` is the incremental watermark; `page_offset` is
+   *  WHERE INSIDE that watermark's window we stopped (capture spec §6.6.2). A cursor carrying a
+   *  page_offset is a RESUME point: the date filter stays put and the next tick continues at that
+   *  row, so a day with more rows than one tick can read is never partially consumed and skipped. */
+  cursor: { last_date?: string; page_offset?: number; [k: string]: unknown };
 }
 
 /** A party read off a record, with the column it came from (the verbatim discipline). */
@@ -172,7 +176,19 @@ const DEFAULT_TYPE: Record<SourceKind, LeadEventType> = {
   liquor: 'liquor_license', health: 'health_permit', sos: 'business_registered', rss: 'news',
 };
 
-export const FETCH_LIMIT = 100; // per source per tick — a backlog drains over ticks, never in one stampede
+export const FETCH_LIMIT = 100; // rows per PAGE — a backlog drains over pages and ticks, never in one stampede
+
+/** Pages per source per tick. FETCH_LIMIT × this is the most rows one source can consume in one
+ *  run; past it the cursor keeps its date and records a `page_offset`, and the next tick resumes
+ *  mid-window. Bounded work per tick, and never a skipped record (capture spec §6.6.2). */
+export const MAX_PAGES_PER_TICK = 10;
+
+/** The row offset a fetch should start at: the explicit page offset when the caller is paging
+ *  within a tick, else the cursor's stored resume point, else the top of the window. */
+export function fetchOffset(source: Pick<SourceLike, 'cursor'>, offset?: number): number {
+  const n = Number(offset ?? source.cursor?.page_offset ?? 0);
+  return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
+}
 
 /** The wire format a source speaks: JSON (Socrata/ArcGIS/plain), CSV export, or an RSS/Atom feed.
  *  Explicit via query_config.format; the rss kind defaults to 'rss', everything else to 'json'. */
@@ -183,15 +199,27 @@ export function sourceFormat(source: Pick<SourceLike, 'kind' | 'query_config'>):
   return source.kind === 'rss' ? 'rss' : 'json';
 }
 
-/** Build the incremental fetch URL for a source. Socrata (SODA 2.x) and ArcGIS REST are the two
- *  JSON dialects; accela/liquor/health/sos portals that speak plain JSON reuse 'socrata' via
- *  their kind's own default event_type. CSV and RSS sources fetch base_url as-is (whole-feed
- *  reads — the dedupe key makes re-reads free). Cursoring is by the configured date field. */
-export function buildFetchUrl(source: SourceLike): string {
+/** Build the incremental fetch URL for a source, optionally at a page offset. Socrata (SODA 2.x)
+ *  and ArcGIS REST are the two JSON dialects; accela/liquor/health/sos portals that speak plain
+ *  JSON reuse 'socrata' via their kind's own default event_type. CSV and RSS sources fetch
+ *  base_url as-is (whole-feed reads — the dedupe key makes re-reads free), and ignore paging.
+ *  Cursoring is by the configured date field.
+ *
+ *  THE CURSOR SKIP (capture spec §6.6.2): this used to send `$limit` with NO `$offset`, ordered by
+ *  date ASC, and the cursor then advanced to the max date seen — so any day with more than
+ *  FETCH_LIMIT qualifying records (routine in NYC and Chicago) moved the watermark past that day
+ *  and the rest of it was never fetched again. Now the window is PAGED: `$offset` (SODA) /
+ *  `resultOffset` (ArcGIS) walks it, and the date filter deliberately stays pinned to the SAME
+ *  `cursor.last_date` while a `page_offset` is outstanding — resuming where we stopped instead of
+ *  stepping over the remainder. */
+export function buildFetchUrl(source: SourceLike, offset?: number): string {
   const cfg = source.query_config ?? {};
   if (sourceFormat(source) !== 'json') return source.base_url;
   const dateField = (cfg.date_field ?? '').trim();
+  // NOT advanced mid-window: while paging, every page filters on the same watermark the tick
+  // started with. Advancing it here is precisely the skip this fix exists to remove.
   const since = (source.cursor?.last_date ?? '').trim();
+  const off = fetchOffset(source, offset);
   const base = source.base_url;
 
   if (source.kind === 'arcgis') {
@@ -202,6 +230,7 @@ export function buildFetchUrl(source: SourceLike): string {
     const p = new URLSearchParams({
       where, outFields: '*', f: 'json', resultRecordCount: String(FETCH_LIMIT),
       ...(dateField ? { orderByFields: `${dateField} ASC` } : {}),
+      ...(off ? { resultOffset: String(off) } : {}),
     });
     return `${base}${base.includes('?') ? '&' : '?'}${p.toString()}`;
   }
@@ -213,6 +242,7 @@ export function buildFetchUrl(source: SourceLike): string {
   if (dateField && since) clauses.push(`${dateField} > '${since.replace(/'/g, '')}'`);
   if (clauses.length) p.set('$where', clauses.join(' AND '));
   if (dateField) p.set('$order', `${dateField} ASC`);
+  if (off) p.set('$offset', String(off));
   return `${base}${base.includes('?') ? '&' : '?'}${p.toString()}`;
 }
 
@@ -591,12 +621,50 @@ export function normalizeEvent(source: SourceLike, row: Record<string, unknown>)
   };
 }
 
-/** The next cursor after a batch: the max date seen (ISO), else the cursor unchanged. Pure —
- *  passing the same rows twice moves nothing. */
-export function nextCursor(source: SourceLike, events: CandidateEvent[]): SourceLike['cursor'] {
+/** What one tick's paging actually did — the only input the advance decision needs beyond the
+ *  rows themselves. `drained` is the honest question: did the last page come back SHORT of
+ *  FETCH_LIMIT (the window is exhausted), or did we stop because we hit the page cap with a full
+ *  page still in hand (there is provably more behind it)? */
+export interface PagingOutcome {
+  /** Rows read across every page of this tick. */
+  rows: number;
+  /** The offset this tick STARTED at — the cursor's page_offset, or 0. */
+  startOffset: number;
+  /** True only when a page returned fewer than FETCH_LIMIT rows. */
+  drained: boolean;
+}
+
+/** The next cursor after a tick. Pure — passing the same rows twice moves nothing.
+ *
+ *  THE ADVANCE RULES (capture spec §6.6.2), and the whole point of the fix:
+ *
+ *  - **Drained** — the last page came back short, so everything past `last_date` has been read.
+ *    Advance `last_date` to the max date seen across ALL of this tick's pages (rows are ordered
+ *    ASC, so the tail page holds the true maximum) and CLEAR `page_offset`.
+ *  - **Capped** — we stopped at the page cap with a full page in hand, so the window is only
+ *    PARTIALLY consumed. Keep `last_date` exactly as it was (the same filter this tick used) and
+ *    record `page_offset` = rows consumed in total, so the next tick resumes mid-window.
+ *
+ *  A partially-consumed day therefore never has its watermark advanced past it. Omitting
+ *  `paging` keeps the historic single-page behaviour: treat the batch as drained.
+ *
+ *  Note the drained-with-no-dates case: `last_date` is left alone and the offset is cleared, so
+ *  the window is simply re-read from the top next tick — a free re-read (dedupe absorbs it),
+ *  never a silent step over unread rows. */
+export function nextCursor(
+  source: SourceLike,
+  events: readonly Pick<CandidateEvent, 'occurred_at'>[],
+  paging?: PagingOutcome,
+): SourceLike['cursor'] {
+  // `page_offset` is re-derived every tick, never carried by accident.
+  const { page_offset: _spent, ...held } = source.cursor ?? {};
+  if (paging && !paging.drained) {
+    const consumed = Math.max(0, Math.trunc(paging.startOffset || 0)) + Math.max(0, Math.trunc(paging.rows || 0));
+    return { ...held, page_offset: consumed };
+  }
   const dates = events.map((e) => e.occurred_at).filter((d): d is string => !!d).sort();
   const max = dates[dates.length - 1];
-  return max ? { ...source.cursor, last_date: max } : { ...source.cursor };
+  return max ? { ...held, last_date: max } : { ...held };
 }
 
 // ---------------------------------------------------------------------------

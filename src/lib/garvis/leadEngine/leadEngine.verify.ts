@@ -13,7 +13,7 @@ import {
 import {
   buildFetchUrl, parseRows, parseRowsResult, parseCsv, parseCsvLine, parseRss, sourceFormat,
   normalizeEvent, nextCursor, toIso, configHash, sourceJurisdiction, slugJurisdiction,
-  FETCH_LIMIT, STARTER_SOURCES, starterById, type SourceLike,
+  fetchOffset, FETCH_LIMIT, MAX_PAGES_PER_TICK, STARTER_SOURCES, starterById, type SourceLike,
 } from './adapters.ts';
 
 let passed = 0; let failed = 0;
@@ -465,6 +465,128 @@ check('a portal error envelope is surfaced, not swallowed',
   (() => { const r = parseRowsResult('socrata', '{"error":{"message":"invalid column"}}'); return !r.ok && /invalid column/.test(r.error ?? ''); })());
 check('parseRows still returns rows for callers that only want the rows',
   parseRows('socrata', '[{"a":1}]').length === 1);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE CURSOR SKIP (§6.6.2) — resumable offset paging
+// ═══════════════════════════════════════════════════════════════════════════
+// `$limit=100` ordered by the date field ASC with NO `$offset`, and the cursor then advanced to
+// the max date seen. Any single day with more than 100 qualifying records — routine for NYC and
+// Chicago — moved the watermark past that day, and the remainder was NEVER fetched again:
+// permanent, silent loss in exactly the highest-volume cities.
+
+// ── the URL half: $offset / resultOffset, and a filter that stays put ─────
+check('a fresh window carries NO $offset — the unpaged first page is unchanged',
+  !buildFetchUrl(soc).includes('%24offset') && !buildFetchUrl(soc, 0).includes('%24offset'));
+check('a page offset emits $offset on the socrata dialect',
+  buildFetchUrl(soc, 200).includes('%24offset=200'));
+check('a cursor carrying page_offset pages on its own — a resumed tick needs no argument',
+  buildFetchUrl({ ...soc, cursor: { last_date: '2026-07-01', page_offset: 300 } }).includes('%24offset=300'));
+check('the arcgis dialect speaks resultOffset, not $offset, and only when paging',
+  buildFetchUrl(arc, 200).includes('resultOffset=200') && !buildFetchUrl(arc, 200).includes('%24offset')
+  && !buildFetchUrl(arc).includes('resultOffset'));
+check('PAGING RESUMES, IT DOES NOT SKIP: with a page offset the date filter stays on the SAME last_date',
+  (() => {
+    const resumed = buildFetchUrl({ ...soc, cursor: { last_date: '2026-07-01', page_offset: 200 } });
+    return resumed.includes('2026-07-01') && resumed.includes('%24offset=200')
+      && new URL(resumed).searchParams.get('$where') === new URL(buildFetchUrl(soc)).searchParams.get('$where');
+  })());
+check('fetchOffset prefers the explicit page, falls back to the cursor, and floors junk at 0',
+  fetchOffset({ cursor: { page_offset: 300 } }, 100) === 100 && fetchOffset({ cursor: { page_offset: 300 } }) === 300
+  && fetchOffset({ cursor: {} }) === 0 && fetchOffset({ cursor: { page_offset: -5 } }) === 0
+  && fetchOffset({ cursor: { page_offset: 'x' as unknown as number } }) === 0);
+check('whole-feed formats ignore paging entirely — a CSV/RSS read is the feed, not a page of it',
+  buildFetchUrl(rssSource, 200) === rssSource.base_url);
+
+// ── the decision half: drained advances, capped resumes ──────────────────
+const pagedSoc: SourceLike = { ...soc, cursor: { last_date: '2026-07-01' } };
+const drainedCursor = nextCursor(pagedSoc, evs, { rows: 150, startOffset: 0, drained: true });
+check('DRAINED: the watermark advances to the max date read and the page offset is cleared',
+  drainedCursor.last_date === '2026-08-03T00:00:00.000Z' && drainedCursor.page_offset === undefined);
+const cappedCursor = nextCursor(pagedSoc, evs, { rows: 1000, startOffset: 0, drained: false });
+check('CAPPED: the watermark does NOT move past a part-read window — the offset records where we stopped',
+  cappedCursor.last_date === '2026-07-01' && cappedCursor.page_offset === 1000);
+check('CAPPED AGAIN: the resume point accumulates across ticks (1,000 read, then 1,000 more)',
+  (() => {
+    const c = nextCursor({ ...soc, cursor: { last_date: '2026-07-01', page_offset: 1000 } }, evs,
+      { rows: 1000, startOffset: 1000, drained: false });
+    return c.page_offset === 2000 && c.last_date === '2026-07-01';
+  })());
+check('the resume point is dropped the moment the window drains — a stale offset never re-skips',
+  (() => {
+    const c = nextCursor({ ...soc, cursor: { last_date: '2026-07-01', page_offset: 2000 } }, evs,
+      { rows: 40, startOffset: 2000, drained: true });
+    return c.page_offset === undefined && c.last_date === '2026-08-03T00:00:00.000Z';
+  })());
+check('nextCursor with no paging outcome keeps the historic single-page behaviour',
+  nextCursor(soc, evs).last_date === '2026-08-03T00:00:00.000Z');
+
+// ── THE REGRESSION: a 250-record day at a 100-row limit ──────────────────
+// A pretend portal that answers exactly what the URL asks for — the $where date filter and the
+// $offset/$limit window, date ASC — so this exercises the REAL URL builder and the REAL advance
+// rule rather than a stand-in for them.
+const BIG_DAY = '2026-08-02';
+const CORPUS: Record<string, unknown>[] = [
+  ...Array.from({ length: 250 }, (_, i) => ({ description: `Permit ${i}`, full_address: `${i} Big St`, issued_date: BIG_DAY })),
+  ...Array.from({ length: 5 }, (_, i) => ({ description: `Next ${i}`, full_address: `${i} Next St`, issued_date: '2026-08-03' })),
+];
+function portal(url: string): Record<string, unknown>[] {
+  const q = new URL(url).searchParams;
+  const since = /issued_date > '([^']*)'/.exec(q.get('$where') ?? '')?.[1] ?? '';
+  const from = Number(q.get('$offset') ?? 0);
+  const limit = Number(q.get('$limit') ?? FETCH_LIMIT);
+  return CORPUS.filter((r) => String(r.issued_date) > since)
+    .sort((a, b) => String(a.issued_date).localeCompare(String(b.issued_date)))
+    .slice(from, from + limit);
+}
+/** One tick of the edge function's loop, built from the pure pieces it uses. */
+function tick(cursor: SourceLike['cursor'], maxPages = MAX_PAGES_PER_TICK) {
+  const src: SourceLike = { ...soc, cursor };
+  const startOffset = fetchOffset(src);
+  let offset = startOffset; let pages = 0; let rows = 0; let drained = false;
+  const titles: string[] = []; const dates: { occurred_at: string | null }[] = [];
+  while (pages < maxPages) {
+    const page = portal(buildFetchUrl(src, offset));
+    pages++; rows += page.length;
+    for (const r of page) {
+      const e = normalizeEvent(src, r)!;
+      titles.push(e.title); dates.push({ occurred_at: e.occurred_at });
+    }
+    if (page.length < FETCH_LIMIT) { drained = true; break; }
+    offset += FETCH_LIMIT;
+  }
+  return { titles, pages, cursor: nextCursor(src, dates, { rows, startOffset, drained }) };
+}
+
+const freshSrc: SourceLike = { ...soc, cursor: { last_date: '2026-07-01' } };
+const firstPage = portal(buildFetchUrl(freshSrc));
+const buggyCursor = nextCursor(freshSrc, firstPage.map((r) => ({ occurred_at: normalizeEvent(freshSrc, r)!.occurred_at })));
+const afterBuggy = portal(buildFetchUrl({ ...freshSrc, cursor: buggyCursor }));
+check('THE BUG IS REAL — one page, then the watermark jumps: 150 of the day\'s 250 records become unfetchable',
+  firstPage.length === 100 && buggyCursor.last_date === '2026-08-02T00:00:00.000Z'
+  && !afterBuggy.some((r) => String(r.description).startsWith('Permit ')));
+
+// Two ticks with a deliberately tiny cap (2 pages = 200 rows) — the multi-tick resume path.
+const t1 = tick({ last_date: '2026-07-01' }, 2);
+const t2 = tick(t1.cursor, 2);
+const t3 = tick(t2.cursor, 2);
+const reached = new Set([...t1.titles, ...t2.titles, ...t3.titles]);
+check('THE FIX — all 250 records of that day are reached across ticks, none skipped',
+  reached.size === 255 && Array.from({ length: 250 }, (_, i) => `Permit ${i}`).every((t) => reached.has(t)));
+check('…the capped tick kept its watermark and recorded WHERE it stopped',
+  t1.titles.length === 200 && t1.cursor.last_date === '2026-07-01' && t1.cursor.page_offset === 200);
+check('…the next tick resumed at row 200 (not row 0, not the next day) and drained the remainder',
+  t2.titles.length === 55 && t2.titles[0] === 'Permit 200'
+  && t2.cursor.last_date === '2026-08-03T00:00:00.000Z' && t2.cursor.page_offset === undefined);
+check('…and once drained the window goes quiet — a resumed cursor does not re-read forever',
+  t3.titles.length === 0 && t3.cursor.last_date === '2026-08-03T00:00:00.000Z');
+check('at the real page cap the same day drains inside ONE tick, in 3 pages',
+  (() => {
+    const one = tick({ last_date: '2026-07-01' });
+    return one.pages === 3 && one.titles.length === 255 && one.cursor.page_offset === undefined
+      && one.cursor.last_date === '2026-08-03T00:00:00.000Z';
+  })());
+check('the page cap is bounded work per tick, not an unbounded stampede',
+  MAX_PAGES_PER_TICK === 10 && FETCH_LIMIT * MAX_PAGES_PER_TICK === 1000);
 
 // ── score provenance ─────────────────────────────────────────────────────
 check('a score version is stamped so historic scores stay interpretable', /^le-\d+$/.test(SCORE_VERSION));
