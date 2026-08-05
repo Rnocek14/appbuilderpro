@@ -14,7 +14,7 @@ import {
   type LeadEventLike, type TradeKey as TradeKeyT,
 } from './leadEngine.ts';
 import {
-  buildFetchUrl, parseRows, parseRowsResult, parseCsv, parseCsvLine, parseRss, sourceFormat,
+  cursorLiteral, buildFetchUrl, parseRows, parseRowsResult, parseCsv, parseCsvLine, parseRss, sourceFormat,
   normalizeEvent, nextCursor, toIso, configHash, sourceJurisdiction, slugJurisdiction,
   fetchOffset, FETCH_LIMIT, MAX_PAGES_PER_TICK, STARTER_SOURCES, starterById,
   startersForSegment, RESIDENTIAL_FLOOR_USD, type SourceLike,
@@ -187,6 +187,21 @@ check('rss events normalize via the default map: link is the permalink, pubDate 
   !!rssEv && rssEv.source_url === 'https://boards.example.gov/dockets/55' && (rssEv.occurred_at ?? '').startsWith('2026-08-03') && rssEv.event_type === 'news');
 check('csv/rss sources fetch base_url as-is (no SODA params)',
   buildFetchUrl(rssSource) === rssSource.base_url && sourceFormat({ kind: 'liquor', query_config: { format: 'csv' } }) === 'csv');
+
+// ── the cursor timestamp dialects (a 2nd-check-only failure if wrong) ─────
+check('socrata cursor literal is ZONELESS — a trailing Z is a floating_timestamp parse error',
+  cursorLiteral('2026-08-03T00:00:00.000Z', 'socrata') === '2026-08-03T00:00:00.000'
+  && !cursorLiteral('2026-08-03T00:00:00.000Z', 'socrata').endsWith('Z'));
+check('arcgis cursor literal is space-separated with no fraction or zone',
+  cursorLiteral('2026-08-03T00:00:00.000Z', 'arcgis') === '2026-08-03 00:00:00');
+check('a quote in the cursor cannot break out of either clause',
+  !cursorLiteral("2026-08-03'--", 'socrata').includes("'") && !cursorLiteral("2026-08-03'--", 'arcgis').includes("'"));
+check('the built socrata URL carries no Z in its where clause', (() => {
+  const u = buildFetchUrl({ kind: 'socrata', base_url: 'https://x.gov/r/a.json', region: 'X, TX',
+    query_config: { date_field: 'issued_date' }, cursor: { last_date: '2026-08-03T00:00:00.000Z' } } as never);
+  const d = decodeURIComponent(u).replace(/\+/g, ' ');   // URLSearchParams encodes spaces as '+'
+  return d.includes("issued_date > '2026-08-03T00:00:00.000'") && !d.includes(".000Z'");
+})());
 
 // ── starter presets — every one must be a valid, buildable source ─────────
 check('every starter preset is https with a region, a date_field, and a title or address mapping',

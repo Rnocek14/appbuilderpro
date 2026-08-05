@@ -212,6 +212,24 @@ export function sourceFormat(source: Pick<SourceLike, 'kind' | 'query_config'>):
  *  `resultOffset` (ArcGIS) walks it, and the date filter deliberately stays pinned to the SAME
  *  `cursor.last_date` while a `page_offset` is outstanding — resuming where we stopped instead of
  *  stepping over the remainder. */
+
+/** THE CURSOR TIMESTAMP, IN EACH DIALECT'S OWN GRAMMAR. We store the watermark as a full ISO
+ *  instant ('2026-08-03T00:00:00.000Z'), but neither portal dialect accepts that verbatim:
+ *  Socrata's floating_timestamp is ZONELESS (a trailing Z is a parse error), and ArcGIS wants
+ *  'YYYY-MM-DD HH:MM:SS'. Getting this wrong is invisible on a source's FIRST check — there is no
+ *  cursor yet, so no filter is emitted — and then every later check 400s. "Worked once, then
+ *  stopped" is the signature. Quotes are stripped so a cursor value can never break out of the
+ *  clause. */
+export function cursorLiteral(iso: string, dialect: 'socrata' | 'arcgis'): string {
+  const clean = (iso ?? '').replace(/'/g, '').trim();
+  const t = Date.parse(clean);
+  if (!Number.isFinite(t)) return clean;                      // unparseable → pass through, fail loudly upstream
+  const full = new Date(t).toISOString();                     // normalize, then re-dress per dialect
+  return dialect === 'arcgis'
+    ? full.slice(0, 19).replace('T', ' ')                     // 2026-08-03 00:00:00
+    : full.replace(/Z$/, '');                                 // 2026-08-03T00:00:00.000  (floating)
+}
+
 export function buildFetchUrl(source: SourceLike, offset?: number): string {
   const cfg = source.query_config ?? {};
   if (sourceFormat(source) !== 'json') return source.base_url;
@@ -225,7 +243,7 @@ export function buildFetchUrl(source: SourceLike, offset?: number): string {
   if (source.kind === 'arcgis') {
     const clauses: string[] = [];
     if (cfg.where && String(cfg.where).trim()) clauses.push(`(${String(cfg.where).trim()})`);
-    if (dateField && since) clauses.push(`${dateField} > TIMESTAMP '${since.replace(/'/g, '')}'`);
+    if (dateField && since) clauses.push(`${dateField} > TIMESTAMP '${cursorLiteral(since, 'arcgis')}'`);
     const where = clauses.length ? clauses.join(' AND ') : '1=1';
     const p = new URLSearchParams({
       where, outFields: '*', f: 'json', resultRecordCount: String(FETCH_LIMIT),
@@ -239,7 +257,7 @@ export function buildFetchUrl(source: SourceLike, offset?: number): string {
   const p = new URLSearchParams({ $limit: String(FETCH_LIMIT) });
   const clauses: string[] = [];
   if (cfg.where && String(cfg.where).trim()) clauses.push(`(${String(cfg.where).trim()})`);
-  if (dateField && since) clauses.push(`${dateField} > '${since.replace(/'/g, '')}'`);
+  if (dateField && since) clauses.push(`${dateField} > '${cursorLiteral(since, 'socrata')}'`);
   if (clauses.length) p.set('$where', clauses.join(' AND '));
   if (dateField) p.set('$order', `${dateField} ASC`);
   if (off) p.set('$offset', String(off));
