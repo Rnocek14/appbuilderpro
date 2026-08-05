@@ -17,7 +17,8 @@ import {
   cursorLiteral, buildFetchUrl, parseRows, parseRowsResult, parseCsv, parseCsvLine, parseRss, sourceFormat,
   normalizeEvent, nextCursor, toIso, configHash, sourceJurisdiction, slugJurisdiction,
   fetchOffset, FETCH_LIMIT, MAX_PAGES_PER_TICK, STARTER_SOURCES, starterById,
-  startersForSegment, RESIDENTIAL_FLOOR_USD, type SourceLike,
+  startersForSegment, RESIDENTIAL_FLOOR_USD, seedCursor, DEFAULT_BACKFILL_DAYS,
+  presetForSource, sourceIsStale, type SourceLike,
 } from './adapters.ts';
 
 let passed = 0; let failed = 0;
@@ -225,12 +226,12 @@ check('every preset builds a FULL address — house number included, never a bar
 // ── the junk floor + multi-part address (the two lead-quality defects) ────
 const chicago = starterById('chicago-permits')!;
 const chiSource: SourceLike = { kind: chicago.kind, base_url: chicago.base_url, region: chicago.region, query_config: chicago.query_config, cursor: {} };
-const bigPermit = normalizeEvent(chiSource, { work_description: 'Interior build-out', street_number: '400', street_direction: 'N', street_name: 'MILWAUKEE', suffix: 'AVE', reported_cost: '250000', issue_date: '2026-08-01' });
+const bigPermit = normalizeEvent(chiSource, { work_description: 'Interior build-out', street_number: '400', street_direction: 'N', street_name: 'MILWAUKEE AVE', reported_cost: '250000', issue_date: '2026-08-01' });
 check('a real commercial permit keeps its FULL address', !!bigPermit && bigPermit.address === '400 N MILWAUKEE AVE');
 check('a permit with NO stated value is kept — we do not drop what we cannot judge',
   normalizeEvent(chiSource, { work_description: 'Tenant work', street_number: '9', street_name: 'PINE', issue_date: '2026-08-01' })?.qualified === true);
 check('full addresses keep two permits on the same street distinct (dedupe would collapse them)',
-  bigPermit!.dedupe_key !== normalizeEvent(chiSource, { work_description: 'Other build-out', permit_: 'P-2', street_number: '900', street_direction: 'N', street_name: 'MILWAUKEE', suffix: 'AVE', reported_cost: '90000', issue_date: '2026-08-02' })!.dedupe_key);
+  bigPermit!.dedupe_key !== normalizeEvent(chiSource, { work_description: 'Other build-out', permit_: 'P-2', street_number: '900', street_direction: 'N', street_name: 'MILWAUKEE AVE', reported_cost: '90000', issue_date: '2026-08-02' })!.dedupe_key);
 
 // ── DISQUALIFIED ROWS ARE STORED, NOT DROPPED (capture spec §3.9) ─────────
 // A portal serves a rolling window: a row we discard is gone for good, and absence cannot be
@@ -288,21 +289,21 @@ const austin = starterById('austin-permits')!;
 const atxSource: SourceLike = { kind: austin.kind, base_url: austin.base_url, region: austin.region, jurisdiction: austin.jurisdiction, query_config: austin.query_config, cursor: {} };
 const atxRow = {
   description: 'Interior finish out — suite 200', original_address1: '900 CONGRESS AVE',
-  permit_number: '2026-041234 BP', master_permit_num: '2026-000900 MP', total_job_valuation: '450000',
-  issued_date: '2026-08-01T00:00:00.000', applied_date: '2026-04-02T00:00:00.000',
+  permit_number: '2026-041234 BP', masterpermitnum: '2026-000900 MP', total_job_valuation: '450000',
+  issue_date: '2026-08-01T00:00:00.000', applieddate: '2026-04-02T00:00:00.000',
   status_current: 'Active', statusdate: '2026-08-01T00:00:00.000', expiresdate: '2027-02-01T00:00:00.000',
-  permit_class_mapped: 'Commercial', work_class: 'Remodel', permit_type: 'BP', permit_type_desc: 'Building Permit',
+  permit_class_mapped: 'Commercial', work_class: 'Remodel', permittype: 'BP', permit_type_desc: 'Building Permit',
   total_new_add_sqft: '0', remodel_repair_sqft: '6200', total_existing_bldg_sqft: '48000',
   number_of_floors: '3', housing_units: '0', tcad_id: '0123456789',
   original_city: 'AUSTIN', original_state: 'TX', original_zip: '78701',
   latitude: '30.2711', longitude: '-97.7437',
   contractor_full_name: 'Pat Jones', contractor_company_name: 'Jones GC', contractor_phone: '512-555-0134',
   contractor_trade: 'General Contractor',
-  applicant_full_name: 'Dana Reed', applicant_organization: 'Reed Architects', applicant_phone: '512-555-0199',
+  applicant_full_name: 'Dana Reed', applicant_org: 'Reed Architects', applicant_phone: '512-555-0199',
   link: { url: 'https://austin.gov/permits/2026-041234' },
 };
 const atx = normalizeEvent(atxSource, atxRow)!;
-const atxSub = normalizeEvent(atxSource, { ...atxRow, permit_number: '2026-041235 EP', permit_type: 'EP', description: 'Electrical sub-permit' })!;
+const atxSub = normalizeEvent(atxSource, { ...atxRow, permit_number: '2026-041235 EP', permittype: 'EP', description: 'Electrical sub-permit' })!;
 check('REAL CASE: an Austin job and its electrical sub-permit are two distinct events',
   atx.dedupe_key !== atxSub.dedupe_key && atx.address === atxSub.address);
 check('…and both hang off the same parent record, so the project can be re-collapsed later',
@@ -366,12 +367,13 @@ check('name_parts joins split first/last name columns (feeds that could not prod
     const nycP = starterById('nyc-dob-permits')!;
     const e = normalizeEvent(
       { kind: nycP.kind, base_url: nycP.base_url, region: nycP.region, jurisdiction: nycP.jurisdiction, query_config: nycP.query_config, cursor: {} },
-      { job_type: 'A1', house__: '100', street_name: 'BROADWAY', permit_si_no: 'S1',
-        permittee_s_first_name: 'Alex', permittee_s_last_name: 'Ruiz', permittee_s_license__: '12345',
-        owner_s_first_name: 'Jo', owner_s_last_name: 'Kim', owner_s_phone__: '2125550100' },
+      { job_description: 'Core and shell', house_no: '100', street_name: 'BROADWAY',
+        work_permit: 'M1-GC', work_type: 'General Construction',
+        applicant_first_name: 'Alex', applicant_last_name: 'Ruiz', applicant_license: '12345',
+        owner_name: 'Jo Kim', owner_business_name: 'Kim Holdings' },
     )!;
     return e.parties.some((p) => p.name === 'Alex Ruiz' && p.license_no === '12345')
-      && e.parties.some((p) => p.name === 'Jo Kim' && p.phone === '2125550100' && p.role_normalized === 'owner');
+      && e.parties.some((p) => p.name === 'Jo Kim' && p.company === 'Kim Holdings' && p.role_normalized === 'owner');
   })());
 check('named_parties (what scoring reads) mirrors the captured parties, phones included',
   atx.named_parties.length === atx.parties.length
@@ -938,6 +940,156 @@ check('A HALF-BUILT MARKET SAYS SO — it never claims the step that failed',
 check('every problem is surfaced, not just the first',
   marketStartLine({ title: 'M', withPreset: true, clockOn: false, sourceWired: false, problems: ['a happened.', 'b happened.'] })
     .text.includes('a happened. b happened.'));
+
+// ── THE STARTING WATERMARK, AND THE PRESETS' LIVE-VERIFIED COLUMN NAMES ─────────────────────
+// Every assertion below about what a portal publishes was checked against the live portal on
+// 2026-08-05, not against documentation. The 2026-08-05 audit found seven presets misconfigured
+// and two that had never returned a row.
+
+check('seedCursor: a new source is born looking back, not at the dataset\'s first row',
+  (() => {
+    const c = seedCursor({ date_field: 'issue_date' }, '2026-08-05T00:00:00.000Z');
+    return c.last_date === '2026-05-07T00:00:00.000Z';        // 90 days back
+  })());
+check('seedCursor: backfill_days overrides the default',
+  seedCursor({ date_field: 'issued_date', backfill_days: 30 }, '2026-08-05T00:00:00.000Z').last_date
+  === '2026-07-06T00:00:00.000Z');
+check('seedCursor: an explicit 0 means read the whole history — no watermark',
+  seedCursor({ date_field: 'd', backfill_days: 0 }, '2026-08-05T00:00:00.000Z').last_date === undefined);
+check('seedCursor: no date_field → nothing to cursor on, so no watermark',
+  seedCursor({ field_map: { title: 't' } }, '2026-08-05T00:00:00.000Z').last_date === undefined);
+check('seedCursor: an unparseable now never invents a date',
+  seedCursor({ date_field: 'd' }, 'not-a-date').last_date === undefined);
+check('DEFAULT_BACKFILL_DAYS is a sales quarter', DEFAULT_BACKFILL_DAYS === 90);
+check('THE SEEDED CURSOR REACHES THE FETCH URL — a first check reads this quarter, not 1921',
+  (() => {
+    const src: SourceLike = {
+      kind: 'socrata', base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json',
+      region: 'Austin, TX', jurisdiction: 'austin-tx',
+      query_config: { date_field: 'issue_date', where: "permit_class_mapped='Commercial'" },
+      cursor: seedCursor({ date_field: 'issue_date' }, '2026-08-05T00:00:00.000Z'),
+    };
+    const u = decodeURIComponent(buildFetchUrl(src)).replace(/\+/g, ' ');
+    return u.includes("issue_date > '2026-05-07T00:00:00.000'") && u.includes('$order=issue_date ASC');
+  })());
+
+check('COMPOSITE IDENTITY: one work_permit carrying two trades is two records, not one',
+  (() => {
+    const src: SourceLike = {
+      kind: 'socrata', base_url: 'https://x/y.json', region: 'New York, NY', jurisdiction: 'new-york-ny',
+      query_config: {
+        event_type: 'permit_issued', date_field: 'issued_date',
+        field_map: { record_id_parts: ['work_permit', 'work_type'], record_id: 'work_permit', date: 'issued_date', title: 'job_description' },
+      },
+      cursor: {},
+    };
+    const a = normalizeEvent(src, { work_permit: 'M00854325-I1-GC-CX', work_type: 'General Construction', issued_date: '2026-07-07T00:00:00.000', job_description: 'core and shell' });
+    const b = normalizeEvent(src, { work_permit: 'M00854325-I1-GC-CX', work_type: 'Foundation', issued_date: '2026-07-07T00:00:00.000', job_description: 'core and shell' });
+    return !!a && !!b && a.dedupe_key !== b.dedupe_key
+      && a.source_record_id === 'M00854325-I1-GC-CX/General Construction';
+  })());
+check('composite identity falls back to record_id when no part resolves',
+  (() => {
+    const src: SourceLike = {
+      kind: 'socrata', base_url: 'https://x/y.json', region: 'R', jurisdiction: 'r',
+      query_config: { field_map: { record_id_parts: ['nope', 'also_nope'], record_id: 'permit_number', title: 't' } },
+      cursor: {},
+    };
+    return normalizeEvent(src, { permit_number: 'P-1', t: 'a job' })?.source_record_id === 'P-1';
+  })());
+check('a joined id uses / so it can never read as a joined address',
+  (() => {
+    const src: SourceLike = {
+      kind: 'socrata', base_url: 'https://x/y.json', region: 'R', jurisdiction: 'r',
+      query_config: { field_map: { record_id_parts: ['a', 'b'], title: 't' } }, cursor: {},
+    };
+    return normalizeEvent(src, { a: '202605040603', b: '1641', t: 'a job' })?.source_record_id === '202605040603/1641';
+  })());
+
+// Preset assertions — each one is a column name a live call proved wrong before this pass.
+const preset = (id: string) => starterById(id)!;
+check('AUSTIN: the date column is issue_date — `issued_date` does not exist, and 400\'d every call',
+  preset('austin-permits').query_config.date_field === 'issue_date'
+  && preset('austin-permits-residential').query_config.date_field === 'issue_date');
+check('AUSTIN: applieddate / permittype / masterpermitnum / applicant_org are the real names',
+  (() => {
+    const fm = preset('austin-permits').query_config.field_map!;
+    const pm = preset('austin-permits').query_config.parties!;
+    return fm.applied_date === 'applieddate' && fm.permit_type === 'permittype'
+      && fm.parent_record_id === 'masterpermitnum'
+      && pm.some((x) => x.company === 'applicant_org');
+  })());
+check('SF: estimated_cost is TEXT, so the floor must cast — a bare > 25000 is a type mismatch',
+  preset('sf-building-permits').query_config.where!.includes('estimated_cost::number > 25000'));
+check('SF: the alias-address rows are filtered out, losing no permit',
+  preset('sf-building-permits').query_config.where!.includes("primary_address_flag='Y'"));
+check('SF: the status columns are status / status_date, and no expiry column is claimed',
+  (() => {
+    const fm = preset('sf-building-permits').query_config.field_map!;
+    return fm.status === 'status' && fm.status_date === 'status_date' && fm.expires_date === undefined;
+  })());
+check('CHICAGO: no `suffix` column is named — street_name already carries it',
+  STARTER_SOURCES.filter((s) => s.jurisdiction.startsWith('chicago'))
+    .every((s) => !(s.query_config.field_map?.address_parts ?? []).includes('suffix')));
+check('CHICAGO: work_type is read — its plainest trade signal',
+  STARTER_SOURCES.filter((s) => s.jurisdiction.startsWith('chicago'))
+    .every((s) => s.query_config.field_map?.work_class === 'work_type'));
+check('NYC: the un-cursorable text-date dataset is gone; DOB NOW replaces it',
+  (() => {
+    const p = preset('nyc-dob-permits');
+    return p.base_url.includes('rbx6-tga4') && !p.base_url.includes('ipu4-2q9a')
+      && p.query_config.date_field === 'issued_date'
+      && p.query_config.field_map?.work_class === 'work_type';
+  })());
+check('NYC reads a shorter window than the rest — it files more than the other four combined',
+  preset('nyc-dob-permits').query_config.backfill_days === 30);
+check('EVERY preset names a date field, so every preset gets a seeded watermark',
+  STARTER_SOURCES.every((s) => !!s.query_config.date_field
+    && !!seedCursor(s.query_config, '2026-08-05T00:00:00.000Z').last_date));
+check('every preset still builds a URL that filters, orders and pages',
+  STARTER_SOURCES.every((s) => {
+    const u = decodeURIComponent(buildFetchUrl({
+      kind: s.kind, base_url: s.base_url, region: s.region, jurisdiction: s.jurisdiction,
+      query_config: s.query_config, cursor: seedCursor(s.query_config, '2026-08-05T00:00:00.000Z'),
+    }));
+    return u.includes('$order=') && u.includes('$where=') && u.includes('$limit=100');
+  }));
+
+// ── REWIRING A MARKET THAT WAS BUILT ON A WRONG PRESET ─────────────────────────────────────
+// Correcting a preset fixes every market created afterwards and nothing already wired. These
+// cover the check that finds those, since the operator has no way to know a column name moved.
+check('a live source is matched back to its preset by DATASET, not by its editable name',
+  presetForSource({ base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json', jurisdiction: 'austin-tx' })?.id
+  === 'austin-permits');
+check('…and the commercial and residential reads of ONE dataset stay apart',
+  presetForSource({ base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json', jurisdiction: 'austin-tx-res' })?.id
+  === 'austin-permits-residential');
+check('a source whose dataset MOVED is still matched, so it can be pointed at the new one',
+  presetForSource({ base_url: 'https://data.cityofnewyork.us/resource/ipu4-2q9a.json', jurisdiction: 'new-york-ny' })?.id
+  === 'nyc-dob-permits');
+check('a hand-built source matches no preset — and is therefore never called stale',
+  presetForSource({ base_url: 'https://example.gov/permits.json', jurisdiction: 'nowhere-zz' }) === null
+  && sourceIsStale({ base_url: 'https://example.gov/permits.json', jurisdiction: 'nowhere-zz', query_config: { date_field: 'd' } }) === false);
+check('THE PRE-AUDIT AUSTIN CONFIG READS AS STALE — the exact config every Austin market was wired with',
+  sourceIsStale({
+    base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json', jurisdiction: 'austin-tx',
+    query_config: {
+      event_type: 'permit_issued', date_field: 'issued_date',   // ← the column that does not exist
+      where: "permit_class_mapped='Commercial'",
+      field_map: { date: 'issued_date', applied_date: 'applied_date', permit_type: 'permit_type' },
+    },
+  }) === true);
+check('a source carrying today\'s preset is NOT stale — no false alarm on a healthy market',
+  STARTER_SOURCES.every((p) => !sourceIsStale({
+    base_url: p.base_url, jurisdiction: p.jurisdiction,
+    // `segment` is stamped on at creation and is not part of the preset's own config.
+    query_config: { ...p.query_config, segment: p.segment },
+  })));
+check('staleness is decided on config, not on the cursor a source happens to hold',
+  !sourceIsStale({
+    base_url: starterById('seattle-permits')!.base_url, jurisdiction: 'seattle-wa',
+    query_config: { ...starterById('seattle-permits')!.query_config, segment: 'commercial' },
+  }));
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} lead-engine check(s) failed`);

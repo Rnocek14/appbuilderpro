@@ -15,7 +15,10 @@ import {
   digestFor, commissionFor, TRADES, isTradeKey, pitchFor,
   type DigestLead, type TradeKey, type LeadStatus, type MarketSegment,
 } from './leadEngine.ts';
-import { slugJurisdiction, type SourceKind, type StarterSource } from './adapters.ts';
+import {
+  presetForSource, seedCursor, slugJurisdiction, sourceIsStale,
+  type SourceKind, type StarterSource,
+} from './adapters.ts';
 
 export interface LeadSourceRow {
   id: string; world_id: string; name: string; kind: SourceKind; base_url: string;
@@ -70,9 +73,51 @@ export async function createSource(input: {
     // collide on the same permit number.
     jurisdiction: input.jurisdiction?.trim() || slugJurisdiction(input.region),
     query_config: input.queryConfig ?? {},
+    // BORN WITH A WATERMARK. An empty cursor emits no date filter, and the fetch is ordered
+    // oldest-first — so a new source used to start at the dataset's first row (Austin: 1921) and
+    // crawl forward 100 rows a page. Seeding it to now-minus-backfill_days is what makes the very
+    // first check return permits from this quarter instead of the Coolidge administration.
+    cursor: seedCursor(input.queryConfig as never, new Date().toISOString()),
   }).select(SOURCE_COLS).single();
   if (error) throw new Error(error.message);
   return data as LeadSourceRow;
+}
+
+/** REWIRE A SOURCE FROM ITS (corrected) PRESET.
+ *
+ *  A market wired before 2026-08-05 carries a config the live audit proved wrong — Austin asking
+ *  for `issued_date`, SF comparing text to a number, NYC reading a dataset with text dates — and
+ *  correcting the presets does nothing for a source already in the table. It also re-seeds the
+ *  watermark, because the other half of the problem was that a source with an empty cursor starts
+ *  at the dataset's first row and crawls forward a page at a time.
+ *
+ *  Deliberately NOT automatic: it overwrites whatever is in query_config, including edits the
+ *  operator made by hand. The panel offers it; nothing takes it silently. */
+export async function repairSourceFromPreset(sourceId: string): Promise<{ name: string; from: string | null }> {
+  const { data, error } = await supabase.from('le_sources').select(SOURCE_COLS).eq('id', sourceId).single();
+  if (error) throw new Error(error.message);
+  const src = data as LeadSourceRow;
+  const preset = presetForSource(src);
+  if (!preset) throw new Error(`No preset matches this source (${src.jurisdiction ?? 'no jurisdiction'}), so there is nothing verified to restore it from. Edit it by hand instead.`);
+  const config = { ...preset.query_config, segment: preset.segment };
+  const { error: upErr } = await supabase.from('le_sources').update({
+    base_url: preset.base_url,
+    query_config: config,
+    // A corrected config with the old watermark would resume mid-nowhere: the old cursor was
+    // produced by a query that could not run. Start the window over from the preset's own
+    // backfill, and clear any page offset that belonged to the broken window.
+    cursor: seedCursor(config as never, new Date().toISOString()),
+    consecutive_failures: 0,
+    last_status: 'Rewired from the verified preset — the next check reads a fresh window.',
+    updated_at: new Date().toISOString(),
+  }).eq('id', sourceId);
+  if (upErr) throw new Error(upErr.message);
+  return { name: preset.label, from: src.base_url === preset.base_url ? null : src.base_url };
+}
+
+/** Which of a market's sources are still on a config their preset has since corrected. */
+export function staleSources(sources: readonly LeadSourceRow[]): LeadSourceRow[] {
+  return sources.filter((s) => sourceIsStale(s));
 }
 
 /** Pause/resume. Resuming also forgives the failure streak — the operator said try again. */
