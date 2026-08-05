@@ -43,6 +43,14 @@ export interface FieldMap {
 
   // identity — the dedupe fix (capture spec §3.1)
   record_id?: string; parent_record_id?: string;
+  /** COMPOSITE identity, when one id column is not one record. Verified live 2026-08-05:
+   *  NYC files General Construction, Foundation and Structural under a SINGLE `work_permit`
+   *  string, and SF publishes one `permit_number` across several addresses on a multi-lot job.
+   *  With a single-column id those fold into one event and the losing row's trade — the strongest
+   *  scoring signal on the record — is silently discarded. Joined with '/' rather than the space
+   *  `address_parts` uses, so an id is never ambiguous with an address. Falls back to `record_id`
+   *  when every part is missing. */
+  record_id_parts?: string[];
 
   // lifecycle — overwritten in place upstream, so unrecoverable if not taken now (§3.2)
   status?: string; status_date?: string;
@@ -90,6 +98,9 @@ export interface SourceLike {
      *  unrecoverable. Records with no stated value are kept qualified: we don't judge what the
      *  record doesn't say. */
     min_valuation_usd?: number;
+    /** How far back a BRAND-NEW source starts reading, in days. See `seedCursor` — without this
+     *  a new source begins at the dataset's first row, which for Austin is 1921. */
+    backfill_days?: number;
     [k: string]: unknown;
   };
   /** Free-form jsonb on le_sources. `last_date` is the incremental watermark; `page_offset` is
@@ -228,6 +239,40 @@ export function cursorLiteral(iso: string, dialect: 'socrata' | 'arcgis'): strin
   return dialect === 'arcgis'
     ? full.slice(0, 19).replace('T', ' ')                     // 2026-08-03 00:00:00
     : full.replace(/Z$/, '');                                 // 2026-08-03T00:00:00.000  (floating)
+}
+
+/** How far back a new source reads when the preset doesn't say. 90 days is a full sales quarter
+ *  of permits — enough for a market to look alive on day one and to score follow-on work against
+ *  recent history, without dragging a century of dead records into the table. */
+export const DEFAULT_BACKFILL_DAYS = 90;
+
+/** THE STARTING WATERMARK (and the reason a new market used to look empty).
+ *
+ *  `buildFetchUrl` emits a date filter only when the cursor HAS a `last_date`, and orders ASC. A
+ *  source created with an empty cursor therefore starts at the oldest row in the dataset and
+ *  crawls forward FETCH_LIMIT rows at a time. Measured against the live portals on 2026-08-05:
+ *
+ *      Austin commercial   751,827 rows all-time    4,051 in the last 90 days  (oldest: 1921)
+ *      Chicago >$25k       197,426                  2,640                      (oldest: 2006)
+ *      SF >$25k            274,172                  2,055
+ *
+ *  At 100 rows a page that is thousands of ticks — days of clock time — before the feed reaches
+ *  anything a contractor could sell to, and the events table fills with century-old permits in
+ *  the meantime. Nothing errored; the market simply showed 1921 and looked broken.
+ *
+ *  So a new source is BORN with a watermark: now minus `backfill_days`. The first check then reads
+ *  this quarter's permits, which is what every screen downstream is actually for. Existing sources
+ *  are untouched — this only ever sets the cursor a source is created with. */
+export function seedCursor(
+  cfg: SourceLike['query_config'] | null | undefined, nowIso: string,
+): SourceLike['cursor'] {
+  if (!cfg?.date_field) return {};                            // no date field → nothing to cursor on
+  const raw = cfg.backfill_days;
+  const days = Number.isFinite(raw) ? Math.trunc(raw as number) : DEFAULT_BACKFILL_DAYS;
+  if (days <= 0) return {};                                   // an explicit 0 means "read everything"
+  const t = Date.parse(nowIso);
+  if (!Number.isFinite(t)) return {};
+  return { last_date: new Date(t - days * 86_400_000).toISOString() };
 }
 
 export function buildFetchUrl(source: SourceLike, offset?: number): string {
@@ -400,9 +445,9 @@ function int(row: Record<string, unknown>, key: string | undefined): number | nu
 
 /** Join a set of columns into one string (address parts, first+last name). Missing parts are
  *  skipped, never padded with a placeholder. */
-function joinParts(row: Record<string, unknown>, keys: string[] | undefined): string | null {
+function joinParts(row: Record<string, unknown>, keys: string[] | undefined, sep = ' '): string | null {
   if (!keys?.length) return null;
-  return keys.map((k) => str(row, k)).filter(Boolean).join(' ').trim() || null;
+  return keys.map((k) => str(row, k)).filter(Boolean).join(sep).trim() || null;
 }
 
 /** Date columns → ISO, else null.
@@ -600,7 +645,10 @@ export function normalizeEvent(source: SourceLike, row: Record<string, unknown>)
   const floor = Number(cfg.min_valuation_usd);
   const belowFloor = Number.isFinite(floor) && floor > 0 && valuation !== null && valuation < floor;
 
-  const recordId = str(row, map.record_id);
+  // Composite first (NYC's work_permit+work_type, SF's permit_number+block+lot), single column
+  // otherwise. '/' keeps a joined id visually distinct from a joined address.
+  const recordId = (map.record_id_parts?.length ? joinParts(row, map.record_id_parts, '/') : null)
+    ?? str(row, map.record_id);
   const parentRecordId = str(row, map.parent_record_id);
   const recordStatus = str(row, map.status);
   const dateCol = map.date ?? cfg.date_field ?? undefined;
@@ -774,13 +822,18 @@ export const STARTER_SOURCES: StarterSource[] = [
       field_map: {
         title: 'work_description', valuation: 'reported_cost', date: 'issue_date',
         contact_name: 'contact_1_name',
-        address_parts: ['street_number', 'street_direction', 'street_name', 'suffix'],
+        // VERIFIED live 2026-08-05: there is no `suffix` column — street_name already carries it
+        // ("NORMAL AVE"). The four-part join named a field that never resolved.
+        address_parts: ['street_number', 'street_direction', 'street_name'],
         // No status_date: Chicago's `permit_milestone` is a milestone LABEL, not a date, and
         // mapping it to a date slot would be a guess dressed as data. No postal_code either —
         // the only zip on the row is the CONTACT's, which is not the property's.
         record_id: 'permit_', status: 'permit_status',
         applied_date: 'application_start_date', issued_date: 'issue_date',
         permit_type: 'permit_type', permit_sub_type: 'review_type',
+        // Chicago's plainest trade signal, and it was going unread: "Masonry Work",
+        // "Small-Scale Solar PV System", "Porch Construction".
+        work_class: 'work_type',
         lat: 'latitude', lon: 'longitude', fees: 'total_fee',
       },
       parties: [
@@ -793,43 +846,68 @@ export const STARTER_SOURCES: StarterSource[] = [
     },
   },
   {
-    id: 'nyc-dob-permits', label: 'NYC DOB permit issuance', region: 'New York, NY',
+    // DATASET SWAP, VERIFIED LIVE 2026-08-05. This preset pointed at `ipu4-2q9a` (DOB Permit
+    // Issuance), and that dataset CANNOT be cursored: every one of its date columns —
+    // issuance_date, filing_date, expiration_date — is a TEXT column holding 'MM/DD/YYYY'. Socrata
+    // sorts it lexically, so `$order=issuance_date DESC` returns 12/08/1999 as the newest row in
+    // the city, and `issuance_date > '2026-05-07T00:00:00'` is a string comparison that means
+    // nothing. The feed's only real calendar_date is `dobrundate`, the day DOB republished the
+    // row — which is not when anything happened. There is no correct configuration of it.
+    //
+    // `rbx6-tga4` (DOB NOW: Build – Approved Permits) is the live system NYC filed everything
+    // through since 2021: real calendar_date issued/approved/expired, a numeric-castable cost,
+    // a written job_description, the owner by name, and the applicant's firm and licence.
+    // Confirmed: newest issued_date is today's, and 22,130 rows cleared $25k in the last 90 days.
+    id: 'nyc-dob-permits', label: 'NYC DOB approved permits', region: 'New York, NY',
     jurisdiction: 'new-york-ny', kind: 'socrata', segment: 'commercial',
-    base_url: 'https://data.cityofnewyork.us/resource/ipu4-2q9a.json',
+    base_url: 'https://data.cityofnewyork.us/resource/rbx6-tga4.json',
     query_config: {
-      // NYC's issuance feed carries no cost column; job_type A1 (major alteration) and NB (new
-      // building) are its substantial work — the rest is largely small/residential.
-      // permit_si_no is the per-permit serial (the row's own identity); job__ is the JOB, which
-      // is the parent that collapses a project's sub-permits.
-      event_type: 'permit_issued', date_field: 'issuance_date',
-      where: "job_type in ('A1','NB')",
-      permalink_template: 'https://data.cityofnewyork.us/resource/ipu4-2q9a.json?permit_si_no={record_id}',
+      // No property-class column exists on this feed, so the value floor is the only commercial
+      // screen available — stated plainly rather than implied. `::number` is required: the cost
+      // column is text. 30 days rather than the 90-day default purely on volume: NYC alone files
+      // more qualifying permits per quarter than the other four cities combined.
+      event_type: 'permit_issued', date_field: 'issued_date',
+      where: 'estimated_job_costs::number > 25000',
+      min_valuation_usd: 25000, backfill_days: 30,
+      permalink_template: 'https://data.cityofnewyork.us/resource/rbx6-tga4.json?work_permit={record_id}',
       field_map: {
-        title: 'job_type', date: 'issuance_date', contact_company: 'permittee_s_business_name',
-        address_parts: ['house__', 'street_name'],
-        record_id: 'permit_si_no', parent_record_id: 'job__',
-        status: 'permit_status', applied_date: 'filing_date', issued_date: 'issuance_date',
-        expires_date: 'expiration_date',
-        permit_type: 'permit_type', permit_sub_type: 'permit_subtype', work_class: 'job_type',
-        use_type: 'bldg_type', property_class: 'residential',
-        // The city is the BOROUGH here: without it "100 Broadway" in Manhattan and in Brooklyn
+        title: 'job_description', valuation: 'estimated_job_costs', date: 'issued_date',
+        contact_company: 'applicant_business_name',
+        address_parts: ['house_no', 'street_name'],
+        // work_permit is the permit itself ('Q01428186-I1-GC'); job_filing_number is the FILING
+        // ('Q01428186-I1'), the parent that ties a project's trades together.
+        // work_permit ALONE is not one record: verified live, 1,000 qualifying rows carried only
+        // 831 distinct values, and the repeats are different TRADES on the same filing
+        // (General Construction / Foundation / Structural). Pairing it with work_type takes that
+        // to 998/1,000 — the last two are true duplicate publications, which should collapse.
+        record_id_parts: ['work_permit', 'work_type'],
+        record_id: 'work_permit', parent_record_id: 'job_filing_number',
+        status: 'permit_status',
+        approved_date: 'approved_date', issued_date: 'issued_date', expires_date: 'expired_date',
+        // DOB NOW names the trade outright — 'Plumbing', 'Sprinklers', 'Mechanical Systems',
+        // 'Sign', 'Structural'. That is the single most useful column on the row for scoring.
+        work_class: 'work_type', permit_sub_type: 'filing_reason',
+        // The city is the BOROUGH: without it "100 Broadway" in Manhattan and in Brooklyn
         // produced an identical key. Cross-borough false merges were guaranteed.
-        city: 'borough', postal_code: 'zip_code', parcel_id: 'bin__',
-        lat: 'gis_latitude', lon: 'gis_longitude',
+        city: 'borough', postal_code: 'zip_code', parcel_id: 'bin', unit: 'apt_condo_no_s',
+        lat: 'latitude', lon: 'longitude',
       },
       parties: [
         {
-          role: 'permittee', name_parts: ['permittee_s_first_name', 'permittee_s_last_name'],
-          company: 'permittee_s_business_name', phone: 'permittee_s_phone__',
-          license_no: 'permittee_s_license__',
+          // permittee_s_license_type is the applicant's licence class — GC, PL, EW — which is
+          // the record labelling the party's trade in its own words.
+          role_field: 'permittee_s_license_type',
+          name_parts: ['applicant_first_name', 'applicant_last_name'],
+          company: 'applicant_business_name', license_no: 'applicant_license',
         },
-        // Owner-distinct-from-permittee is the highest-intent segment there is: the owner is
+        // Owner-distinct-from-applicant is the highest-intent segment there is: the owner is
         // doing the work and has not named a GC yet.
+        { role: 'owner', name: 'owner_name', company: 'owner_business_name' },
         {
-          role: 'owner', name_parts: ['owner_s_first_name', 'owner_s_last_name'],
-          company: 'owner_s_business_name', phone: 'owner_s_phone__',
+          role: 'filing_representative',
+          name_parts: ['filing_representative_first_name', 'filing_representative_last_name'],
+          company: 'filing_representative_business_name',
         },
-        { role: 'superintendent', name_parts: ['superintendent_first___last_name'], company: 'superintendent_business_name' },
       ],
     },
   },
@@ -842,15 +920,34 @@ export const STARTER_SOURCES: StarterSource[] = [
     base_url: 'https://data.sfgov.org/resource/i98e-djp9.json',
     query_config: {
       event_type: 'permit_issued', date_field: 'issued_date', min_valuation_usd: 25000,
-      where: 'estimated_cost > 25000',
+      // `estimated_cost` is a TEXT column here, so a bare `> 25000` is a SoQL type-mismatch —
+      // this source 400'd on every call it ever made. `::number` is the SoQL 2.1 cast, verified
+      // live 2026-08-05.
+      // primary_address_flag: SF publishes one row per ADDRESS ALIAS on a multi-address parcel
+      // (646 and 648 04th Av under one permit, differing only in street_number and a jittered
+      // geocode), and flags exactly one as canonical. Measured live over the last 90 days: 2,055
+      // qualifying rows collapse to 1,902 — and the distinct permit count is 1,902 either way, so
+      // the filter drops alias rows and loses no permit at all.
+      where: "estimated_cost::number > 25000 AND primary_address_flag='Y'",
       permalink_template: 'https://data.sfgov.org/resource/i98e-djp9.json?permit_number={record_id}',
       field_map: {
         title: 'description', valuation: 'estimated_cost', date: 'issued_date',
         address_parts: ['street_number', 'street_name', 'street_suffix'],
+        // One permit_number spans several sites on a multi-lot job — 930 distinct values across
+        // 1,000 qualifying rows, and the repeats are DIFFERENT ADDRESSES (518 and 524 Duncan St
+        // under one permit). block+lot is the parcel, so this splits by site and still collapses
+        // the portal's genuine double-publications (same permit, same parcel, jittered geocode).
+        // SF's own `record_id` is unique but is an epoch-ms value the portal regenerates, so it
+        // would mint a brand-new event on every republication — not identity, a timestamp.
+        record_id_parts: ['permit_number', 'block', 'lot'],
         record_id: 'permit_number',
-        status: 'current_status', status_date: 'current_status_date',
+        // VERIFIED live: the columns are `status` / `status_date`, not `current_*`. And SF
+        // publishes NO expiration column at all — the old `permit_expiration_date` mapping read
+        // null on every row, which under the verbatim rule is correct but was silent. It is gone
+        // rather than pointed at `last_permit_activity_date`, which is not an expiry.
+        status: 'status', status_date: 'status_date',
         applied_date: 'filed_date', issued_date: 'issued_date', completed_date: 'completed_date',
-        expires_date: 'permit_expiration_date',
+        approved_date: 'approved_date',
         permit_type: 'permit_type', permit_sub_type: 'permit_type_definition',
         use_type: 'existing_use', proposed_use: 'proposed_use',
         unit: 'unit', postal_code: 'zipcode', parcel_id: 'block',
@@ -870,18 +967,18 @@ export const STARTER_SOURCES: StarterSource[] = [
     jurisdiction: 'austin-tx', kind: 'socrata', segment: 'commercial',
     base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json',
     query_config: {
-      event_type: 'permit_issued', date_field: 'issued_date',
+      event_type: 'permit_issued', date_field: 'issue_date',
       where: "permit_class_mapped='Commercial'",
       permalink_template: 'https://data.austintexas.gov/resource/3syk-w9eu.json?permit_number={record_id}',
       field_map: {
         title: 'description', address: 'original_address1', valuation: 'total_job_valuation',
-        date: 'issued_date', contact_name: 'applicant_full_name', permalink: 'link',
-        record_id: 'permit_number', parent_record_id: 'master_permit_num',
+        date: 'issue_date', contact_name: 'applicant_full_name', permalink: 'link',
+        record_id: 'permit_number', parent_record_id: 'masterpermitnum',
         status: 'status_current', status_date: 'statusdate',
-        applied_date: 'applied_date', issued_date: 'issued_date',
+        applied_date: 'applieddate', issued_date: 'issue_date',
         completed_date: 'completed_date', expires_date: 'expiresdate',
         property_class: 'permit_class_mapped', work_class: 'work_class',
-        permit_type: 'permit_type', permit_sub_type: 'permit_type_desc',
+        permit_type: 'permittype', permit_sub_type: 'permit_type_desc',
         use_type: 'permit_class',
         sqft_total: 'total_existing_bldg_sqft', sqft_new: 'total_new_add_sqft',
         sqft_remodel: 'remodel_repair_sqft',
@@ -895,7 +992,7 @@ export const STARTER_SOURCES: StarterSource[] = [
           phone: 'contractor_phone', role_field: 'contractor_trade',
         },
         {
-          role: 'applicant', name: 'applicant_full_name', company: 'applicant_organization',
+          role: 'applicant', name: 'applicant_full_name', company: 'applicant_org',
           phone: 'applicant_phone',
         },
       ],
@@ -961,19 +1058,19 @@ export const STARTER_SOURCES: StarterSource[] = [
     jurisdiction: 'austin-tx-res', kind: 'socrata', segment: 'residential',
     base_url: 'https://data.austintexas.gov/resource/3syk-w9eu.json',
     query_config: {
-      event_type: 'permit_issued', date_field: 'issued_date',
+      event_type: 'permit_issued', date_field: 'issue_date',
       where: "permit_class_mapped='Residential'",
       min_valuation_usd: RESIDENTIAL_FLOOR_USD,
       permalink_template: 'https://data.austintexas.gov/resource/3syk-w9eu.json?permit_number={record_id}',
       field_map: {
         title: 'description', address: 'original_address1', valuation: 'total_job_valuation',
-        date: 'issued_date', contact_name: 'applicant_full_name', permalink: 'link',
-        record_id: 'permit_number', parent_record_id: 'master_permit_num',
+        date: 'issue_date', contact_name: 'applicant_full_name', permalink: 'link',
+        record_id: 'permit_number', parent_record_id: 'masterpermitnum',
         status: 'status_current', status_date: 'statusdate',
-        applied_date: 'applied_date', issued_date: 'issued_date',
+        applied_date: 'applieddate', issued_date: 'issue_date',
         completed_date: 'completed_date', expires_date: 'expiresdate',
         property_class: 'permit_class_mapped', work_class: 'work_class',
-        permit_type: 'permit_type', permit_sub_type: 'permit_type_desc',
+        permit_type: 'permittype', permit_sub_type: 'permit_type_desc',
         use_type: 'permit_class',
         sqft_total: 'total_existing_bldg_sqft', sqft_new: 'total_new_add_sqft',
         sqft_remodel: 'remodel_repair_sqft',
@@ -990,7 +1087,7 @@ export const STARTER_SOURCES: StarterSource[] = [
           phone: 'contractor_phone', role_field: 'contractor_trade',
         },
         {
-          role: 'applicant', name: 'applicant_full_name', company: 'applicant_organization',
+          role: 'applicant', name: 'applicant_full_name', company: 'applicant_org',
           phone: 'applicant_phone',
         },
       ],
@@ -1014,10 +1111,15 @@ export const STARTER_SOURCES: StarterSource[] = [
       field_map: {
         title: 'work_description', valuation: 'reported_cost', date: 'issue_date',
         contact_name: 'contact_1_name',
-        address_parts: ['street_number', 'street_direction', 'street_name', 'suffix'],
+        // VERIFIED live 2026-08-05: there is no `suffix` column — street_name already carries it
+        // ("NORMAL AVE"). The four-part join named a field that never resolved.
+        address_parts: ['street_number', 'street_direction', 'street_name'],
         record_id: 'permit_', status: 'permit_status',
         applied_date: 'application_start_date', issued_date: 'issue_date',
         permit_type: 'permit_type', permit_sub_type: 'review_type',
+        // Chicago's plainest trade signal, and it was going unread: "Masonry Work",
+        // "Small-Scale Solar PV System", "Porch Construction".
+        work_class: 'work_type',
         lat: 'latitude', lon: 'longitude', fees: 'total_fee',
       },
       parties: [
@@ -1057,6 +1159,42 @@ export const STARTER_SOURCES: StarterSource[] = [
     },
   },
 ];
+
+/** The preset a live source came from — matched on the DATASET, not the label, because the name
+ *  is editable and the region is free text. `base_url` alone is not enough: Austin's commercial
+ *  and residential presets are the same dataset read two ways, so the jurisdiction slug
+ *  (`austin-tx` vs `austin-tx-res`) is what separates them. */
+export function presetForSource(
+  source: Pick<SourceLike, 'base_url' | 'jurisdiction'>,
+): StarterSource | null {
+  const url = (source.base_url ?? '').trim().toLowerCase();
+  const juris = (source.jurisdiction ?? '').trim().toLowerCase();
+  return STARTER_SOURCES.find((p) => p.jurisdiction.toLowerCase() === juris && p.base_url.toLowerCase() === url)
+    ?? STARTER_SOURCES.find((p) => p.jurisdiction.toLowerCase() === juris)
+    ?? null;
+}
+
+/** Is a live source still configured the way its preset says?
+ *
+ *  This exists because a preset can be WRONG, and was. The 2026-08-05 live audit found Austin
+ *  cursoring on `issued_date` (no such column — every call 400'd), SF's floor comparing a text
+ *  column to a number (same), and NYC pointed at a dataset whose dates are text. Correcting the
+ *  presets fixes every market created afterwards and does nothing at all for the markets already
+ *  wired — those keep the broken config until something rewrites it. This is that check.
+ *
+ *  A source with no matching preset is never "stale": a hand-built source is the operator's, and
+ *  we have nothing truer to compare it against. */
+export function sourceIsStale(
+  source: Pick<SourceLike, 'base_url' | 'jurisdiction' | 'query_config'>,
+): boolean {
+  const preset = presetForSource(source);
+  if (!preset) return false;
+  // The segment is stamped onto a live source's config at creation and is not part of the
+  // preset's own config, so it is excluded from the comparison rather than reported as drift.
+  const { segment: _live, ...live } = (source.query_config ?? {}) as Record<string, unknown>;
+  const { segment: _p, ...want } = { ...preset.query_config } as Record<string, unknown>;
+  return configHash({ query_config: live as never }) !== configHash({ query_config: want as never });
+}
 
 export function starterById(id: string): StarterSource | null {
   return STARTER_SOURCES.find((s) => s.id === id) ?? null;

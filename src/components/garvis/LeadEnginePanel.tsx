@@ -5,13 +5,14 @@
 // per state; everything outbound waits in the approval queue. Every lead links its public record.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Radar, Plus, Play, Pause, ExternalLink, RefreshCw, CheckCircle2, Circle, Users, Settings2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Radar, Plus, Play, Pause, ExternalLink, RefreshCw, CheckCircle2, Circle, Users, Settings2, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, Skeleton } from '../ui';
 import { supabaseUrl } from '../../lib/supabase';
 import {
   listSources, createSource, setSourceActive, listLeads, setLeadStatus, runIngestNow,
   queueDigest, recordOutcome, leadScoreboard, getClockOrder, enableClock, setClockActive,
   listCustomers, addCustomer, setCustomerStatus, queueSamplePitch,
+  repairSourceFromPreset, staleSources,
   type LeadSourceRow, type LeadRow, type LeadCustomerRow,
 } from '../../lib/garvis/leadEngine/leadEngineRun';
 import type { StandingOrder } from '../../lib/garvis/standing';
@@ -19,7 +20,7 @@ import {
   TRADES, parseLeadEngineConfig, parseSegment, tradesForSegment,
   type TradeKey, type MarketSegment,
 } from '../../lib/garvis/leadEngine/leadEngine.ts';
-import { STARTER_SOURCES, starterById, type SourceKind } from '../../lib/garvis/leadEngine/adapters.ts';
+import { STARTER_SOURCES, starterById, sourceIsStale, type SourceKind } from '../../lib/garvis/leadEngine/adapters.ts';
 
 const SOURCE_KINDS: { value: SourceKind; label: string }[] = [
   { value: 'socrata', label: 'Permit portal (Socrata JSON)' },
@@ -150,7 +151,10 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
     { label: 'Outcome recorded', done: (board?.quoted ?? 0) + (board?.won ?? 0) > 0, hint: 'Mark quoted/won/lost on delivered leads — this data is the moat.' },
   ];
   const nextStep = steps.find((s) => !s.done);
-  const needsAttention = !clockOn || sources.length === 0 || failingSources.length > 0;
+  // A feed on a config its preset has since corrected. Setup opens itself for this the same way
+  // it does for a failing source — the operator cannot be expected to know a column name moved.
+  const stale = staleSources(sources);
+  const needsAttention = !clockOn || sources.length === 0 || failingSources.length > 0 || stale.length > 0;
   const showSetup = setupOpen ?? needsAttention;
 
   return (
@@ -384,6 +388,27 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
 
         {showSetup && (
           <div className="mt-3 space-y-3 border-t border-forge-border pt-3">
+            {/* A feed whose settings we have since corrected. The check compares this source's
+                config against its preset; a hand-built source has no preset and never appears. */}
+            {stale.length > 0 && (
+              <div className="rounded-lg border border-forge-warn/40 bg-forge-warn/5 p-3">
+                <p className="text-sm font-medium text-forge-ink">
+                  {stale.length === 1 ? 'This feed is on old settings.' : `${stale.length} feeds are on old settings.`}
+                </p>
+                <p className="mt-1 text-xs text-forge-dim">
+                  We checked every city portal live and corrected the column names and filters. Updating rewrites
+                  the feed from the verified preset and starts its window over, so the next check reads recent
+                  permits. Any hand edits to {stale.length === 1 ? 'it' : 'them'} are replaced.
+                </p>
+                <Button size="sm" className="mt-2" loading={busy === 'fix-all'}
+                  onClick={() => act('fix-all', async () => {
+                    for (const s of stale) await repairSourceFromPreset(s.id);
+                  }, `Updated ${stale.length === 1 ? 'the feed' : `${stale.length} feeds`} — press "Check now" to read a fresh window.`)}>
+                  <Wrench size={13} /> Update {stale.length === 1 ? 'it' : 'them all'}
+                </Button>
+              </div>
+            )}
+
             {/* The clock */}
             <div className="flex flex-wrap items-center gap-2 text-sm text-forge-ink">
               <span>
@@ -417,10 +442,18 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-forge-ink">{s.name}</span>
                         <Badge tone={s.active ? 'ok' : 'dim'}>{s.active ? 'active' : 'paused'}</Badge>
+                        {sourceIsStale(s) && <Badge tone="warn">needs updating</Badge>}
                         <span className="text-xs text-forge-dim">{s.region}</span>
                       </div>
                       <p className="mt-0.5 truncate text-xs text-forge-dim">{s.last_status ?? 'Hasn’t run yet — it will on the next tick.'}</p>
                     </div>
+                    {sourceIsStale(s) && (
+                      <Button size="sm" variant="outline" loading={busy === `fix-${s.id}`}
+                        onClick={() => act(`fix-${s.id}`, async () => { await repairSourceFromPreset(s.id); },
+                          'Feed updated — press "Check now" to read a fresh window.')}>
+                        <Wrench size={13} /> Update
+                      </Button>
+                    )}
                     <Button size="sm" variant="ghost" loading={busy === `src-${s.id}`}
                       onClick={() => act(`src-${s.id}`, () => setSourceActive(s.id, !s.active))}>
                       {s.active ? <Pause size={13} /> : <Play size={13} />}
