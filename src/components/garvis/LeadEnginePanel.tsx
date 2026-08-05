@@ -171,11 +171,18 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
                 <div className="flex items-center gap-2">
                   <Badge tone="ember">{TRADES[l.trade]?.label ?? l.trade} · {l.score}</Badge>
                   <Badge tone={l.status === 'won' ? 'ok' : l.status === 'lost' ? 'err' : 'dim'}>{l.status}</Badge>
-                  {l.le_events?.source_url && (
+                  {/* The record's OWN link, or a plain statement that there isn't one. It used to
+                      fall back to the dataset endpoint, which looked like a record link and was
+                      not one (capture spec §6.6). */}
+                  {l.le_events?.source_url ? (
                     <a href={l.le_events.source_url} target="_blank" rel="noreferrer"
                       className="ml-auto inline-flex items-center gap-1 text-xs text-forge-dim hover:text-forge-ink">
                       record <ExternalLink size={11} />
                     </a>
+                  ) : (
+                    <span className="ml-auto text-xs text-forge-dim" title="This dataset publishes no per-record page.">
+                      no direct link
+                    </span>
                   )}
                 </div>
                 <p className="mt-1 text-sm text-forge-ink">{l.le_events?.title ?? l.why_now}</p>
