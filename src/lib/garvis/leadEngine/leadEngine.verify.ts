@@ -189,6 +189,25 @@ check('every starter preset builds a fetch URL without throwing', STARTER_SOURCE
 }));
 check('starter preset ids are unique and resolvable', new Set(STARTER_SOURCES.map((p) => p.id)).size === STARTER_SOURCES.length
   && starterById('chicago-permits') !== null && starterById('nope') === null);
+check('every preset filters out residential junk (a value floor or a work-type filter)',
+  STARTER_SOURCES.every((p) => (Number(p.query_config.min_valuation_usd) || 0) >= 25000 || !!p.query_config.where));
+check('every preset builds a FULL address — house number included, never a bare street name',
+  STARTER_SOURCES.every((p) => {
+    const m = p.query_config.field_map ?? {};
+    if (m.address_parts?.length) return m.address_parts.length >= 2 && /number|house/i.test(m.address_parts[0]);
+    return !!m.address && /address|original/i.test(m.address);   // single-column full-address feeds
+  }));
+
+// ── the junk floor + multi-part address (the two lead-quality defects) ────
+const chicago = starterById('chicago-permits')!;
+const chiSource: SourceLike = { kind: chicago.kind, base_url: chicago.base_url, region: chicago.region, query_config: chicago.query_config, cursor: {} };
+const bigPermit = normalizeEvent(chiSource, { work_description: 'Interior build-out', street_number: '400', street_direction: 'N', street_name: 'MILWAUKEE', suffix: 'AVE', reported_cost: '250000', issue_date: '2026-08-01' });
+check('a real commercial permit keeps its FULL address', !!bigPermit && bigPermit.address === '400 N MILWAUKEE AVE');
+check('a $3k residential permit never becomes a lead', normalizeEvent(chiSource, { work_description: 'Deck', street_number: '12', street_name: 'OAK', reported_cost: '3000', issue_date: '2026-08-01' }) === null);
+check('a permit with NO stated value is kept — we do not drop what we cannot judge',
+  normalizeEvent(chiSource, { work_description: 'Tenant work', street_number: '9', street_name: 'PINE', issue_date: '2026-08-01' }) !== null);
+check('full addresses keep two permits on the same street distinct (dedupe would collapse them)',
+  bigPermit!.dedupe_key !== normalizeEvent(chiSource, { work_description: 'Other build-out', street_number: '900', street_direction: 'N', street_name: 'MILWAUKEE', suffix: 'AVE', reported_cost: '90000', issue_date: '2026-08-02' })!.dedupe_key);
 
 // ── adapters: cursor stepping ──────────────────────────────────────────────
 const evs = [ev!, { ...ev!, occurred_at: '2026-08-03T00:00:00.000Z' }];
