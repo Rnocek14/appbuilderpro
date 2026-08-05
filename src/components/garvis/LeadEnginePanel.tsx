@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Radar, Plus, Play, Pause, ExternalLink, RefreshCw, CheckCircle2, Circle, Users, Settings2, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, Skeleton } from '../ui';
+import { supabaseUrl } from '../../lib/supabase';
 import {
   listSources, createSource, setSourceActive, listLeads, setLeadStatus, runIngestNow,
   queueDigest, recordOutcome, leadScoreboard, getClockOrder, enableClock, setClockActive,
@@ -111,11 +112,19 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
         <p className="font-medium text-forge-ink">The lead market could not load.</p>
         <p className="mt-1 font-mono text-xs text-forge-err">{loadError}</p>
         {(missingTable || missingCol) && (
-          <p className="mt-2 text-xs text-forge-dim">
-            This database is behind the app. Run the Lead Engine migrations
-            (<span className="font-mono">app_0129</span>…<span className="font-mono">app_0133</span>), or deploy with
-            <span className="font-mono"> mode=full</span> to replay every migration — they are additive and idempotent.
-          </p>
+          <div className="mt-2 space-y-1 text-xs text-forge-dim">
+            <p>
+              This app is talking to project{' '}
+              <span className="font-mono text-forge-ink">{(/https?:\/\/([^.]+)\./.exec(supabaseUrl)?.[1]) ?? supabaseUrl}</span>
+              {' '}— the schema has to exist <em>there</em>. Running the migration against a different
+              project cannot fix this one.
+            </p>
+            <p>
+              Fix: open THAT project in Supabase → SQL Editor → paste the Lead Engine migrations
+              (<span className="font-mono">app_0129</span>…<span className="font-mono">app_0134</span>), then reload.
+              They are additive and idempotent, so re-running is safe.
+            </p>
+          </div>
         )}
         <button className="mt-2 underline text-xs text-forge-dim hover:text-forge-ink" onClick={() => void refresh()}>Retry</button>
       </div>
