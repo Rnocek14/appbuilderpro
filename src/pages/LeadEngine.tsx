@@ -12,7 +12,8 @@ import { Button, Card } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
 import { quickStartMarket } from '../lib/garvis/leadEngine/leadEngineRun';
-import { STARTER_SOURCES, type StarterSource } from '../lib/garvis/leadEngine/adapters.ts';
+import { startersForSegment, type StarterSource } from '../lib/garvis/leadEngine/adapters.ts';
+import type { MarketSegment } from '../lib/garvis/leadEngine/leadEngine.ts';
 
 interface MarketWorld { worldId: string; title: string; sources: number; newLeads: number; lastStatus: string | null }
 
@@ -58,10 +59,10 @@ export function LeadEngine() {
     return () => { live = false; };
   }, []);
 
-  const start = async (preset?: StarterSource) => {
-    setStarting(preset?.id ?? 'blank');
+  const start = async (preset: StarterSource | null, segment: MarketSegment) => {
+    setStarting(preset?.id ?? `blank-${segment}`);
     try {
-      const market = await quickStartMarket(preset ?? null);
+      const market = await quickStartMarket(preset, segment);
       toast('success', preset
         ? `${market.title} is live — permit feed wired, clock on, first check running.`
         : 'Market created and on the clock — add its first source inside.');
@@ -72,18 +73,35 @@ export function LeadEngine() {
     }
   };
 
-  const cityRow = (
-    <div className="flex flex-wrap gap-2">
-      {STARTER_SOURCES.map((p) => (
-        <Button key={p.id} size="sm" variant="outline" loading={starting === p.id} disabled={starting !== null}
-          onClick={() => void start(p)} title={`${p.label} — creates the market, wires this feed, first check runs now`}>
-          <Building2 size={13} /> {p.region}
+  // TWO MARKETS, ONE ENGINE. A market serves one buyer, and the choice is made here —
+  // it names the market, wires the segment's presets, and decides which trades its events are ever
+  // scored for. Same rails either way; only the buyer changes.
+  const segmentRow = (segment: MarketSegment, title: string, blurb: string) => (
+    <div className="mt-3 first:mt-0">
+      <p className="text-xs font-medium text-forge-ink">{title}</p>
+      <p className="mb-2 text-xs text-forge-dim">{blurb}</p>
+      <div className="flex flex-wrap gap-2">
+        {startersForSegment(segment).map((p) => (
+          <Button key={p.id} size="sm" variant="outline" loading={starting === p.id} disabled={starting !== null}
+            onClick={() => void start(p, segment)} title={`${p.label} — creates the market, wires this feed, first check runs now`}>
+            <Building2 size={13} /> {p.region}
+          </Button>
+        ))}
+        <Button size="sm" variant="ghost" loading={starting === `blank-${segment}`} disabled={starting !== null}
+          onClick={() => void start(null, segment)}>
+          <Plus size={13} /> Blank {segment} market
         </Button>
-      ))}
-      <Button size="sm" variant="ghost" loading={starting === 'blank'} disabled={starting !== null} onClick={() => void start()}>
-        <Plus size={13} /> Blank market
-      </Button>
+      </div>
     </div>
+  );
+
+  const cityRow = (
+    <>
+      {segmentRow('commercial', 'Commercial',
+        'Fit-outs, licences and registrations — security, fire safety, signage, janitorial, acoustics, plus the trades that work both sides.')}
+      {segmentRow('residential', 'Residential',
+        'Home permits — decks, remodels, roofing, concrete. Scored on the follow-on work: the permitted scope is usually already contracted, what comes after it is not.')}
+    </>
   );
 
   return (
@@ -102,7 +120,7 @@ export function LeadEngine() {
         <Card className="mb-6 p-4">
           <p className="mb-2 text-sm font-medium text-forge-ink">Start a market — one click, fully wired</p>
           <p className="mb-3 text-xs text-forge-dim">
-            Creates the market, names it for the city, puts it on the hourly clock, connects the permit feed, and runs the first check immediately. Presets carry each portal's field names; every source stays editable inside.
+            Pick the buyer, then the city. Creates the market, names it for both, puts it on the hourly clock, connects the permit feed, and runs the first check immediately. Presets carry each portal's field names; every source stays editable inside.
           </p>
           {cityRow}
         </Card>

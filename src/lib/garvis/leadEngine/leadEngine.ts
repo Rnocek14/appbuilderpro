@@ -88,6 +88,11 @@ export interface LeadEventLike {
    *  It is never the dataset endpoint: linking the whole feed as if it were the record is the
    *  bug this replaced (capture spec §6.6). A null link is stated as "no direct link". */
   source_url: string | null;
+  /** The record's own classification columns, when the source publishes them. Optional so every
+   *  existing caller still type-checks; read ONLY by the residential follow-on rule below, and
+   *  only as the record's own words. */
+  work_class?: string | null;
+  permit_type?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,10 +102,22 @@ export interface LeadEventLike {
 export type TradeKey =
   | 'acoustics' | 'security' | 'janitorial' | 'fire_safety' | 'signage'
   | 'roofing' | 'hvac' | 'electrical' | 'plumbing' | 'flooring'
-  | 'pest_control' | 'landscaping';
+  | 'pest_control' | 'landscaping'
+  // Residential trades — the segment split. Same rails, same events, a different buyer.
+  | 'carpentry' | 'remodeling' | 'painting' | 'windows_doors' | 'concrete' | 'handyman';
+
+/** WHICH MARKET A TRADE SELLS INTO. The same public-record stream serves two different buyers:
+ *  a commercial fit-out contractor and a residential remodeler read the SAME permit feed and want
+ *  opposite halves of it. A market declares its segment once (the standing order's config); a
+ *  trade declares whose market it belongs in. 'both' trades — roofing, HVAC, electrical, plumbing,
+ *  flooring, landscaping, pest control — are eligible everywhere, because the work is genuinely
+ *  the same trade on either side of the line. */
+export type MarketSegment = 'commercial' | 'residential';
 
 export interface TradeProfile {
   label: string;
+  /** Which market segment(s) this trade is sold into. 'both' = eligible in every market. */
+  segment: MarketSegment | 'both';
   /** Base relevance per event type, 0..40. 0 = this event never becomes a lead for this trade. */
   weights: Partial<Record<LeadEventType, number>>;
   /** One honest line of why this trade buys after these events — shown in the UI, never sent. */
@@ -109,64 +126,102 @@ export interface TradeProfile {
 
 export const TRADES: Record<TradeKey, TradeProfile> = {
   acoustics: {
-    label: 'Acoustic panels & treatment',
+    label: 'Acoustic panels & treatment', segment: 'commercial',
     weights: { permit_issued: 30, permit_applied: 20, liquor_license: 35, health_permit: 30, business_registered: 15, news: 10 },
     buys: 'Fit-outs, restaurants, gyms, and offices treat sound near the end of build-out.',
   },
   security: {
-    label: 'Security & access control',
+    label: 'Security & access control', segment: 'commercial',
     weights: { permit_issued: 35, permit_applied: 25, liquor_license: 30, health_permit: 25, business_registered: 20, news: 10 },
     buys: 'Every new commercial space needs alarms, cameras, and access control before opening.',
   },
   janitorial: {
-    label: 'Commercial cleaning',
+    label: 'Commercial cleaning', segment: 'commercial',
     weights: { permit_issued: 25, permit_applied: 10, liquor_license: 30, health_permit: 35, business_registered: 20, news: 10 },
     buys: 'New locations sign recurring cleaning contracts at opening.',
   },
   fire_safety: {
-    label: 'Fire & life safety',
+    label: 'Fire & life safety', segment: 'commercial',
     weights: { permit_issued: 35, permit_applied: 25, liquor_license: 25, health_permit: 25, business_registered: 15, news: 5 },
     buys: 'Code-mandated: every new commercial space buys inspection and monitoring, forever.',
   },
   signage: {
-    label: 'Signage',
+    label: 'Signage', segment: 'commercial',
     weights: { permit_issued: 25, permit_applied: 15, liquor_license: 35, health_permit: 30, business_registered: 25, news: 10 },
     buys: 'A new location needs signs before it opens — timing is everything.',
   },
+  // ── 'both' trades: the same work on either side of the line. Their labels stay segment-neutral
+  //    on purpose — "Commercial roofing" is the wrong word in a residential market's digest.
   roofing: {
-    label: 'Commercial roofing',
+    label: 'Roofing', segment: 'both',
     weights: { permit_issued: 30, permit_applied: 20, news: 10 },
     buys: 'New builds and remodels need roofs; storm events (coming stream) make them urgent.',
   },
   hvac: {
-    label: 'Commercial HVAC',
+    label: 'HVAC', segment: 'both',
     weights: { permit_issued: 35, permit_applied: 25, liquor_license: 25, health_permit: 25, business_registered: 10, news: 5 },
-    buys: 'Every fit-out touches mechanical — and installs become maintenance contracts.',
+    buys: 'Every fit-out and most remodels touch mechanical — and installs become maintenance contracts.',
   },
   electrical: {
-    label: 'Electrical',
+    label: 'Electrical', segment: 'both',
     weights: { permit_issued: 35, permit_applied: 25, liquor_license: 25, health_permit: 20, business_registered: 10, news: 5 },
-    buys: 'Fit-outs, equipment, and code work — electrical is on nearly every commercial permit.',
+    buys: 'Fit-outs, equipment, and code work — electrical is on nearly every permit.',
   },
   plumbing: {
-    label: 'Plumbing',
+    label: 'Plumbing', segment: 'both',
     weights: { permit_issued: 30, permit_applied: 20, liquor_license: 30, health_permit: 30, news: 5 },
-    buys: 'Restaurants and health-permitted spaces are plumbing-heavy builds.',
+    buys: 'Restaurants, health-permitted spaces and every bath remodel are plumbing-heavy builds.',
   },
   flooring: {
-    label: 'Commercial flooring',
+    label: 'Flooring', segment: 'both',
     weights: { permit_issued: 25, permit_applied: 15, liquor_license: 25, health_permit: 20, business_registered: 15, news: 5 },
-    buys: 'Late-stage fit-out: floors go in as permits close out.',
+    buys: 'Late-stage work: floors go in as the job closes out.',
   },
   pest_control: {
-    label: 'Pest control',
+    label: 'Pest control', segment: 'both',
     weights: { liquor_license: 30, health_permit: 35, business_registered: 20, permit_issued: 10, news: 5 },
     buys: 'Food-service spaces sign recurring pest contracts at opening — health code demands it.',
   },
   landscaping: {
-    label: 'Landscaping & snow',
+    label: 'Landscaping & snow', segment: 'both',
     weights: { permit_issued: 20, business_registered: 20, liquor_license: 15, health_permit: 10, news: 5 },
-    buys: 'New commercial locations sign recurring grounds and snow contracts.',
+    buys: 'New locations sign recurring grounds and snow contracts.',
+  },
+
+  // ── RESIDENTIAL TRADES ────────────────────────────────────────────────────
+  // A residential market's events are permits, essentially only permits: a homeowner does not pull
+  // a liquor licence or a health permit, and does not register a business, so those event types
+  // carry NO weight here (omitted, which is 0 — the pairing never becomes a lead row at all).
+  // `news` stays small: a storm or a development story is a real signal, just a weak one.
+  carpentry: {
+    label: 'Carpentry & decks', segment: 'residential',
+    weights: { permit_issued: 32, permit_applied: 24, news: 5 },
+    buys: 'Decks, framing and additions pull their own permits — and the trim, rot repair and punch work around them is rarely contracted yet.',
+  },
+  remodeling: {
+    label: 'Remodeling & general contracting', segment: 'residential',
+    weights: { permit_issued: 34, permit_applied: 28, news: 5 },
+    buys: 'A kitchen, bath or addition permit is a homeowner mid-project, with scope still open on both sides of the permitted work.',
+  },
+  painting: {
+    label: 'Painting', segment: 'residential',
+    weights: { permit_issued: 26, permit_applied: 16, news: 5 },
+    buys: 'Nearly every remodel, addition, window or drywall job ends in paint — and paint is contracted last.',
+  },
+  windows_doors: {
+    label: 'Windows & doors', segment: 'residential',
+    weights: { permit_issued: 28, permit_applied: 18, news: 5 },
+    buys: 'Additions and remodels change openings; replacement runs on its own cycle and is quoted separately.',
+  },
+  concrete: {
+    label: 'Concrete & flatwork', segment: 'residential',
+    weights: { permit_issued: 30, permit_applied: 22, news: 5 },
+    buys: 'Driveways, patios and foundations — for this trade the permit usually IS the whole job.',
+  },
+  handyman: {
+    label: 'Handyman & home repair', segment: 'residential',
+    weights: { permit_issued: 20, permit_applied: 12, news: 5 },
+    buys: 'Small permitted jobs, and the punch list a bigger job leaves behind.',
   },
 };
 
@@ -186,6 +241,10 @@ const PLACE_TYPE_TRADE: Record<string, TradeKey> = {
   fire_protection_service: 'fire_safety',
   flooring_contractor: 'flooring',
   flooring_store: 'flooring',
+  // Residential-side categories, same discipline: a type not in this table maps to null, so a
+  // wrong guess is impossible — it simply produces no suggestion.
+  painter: 'painting',
+  general_contractor: 'remodeling',
 };
 
 export function tradeForPlaceType(primaryType: string | null | undefined): TradeKey | null {
@@ -196,6 +255,24 @@ export const TRADE_KEYS = Object.keys(TRADES) as TradeKey[];
 
 export function isTradeKey(v: unknown): v is TradeKey {
   return typeof v === 'string' && v in TRADES;
+}
+
+/** Is this trade sellable in this market? 'both' trades always are. This is the ONE place the
+ *  segment gate is decided — scoring, the config parser and the UI dropdowns all ask here. */
+export function tradeMatchesSegment(trade: TradeKey, segment: MarketSegment): boolean {
+  const s = TRADES[trade].segment;
+  return s === 'both' || s === segment;
+}
+
+/** The trades a market of this segment may offer — the UI's dropdown list, in registry order. */
+export function tradesForSegment(segment: MarketSegment): TradeKey[] {
+  return TRADE_KEYS.filter((t) => tradeMatchesSegment(t, segment));
+}
+
+/** A stored/config value → a MarketSegment. Anything that is not literally 'residential' reads as
+ *  'commercial', which is what every market created before segments existed is. */
+export function parseSegment(v: unknown): MarketSegment {
+  return v === 'residential' ? 'residential' : 'commercial';
 }
 
 // ---------------------------------------------------------------------------
@@ -289,14 +366,115 @@ export interface LeadScore { score: number; reasons: string[] }
 
 const DAY_MS = 86_400_000;
 
-/** Score an event for a trade. Returns null when the trade has no weight for this event type —
- *  a zero-relevance pairing never becomes a lead row. Score is 0..100:
- *  base weight (0..40) + valuation band (0..30) + recency (0..20) + named contact (0..10). */
-export function scoreLead(event: LeadEventLike, trade: TradeKey, nowIso: string): LeadScore | null {
+// ---------------------------------------------------------------------------
+// THE FOLLOW-ON RULE — the residential insight
+// ---------------------------------------------------------------------------
+//
+// In a COMMERCIAL market, a permit is an opening bell: a fit-out pulls in a dozen trades over the
+// months after issuance, and almost none of them are signed on the day the permit is filed. So a
+// commercial permit scores every relevant trade the same way — highest for the ones the job needs.
+//
+// A RESIDENTIAL permit does not work like that. A homeowner does not pull a deck permit and then
+// go looking for a deck builder: by the time the permit is issued, the permitted scope is already
+// contracted — usually to the contractor who pulled it. Selling *that* trade off *that* permit is
+// selling into a job that is already sold. What is NOT sold is everything the permitted work
+// creates work for afterwards: the flooring and paint after an addition, the trim and rot repair
+// after a reroof, the framing after a foundation pour.
+//
+// So for residential markets scoreLead:
+//   1. reads the trade the permit's OWN words name (title/description/work class/permit type),
+//   2. subtracts PERMITTED_TRADE_PENALTY from that trade — the scope is likely already let,
+//   3. adds FOLLOW_ON_BONUS to the trades that typically come AFTER that scope,
+//   4. says both out loud in the score's reasons, so the operator can disagree with the engine.
+//
+// Deterministic and pure: ordered keyword patterns, a fixed adjacency table, fixed integers. No
+// statistics are claimed — the adjacency table is a stated trade-sequence opinion, readable and
+// editable in one place, not a number dressed up as evidence. Commercial markets are untouched.
+
+/** How much a follow-on trade gains, and how much the permitted trade itself loses. */
+export const FOLLOW_ON_BONUS = 12;
+export const PERMITTED_TRADE_PENALTY = 10;
+
+/** The record's own words → the trade its scope names. ORDERED: the first pattern that matches
+ *  wins, so a "kitchen remodel — new flooring" reads as remodeling (the permitted scope) rather
+ *  than flooring (one of its follow-ons). Nothing outside the record's text is consulted. */
+const PERMITTED_TRADE_PATTERNS: [RegExp, TradeKey][] = [
+  [/\b(kitchen|bath(room)?s?|addition|remodel|renovat|alteration|adu|accessory dwelling)\b/, 'remodeling'],
+  [/\b(re-?roof|roofing|roof)\b/, 'roofing'],
+  [/\b(deck|porch|framing|carpentry|trim)\b/, 'carpentry'],
+  [/\b(window|windows|door|doors)\b/, 'windows_doors'],
+  [/\b(driveway|patio|foundation|concrete|slab|footing|sidewalk)\b/, 'concrete'],
+  [/\b(electric\w*|wiring|panel upgrade)\b/, 'electrical'],
+  [/\b(plumb\w*|sewer|repipe|water heater)\b/, 'plumbing'],
+  [/\b(hvac|mechanical|furnace|heat pump|air condition\w*|ductwork)\b/, 'hvac'],
+  [/\b(paint\w*)\b/, 'painting'],
+  [/\b(floor\w*|tile)\b/, 'flooring'],
+  [/\b(landscap\w*|irrigation|fence|retaining wall)\b/, 'landscaping'],
+];
+
+/** Which trades typically follow a given permitted scope on a residential job. A stated sequence
+ *  opinion, not a measurement — every entry is the work that becomes available AFTER the permitted
+ *  scope is done, which is the work still open to be sold. */
+const FOLLOW_ON_TRADES: Partial<Record<TradeKey, TradeKey[]>> = {
+  remodeling: ['flooring', 'painting', 'electrical', 'plumbing', 'windows_doors', 'hvac'],
+  carpentry: ['painting', 'flooring', 'roofing'],
+  concrete: ['carpentry', 'landscaping'],
+  roofing: ['carpentry'],
+  windows_doors: ['painting', 'carpentry'],
+  electrical: ['painting'],
+  plumbing: ['flooring', 'painting'],
+};
+
+/** The trade a permit's own text names, or null when its words name none of ours. Pure and
+ *  deterministic; reads title, description and the record's classification columns only. */
+export function permittedTrade(event: Pick<LeadEventLike, 'title' | 'description' | 'work_class' | 'permit_type'>): TradeKey | null {
+  const text = [event.title, event.description, event.work_class, event.permit_type]
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+    .join(' ')
+    .toLowerCase();
+  if (!text) return null;
+  for (const [re, trade] of PERMITTED_TRADE_PATTERNS) if (re.test(text)) return trade;
+  return null;
+}
+
+/** Do jobs of `permitted` scope typically create work for `trade` afterwards? */
+export function isFollowOnTrade(permitted: TradeKey, trade: TradeKey): boolean {
+  return (FOLLOW_ON_TRADES[permitted] ?? []).includes(trade);
+}
+
+/** Score an event for a trade. Returns null when the trade has no weight for this event type, or
+ *  when the trade does not sell into this market's segment — either way a zero-relevance pairing
+ *  never becomes a lead row. Score is 0..100:
+ *  base weight (0..40) + valuation band (0..30) + recency (0..20) + named contact (0..10),
+ *  plus the residential follow-on adjustment above (±).
+ *
+ *  `segment` defaults to 'commercial' — the same default parseLeadEngineConfig uses, so every
+ *  market that existed before segments scores exactly as it did. */
+export function scoreLead(
+  event: LeadEventLike, trade: TradeKey, nowIso: string,
+  opts?: { segment?: MarketSegment },
+): LeadScore | null {
+  const segment = opts?.segment ?? 'commercial';
+  if (!tradeMatchesSegment(trade, segment)) return null;
   const base = TRADES[trade].weights[event.event_type] ?? 0;
   if (base <= 0) return null;
   const reasons: string[] = [`${event.event_type.replace(/_/g, ' ')} is a ${TRADES[trade].label} trigger (+${base})`];
   let score = base;
+
+  // THE FOLLOW-ON RULE (residential permits only — see the block comment above).
+  if (segment === 'residential' && (event.event_type === 'permit_issued' || event.event_type === 'permit_applied')) {
+    const permitted = permittedTrade(event);
+    if (permitted) {
+      const permittedLabel = TRADES[permitted].label.toLowerCase();
+      if (permitted === trade) {
+        score -= PERMITTED_TRADE_PENALTY;
+        reasons.push(`-${PERMITTED_TRADE_PENALTY}: the permit names ${permittedLabel} itself — that scope is usually contracted before the permit is pulled`);
+      } else if (isFollowOnTrade(permitted, trade)) {
+        score += FOLLOW_ON_BONUS;
+        reasons.push(`+${FOLLOW_ON_BONUS}: permitted work is ${permittedLabel}; ${TRADES[trade].label.toLowerCase()} typically follows`);
+      }
+    }
+  }
 
   const v = event.valuation_usd;
   if (v != null && v > 0) {
@@ -317,7 +495,7 @@ export function scoreLead(event: LeadEventLike, trade: TradeKey, nowIso: string)
   const contact = pickContact(event.named_parties);
   if (contact) { score += 10; reasons.push(`record names ${contact.name || contact.company} (+10)`); }
 
-  return { score: Math.min(100, score), reasons };
+  return { score: Math.max(0, Math.min(100, score)), reasons };
 }
 
 /** The best contact the record itself names: prefer a party with a person name, else a company.
@@ -481,10 +659,14 @@ export function commissionFor(contractValueUsd: number, pct = DEFAULT_COMMISSION
 export interface LeadEngineConfig {
   trades: TradeKey[];              // which trades this market scores for
   commissionPct: number;           // 0..50
+  /** Which buyer this market serves. DEFAULTS TO 'commercial' — every standing order written
+   *  before segments existed has no segment key, and those markets are commercial ones. */
+  segment: MarketSegment;
 }
 
 /** Parse an order's config into a safe LeadEngineConfig. Unknown trades are dropped; an empty
- *  list falls back to ALL trades (scoring more is honest; delivering is still gated). */
+ *  list falls back to ALL trades (scoring more is honest; the segment gate in scoreLead and
+ *  delivery approval both still apply). */
 export function parseLeadEngineConfig(config: unknown): LeadEngineConfig {
   const c = (config ?? {}) as Record<string, unknown>;
   const raw = Array.isArray(c.trades) ? (c.trades as unknown[]).filter(isTradeKey) : [];
@@ -492,6 +674,7 @@ export function parseLeadEngineConfig(config: unknown): LeadEngineConfig {
   return {
     trades: raw.length ? (raw as TradeKey[]) : [...TRADE_KEYS],
     commissionPct: Number.isFinite(pct) ? Math.max(0, Math.min(50, pct)) : DEFAULT_COMMISSION_PCT,
+    segment: parseSegment(c.segment),
   };
 }
 

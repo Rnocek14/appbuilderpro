@@ -137,7 +137,8 @@ export default function WorkWeb() {
           if (requestedArea && w.clusters.some((c) => c.slug === requestedArea && c.charter)) return requestedArea;
           // Single-purpose worlds (answering desk / document studio / data workspace) should OPEN on
           // their studio — the working surface — not on the vault/intel the model emitted first.
-          const studio = w.clusters.find((c) => c.charter?.flavor === 'assist' || c.charter?.flavor === 'deliver' || c.charter?.flavor === 'data' || c.charter?.flavor === 'tracker');
+          const STUDIO_FIRST = ['assist', 'deliver', 'data', 'tracker', 'lead_engine', 'content_growth'];
+          const studio = w.clusters.find((c) => c.charter && STUDIO_FIRST.includes(c.charter.flavor));
           return studio?.slug ?? w.clusters.find((c) => c.charter)?.slug ?? null;
         });
       }
@@ -399,7 +400,7 @@ export default function WorkWeb() {
 
         {/* FIRST-RUN ORIENTATION — three concrete steps to the first real marketing. Only shows
             when this world has produced no EARNED work yet; vanishes the moment it has. */}
-        <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} growthDesk={growthDesk} />
+        <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} growthDesk={growthDesk} leadDesk={leadDesk} />
 
         {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
         <div className="mb-4">
