@@ -73,7 +73,7 @@ export function normalizeStatus(raw: string | null | undefined): RecordStatus {
 /** Stamped onto every lead. The recency term decays, so a stored score is uninterpretable the
  *  moment the model changes — bump this whenever scoreLead's arithmetic changes.
  *  le-2: the FIT SIGNAL (see below) — trade-specific evidence read from the record's own words. */
-export const SCORE_VERSION = 'le-2';
+export const SCORE_VERSION = 'le-3';
 
 /** The fields scoring needs — a subset of the le_events row (verbatim from the source record). */
 export interface LeadEventLike {
@@ -441,6 +441,84 @@ export function recordWords(event: RecordWordsInput): string {
     .toLowerCase();
 }
 
+// ---------------------------------------------------------------------------
+// ONE FIRM, ONE KEY
+// ---------------------------------------------------------------------------
+//
+// Permit portals take the contractor's name as free text, so the same company arrives spelled
+// several ways and every count over it is wrong. Measured on Austin, trailing 12 months:
+//
+//     IES Residential, Inc.              1,206      Radiant Plumbing & AC                 673
+//     IES Residential Inc                  472      Radiant Plumbing and Air Conditioning 575
+//
+// Two firms, four rows, and a "most active contractors" list that ranks neither correctly. This
+// folds the spellings onto one key so counting is possible. It is a GROUPING key, never a display
+// name: the label shown to a human stays whatever the record said, verbatim.
+
+/** Legal-form suffixes, stripped only from the END of a name. `Company` is here because
+ *  "Victory Plumbing Company" and "Victory Plumbing" are one firm; it is not stripped mid-name,
+ *  so "Company Roofing LLC" keeps its first word. */
+const LEGAL_SUFFIXES = [
+  'incorporated', 'corporation', 'company', 'limited',
+  'inc', 'llc', 'lc', 'ltd', 'corp', 'co', 'lp', 'llp', 'lllp', 'pllc', 'plc', 'pc', 'pa', 'dba',
+];
+
+/** A stable grouping key for a company name — or null when the name carries no letters or digits
+ *  at all, which is the honest answer for "", "-" and "N/A".
+ *
+ *  Deliberately conservative. It folds punctuation, legal form, `&`/`and`, and a leading "the";
+ *  it does NOT stem words, expand abbreviations or fuzzy-match, because every one of those merges
+ *  firms that are genuinely different ("Allied Electric" and "Allied Electrical Services" may or
+ *  may not be one company, and a wrong merge is unrecoverable once counted). */
+export function companyKey(name: string | null | undefined): string | null {
+  let s = (name ?? '').toLowerCase();
+  if (!s.trim()) return null;
+  if (/^(n\/?a|none|unknown|owner|self|tbd)$/i.test(s.trim())) return null;
+  s = s.normalize('NFKD').replace(/[̀-ͯ]/g, '');   // café → cafe
+  s = s.replace(/&/g, ' and ');
+  // Apostrophes are DELETED, not spaced: contractor names are full of possessives, and
+  // "Stan's Heating" splitting into "stan s heating" would never match "Stans Heating".
+  // Covers the straight quote and the three curly forms portals actually emit.
+  s = s.replace(/['‘’‛`]/g, '');
+  s = s.replace(/[^a-z0-9]+/g, ' ').trim();                  // other punctuation is never identity
+  s = s.replace(/^the\s+/, '');
+  // Strip trailing legal forms repeatedly: "Reed Architects Inc LLC" → "reed architects".
+  for (let i = 0; i < 3; i++) {
+    const before = s;
+    for (const suf of LEGAL_SUFFIXES) {
+      s = s.replace(new RegExp(`\\s+${suf}$`), '');
+    }
+    if (s === before) break;
+  }
+  s = s.replace(/\s+/g, ' ').trim();
+  return s || null;
+}
+
+/** Do two company names denote the same firm, as far as we are willing to claim? */
+export function sameCompany(a: string | null | undefined, b: string | null | undefined): boolean {
+  const ka = companyKey(a); const kb = companyKey(b);
+  return ka !== null && ka === kb;
+}
+
+/** Fold a list of company names onto their keys, keeping the LONGEST spelling seen as the label
+ *  (the fullest version a portal published) and the total count. Sorted by count, descending —
+ *  this is the contractor map, and it is pure so it can be verified with fixtures. */
+export function foldCompanies(
+  names: readonly (string | null | undefined)[],
+): { key: string; label: string; count: number }[] {
+  const acc = new Map<string, { label: string; count: number }>();
+  for (const n of names) {
+    const k = companyKey(n);
+    if (!k) continue;
+    const cur = acc.get(k);
+    const label = (n ?? '').trim();
+    if (!cur) acc.set(k, { label, count: 1 });
+    else { cur.count++; if (label.length > cur.label.length) cur.label = label; }
+  }
+  return [...acc].map(([key, v]) => ({ key, label: v.label, count: v.count }))
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+}
+
 /** The trade a permit's own text names, or null when its words name none of ours. Pure and
  *  deterministic; reads title, description and the record's classification columns only. */
 export function permittedTrade(event: RecordWordsInput): TradeKey | null {
@@ -548,6 +626,85 @@ export function isFollowOnTrade(permitted: TradeKey, trade: TradeKey): boolean {
   return (FOLLOW_ON_TRADES[permitted] ?? []).includes(trade);
 }
 
+// ---------------------------------------------------------------------------
+// THE FOLLOW-ON WINDOW — the one signal a competitor cannot scrape
+// ---------------------------------------------------------------------------
+//
+// Every other permit vendor sells a trade job when the TRADE permit appears. The trade permit is
+// not the first public evidence that the job exists: the master Building Permit is, and the trade
+// sub-permit follows it by a measurable lag. Selling on the master permit is selling the same job
+// roughly two weeks earlier than anyone reading the same portal.
+//
+// MEASURED, NOT ASSUMED (docs/lead-engine-productization.md §1). Austin commercial permits,
+// 29,607 rows over 24 months, grouped by permit-number base — "2025-118161 BP" and
+// "2025-118161 MP" are one job. Of the 3,245 master Building Permits issued 2025-08 → 2026-06:
+//
+//     trade         share of BP jobs   median lag   p25    p75    same day
+//     Electrical          45%             15 d      4 d    53 d     10%
+//     Plumbing            33%             22 d      5 d    60 d      8%
+//     Mechanical          30%             19 d      5 d    55 d      9%
+//
+// 50% of master Building Permits produced at least one trade sub-permit; 43% gave three or more
+// days' notice before one was pulled.
+//
+// HONESTY, and it is the whole product: p25–p75 for electrical is 4–53 days. This is a WARM
+// WINDOW, not an appointment, and every line of copy generated from it says so. A lead that
+// claims "an electrician will be needed on day 15" is a lie the first customer will catch. A lead
+// that says "45% of jobs like this pull an electrical permit, typically within two to eight
+// weeks" is true and still worth paying for.
+//
+// SCOPE: measured on Austin, the only preset publishing a master/child link. Applying these
+// numbers to another city is an extrapolation — `FOLLOW_ON_MEASURED_IN` names where they came
+// from, and the lead's reasons say it out loud.
+export const FOLLOW_ON_MEASURED_IN = 'Austin commercial permits, 3,245 master building permits, 2025-08 → 2026-06';
+
+export interface FollowOnWindow {
+  /** Share of master building permits that produced this trade's sub-permit (0..1). */
+  rate: number;
+  medianDays: number;
+  p25Days: number;
+  p75Days: number;
+}
+
+export const FOLLOW_ON_WINDOWS: Partial<Record<TradeKey, FollowOnWindow>> = {
+  electrical: { rate: 0.45, medianDays: 15, p25Days: 4, p75Days: 53 },
+  plumbing:   { rate: 0.33, medianDays: 22, p25Days: 5, p75Days: 60 },
+  hvac:       { rate: 0.30, medianDays: 19, p25Days: 5, p75Days: 55 },
+};
+
+/** Bonus for a trade with a measured window on a master building permit. Smaller than FIT_NAMED
+ *  (16) on purpose: a record that NAMES this trade's work is harder evidence than a base rate. */
+export const FOLLOW_ON_WINDOW_BONUS = 12;
+
+/** Does this record read as a MASTER building permit — the anchor a trade sub-permit follows —
+ *  rather than as a trade permit itself? Reads the record's own classification columns and words.
+ *  A record whose words already name a trade is that trade's permit, not the anchor. */
+export function isMasterBuildingPermit(event: RecordWordsInput & { event_type?: LeadEventType }): boolean {
+  if (event.event_type && event.event_type !== 'permit_issued' && event.event_type !== 'permit_applied') return false;
+  const cls = [event.permit_type, event.permit_sub_type, event.work_class, event.title]
+    .filter(Boolean).join(' ').toLowerCase();
+  if (!cls) return false;
+  // 'BP' is Austin's code; the readable forms cover the other portals.
+  const looksMaster = /\bbp\b|building permit|new construction|commercial (remodel|build|new)/.test(cls);
+  if (!looksMaster) return false;
+  // An electrical or plumbing permit is not the anchor even when its description mentions the
+  // building — the anchor is the permit the trades hang off.
+  return !/\b(ep|pp|mp)\b|electrical permit|plumbing permit|mechanical permit/.test(cls);
+}
+
+/** The measured window for a trade, when there is one. */
+export function followOnWindow(trade: TradeKey): FollowOnWindow | null {
+  return FOLLOW_ON_WINDOWS[trade] ?? null;
+}
+
+/** The sentence a lead carries for a measured window. Always states the rate AND the spread —
+ *  never a single day, which would claim precision the measurement does not support. */
+export function followOnReason(trade: TradeKey, w: FollowOnWindow): string {
+  return `+${FOLLOW_ON_WINDOW_BONUS}: this is the building permit, not the ${TRADES[trade].label.toLowerCase()} permit — `
+    + `${Math.round(w.rate * 100)}% of jobs like it pull one, typically ${w.p25Days}–${w.p75Days} days later `
+    + `(median ${w.medianDays}; measured on ${FOLLOW_ON_MEASURED_IN})`;
+}
+
 /** Score an event for a trade. Returns null when the trade has no weight for this event type, or
  *  when the trade does not sell into this market's segment — either way a zero-relevance pairing
  *  never becomes a lead row. Score is 0..100:
@@ -591,6 +748,19 @@ export function scoreLead(
   // residential follow-on rule has already spoken about this trade it owns the adjustment, because
   // the two would otherwise contradict each other in the same lead's reasons — "flooring typically
   // follows" next to "the record's words don't name flooring" says nothing an operator can act on.
+  // THE COMMERCIAL FOLLOW-ON WINDOW. Fires on the MASTER building permit — the first public
+  // evidence a job exists — for the three trades whose lag has actually been measured. Like the
+  // residential rule above it OWNS the adjustment when it speaks, so one lead never carries
+  // "electrical typically follows" beside "the record's words don't name electrical".
+  if (!followOnSpoke && segment === 'commercial' && isPermit && !permitted && isMasterBuildingPermit(event)) {
+    const w = followOnWindow(trade);
+    if (w) {
+      followOnSpoke = true;
+      score += FOLLOW_ON_WINDOW_BONUS;
+      reasons.push(followOnReason(trade, w));
+    }
+  }
+
   if (!followOnSpoke) {
     const fit = fitFor(words, trade);
     if (fit) { score += fit.delta; reasons.push(fit.reason); }

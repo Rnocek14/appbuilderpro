@@ -5,14 +5,14 @@
 // per state; everything outbound waits in the approval queue. Every lead links its public record.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Radar, Plus, Play, Pause, ExternalLink, RefreshCw, CheckCircle2, Circle, Users, Settings2, ChevronDown, ChevronRight, Wrench } from 'lucide-react';
+import { Radar, Plus, Play, Pause, ExternalLink, RefreshCw, CheckCircle2, Circle, Users, Settings2, ChevronDown, ChevronRight, Wrench, Building2 } from 'lucide-react';
 import { Button, Input, Badge, EmptyState, Skeleton } from '../ui';
 import { supabaseUrl } from '../../lib/supabase';
 import {
   listSources, createSource, setSourceActive, listLeads, setLeadStatus, runIngestNow,
   queueDigest, recordOutcome, leadScoreboard, getClockOrder, enableClock, setClockActive,
   listCustomers, addCustomer, setCustomerStatus, queueSamplePitch,
-  repairSourceFromPreset, staleSources,
+  repairSourceFromPreset, staleSources, contractorMap, type ContractorRow,
   type LeadSourceRow, type LeadRow, type LeadCustomerRow,
 } from '../../lib/garvis/leadEngine/leadEngineRun';
 import type { StandingOrder } from '../../lib/garvis/standing';
@@ -42,6 +42,9 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   const [board, setBoard] = useState<Awaited<ReturnType<typeof leadScoreboard>> | null>(null);
   const [clock, setClock] = useState<StandingOrder | null | undefined>(undefined); // undefined = loading
   const [customers, setCustomers] = useState<LeadCustomerRow[] | null>(null);
+  // The contractor map (docs/lead-engine-productization.md §3C). Loaded on demand, not on mount:
+  // it walks every party on every event, which is the most expensive read on this screen.
+  const [firms, setFirms] = useState<ContractorRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -285,6 +288,48 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
                     </Button>
                   </div>
                 )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* ── WHO WORKS HERE — the contractor map ─────────────────────────────
+          Not a lead list. This is the market itself: who pulls permits here, ranked, folded onto
+          one row per firm. A materials supplier buys this; a contractor uses it to see who the
+          general contractors are. Blank until a check has run. */}
+      <section className="rounded-xl border border-forge-border bg-forge-panel p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <Building2 size={14} className="text-forge-ember" />
+          <h3 className="text-sm font-semibold text-forge-ink">Who works in this market</h3>
+          {firms && firms.length > 0 && <Badge tone="ok">{firms.length} firms</Badge>}
+          <div className="ml-auto">
+            <Button size="sm" variant="ghost" loading={busy === 'firms'}
+              onClick={() => act('firms', async () => { setFirms(await contractorMap(worldId)); })}>
+              <RefreshCw size={13} /> {firms ? 'Refresh' : 'Build the map'}
+            </Button>
+          </div>
+        </div>
+        {firms === null ? (
+          <p className="text-xs text-forge-dim">
+            Ranks every company named on a permit in this market, most active first — one row per firm,
+            with the spellings folded together.
+          </p>
+        ) : firms.length === 0 ? (
+          <p className="text-xs text-forge-dim">
+            No companies named yet. The map fills in as checks run — and some cities (San Francisco)
+            publish no contractor at all, which is a fact about the portal, not a bug here.
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {firms.slice(0, 12).map((f) => (
+              <li key={f.key} className="flex items-baseline gap-2 rounded-lg px-2 py-1 text-sm hover:bg-forge-bg/40">
+                <span className="w-10 shrink-0 text-right font-medium tabular-nums text-forge-ember">{f.permits}</span>
+                <span className="min-w-0 flex-1 truncate text-forge-ink">{f.label}</span>
+                {f.roles.length > 0 && <span className="hidden shrink-0 text-xs text-forge-dim sm:inline">{f.roles[0].replace(/_/g, ' ')}</span>}
+                {/* Honest about the fold: three spellings folded into one row is worth showing. */}
+                {f.spellings > 1 && <span className="shrink-0 text-[10px] text-forge-dim">{f.spellings} spellings</span>}
+                {f.phone && <a href={`tel:${f.phone}`} className="shrink-0 text-xs text-forge-ember hover:underline">{f.phone}</a>}
               </li>
             ))}
           </ul>

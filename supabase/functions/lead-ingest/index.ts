@@ -24,6 +24,7 @@ import {
   digestFor, digestDue, isTradeKey,
   pitchFor, tradeForPlaceType, changedFields, tradeMatchesSegment, TRADES, SCORE_VERSION,
   type LeadEventLike, type TradeKey, type DigestLead,
+  companyKey,
 } from '../../../src/lib/garvis/leadEngine/leadEngine.ts';
 import {
   buildFetchUrl, parseRowsResult, sourceFormat, normalizeEvent, nextCursor, configHash,
@@ -53,6 +54,54 @@ const APPEND_MIN_SCORE = 60;      // score-gated enrichment — junk spends noth
 const PORTAL_TIMEOUT_MS = 25_000;
 const SITE_TIMEOUT_MS = 8_000;
 
+/** Read the addresses a business PUBLISHES ON ITS OWN SITE. Never a guess: `info@<domain>` is
+ *  not returned unless the site actually prints it. Homepage first, then one contact-ish page it
+ *  links to — which is where most small contractors put the address, and where the homepage-only
+ *  read was giving up. Both fetches are bounded; a site that won't read costs nothing.
+ *
+ *  RANKING: a mailbox on the business's own domain beats a free mailbox (gmail/yahoo), because a
+ *  permit-sourced contractor with a domain answers there. Within a tier, the first published wins
+ *  — we are not scoring people, only preferring the address most likely to be monitored. */
+const EMAIL_IN_TEXT = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
+const EMAIL_JUNK = /\.(png|jpe?g|gif|svg|webp|css|js|woff2?)$/i;
+const EMAIL_VENDOR = /example\.|sentry|wixpress|godaddy|squarespace|shopify|cloudflare|\.png|@2x|sentry\.io|schema\.org/i;
+const CONTACT_HREF = /href=["']([^"']{1,300}?(?:contact|about|connect|reach|get-in-touch|estimate|quote)[^"']{0,80})["']/i;
+
+function harvestEmails(html: string, host: string): string[] {
+  const found = new Set<string>();
+  // A mailto: is the site TELLING us the address, so it is read first and trusted most.
+  for (const m of html.matchAll(/mailto:([^"'?>\s]+)/gi)) found.add(m[1]);
+  for (const m of html.matchAll(EMAIL_IN_TEXT)) found.add(m[0]);
+  const clean = [...found]
+    .map((e) => e.trim().toLowerCase().replace(/^[.,;:]+|[.,;:]+$/g, ''))
+    .filter((e) => e.length <= 120 && !EMAIL_JUNK.test(e) && !EMAIL_VENDOR.test(e));
+  const domain = host.replace(/^www\./, '');
+  const onDomain = clean.filter((e) => e.endsWith(`@${domain}`) || e.endsWith(`.${domain}`));
+  return [...new Set([...onDomain, ...clean])];
+}
+
+async function readPublishedEmail(websiteUri: string): Promise<string | null> {
+  let host = '';
+  try { host = new URL(websiteUri).host.toLowerCase(); } catch { return null; }
+  let html = '';
+  try {
+    const site = await safeFetch(websiteUri, { signal: AbortSignal.timeout(SITE_TIMEOUT_MS) });
+    html = (await site.text()).slice(0, 300_000);
+  } catch { return null; }
+  const first = harvestEmails(html, host);
+  if (first.length) return first[0];
+  // Nothing on the homepage — follow ONE contact-ish link, same host only.
+  const href = CONTACT_HREF.exec(html)?.[1];
+  if (!href) return null;
+  let next: URL;
+  try { next = new URL(href, websiteUri); } catch { return null; }
+  if (next.host.toLowerCase() !== host || next.protocol !== 'https:') return null;
+  try {
+    const page = await safeFetch(next.toString(), { signal: AbortSignal.timeout(SITE_TIMEOUT_MS) });
+    return harvestEmails((await page.text()).slice(0, 300_000), host)[0] ?? null;
+  } catch { return null; }
+}
+
 /** WAVE-1 CONTACT APPEND (docs/lead-engine-data-plan.md §Layer 2): the highest-leverage
  *  enrichment is a phone number. For a bounded set of NEW high-score leads, ask Google Places
  *  for the business at the record's address (the same endpoint discover-run uses). Verbatim
@@ -62,12 +111,17 @@ const SITE_TIMEOUT_MS = 8_000;
 async function appendContacts(
   // deno-lint-ignore no-explicit-any
   admin: any,
-  leads: { id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[],
+  leads: { id: string; score: number; contact_phone: string | null; contact_email: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[],
 ): Promise<number> {
   const apiKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
   if (!apiKey) return 0;
+  // THE GATE WAS BACKWARDS FOR EMAIL. This filtered on `!contact_phone`, so any lead whose permit
+  // already published a phone was skipped entirely — and Austin publishes the contractor's phone on
+  // 94% of rows. The leads most likely to convert were precisely the ones never enriched, and since
+  // NO portal publishes an email and the whole send path is email, that meant the best leads could
+  // never be emailed at all. A lead is now a target when it is missing EITHER contact channel.
   const targets = leads
-    .filter((l) => !l.contact_phone && l.score >= APPEND_MIN_SCORE && (l.address || l.contact_company))
+    .filter((l) => (!l.contact_phone || !l.contact_email) && l.score >= APPEND_MIN_SCORE && (l.address || l.contact_company))
     .sort((a, b) => b.score - a.score)
     .slice(0, MAX_PLACES_PER_RUN);
   let appended = 0;
@@ -89,22 +143,18 @@ async function appendContacts(
       const phone = (hit?.nationalPhoneNumber ?? '').trim();
       // Wave-1b: when the matched business has a website, read its contact page for an email —
       // through the hardened fetch, best-effort, verbatim (the first plausible address, no guessing).
-      let email: string | null = null;
-      if (hit?.websiteUri) {
-        try {
-          const site = await safeFetch(hit.websiteUri, { signal: AbortSignal.timeout(SITE_TIMEOUT_MS) });
-          const html = (await site.text()).slice(0, 300_000);
-          const m = html.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? [];
-          email = m.find((e) => !/\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(e) && !/example\.|sentry|wixpress|godaddy/i.test(e)) ?? null;
-        } catch { /* a site that won't read costs nothing */ }
-      }
-      if (!phone && !email) continue;
+      let email: string | null = l.contact_email ? l.contact_email : null;
+      if (!email && hit?.websiteUri) email = await readPublishedEmail(hit.websiteUri);
+      const newPhone = !l.contact_phone && phone ? phone : null;
+      const newEmail = !l.contact_email && email ? email.toLowerCase() : null;
+      if (!newPhone && !newEmail) continue;
       const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
-      if (phone) patch.contact_phone = phone;
-      if (email) patch.contact_email = email.toLowerCase();
-      // Provenance, so an appended contact is never mistaken for one the public record named.
-      // Only set here because this path only runs when the record named no phone at all.
-      patch.contact_source = phone ? 'places' : 'website';
+      if (newPhone) patch.contact_phone = newPhone;
+      if (newEmail) patch.contact_email = newEmail;
+      // Provenance, so an appended contact is never mistaken for one the public record named —
+      // and a record-sourced phone is never relabelled just because we appended an email beside it.
+      if (l.contact_phone) { /* the record named it; 'record' stands */ }
+      else patch.contact_source = newPhone ? 'places' : 'website';
       if (!l.contact_company && !l.contact_name && hit?.displayName?.text) patch.contact_company = hit.displayName.text.slice(0, 120);
       await admin.from('le_leads').update(patch).eq('id', l.id);
       appended++;
@@ -214,7 +264,7 @@ Deno.serve(async (req) => {
   const cfg = parseLeadEngineConfig({ trades: body.trades, commissionPct: body.commissionPct, segment: segmentRaw });
 
   let checked = 0, unreachable = 0, eventsNew = 0, eventsChanged = 0, leadsNew = 0, persistFailures = 0;
-  const newLeadRecords: { id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[] = [];
+  const newLeadRecords: { id: string; score: number; contact_phone: string | null; contact_email: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[] = [];
 
   for (const src of (sources ?? []) as SourceRow[]) {
     checked++;
@@ -343,6 +393,8 @@ Deno.serve(async (req) => {
               owner_id: src.owner_id, event_id: eventId, ordinal: p.ordinal,
               role: p.role, role_normalized: p.role_normalized,
               name: p.name, company: p.company, phone: p.phone, email: p.email,
+              // app_0135: the grouping key beside the verbatim name, never instead of it.
+              company_key: companyKey(p.company),
               license_no: p.license_no, source_field: p.source_field,
             }));
           });
@@ -380,6 +432,7 @@ Deno.serve(async (req) => {
               owner_id: src.owner_id, world_id: src.world_id, event_id: eventId, trade,
               score: s.score, score_reasons: s.reasons,
               contact_name: contact?.name ?? null, contact_company: contact?.company ?? null,
+              contact_company_key: companyKey(contact?.company),
               contact_phone: contact?.phone ?? null, contact_email: contact?.email ?? null,
               // Provenance: a phone the PERMIT published and a phone Google Places guessed at are
               // not the same asset, and used to be the same column with no way to tell them apart.
@@ -396,8 +449,8 @@ Deno.serve(async (req) => {
           }] as const));
           const { data: ins } = await admin.from('le_leads')
             .upsert(leadRows, { onConflict: 'owner_id,event_id,trade', ignoreDuplicates: true })
-            .select('id, event_id, score, contact_phone, contact_company, contact_name');
-          const inserted = (ins ?? []) as { id: string; event_id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null }[];
+            .select('id, event_id, score, contact_phone, contact_email, contact_company, contact_name');
+          const inserted = (ins ?? []) as { id: string; event_id: string; score: number; contact_phone: string | null; contact_email: string | null; contact_company: string | null; contact_name: string | null }[];
           leadsNew += inserted.length;
           for (const row of inserted) {
             const meta = eventMeta.get(row.event_id);
