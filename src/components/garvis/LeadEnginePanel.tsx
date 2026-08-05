@@ -131,9 +131,9 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
           <div className="flex flex-wrap items-center gap-2 text-sm text-forge-ink">
             <CheckCircle2 size={15} className="text-forge-ok" />
             <span>
-              Checking {activeSources.length} source{activeSources.length === 1 ? '' : 's'} hourly
-              · {fresh.length} new lead{fresh.length === 1 ? '' : 's'}
-              · {activeCustomers.length} customer{activeCustomers.length === 1 ? '' : 's'} on weekly digests
+              Checking {activeSources.length} source{activeSources.length === 1 ? '' : 's'} hourly{' · '}
+              {fresh.length} new lead{fresh.length === 1 ? '' : 's'}{' · '}
+              {activeCustomers.length} customer{activeCustomers.length === 1 ? '' : 's'} on weekly digests
             </span>
           </div>
         )}
@@ -324,8 +324,8 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
           <span className="text-sm font-medium text-forge-ink">Setup</span>
           <span className="text-xs text-forge-dim">
             {sources.length} source{sources.length === 1 ? '' : 's'}
-            {failingSources.length > 0 ? ` · ${failingSources.length} failing` : sources.length > 0 ? ' · healthy' : ''}
-            · clock {clockOn ? 'on' : clock === null ? 'off' : 'paused'}
+            {failingSources.length > 0 ? ` · ${failingSources.length} failing` : sources.length > 0 ? ' · healthy' : ''}{' · '}
+            clock {clockOn ? 'on' : clock === null ? 'off' : 'paused'}
           </span>
           <span className="ml-auto">{showSetup ? <ChevronDown size={14} className="text-forge-dim" /> : <ChevronRight size={14} className="text-forge-dim" />}</span>
         </button>
