@@ -181,7 +181,11 @@ export default function WorkWeb() {
   const growthDesk = useMemo(() => !!web
     && web.clusters.some((c) => c.charter?.flavor === 'content_growth')
     && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
-  const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk || growthDesk;
+  // A lead market's front page IS its studio too (QA finding #1) — same rule as growthDesk.
+  const leadDesk = useMemo(() => !!web
+    && web.clusters.some((c) => c.charter?.flavor === 'lead_engine')
+    && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
+  const noOutreach = productLab || assistDesk || docStudio || dataStudio || trackerDesk || growthDesk || leadDesk;
 
   const doRunPlay = async () => {
     if (!templatePlay) return;

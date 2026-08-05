@@ -69,7 +69,7 @@ export function StandingOrdersPanel({ worldId, onToast }: {
       </div>
       <p className="text-xs text-forge-dim">
         {global
-          ? <>Every recurring check you have, across all worlds — including watches created in conversation. <span className="text-forge-ink/80">They only read and record; nothing is ever sent for you.</span></>
+          ? <>Every recurring check you have, across all businesses — including watches created in conversation. <span className="text-forge-ink/80">They only read and record; nothing is ever sent for you.</span></>
           : <>Recurring checks that run on their own — watch a page for changes, or digest this world on a cadence. <span className="text-forge-ink/80">They only read and record; nothing is ever sent for you.</span></>}
       </p>
 
