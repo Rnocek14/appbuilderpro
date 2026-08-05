@@ -143,6 +143,12 @@ check('pitch caps at 3 leads, highest score first', (() => {
 })());
 check('a pitch with zero leads is null — a sample never bluffs', pitchFor('security', 'X', [], 'R') === null);
 check('pitch invents no stats (no percent signs, no claimed close rates)', !!pitch && !/%|close rate/i.test(pitch.body));
+const bundled = pitchFor('security', 'Denver, CO', [pl], 'Riley', { siteUrl: 'https://x.example/preview-site/abc' });
+check('the bundle line appears ONLY with a real site url',
+  !!bundled && bundled.body.includes('https://x.example/preview-site/abc') && /website preview/i.test(bundled.body)
+  && !!pitch && !/website preview/i.test(pitch.body));
+check('the bundle mentions automation without inventing a claim',
+  !!bundled && /follow-ups and invoice reminders/i.test(bundled.body) && !/%/.test(bundled.body));
 
 // ── weekly digest due math ─────────────────────────────────────────────────
 check('never-digested customers are due', digestDue(null, '2026-08-04T12:00:00Z'));

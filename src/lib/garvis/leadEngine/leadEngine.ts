@@ -264,7 +264,10 @@ export function digestFor(worldLabel: string, leads: DigestLead[], max = 15): { 
 /** The cold email that sells the feed: 2–3 REAL leads for the prospect's trade with public-record
  *  links. No invented stats, no claims — the sample IS the proof. Pure composition; the caller
  *  supplies the leads (top-scored, freshest first). */
-export function pitchFor(trade: TradeKey, region: string, leads: DigestLead[], fromName: string): { subject: string; body: string } | null {
+export function pitchFor(
+  trade: TradeKey, region: string, leads: DigestLead[], fromName: string,
+  opts?: { siteUrl?: string | null },
+): { subject: string; body: string } | null {
   const picks = [...leads].sort((a, b) => b.score - a.score).slice(0, 3);
   if (picks.length === 0) return null; // no real leads → no pitch. A sample pitch never bluffs.
   const label = TRADES[trade].label.toLowerCase();
@@ -284,6 +287,14 @@ export function pitchFor(trade: TradeKey, region: string, leads: DigestLead[], f
     ``,
     `Every lead links its public record, so you can verify each one yourself. ${TRADES[trade].buys}`,
     ``,
+    // THE BUNDLE (only when a real demo site exists for this business — never claimed otherwise):
+    // leads open the door, the website raises the ticket, automation keeps the account.
+    ...(opts?.siteUrl ? [
+      `While I was at it I built you a working website preview — it's live here: ${opts.siteUrl}. It's yours if you want it.`,
+      ``,
+      `I can also set up the follow-ups and invoice reminders that chase these jobs for you.`,
+      ``,
+    ] : []),
     `Want the full list for ${region} every week? Reply to this email and I'll set you up.`,
     ``,
     `— ${fromName}`,
