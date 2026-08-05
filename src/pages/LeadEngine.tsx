@@ -13,7 +13,7 @@ import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
 import { quickStartMarket } from '../lib/garvis/leadEngine/leadEngineRun';
 import { startersForSegment, type StarterSource } from '../lib/garvis/leadEngine/adapters.ts';
-import type { MarketSegment } from '../lib/garvis/leadEngine/leadEngine.ts';
+import { marketStartLine, type MarketSegment } from '../lib/garvis/leadEngine/leadEngine.ts';
 
 interface MarketWorld { worldId: string; title: string; sources: number; newLeads: number; lastStatus: string | null }
 
@@ -63,9 +63,16 @@ export function LeadEngine() {
     setStarting(preset?.id ?? `blank-${segment}`);
     try {
       const market = await quickStartMarket(preset, segment);
-      toast('success', preset
-        ? `${market.title} is live — permit feed wired, clock on, first check running.`
-        : 'Market created and on the clock — add its first source inside.');
+      // WHAT ACTUALLY HAPPENED, not what was attempted. Every step past world-creation is
+      // fail-soft, and this line used to claim all of them landed even when the source insert and
+      // the first check had both thrown — the operator then went looking inside for leads that
+      // were never going to arrive. marketStartLine reports the true state and names the reason.
+      const said = marketStartLine({
+        title: market.title, withPreset: !!preset,
+        clockOn: market.clockOn, sourceWired: market.sourceWired,
+        firstCheckLine: market.firstCheckLine, problems: market.problems,
+      });
+      toast(said.tone, said.text);
       navigate(`/garvis/webs/${market.worldId}`);
     } catch (e) {
       toast('error', e instanceof Error ? e.message : 'Could not create it.');

@@ -71,8 +71,9 @@ export function normalizeStatus(raw: string | null | undefined): RecordStatus {
 }
 
 /** Stamped onto every lead. The recency term decays, so a stored score is uninterpretable the
- *  moment the model changes — bump this whenever scoreLead's arithmetic changes. */
-export const SCORE_VERSION = 'le-1';
+ *  moment the model changes — bump this whenever scoreLead's arithmetic changes.
+ *  le-2: the FIT SIGNAL (see below) — trade-specific evidence read from the record's own words. */
+export const SCORE_VERSION = 'le-2';
 
 /** The fields scoring needs — a subset of the le_events row (verbatim from the source record). */
 export interface LeadEventLike {
@@ -89,10 +90,13 @@ export interface LeadEventLike {
    *  bug this replaced (capture spec §6.6). A null link is stated as "no direct link". */
   source_url: string | null;
   /** The record's own classification columns, when the source publishes them. Optional so every
-   *  existing caller still type-checks; read ONLY by the residential follow-on rule below, and
-   *  only as the record's own words. */
+   *  existing caller still type-checks; read by the residential follow-on rule and the fit signal
+   *  below, and only ever as the record's own words. `permit_sub_type` is where several portals put
+   *  the READABLE label (Austin's `permit_type_desc` = "Mechanical Permit" against a `permit_type`
+   *  of "MP"), which is exactly the wording that names a trade. */
   work_class?: string | null;
   permit_type?: string | null;
+  permit_sub_type?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -425,15 +429,117 @@ const FOLLOW_ON_TRADES: Partial<Record<TradeKey, TradeKey[]>> = {
   plumbing: ['flooring', 'painting'],
 };
 
-/** The trade a permit's own text names, or null when its words name none of ours. Pure and
- *  deterministic; reads title, description and the record's classification columns only. */
-export function permittedTrade(event: Pick<LeadEventLike, 'title' | 'description' | 'work_class' | 'permit_type'>): TradeKey | null {
-  const text = [event.title, event.description, event.work_class, event.permit_type]
+/** Everything the RECORD ITSELF says, in one lowercased string: its title, its description and its
+ *  own classification columns. The only trade-specific evidence a permit row carries, and the only
+ *  text any rule in this module is allowed to read. */
+export type RecordWordsInput = Pick<LeadEventLike, 'title' | 'description' | 'work_class' | 'permit_type' | 'permit_sub_type'>;
+
+export function recordWords(event: RecordWordsInput): string {
+  return [event.title, event.description, event.work_class, event.permit_type, event.permit_sub_type]
     .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
     .join(' ')
     .toLowerCase();
+}
+
+/** The trade a permit's own text names, or null when its words name none of ours. Pure and
+ *  deterministic; reads title, description and the record's classification columns only. */
+export function permittedTrade(event: RecordWordsInput): TradeKey | null {
+  const text = recordWords(event);
   if (!text) return null;
   for (const [re, trade] of PERMITTED_TRADE_PATTERNS) if (re.test(text)) return trade;
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// THE FIT SIGNAL — what makes one permit's twelve leads a RANKING
+// ---------------------------------------------------------------------------
+//
+// Base weight is per EVENT TYPE, and the valuation, recency and named-contact terms are properties
+// of the RECORD — identical for every trade scored off it. So one $385k commercial permit produced
+// a dozen leads within a few points of each other, with fire safety, HVAC, electrical and security
+// tied to the point. A ranking that ranks nothing is the product failing quietly: the operator
+// reads the top of the list as "these matter most" and it does not mean that.
+//
+// The record's own words are the only trade-specific evidence a permit row carries, so they are
+// what separates the trades. Three mechanisms, each stated in the lead's reasons with the matched
+// word quoted verbatim:
+//
+//   A. the record NAMES this trade's work  ("re-roof", "sprinkler", "Mechanical Permit") → +FIT_NAMED
+//   B. the record names a SPACE this trade sells into ("restaurant", "clinic")           → +FIT_USE
+//   C. the record was specific about trades and named none of this one's                 → −FIT_MISS
+//
+// C only fires when the record was specific about SOMETHING. A permit whose words name no trade and
+// no use at all ("COMMERCIAL BUILDING") adjusts nobody: silence is not evidence, and inventing a
+// spread out of it would be exactly the fabrication this module exists to refuse.
+//
+// The tables below are a STATED OPINION about what words implicate which trade — readable and
+// editable in one place, the same discipline as FOLLOW_ON_TRADES. No statistic is claimed and none
+// is implied: a reason says "the record names roofing work ("re-roof")", never a probability.
+
+export const FIT_NAMED = 16;
+export const FIT_USE = 8;
+export const FIT_MISS = 8;
+
+/** The record names this trade's OWN work. */
+const TRADE_WORK_PATTERNS: Partial<Record<TradeKey, RegExp>> = {
+  acoustics: /\b(acoustic\w*|soundproof\w*|sound attenuation|noise)\b/,
+  security: /\b(security|burglar|alarm|access control|cctv|camera\w*|low[- ]?voltage)\b/,
+  janitorial: /\b(janitorial|custodial|housekeeping)\b/,
+  fire_safety: /\b(fire|sprinkler|standpipe|suppression|smoke|extinguisher\w*)\b/,
+  signage: /\b(sign|signage|awning|canopy|marquee)\b/,
+  roofing: /\b(roof\w*|re-?roof|shingle\w*|membrane|tpo|parapet)\b/,
+  hvac: /\b(hvac|mechanical|furnace|boiler|chiller|rooftop unit|rtu|duct\w*|ventilat\w*|exhaust hood|air condition\w*)\b/,
+  electrical: /\b(electric\w*|wiring|panel upgrade|service upgrade|lighting|generator|ev charg\w*|solar|photovoltaic)\b/,
+  plumbing: /\b(plumb\w*|sewer|water heater|grease trap|grease interceptor|backflow|repipe|restroom|gas line)\b/,
+  flooring: /\b(floor\w*|tile|carpet|epoxy|terrazzo)\b/,
+  pest_control: /\b(pest|rodent|vermin|fumigat\w*)\b/,
+  landscaping: /\b(landscap\w*|irrigation|grading|site work|parking lot|retaining wall|fence)\b/,
+  carpentry: /\b(deck|porch|framing|carpentry|trim|cabinet\w*|stair\w*)\b/,
+  remodeling: /\b(remodel\w*|renovat\w*|addition|alteration|adu|accessory dwelling|finish[- ]?out|tenant improvement)\b/,
+  painting: /\b(paint\w*|coating|drywall|stucco|plaster)\b/,
+  windows_doors: /\b(window\w*|door\w*|glazing|storefront|curtain wall)\b/,
+  concrete: /\b(concrete|slab|foundation|footing|driveway|patio|sidewalk|flatwork)\b/,
+  handyman: /\b(minor repair|handyman|punch list)\b/,
+};
+
+/** The record names a SPACE this trade sells into. Weaker than naming the work, and deliberately
+ *  absent for the residential trades — "a house" implicates no one trade over another. */
+const TRADE_USE_PATTERNS: Partial<Record<TradeKey, RegExp>> = {
+  acoustics: /\b(restaurant|bar|brewery|taproom|gym|fitness|studio|theat(er|re)|church|worship|school|classroom|office|conference)\b/,
+  security: /\b(retail|store|bank|pharmacy|dispensary|cannabis|warehouse|storage|office|school|clinic|medical)\b/,
+  janitorial: /\b(restaurant|cafe|kitchen|food|grocery|clinic|medical|dental|office|retail|school|gym|fitness)\b/,
+  fire_safety: /\b(restaurant|kitchen|bar|brewery|assembly|school|hotel|hospital|clinic|warehouse|storage|apartment|multi-?family)\b/,
+  signage: /\b(retail|store|restaurant|cafe|shop|salon|clinic|dealership|storefront|tenant)\b/,
+  roofing: /\b(warehouse|industrial|shell|new building|new construction)\b/,
+  hvac: /\b(restaurant|kitchen|brewery|clinic|medical|dental|laborator\w+|data center|warehouse|office)\b/,
+  electrical: /\b(kitchen|brewery|laborator\w+|data center|dealership|industrial|clinic|medical)\b/,
+  plumbing: /\b(restaurant|kitchen|cafe|brewery|salon|clinic|medical|dental)\b/,
+  flooring: /\b(retail|store|restaurant|office|clinic|school|gym|fitness|salon)\b/,
+  pest_control: /\b(restaurant|kitchen|cafe|grocery|food|brewery|bar|hotel|apartment|multi-?family)\b/,
+  landscaping: /\b(retail|office|apartment|multi-?family|hotel|campus|parking)\b/,
+};
+
+/** Did the record name ANY trade's work, or any use we recognise? Only when it did is a silence
+ *  about one particular trade evidence of anything (the FIT_MISS dampener). */
+export function recordIsSpecific(words: string): boolean {
+  if (!words) return false;
+  for (const re of Object.values(TRADE_WORK_PATTERNS)) if (re.test(words)) return true;
+  for (const re of Object.values(TRADE_USE_PATTERNS)) if (re.test(words)) return true;
+  return false;
+}
+
+/** The fit adjustment for one trade against one record's words, with its reason. Null when the
+ *  record says nothing that bears on this trade either way. Pure and order-independent. */
+export function fitFor(words: string, trade: TradeKey): { delta: number; reason: string } | null {
+  if (!words) return null;
+  const label = TRADES[trade].label.toLowerCase();
+  const named = TRADE_WORK_PATTERNS[trade]?.exec(words)?.[0];
+  if (named) return { delta: FIT_NAMED, reason: `+${FIT_NAMED}: the record names ${label} work ("${named}")` };
+  const use = TRADE_USE_PATTERNS[trade]?.exec(words)?.[0];
+  if (use) return { delta: FIT_USE, reason: `+${FIT_USE}: the record names a space this trade sells into ("${use}")` };
+  if (recordIsSpecific(words)) {
+    return { delta: -FIT_MISS, reason: `-${FIT_MISS}: the record's words name other trades' work, not ${label}` };
+  }
   return null;
 }
 
@@ -461,19 +567,33 @@ export function scoreLead(
   const reasons: string[] = [`${event.event_type.replace(/_/g, ' ')} is a ${TRADES[trade].label} trigger (+${base})`];
   let score = base;
 
+  const words = recordWords(event);
+  const isPermit = event.event_type === 'permit_issued' || event.event_type === 'permit_applied';
+  const permitted = isPermit ? permittedTrade(event) : null;
+
   // THE FOLLOW-ON RULE (residential permits only — see the block comment above).
-  if (segment === 'residential' && (event.event_type === 'permit_issued' || event.event_type === 'permit_applied')) {
-    const permitted = permittedTrade(event);
-    if (permitted) {
-      const permittedLabel = TRADES[permitted].label.toLowerCase();
-      if (permitted === trade) {
-        score -= PERMITTED_TRADE_PENALTY;
-        reasons.push(`-${PERMITTED_TRADE_PENALTY}: the permit names ${permittedLabel} itself — that scope is usually contracted before the permit is pulled`);
-      } else if (isFollowOnTrade(permitted, trade)) {
-        score += FOLLOW_ON_BONUS;
-        reasons.push(`+${FOLLOW_ON_BONUS}: permitted work is ${permittedLabel}; ${TRADES[trade].label.toLowerCase()} typically follows`);
-      }
+  let followOnSpoke = false;
+  if (segment === 'residential' && isPermit && permitted) {
+    const permittedLabel = TRADES[permitted].label.toLowerCase();
+    if (permitted === trade) {
+      followOnSpoke = true;
+      score -= PERMITTED_TRADE_PENALTY;
+      reasons.push(`-${PERMITTED_TRADE_PENALTY}: the permit names ${permittedLabel} itself — that scope is usually contracted before the permit is pulled`);
+    } else if (isFollowOnTrade(permitted, trade)) {
+      followOnSpoke = true;
+      score += FOLLOW_ON_BONUS;
+      reasons.push(`+${FOLLOW_ON_BONUS}: permitted work is ${permittedLabel}; ${TRADES[trade].label.toLowerCase()} typically follows`);
     }
+  }
+
+  // THE FIT SIGNAL — the trade-specific evidence, and the only term that differs between the
+  // trades scored off one record. The two rules are ALTERNATIVES, not additives: when the
+  // residential follow-on rule has already spoken about this trade it owns the adjustment, because
+  // the two would otherwise contradict each other in the same lead's reasons — "flooring typically
+  // follows" next to "the record's words don't name flooring" says nothing an operator can act on.
+  if (!followOnSpoke) {
+    const fit = fitFor(words, trade);
+    if (fit) { score += fit.delta; reasons.push(fit.reason); }
   }
 
   const v = event.valuation_usd;
@@ -684,4 +804,59 @@ export function ingestLine(sourcesChecked: number, sourcesFailed: number, events
   const src = `${sourcesChecked} source${sourcesChecked === 1 ? '' : 's'} checked${sourcesFailed ? ` (${sourcesFailed} unreachable — counted, will retry)` : ''}`;
   if (eventsNew === 0) return `${src} — nothing new since the last run.`;
   return `${src} — ${eventsNew} new event${eventsNew === 1 ? '' : 's'}, ${leadsNew} scored lead${leadsNew === 1 ? '' : 's'}.`;
+}
+
+/** The one line stamped onto `le_sources.last_status` after a run — the ONLY run detail the panel
+ *  shows, so it has to be the truth about what the run achieved, not merely what it fetched.
+ *
+ *  A READ THAT COULD NOT BE STORED IS NOT A CHECK. It used to render as
+ *  "Checked — 240 rows read, 0 new, 0 updated." — indistinguishable from a genuinely quiet window,
+ *  while the rows were dropped and (worse) the cursor moved past them. This states the failure and
+ *  the consequence, in the source's own row where the operator is already looking. */
+export function sourceStatusLine(run: {
+  rowsParsed: number; rowsNew: number; rowsChanged: number; rowsDisqualified: number;
+  pages: number; capped: boolean;
+  /** Where the next run resumes, when this one stopped mid-window. */
+  resumeOffset?: number | null;
+  /** Set when the rows were read but the write failed — the honest headline. */
+  persistError?: string | null;
+}): string {
+  const rows = `${run.rowsParsed} row${run.rowsParsed === 1 ? '' : 's'} read${run.pages > 1 ? ` over ${run.pages} pages` : ''}`;
+  if (run.persistError) {
+    return `Read ${rows} but COULD NOT STORE them — ${run.persistError.slice(0, 160)}. Nothing was recorded; the same window is re-read next run.`;
+  }
+  const dq = run.rowsDisqualified ? `, ${run.rowsDisqualified} below the floor (kept, flagged)` : '';
+  const more = run.capped ? ` More remain — resuming at row ${run.resumeOffset ?? 0} next run.` : '';
+  return `Checked — ${rows}, ${run.rowsNew} new, ${run.rowsChanged} updated${dq}.${more}`;
+}
+
+/** What the operator is told after one-click market creation. Every step past world-creation is
+ *  fail-soft, so the copy MUST follow what actually landed: "permit feed wired, clock on, first
+ *  check running" was printed unconditionally, including when the source insert and the first
+ *  check had both thrown and been swallowed. A market that came up half-built now says so, names
+ *  the reason, and points at the one place that fixes it. */
+export function marketStartLine(m: {
+  title: string; withPreset: boolean;
+  clockOn: boolean; sourceWired: boolean;
+  /** The ingest's own honest line, when the first check actually ran. */
+  firstCheckLine?: string | null;
+  /** One full sentence per step that did not happen. Empty = everything landed. */
+  problems: string[];
+}): { tone: 'success' | 'error'; text: string } {
+  if (m.problems.length === 0) {
+    if (!m.withPreset) return { tone: 'success', text: 'Market created and on the clock — add its first source inside.' };
+    const check = m.firstCheckLine?.trim();
+    return {
+      tone: 'success',
+      text: `${m.title} is live — permit feed wired, clock on.${check ? ` ${check}` : ''}`,
+    };
+  }
+  const landed = [
+    m.clockOn ? 'clock on' : null,
+    m.sourceWired ? 'permit feed wired' : null,
+  ].filter(Boolean).join(', ');
+  return {
+    tone: 'error',
+    text: `${m.title} was created${landed ? ` (${landed})` : ''}, but ${m.problems.join(' ')} Finish it in Setup inside the market.`,
+  };
 }

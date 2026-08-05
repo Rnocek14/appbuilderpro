@@ -212,6 +212,24 @@ export function sourceFormat(source: Pick<SourceLike, 'kind' | 'query_config'>):
  *  `resultOffset` (ArcGIS) walks it, and the date filter deliberately stays pinned to the SAME
  *  `cursor.last_date` while a `page_offset` is outstanding — resuming where we stopped instead of
  *  stepping over the remainder. */
+
+/** THE CURSOR TIMESTAMP, IN EACH DIALECT'S OWN GRAMMAR. We store the watermark as a full ISO
+ *  instant ('2026-08-03T00:00:00.000Z'), but neither portal dialect accepts that verbatim:
+ *  Socrata's floating_timestamp is ZONELESS (a trailing Z is a parse error), and ArcGIS wants
+ *  'YYYY-MM-DD HH:MM:SS'. Getting this wrong is invisible on a source's FIRST check — there is no
+ *  cursor yet, so no filter is emitted — and then every later check 400s. "Worked once, then
+ *  stopped" is the signature. Quotes are stripped so a cursor value can never break out of the
+ *  clause. */
+export function cursorLiteral(iso: string, dialect: 'socrata' | 'arcgis'): string {
+  const clean = (iso ?? '').replace(/'/g, '').trim();
+  const t = Date.parse(clean);
+  if (!Number.isFinite(t)) return clean;                      // unparseable → pass through, fail loudly upstream
+  const full = new Date(t).toISOString();                     // normalize, then re-dress per dialect
+  return dialect === 'arcgis'
+    ? full.slice(0, 19).replace('T', ' ')                     // 2026-08-03 00:00:00
+    : full.replace(/Z$/, '');                                 // 2026-08-03T00:00:00.000  (floating)
+}
+
 export function buildFetchUrl(source: SourceLike, offset?: number): string {
   const cfg = source.query_config ?? {};
   if (sourceFormat(source) !== 'json') return source.base_url;
@@ -225,7 +243,7 @@ export function buildFetchUrl(source: SourceLike, offset?: number): string {
   if (source.kind === 'arcgis') {
     const clauses: string[] = [];
     if (cfg.where && String(cfg.where).trim()) clauses.push(`(${String(cfg.where).trim()})`);
-    if (dateField && since) clauses.push(`${dateField} > TIMESTAMP '${since.replace(/'/g, '')}'`);
+    if (dateField && since) clauses.push(`${dateField} > TIMESTAMP '${cursorLiteral(since, 'arcgis')}'`);
     const where = clauses.length ? clauses.join(' AND ') : '1=1';
     const p = new URLSearchParams({
       where, outFields: '*', f: 'json', resultRecordCount: String(FETCH_LIMIT),
@@ -239,7 +257,7 @@ export function buildFetchUrl(source: SourceLike, offset?: number): string {
   const p = new URLSearchParams({ $limit: String(FETCH_LIMIT) });
   const clauses: string[] = [];
   if (cfg.where && String(cfg.where).trim()) clauses.push(`(${String(cfg.where).trim()})`);
-  if (dateField && since) clauses.push(`${dateField} > '${since.replace(/'/g, '')}'`);
+  if (dateField && since) clauses.push(`${dateField} > '${cursorLiteral(since, 'socrata')}'`);
   if (clauses.length) p.set('$where', clauses.join(' AND '));
   if (dateField) p.set('$order', `${dateField} ASC`);
   if (off) p.set('$offset', String(off));
@@ -481,6 +499,46 @@ function readParty(row: Record<string, unknown>, pm: PartyMap, ordinal: number):
   };
 }
 
+/** WHO a captured party IS, for the purpose of "have we already read this person off this row?".
+ *  Normalized so casing and punctuation can't split one person into two. Falls back to the contact
+ *  details when the entry names nobody at all, so two distinct phone-only rows never collapse into
+ *  one. */
+function partyIdentity(p: PartyCapture): string {
+  const n = (s: string | null) => normalizeKeyPart(s ?? '');
+  const who = `${n(p.name)}|${n(p.company)}`;
+  return who === '|' ? `#${n(p.phone)}|${n(p.email)}|${n(p.license_no)}` : who;
+}
+
+/** Add a party to the row's list, or FOLD it into the one that already names the same person or
+ *  company.
+ *
+ *  THE DUPLICATE-PARTY BUG: every preset reads the same columns twice — once through the legacy
+ *  `field_map.contact_name`/`contact_company` path (which predates multi-party capture and is kept
+ *  for hand-written sources) and once through its declared `query_config.parties[]` entry. Austin's
+ *  applicant, Chicago's contact_1 and Seattle's contractor were therefore each emitted TWICE per
+ *  event: duplicated in `named_parties` (so the scoring core saw the same person as two witnesses)
+ *  and duplicated as rows in le_event_parties. The record names them once.
+ *
+ *  Folding, not dropping: the declared entry carries data the legacy path cannot see (the phone,
+ *  the licence number, the record's own role label), so gaps are filled from whichever capture has
+ *  the value, `role` prefers the capture that read the record's own label, and BOTH source columns
+ *  are kept — provenance is the whole point of source_field. */
+function addParty(parties: PartyCapture[], p: PartyCapture, roleWins: boolean): void {
+  const key = partyIdentity(p);
+  const held = parties.find((q) => partyIdentity(q) === key);
+  if (!held) { parties.push({ ...p, ordinal: parties.length }); return; }
+  held.name ??= p.name;
+  held.company ??= p.company;
+  held.phone ??= p.phone;
+  held.email ??= p.email;
+  held.license_no ??= p.license_no;
+  if (roleWins && p.role) { held.role = p.role; held.role_normalized = p.role_normalized; }
+  else { held.role ??= p.role; held.role_normalized ??= p.role_normalized; }
+  const cols = [...held.source_field.split('+'), ...p.source_field.split('+')]
+    .filter((c) => c && c !== '(unmapped)');
+  held.source_field = ([...new Set(cols)].join('+') || '(unmapped)').slice(0, 200);
+}
+
 /** Normalize one source row into a candidate event — verbatim fields only. Rows with no title
  *  AND no address are dropped (nothing identifiable to act on). */
 const RSS_DEFAULT_MAP = { title: 'title', permalink: 'link', date: 'pubDate', description: 'description' };
@@ -506,15 +564,18 @@ export function normalizeEvent(source: SourceLike, row: Record<string, unknown>)
       ...(map.name_parts?.length ? (legacyName ? map.name_parts : []) : (legacyName && map.contact_name ? [map.contact_name] : [])),
       ...(legacyCompany && map.contact_company ? [map.contact_company] : []),
     ];
-    parties.push({
+    // `roleWins: false` — 'applicant' here is this path's DEFAULT, not something the record said,
+    // so a declared entry's role label (Chicago's contact_1_type, Austin's contractor_trade) must
+    // be free to replace it when the two describe the same person.
+    addParty(parties, {
       ordinal: 0, role: 'applicant', role_normalized: 'applicant',
       name: legacyName, company: legacyCompany, phone: null, email: null, license_no: null,
       source_field: (used.length ? used : ['(unmapped)']).join('+').slice(0, 200),
-    });
+    }, false);
   }
   for (const pm of (Array.isArray(cfg.parties) ? cfg.parties : [])) {
     const p = readParty(row, pm, parties.length);
-    if (p) parties.push(p);
+    if (p) addParty(parties, p, true);
   }
   // The scoring core reads named_parties; it is the same list, verbatim.
   const named_parties: NamedParty[] = parties.map((p) => ({

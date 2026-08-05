@@ -20,7 +20,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
 import {
-  scoreLead, pickLeadContact, whyNow, ingestLine, parseLeadEngineConfig, digestFor, digestDue, isTradeKey,
+  scoreLead, pickLeadContact, whyNow, ingestLine, sourceStatusLine, parseLeadEngineConfig,
+  digestFor, digestDue, isTradeKey,
   pitchFor, tradeForPlaceType, changedFields, tradeMatchesSegment, TRADES, SCORE_VERSION,
   type LeadEventLike, type TradeKey, type DigestLead,
 } from '../../../src/lib/garvis/leadEngine/leadEngine.ts';
@@ -45,6 +46,12 @@ const MAX_PLACES_PER_RUN = 8;     // contact append (Wave 1): bounded per tick, 
 const PITCHES_PER_WEEK = 5;       // auto-pitch pacing: at most five new contractors a week
 const MAX_PITCH_CANDIDATES = 12;  // sites read per run — bounded like every other fetch loop
 const APPEND_MIN_SCORE = 60;      // score-gated enrichment — junk spends nothing
+// safeFetch has NO default timeout and Deno's fetch has none either, so a portal that accepts the
+// connection and never answers used to hold the whole run until the platform killed it — with the
+// source's status and its le_ingest_runs row never written, i.e. the run vanished. One tick can
+// issue ~100 portal reads plus the enrichment reads; every one of them is bounded here.
+const PORTAL_TIMEOUT_MS = 25_000;
+const SITE_TIMEOUT_MS = 8_000;
 
 /** WAVE-1 CONTACT APPEND (docs/lead-engine-data-plan.md §Layer 2): the highest-leverage
  *  enrichment is a phone number. For a bounded set of NEW high-score leads, ask Google Places
@@ -85,7 +92,7 @@ async function appendContacts(
       let email: string | null = null;
       if (hit?.websiteUri) {
         try {
-          const site = await safeFetch(hit.websiteUri);
+          const site = await safeFetch(hit.websiteUri, { signal: AbortSignal.timeout(SITE_TIMEOUT_MS) });
           const html = (await site.text()).slice(0, 300_000);
           const m = html.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? [];
           email = m.find((e) => !/\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(e) && !/example\.|sentry|wixpress|godaddy/i.test(e)) ?? null;
@@ -176,7 +183,12 @@ Deno.serve(async (req) => {
   // The sources to check — always re-verified against the owner (defense in depth over RLS).
   let q = admin.from('le_sources')
     .select('id, owner_id, world_id, name, kind, base_url, region, jurisdiction, active, query_config, cursor, consecutive_failures')
-    .eq('owner_id', owner).eq('active', true).limit(MAX_SOURCES_PER_RUN);
+    .eq('owner_id', owner).eq('active', true)
+    // LEAST-RECENTLY-CHECKED FIRST. The cap is meant to let "a big market drain over ticks", but
+    // with no ORDER BY Postgres returns the same first rows every time, so a market with more than
+    // MAX_SOURCES_PER_RUN sources never checked the tail of its list — silently, forever.
+    .order('last_fetch_at', { ascending: true, nullsFirst: true })
+    .limit(MAX_SOURCES_PER_RUN);
   if (body.source_id) q = q.eq('id', body.source_id);
   if (body.world_id) q = q.eq('world_id', body.world_id);
   const { data: sources, error } = await q;
@@ -201,7 +213,7 @@ Deno.serve(async (req) => {
   }
   const cfg = parseLeadEngineConfig({ trades: body.trades, commissionPct: body.commissionPct, segment: segmentRaw });
 
-  let checked = 0, unreachable = 0, eventsNew = 0, eventsChanged = 0, leadsNew = 0;
+  let checked = 0, unreachable = 0, eventsNew = 0, eventsChanged = 0, leadsNew = 0, persistFailures = 0;
   const newLeadRecords: { id: string; score: number; contact_phone: string | null; contact_company: string | null; contact_name: string | null; title: string; address: string | null; region: string }[] = [];
 
   for (const src of (sources ?? []) as SourceRow[]) {
@@ -352,9 +364,11 @@ Deno.serve(async (req) => {
             event_type: c.event_type, occurred_at: c.occurred_at, address: c.address, region: c.region,
             valuation_usd: c.valuation_usd, title: c.title, description: c.description,
             named_parties: c.named_parties, source_url: c.source_url,
-            // The record's own classification words — what the residential follow-on rule reads
-            // to tell which trade the permit already names.
-            work_class: c.work_class, permit_type: c.permit_type,
+            // The record's own classification words — what the residential follow-on rule and the
+            // fit signal read to tell which trade the record actually implicates. permit_sub_type
+            // carries the READABLE label on several portals ("Mechanical Permit" against a
+            // permit_type of "MP"), which is exactly the wording that names a trade.
+            work_class: c.work_class, permit_type: c.permit_type, permit_sub_type: c.permit_sub_type,
           };
           const contact = pickLeadContact(c.named_parties);
           for (const trade of cfg.trades as TradeKey[]) {
@@ -411,7 +425,7 @@ Deno.serve(async (req) => {
       while (pages < MAX_PAGES_PER_TICK) {
         const url = buildFetchUrl(src, offset);
         run.request_url = url.slice(0, 2000);   // the page in hand: on failure, the one that failed
-        const res = await safeFetch(url);
+        const res = await safeFetch(url, { signal: AbortSignal.timeout(PORTAL_TIMEOUT_MS) });
         run.http_status = res.status;
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const full = await res.text();
@@ -460,19 +474,31 @@ Deno.serve(async (req) => {
     }
 
     if (fetchOk) {
-      // THE ADVANCE DECISION lives in the pure core (adapters.nextCursor), verified there:
-      // drained → the watermark moves to the max date read and the offset is cleared; capped →
-      // the watermark stays exactly where it was and the offset records how far in we got.
-      const cursorAfter = nextCursor(src, dateSamples, { rows: rowsThisTick, startOffset, drained });
-      run.cursor_after = cursorAfter as Record<string, unknown>;
-      const dq = run.rows_disqualified ? `, ${run.rows_disqualified} below the floor (kept, flagged)` : '';
-      const pageNote = pages > 1 ? ` over ${pages} pages` : '';
-      // Say it plainly when a window is only part-read — a capped run is not a finished one.
-      const more = run.capped ? ` More remain — resuming at row ${cursorAfter.page_offset} next run.` : '';
+      // A PERSIST FAILURE IS NOT A SUCCESSFUL CHECK. The fetch worked, so the rows were read — but
+      // if the upsert failed they were never stored, and advancing the watermark past them deleted
+      // them for good (a portal serves a rolling window; nothing re-offers a skipped day). That is
+      // the exact silent-permanent-loss class app_0133 was written to end, arriving through the
+      // other door. On a persist failure the cursor stays EXACTLY where it was, so the same window
+      // is read again next run, and the source says so in the one field the panel shows.
+      const persistFailed = !!run.error;
+      if (persistFailed) persistFailures++;
+      const cursorAfter = persistFailed
+        ? ((src.cursor ?? {}) as Record<string, unknown>)
+        // THE ADVANCE DECISION lives in the pure core (adapters.nextCursor), verified there:
+        // drained → the watermark moves to the max date read and the offset is cleared; capped →
+        // the watermark stays exactly where it was and the offset records how far in we got.
+        : (nextCursor(src, dateSamples, { rows: rowsThisTick, startOffset, drained }) as Record<string, unknown>);
+      run.cursor_after = cursorAfter;
       await admin.from('le_sources').update({
         consecutive_failures: 0, last_fetch_at: nowIso, updated_at: nowIso,
         cursor: cursorAfter, config_hash: cfgHash,
-        last_status: `Checked — ${run.rows_parsed} row${run.rows_parsed === 1 ? '' : 's'} read${pageNote}, ${run.rows_new} new, ${run.rows_changed} updated${dq}.${more}`,
+        // Composed by the verified pure core — including the "read but could not store" headline.
+        last_status: sourceStatusLine({
+          rowsParsed: run.rows_parsed, rowsNew: run.rows_new, rowsChanged: run.rows_changed,
+          rowsDisqualified: run.rows_disqualified, pages, capped: run.capped,
+          resumeOffset: (cursorAfter as { page_offset?: number }).page_offset ?? null,
+          persistError: run.error,
+        }),
       }).eq('id', src.id);
     }
     await admin.from('le_ingest_runs').insert({ ...run, finished_at: new Date().toISOString() })
@@ -609,7 +635,7 @@ Deno.serve(async (req) => {
               // An email address, read from their own site (verbatim; bounded; never guessed).
               let email: string | null = null;
               try {
-                const site = await safeFetch(biz.website!);
+                const site = await safeFetch(biz.website!, { signal: AbortSignal.timeout(SITE_TIMEOUT_MS) });
                 const html = (await site.text()).slice(0, 300_000);
                 const found = html.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? [];
                 email = found.find((e) => !/\.(png|jpg|jpeg|gif|svg|webp|css|js)$/i.test(e)
@@ -677,6 +703,8 @@ Deno.serve(async (req) => {
   }
 
   let line = ingestLine(checked, unreachable, eventsNew, leadsNew);
+  // A source that read rows and could not store them must not disappear behind "nothing new".
+  if (persistFailures > 0) line += ` ${persistFailures} source${persistFailures === 1 ? '' : 's'} read rows but could NOT store them — see the source's status; the same window is re-read next run.`;
   if (eventsChanged > 0) line += ` ${eventsChanged} record${eventsChanged === 1 ? '' : 's'} changed upstream and ${eventsChanged === 1 ? 'was' : 'were'} updated.`;
   if (pitchesDrafted > 0) line += ` ${pitchesDrafted} sample pitch${pitchesDrafted === 1 ? '' : 'es'} drafted for approval.`;
   if (appended > 0) line += ` ${appended} contact${appended === 1 ? '' : 's'} appended.`;

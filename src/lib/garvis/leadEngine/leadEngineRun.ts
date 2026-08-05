@@ -100,11 +100,27 @@ export async function setLeadStatus(leadId: string, status: LeadStatus): Promise
 
 const SEGMENT_LABEL: Record<MarketSegment, string> = { commercial: 'Commercial', residential: 'Residential' };
 
+/** What one-click creation ACTUALLY achieved. Every step past world-creation is fail-soft, and it
+ *  used to be fail-SILENT: `.catch(() => {})` on the clock, the source insert and the first check
+ *  meant a market whose feed never wired still reported "permit feed wired, clock on, first check
+ *  running". The booleans are the true state and `problems` carries one honest sentence per step
+ *  that did not happen — the caller composes the operator's line with marketStartLine(). */
+export interface MarketStart {
+  worldId: string;
+  title: string;
+  segment: MarketSegment;
+  clockOn: boolean;
+  sourceWired: boolean;
+  /** The ingest's own line when the first check ran, else null. */
+  firstCheckLine: string | null;
+  problems: string[];
+}
+
 /** TURNKEY START: one call takes a city preset (or nothing) to a working market — world created,
  *  named for the city AND its segment, put on the hourly clock with that segment in its standing
  *  config, its source wired, and the first check fired. Every step past world-creation is
- *  fail-soft: the panel's checklist shows the true state and offers the missing step, so a partial
- *  start is visible, never silent.
+ *  fail-soft AND REPORTED: the returned MarketStart says which steps landed and why the rest
+ *  didn't, so a partial start is visible in the toast, not just in the panel's checklist.
  *
  *  The segment comes from the preset when there is one (a preset knows which buyer it serves) and
  *  from the caller for a blank market; it defaults to 'commercial', which is what every market
@@ -113,25 +129,46 @@ const SEGMENT_LABEL: Record<MarketSegment, string> = { commercial: 'Commercial',
  *  right trades). */
 export async function quickStartMarket(
   preset?: StarterSource | null, segment: MarketSegment = 'commercial',
-): Promise<{ worldId: string; title: string; segment: MarketSegment }> {
+): Promise<MarketStart> {
   const seg = preset?.segment ?? segment;
   const web = await instantiateWeb('lead-market');
   const title = `${preset ? `Lead Market — ${preset.region}` : web.title} (${SEGMENT_LABEL[seg]})`;
-  await supabase.from('knowledge_worlds').update({ title }).eq('id', web.worldId);
-  await enableClock(web.worldId, title, seg).catch(() => {});
+  const problems: string[] = [];
+  const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  // The rename is what the panel, the digest subject and the standing order's label all read. A
+  // silent failure here left the market titled after the TEMPLATE while the toast announced the
+  // city name — the two disagreeing with no way to tell which was real.
+  const { error: renameErr } = await supabase.from('knowledge_worlds').update({ title }).eq('id', web.worldId);
+  if (renameErr) problems.push(`it could not be renamed (${renameErr.message}).`);
+
+  let clockOn = false;
+  try { await enableClock(web.worldId, title, seg); clockOn = true; }
+  catch (e) { problems.push(`the hourly clock could not be turned on (${why(e)}).`); }
+
+  let sourceWired = false;
+  let firstCheckLine: string | null = null;
   if (preset) {
-    await createSource({
-      worldId: web.worldId, name: preset.label, kind: preset.kind,
-      baseUrl: preset.base_url, region: preset.region,
-      // The segment rides along on the source too, so a market whose clock was removed can still
-      // say honestly which buyer it serves (the panel reads it as a fallback).
-      queryConfig: { ...preset.query_config, segment: preset.segment },
-      jurisdiction: preset.jurisdiction,
-    }).catch(() => {});
-    // First check now — instant first results instead of waiting for the next tick.
-    await supabase.functions.invoke('lead-ingest', { body: { world_id: web.worldId } }).catch(() => {});
+    try {
+      await createSource({
+        worldId: web.worldId, name: preset.label, kind: preset.kind,
+        baseUrl: preset.base_url, region: preset.region,
+        // The segment rides along on the source too, so a market whose clock was removed can still
+        // say honestly which buyer it serves (the panel reads it as a fallback).
+        queryConfig: { ...preset.query_config, segment: preset.segment },
+        jurisdiction: preset.jurisdiction,
+      });
+      sourceWired = true;
+    } catch (e) { problems.push(`the ${preset.label} feed could not be wired (${why(e)}).`); }
+    // First check now — instant first results instead of waiting for the next tick. Pointless
+    // without a source, so it is not attempted (and not reported as a second failure) when the
+    // wiring above already failed.
+    if (sourceWired) {
+      try { firstCheckLine = (await runIngestNow(web.worldId)).line; }
+      catch (e) { problems.push(`the first check did not run (${why(e)}).`); }
+    }
   }
-  return { worldId: web.worldId, title, segment: seg };
+  return { worldId: web.worldId, title, segment: seg, clockOn, sourceWired, firstCheckLine, problems };
 }
 
 /** THE CLOCK: is this market on the standing schedule? One lead_engine order per world — the
@@ -165,11 +202,28 @@ export async function setClockActive(orderId: string, active: boolean): Promise<
   await setOrderStatus(orderId, active ? 'active' : 'paused');
 }
 
+/** THE SERVER'S OWN REASON, not supabase-js's summary of it. On a non-2xx, functions.invoke
+ *  reports the useless "Edge Function returned a non-2xx status code" and hides the response on
+ *  `error.context` — so a missing table, a bad scope or a 500 all arrived at the operator wearing
+ *  the same anonymous sentence, and the panel's schema diagnosis (which keys on the Postgres
+ *  wording) never fired. Same read as preview/engine.ts's checkout path. */
+async function edgeErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const ctx = (error as { context?: unknown } | null)?.context;
+  if (typeof Response !== 'undefined' && ctx instanceof Response) {
+    try {
+      const body = (await ctx.clone().json()) as { error?: string } | null;
+      const msg = body?.error?.trim();
+      if (msg) return msg;
+    } catch { /* not JSON — the fallback is all there is */ }
+  }
+  return fallback;
+}
+
 /** Run one market's ingest now (the panel's "Check sources now" button). The edge function does
  *  the fetching; a signed-in call is scoped to the caller's own sources server-side. */
 export async function runIngestNow(worldId: string): Promise<{ line: string }> {
   const { data, error } = await supabase.functions.invoke('lead-ingest', { body: { world_id: worldId } });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(await edgeErrorMessage(error, error.message));
   if ((data as { error?: string } | null)?.error) throw new Error((data as { error: string }).error);
   return { line: (data as { line?: string } | null)?.line ?? 'Ingest ran.' };
 }
@@ -370,8 +424,11 @@ export async function leadScoreboard(worldId: string): Promise<{
   const delivered = rows.filter((r) => r.status !== 'new' && r.status !== 'skipped').length;
   const quoted = rows.filter((r) => r.status === 'quoted' || r.status === 'won' || r.status === 'lost').length;
   const won = rows.filter((r) => r.status === 'won').length;
-  const { data: oc } = await supabase.from('le_outcomes')
+  // Not swallowed: an unreadable outcomes table used to render as "$0 commission", which is a
+  // headline number stating something false. The panel's load-error surface names the real reason.
+  const { data: oc, error: ocErr } = await supabase.from('le_outcomes')
     .select('contract_value_usd, result').eq('world_id', worldId).eq('result', 'won');
+  if (ocErr) throw new Error(ocErr.message);
   const commissionUsd = ((oc ?? []) as { contract_value_usd: number | null }[])
     .reduce((s, o) => s + commissionFor(o.contract_value_usd ?? 0), 0);
   return { delivered, quoted, won, closeRatePct: delivered ? Math.round((won / delivered) * 100) : null, commissionUsd };
