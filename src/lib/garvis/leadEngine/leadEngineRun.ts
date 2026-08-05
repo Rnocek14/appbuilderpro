@@ -15,11 +15,11 @@ import {
   digestFor, commissionFor, TRADES, isTradeKey, pitchFor,
   type DigestLead, type TradeKey, type LeadStatus,
 } from './leadEngine.ts';
-import type { SourceKind, StarterSource } from './adapters.ts';
+import { slugJurisdiction, type SourceKind, type StarterSource } from './adapters.ts';
 
 export interface LeadSourceRow {
   id: string; world_id: string; name: string; kind: SourceKind; base_url: string;
-  query_config: Record<string, unknown>; region: string; active: boolean;
+  query_config: Record<string, unknown>; region: string; jurisdiction: string | null; active: boolean;
   last_fetch_at: string | null; last_status: string | null; consecutive_failures: number;
   cursor: Record<string, unknown>; created_at: string;
 }
@@ -30,7 +30,7 @@ export interface LeadRow {
   contact_email: string | null; contact_phone: string | null; why_now: string;
   status: LeadStatus; delivered_at: string | null; verified_at: string | null; created_at: string;
   // joined from le_events for display
-  le_events?: { title: string; source_url: string; event_type: string; address: string | null; valuation_usd: number | null } | null;
+  le_events?: { title: string; source_url: string | null; event_type: string; address: string | null; valuation_usd: number | null } | null;
 }
 
 export interface OutcomeRow {
@@ -38,7 +38,7 @@ export interface OutcomeRow {
   contract_value_usd: number | null; commission_invoice_id: string | null; notes: string | null; reported_at: string;
 }
 
-const SOURCE_COLS = 'id, world_id, name, kind, base_url, query_config, region, active, last_fetch_at, last_status, consecutive_failures, cursor, created_at';
+const SOURCE_COLS = 'id, world_id, name, kind, base_url, query_config, region, jurisdiction, active, last_fetch_at, last_status, consecutive_failures, cursor, created_at';
 const LEAD_COLS = 'id, world_id, event_id, trade, score, score_reasons, contact_name, contact_company, contact_email, contact_phone, why_now, status, delivered_at, verified_at, created_at, le_events(title, source_url, event_type, address, valuation_usd)';
 
 async function uid(): Promise<string> {
@@ -57,7 +57,7 @@ export async function listSources(worldId: string): Promise<LeadSourceRow[]> {
 
 export async function createSource(input: {
   worldId: string; name: string; kind: SourceKind; baseUrl: string; region: string;
-  queryConfig?: Record<string, unknown>;
+  queryConfig?: Record<string, unknown>; jurisdiction?: string | null;
 }): Promise<LeadSourceRow> {
   const owner = await uid();
   if (!input.name.trim()) throw new Error('Name the source (e.g. "Denver building permits").');
@@ -65,6 +65,10 @@ export async function createSource(input: {
   const { data, error } = await supabase.from('le_sources').insert({
     owner_id: owner, world_id: input.worldId, name: input.name.trim(), kind: input.kind,
     base_url: input.baseUrl.trim(), region: input.region.trim(),
+    // The stable slug is half of a record's identity (leadEngine.dedupeKey). Absent one, the
+    // region label is slugged at read time — never left empty, which would let two markets
+    // collide on the same permit number.
+    jurisdiction: input.jurisdiction?.trim() || slugJurisdiction(input.region),
     query_config: input.queryConfig ?? {},
   }).select(SOURCE_COLS).single();
   if (error) throw new Error(error.message);
@@ -109,6 +113,7 @@ export async function quickStartMarket(preset?: StarterSource | null): Promise<{
     await createSource({
       worldId: web.worldId, name: preset.label, kind: preset.kind,
       baseUrl: preset.base_url, region: preset.region, queryConfig: preset.query_config,
+      jurisdiction: preset.jurisdiction,
     }).catch(() => {});
     // First check now — instant first results instead of waiting for the next tick.
     await supabase.functions.invoke('lead-ingest', { body: { world_id: web.worldId } }).catch(() => {});

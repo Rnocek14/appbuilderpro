@@ -727,6 +727,84 @@ Before any `field_map` in this document is committed, confirm against
 
 ---
 
+## 14. Implementation record — what P0 actually shipped
+
+Migrations `app_0131_lead_capture.sql` + `app_0132_lead_source_url_nullable.sql`; code in
+`src/lib/garvis/leadEngine/{leadEngine,adapters}.ts` and `supabase/functions/lead-ingest/index.ts`;
+150 checks in `leadEngine.verify.ts`.
+
+**Shipped (CAPTURE-NOW only).**
+
+| # | Change | Where |
+|---|---|---|
+| 1 | Field map widened to the full §3 set — identity, lifecycle dates, geo/parcel, class/use, sizing, fees — plus a `name_parts` joiner mirroring `address_parts`. Verbatim rule intact: an unmapped or absent column is null. | `adapters.ts` `FieldMap` |
+| 2 | Multi-party capture. A `parties[]` config lists several column-sets per row; each yields a `le_event_parties` row with `role`/`role_normalized`, phone, email, licence no. and `source_field` provenance. The single `contact_name`/`contact_company` path still works unchanged. | `adapters.ts`, `lead-ingest` |
+| 3 | **Dedupe fix (§6.5).** Identity is `type :: jurisdiction :: source_record_id` when the record has a number, falling back to the documented address+month bucket when it does not. `jurisdiction` is a stable slug on sources and presets. | `leadEngine.dedupeKey` |
+| 4 | `ignoreDuplicates` replaced by upsert-on-change: the run reads what it already holds, compares `content_hash`, updates changed rows, bumps `seen_count`/`last_seen_at` on every observation, and appends a `le_event_versions` row carrying `changed_fields`. | `lead-ingest` |
+| 5 | Sub-floor rows persist with `qualified=false` + `disqualified_reason` instead of being discarded. Leads are minted for qualified rows only. | `adapters.ts`, `lead-ingest` |
+| 6 | Both live bugs — see below. | `adapters.ts` |
+| 7 | `le_ingest_runs`: one row per source per run with request URL, HTTP status, body bytes, truncation flag, rows parsed/disqualified/new/changed, cursor either side, config hash, error. | `lead-ingest` |
+| 8 | `le_leads` now stamps `contact_source` (`record` from the permit, `places`/`website` from the append), `contact_role`, `stage` (the normalized lifecycle state) and `score_version`. | `lead-ingest` |
+
+**Bug 1 — `source_url` (§6.6).** The `?? source.base_url` fallback is gone. Resolution is now:
+a mapped permalink **column** (Seattle and Austin publish a real `Link`), else a per-record
+`permalink_template` that resolves to exactly one record, else **null**. A template with any
+unresolvable token yields null rather than a half-built URL. All five presets now produce a
+per-record link. Where a link is genuinely absent the UI shows *"no direct link"* and the digest
+prints the same words — it never links the dataset endpoint. The digest also only claims *"every
+lead links its public record"* when that is true of every line in it, and a sample pitch will not
+use an unlinkable lead as proof.
+
+**Bug 2 — Seattle: VERIFIED AND FIXED, not removed.** `76t8-zvzf` is confirmed dead; the live
+Building Permits dataset is **`76t5-zqzr`**, corroborated by the Seattle portal's dataset page, its
+Socrata API foundry entry, the Tyler Data & Insights mirror and the Data.gov catalogue record. The
+preset now points there and is re-mapped against that dataset's published columns (`permitnum`,
+`permitclassmapped`, `statuscurrent`, `applieddate`/`issueddate`/`expiresdate`/`completeddate`,
+`originaladdress1`, `contractorcompanyname`, `latitude`/`longitude`, and the `Link` permalink).
+`permitclassmapped='Non-Residential'` replaces the value floor, per §3.4.
+
+**Also fixed in passing, because the dedupe fix depends on them:**
+
+- **Silent parse failure (§6.6.1).** `parseRowsResult` distinguishes *unreadable* from *empty*. A
+  truncated body, a WAF page or a changed envelope is now UNREACHABLE with a stated reason instead
+  of a healthy-looking "0 rows read"; an empty JSON array is still genuine no-change.
+- **`toIso` (§6.5).** Floating Socrata timestamps are pinned to UTC explicitly, so a
+  month-boundary record can no longer shift buckets on a non-UTC runtime and re-ingest itself. The
+  epoch-millis heuristic is now switchable off via a per-source `date_format` hint, so a numeric
+  permit id cannot become a plausible date.
+- **Signed coordinates.** The shared numeric reader rejected negatives, which would have nulled
+  **every** US longitude the moment `lat`/`lon` were mapped.
+- **Socrata structured columns.** `url`-typed columns yield their URL; any other object yields
+  null instead of the string `"[object Object]"`.
+
+**Deliberately NOT done here** (the buckets are the point):
+
+- **Server-side `where` filtering stays as it is.** §3.9's stored-flag decision is implemented
+  **client-side only**: a row the portal never sends cannot be flagged, so the disqualified-row
+  guarantee covers everything we download, not everything that exists. Austin and Seattle move to
+  a `property_class` clause (which is *wider* than the value floor it replaces — it stops dropping
+  unpriced commercial jobs); Chicago, NYC and SF keep their existing clauses. Widening those
+  windows is a coverage decision with a bandwidth cost and belongs with P3, and `le_ingest_runs`
+  now records the denominator needed to make it.
+- **No BUY-LATER work**: no DNC scrub, no email verification, no mobile/email append beyond the
+  Places+website lookup that already existed.
+- **No DERIVE-LATER work**: no `roof_age`, no `est_value_usd`, no contractor rollups, no
+  `trade_tags` rule engine, no absence queries. The `trade_tags` column exists and stays empty.
+- **No scoring changes** (§8) and no new sources (§7). `status_normalized` is captured and stamped
+  onto the lead as `stage`, but nothing scores on it yet.
+- **The cursor skip (§6.6.2) is still open** — `$limit` with no `$offset` still means a day with
+  more than 100 qualifying records advances the cursor past the remainder. The dedupe fix makes
+  this *safe to retry* (a re-fetched record now resolves to the same row instead of a duplicate),
+  but paging itself is unbuilt.
+
+**Still unverified against a live portal.** The egress proxy blocks every data portal from this
+environment (§0), so apart from Seattle's dataset id every column name below remains
+search-and-DDL sourced, exactly as §12 requires. Mapping an absent column is safe — it reads as
+null, never invented — but a *wrong* mapping is silently empty, so §12's checklist stands, and
+**Austin's `contractor_phone` / `applicant_phone` remain the single highest-value check.**
+
+---
+
 *Written against the shipped code: `app_0129_lead_engine.sql`, `app_0130_lead_customers.sql`,
 `src/lib/garvis/leadEngine/leadEngine.ts`, `src/lib/garvis/leadEngine/adapters.ts`,
 `supabase/functions/lead-ingest/index.ts`. Every line reference in this document was read, not

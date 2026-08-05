@@ -18,7 +18,61 @@ export type LeadEventType =
 
 export type LeadStatus = 'new' | 'delivered' | 'contacted' | 'quoted' | 'won' | 'lost' | 'skipped';
 
-export interface NamedParty { role?: string; name?: string; company?: string }
+/** A party named ON the record. Widened by app_0131: permit feeds publish phones, licence numbers
+ *  and role labels inline (Austin's `contractor_phone` is the highest-value field in the audit),
+ *  and every one of them is verbatim-or-null. `source_field` keeps the provenance discipline:
+ *  which column this party was read out of. */
+export interface NamedParty {
+  role?: string;
+  role_normalized?: PartyRole;
+  name?: string;
+  company?: string;
+  phone?: string;
+  email?: string;
+  license_no?: string;
+  ordinal?: number;
+  source_field?: string;
+}
+
+export type PartyRole =
+  | 'owner' | 'contractor' | 'applicant' | 'architect' | 'engineer'
+  | 'filing_rep' | 'superintendent' | 'other';
+
+/** Role labels are verbatim in the record ('CONTRACTOR-ELECTRICAL', 'OWNER', 'Permittee'); this
+ *  maps them onto the ladder the UI and rollups can group by. Unknown → 'other', never guessed
+ *  into a specific role. An absent label stays null (the caller keeps `role` verbatim). */
+export function normalizeRole(raw: string | null | undefined): PartyRole | null {
+  const s = (raw ?? '').trim().toLowerCase();
+  if (!s) return null;
+  if (s.includes('owner')) return 'owner';
+  if (s.includes('contractor')) return 'contractor';
+  if (s.includes('applicant')) return 'applicant';
+  if (s.includes('architect')) return 'architect';
+  if (s.includes('engineer')) return 'engineer';
+  if (s.includes('superintendent')) return 'superintendent';
+  if (s.includes('filing') || s.includes('representative') || s.includes('agent')) return 'filing_rep';
+  if (s.includes('permittee') || s.includes('permit')) return 'contractor';
+  return 'other';
+}
+
+/** The 4-state lifecycle ladder (app_0131). The raw string is ALWAYS kept alongside — this is a
+ *  grouping, not a replacement. §9 of the capture spec: a date-based "is it done" test is wrong
+ *  ~15% of the time, so status is modelled as its own field and never inferred from dates. */
+export type RecordStatus = 'in_review' | 'active' | 'final' | 'inactive' | 'unknown';
+
+export function normalizeStatus(raw: string | null | undefined): RecordStatus {
+  const s = (raw ?? '').trim().toLowerCase();
+  if (!s) return 'unknown';
+  if (/(final|complete|closed|c of o|certificate of occupancy|co issued)/.test(s)) return 'final';
+  if (/(expire|withdraw|cancel|void|revoked|abandon|denied|rejected)/.test(s)) return 'inactive';
+  if (/(review|submitted|filed|application|pending|intake|triage|plan check|awaiting)/.test(s)) return 'in_review';
+  if (/(issued|active|approved|in progress|permit issued|ready to issue|open)/.test(s)) return 'active';
+  return 'unknown';
+}
+
+/** Stamped onto every lead. The recency term decays, so a stored score is uninterpretable the
+ *  moment the model changes — bump this whenever scoreLead's arithmetic changes. */
+export const SCORE_VERSION = 'le-1';
 
 /** The fields scoring needs — a subset of the le_events row (verbatim from the source record). */
 export interface LeadEventLike {
@@ -30,7 +84,10 @@ export interface LeadEventLike {
   title: string;
   description: string | null;
   named_parties: NamedParty[];
-  source_url: string;
+  /** The record's OWN public page/API row — null when the dataset publishes no per-record URL.
+   *  It is never the dataset endpoint: linking the whole feed as if it were the record is the
+   *  bug this replaced (capture spec §6.6). A null link is stated as "no direct link". */
+  source_url: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,13 +209,76 @@ export function normalizeKeyPart(s: string): string {
   return (s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, '-').slice(0, 120);
 }
 
-/** type :: normalized address (or title) :: month bucket. The month bucket keeps a re-fetched
- *  record identical while letting a genuinely new filing at the same address (next quarter's
- *  renovation) be a new event. */
-export function dedupeKey(e: Pick<LeadEventLike, 'event_type' | 'address' | 'title' | 'occurred_at'>): string {
+/** What identifies an event. `source_record_id` is the permit/licence number — the record's REAL
+ *  identity; `jurisdiction` is a stable slug (not the free-text region label), so two markets with
+ *  overlapping regions cannot collide. */
+export interface EventIdentity {
+  event_type: LeadEventType;
+  jurisdiction?: string | null;
+  source_record_id?: string | null;
+  address: string | null;
+  title: string;
+  occurred_at: string | null;
+}
+
+/** THE DEDUPE FIX (capture spec §6.5). Identity is `type :: jurisdiction :: record number` when
+ *  the record HAS a number, which is the normal case for permit and licence feeds. The old
+ *  address+month key collapsed the normal case — a job's electrical, plumbing and mechanical
+ *  sub-permits share one address in one month, differ only by permit number, and are three
+ *  separate trade leads. Only when a source publishes no record number do we fall back to the
+ *  documented address+month bucket, and the jurisdiction slug still keeps markets apart. */
+export function dedupeKey(e: EventIdentity): string {
+  const juris = normalizeKeyPart(e.jurisdiction ?? '') || 'unknown';
+  const record = normalizeKeyPart(e.source_record_id ?? '');
+  if (record) return `${e.event_type}::${juris}::${record}`;
   const place = normalizeKeyPart(e.address || e.title);
   const bucket = (e.occurred_at ?? '').slice(0, 7) || 'undated';
-  return `${e.event_type}::${place}::${bucket}`;
+  return `${e.event_type}::${juris}::${place}::${bucket}`;
+}
+
+// ---------------------------------------------------------------------------
+// Content hashing — "has the portal changed a row we already hold?"
+// ---------------------------------------------------------------------------
+
+/** Deterministic JSON: object keys sorted, undefined dropped, non-finite numbers → null. The same
+ *  normalized fields always produce the same string, in every runtime, in any key order. */
+export function stableStringify(v: unknown): string {
+  if (v === null || v === undefined) return 'null';
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'null';
+  if (typeof v === 'boolean' || typeof v === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(',')}]`;
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o).filter((k) => o[k] !== undefined).sort();
+    return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(o[k])}`).join(',')}}`;
+  }
+  return 'null';
+}
+
+/** A stable 64-bit content fingerprint (two FNV-1a lanes → 16 hex chars). Not cryptographic and
+ *  not meant to be: it answers exactly one question — did this record's normalized content change
+ *  since we last saw it? Pure, no Web Crypto, so the core stays importable everywhere. */
+export function contentHash(fields: unknown): string {
+  const s = stableStringify(fields);
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+    h2 = Math.imul(h2 ^ (c + i), 0x85ebca6b) >>> 0;
+  }
+  return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+}
+
+/** Which fields differ between the row we hold and the row the portal just served. Drives
+ *  le_event_versions.changed_fields — the transition record that no re-scrape can rebuild.
+ *  Compared loosely by string form: a numeric column round-trips from Postgres as a string and
+ *  that is not a change. */
+export function changedFields(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  const norm = (v: unknown) => (v === null || v === undefined || v === '' ? '' : String(v));
+  return Object.keys(after)
+    .filter((k) => norm(before[k]) !== norm(after[k]))
+    .sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -209,6 +329,20 @@ export function pickContact(parties: NamedParty[]): NamedParty | null {
   return named.find((p) => (p.name ?? '').trim()) ?? named[0];
 }
 
+/** The party a LEAD should carry. Same discipline as pickContact, but a directly dialable party
+ *  wins: a permit that publishes the GC's phone inline is worth more than one that publishes a
+ *  name only, and preferring it is what keeps the record-sourced phone (contact_source='record')
+ *  ahead of any paid append. Null when the record names nobody. */
+export function pickLeadContact(parties: NamedParty[]): NamedParty | null {
+  if (!Array.isArray(parties)) return null;
+  const named = parties.filter((p) => (p?.name ?? '').trim() || (p?.company ?? '').trim());
+  if (!named.length) return null;
+  return named.find((p) => (p.phone ?? '').trim() && (p.name ?? '').trim())
+    ?? named.find((p) => (p.phone ?? '').trim())
+    ?? named.find((p) => (p.name ?? '').trim())
+    ?? named[0];
+}
+
 /** One why-now sentence composed ONLY from record fields. Missing fields are omitted, never
  *  invented. */
 export function whyNow(event: LeadEventLike): string {
@@ -230,9 +364,15 @@ export interface DigestLead {
   why_now: string;
   contact_name: string | null;
   contact_company: string | null;
-  source_url: string;
+  /** null when the dataset publishes no per-record URL — said plainly, never faked with the
+   *  dataset endpoint (capture spec §6.6). */
+  source_url: string | null;
   title: string;
 }
+
+/** The honest source line: the record's own URL, or a plain statement that this dataset has no
+ *  per-record page. Linking the whole feed and calling it "the record" is the thing we fixed. */
+export const NO_DIRECT_LINK = 'no direct link — this dataset publishes no per-record page';
 
 /** Ranked digest for one market world. Pure composition: every line comes from the rows the
  *  caller supplies; every entry carries its source URL. Empty in → an honest "quiet week" out. */
@@ -250,10 +390,15 @@ export function digestFor(worldLabel: string, leads: DigestLead[], max = 15): { 
       `${i + 1}. [${TRADES[l.trade].label} · score ${l.score}] ${l.title}`,
       `   ${l.why_now}`,
       who ? `   Named on the record: ${who}` : null,
-      `   Source: ${l.source_url}`,
+      `   Source: ${l.source_url || NO_DIRECT_LINK}`,
     ].filter(Boolean).join('\n');
   });
-  const body = `Top leads for ${worldLabel}, ranked by the engine's stated reasons:\n\n${lines.join('\n\n')}\n\nEvery lead links its public record. Reply with what you quoted or won — outcomes make next week's ranking smarter.`;
+  // The trust claim is only made when it is TRUE of every line in this digest.
+  const allLinked = ranked.every((l) => !!l.source_url);
+  const closer = allLinked
+    ? 'Every lead links its public record.'
+    : 'Each lead links its public record where the dataset publishes one; the rest name the source and say so.';
+  const body = `Top leads for ${worldLabel}, ranked by the engine's stated reasons:\n\n${lines.join('\n\n')}\n\n${closer} Reply with what you quoted or won — outcomes make next week's ranking smarter.`;
   return { subject, body, included: ranked.length };
 }
 
@@ -268,8 +413,10 @@ export function pitchFor(
   trade: TradeKey, region: string, leads: DigestLead[], fromName: string,
   opts?: { siteUrl?: string | null },
 ): { subject: string; body: string } | null {
-  const picks = [...leads].sort((a, b) => b.score - a.score).slice(0, 3);
-  if (picks.length === 0) return null; // no real leads → no pitch. A sample pitch never bluffs.
+  // A sample pitch's whole job is to be CHECKABLE — its claim is "verify each one yourself". A
+  // lead with no public-record link cannot carry that claim, so it is never used as proof.
+  const picks = [...leads].filter((l) => !!l.source_url).sort((a, b) => b.score - a.score).slice(0, 3);
+  if (picks.length === 0) return null; // no verifiable leads → no pitch. A sample never bluffs.
   const label = TRADES[trade].label.toLowerCase();
   const subject = `${picks.length} ${label} project${picks.length === 1 ? '' : 's'} in ${region} — from this month's public records`;
   const lines = picks.map((l, i) => [
