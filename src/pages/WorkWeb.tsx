@@ -399,7 +399,7 @@ export default function WorkWeb() {
 
         {/* FIRST-RUN ORIENTATION — three concrete steps to the first real marketing. Only shows
             when this world has produced no EARNED work yet; vanishes the moment it has. */}
-        <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} growthDesk={growthDesk} />
+        <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} growthDesk={growthDesk} leadDesk={leadDesk} />
 
         {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
         <div className="mb-4">

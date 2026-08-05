@@ -40,7 +40,7 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   const [board, setBoard] = useState<Awaited<ReturnType<typeof leadScoreboard>> | null>(null);
   const [clock, setClock] = useState<StandingOrder | null | undefined>(undefined); // undefined = loading
   const [customers, setCustomers] = useState<LeadCustomerRow[] | null>(null);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   // Setup disclosure — opens itself only when something needs attention.
@@ -69,9 +69,11 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
   const refresh = useCallback(async () => {
     try {
       const [s, l, b, c, cu] = await Promise.all([listSources(worldId), listLeads(worldId), leadScoreboard(worldId), getClockOrder(worldId), listCustomers(worldId)]);
-      setSources(s); setLeads(l); setBoard(b); setClock(c); setCustomers(cu); setLoadFailed(false);
-    } catch {
-      setLoadFailed(true); // a failed load must never render as an empty market
+      setSources(s); setLeads(l); setBoard(b); setClock(c); setCustomers(cu); setLoadError(null);
+    } catch (e) {
+      // A failed load must never render as an empty market — and it must SAY WHAT BROKE.
+      // "could not load" sent the operator to a browser console; the message is the diagnosis.
+      setLoadError(e instanceof Error ? e.message : String(e));
     }
   }, [worldId]);
 
@@ -101,10 +103,21 @@ export function LeadEnginePanel({ worldId, worldLabel, onToast }: {
     finally { setBusy(null); }
   };
 
-  if (loadFailed) {
+  if (loadError) {
+    const missingTable = /relation .* does not exist|could not find the table/i.test(loadError);
+    const missingCol = /column .* does not exist|could not find the .* column/i.test(loadError);
     return (
-      <div className="mt-4 rounded-xl border border-forge-err/40 bg-forge-panel p-4 text-sm text-forge-dim">
-        The lead market could not load. <button className="underline" onClick={() => void refresh()}>Retry</button>
+      <div className="mt-4 rounded-xl border border-forge-err/40 bg-forge-panel p-4 text-sm">
+        <p className="font-medium text-forge-ink">The lead market could not load.</p>
+        <p className="mt-1 font-mono text-xs text-forge-err">{loadError}</p>
+        {(missingTable || missingCol) && (
+          <p className="mt-2 text-xs text-forge-dim">
+            This database is behind the app. Run the Lead Engine migrations
+            (<span className="font-mono">app_0129</span>…<span className="font-mono">app_0133</span>), or deploy with
+            <span className="font-mono"> mode=full</span> to replay every migration — they are additive and idempotent.
+          </p>
+        )}
+        <button className="mt-2 underline text-xs text-forge-dim hover:text-forge-ink" onClick={() => void refresh()}>Retry</button>
       </div>
     );
   }

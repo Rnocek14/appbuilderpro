@@ -19,10 +19,10 @@ import { getBrandKit } from '../../lib/garvis/artifacts';
 
 const DISMISS_PREFIX = 'garvis.firstrun.dismissed.';
 
-export function FirstRunGuide({ worldId, hasEarnedWork, growthDesk = false }: {
+export function FirstRunGuide({ worldId, hasEarnedWork, growthDesk = false, leadDesk = false }: {
   worldId: string; hasEarnedWork: boolean;
   /** A content-growth world's first steps are the CHANNEL workflow, not the outreach studios. */
-  growthDesk?: boolean;
+  growthDesk?: boolean; leadDesk?: boolean;
 }) {
   const [dismissed, setDismissed] = useState(true); // default hidden until we read storage
   const [ai, setAi] = useState(() => resolveAI());
@@ -59,6 +59,31 @@ export function FirstRunGuide({ worldId, hasEarnedWork, growthDesk = false }: {
       body: <>This is what makes studios generate <span className="text-forge-ink">real, personalized</span> work instead of generic templates. <Link to="/settings" className="text-forge-ember underline">Open Settings</Link> — paste-once, stored in this browser.</>,
     });
   }
+  // A LEAD MARKET IS NOT A MARKETING WORLD. Its first run is: wire a source, let the clock read
+  // it, pitch someone. Telling its operator to "open Seller Campaigns" was the guide describing a
+  // world that does not exist here (visual QA finding, escalated after it shipped).
+  if (leadDesk) {
+    return (
+      <div className="mb-4 overflow-hidden rounded-2xl border border-forge-ember/30 bg-gradient-to-br from-forge-ember/10 to-forge-panel/30">
+        <div className="flex items-center gap-2 border-b border-forge-border/60 px-4 py-2.5">
+          <Compass size={16} className="text-forge-ember" />
+          <h3 className="text-sm font-semibold text-forge-ink">Your first leads — 2 steps</h3>
+          <button onClick={dismiss} title="Dismiss" className="ml-auto text-forge-dim/60 transition-colors hover:text-forge-ink"><X size={15} /></button>
+        </div>
+        <ol className="divide-y divide-forge-border/40">
+          <li className="px-4 py-3 text-sm text-forge-ink">
+            <span className="font-medium">1. Check the sources.</span>{' '}
+            <span className="text-forge-dim">In the Lead Market panel below, press <span className="text-forge-ink">Check now</span>. Ranked leads appear with their reasons and a link to each public record.</span>
+          </li>
+          <li className="px-4 py-3 text-sm text-forge-ink">
+            <span className="font-medium">2. Pitch someone.</span>{' '}
+            <span className="text-forge-dim">In <span className="text-forge-ink">Selling</span>, enter a contractor's email and trade, then press <span className="text-forge-ink">Draft sample pitch</span>. It waits in your Queue — nothing sends without your approval.</span>
+          </li>
+        </ol>
+      </div>
+    );
+  }
+
   steps.push({
     done: brandSet, icon: Palette,
     title: brandSet ? 'Brand set' : 'Set the brand (optional)',
