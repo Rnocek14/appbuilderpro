@@ -121,18 +121,71 @@ export function bespokeHonest(html: string, profile: BusinessProfile): HonestyRe
   for (const term of ['licensed', 'insured', 'bonded', 'certified', 'accredited']) {
     if (hay.includes(term) && !grounded.includes(term)) v.push(`unverified credential: "${term}"`);
   }
-  // 2. A made-up license/permit number (codes often start with a letter, e.g. "Lic. #C36-000000").
-  if (/\blic(?:ense)?\.?\s*(?:#|no\.?|number)\s*[:#]?\s*[a-z0-9]{2,}/i.test(html) && !/\blic/i.test(grounded)) {
-    v.push('invented license number');
+  // 2. A made-up license number. THIS BRANCH USED TO FAIL OPEN TWICE OVER.
+  //    (a) It required the literal token "lic" before the number, so every real Texas format —
+  //        TECL #12345 (electrical), TACLA00123C / TACLB (A/C), RMP-12345 (master plumber),
+  //        M-38291 — carried no "lic" and sailed straight through unexamined.
+  //    (b) The guard `!/\blic/i.test(grounded)` disabled the whole check whenever the profile
+  //        description merely contained the word "licensed" — which is the single most common
+  //        sentence a contractor writes about themselves. So the usual case was no check at all.
+  //    A fabricated state licence number printed on a page carrying a real contractor's name is
+  //    not a cosmetic defect: in Texas it is a Class A violation for the CLIENT, and TDLR runs
+  //    stings that select targets on exactly that signature. Presence of a licence-shaped string
+  //    is now a violation unless it matches one the profile actually carries.
+  const licencePatterns = [
+    // "Lic. #C36-000000", "License No: 12345" — the code may interleave letters and digits.
+    /\blic(?:ense|ence)?\.?\s*(?:#|no\.?|number)?\s*[:#]?\s*([a-z0-9][a-z0-9-]{3,})/gi,
+    // Texas formats, which carry no "lic" token at all and were therefore never examined.
+    /\b((?:TECL|TACLA|TACLB|TACLC|RMP|MPL|RCE|ACR)\s*#?\s*-?\s*\d{3,}[a-z]?)\b/gi,
+    /\b(M-?\s?\d{4,6})\b/g,                                                   // master plumber M-38291
+  ];
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const groundedCodes = norm(grounded);
+  // EVERY match, not the first: on "Licensed & insured · CA Lic. #C36-000000" the first hit is the
+  // word "Licensed" itself, and stopping there let the actual number through untouched.
+  let licenceHit: RegExpMatchArray | null = null;
+  for (const re of licencePatterns) {
+    for (const m of html.matchAll(re)) {
+      // Fewer than two digits is prose ("licensed and insured"), not a number.
+      if ((m[1].match(/\d/g) ?? []).length >= 2) { licenceHit = m; break; }
+    }
+    if (licenceHit) break;
   }
-  // 3. Tenure ("22 years", "since 1998") with nothing in the brief to support it.
+  if (licenceHit) {
+    // Grounded ONLY when the business itself gave us this exact code, punctuation ignored.
+    const code = norm(licenceHit[1]);
+    if (!groundedCodes.includes(code)) v.push(`invented license number: "${licenceHit[0].trim()}"`);
+  }
+  // 3. Tenure. The old guard passed ANY specific claim once the word "years" appeared anywhere in
+  //    the grounded text — and "years" turns up constantly in review snippets ("used them for
+  //    years"). "Serving Austin since 1998" then shipped on the strength of a customer's phrasing.
+  //    The specific NUMBER now has to be present in the grounded text, not the category word.
   const tenure = /\b(\d{1,3})\+?\s*(?:years|yrs)\b/i.exec(html) || /\bsince\s+((?:19|20)\d{2})\b/i.exec(html);
-  if (tenure && !/\b(?:years|yrs|since\s+(?:19|20)\d{2}|est\.?\s*(?:19|20)\d{2}|decades?)\b/i.test(grounded)) {
+  if (tenure && !grounded.includes(tenure[1])) {
     v.push(`unverified tenure: "${tenure[0].trim()}"`);
   }
-  // 4. Ratings / review counts the brief doesn't provide.
-  if (/\b\d(?:\.\d)?\s*(?:★|stars?\b|\/\s*5\b)/i.test(html) && profile.google_rating == null) v.push('invented star rating');
-  if (/\b[\d,]{1,7}\+?\s*(?:reviews|ratings)\b/i.test(html) && !(profile.review_count && profile.review_count > 0)) v.push('invented review count');
+  // 4. Ratings and review counts. Both branches only fired when the profile had NO figure at all,
+  //    so a business genuinely rated 4.1 with 12 reviews could be advertised as "5.0 stars, 2,400+
+  //    reviews" and pass clean — the worst case, because it is the one a real customer can
+  //    disprove. Compare NUMERICALLY against what the profile actually says.
+  const starHit = /\b(\d(?:\.\d)?)\s*(?:★|stars?\b|\/\s*5\b)/i.exec(html);
+  if (starHit) {
+    const claimed = Number(starHit[1]);
+    const actual = profile.google_rating;
+    // 0.05 tolerance: "4.7" for a 4.72 is rounding, "5.0" for a 4.1 is a lie.
+    if (actual == null || !Number.isFinite(claimed) || Math.abs(claimed - actual) > 0.05) {
+      v.push(actual == null ? 'invented star rating' : `inflated star rating: claims ${claimed}, profile says ${actual}`);
+    }
+  }
+  const countHit = /\b([\d,]{1,7})\+?\s*(?:reviews|ratings)\b/i.exec(html);
+  if (countHit) {
+    const claimed = Number(countHit[1].replace(/,/g, ''));
+    const actual = profile.review_count;
+    // A "500+" against 512 real is fair; against 12 real it is not. Never claim MORE than there are.
+    if (!actual || actual <= 0 || !Number.isFinite(claimed) || claimed > actual) {
+      v.push(!actual ? 'invented review count' : `inflated review count: claims ${claimed}, profile says ${actual}`);
+    }
+  }
   // 5. Warranties / guarantees the brief never promised.
   for (const term of ['warrant', 'guarantee', 'money-back', 'money back', 'satisfaction guaranteed']) {
     if (hay.includes(term) && !grounded.includes(term)) v.push(`unverified promise: "${term}"`);

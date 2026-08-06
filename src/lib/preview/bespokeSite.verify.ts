@@ -70,5 +70,75 @@ check('looksLikeHtmlDoc accepts a real full document', looksLikeHtmlDoc(honestHt
 check('looksLikeHtmlDoc rejects a fenced/prose reply', !looksLikeHtmlDoc('```html\n<div>hi</div>\n```'));
 check('looksLikeHtmlDoc rejects a truncated fragment', !looksLikeHtmlDoc('<!doctype html><html><body><h1>Cut o'));
 
+// ── THE FAIL-OPEN BRANCHES (found 2026-08-06 by adversarial audit) ──────────
+// Four branches used presence of a TOKEN as a stand-in for entailment of a CLAIM. Each shipped a
+// specific lie onto a page carrying a real, named, licensed contractor's business. In Texas that is
+// a Class A violation for the CLIENT, and TDLR selects sting targets on exactly that signature.
+
+/** The profile shape that disarmed the gate: a real business that says the ordinary things. */
+const realBiz: BusinessProfile = {
+  business_name: 'Wimberley Electric', industry: 'electrician', photos: [],
+  description: 'Licensed and insured electricians serving Austin for years.',
+  google_rating: 4.1, review_count: 12,
+  services: ['panel upgrades'], issues: [], review_snippets: [],
+};
+
+check('TEXAS LICENCE FORMATS carry no "lic" token and were never examined at all',
+  ['TECL #12345', 'TACLA00123C', 'RMP-12345', 'M-38291'].every((code) => {
+    const html = `<!doctype html><html><body><p>${code}</p></body></html>`;
+    return bespokeHonest(html, realBiz).violations.some((x) => /license number/.test(x));
+  }));
+check('…and the word "Licensed" in the profile no longer disables the licence check entirely',
+  // The old guard was `!/\blic/i.test(grounded)` — one ordinary sentence switched the branch off.
+  bespokeHonest('<!doctype html><html><body>Lic. #C36-000000</body></html>', realBiz)
+    .violations.some((x) => /license number/.test(x)));
+check('the FIRST match is not the only one checked — "Licensed" precedes the real number',
+  bespokeHonest('<!doctype html><html><body>Licensed &amp; insured · CA Lic. #C36-000000</body></html>', realBiz)
+    .violations.some((x) => /license number/.test(x)));
+check('a licence the profile ACTUALLY carries is allowed through',
+  !bespokeHonest('<!doctype html><html><body>TECL #29481</body></html>',
+    { ...realBiz, description: 'Licensed electricians, TECL #29481, serving Austin.' })
+    .violations.some((x) => /license number/.test(x)));
+check('prose is not a licence number — "licensed and insured" alone does not trip it',
+  !bespokeHonest('<!doctype html><html><body>Licensed and insured.</body></html>', realBiz)
+    .violations.some((x) => /license number/.test(x)));
+
+check('AN INFLATED RATING IS CAUGHT — the branch only fired when the profile had NO rating',
+  // Real 4.1, page claims 5.0. The customer can disprove this in one click, which is the worst case.
+  bespokeHonest('<!doctype html><html><body><span>5.0 ★</span></body></html>', realBiz)
+    .violations.some((x) => /inflated star rating/.test(x)));
+check('an INFLATED REVIEW COUNT is caught — real 12, page claims 2,400+',
+  bespokeHonest('<!doctype html><html><body><span>2,400+ reviews</span></body></html>', realBiz)
+    .violations.some((x) => /inflated review count/.test(x)));
+check('the TRUE rating and count still pass — rounding is allowed, inflation is not',
+  bespokeHonest('<!doctype html><html><body><span>4.1 ★ · 12 reviews</span></body></html>', realBiz)
+    .violations.length === 0);
+check('claiming FEWER reviews than exist is honest and allowed',
+  !bespokeHonest('<!doctype html><html><body><span>4.1 ★ · 10 reviews</span></body></html>', realBiz)
+    .violations.some((x) => /review count/.test(x)));
+
+check('TENURE needs the actual NUMBER in the grounded text, not the word "years"',
+  // A review snippet saying "used them for years" used to license "Serving Austin since 1998".
+  bespokeHonest('<!doctype html><html><body>Serving Austin since 1998</body></html>', realBiz)
+    .violations.some((x) => /unverified tenure/.test(x)));
+check('…and a tenure the profile states IS allowed',
+  !bespokeHonest('<!doctype html><html><body>22 years in business</body></html>',
+    { ...realBiz, description: '22 years serving Austin.' })
+    .violations.some((x) => /unverified tenure/.test(x)));
+
+check('THE COMPOUND CASE: the profile that disarmed every branch at once is now rejected',
+  (() => {
+    const html = `<!doctype html><html><body>
+      <p>Licensed &amp; insured · TACLA00123C</p>
+      <b>Serving Austin since 1998</b> · <span>5.0 ★ · 2,400+ reviews</span>
+    </body></html>`;
+    const r = bespokeHonest(html, realBiz);
+    return !r.ok
+      && r.violations.some((x) => /license number/.test(x))
+      && r.violations.some((x) => /inflated star rating/.test(x))
+      && r.violations.some((x) => /inflated review count/.test(x))
+      && r.violations.some((x) => /unverified tenure/.test(x));
+  })());
+
 console.log(`\nbespokeSite.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} bespokeSite check(s) failed`);
