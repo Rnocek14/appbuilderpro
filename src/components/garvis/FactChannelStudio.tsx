@@ -68,6 +68,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [lane, setLane] = useState<'calm' | 'energetic'>('calm');
   const [sfx, setSfx] = useState<SfxKit>(loadSfxKit);
   const [sfxOpen, setSfxOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [epFilter, setEpFilter] = useState<'all' | 'needs_action' | 'posted'>('all');
 
   const channel = channels?.find((c) => c.id === channelId) ?? null;
@@ -284,7 +285,9 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
         <span className="text-[11px] text-forge-dim">cited script → illustrated beats → narrated 9:16 mp4 → approval-gated publish</span>
       </div>
 
-      {/* Channel roster — a handful of DISTINCT brands. The presets are different postures on purpose. */}
+      {/* Channel roster — DAILY surface: your channels and (until one exists) the presets to start
+          one. Everything setup-once lives behind "Channel setup" (simplicity audit: the daily flow
+          is pulse → Draft → episodes; CTA/music/lane/kit/new-channels are occasional). */}
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         {channels.map((c) => (
           <button key={c.id} onClick={() => setChannelId(c.id)}
@@ -292,12 +295,18 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
             {c.name}
           </button>
         ))}
-        {CHANNEL_PRESETS.filter((p) => !channels.some((c) => c.name === p.label)).map((p) => (
+        {channels.length === 0 && CHANNEL_PRESETS.map((p) => (
           <button key={p.id} onClick={() => void doCreate(p.id)} disabled={busy} title={p.persona}
             className="flex items-center gap-1 rounded-lg border border-dashed border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">
             <Plus size={11} /> {p.label}
           </button>
         ))}
+        {channel && (
+          <button onClick={() => setSetupOpen(!setupOpen)}
+            className={cn('ml-auto rounded-lg border px-2.5 py-1 text-xs transition-colors', setupOpen ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+            Channel setup {setupOpen ? '▴' : '▾'}
+          </button>
+        )}
       </div>
 
       {channel && (
@@ -334,43 +343,60 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
               <span className="text-forge-dim">— {pulse.read}</span>
             </p>
           )}
-          {/* THE MONEY ROUTE — one destination per channel; every caption carries it, src-stamped
-              so your own sites answer "which channel sold this" through site_events. */}
-          <div className="mt-2 flex flex-wrap gap-2">
-            <input value={ctaDraft} onChange={(e) => setCtaDraft(e.target.value)} placeholder="destination link (your app / shop / page) — rides every caption, src-tagged"
-              className="min-w-[280px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
-            {ctaDraft.trim() !== channel.cta_url && (
-              <button onClick={() => { void setChannelCta(channel.id, ctaDraft, channel.cta_label).then(() => { void reloadChannels(); onToast('success', 'Destination saved — new episodes link to it.'); }).catch((e) => onToast('error', e instanceof Error ? e.message : 'Could not save.')); }}
-                className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">
-                Save destination
-              </button>
-            )}
-          </div>
+          {/* THE DAILY ROW — one primary action. Topic stays because it feeds that action and is
+              optional; everything else moved into Channel setup. */}
           <div className="mt-2 flex flex-wrap gap-2">
             <input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="topic (optional — blank lets it pick one in the niche)"
               className="min-w-[240px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
-            <input value={musicUrl} onChange={(e) => setMusicUrl(e.target.value)} placeholder="music bed URL (CC0 mp3), optional"
-              className="min-w-[200px] rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
             <Button variant='primary' size='sm' onClick={() => void doDraft()} disabled={busy}>
               {busy && progress?.startsWith('Drafting') ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Draft a cited episode
             </Button>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-            <span className="text-forge-dim">edit lane:</span>
-            {(['calm', 'energetic'] as const).map((l) => (
-              <button key={l} onClick={() => setLane(l)}
-                title={l === 'calm' ? 'Educational: karaoke captions, sparse sound cues (the caregiver default)' : 'High-energy: per-word pop captions, dense sound cues, riser under the hook'}
-                className={cn('rounded-lg border px-2 py-1', lane === l ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
-                {l}
-              </button>
-            ))}
-            <button onClick={() => setSfxOpen(!sfxOpen)}
-              className={cn('rounded-lg border px-2 py-1', sfxKitCount(sfx) ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
-              Sound kit{sfxKitCount(sfx) ? ` (${sfxKitCount(sfx)})` : ''}
-            </button>
-            <span className="text-forge-dim">— whooshes ride the scene cuts on the next Produce</span>
-          </div>
-          {sfxOpen && <SoundKitFields sfx={sfx} onChange={setSfx} />}
+
+          {/* CHANNEL SETUP — set-once controls: the money route, the music bed, the edit lane, the
+              sound kit, and starting more channels. Closed by default; the daily flow never sees it. */}
+          {setupOpen && (
+            <div className="mt-2 space-y-2 rounded-xl border border-forge-border p-3">
+              <div className="flex flex-wrap gap-2">
+                <input value={ctaDraft} onChange={(e) => setCtaDraft(e.target.value)} placeholder="destination link (your app / shop / page) — rides every caption, src-tagged"
+                  className="min-w-[280px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
+                {ctaDraft.trim() !== channel.cta_url && (
+                  <button onClick={() => { void setChannelCta(channel.id, ctaDraft, channel.cta_label).then(() => { void reloadChannels(); onToast('success', 'Destination saved — new episodes link to it.'); }).catch((e) => onToast('error', e instanceof Error ? e.message : 'Could not save.')); }}
+                    className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">
+                    Save destination
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <input value={musicUrl} onChange={(e) => setMusicUrl(e.target.value)} placeholder="music bed URL (CC0 mp3), optional"
+                  className="min-w-[200px] rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-dim focus:border-forge-ember/60 focus:outline-none" />
+                <span className="text-forge-dim">edit lane:</span>
+                {(['calm', 'energetic'] as const).map((l) => (
+                  <button key={l} onClick={() => setLane(l)}
+                    title={l === 'calm' ? 'Educational: karaoke captions, sparse sound cues (the caregiver default)' : 'High-energy: per-word pop captions, dense sound cues, riser under the hook'}
+                    className={cn('rounded-lg border px-2 py-1', lane === l ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                    {l}
+                  </button>
+                ))}
+                <button onClick={() => setSfxOpen(!sfxOpen)}
+                  className={cn('rounded-lg border px-2 py-1', sfxKitCount(sfx) ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                  Sound kit{sfxKitCount(sfx) ? ` (${sfxKitCount(sfx)})` : ''}
+                </button>
+              </div>
+              {sfxOpen && <SoundKitFields sfx={sfx} onChange={setSfx} />}
+              {CHANNEL_PRESETS.some((p) => !channels.some((c) => c.name === p.label)) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-forge-dim">start another channel:</span>
+                  {CHANNEL_PRESETS.filter((p) => !channels.some((c) => c.name === p.label)).map((p) => (
+                    <button key={p.id} onClick={() => void doCreate(p.id)} disabled={busy} title={p.persona}
+                      className="flex items-center gap-1 rounded-lg border border-dashed border-forge-border px-2.5 py-1 text-xs text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">
+                      <Plus size={11} /> {p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {progress && <p className="mt-2 flex items-center gap-1.5 text-xs text-forge-dim"><Loader2 size={12} className="animate-spin" /> {progress}</p>}
 
           {/* Month-scale triage: the list shows the recent 20; these chips answer "what needs me"

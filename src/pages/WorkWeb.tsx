@@ -177,6 +177,9 @@ export default function WorkWeb() {
   // centerpiece (found by the visual walkthrough). A world that ALSO runs outreach
   // (launch/audience areas) still leads with the marketing canvas — the productLab exclusion,
   // applied here too (review finding #1).
+  // Which preamble panel (goal / standing orders / ask) is expanded — closed by default so the
+  // page opens on the WORK (whole-platform simplicity audit).
+  const [preamble, setPreamble] = useState<'goal' | 'orders' | 'ask' | null>(null);
   const growthDesk = useMemo(() => !!web
     && web.clusters.some((c) => c.charter?.flavor === 'content_growth')
     && !web.clusters.some((c) => c.charter?.archetype === 'launch' || c.charter?.archetype === 'audience'), [web]);
@@ -394,33 +397,45 @@ export default function WorkWeb() {
             when this world has produced no EARNED work yet; vanishes the moment it has. */}
         <FirstRunGuide worldId={worldId} hasEarnedWork={web.rollup.artifacts > 0} growthDesk={growthDesk} />
 
-        {/* THE GOAL — what this world is for. Every function bends toward it (goals spine). */}
-        <div className="mb-4">
-          <WorldGoalPanel worldId={worldId} />
+        {/* WORK FIRST, CHROME COLLAPSED (whole-platform simplicity audit): the goal, the clock,
+            and the ask bar are occasional-use — stacked as permanent preamble they buried the
+            actual work under five panels of options. One thin strip now; each expands on demand.
+            Nothing was removed: same panels, one click away, closed by default. */}
+        <div className="mb-4 flex flex-wrap items-center gap-1.5 text-[11px]">
+          {([['goal', 'The goal'], ['orders', 'Standing orders'], ['ask', `Ask about ${web.title}`]] as const).map(([id, label]) => (
+            <button key={id} onClick={() => setPreamble(preamble === id ? null : id)}
+              className={cn('rounded-lg border px-2.5 py-1 transition-colors', preamble === id ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink')}>
+              {label}
+            </button>
+          ))}
         </div>
-
-        {/* THE CLOCK — this world's standing orders: watch a page, digest on a cadence. Read-and-
-            record only; findings surface in the waking moment, never auto-sent anywhere. */}
-        <div className="mb-4">
-          <StandingOrdersPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
-        </div>
-
-        {/* Ask this world — retrieval scoped to its own artifacts, playbooks, research, designs */}
-        <div className="mb-4">
-          <AskGarvis worldId={worldId} placeholder={assistDesk
-            ? `Ask about ${web.title} — "what's our return policy?", "what do we tell people about shipping times?"`
-            : docStudio
-            ? `Ask about ${web.title} — "what's in our rate card?", "what did we say in the last proposal?"`
-            : dataStudio
-            ? `Ask about ${web.title} — "what did the last analysis find?", "which dataset covered Q3?"`
-            : trackerDesk
-            ? `Ask about ${web.title} — "what do I know about Jane?", "what did I log about June?"`
-            : productLab
-            ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
-            : growthDesk
-            ? `Ask about ${web.title} — "which hooks won this month?", "what should the channel cover next?"`
-            : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
-        </div>
+        {preamble === 'goal' && (
+          <div className="mb-4">
+            <WorldGoalPanel worldId={worldId} />
+          </div>
+        )}
+        {preamble === 'orders' && (
+          <div className="mb-4">
+            <StandingOrdersPanel worldId={worldId} onToast={(k, m) => toast(k, m)} />
+          </div>
+        )}
+        {preamble === 'ask' && (
+          <div className="mb-4">
+            <AskGarvis worldId={worldId} placeholder={assistDesk
+              ? `Ask about ${web.title} — "what's our return policy?", "what do we tell people about shipping times?"`
+              : docStudio
+              ? `Ask about ${web.title} — "what's in our rate card?", "what did we say in the last proposal?"`
+              : dataStudio
+              ? `Ask about ${web.title} — "what did the last analysis find?", "which dataset covered Q3?"`
+              : trackerDesk
+              ? `Ask about ${web.title} — "what do I know about Jane?", "what did I log about June?"`
+              : productLab
+              ? `Ask about ${web.title} — "what do we know about the users?", "which concept should we spec first?"`
+              : growthDesk
+              ? `Ask about ${web.title} — "which hooks won this month?", "what should the channel cover next?"`
+              : `Ask about ${web.title} — "what's our plan for direct mail?", "who did we find?"`} />
+          </div>
+        )}
 
         {/* THE HOME: for a marketing business, the marketing canvas IS the front page — what you're
             marketing glows in the center and everything you can make branches around it. Tap a node
