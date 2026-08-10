@@ -233,7 +233,7 @@ jobs:
       # ingest-profile) + the boards' words seam (board-copy/generate-image). All self-auth.
       - name: Deploy hot functions (JWT-verified)
         run: |
-          for fn in board-copy generate-image render-design discover-media fetch-url ingest-profile send-email send-sms social-publish discover-run generate-video publish-preview client-checkout connect-domain; do
+          for fn in board-copy generate-image render-design discover-media fetch-url ingest-profile send-email send-sms social-publish discover-run generate-video publish-preview client-checkout connect-domain concierge; do
             echo "── deploying $fn ──"
             supabase functions deploy "$fn" --project-ref "$PROJECT_REF"
           done
@@ -314,7 +314,7 @@ jobs:
           set -e
           fail=0
           echo "— function probes —"
-          for fn in board-copy generate-image discover-media fetch-url ingest-profile inbox-draft standing-worker; do
+          for fn in board-copy generate-image discover-media fetch-url ingest-profile inbox-draft standing-worker concierge; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS "https://${PROJECT_REF}.supabase.co/functions/v1/${fn}")
             if [ "$code" = "404" ]; then echo "::error::$fn NOT deployed (404)"; fail=1; else echo "$fn: $code (live)"; fi
           done
