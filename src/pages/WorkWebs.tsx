@@ -25,6 +25,14 @@ export default function WorkWebs() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState<string | null>(null);
   const [intent, setIntent] = useState('');
+  // The concierge's creation handoff: "start a clothing brand" in the corner agent lands here
+  // with the intent prefilled — the human finishes the sentence and presses Draft. Never silent.
+  useEffect(() => {
+    try {
+      const prefill = sessionStorage.getItem('ff:genesis-intent');
+      if (prefill) { setIntent(prefill); sessionStorage.removeItem('ff:genesis-intent'); }
+    } catch { /* private mode */ }
+  }, []);
   const [drafting, setDrafting] = useState(false);
   const [repoUrl, setRepoUrl] = useState('');
   const [repoDrafting, setRepoDrafting] = useState(false);
