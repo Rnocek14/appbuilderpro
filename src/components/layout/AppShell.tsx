@@ -11,6 +11,7 @@ import { useInbox } from '../../hooks/useAutopilot';
 import { usePreviewClaims } from '../../hooks/usePreviewClaims';
 import { cn } from '../../lib/utils';
 import { CommandPalette } from '../CommandPalette';
+import { ConciergeDock } from '../ConciergeDock';
 
 // Grouped nav — one labeled section per job so the sidebar reads at a glance. This is a Garvis
 // deployment: the business OS LEADS (it's what the operator came for); the app builder is a real,
@@ -300,6 +301,9 @@ export function AppShell({ children, fullBleed }: { children: ReactNode; fullBle
       </div>
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      {/* THE CONCIERGE — the corner agent on every page: say the task, it takes you there and
+          walks you through. The universal escape hatch that makes knowing the map unnecessary. */}
+      <ConciergeDock />
     </div>
   );
 }
