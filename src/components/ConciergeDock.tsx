@@ -10,7 +10,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, MessageCircle, Sparkles, X } from 'lucide-react';
-import { resolve, CONCIERGE_TASKS, type ConciergeTask, type ConciergeWorld } from '../lib/garvis/concierge';
+import { resolve, routeFor, type ConciergeTask, type ConciergeWorld } from '../lib/garvis/concierge';
+import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
 
@@ -24,6 +25,7 @@ export function ConciergeDock() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(() => sessionStorage.getItem(OPEN_KEY) === '1');
   const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<ConciergeTask[]>([]);
   const [pendingCreate, setPendingCreate] = useState<ConciergeTask | null>(null);
@@ -80,13 +82,42 @@ export function ConciergeDock() {
     navigate(task.route);
   };
 
+  // Tier 2 — the AI router. Only a tier-1 MISS pays for this round-trip: the edge function
+  // classifies the sentence against the SAME task list and either picks one task id (validated
+  // server-side against the list — it can't invent destinations) or answers in two sentences.
+  // Degraded (no AI key) or failing, the dock says so honestly and points at Garvis on Home.
+  const FALLBACK = "I don't have a shortcut for that — Garvis on Home handles anything free-form.";
+  const askBrain = async (sentence: string, worlds: ConciergeWorld[]) => {
+    setBusy(true);
+    setNote('Thinking…');
+    try {
+      const { data, error } = await supabase.functions.invoke('concierge', {
+        body: { sentence, tasks: ALL_CONCIERGE_TASKS.map(({ id, label }) => ({ id, label })) },
+      });
+      if (error || !data) { setNote(FALLBACK); return; }
+      const d = data as { available?: boolean; setup?: string[]; taskId?: string | null; answer?: string | null };
+      if (d.available === false) { setNote(d.setup?.[0] ?? FALLBACK); return; }
+      const picked = d.taskId ? ALL_CONCIERGE_TASKS.find((t) => t.id === d.taskId) ?? null : null;
+      if (picked) {
+        const { route, missingWorld } = routeFor(picked, worlds);
+        act(picked, route, missingWorld);
+        return;
+      }
+      setNote(d.answer?.trim() ? d.answer : FALLBACK);
+    } catch {
+      setNote(FALLBACK);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || busy) return;
     setInput('');
     setPendingCreate(null);
     const worlds = await loadWorlds().catch(() => [] as ConciergeWorld[]);
-    const r = resolve(text, worlds);
+    const r = resolve(text, worlds, ALL_CONCIERGE_TASKS);
     if (r.kind === 'go' && r.task && r.route) { act(r.task, r.route, r.missingWorld); return; }
     if (r.kind === 'suggest' && r.suggestions?.length) {
       setSuggestions(r.suggestions);
@@ -95,10 +126,10 @@ export function ConciergeDock() {
     }
     setGuide(null);
     setSuggestions([]);
-    setNote("I don't have a shortcut for that — Garvis on Home handles anything free-form.");
+    await askBrain(text, worlds);
   };
 
-  const task = guide ? CONCIERGE_TASKS.find((t) => t.id === guide.taskId) ?? null : null;
+  const task = guide ? ALL_CONCIERGE_TASKS.find((t) => t.id === guide.taskId) ?? null : null;
 
   if (!open) {
     return (
@@ -123,8 +154,8 @@ export function ConciergeDock() {
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
           placeholder={'"moms postcard" · "start a clothing brand" · "what\'s waiting on me"'}
           className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
-        <button onClick={() => void submit()} aria-label="Go"
-          className="rounded-lg border border-forge-ember/50 px-2.5 text-forge-ember hover:bg-forge-ember/10"><ArrowRight size={14} /></button>
+        <button onClick={() => void submit()} aria-label="Go" disabled={busy}
+          className="rounded-lg border border-forge-ember/50 px-2.5 text-forge-ember hover:bg-forge-ember/10 disabled:opacity-50"><ArrowRight size={14} /></button>
       </div>
 
       {note && <p className="mt-2 text-[11px] text-forge-dim">{note}</p>}
@@ -132,7 +163,7 @@ export function ConciergeDock() {
       {suggestions.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {suggestions.map((s) => (
-            <button key={s.id} onClick={() => { const w = worldsRef.current ?? []; const r = resolve(s.keywords[0], w, [s]); act(s, r.route ?? s.route, r.missingWorld); }}
+            <button key={s.id} onClick={() => { const { route, missingWorld } = routeFor(s, worldsRef.current ?? []); act(s, route, missingWorld); }}
               className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
               {s.label}
             </button>
@@ -143,7 +174,11 @@ export function ConciergeDock() {
       {pendingCreate && (
         <div className="mt-2 rounded-xl border border-forge-border bg-forge-bg/60 p-2.5">
           <p className="text-[11px] text-forge-ink">{pendingCreate.label}</p>
-          <p className="mt-0.5 text-[11px] text-forge-dim">Nothing is created yet — this fills in the start for you; you press "Draft the web" when it reads right.</p>
+          <p className="mt-0.5 text-[11px] text-forge-dim">
+            {pendingCreate.templateId
+              ? 'Nothing is created yet — the template card builds it in one tap when you press it there.'
+              : 'Nothing is created yet — this fills in the start for you; you press "Draft the web" when it reads right.'}
+          </p>
           <button onClick={() => confirmCreate(pendingCreate)}
             className="mt-1.5 rounded-lg border border-forge-ember/50 px-2.5 py-1 text-[11px] text-forge-ember hover:bg-forge-ember/10">
             Set it up →
