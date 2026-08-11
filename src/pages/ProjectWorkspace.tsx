@@ -42,6 +42,7 @@ import type { Project, Deployment, EditPlan, ProjectFile } from '../types';
 import { publishThroughSpine, deployBackendThroughSpine } from '../lib/garvis/deployRun';
 import { parseBuilderCommand } from '../lib/garvis/concierge';
 import { registerSurface } from '../lib/garvis/surfaceBridge';
+import { nextMoves } from '../lib/garvis/suggestionDeck';
 import { readHandoff } from '../components/ConciergeDock';
 
 type MiddleTab = 'chat' | 'code';
@@ -922,6 +923,7 @@ export default function ProjectWorkspace() {
   useEffect(() => registerSurface({
     id: `builder:${id}`,
     claims: parseBuilderCommand,
+    suggest: () => nextMoves('builder', { hasPieces: true }),
     handle: (cmd) => { void sendRef.current(cmd.text); return 'On it — the edit lands in the chat as a reviewable diff.'; },
   }), [id]);
   const handedOff = useRef(false);

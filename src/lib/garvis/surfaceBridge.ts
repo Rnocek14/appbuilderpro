@@ -9,6 +9,7 @@
 // this file is only the wire.
 
 import type { SurfaceAsk } from './concierge';
+import type { SurfaceSuggestion } from './suggestionDeck';
 
 export interface Surface {
   id: string;
@@ -16,14 +17,26 @@ export interface Surface {
   claims: (sentence: string) => SurfaceAsk | null;
   /** Act on a claimed ask. Returns the short confirmation line the dock shows (and speaks). */
   handle: (cmd: SurfaceAsk) => string;
+  /** Tap-to-do next moves for THIS surface right now (suggestionDeck). Optional — a surface
+   *  without a deck just shows no chips. Read fresh on every call, so state gating is live. */
+  suggest?: () => SurfaceSuggestion[];
 }
 
 let active: Surface | null = null;
+const listeners = new Set<() => void>();
+const emit = () => { for (const l of [...listeners]) { try { l(); } catch { /* a dead listener never blocks the rest */ } } };
+
+/** Subscribe to surface register/unregister (the dock re-reads its chips on change). */
+export function onSurfaceChange(l: () => void): () => void {
+  listeners.add(l);
+  return () => { listeners.delete(l); };
+}
 
 /** Register the mounted surface; returns the unregister for the effect cleanup. */
 export function registerSurface(s: Surface): () => void {
   active = s;
-  return () => { if (active === s) active = null; };
+  emit();
+  return () => { if (active === s) { active = null; emit(); } };
 }
 
 /** The dock's entry: offer a sentence to the active surface. Null = nothing mounted or not
@@ -37,4 +50,15 @@ export function offerToSurface(sentence: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** The active surface's next-move chips (empty when nothing is mounted or it has no deck). */
+export function surfaceSuggestions(): SurfaceSuggestion[] {
+  try { return active?.suggest?.() ?? []; } catch { return []; }
+}
+
+/** Run a tapped chip through the active surface. Same degradation rule as offerToSurface. */
+export function applySuggestion(s: SurfaceSuggestion): string | null {
+  if (!active) return null;
+  try { return active.handle(s.cmd); } catch { return null; }
 }
