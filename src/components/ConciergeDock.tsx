@@ -100,7 +100,14 @@ export function ConciergeDock() {
   const [open, setOpen] = useState(() => sessionStorage.getItem(OPEN_KEY) === '1');
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  // A note written just before a navigation (the missing-world explanation) must survive the
+  // remount — AppShell is per-page, so plain state would vanish before the operator reads it.
+  // Read here, clear in an effect: StrictMode runs initializers twice, and a clearing read
+  // would eat the note on the throwaway first pass.
+  const [note, setNote] = useState<string | null>(() => {
+    try { return sessionStorage.getItem('ff:concierge-note'); } catch { return null; }
+  });
+  useEffect(() => { try { sessionStorage.removeItem('ff:concierge-note'); } catch { /* fine */ } }, []);
   const [suggestions, setSuggestions] = useState<ConciergeTask[]>([]);
   const [lastSentence, setLastSentence] = useState('');
   const [compound, setCompound] = useState(false);
@@ -300,7 +307,9 @@ export function ConciergeDock() {
     // The operator's words ride along — destinations with a primary input read them once.
     if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); } catch { /* fine */ } }
     startGuide(task.id);
-    setNote(missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null);
+    const missing = missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null;
+    setNote(missing);
+    if (missing) { try { sessionStorage.setItem('ff:concierge-note', missing); } catch { /* fine */ } }
     // The Explore bridge: "explore lakefront resort branding" FALLS INTO a galaxy of the topic
     // (the page's live ?dive= mechanism), instead of landing on an empty prompt.
     const dive = task.id === 'explore' && sentence ? exploreDive(sentence) : null;
@@ -308,7 +317,7 @@ export function ConciergeDock() {
   };
 
   const confirmCreate = (task: ConciergeTask) => {
-    if (task.genesisIntent) { try { sessionStorage.setItem(GENESIS_PREFILL_KEY, task.genesisIntent); } catch { /* fine */ } }
+    if (task.genesisIntent) { try { sessionStorage.setItem(GENESIS_PREFILL_KEY, task.genesisIntent); window.dispatchEvent(new Event('ff:genesis-intent')); } catch { /* fine */ } }
     setPendingCreate(null);
     startGuide(task.id);
     navigate(task.route);
@@ -373,7 +382,8 @@ export function ConciergeDock() {
   };
   const briefToGenesis = () => {
     if (!briefText) return;
-    try { sessionStorage.setItem(GENESIS_PREFILL_KEY, briefText); } catch { /* fine */ }
+    // The event covers the already-on-the-page case — navigate() to the same route never remounts.
+    try { sessionStorage.setItem(GENESIS_PREFILL_KEY, briefText); window.dispatchEvent(new Event('ff:genesis-intent')); } catch { /* fine */ }
     setBriefText(null);
     startGuide('big-brief');
     navigate('/garvis/webs');
