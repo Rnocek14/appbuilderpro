@@ -65,6 +65,7 @@ const DataWorkspace = lazy(() => import('../components/garvis/DataWorkspace').th
 const TrackerRegistry = lazy(() => import('../components/garvis/TrackerRegistry').then((m) => ({ default: m.TrackerRegistry })));
 const LeadEnginePanel = lazy(() => import('../components/garvis/LeadEnginePanel').then((m) => ({ default: m.LeadEnginePanel })));
 const MarketingCanvas = lazy(() => import('../components/garvis/canvas/MarketingCanvas').then((m) => ({ default: m.MarketingCanvas })));
+const MerchBoard = lazy(() => import('../components/garvis/canvas/MerchBoard').then((m) => ({ default: m.MerchBoard })));
 
 const STATUS_DOT: Record<CharterStatus, string> = {
   active: 'text-forge-ember', waiting: 'text-forge-warn', done: 'text-forge-ok', dormant: 'text-forge-dim/40',
@@ -900,6 +901,13 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
           mail log so mailed batches count as real outreach. */}
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'direct_mail' && (
         <PanelBoundary name="postcard designer"><MailerDesigner worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+      )}
+
+      {/* THE MERCH CAPSULE — garment concept cards from the brand (tee/hat/polo/crew/tote):
+          move the mark by saying it, discipline the colors, and put the operator's own printer
+          numbers on the keepers (the verified costSheet core does the reads). */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'merch' && (
+        <PanelBoundary name="merch board"><MerchBoard worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {/* THE FARM — neighborhood prospecting: territories, address-first household lists (columns

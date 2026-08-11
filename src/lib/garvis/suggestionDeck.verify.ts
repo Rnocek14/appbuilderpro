@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/suggestionDeck.verify.ts
 // Pins the tap-to-do suggestion contract: right moves for the surface's state, never a wrong
 // channel, never a riff at an empty board, research chip only when research exists.
-import { nextMoves } from './suggestionDeck';
+import { nextMoves, rankMoves } from './suggestionDeck';
 
 let passed = 0;
 let failed = 0;
@@ -46,6 +46,19 @@ const check = (n: string, c: boolean) => {
   check('every cmd carries a real instruction', ['postcard', 'social', 'email', 'brand', 'merch', 'builder']
     .every((c) => [...nextMoves(c, { hasPieces: true }), ...nextMoves(c, { hasPieces: false })].every((s) => s.cmd.text.length > 10)));
   check('deterministic', JSON.stringify(nextMoves('postcard', { hasPieces: true })) === JSON.stringify(nextMoves('postcard', { hasPieces: true })));
+}
+
+// Tap learning — the deck bends toward what the operator actually uses.
+{
+  const moves = nextMoves('postcard', { hasPieces: true });
+  check('zero taps → the curated deck order, untouched', JSON.stringify(rankMoves(moves, {})) === JSON.stringify(moves));
+  const ranked = rankMoves(moves, { 'Add a local stat': 3 });
+  check('a tapped chip rises to the front', ranked[0]?.label === 'Add a local stat');
+  check('the rest keep deck order (stable ties)',
+    JSON.stringify(ranked.slice(1).map((m) => m.label)) === JSON.stringify(moves.filter((m) => m.label !== 'Add a local stat').map((m) => m.label)));
+  check('ranking never adds or drops', rankMoves(moves, { 'Not a chip': 99 }).length === moves.length);
+  check('negative counts are ignored (never demote below deck order)',
+    JSON.stringify(rankMoves(moves, { [moves[0].label]: -5 })) === JSON.stringify(moves));
 }
 
 console.log(`\nsuggestionDeck.verify: ${passed} passed, ${failed} failed`);

@@ -124,6 +124,8 @@ check('parseCharter handles null/undefined/strings', parseCharter(null) === null
   check('an unknown area opens nothing — never a guessed sheet', canvasNodeForArea(clusters, 'not-a-real-area') === null);
   check('no area requested → nothing auto-opens', canvasNodeForArea(clusters, null) === null);
   check('a charterless cluster opens nothing', canvasNodeForArea([{ slug: 'x', charter: null }], 'x') === null);
+  check('a merch area opens the merch node (the capsule room)',
+    canvasNodeForArea([{ slug: 'capsule-merch', charter: makeCharter('studio', 'merch') }], 'capsule-merch') === 'merch');
 }
 
 console.log(`\nworkweb.verify: ${passed} passed, ${failed} failed`);

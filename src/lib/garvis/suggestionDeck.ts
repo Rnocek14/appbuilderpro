@@ -110,3 +110,13 @@ export function nextMoves(channel: string, state: DeckState): SurfaceSuggestion[
   }
   return out.slice(0, 4);
 }
+
+/** The deck learns from the operator's OWN taps: chips they actually use rise to the front.
+ *  Pure reorder — never adds, drops, or invents; ties and never-tapped chips keep deck order,
+ *  so day one looks exactly like the curated deck. The tap counts live client-side only. */
+export function rankMoves(moves: SurfaceSuggestion[], taps: Record<string, number>): SurfaceSuggestion[] {
+  return moves
+    .map((m, i) => ({ m, i, t: Math.max(0, taps[m.label] ?? 0) }))
+    .sort((a, b) => (b.t - a.t) || (a.i - b.i))
+    .map((x) => x.m);
+}
