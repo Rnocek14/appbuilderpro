@@ -58,6 +58,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
 
     return {
       storageKey: 'social',
+      voiceNouns: ['post', 'social', 'instagram', 'ig', 'caption'],
       title: 'Social board',
       subtitle: 'Make posts for any platform — spread them out, compare, restyle, then queue to your publisher.',
       metrics: { w: 248, h: 320, gap: 26, cols: 3, pad: 40 },

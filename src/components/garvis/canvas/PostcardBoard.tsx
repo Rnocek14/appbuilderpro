@@ -71,6 +71,7 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
 
     return {
       storageKey: 'postcard',
+      voiceNouns: ['postcard', 'card', 'mailer'],
       title: 'Postcard board',
       subtitle: 'Make one, then another — spread them out, compare, tell one what to change, star the keepers, print.',
       metrics: { w: 248, h: 165, gap: 26, cols: 3, pad: 40 },

@@ -641,3 +641,118 @@ export function deriveTasks(existing: ConciergeTask[], src: DerivedSources): Con
 
   return [...existing.map(foldKeywords), ...derived];
 }
+
+/** The operator's BUILDER projects become sayable doors ("work on jims site" → that project's
+ *  workspace). Same word-claim discipline as deriveTasks: existing tasks own their vocabulary,
+ *  so a project can never outrank an acceptance-tested match — projects ride on their NAME
+ *  words (plus 'site', when free). Two projects sharing every free word tie into an honest
+ *  suggest, never a guess. */
+export function withProjectTasks(tasks: ConciergeTask[], projects: { id: string; name: string }[]): ConciergeTask[] {
+  if (!projects.length) return tasks;
+  const claimedExact = new Set<string>();
+  const claimed = new Set<string>();
+  for (const t of tasks) for (const k of t.keywords) {
+    claimedExact.add(norm(k));
+    claimed.add(norm(k));
+    for (const w of norm(k).split(' ')) { claimedExact.add(w); claimed.add(w); claimed.add(fold(w)); }
+  }
+  const out = [...tasks];
+  for (const p of projects.slice(0, 40)) {
+    if (!p.id || !p.name?.trim()) continue;
+    const phrase = norm(p.name);
+    const words = [...new Set([...significantWords(p.name), 'site', 'sites'].filter((w) => w && !claimed.has(w)))];
+    out.push({
+      id: `proj:${p.id}`,
+      label: `Work on "${p.name.trim()}" in the builder`,
+      keywords: phrase && !claimedExact.has(phrase) ? [...new Set([phrase, ...words])] : words,
+      kind: 'navigate',
+      route: `/project/${p.id}`,
+      steps: [
+        'The builder is open on this project — say the change in its chat',
+        'Edits arrive as a reviewable diff; nothing applies until you press Apply',
+      ],
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE SURFACE TIER — when a working surface is mounted (a creative board, the site builder),
+// it gets FIRST CLAIM on the sentence: "make one with a lake background" acts here, it doesn't
+// navigate away. Pure parsers only; the registry the surfaces register into lives in
+// surfaceBridge.ts (impure), and the claims stay conservative on purpose — a sentence naming a
+// DIFFERENT door ("make a video for the channel" on the postcard board) is left unclaimed.
+// ---------------------------------------------------------------------------------------------
+
+export interface SurfaceAsk { kind: 'make' | 'riff' | 'instruct'; text: string }
+
+// Deixis — the sentence points AT a piece on screen ("on this one"), typos in the noun and all.
+// Bare "this/that" counts only when the sentence ends there or a clause break follows — "a post
+// of this quarter's numbers" is a subject, not a pointer. (Tested against norm'd text: no punctuation.)
+const RIFF_DEIXIS = /\bthis one\b|\b(on|of|off|from|like)\s+(this|that)(?=\s*$|\s+(but|and|so|then)\b)/;
+const RIFF_WORD = /\b(rendition|version|variation|remix|riff)\b/;
+const MAKE_LEAD = /^(make|create|generate|draft|design|do|give me)\s+(me\s+)?(one|another|a|an|some|\d+)\b/;
+const ANCHOR = /\b(this one|this|that one|rendition\w*|version|variation|remix|riff)\b/gi;
+
+/** What to change, pulled out of a riff sentence. The instruction usually FOLLOWS the pointing
+ *  phrase ("…on this one but add text saying X" → "add text saying X"); when the sentence ends
+ *  on the anchor ("make the sky pink on this one"), the instruction is what came before. Empty
+ *  is honest — the board opens its rendition input instead of inventing a change. */
+function riffInstruction(sentence: string): string {
+  const s = sentence.trim();
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  ANCHOR.lastIndex = 0;
+  while ((m = ANCHOR.exec(s))) last = m;
+  const lead = (x: string) => x
+    .replace(/^[\s,.;:—–-]+/, '')
+    .replace(/^(but|and|so|then)\s+/i, '')
+    .replace(/^(i want to|i want|i wanna|i'd like to|id like to|please|can you|could you)\s+/i, '')
+    .replace(/^(but|and|so|then|on|off)\s+/i, '');
+  const after = last ? lead(s.slice(last.index + last[0].length)).trim() : '';
+  if (after) return after;
+  const before = last ? s.slice(0, last.index) : s;
+  return before
+    .replace(/[\s,.;:—–-]+$/, '')
+    .replace(/\s+(on|of|off|from|like|to|but|and|for)$/i, '')
+    // Strip a riff LEAD ("spin a version of…") — but only with the riff word present: in
+    // "make the sky pink on this one" the verb phrase IS the instruction and must survive.
+    .replace(/^(make|spin|create|do|give me)\s+(me\s+)?(another|a|an|one)?\s*(rendition\w*|version|variation|remix|riff)\s*(on|of)?\s*/i, '')
+    .trim();
+}
+
+/** The make-ask's payload, stripped of its lead ("make one with a background of lake" → "a
+ *  background of lake"), the board's own noun, and the connector — what lands in the prompt box. */
+function makePrompt(sentence: string, nouns: string[]): string {
+  let s = sentence.trim().replace(/^(make|create|generate|draft|design|do|give me)\s+(me\s+)?(one|another|a couple of|a few|some|a|an|\d+)(\s+|$)/i, '');
+  for (const n of nouns) {
+    const re = new RegExp(`^${n.replace(/[^a-z0-9 ]/gi, '')}s?\\s+`, 'i');
+    if (re.test(s)) { s = s.replace(re, ''); break; }
+  }
+  return s.replace(/^(with|about|of|for|that says|that say|saying|showing|featuring)\s+/i, '').trim();
+}
+
+/** Parse a sentence as a command for the OPEN creative board. Riff wins over make (riff asks
+ *  often start with "make another…"); make claims only pure deixis ("one", "another", "some")
+ *  or the board's own nouns — a plural like "posts" folds onto the noun "post". */
+export function parseBoardCommand(sentence: string, nouns: string[]): SurfaceAsk | null {
+  const t = sentence.trim();
+  if (!t) return null;
+  const lower = ` ${norm(t)} `;
+  if (RIFF_DEIXIS.test(lower) || RIFF_WORD.test(lower)) return { kind: 'riff', text: riffInstruction(t) };
+  const m = MAKE_LEAD.exec(norm(t));
+  if (!m) return null;
+  const hasNoun = nouns.some((n) => lower.includes(` ${norm(n)} `) || lower.includes(` ${fold(norm(n))} `));
+  if (!(m[3] === 'one' || m[3] === 'another' || m[3] === 'some' || hasNoun)) return null;
+  return { kind: 'make', text: makePrompt(t, nouns) };
+}
+
+/** Parse a sentence as an instruction for the OPEN builder project. Imperative build-verbs only —
+ *  navigation ("open the queue"), questions ("how do i…"), and creation asks for OTHER doors are
+ *  all left unclaimed so the normal tiers still work from inside the builder. */
+const BUILDER_LEAD = /^(add|change|update|remove|delete|fix|redesign|restyle|rebuild|rework|implement|wire up|hook up|integrate|install|swap|replace|tweak|adjust|animate|automate|embed|connect|rename|restructure)\b/;
+export function parseBuilderCommand(sentence: string): SurfaceAsk | null {
+  const t = sentence.trim();
+  if (t.length < 8 || !BUILDER_LEAD.test(norm(t))) return null;
+  return { kind: 'instruct', text: t };
+}

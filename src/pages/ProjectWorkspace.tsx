@@ -40,6 +40,9 @@ import { BranchBar, MergeModal } from '../components/BranchBar';
 import { validateProject } from '../lib/qaCheck';
 import type { Project, Deployment, EditPlan, ProjectFile } from '../types';
 import { publishThroughSpine, deployBackendThroughSpine } from '../lib/garvis/deployRun';
+import { parseBuilderCommand } from '../lib/garvis/concierge';
+import { registerSurface } from '../lib/garvis/surfaceBridge';
+import { readHandoff } from '../components/ConciergeDock';
 
 type MiddleTab = 'chat' | 'code';
 
@@ -906,6 +909,29 @@ export default function ProjectWorkspace() {
       setStream(null);
     }
   };
+
+  // THE VOICE WIRE — the concierge acts on THIS builder two ways, both through the same chat
+  // (so the safe-edit spine — reviewable diff, explicit Apply — is unchanged):
+  //   1. In-page: builder-verb asks typed into the corner dock ("add a custom automation that
+  //      emails new leads") land straight in this project's chat via the surface bridge.
+  //   2. Handed off: the same ask said ANYWHERE routes here (the project's concierge task),
+  //      rides along in the handoff, and auto-sends on arrival — but only once files have
+  //      loaded, so an existing project can never be mistaken for empty and re-generated.
+  const sendRef = useRef(handleSend);
+  sendRef.current = handleSend;
+  useEffect(() => registerSurface({
+    id: `builder:${id}`,
+    claims: parseBuilderCommand,
+    handle: (cmd) => { void sendRef.current(cmd.text); return 'On it — the edit lands in the chat as a reviewable diff.'; },
+  }), [id]);
+  const handedOff = useRef(false);
+  useEffect(() => {
+    if (!id || filesLoading || handedOff.current) return;
+    handedOff.current = true;
+    const h = readHandoff(`proj:${id}`);
+    // Only an INSTRUCTION auto-sends; a plain "open jims site" just arrives (being here is the answer).
+    if (h && parseBuilderCommand(h.sentence)) void sendRef.current(h.sentence);
+  }, [id, filesLoading]);
 
   const recordDeployment = async (target: 'vercel' | 'netlify' | 'supabase') => {
     if (!id || !session) return;

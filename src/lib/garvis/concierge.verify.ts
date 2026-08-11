@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, statsFor, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, parseCommandPrefix, resolve, routeFor, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -273,6 +273,56 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('deriveTasks is deterministic', JSON.stringify(a) === JSON.stringify(deriveTasks(CONCIERGE_TASKS, sample)));
   check('a not_built capability is never proposed', !a.some((t) => t.id === 'cap:c2') && a.some((t) => t.id === 'cap:c1'));
   check('a nav item on a handwritten route is skipped', !a.some((t) => t.id === 'nav:/garvis/queue'));
+}
+
+// ---- THE SURFACE TIER — the open board/builder claims the ask, conservatively ----
+{
+  const SOCIAL = ['post', 'social', 'instagram', 'ig', 'caption'];
+  // The operator's own sentences, typo and all.
+  const make = parseBoardCommand('make one with a background of lake', SOCIAL);
+  check('"make one with a background of lake" → MAKE on the open board', make?.kind === 'make');
+  check('…and the payload is the idea, not the command words', make?.text === 'a background of lake');
+  const riff = parseBoardCommand("make another rendidtiion on this one but i want to add text saying 'love lake geneva'", SOCIAL);
+  check('"another rendidtiion on this one but…" (typo and all) → RIFF', riff?.kind === 'riff');
+  check("…instruction extracted intact: add text saying 'love lake geneva'", riff?.text === "add text saying 'love lake geneva'");
+  const before = parseBoardCommand('make the sky pink on this one', SOCIAL);
+  check('an instruction BEFORE the pointer survives ("make the sky pink on this one")',
+    before?.kind === 'riff' && before.text === 'make the sky pink');
+  check('a bare riff opens the rendition input (empty instruction is honest)',
+    parseBoardCommand('make another version of this', SOCIAL)?.kind === 'riff' && parseBoardCommand('make another version of this', SOCIAL)?.text === '');
+  check('the board noun claims MAKE ("make a post about the fall market" → "the fall market")',
+    parseBoardCommand('make a post about the fall market', SOCIAL)?.text === 'the fall market');
+  check('plurals fold onto the noun ("make some posts…")', parseBoardCommand('make some posts for the weekend', SOCIAL)?.kind === 'make');
+  check('a DIFFERENT door is never claimed ("make a video for the channel" on the postcard board)',
+    parseBoardCommand('make a video for the channel', ['postcard', 'card', 'mailer']) === null);
+  check('navigation is never claimed ("open the queue")', parseBoardCommand('open the queue', SOCIAL) === null);
+  check('a subject "this" is not a pointer ("make a post of this quarters numbers" → MAKE, not riff)',
+    parseBoardCommand('make a post of this quarters numbers', SOCIAL)?.kind === 'make');
+
+  check('builder verbs claim ("add a custom automation that emails new leads")',
+    parseBuilderCommand('add a custom automation that emails new leads')?.kind === 'instruct');
+  check('…and the instruction rides INTACT', parseBuilderCommand('add a custom automation that emails new leads')?.text === 'add a custom automation that emails new leads');
+  check('builder never claims navigation ("open the queue")', parseBuilderCommand('open the queue') === null);
+  check('builder never claims questions ("how do i add a page")', parseBuilderCommand('how do i add a page') === null);
+  check('too-short imperatives fall through ("add it")', parseBuilderCommand('add it') === null);
+}
+
+// ---- PROJECT DOORS — the operator's builder projects are sayable, claims respected ----
+{
+  const tasks = withProjectTasks(ALL_CONCIERGE_TASKS, [
+    { id: 'p1', name: 'Jims Landscaping' },
+    { id: 'p2', name: 'Idea Digest Spark' },
+  ]);
+  const r1 = resolve('work on jims website', WORLDS, tasks);
+  check('"work on jims website" reaches the jims project (go or suggested)',
+    (r1.kind === 'go' && r1.task?.id === 'proj:p1') || (r1.kind === 'suggest' && !!r1.suggestions?.some((t) => t.id === 'proj:p1')));
+  const r2 = resolve('open idea digest spark', WORLDS, tasks);
+  check('a project NAME is a confident door ("open idea digest spark")', r2.kind === 'go' && r2.task?.id === 'proj:p2' && r2.route === '/project/p2');
+  check('claimed words never leak to projects (no project task carries "website")',
+    tasks.filter((t) => t.id.startsWith('proj:')).every((t) => !t.keywords.includes('website')));
+  check('withProjectTasks is deterministic and additive',
+    tasks.length === ALL_CONCIERGE_TASKS.length + 2 && JSON.stringify(tasks) === JSON.stringify(withProjectTasks(ALL_CONCIERGE_TASKS, [{ id: 'p1', name: 'Jims Landscaping' }, { id: 'p2', name: 'Idea Digest Spark' }])));
+  check('no projects, no change', withProjectTasks(ALL_CONCIERGE_TASKS, []) === ALL_CONCIERGE_TASKS);
 }
 
 console.log(`\nconcierge.verify: ${passed} passed, ${failed} failed`);
