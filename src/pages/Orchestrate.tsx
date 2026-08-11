@@ -56,7 +56,7 @@ export default function Orchestrate() {
   // agent arrives here with the sentence already in the intent box — Compile stays the explicit
   // press, so nothing runs from the handoff alone.
   useEffect(() => {
-    const h = readHandoff('orchestrate', 'send-emails');
+    const h = readHandoff('orchestrate', 'send-emails', 'app-marketing');
     if (h) setIntent(h.sentence);
   }, []);
 

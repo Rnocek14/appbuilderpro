@@ -4,8 +4,13 @@
 // line, never a fake number. Matching lives in concierge.ts (statsFor).
 
 import { supabase } from '../supabase';
+import { marketingReadiness } from './marketingReadiness';
 
 export interface StatAnswer { text: string; link?: string }
+
+/** The app-marketing template's slug signature — how portfolio worlds are recognized by
+ *  STRUCTURE (same discipline as templateForWeb: slugs are identity, titles are editable). */
+const MKT_SLUGS = ['mkt-plan', 'competitor-intel', 'seo-articles', 'social-posts', 'video-ideas', 'mkt-results'];
 
 export async function answerStat(id: string): Promise<StatAnswer> {
   try {
@@ -59,6 +64,27 @@ export async function answerStat(id: string): Promise<StatAnswer> {
         return arcs.length === 0
           ? { text: 'No arcs in flight right now — say "do …" and I\'ll compile one.' }
           : { text: `In flight: ${arcs.map((a) => `"${a.title}" (${a.status})`).join(' · ')}.`, link: '/garvis/orchestrate' };
+      }
+      case 'portfolio': {
+        const { data: cl, error } = await supabase.from('knowledge_clusters')
+          .select('id, slug, title, world_id, knowledge_worlds!inner(title)').in('slug', MKT_SLUGS).limit(120);
+        if (error) throw error;
+        const clusters = (cl ?? []) as unknown as { id: string; slug: string; title: string; world_id: string; knowledge_worlds: { title: string } }[];
+        if (!clusters.length) {
+          return { text: 'No marketing operations stand yet — say "do start marketing <app name>" and I\'ll build the mapped operation.', link: '/garvis/orchestrate' };
+        }
+        const ids = clusters.map((c) => c.id);
+        const { data: arts } = await supabase.from('knowledge_artifacts').select('cluster_id').in('cluster_id', ids).limit(2000);
+        const countBy = new Map<string, number>();
+        for (const a of (arts ?? []) as { cluster_id: string }[]) countBy.set(a.cluster_id, (countBy.get(a.cluster_id) ?? 0) + 1);
+        const byWorld = new Map<string, { title: string; areas: { slug: string; title: string; artifacts: number }[] }>();
+        for (const c of clusters) {
+          const w = byWorld.get(c.world_id) ?? { title: c.knowledge_worlds?.title ?? 'Marketing op', areas: [] };
+          w.areas.push({ slug: c.slug, title: c.title, artifacts: countBy.get(c.id) ?? 0 });
+          byWorld.set(c.world_id, w);
+        }
+        const lines = [...byWorld.values()].map((w) => `"${w.title}": ${marketingReadiness({ areas: w.areas, ctaSet: null }).pct}%`);
+        return { text: `Completeness, from real counts — ${lines.join(' · ')}. Open the operation for the next steps.`, link: '/garvis/webs' };
       }
       default:
         return { text: "I don't track that number yet." };

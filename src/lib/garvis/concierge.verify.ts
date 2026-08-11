@@ -218,6 +218,11 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('"whats waiting on me" stays a command (Queue)', statsFor('whats waiting on me') === null);
   check('gibberish is never a stat', statsFor('asdf jkl') === null);
   check('every stat query id is unique', new Set(STAT_QUERIES.map((q) => q.id)).size === STAT_QUERIES.length);
+  check('"how complete are my projects" is the portfolio stat', statsFor('how complete are my projects') === 'portfolio');
+  check('"start marketing my stroke app" reaches the marketing operation task',
+    (() => { const r = resolve('start marketing my stroke app', WORLDS, ALL); return r.task?.id === 'app-marketing' || (r.suggestions ?? []).some((t) => t.id === 'app-marketing'); })());
+  check('"work on the marketing plan for my app" reaches it too',
+    (() => { const r = resolve('work on the marketing plan for my app', WORLDS, ALL); return r.task?.id === 'app-marketing' || (r.suggestions ?? []).some((t) => t.id === 'app-marketing'); })());
 }
 {
   // Determinism + purity of the derivation itself.

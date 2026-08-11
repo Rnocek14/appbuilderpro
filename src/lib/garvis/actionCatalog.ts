@@ -225,6 +225,17 @@ export const ACTION_SPECS: ActionSpec[] = [
     produces: 'one drafted episode (script + hooks + citations) sitting in the Channel Studio for review',
   },
   {
+    id: 'start_app_marketing',
+    title: 'Stand up the marketing operation for an app',
+    category: 'marketing',
+    risk: 'safe',
+    description: 'Create the MAPPED marketing operation for one of the operator\'s built apps: a business web with areas for the plan, competitor intel, SEO articles, social posts, video ideas, and results. Use FIRST for "market my app X" intents — later steps (research_market, start_content_week, point_channel_cta) then fill the map. Instant and deterministic; nothing sends.',
+    params: [
+      { name: 'app', required: true, hint: 'the app\'s name EXACTLY as it appears in the situation\'s app list' },
+    ],
+    produces: 'a new "<app> Marketing" business whose canvas IS the plan — every area a real studio that fills as work runs',
+  },
+  {
     id: 'point_channel_cta',
     title: "Point a channel's traffic at an asset",
     category: 'marketing',

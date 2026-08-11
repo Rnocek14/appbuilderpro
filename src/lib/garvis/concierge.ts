@@ -244,6 +244,18 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     ],
   },
   {
+    id: 'app-marketing',
+    label: 'Market one of my apps (the whole mapped operation)',
+    keywords: ['market my app', 'market the app', 'app marketing', 'marketing', 'promote', 'promotion', 'marketing plan', 'marketing for', 'seo'],
+    kind: 'navigate',
+    route: '/garvis/orchestrate',
+    steps: [
+      'Your ask is in the intent box — press "Compile the plan"',
+      'The plan stands up the mapped operation: competitor intel, SEO articles, social, video ideas, results',
+      'Approve to run — the new business\'s canvas IS the plan, with a completeness % that rises as areas fill',
+    ],
+  },
+  {
     id: 'explore',
     label: 'Explore an idea (the Knowledge Universe)',
     // 'galaxy'/'universe' stay with the Galaxy nav page (every world in one sky) — this is the
@@ -363,6 +375,7 @@ export const STAT_QUERIES: StatQuery[] = [
   { id: 'revenue_month', keywords: ['revenue this month', 'how much did i make', 'how much money did i make', 'income this month', 'what did i earn', 'how much have i made'] },
   { id: 'pipeline_count', keywords: ['how many leads', 'how many prospects', 'pipeline size', 'how big is my pipeline', 'how many businesses have you found'] },
   { id: 'arcs_running', keywords: ['what are you working on', 'whats running', "what's running", 'running arcs', 'active plans', 'what is in flight', 'what are you doing'] },
+  { id: 'portfolio', keywords: ['how complete', 'portfolio status', 'project completeness', 'how far along', 'percent complete', 'completeness', 'hows my portfolio', 'how are my projects'] },
 ];
 
 /** Match a sentence to ONE stat, or null. Phrase-anchored (multi-word keywords only score when

@@ -15,6 +15,7 @@ import { useToast } from '../context/ToastContext';
 import { cn, timeAgo } from '../lib/utils';
 import { ARCHETYPES, type CharterStatus, type WorkTool } from '../lib/garvis/workweb';
 import { templateForWeb } from '../lib/garvis/workweb';
+import { marketingReadiness } from '../lib/garvis/marketingReadiness';
 import { listContacts, type ContactRow } from '../lib/garvis/workwebRun';
 import { loadWeb, runPlay, runTool, type LoadedWeb, type WebCluster } from '../lib/garvis/workwebRun';
 import { listClusterArtifacts, listClusterFiles, uploadClusterFile, getBrandKit, saveBrandKit, type StudioArtifact, type ClusterFile, type BrandKit } from '../lib/garvis/artifacts';
@@ -160,6 +161,34 @@ export default function WorkWeb() {
     const t = templateForWeb(web.clusters.map((c) => c.slug));
     return t?.playIds[0] ?? null;
   }, [web]);
+
+  // THE COMPLETENESS STRIP (operator ask: "a percentage of completeness for each project").
+  // App-marketing worlds show an honest percentage computed from REAL artifact counts per area
+  // plus whether any channel routes its audience here — with the ONE next step per gap.
+  const mktReady = useMemo(() => {
+    if (!web) return null;
+    if (templateForWeb(web.clusters.map((c) => c.slug))?.id !== 'app-marketing') return null;
+    return marketingReadiness({
+      areas: web.clusters.map((c) => ({ slug: c.slug, title: c.title, artifacts: c.artifacts.length })),
+      ctaSet: null,   // channel linkage scores once loaded below
+    });
+  }, [web]);
+  const [ctaSet, setCtaSet] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!mktReady) return;
+    let dead = false;
+    void import('../lib/garvis/channelsRun').then(({ listChannels }) => listChannels())
+      .then((chs) => { if (!dead) setCtaSet(chs.length ? chs.some((c) => !!c.cta_url) : null); })
+      .catch(() => { /* the strip just omits the CTA check */ });
+    return () => { dead = true; };
+  }, [mktReady]);
+  const mktStrip = useMemo(() => {
+    if (!web || !mktReady) return null;
+    return marketingReadiness({
+      areas: web.clusters.map((c) => ({ slug: c.slug, title: c.title, artifacts: c.artifacts.length })),
+      ctaSet,
+    });
+  }, [web, mktReady, ctaSet]);
 
   // PRODUCT LAB = feature_lab studios, no outreach machinery. The page's framing follows the
   // world's shape: no send/reply chips, product Ask examples, a product ledger.
@@ -367,6 +396,13 @@ export default function WorkWeb() {
                 )}
               >{intel.state.momentum.label}</span>
             )}
+            {mktStrip && (
+              <span
+                title={`Completeness from real counts: ${mktStrip.done.length ? mktStrip.done.join(' · ') : 'nothing worked yet'}`}
+                className={cn('rounded-lg border px-2.5 py-1 text-xs font-medium',
+                  mktStrip.pct >= 70 ? 'border-forge-ok/40 text-forge-ok' : mktStrip.pct >= 30 ? 'border-forge-ember/50 text-forge-ember' : 'border-forge-border text-forge-dim')}
+              >{mktStrip.pct}% complete</span>
+            )}
             <button
               onClick={() => void doReflect()} disabled={reflecting}
               title="Garvis reviews this world's record — what was tried, what the evidence says, what should change. Evidence-gated: lessons without proof are dropped."
@@ -400,6 +436,17 @@ export default function WorkWeb() {
         </div>
 
         {showIntel && intel && <WorldIntelDashboard intel={intel} />}
+
+        {/* WHAT'S DONE / WHAT'S NEXT — the marketing operation's honest checklist: the percentage
+            above is computed from these same real counts, and each gap names its ONE next step. */}
+        {mktStrip && mktStrip.next.length > 0 && (
+          <div className="mb-4 rounded-xl border border-forge-border bg-forge-panel/60 p-3">
+            <p className="text-xs font-medium text-forge-ink">To raise the number ({mktStrip.pct}% now):</p>
+            <ul className="mt-1 space-y-0.5">
+              {mktStrip.next.slice(0, 4).map((n, i) => <li key={i} className="text-xs text-forge-dim">· {n}</li>)}
+            </ul>
+          </div>
+        )}
 
         {/* FIRST-RUN ORIENTATION — three concrete steps to the first real marketing. Only shows
             when this world has produced no EARNED work yet; vanishes the moment it has. */}

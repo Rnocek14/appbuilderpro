@@ -277,7 +277,26 @@ export const LEAD_ENGINE_TEMPLATE: WebTemplate = {
   ],
 };
 
-export const WEB_TEMPLATES: WebTemplate[] = [CONTENT_CHANNEL_TEMPLATE, MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, LEAD_ENGINE_TEMPLATE];
+/** App Marketing — the WHOLE marketing operation for one built app, mapped as areas the operator
+ *  can walk: the plan, competitor intel, SEO articles, social posts, video ideas, results. The
+ *  strategist's start_app_marketing action instantiates this so "market my app" produces a
+ *  legible operation, not a chat answer — each area is a real studio that fills as work runs. */
+export const APP_MARKETING_TEMPLATE: WebTemplate = {
+  id: 'app-marketing',
+  title: 'App Marketing',
+  description: 'Market one of your apps end to end: the strategy and theses, competitor research, SEO articles, social posts, video ideas, and honest results — one mapped operation whose areas fill as the work happens.',
+  playIds: [],
+  nodes: [
+    N('mkt-plan', 'The Plan', 'Strategy, theses, and the compiled arcs — what we decided and why.', 'intel', 'generic'),
+    N('competitor-intel', 'Competitor Intel', 'Research on comparable products: what works, positioning, pricing, channels.', 'intel', 'market'),
+    N('seo-articles', 'SEO Articles', 'Article ideas and drafts that earn search traffic and link to the app.', 'studio', 'generic'),
+    N('social-posts', 'Social Posts', 'Instagram/TikTok/X post ideas and scheduled posts — approval-gated.', 'studio', 'social'),
+    N('video-ideas', 'Video Ideas', 'Short-video concepts and storyboards for the app.', 'studio', 'video'),
+    N('mkt-results', 'Results', 'Signups, installs, referrers, what worked — counted from real rows.', 'ledger', 'generic'),
+  ],
+};
+
+export const WEB_TEMPLATES: WebTemplate[] = [CONTENT_CHANNEL_TEMPLATE, MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, LEAD_ENGINE_TEMPLATE, APP_MARKETING_TEMPLATE];
 
 export function templateById(id: string): WebTemplate | null {
   return WEB_TEMPLATES.find((t) => t.id === id) ?? null;
