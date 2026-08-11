@@ -256,6 +256,18 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     ],
   },
   {
+    id: 'brainstorm',
+    label: 'Brainstorm with Garvis (ideas, angles, strategies)',
+    keywords: ['brainstorm', 'ideas', 'creative', 'strategies', 'come up with', 'new angles', 'think with me', 'ideate', 'inspiration', 'instagram'],
+    kind: 'navigate',
+    route: '/garvis/command',
+    steps: [
+      'Garvis is already thinking about it — your ask sent itself into the conversation',
+      'Push back and riff — anything consequential it proposes becomes an approval-gated mission',
+      'Keep what you like: send winners into the right studio from the chat',
+    ],
+  },
+  {
     id: 'explore',
     label: 'Explore an idea (the Knowledge Universe)',
     // 'galaxy'/'universe' stay with the Galaxy nav page (every world in one sky) — this is the
@@ -371,11 +383,11 @@ export interface StatQuery { id: string; keywords: string[] }
 
 export const STAT_QUERIES: StatQuery[] = [
   { id: 'approvals_waiting', keywords: ['how many approvals', 'approvals waiting', 'anything waiting', 'pending approvals', 'how many pending', 'how many things are waiting'] },
-  { id: 'episode_stats', keywords: ['how are my episodes', 'episode views', 'how did my videos do', 'channel stats', 'how is the channel doing', 'views this week', 'how many views'] },
+  { id: 'episode_stats', keywords: ['how are my episodes', 'episode views', 'how did my videos do', 'channel stats', 'how is the channel doing', 'views this week', 'how many views', 'what worked', 'whats working', "what's working"] },
   { id: 'revenue_month', keywords: ['revenue this month', 'how much did i make', 'how much money did i make', 'income this month', 'what did i earn', 'how much have i made'] },
   { id: 'pipeline_count', keywords: ['how many leads', 'how many prospects', 'pipeline size', 'how big is my pipeline', 'how many businesses have you found'] },
   { id: 'arcs_running', keywords: ['what are you working on', 'whats running', "what's running", 'running arcs', 'active plans', 'what is in flight', 'what are you doing'] },
-  { id: 'portfolio', keywords: ['how complete', 'portfolio status', 'project completeness', 'how far along', 'percent complete', 'completeness', 'hows my portfolio', 'how are my projects'] },
+  { id: 'portfolio', keywords: ['how complete', 'portfolio status', 'project completeness', 'how far along', 'percent complete', 'completeness', 'hows my portfolio', 'how are my projects', 'app going', 'project going', 'hows the app', 'how are the apps'] },
 ];
 
 /** Match a sentence to ONE stat, or null. Phrase-anchored (multi-word keywords only score when

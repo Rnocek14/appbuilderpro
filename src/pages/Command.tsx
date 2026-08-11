@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sparkles, Send, Play, Maximize2, StopCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
+import { readHandoff } from '../components/ConciergeDock';
 import { WakingMoment } from '../components/garvis/WakingMoment';
 import { RemindersCard } from '../components/garvis/RemindersCard';
 import { useAuth } from '../context/AuthContext';
@@ -89,6 +90,18 @@ export default function Command() {
   }, [oppLoading]);
 
   const submit = () => { const t = input.trim(); if (!t || thinking) return; setInput(''); void send(t); };
+
+  // THE BRAINSTORM HANDOFF: "lets come up with new creative strategies" said to the concierge
+  // arrives here already IN the conversation — chat is non-consequential (anything real it
+  // proposes becomes an approval-gated mission), so sending the ask itself is safe and Stark.
+  const handedOff = useRef(false);
+  useEffect(() => {
+    if (handedOff.current) return;
+    handedOff.current = true;
+    const h = readHandoff('brainstorm');
+    if (h) void send(h.sentence);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const renderGarvis = (m: ChatMessage) => {
     const mission = m.missionId ? missions.find((x) => x.id === m.missionId) : undefined;

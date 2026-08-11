@@ -83,8 +83,11 @@ export async function answerStat(id: string): Promise<StatAnswer> {
           w.areas.push({ slug: c.slug, title: c.title, artifacts: countBy.get(c.id) ?? 0 });
           byWorld.set(c.world_id, w);
         }
-        const lines = [...byWorld.values()].map((w) => `"${w.title}": ${marketingReadiness({ areas: w.areas, ctaSet: null }).pct}%`);
-        return { text: `Completeness, from real counts — ${lines.join(' · ')}. Open the operation for the next steps.`, link: '/garvis/webs' };
+        const lines = [...byWorld.values()].map((w) => {
+          const r = marketingReadiness({ areas: w.areas, ctaSet: null });
+          return `${w.title}: ${r.pct}%${r.next.length ? ` — next: ${r.next[0].split(':')[0].toLowerCase()}` : ' — all areas worked'}`;
+        });
+        return { text: `Completeness, from real counts:\n${lines.join('\n')}\nOpen an operation for its full next-step list.`, link: '/garvis/webs' };
       }
       default:
         return { text: "I don't track that number yet." };

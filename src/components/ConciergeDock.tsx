@@ -350,7 +350,8 @@ export function ConciergeDock() {
       setBusy(false);
       setSuggestions([]);
       setNote(a.text);
-      if (a.link) { const t = ALL_CONCIERGE_TASKS.find((x) => routeFor(x, worldsRef.current ?? []).route === a.link); if (t) setSuggestions([t]); }
+      // Raw-route match only — a world task's missing-world fallback must never steal the chip.
+      if (a.link) { const t = ALL_CONCIERGE_TASKS.find((x) => x.route === a.link); if (t) setSuggestions([t]); }
       speak(a.text);
       inputRef.current?.focus();
       return;
@@ -453,7 +454,7 @@ export function ConciergeDock() {
           className="rounded-lg border border-forge-ember/50 px-2.5 text-forge-ember hover:bg-forge-ember/10 disabled:opacity-50"><ArrowRight size={14} /></button>
       </div>
 
-      {note && <p className="mt-2 text-[11px] text-forge-dim">{note}</p>}
+      {note && <p className="mt-2 whitespace-pre-line text-[11px] text-forge-dim">{note}</p>}
 
       {compound && (
         <div className="mt-1.5 flex gap-1.5">
@@ -506,7 +507,12 @@ export function ConciergeDock() {
             <p className="mt-1.5 text-[11px] text-forge-warn">Can't do yet: {doState.plan.holes.join(' · ')}</p>
           )}
           {doState.plan.questions.length > 0 && (
-            <p className="mt-1 text-[11px] text-forge-dim">It will ask: {doState.plan.questions[0]}</p>
+            <div className="mt-1">
+              {doState.plan.questions.map((q, i) => <p key={i} className="text-[11px] text-forge-dim">It will ask: {q}</p>)}
+            </div>
+          )}
+          {!doState.statuses && (doState.plan.steps.length > 4 || doState.plan.questions.length > 1) && (
+            <p className="mt-1 text-[10px] text-forge-dim">Big plan — "Review big" shows every step's why on the full card.</p>
           )}
           {doState.finalNote
             ? <p className={cn('mt-1.5 text-[11px] font-medium', doState.finished === 'done' ? 'text-forge-ok' : doState.finished === 'failed' ? 'text-forge-err' : 'text-forge-warn')}>{doState.finalNote}</p>
