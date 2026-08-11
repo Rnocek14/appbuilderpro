@@ -256,6 +256,20 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     ],
   },
   {
+    // Reached ONLY through the dock's brief-capture card (no keywords — pasted briefs skip
+    // matching entirely); the guide that meets the operator on the Businesses page.
+    id: 'big-brief',
+    label: 'Design the business from my brief',
+    keywords: [],
+    kind: 'navigate',
+    route: '/garvis/webs',
+    steps: [
+      'Your ENTIRE brief is in the intent box — every section, untouched',
+      'Press "Draft the web" — Garvis designs the whole operation around it (brand vault, studios, results)',
+      'Approve the draft; then say "do research the market for <name>" and the intel area fills',
+    ],
+  },
+  {
     id: 'brainstorm',
     label: 'Brainstorm with Garvis (ideas, angles, strategies)',
     keywords: ['brainstorm', 'ideas', 'creative', 'strategies', 'come up with', 'new angles', 'think with me', 'ideate', 'inspiration', 'instagram'],
@@ -372,6 +386,15 @@ export function parseCommandPrefix(input: string): { sentence: string; execute: 
  *  of that plan, not new commands. Word-anchored so ordinary asks never trigger it. */
 export function isRevision(input: string): boolean {
   return /^(actually|instead|change|swap|make it|make that|add|remove|drop|skip|no[,.]|wait[,.]|also add)\b/i.test(input.trim());
+}
+
+/** A pasted BRIEF (a whole project written out — sections, paragraphs, a wall of thinking) is
+ *  the most valuable input the system receives, and keyword-matching it would mangle it. Long
+ *  or multi-line text is a brief: it skips every matching tier and rides INTACT into genesis
+ *  (the business designer) or Orchestrate — never truncated, never replaced by a canned intent. */
+export function isBrief(text: string): boolean {
+  const t = text.trim();
+  return t.length >= 280 || (t.match(/\n/g)?.length ?? 0) >= 3;
 }
 
 // ---------------------------------------------------------------------------------------------

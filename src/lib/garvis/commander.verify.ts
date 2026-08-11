@@ -1,7 +1,7 @@
 // src/lib/garvis/commander.verify.ts
 // Standalone verification of the Commander dispatcher pure helpers (run: `npm run verify:commander`).
 
-import { parseCommand, buildCommanderUser, COMMANDER_SYSTEM } from './commander';
+import { commanderSnag, parseCommand, buildCommanderUser, COMMANDER_SYSTEM } from './commander';
 
 let passed = 0;
 let failed = 0;
@@ -43,6 +43,17 @@ check('user prompt includes the message', user.includes('grow Theory Thread'));
 check('user prompt includes the portfolio snapshot', user.includes('Theory Thread (building)'));
 check('user prompt includes recent conversation', user.includes('FOUNDER: hi') && user.includes('GARVIS: hey'));
 check('system describes the two choices', COMMANDER_SYSTEM.includes('REPLY') && COMMANDER_SYSTEM.includes('MISSION'));
+
+// ---- commanderSnag: failures speak operator, never plumbing (honesty spine) ----
+check('a JS type error becomes "shape I couldn\'t read", never raw plumbing',
+  commanderSnag(new TypeError('((intermediate value) ?? []).filter is not a function')).includes("shape I couldn't read"));
+check('undefined-property crashes are translated too',
+  commanderSnag(new TypeError("Cannot read properties of undefined (reading 'map')")).includes("shape I couldn't read"));
+check('network/edge failures name the real fix',
+  commanderSnag(new Error('Edge Function returned a non-2xx status code')).includes('is an AI key set'));
+check('operator-language messages pass through untouched',
+  commanderSnag(new Error('Out of credits for this billing period — top up on Subscription.')) === 'Out of credits for this billing period — top up on Subscription.');
+check('non-Error throws never crash the translator', commanderSnag(undefined).length > 0);
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} commander check(s) failed`);
