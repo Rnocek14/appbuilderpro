@@ -456,9 +456,14 @@ function VeoStage({ video, progress, children }: {
   const still = reduce();
   return (
     <div className="relative h-full min-h-[82vh] w-full overflow-hidden">
-      <video ref={ref} className="absolute inset-0 h-full w-full object-cover"
+      <video
+        // React never writes the muted ATTRIBUTE, so parse-time autoplay policy blocked the
+        // ambient loop on mobile (scrub-harness finding) — set it imperatively and nudge play.
+        ref={(el) => { ref.current = el; if (el) { el.muted = true; el.defaultMuted = true; } }}
+        className="absolute inset-0 h-full w-full object-cover"
         src={scrub && video.scrubUrl ? video.scrubUrl : video.url} poster={video.poster}
         autoPlay={!scrub && !still} muted loop={!scrub} playsInline
+        onCanPlay={(e) => { if (!scrub && !still && e.currentTarget.paused) void e.currentTarget.play().catch(() => {}); }}
         preload={scrub ? 'auto' : 'metadata'} aria-hidden />
       <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 90% at 50% 60%, rgb(0 0 0 / 0.28), rgb(0 0 0 / 0.62))' }} />
       {children}
