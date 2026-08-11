@@ -17,7 +17,7 @@ export const DEMO_PROFILES: Record<string, unknown>[] = [
     services: ['Roof repair', 'Roof replacement', 'Storm damage repair', 'Gutter installation', 'Roof inspections', 'Emergency tarping'],
     photos: [
       { url: unsplash('photo-1632759145351-1d592919f522'), alt: 'New asphalt shingle roof', source_type: 'demo', can_use_in_preview: true },
-      { url: unsplash('photo-1622993295842-d945a48f7062'), alt: 'Roofer at work', source_type: 'demo', can_use_in_preview: true },
+      { url: unsplash('photo-1635424710928-0544e8512eae'), alt: 'Roofer at work', source_type: 'demo', can_use_in_preview: true },
       { url: unsplash('photo-1600585154340-be6161a56a0c'), alt: 'Finished home exterior', source_type: 'demo', can_use_in_preview: true },
       { url: unsplash('photo-1600607687939-ce8a6c25118c'), alt: 'Home exterior detail', source_type: 'demo', can_use_in_preview: true },
     ],

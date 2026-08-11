@@ -363,7 +363,7 @@ export const RECIPES: Recipe[] = [
     theme: {
       primary: '350 62% 38%', primaryInk: '30 40% 97%', bg: '38 42% 96%', ink: '20 30% 13%',
       muted: '24 14% 38%', card: '40 40% 99%', border: '34 24% 87%', radius: 4,
-      displayFont: 'Fraunces', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, editorial — food photography leads', flair: ['grain', 'marquee'], motion: 'cinematic',
+      displayFont: 'Bricolage Grotesque', bodyFont: 'Hanken Grotesk', tone: 'warm, appetizing, modern — bold characterful headlines, food photography leads', flair: ['grain', 'marquee'], motion: 'cinematic',
     },
     cta: 'Reserve a Table',
     variants: { hero: 'stacked', reviews: 'spotlight', ctaBanner: 'giant' },
@@ -475,7 +475,9 @@ export const RECIPES: Recipe[] = [
   {
     id: 'pet_care',
     label: 'Pet Care / Grooming / Boarding',
-    match: ['pet', 'dog', 'cat', 'groom', 'kennel', 'boarding', 'daycare', 'walker', 'animal', 'dog training', 'dog train'],
+    // 'daycare' alone routed a CHILDREN'S daycare center to the pet recipe — pet daycares are
+    // still caught by 'dog'/'pet'/the compound forms; a kids' daycare falls to the neutral default.
+    match: ['pet', 'dog', 'cat', 'groom', 'kennel', 'boarding', 'dog daycare', 'doggy daycare', 'pet daycare', 'walker', 'animal', 'dog training', 'dog train'],
     sections: ['hero', 'services', 'gallery', 'reviews', 'about', 'trust', 'faq', 'hours', 'quote', 'map', 'ctaBanner', 'seoText'],
     theme: {
       primary: '25 85% 50%', primaryInk: '30 50% 98%', bg: '45 40% 97%', ink: '30 26% 13%',
@@ -774,6 +776,8 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     if (s.type === 'serviceArea' && !profile.service_area?.length && !Array.isArray(s.props.areas)) return false;
     return true;
   });
+  // gallery + showcase on one page must not repeat the same photos
+  sections = splitPortfolio(sections);
 
   // TRADE SCENE: the visual is never model-chosen — the deterministic kind for this trade is
   // stamped onto the props; no scene exists for the trade (or a second scene appears) → dropped.
@@ -845,6 +849,22 @@ export function navFor(sections: SectionSpec[], cta: string): { label: string; a
   return out.slice(0, 6);
 }
 
+/** A page carrying BOTH portfolio sections (gallery + showcase — the photography recipe) used
+ *  to show the SAME photo set twice. Split the photos between them; with fewer than 4 photos
+ *  there is nothing to split, so the later section is dropped instead of duplicating. Shared
+ *  by the normalizer and the fallback assembler. */
+export function splitPortfolio(sections: SectionSpec[]): SectionSpec[] {
+  const first = sections.find((s) => s.type === 'gallery' || s.type === 'showcase');
+  const second = sections.find((s) => (s.type === 'gallery' || s.type === 'showcase') && s !== first);
+  if (!first || !second) return sections;
+  const photos = (first.props.photos as { url: string; alt?: string }[] | undefined) ?? [];
+  if (photos.length < 4) return sections.filter((s) => s !== second);
+  const half = Math.ceil(photos.length / 2);
+  first.props = { ...first.props, photos: photos.slice(0, half) };
+  second.props = { ...second.props, photos: photos.slice(half) };
+  return sections;
+}
+
 // ---------------------------------------------------------------------------
 // Deterministic fallback assembly — a complete, decent site with ZERO model calls.
 // This is both the no-key/dev path and the floor the normalizer patches holes with.
@@ -872,6 +892,20 @@ function voiceFor(industry: string, name: string, city: string | null): Voice {
   const inCity = city ? ` in ${city}` : '';
   const cityOr = city ?? 'your area';
   const pick = (arr: string[]): string => arr[nameHash(name) % arr.length];
+
+  // DIGNITY FIRST — the layout guard (applyRestraint) already strips spectacle for
+  // grief-adjacent categories, but the voice must match: no "go-to", no quotes, no projects,
+  // no sales urgency. Service-first language a funeral director could read aloud.
+  if (restraintFor(ind)) {
+    return {
+      heading: pick([
+        `Support for families${inCity}, whenever you need it.`,
+        `Care, guidance, and time — when it matters most.`,
+      ]),
+      sub: `${name} walks with families through every arrangement — unhurried, clear, and kind.`,
+      bannerHeading: pick([`We're here when you need us${inCity}.`, `Whenever you're ready, ${name} is here.`]),
+    };
+  }
 
   if (/(roof|plumb|hvac|electric|landscap|lawn|paint|pressure|cleaning|pest|tree|fenc|concrete|garage|handyman|remodel|floor|window|gutter|pool|appliance|junk|moving|towing|locksmith)/.test(indLc)) {
     return {
@@ -930,8 +964,18 @@ function voiceFor(industry: string, name: string, city: string | null): Voice {
 // service so a fallback page doesn't repeat one identical line down every service (the old tell was
 // "done on time, done right" on all eight). Deterministic.
 const capFirst = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
-function serviceBlurb(service: string, seed: string): string {
+function serviceBlurb(service: string, seed: string, dignified = false): string {
   const s = service.toLowerCase();
+  if (dignified) {
+    // No "clean-up", no "fair quote", no booking urgency — care language only.
+    const pool = [
+      `${capFirst(s)}, handled with care and unhurried attention.`,
+      `Gentle, clear guidance through ${s}.`,
+      `${capFirst(s)}, arranged around your family's wishes.`,
+      `Quiet, attentive support with ${s}.`,
+    ];
+    return pool[nameHash(seed) % pool.length];
+  }
   const pool = [
     `${capFirst(s)} handled properly, from the first call to the final clean-up.`,
     `Straightforward ${s} with clear pricing and no surprises.`,
@@ -943,12 +987,13 @@ function serviceBlurb(service: string, seed: string): string {
   return pool[nameHash(seed) % pool.length];
 }
 // A couple of honest sub-headline variants for the services block, so the section header isn't
-// identical across every fallback site either.
+// identical across every fallback site either. `loc` here is the CITY (assembleFallbackSpec
+// extracts it) — never a street address.
 function servicesSub(name: string, loc: string | null): string {
   const pool = [
     `Every job backed by ${name}'s reputation.`,
     `Done properly, and cleaned up after — every time.`,
-    loc ? `Trusted by ${loc.split(',')[0]} and the surrounding area.` : `Trusted work you can book with one call.`,
+    loc ? `Trusted by ${loc} and the surrounding area.` : `Trusted work you can book with one call.`,
   ];
   return pool[nameHash(`${name}:services-sub`) % pool.length];
 }
@@ -969,8 +1014,18 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const loc = profile.location ?? '';
   const name = profile.business_name;
   const cta = recipe.cta;
+  // Grief-adjacent categories: every piece of boilerplate below switches to care language —
+  // the layout guard alone left "How do I get a quote?" on funeral homes.
+  const dignified = !!restraintFor(profile.industry);
 
-  const voice = voiceFor(profile.industry, name, loc ? loc.split(',')[0] : null);
+  // The CITY for copy ("in Asheville") — never a street. A location like "412 Main St,
+  // Asheville, NC" used to yield "done right in 412 Main St."; skip leading segments that
+  // start with a house number.
+  const city = loc
+    ? (loc.split(',').map((s) => s.trim()).find((s) => s && !/^\d/.test(s)) ?? null)
+    : null;
+
+  const voice = voiceFor(profile.industry, name, city);
 
   const sections: SectionSpec[] = [];
   for (const type of recipe.sections) {
@@ -993,16 +1048,16 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         // guaranteed' — claims nobody verified have no place on a pitched demo.
         sections.push({ type, props: { items: [
           profile.google_rating ? `${profile.google_rating.toFixed(1)}★ on Google` : `Professional ${profile.industry.toLowerCase()}`,
-          profile.review_count ? `${profile.review_count}+ customer reviews` : (loc ? `Serving ${loc.split(',')[0]} & nearby` : 'Serving the local area'),
+          profile.review_count ? `${profile.review_count}+ customer reviews` : (city ? `Serving ${city} & nearby` : 'Serving the local area'),
           'Free, no-obligation quotes',
           profile.phone ? `Call ${profile.phone}` : 'Fast online quotes',
         ] } });
         break;
       case 'services':
         sections.push({ type, props: {
-          heading: 'What we do',
-          sub: servicesSub(name, loc),
-          services: profile.services.slice(0, 8).map((s, i) => ({ name: s, blurb: serviceBlurb(s, `${name}:${s}:${i}`) })),
+          heading: dignified ? 'How we can help' : 'What we do',
+          sub: dignified ? `Each family is cared for personally, from the first call onward.` : servicesSub(name, city),
+          services: profile.services.slice(0, 8).map((s, i) => ({ name: s, blurb: serviceBlurb(s, `${name}:${s}:${i}`, dignified) })),
           cta,
         } });
         break;
@@ -1034,7 +1089,11 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'faq':
-        sections.push({ type, props: { heading: 'Common questions', faqs: [
+        sections.push({ type, props: { heading: 'Common questions', faqs: dignified ? [
+          { q: 'How do we reach you?', a: `Call${profile.phone ? ` ${profile.phone}` : ' us'} or use the form below — your message goes directly to ${name}.` },
+          { q: 'What areas do you serve?', a: profile.service_area?.length ? profile.service_area.join(', ') : (loc || 'Our local community and the surrounding area.') },
+          { q: 'When should we get in touch?', a: `Whenever you are ready. There is no wrong time to ask a question, and no obligation in reaching out.` },
+        ] : [
           { q: 'How do I get a quote?', a: `Use the form below or call${profile.phone ? ` ${profile.phone}` : ' us'} — quotes are free and carry no obligation.` },
           { q: 'What areas do you cover?', a: profile.service_area?.length ? profile.service_area.join(', ') : (loc || 'Our local area and surrounding communities.') },
           // No invented licensing claim — the one question a fallback site can answer honestly is
@@ -1051,14 +1110,18 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
       case 'quote':
         sections.push({ type, props: {
           heading: cta,
-          sub: 'Tell us what you need — we typically respond the same day.',
+          sub: dignified
+            ? 'Reach out whenever you are ready — your message comes directly to us.'
+            : 'Tell us what you need — we typically respond the same day.',
           phone: profile.phone, email: profile.email, cta,
         } });
         break;
       case 'ctaBanner':
         sections.push({ type, props: {
           heading: voice.bannerHeading,
-          sub: profile.phone ? `Call ${profile.phone} or request a quote online.` : 'Request a quote online — it takes 30 seconds.',
+          sub: dignified
+            ? (profile.phone ? `Call ${profile.phone}, or send a note online.` : 'Send a note online — it reaches us directly.')
+            : (profile.phone ? `Call ${profile.phone} or request a quote online.` : 'Request a quote online — it takes 30 seconds.'),
           cta,
         } });
         break;
@@ -1086,12 +1149,15 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
     }
   }
 
+  // gallery + showcase on one page must not repeat the same photos (photography recipe)
+  const dedupedSections = splitPortfolio(sections);
+
   // Seeded structural compositions ride into the fallback — the floor is architecturally
   // distinct per BUSINESS, not one skeleton per vertical with different paint.
-  for (const s of sections) s.variant = s.variant ?? seededVariant(name, s.type, recipe);
+  for (const s of dedupedSections) s.variant = s.variant ?? seededVariant(name, s.type, recipe);
 
   const fbTheme: ThemeSpec = { ...recipe.theme };
-  const restrainedSections = applyRestraint(fbTheme, sections, profile.industry);
+  const restrainedSections = applyRestraint(fbTheme, dedupedSections, profile.industry);
   // marquee with no trust section to host it is a silent no-op (restaurant/retail/pet recipes).
   if (fbTheme.flair?.includes('marquee') && !restrainedSections.some((s) => s.type === 'trust')) {
     fbTheme.flair = fbTheme.flair.filter((f) => f !== 'marquee');

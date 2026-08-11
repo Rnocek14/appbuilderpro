@@ -517,5 +517,79 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   check('blurbs are deterministic for the same business', JSON.stringify(assembleFallbackSpec(prof).sections.find((s) => s.type === 'services')?.props.services) === JSON.stringify(svc?.props.services));
 }
 
+// --- dignified categories get dignified COPY, not just a dignified layout (audit finding: the
+// --- fallback voice produced "Duluth's go-to for funeral home." and quote-flavored boilerplate) ---
+{
+  const funeral = parseBusinessProfile({
+    business_name: 'Harborview Funeral Home', industry: 'Funeral Home', location: 'Duluth, MN',
+    phone: '555-555-0119', services: ['Funeral services', 'Cremation services', 'Pre-planning'],
+  }).profile!;
+  const fb = assembleFallbackSpec(funeral);
+  const hero = fb.sections.find((s) => s.type === 'hero');
+  const svc = fb.sections.find((s) => s.type === 'services');
+  const faq = fb.sections.find((s) => s.type === 'faq');
+  const quote = fb.sections.find((s) => s.type === 'quote');
+  const banner = fb.sections.find((s) => s.type === 'ctaBanner');
+  const copy = [
+    hero?.props.heading, hero?.props.sub, svc?.props.heading, svc?.props.sub,
+    ...((svc?.props.services ?? []) as { blurb: string }[]).map((x) => x.blurb),
+    ...((faq?.props.faqs ?? []) as { q: string; a: string }[]).flatMap((x) => [x.q, x.a]),
+    quote?.props.sub, banner?.props.heading, banner?.props.sub,
+  ].filter((x): x is string => typeof x === 'string').join(' ');
+  check('dignified voice: no "go-to" / trade-sales heading on a funeral home', !/go-to|done right|count on/i.test(String(hero?.props.heading)));
+  check('dignified voice: no quote/booking language anywhere in the copy', !/\bquote\b|book it|ready to get started|30 seconds/i.test(copy));
+  check('dignified voice: no trade blurb boilerplate ("clean-up", "runaround")', !/clean-up|runaround|no surprises/i.test(copy));
+  check('dignified voice stays deterministic', JSON.stringify(assembleFallbackSpec(funeral).sections) === JSON.stringify(fb.sections));
+}
+
+// --- gallery + showcase on one page split the photo set instead of repeating it -------------------
+{
+  const photographer = parseBusinessProfile({
+    business_name: 'Golden Hour Studios', industry: 'Wedding Photography',
+    services: ['Weddings', 'Elopements', 'Portraits'],
+    photos: [1, 2, 3, 4, 5, 6].map((n) => ({ url: `https://x/p${n}.jpg` })),
+  }).profile!;
+  for (const spec of [assembleFallbackSpec(photographer), normalizeSpec({}, photographer)]) {
+    const parts = spec.sections.filter((s) => s.type === 'gallery' || s.type === 'showcase');
+    if (parts.length === 2) {
+      const a = ((parts[0].props.photos ?? []) as { url: string }[]).map((p) => p.url);
+      const b = ((parts[1].props.photos ?? []) as { url: string }[]).map((p) => p.url);
+      check('portfolio split: no photo appears in both sections', a.every((u) => !b.includes(u)));
+      check('portfolio split: every photo still appears once', a.length + b.length === 6 && a.length > 0 && b.length > 0);
+    } else {
+      check('portfolio split: with both sections in the recipe, two must survive on 6 photos', false);
+    }
+  }
+  const thin = parseBusinessProfile({ ...{
+    business_name: 'Golden Hour Studios', industry: 'Wedding Photography', services: ['Weddings'],
+  }, photos: [{ url: 'https://x/only1.jpg' }, { url: 'https://x/only2.jpg' }] }).profile!;
+  const thinSpec = assembleFallbackSpec(thin);
+  check('portfolio split: too few photos → only one portfolio section survives',
+    thinSpec.sections.filter((s) => s.type === 'gallery' || s.type === 'showcase').length === 1);
+}
+
+// --- copy uses the CITY, never a street address ("done right in 412 Main St." was real) -----------
+{
+  const street = parseBusinessProfile({
+    business_name: 'Luna Trattoria', industry: 'Italian Restaurant',
+    location: '412 Main St, Asheville, NC', services: ['Handmade pasta'],
+  }).profile!;
+  const heading = String(assembleFallbackSpec(street).sections.find((s) => s.type === 'hero')?.props.heading);
+  check('fallback voice never puts a street address in the headline', !/412|Main St/i.test(heading));
+  check('fallback voice found the actual city', /Asheville/.test(heading) || !/\bin\b/.test(heading));
+}
+
+// --- recipe hygiene: every recipe font must exist in the loadable library -------------------------
+check('every recipe display/body font is in FONT_LIBRARY',
+  RECIPES.every((r) => FONT_LIBRARY.includes(r.theme.displayFont) && FONT_LIBRARY.includes(r.theme.bodyFont)));
+
+// --- routing: a children's daycare must not get the pet recipe ------------------------------------
+{
+  const kids = parseBusinessProfile({ business_name: 'Little Sprouts', industry: 'Daycare Center', services: ['Infant care'] }).profile!;
+  const dogs = parseBusinessProfile({ business_name: 'Rover', industry: 'Dog Daycare', services: ['Daycare'] }).profile!;
+  check("a children's daycare no longer routes to pet_care", pickRecipe(kids).id !== 'pet_care');
+  check('a dog daycare still routes to pet_care', pickRecipe(dogs).id === 'pet_care');
+}
+
 console.log(`\npreview-spec.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} check(s) failed`);

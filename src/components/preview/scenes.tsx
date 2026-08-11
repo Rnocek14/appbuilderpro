@@ -276,7 +276,9 @@ function GlassScene({ p, stats, headline, sub, cta, hue }: {
   ];
   const ease = (t: number) => 1 - Math.pow(1 - t, 3);
   return (
-    <div className="relative h-full w-full overflow-hidden" style={{ perspective: '1200px' }}>
+    // min-h floor: ScrollScene's reduced-motion branch (and any indefinite-height host) can't
+    // resolve h-full — without it the all-absolute chapter collapsed to a blank 0px band.
+    <div className="relative h-full min-h-[80vh] w-full overflow-hidden" style={{ perspective: '1200px' }}>
       {/* the stage: deep brand-hue field, drifting slightly as the chapter plays */}
       <div className="absolute inset-0" style={{
         background: `radial-gradient(120% 90% at ${18 + p * 10}% 8%, hsl(${hue} 82% ${36 - p * 7}%), hsl(${hue} 85% 10%) 72%), hsl(${hue} 85% 10%)`,
@@ -395,7 +397,9 @@ function RibbonScene({ p, headline, sub, cta, hue, seed }: {
   const arrive = seg(p, 0.18, 0.42);
   const ctaShow = seg(p, 0.52, 0.7);
   return (
-    <div className="relative h-full w-full overflow-hidden">
+    // Same min-h floor as the glass chapter: keep the stage visible when the parent's height
+    // is indefinite (reduced-motion path) instead of collapsing to an empty band.
+    <div className="relative h-full min-h-[80vh] w-full overflow-hidden">
       {/* stage: near-black with a breath of the brand hue — canvas strips float over it */}
       <div className="absolute inset-0" style={{
         background: `radial-gradient(110% 90% at 50% ${20 + p * 18}%, hsl(${hue} 45% 13%), hsl(${hue} 55% 6%) 75%)`,

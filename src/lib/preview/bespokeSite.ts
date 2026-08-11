@@ -125,18 +125,35 @@ export function bespokeHonest(html: string, profile: BusinessProfile): HonestyRe
   if (/\blic(?:ense)?\.?\s*(?:#|no\.?|number)\s*[:#]?\s*[a-z0-9]{2,}/i.test(html) && !/\blic/i.test(grounded)) {
     v.push('invented license number');
   }
-  // 3. Tenure ("22 years", "since 1998") with nothing in the brief to support it.
-  const tenure = /\b(\d{1,3})\+?\s*(?:years|yrs)\b/i.exec(html) || /\bsince\s+((?:19|20)\d{2})\b/i.exec(html);
+  // 3. Tenure ("22 years", "since 1998", "two decades of…") with nothing in the brief to support it.
+  const tenure = /\b(\d{1,3})\+?\s*(?:years|yrs)\b/i.exec(html) || /\bsince\s+((?:19|20)\d{2})\b/i.exec(html)
+    || /\b(?:two|three|four|five|six|seven|eight|nine|ten)?\s*decades?\s+(?:of|in|serving)\b/i.exec(html);
   if (tenure && !/\b(?:years|yrs|since\s+(?:19|20)\d{2}|est\.?\s*(?:19|20)\d{2}|decades?)\b/i.test(grounded)) {
     v.push(`unverified tenure: "${tenure[0].trim()}"`);
   }
-  // 4. Ratings / review counts the brief doesn't provide.
-  if (/\b\d(?:\.\d)?\s*(?:★|stars?\b|\/\s*5\b)/i.test(html) && profile.google_rating == null) v.push('invented star rating');
+  // 4. Ratings / review counts the brief doesn't provide — digits, hyphens ("5-star"), rows of
+  //    unicode stars, or spelled-out ("five-star") all count as a rating claim.
+  if (profile.google_rating == null) {
+    if (/\b\d(?:\.\d)?[\s-]*(?:★|stars?\b|\/\s*5\b)/i.test(html)) v.push('invented star rating');
+    else if (/★{2,}/.test(html) || /\bfive[\s-]?star\b/i.test(hay)) v.push('invented star rating');
+  }
   if (/\b[\d,]{1,7}\+?\s*(?:reviews|ratings)\b/i.test(html) && !(profile.review_count && profile.review_count > 0)) v.push('invented review count');
   // 5. Warranties / guarantees the brief never promised.
   for (const term of ['warrant', 'guarantee', 'money-back', 'money back', 'satisfaction guaranteed']) {
     if (hay.includes(term) && !grounded.includes(term)) v.push(`unverified promise: "${term}"`);
   }
+  if (/\b100%\s*satisfaction\b/i.test(hay) && !grounded.includes('satisfaction')) v.push('unverified promise: "100% satisfaction"');
+  // 6. Reputation theater the brief never provided: awards, BBB grades, "#1"/"voted best",
+  //    invented "trusted by N" counts. (The system prompt bans these; the gate is the backstop.)
+  if (/\baward[-\s]?winning\b/i.test(hay) && !grounded.includes('award')) v.push('unverified claim: "award-winning"');
+  if ((/\bbbb\b/i.test(html) || hay.includes('better business bureau')) && !/\bbbb\b|better business bureau/i.test(grounded)) {
+    v.push('unverified claim: BBB rating');
+  }
+  if (/\ba\+\s*(?:rated|rating)\b/i.test(html) && !/\ba\+/i.test(grounded)) v.push('unverified claim: "A+ rating"');
+  // "#1" as prose (a hex color like #1a2b3c never has a word boundary after the 1)
+  if (/#\s?1\b/.test(html) && !/#\s?1\b/.test(grounded)) v.push('unverified claim: "#1"');
+  if (/\bvoted\s+(?:best|#\s?1)\b/i.test(hay) && !grounded.includes('voted')) v.push('unverified claim: "voted best"');
+  if (/\btrusted by\s+[\d,]+/i.test(hay) && !(profile.review_count && profile.review_count > 0)) v.push('invented trust count');
 
   // de-dupe while preserving order
   const seen = new Set<string>();

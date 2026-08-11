@@ -65,6 +65,27 @@ const licensed: BusinessProfile = { ...base, description: 'Licensed and insured 
 const licHtml = `<!doctype html><html><body><p>Licensed &amp; insured, serving since 2003.</p><a href="tel:1">c</a></body></html>`;
 check('a credential the profile states IS allowed', bespokeHonest(licHtml, licensed).ok === true);
 
+// evasion phrasings a dishonest generator actually produces — each must be caught
+const evasions: [string, string][] = [
+  ['a hyphenated "5-star"', 'Our 5-star service is known county-wide.'],
+  ['a row of unicode stars', 'Rated ★★★★★ by our customers.'],
+  ['a spelled-out "five-star"', 'A five-star rated company.'],
+  ['spelled-out decades of tenure', 'Over two decades of experience.'],
+  ['"award-winning"', 'An award-winning local company.'],
+  ['a BBB grade', 'A+ rated by the BBB.'],
+  ['a "#1" claim', 'The #1 plumber in the state.'],
+  ['"voted best"', 'Voted best plumber in the county.'],
+  ['an invented "trusted by N"', 'Trusted by 1,200+ homeowners.'],
+  ['a "100% satisfaction" promise', 'We promise 100% satisfaction on every job.'],
+];
+for (const [label, line] of evasions) {
+  check(`gate catches ${label}`, bespokeHonest(`<!doctype html><html><body><p>${line}</p></body></html>`, base).ok === false);
+}
+// …and the new guards must NOT fire on technical or grounded content
+check('a hex color like #1a2b3c is not a "#1" claim', bespokeHonest('<!doctype html><html><body><div style="color:#1a2b3c">x</div></body></html>', base).ok === true);
+check('★★★★★ is allowed when the profile has a real rating', bespokeHonest('<!doctype html><html><body>★★★★★ 4.9 on Google · 380 reviews</body></html>', { ...base, google_rating: 4.9, review_count: 380 }).ok === true);
+check('"trusted by N" is allowed with a real review count', bespokeHonest('<!doctype html><html><body>Trusted by 380 customers</body></html>', { ...base, google_rating: 4.9, review_count: 380 }).ok === true);
+
 // ── doc shape guard ────────────────────────────────────────────────────────
 check('looksLikeHtmlDoc accepts a real full document', looksLikeHtmlDoc(honestHtml));
 check('looksLikeHtmlDoc rejects a fenced/prose reply', !looksLikeHtmlDoc('```html\n<div>hi</div>\n```'));

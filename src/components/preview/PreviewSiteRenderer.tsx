@@ -74,7 +74,15 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
   const [logoMain, logoAccent] = spec.logoText.includes('|')
     ? spec.logoText.split('|', 2)
     : [spec.logoText, ''];
-  const phone = spec.sections.find((s) => s.type === 'quote')?.props.phone as string | undefined;
+  // The phone lives on whichever section carries it. Recipes without a quote section
+  // (restaurant, retail) used to leave this undefined — no header phone, no mobile call bar,
+  // and a dead "#quote" header link, on exactly the verticals where calling IS the conversion.
+  const phone = (['quote', 'hero', 'map'] as const)
+    .map((t) => spec.sections.find((s) => s.type === t)?.props.phone)
+    .find((p): p is string => typeof p === 'string' && !!p);
+  // Where the header/call-bar CTA scrolls: the quote form when the page has one, else the CTA
+  // banner (normalizeSpec guarantees at least one of the two exists — never a dead anchor).
+  const ctaAnchor = spec.sections.some((s) => s.type === 'quote') ? '#quote' : '#ctaBanner';
 
   // Signature devices (themePresets personality kit, ported): activated as pv-f-* classes on the
   // root so the device CSS below can style hosts declaratively. Shot mode drops them — a static
@@ -136,7 +144,7 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
             <div className="flex items-center gap-2">
               {phone
                 ? <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className="inline-flex items-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] px-4 py-2 text-sm font-semibold text-[hsl(var(--pi))]"><Phone size={14} /> <span className="hidden sm:inline">{phone}</span><span className="sm:hidden">Call</span></a>
-                : <a href="#quote" className="rounded-[var(--r)] bg-[hsl(var(--p))] px-4 py-2 text-sm font-semibold text-[hsl(var(--pi))]">{spec.nav.find((n) => n.anchor === 'quote')?.label ?? 'Contact'}</a>}
+                : <a href={ctaAnchor} className="rounded-[var(--r)] bg-[hsl(var(--p))] px-4 py-2 text-sm font-semibold text-[hsl(var(--pi))]">{spec.nav.find((n) => n.anchor === 'quote')?.label ?? 'Contact'}</a>}
               {/* Mobile: the nav used to vanish entirely below md — on the device every owner
                   opens the email with. A plain disclosure menu, no dependencies. */}
               <button type="button" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen}
@@ -183,9 +191,9 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
               className="flex flex-1 items-center justify-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] py-3 text-sm font-bold text-[hsl(var(--pi))]">
               <Phone size={15} /> Call {phone}
             </a>
-            <a href="#quote"
+            <a href={ctaAnchor}
               className="flex flex-1 items-center justify-center rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))] py-3 text-sm font-semibold text-[hsl(var(--ink))]">
-              {spec.nav.find((n) => n.anchor === 'quote')?.label ?? 'Get a Quote'}
+              {spec.nav.find((n) => n.anchor === 'quote')?.label ?? 'Get in Touch'}
             </a>
           </div>
         </div>
