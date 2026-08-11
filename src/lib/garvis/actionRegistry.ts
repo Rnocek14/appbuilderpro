@@ -271,6 +271,16 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     return { kind: 'needs_review', note: `Episode "${episode.title}" drafted for ${channel.name}${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
   },
 
+  start_app_marketing: async (p) => {
+    const app = (p.app ?? '').trim();
+    if (!app) throw new Error('Which app? Name it exactly as it appears on Projects.');
+    const { instantiateWeb } = await import('./workwebRun');
+    const web = await instantiateWeb('app-marketing');
+    const title = `${app.slice(0, 50)} Marketing`;
+    await supabase.from('knowledge_worlds').update({ title }).eq('id', web.worldId);
+    return { kind: 'done', note: `"${title}" stands — the canvas IS the plan: competitor intel, SEO articles, social, video ideas, results. Later steps (and you) fill the areas.`, link: `/garvis/webs/${web.worldId}` };
+  },
+
   point_channel_cta: async (p) => {
     const { listChannels, setChannelCta } = await import('./channelsRun');
     const url = (p.url ?? '').trim();

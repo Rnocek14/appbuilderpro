@@ -171,7 +171,8 @@
     "verify:selfinteraction": "tsx scripts/self-interaction-lint.mjs",
     "verify:cohortstats": "tsx src/lib/garvis/prospects/cohortStats.verify.ts",
     "verify:areasweep": "tsx src/lib/garvis/prospects/areaSweep.verify.ts",
-    "verify:leadengine": "tsx src/lib/garvis/leadEngine/leadEngine.verify.ts"
+    "verify:leadengine": "tsx src/lib/garvis/leadEngine/leadEngine.verify.ts",
+    "verify:marketingreadiness": "tsx src/lib/garvis/marketingReadiness.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
