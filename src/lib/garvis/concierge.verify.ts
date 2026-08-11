@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, statsFor, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, isBrief, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, statsFor, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -230,6 +230,28 @@ const ALL = ALL_CONCIERGE_TASKS;
     resolve('new ideas for instagram posts', WORLDS, ALL).task?.id === 'brainstorm');
   check('"what worked this week" is the episode-results stat', statsFor('what worked this week') === 'episode_stats');
   check('"hows the stroke app going" is the portfolio stat', statsFor('hows the stroke app going') === 'portfolio');
+}
+// ---- The brief door: pasted walls of thinking arrive intact, never keyword-mangled ----
+{
+  check('a multi-section project brief IS a brief', isBrief('COMO COUNTRY CLUB — BRAND & MERCH\n1. The Big Idea\nI am building a brand...\n2. Objective\nHats, tees, polos.'));
+  check('280+ chars of prose is a brief even on one line', isBrief('x'.repeat(300)));
+  check('an ordinary command is NEVER a brief', !isBrief('lets work on moms postcard'));
+  check('a two-line note is not a brief', !isBrief('remember this:\ncall the printer'));
+  const brief = CONCIERGE_TASKS.find((t) => t.id === 'big-brief');
+  check('the big-brief task exists, keywordless (reached only via capture), and lands on Businesses',
+    !!brief && brief.keywords.length === 0 && brief.route === '/garvis/webs');
+  check('a keywordless task never matches any sentence',
+    matchTasks('design the business from my brief', ALL).every((m) => m.task.id !== 'big-brief'));
+}
+// ---- The design board: visual ideation is sayable ----
+{
+  check('"lets design como logos" reaches the creative board',
+    (() => { const r = resolve('lets design como logos', WORLDS, ALL); return r.task?.id === 'design-board' || (r.suggestions ?? []).some((t) => t.id === 'design-board'); })());
+  check('"work on the ccc monogram" reaches it too',
+    (() => { const r = resolve('work on the ccc monogram', WORLDS, ALL); return r.task?.id === 'design-board' || (r.suggestions ?? []).some((t) => t.id === 'design-board'); })());
+  check('"make a moodboard" reaches the board', (() => { const r = resolve('make a moodboard', WORLDS, ALL); return r.task?.id === 'design-board'; })());
+  check('the board steps teach the riff loop (say what to change)',
+    CONCIERGE_TASKS.find((t) => t.id === 'design-board')!.steps.join(' ').includes('SAY what to change'));
 }
 {
   // Determinism + purity of the derivation itself.

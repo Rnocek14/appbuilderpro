@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasKey, aliasLookup, aliasRemember, isRevision, parseCommandPrefix, resolve, routeFor, statsFor,
+  aliasKey, aliasLookup, aliasRemember, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
 import { answerStat } from '../lib/garvis/conciergeStats';
@@ -87,6 +87,7 @@ export function ConciergeDock() {
     try { return JSON.parse(sessionStorage.getItem(TASK_KEY) || 'null') as ActiveGuide | null; } catch { return null; }
   });
   const [doState, setDoState] = useState<DoState | null>(null);
+  const [briefText, setBriefText] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
@@ -248,6 +249,31 @@ export function ConciergeDock() {
     act(orch, orch.route, false, sentence);
   };
 
+  // THE BRIEF DOOR — a pasted wall of thinking skips every matching tier and arrives INTACT.
+  // "Design the business" puts the WHOLE brief in the genesis intent box (Draft the web stays
+  // the explicit press); "Compile a plan" carries it to Orchestrate the same way.
+  const captureBrief = (text: string) => {
+    setBriefText(text);
+    setInput('');
+    setSuggestions([]);
+    setCompound(false);
+    setDoState(null);
+    setNote(null);
+  };
+  const briefToGenesis = () => {
+    if (!briefText) return;
+    try { sessionStorage.setItem(GENESIS_PREFILL_KEY, briefText); } catch { /* fine */ }
+    setBriefText(null);
+    startGuide('big-brief');
+    navigate('/garvis/webs');
+  };
+  const briefToOrchestrate = () => {
+    if (!briefText) return;
+    const b = briefText;
+    setBriefText(null);
+    goOrchestrate(b);
+  };
+
   // THE DO-ENGINE — "garvis, do X" without leaving the corner. Reuses the Orchestrator wholesale:
   // compile → the SAME reviewable contract (steps, risks, holes, questions) rendered small →
   // "Run it" is the explicit press → the arc executes live with per-step outcomes. Nothing runs
@@ -336,6 +362,8 @@ export function ConciergeDock() {
       return;
     }
     setDoState(null);
+    // A typed-out wall of thinking is a brief too — same intact-capture door as a paste.
+    if (isBrief(raw)) { captureBrief(raw); return; }
     // "garvis" is courtesy; "do/run/execute" is an execution order → straight to the compiler.
     const { sentence: text, execute } = parseCommandPrefix(raw);
     if (!text) return;
@@ -442,6 +470,10 @@ export function ConciergeDock() {
       <div className="mt-2 flex gap-1.5">
         <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+          onPaste={(e) => {
+            const t = e.clipboardData.getData('text');
+            if (isBrief(t)) { e.preventDefault(); captureBrief(t); }
+          }}
           placeholder={'"moms postcard" · "do draft an episode about rates" · "what\'s next"'}
           className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
         {SpeechCtor && (
@@ -455,6 +487,27 @@ export function ConciergeDock() {
       </div>
 
       {note && <p className="mt-2 whitespace-pre-line text-[11px] text-forge-dim">{note}</p>}
+
+      {briefText && (
+        <div className="mt-2 rounded-xl border border-forge-ember/40 bg-forge-bg/60 p-2.5">
+          <p className="text-[11px] font-semibold text-forge-ink">That's a whole brief — {briefText.trim().split(/\s+/).length.toLocaleString()} words, captured intact.</p>
+          <p className="mt-0.5 text-[11px] text-forge-dim">Nothing is created yet. Where should it go?</p>
+          <div className="mt-1.5 flex flex-col gap-1.5">
+            <button onClick={briefToGenesis}
+              className="rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20">
+              Design the business from it — genesis reads every word, you press "Draft the web"
+            </button>
+            <button onClick={briefToOrchestrate}
+              className="rounded-lg border border-forge-border px-2.5 py-1.5 text-left text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+              Compile it as a plan in Orchestrate instead
+            </button>
+            <button onClick={() => setBriefText(null)}
+              className="rounded-lg px-2.5 py-1 text-left text-[10px] text-forge-dim hover:text-forge-ink">
+              Never mind — discard
+            </button>
+          </div>
+        </div>
+      )}
 
       {compound && (
         <div className="mt-1.5 flex gap-1.5">

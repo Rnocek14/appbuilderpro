@@ -144,6 +144,21 @@ function extractJson(raw: string): Record<string, unknown> | null {
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
 /** Tolerant parse. Unparseable output fails soft into a reply that surfaces whatever text came back. */
+/** Translate a caught failure into OPERATOR language (honesty spine: named, actionable messages,
+ *  never raw plumbing). JS type errors are code shapes the operator can do nothing about — they
+ *  become "came back in a shape I couldn't read", never "x.filter is not a function". Messages
+ *  that already speak to the operator (credits, named setup notes) pass through untouched. */
+export function commanderSnag(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e ?? 'something went wrong');
+  if (/non-2xx|Failed to send a request|Failed to fetch|NetworkError|Load failed/i.test(msg)) {
+    return "The brain isn't answering — is an AI key set and are the edge functions deployed? System health shows provider status.";
+  }
+  if (/is not a function|Cannot read propert|undefined is not|null is not|is not iterable|JSON at position|Unexpected token/i.test(msg)) {
+    return "The reply came back in a shape I couldn't read — say it again; if it repeats, System health shows provider status.";
+  }
+  return msg;
+}
+
 export function parseCommand(raw: string): Command {
   const o = extractJson(raw);
   if (!o) return { kind: 'reply', text: raw.trim() || "I didn't catch that — try rephrasing?" };

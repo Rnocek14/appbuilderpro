@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { rawComplete } from '../lib/aiClient';
 import { supabase } from '../lib/supabase';
-import { COMMANDER_SYSTEM, buildCommanderUser, parseCommand } from '../lib/garvis/commander';
+import { COMMANDER_SYSTEM, buildCommanderUser, commanderSnag, parseCommand } from '../lib/garvis/commander';
 import { usePortfolio } from './usePortfolio';
 import { useMissions } from './useMissions';
 import { useMind } from './useMind';
@@ -294,7 +294,7 @@ export function useCommander() {
           });
           emitMindEvent({ event_type: 'commander_exchange', subject: `Acted: "${text.slice(0, 160)}"`, source: 'commander' });
         } catch (e) {
-          push({ role: 'garvis', text: `I hit a snag acting on that: ${e instanceof Error ? e.message : 'something went wrong'}.` });
+          push({ role: 'garvis', text: `I hit a snag acting on that: ${commanderSnag(e)}` });
         }
         return;
       }
@@ -319,7 +319,7 @@ export function useCommander() {
         payload: { subject: cmd.subject },
       });
     } catch (e) {
-      push({ role: 'garvis', text: `I hit a snag: ${e instanceof Error ? e.message : 'something went wrong'}.` });
+      push({ role: 'garvis', text: `I hit a snag: ${commanderSnag(e)}` });
     } finally {
       setThinking(false);
     }
