@@ -15,6 +15,7 @@ import {
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
 import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
+import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
@@ -60,6 +61,14 @@ const clampPos = (x: number, y: number, w: number, h: number) => ({
   x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - w - 8)),
   y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - h - 8)),
 });
+/** Chip-tap counts (label → taps) — the deck learns which moves this operator actually uses. */
+const TAPS_KEY = 'ff:chip-taps';
+const loadTaps = (): Record<string, number> => {
+  try {
+    const t = JSON.parse(localStorage.getItem(TAPS_KEY) || '{}') as Record<string, number>;
+    return t && typeof t === 'object' && !Array.isArray(t) ? t : {};
+  } catch { return {}; }
+};
 const loadAliases = (): ConciergeAlias[] => {
   try { return (JSON.parse(localStorage.getItem(ALIAS_KEY) || '[]') as ConciergeAlias[]).filter((a) => a?.sentence && a?.taskId); }
   catch { return []; }
@@ -156,6 +165,15 @@ export function ConciergeDock() {
   // Surface chips re-read when a board/builder mounts or unmounts under the dock.
   const [, setSurfaceNonce] = useState(0);
   useEffect(() => onSurfaceChange(() => setSurfaceNonce((n) => n + 1)), []);
+  const tapsRef = useRef<Record<string, number>>(loadTaps());
+  const recordTap = (label: string) => {
+    const t = { ...tapsRef.current, [label]: (tapsRef.current[label] ?? 0) + 1 };
+    // Cap the ledger — drop the least-used entries, never the fresh tap.
+    const keys = Object.keys(t);
+    if (keys.length > 100) for (const k of keys.sort((a, b) => t[a] - t[b]).slice(0, keys.length - 100)) { if (k !== label) delete t[k]; }
+    tapsRef.current = t;
+    try { localStorage.setItem(TAPS_KEY, JSON.stringify(t)); } catch { /* fine */ }
+  };
 
   // PHOTOS INTO THE CHAT — drag a picture onto the dock (or paste one) and it lands on the open
   // work: the postcard board saves it as a real material and puts it ON the pointed-at card; the
@@ -430,10 +448,16 @@ export function ConciergeDock() {
     });
   };
 
-  const submit = async () => {
+  const submit = () => {
     const raw = input.trim();
     if (!raw || busy) return;
     setInput('');
+    return submitText(raw);
+  };
+  // The tier walk, separated from the input box so the mic's hands-free path can submit a
+  // finished utterance directly (the box may already be cleared by then).
+  const submitText = async (raw: string) => {
+    if (!raw || busy) return;
     setPendingCreate(null);
     // A plan is on screen and the operator is correcting it → revise THAT plan, don't start over.
     if (doState && !doState.statuses && isRevision(raw)) {
@@ -522,17 +546,27 @@ export function ConciergeDock() {
   // get the button — no fake affordance.
   const SpeechRec = (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike; SpeechRecognition?: new () => SpeechRecognitionLike });
   const SpeechCtor = SpeechRec.SpeechRecognition ?? SpeechRec.webkitSpeechRecognition;
+  const micText = useRef('');
   const toggleMic = () => {
     if (listening) { recRef.current?.stop(); setListening(false); return; }
     if (!SpeechCtor) return;
     const rec = new SpeechCtor();
     rec.lang = 'en-US';
     rec.interimResults = true;
+    micText.current = '';
     rec.onresult = (ev) => {
       const t = Array.from(ev.results).map((r) => r[0]?.transcript ?? '').join(' ').trim();
-      if (t) setInput(t);
+      if (t) { setInput(t); micText.current = t; }
     };
-    rec.onend = () => { setListening(false); inputRef.current?.focus(); };
+    rec.onend = () => {
+      setListening(false);
+      // HANDS-FREE: with voice replies on, finishing speaking IS the submit — say it, done.
+      // Voice off keeps the review-before-send behavior (the box holds the transcript).
+      const t = micText.current.trim();
+      micText.current = '';
+      if (voiceOn && t) { setInput(''); void submitText(t); return; }
+      inputRef.current?.focus();
+    };
     rec.onerror = () => setListening(false);
     recRef.current = rec;
     setListening(true);
@@ -554,7 +588,7 @@ export function ConciergeDock() {
     );
   }
 
-  const moves = surfaceSuggestions();
+  const moves = rankMoves(surfaceSuggestions(), tapsRef.current);
 
   return (
     <div ref={(el) => { rootRef.current = el; }} style={posStyle}
@@ -605,7 +639,7 @@ export function ConciergeDock() {
           placeholder={'"moms postcard" · "do draft an episode about rates" · "what\'s next"'}
           className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
         {SpeechCtor && (
-          <button onClick={toggleMic} aria-label={listening ? 'Stop listening' : 'Speak instead of typing'}
+          <button onClick={toggleMic} aria-label={listening ? 'Stop listening' : voiceOn ? 'Speak — hands-free: it runs when you stop talking' : 'Speak instead of typing'}
             className={cn('rounded-lg border px-2', listening ? 'border-forge-ember bg-forge-ember/20 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink')}>
             <Mic size={14} />
           </button>
@@ -622,7 +656,7 @@ export function ConciergeDock() {
         <div className="mt-2 flex flex-wrap gap-1">
           {moves.map((s) => (
             <button key={s.label}
-              onClick={() => { const n = applySuggestion(s); if (n) { setNote(n); speak(n); } }}
+              onClick={() => { recordTap(s.label); const n = applySuggestion(s); if (n) { setNote(n); speak(n); } }}
               className="rounded-full border border-forge-border bg-forge-bg/60 px-2 py-0.5 text-[10px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
               {s.label}
             </button>

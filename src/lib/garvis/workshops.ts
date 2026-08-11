@@ -144,6 +144,12 @@ const FLAVOR_WORKSHOPS: Record<Flavor, WorkshopDefinition> = {
     description: 'Wire up the market\'s public sources, let the clock score what\'s new per trade, and queue the digest for approval.',
     group: 'grow', tone: 'ok', steps: ['Wire the sources', 'Review the ranked leads', 'Queue the digest'],
   },
+  merch: {
+    name: 'Merch Workshop', kicker: 'Build the capsule',
+    outcome: 'Garment concepts with the mark where it belongs — and honest per-unit numbers on the keepers.',
+    description: 'Spread garment concepts from the brand, move the mark by saying it, discipline the colors, and put the printer\'s real quote on the cards that survive.',
+    group: 'create', tone: 'ember', steps: ['Spread concepts', 'Riff the placements', 'Price the keepers'],
+  },
 };
 
 const ARCHETYPE_WORKSHOPS: Record<Archetype, WorkshopDefinition> = {

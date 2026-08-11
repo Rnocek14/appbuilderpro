@@ -28,7 +28,8 @@ export type Flavor =
   | 'data'        // DATA & NUMBERS: an analysis workspace — a CSV becomes a typed table, real stats, honest charts
   | 'tracker'     // PERSONAL/INTERNAL REGISTRY: log entries about clients/expenses/anything — each becomes queryable memory
   | 'content_growth' // FACELESS AI-VIDEO GROWTH: a reel factory — a niche idea becomes a multi-scene vertical storyboard (shot prompts + captions + VO), the seed the clip engine fills. Generation-first, the deliberate inverse of `video` (which never fabricates real footage).
-  | 'lead_engine'; // COMMERCIAL LEAD MARKET: public signals (permits, licenses, registrations) scored into ranked trade leads on the standing clock — sources, leads, outcomes, commission tracking. Digests go out only through Approvals.
+  | 'lead_engine' // COMMERCIAL LEAD MARKET: public signals (permits, licenses, registrations) scored into ranked trade leads on the standing clock — sources, leads, outcomes, commission tracking. Digests go out only through Approvals.
+  | 'merch'; // MERCH CAPSULE: garment concept cards (tee/hat/polo/crew/tote) built purely from the brand — placement, mark, color discipline, and the operator's own cost numbers through costSheet. Specs, never print proofs.
 export type CharterStatus = 'dormant' | 'active' | 'waiting' | 'done';
 
 export interface CharterRef { type: string; id: string; label?: string }
@@ -58,7 +59,7 @@ export function parseCharter(raw: unknown): Charter | null {
 }
 
 export const FLAVORS: Flavor[] = [
-  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker', 'content_growth', 'lead_engine',
+  'generic', 'direct_mail', 'email', 'social', 'video', 'landing', 'market', 'brand', 'crm', 'lists', 'ads', 'feature_lab', 'assist', 'deliver', 'data', 'tracker', 'content_growth', 'lead_engine', 'merch',
 ];
 
 export interface ArchetypeMeta {
@@ -307,10 +308,10 @@ export function templateById(id: string): WebTemplate | null {
  *  canvas with nothing open and the operator still has to tap. Flavor decides the node because
  *  slugs are world-specific; flavors are the stable vocabulary. Unknown flavor/area → null (the
  *  canvas opens plain, never a wrong sheet). */
-export type CanvasNodeKey = 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding';
+export type CanvasNodeKey = 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding' | 'merch';
 const NODE_FOR_FLAVOR: Partial<Record<Flavor, CanvasNodeKey>> = {
   direct_mail: 'postcard', social: 'social', email: 'email', lists: 'people',
-  video: 'video', market: 'analysis', brand: 'branding',
+  video: 'video', market: 'analysis', brand: 'branding', merch: 'merch',
 };
 export function canvasNodeForArea(
   clusters: { slug: string; charter: Charter | null }[], area: string | null | undefined,

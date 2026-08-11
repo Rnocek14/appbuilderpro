@@ -43,6 +43,12 @@ export function registerSurface(s: Surface): () => void {
   return () => { if (active === s) { active = null; emit(); } };
 }
 
+/** Surfaces call this when their suggest()-relevant state changed (first piece landed, board
+ *  emptied) so the dock re-reads its chips — it cannot see inside the surface on its own. */
+export function surfaceStateChanged(): void {
+  emit();
+}
+
 /** The dock's entry: offer a sentence to the active surface. Null = nothing mounted or not
  *  claimed — the sentence continues through the normal tiers. A throwing handler also yields
  *  null, so a surface bug degrades to ordinary routing, never a dead dock. */

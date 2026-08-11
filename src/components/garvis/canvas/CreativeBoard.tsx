@@ -17,7 +17,7 @@ import {
 } from '../../../lib/garvis/creativeBoard';
 import { loadBoard, saveBoard } from '../../../lib/garvis/clusterState';
 import { parseBoardCommand } from '../../../lib/garvis/concierge';
-import { offerFileToSurface, registerSurface } from '../../../lib/garvis/surfaceBridge';
+import { offerFileToSurface, registerSurface, surfaceStateChanged } from '../../../lib/garvis/surfaceBridge';
 import { nextMoves } from '../../../lib/garvis/suggestionDeck';
 import { Overlay } from '../../ui/Overlay';
 import { Button } from '../../ui';
@@ -217,6 +217,8 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
   selectedRef.current = selected;
   // The piece the operator is POINTING at: the focused tile, else a single selection, else the
   // newest starred, else the newest piece. Shared by riff asks and photo drops.
+  // The dock's chips gate on "has pieces" — tell it when that flips (it can't see in here).
+  useEffect(() => { surfaceStateChanged(); }, [board.tiles.length]);
   const pointedTile = useCallback(() => {
     const b = boardRef.current;
     const pointedId = focusRef.current ?? (selectedRef.current.size === 1 ? [...selectedRef.current][0] : null);
