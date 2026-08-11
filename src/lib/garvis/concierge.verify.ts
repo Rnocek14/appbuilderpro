@@ -243,6 +243,16 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('a keywordless task never matches any sentence',
     matchTasks('design the business from my brief', ALL).every((m) => m.task.id !== 'big-brief'));
 }
+// ---- The design board: visual ideation is sayable ----
+{
+  check('"lets design como logos" reaches the creative board',
+    (() => { const r = resolve('lets design como logos', WORLDS, ALL); return r.task?.id === 'design-board' || (r.suggestions ?? []).some((t) => t.id === 'design-board'); })());
+  check('"work on the ccc monogram" reaches it too',
+    (() => { const r = resolve('work on the ccc monogram', WORLDS, ALL); return r.task?.id === 'design-board' || (r.suggestions ?? []).some((t) => t.id === 'design-board'); })());
+  check('"make a moodboard" reaches the board', (() => { const r = resolve('make a moodboard', WORLDS, ALL); return r.task?.id === 'design-board'; })());
+  check('the board steps teach the riff loop (say what to change)',
+    CONCIERGE_TASKS.find((t) => t.id === 'design-board')!.steps.join(' ').includes('SAY what to change'));
+}
 {
   // Determinism + purity of the derivation itself.
   const sample = {

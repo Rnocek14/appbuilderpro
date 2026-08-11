@@ -256,6 +256,19 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     ],
   },
   {
+    id: 'design-board',
+    label: 'Design on the board (logos, concepts — spread, compare, riff)',
+    keywords: ['logo', 'logos', 'logo concepts', 'design board', 'moodboard', 'mood board', 'crest', 'monogram', 'wordmark', 'design', 'designs'],
+    kind: 'navigate',
+    route: '/garvis/webs',
+    steps: [
+      "Open the business, then tap its Brand node — the creative board spreads",
+      'Press "Make a concept" — each lands as a tile beside the others, never replacing them',
+      'Click any tile and SAY what to change ("more minimal", "warmer") — the riff keeps its parent',
+      'Star the keepers, group directions, archive the rest — the board is the memory',
+    ],
+  },
+  {
     // Reached ONLY through the dock's brief-capture card (no keywords — pasted briefs skip
     // matching entirely); the guide that meets the operator on the Businesses page.
     id: 'big-brief',
