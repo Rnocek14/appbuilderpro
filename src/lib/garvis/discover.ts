@@ -8,6 +8,7 @@
 // Everything is best-effort and wrapped so a failure returns [] rather than throwing.
 
 import { resolveAI } from '../aiConfig';
+import { mediaRelevant } from './discoverRelevance';
 import { supabase } from '../supabase';
 
 export interface MediaImage { title: string; url: string; thumb: string; source: string }
@@ -87,6 +88,8 @@ export async function fetchWikipedia(query: string): Promise<Gathered> {
     const sData = await sRes.json();
     const title: string | undefined = sData?.query?.search?.[0]?.title;
     if (!title) return empty;
+    // A top hit that shares no significant term with the query is a WRONG page — attach nothing.
+    if (!mediaRelevant(query, title)) return empty;
 
     // 2) Pull the page extract + its images (file titles), and the lead thumbnail.
     const pUrl = `${WIKI}?action=query&prop=extracts|pageimages|images&exintro=1&explaintext=1&piprop=thumbnail&pithumbsize=480&imlimit=20&titles=${encodeURIComponent(title)}&format=json&origin=*`;
@@ -105,6 +108,8 @@ export async function fetchWikipedia(query: string): Promise<Gathered> {
     const fileTitles = (page?.images ?? [])
       .map((i) => i.title)
       .filter((t) => /\.(jpg|jpeg|png)$/i.test(t) && !/(commons-logo|wiki|icon|edit-|ambox|symbol|flag)/i.test(t))
+      // The file's NAME must relate to the topic — kills the random gallery/map/portrait class.
+      .filter((t) => mediaRelevant(`${query} ${title}`, t.replace(/^File:/, '')))
       .slice(0, 6);
     if (fileTitles.length) {
       const iUrl = `${WIKI}?action=query&prop=imageinfo&iiprop=url&iiurlwidth=480&titles=${encodeURIComponent(fileTitles.join('|'))}&format=json&origin=*`;

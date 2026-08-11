@@ -173,7 +173,8 @@
     "verify:areasweep": "tsx src/lib/garvis/prospects/areaSweep.verify.ts",
     "verify:leadengine": "tsx src/lib/garvis/leadEngine/leadEngine.verify.ts",
     "verify:marketingreadiness": "tsx src/lib/garvis/marketingReadiness.verify.ts",
-    "verify:costsheet": "tsx src/lib/garvis/costSheet.verify.ts"
+    "verify:costsheet": "tsx src/lib/garvis/costSheet.verify.ts",
+    "verify:discover": "tsx src/lib/garvis/discover.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",
