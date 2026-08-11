@@ -275,6 +275,20 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('a nav item on a handwritten route is skipped', !a.some((t) => t.id === 'nav:/garvis/queue'));
 }
 
+// ---- THE VERTICALS DOOR — audience-building strategy asks land on Channels ----
+{
+  const full = resolve('i want to work on some ai slop videos or different instagram verticals so i can build following in verical areas where i can market my app', WORLDS, ALL_CONCIERGE_TASKS);
+  check('the operator\'s FULL strategy sentence (typos and all) → the verticals door, confidently',
+    full.kind === 'go' && full.task?.id === 'grow-verticals' && full.route === '/garvis/channels');
+  check('"ai slop videos" is audience work, not an episode', resolve('i want to work on some ai slop videos', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'grow-verticals');
+  check('"build a following" is audience work, NOT software (the new-app misroute is dead)',
+    resolve('lets build a following in different verticals', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'grow-verticals');
+  check('the steps carry the STRATEGY: one channel per niche, CTA pointed at the marketed thing, Queue gate',
+    (() => { const t = CONCIERGE_TASKS.find((x) => x.id === 'grow-verticals')!; const s = t.steps.join(' '); return /per niche/.test(s) && /CTA/.test(s) && /Queue/.test(s); })());
+  check('"start a new channel" still belongs to the handwritten channel task',
+    (() => { const r = resolve('start a new channel', WORLDS, ALL_CONCIERGE_TASKS); return (r.kind === 'go' && r.task?.id === 'start-channel') || (r.kind === 'suggest' && !!r.suggestions?.some((t) => t.id === 'start-channel')); })());
+}
+
 // ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----
 {
   const MOMV: ConciergeWorld[] = [
