@@ -401,6 +401,19 @@ export function isRevision(input: string): boolean {
   return /^(actually|instead|change|swap|make it|make that|add|remove|drop|skip|no[,.]|wait[,.]|also add)\b/i.test(input.trim());
 }
 
+/** The Explore bridge: "explore lakefront resort branding" should FALL INTO a galaxy of that
+ *  topic, not land on an empty prompt. Strips the explore-verbs and returns the topic to dive
+ *  on, or null when there is none (plain "lets explore" → the open page is right). */
+export function exploreDive(sentence: string): string | null {
+  const stripped = sentence.trim()
+    .replace(/^(lets |let's |lets go |can we |i want to |im |i'm )?(explore|deep dive into|deep dive on|learn about|go down the rabbit hole on|curious about)[:,]?\s*/i, '')
+    .trim();
+  // Only a stripped VERB yields a confident topic; an unchanged sentence means the operator
+  // matched on a bare keyword ("rabbit hole") — the open page is the honest landing.
+  if (!stripped || norm(stripped) === norm(sentence)) return null;
+  return stripped.slice(0, 120);
+}
+
 /** A pasted BRIEF (a whole project written out — sections, paragraphs, a wall of thinking) is
  *  the most valuable input the system receives, and keyword-matching it would mangle it. Long
  *  or multi-line text is a brief: it skips every matching tier and rides INTACT into genesis
