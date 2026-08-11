@@ -17,6 +17,7 @@ import { cn, timeAgo } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 import { planProgress, type CompiledPlan, type StepStatus } from '../lib/garvis/orchestrator';
 import { compileIntent, savePlan, runArc, listArcs, abandonArc, type RunReport, type ArcRow } from '../lib/garvis/orchestratorRun';
+import { readHandoff } from '../components/ConciergeDock';
 import { actionById } from '../lib/garvis/actionRegistry';
 
 const RISK_LABEL = { safe: 'safe', spend: 'uses credits', outbound: 'can send' } as const;
@@ -50,6 +51,14 @@ export default function Orchestrate() {
   const [resumingId, setResumingId] = useState<string | null>(null);
   const refreshArcs = () => { void listArcs().then(setArcs).catch(() => {}); };
   useEffect(refreshArcs, []);
+
+  // THE CONCIERGE HANDOFF: "work on my website builder and send some emails" said to the corner
+  // agent arrives here with the sentence already in the intent box — Compile stays the explicit
+  // press, so nothing runs from the handoff alone.
+  useEffect(() => {
+    const h = readHandoff('orchestrate', 'send-emails');
+    if (h) setIntent(h.sentence);
+  }, []);
 
   // AUTO-RESUME (app_0095): the worker's wake sweep flips unblocked arcs to 'ready'; the moment
   // this page sees one, it continues the work by itself — the operator's approval already

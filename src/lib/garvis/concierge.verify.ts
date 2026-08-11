@@ -125,6 +125,60 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('a fully-claimed derived task keeps an EMPTY keyword list (AI-tier only), not stolen words',
     !!tplChannel && tplChannel.keywords.length === 0);
 }
+// ---- THE CENTRAL-COMMAND TIER: compound intents, payload asks, questions, weak signals ----
+{
+  const r = resolve('i want to work on my website builder and send out some emails', WORLDS, ALL);
+  check('a two-intent sentence is COMPOUND → Orchestrate, with the pieces as suggestions',
+    r.kind === 'compound' && r.route === '/garvis/orchestrate' && (r.suggestions?.length ?? 0) >= 2);
+  check('"find leads then email them my pitch" is compound too',
+    resolve('find leads then email them my pitch', WORLDS, ALL).kind === 'compound');
+  check('a single-destination sentence with "and" inside is NOT compound ("draft an episode about cats and dogs")',
+    resolve('draft an episode about cats and dogs', WORLDS, ALL).kind === 'go');
+  check('"scrape all the houses in williams bay" surfaces the listings task',
+    (() => { const x = resolve('scrape all the houses in williams bay', WORLDS, ALL); return x.task?.id === 'listings' || (x.suggestions ?? []).some((t) => t.id === 'listings'); })());
+  check('"email my past clients about the new listing" reaches the email task (→ Orchestrate)',
+    (() => { const x = resolve('email my past clients about the new listing', WORLDS, ALL); return (x.task?.id === 'send-emails' || (x.suggestions ?? []).some((t) => t.id === 'send-emails')); })());
+  check('the send-emails and orchestrate tasks both land on Orchestrate (compile is the only door to sending)',
+    CONCIERGE_TASKS.find((t) => t.id === 'send-emails')?.route === '/garvis/orchestrate'
+    && CONCIERGE_TASKS.find((t) => t.id === 'orchestrate')?.route === '/garvis/orchestrate');
+  check('"check my money" resolves on one distinctive word (uniqueness bonus)',
+    resolve('check my money', WORLDS, ALL).task?.id === 'money');
+  check('"where do postcards get approved" — plural finds the postcard task (fold expansion)',
+    (() => { const x = resolve('where do postcards get approved', WORLDS, ALL); return x.task?.id === 'postcard' || (x.suggestions ?? []).some((t) => t.id === 'postcard'); })());
+  check('a procedural question with a weak match defers to the AI tier, never routes on one word',
+    resolve('how do i connect my tiktok account', WORLDS, ALL).kind === 'none');
+  check('a shared-word hit degrades to honest SUGGESTIONS, not silence ("system health")',
+    resolve('system health', WORLDS, ALL).kind === 'suggest');
+  check('"lets explore" opens the Knowledge Universe', resolve('lets explore', WORLDS, ALL).task?.id === 'explore');
+  check('"take me home" goes to the waking moment', resolve('take me home', WORLDS, ALL).task?.id === 'whats-next');
+  check('NAV_VERBS never appear as task keywords (boost must stay uniform)',
+    (() => { const verbs = new Set(['open', 'go to', 'show me', 'take me to', 'where is', 'set up', 'check', 'see', 'view', 'look at', 'whats', "what's", 'i want to', 'i need to', 'lets', 'make']); return ALL.every((t) => t.keywords.every((k) => !verbs.has(k))); })());
+  check('the listings task is world-scoped and honest about its slug',
+    (() => { const t = CONCIERGE_TASKS.find((x) => x.id === 'listings'); return !!t && t.route.includes('{worldId}') && t.worldSlug === 'lake-geneva-market'; })());
+  check('gibberish still resolves to none even with the weak-signal tier',
+    resolve('asdf jkl qwerty', WORLDS, ALL).kind === 'none');
+}
+// ---- Persona fan-out regressions (each was a confirmed misroute before its fix) ----
+{
+  check('bare "clients" means the client book, never the prospect scraper',
+    resolve('lets look at my clients', WORLDS, ALL).task?.id === 'client-book'
+    || (resolve('lets look at my clients', WORLDS, ALL).suggestions ?? []).some((t) => t.id === 'client-book'));
+  check('"work on the card" is the postcard, not the billing card',
+    (() => { const r = resolve('work on the card', WORLDS, ALL); return r.task?.id === 'postcard' || (r.suggestions ?? []).some((t) => t.id === 'postcard'); })());
+  check('"my new headshot came in" routes NOWHERE (bare "new" must not own a page)',
+    resolve('my new headshot came in', WORLDS, ALL).kind === 'none');
+  check('"open house this weekend" is an idiom — AI tier, never the listings page',
+    resolve('open house this weekend', WORLDS, ALL).kind === 'none');
+  check('the mailing lists / neighborhood farm is sayable',
+    resolve('update the mailing lists', WORLDS, ALL).task?.id === 'mailing-lists');
+  check('"work on the farm" finds the farm', (() => { const r = resolve('work on the farm', WORLDS, ALL); return r.task?.id === 'mailing-lists' || (r.suggestions ?? []).some((t) => t.id === 'mailing-lists'); })());
+  check('a tie between tasks on the SAME resolved page collapses to a go ("lets work on the channel")',
+    resolve('lets work on the channel', WORLDS, ALL).kind === 'go');
+  check('"set up review requests" reaches the review capability (review polysemy freed)',
+    resolve('set up review requests', WORLDS, ALL).task?.id === 'cap:review_request');
+  check('time-generic words never become derived keywords ("how much did i make this month" → AI tier)',
+    resolve('how much did i make this month', WORLDS, ALL).kind === 'none');
+}
 {
   // Determinism + purity of the derivation itself.
   const sample = {

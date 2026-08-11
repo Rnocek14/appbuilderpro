@@ -10,6 +10,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle, Clapperboard } from 'lucide-react';
+import { readHandoff } from '../ConciergeDock';
 import {
   parseFactScript, scriptToScenes, scriptTotalSeconds, bandCheck, illustrationPrompt, composeCaption,
   ctaLink, deliveryInstructions, CHANNEL_PRESETS, type FactScript,
@@ -57,6 +58,14 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [episodes, setEpisodes] = useState<ChannelEpisode[]>([]);
   const [topic, setTopic] = useState('');
   const [musicUrl, setMusicUrl] = useState('');
+
+  // Concierge handoff: "draft an episode about compound interest" arrives with the topic already
+  // in the box — Draft stays the explicit press.
+  useEffect(() => {
+    const h = readHandoff('draft-episode', 'film-episode');
+    const about = h?.sentence.match(/\babout (.+)$/i)?.[1]?.trim();
+    if (about) setTopic(about.slice(0, 120));
+  }, []);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [openEpisode, setOpenEpisode] = useState<string | null>(null);
