@@ -3,6 +3,7 @@
 // logo concept through the image model (honest degrade when the key is off), and — when the owner picks
 // one — set it as the world's brand logo.
 
+import { supabase } from '../supabase';
 import { getBrandKit, saveBrandKit } from './artifacts';
 import { loadWeb } from './workwebRun';
 import { inferRealEstate } from './studioKit';
@@ -18,6 +19,24 @@ export async function loadBrandMaterials(worldId: string): Promise<BrandMaterial
     logoUrl: brand?.logo_url ?? null,
     realEstate: inferRealEstate(businessName),
   };
+}
+
+/** The world's intel notes for the board's research rail — real artifacts from intel areas,
+ *  newest first, trimmed for the rail. Empty on any failure (the rail just doesn't render). */
+export async function loadResearchNotes(worldId: string): Promise<{ title: string; body: string }[]> {
+  try {
+    const { data: clusters } = await supabase.from('knowledge_clusters')
+      .select('id, charter').eq('world_id', worldId).limit(60);
+    const intelIds = ((clusters ?? []) as { id: string; charter: { archetype?: string } | null }[])
+      .filter((c) => c.charter?.archetype === 'intel').map((c) => c.id);
+    if (!intelIds.length) return [];
+    const { data: arts } = await supabase.from('knowledge_artifacts')
+      .select('title, detail, created_at').in('cluster_id', intelIds)
+      .order('created_at', { ascending: false }).limit(6);
+    return ((arts ?? []) as { title: string; detail: string | null }[])
+      .map((a) => ({ title: a.title, body: (a.detail ?? '').replace(/\s+/g, ' ').trim().slice(0, 220) }))
+      .filter((a) => a.body.length > 0);
+  } catch { return []; }
 }
 
 export type LogoResult =

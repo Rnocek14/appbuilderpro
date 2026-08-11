@@ -10,7 +10,7 @@ import {
   LOGO_STYLES, logoStyleById, defaultLogoStyle, buildBrandContent, applyBrandRendition,
   type BrandContent, type BrandMaterials,
 } from '../../../lib/garvis/brandBoard';
-import { loadBrandMaterials, generateLogo, setBrandLogo } from '../../../lib/garvis/brandBoardRun';
+import { loadBrandMaterials, loadResearchNotes, generateLogo, setBrandLogo } from '../../../lib/garvis/brandBoardRun';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
 
@@ -20,6 +20,7 @@ export function BrandBoard({ worldId, clusterId, onToast, materialsOverride }: {
   worldId: string; clusterId: string | null; onToast: Toast; materialsOverride?: BrandMaterials;
 }) {
   const [materials, setMaterials] = useState<BrandMaterials | null>(materialsOverride ?? null);
+  const [research, setResearch] = useState<{ title: string; body: string }[]>([]);
   const [aiState, setAiState] = useState<'unknown' | 'on' | 'off'>(materialsOverride ? 'off' : 'unknown');
 
   useEffect(() => {
@@ -28,6 +29,8 @@ export function BrandBoard({ worldId, clusterId, onToast, materialsOverride }: {
     void (async () => {
       try { const m = await loadBrandMaterials(worldId); if (live) setMaterials(m); }
       catch { if (live) setMaterials({ businessName: '', palette: [], logoUrl: null, realEstate: false }); }
+      const notes = await loadResearchNotes(worldId);
+      if (live) setResearch(notes);
     })();
     return () => { live = false; };
   }, [worldId, materialsOverride]);
@@ -64,6 +67,7 @@ export function BrandBoard({ worldId, clusterId, onToast, materialsOverride }: {
         ...(materials.logoUrl ? [{ label: 'Your official logo', url: materials.logoUrl }] : []),
         ...(materials.palette.length ? [{ label: 'Brand palette', swatches: materials.palette }] : []),
       ],
+      research,
       generate: async ({ prompt, kindId }) => {
         const style = (kindId && logoStyleById(kindId)) || defaultLogoStyle(materials.realEstate);
         const content = buildBrandContent({ materials, style, extra: prompt || null });
@@ -76,7 +80,7 @@ export function BrandBoard({ worldId, clusterId, onToast, materialsOverride }: {
       renderThumb: (c) => <LogoCard content={c} materials={materials} />,
       renderFocus: (c, api) => <BrandFocus content={c} api={api} materials={materials} worldId={worldId} clusterId={clusterId} onToast={onToast} tryLogo={tryLogo} />,
     };
-  }, [materials, aiState, clusterId, worldId, onToast]);
+  }, [materials, research, aiState, clusterId, worldId, onToast]);
 
   if (!materials || !adapter) {
     return <div className="grid h-full min-h-[400px] place-items-center"><Loader2 size={20} className="animate-spin text-forge-ember" /></div>;
