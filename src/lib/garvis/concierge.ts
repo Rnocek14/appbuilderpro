@@ -74,6 +74,21 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     ],
   },
   {
+    id: 'reel',
+    label: 'Make an AI reel',
+    // 'reel about/on/for' phrases outvote a topic's own place-words ("a reel about lake geneva"
+    // must open the reel studio with lake geneva as the TOPIC, not the market page).
+    keywords: ['reel', 'reels', 'ai video', 'ai videos', 'faceless video', 'vertical video', 'short video', 'reel about', 'reel on', 'reel for'],
+    kind: 'navigate',
+    route: '/garvis/webs/{worldId}?area=growth-studio',
+    worldSlug: 'growth-studio',
+    steps: [
+      "You're in the channel studio — your topic rode into the box; press Draft a cited episode",
+      'Hook variants come back — pick one, produce it faceless, or film the shot list yourself',
+      'The post waits for your approval in Queue — nothing publishes itself',
+    ],
+  },
+  {
     id: 'start-channel',
     label: 'Start a content channel',
     keywords: ['start', 'channel', 'tiktok', 'youtube', 'faceless', 'content channel', 'audience'],
@@ -412,6 +427,24 @@ export function exploreDive(sentence: string): string | null {
   // matched on a bare keyword ("rabbit hole") — the open page is the honest landing.
   if (!stripped || norm(stripped) === norm(sentence)) return null;
   return stripped.slice(0, 120);
+}
+
+/** The reel bridge: "lets make an ai video for real estate" carries its TOPIC into the reel
+ *  studio's idea box, so the format's idea cards appear already about the right thing. Strips
+ *  the ask-shell (verbs, articles, the video/reel nouns and their connectors) and returns what
+ *  remains, or null when the sentence was all shell ("make a reel") — the studio then opens on
+ *  its own seeded topic, honestly. */
+export function reelTopic(sentence: string): string | null {
+  let s = sentence.trim()
+    .replace(/^(hey |ok |okay )?garvis[,:]?\s+/i, '')
+    .replace(/^(lets |let's |can we |i want to |i need to |please )+/i, '')
+    .replace(/^(make|create|draft|generate|do|shoot)\s+(me\s+)?(an?\s+)?/i, '')
+    .replace(/^(ai|faceless|vertical|short)\s+/i, '')
+    .replace(/^(video|videos|reel|reels)\s*(for|about|on|of)?\s*/i, '')
+    .trim();
+  s = s.replace(/\s+(reel|reels|video|videos)$/i, '').trim();
+  if (!s || norm(s) === norm(sentence)) return null;
+  return s.slice(0, 120);
 }
 
 /** A pasted BRIEF (a whole project written out — sections, paragraphs, a wall of thinking) is

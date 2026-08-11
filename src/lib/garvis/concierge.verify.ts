@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, parseCommandPrefix, resolve, routeFor, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, parseCommandPrefix, reelTopic, resolve, routeFor, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -273,6 +273,28 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('deriveTasks is deterministic', JSON.stringify(a) === JSON.stringify(deriveTasks(CONCIERGE_TASKS, sample)));
   check('a not_built capability is never proposed', !a.some((t) => t.id === 'cap:c2') && a.some((t) => t.id === 'cap:c1'));
   check('a nav item on a handwritten route is skipped', !a.some((t) => t.id === 'nav:/garvis/queue'));
+}
+
+// ---- THE REEL DOOR — "make an ai video for X" lands in the reel studio ABOUT X ----
+{
+  const REEL_WORLDS: ConciergeWorld[] = [...WORLDS, { id: 'w-chan', title: 'Caregiver Channel', slugs: ['channel-brand'] }];
+  const r1 = resolve('lets make an ai video for real estate reel', REEL_WORLDS, ALL_CONCIERGE_TASKS);
+  check('"lets make an ai video for real estate reel" → the reel studio, inside its area',
+    r1.kind === 'go' && r1.task?.id === 'reel' && r1.route === '/garvis/webs/w-growth?area=growth-studio');
+  const r2 = resolve('lets make a reel about lake geneva', REEL_WORLDS, ALL_CONCIERGE_TASKS);
+  check('"a reel about lake geneva" is a REEL with a topic, not the market page (payload words never outvote the action)',
+    r2.kind === 'go' && r2.task?.id === 'reel');
+  const r3 = resolve('make a video for the channel', REEL_WORLDS, ALL_CONCIERGE_TASKS);
+  check('"make a video for the channel" still reaches the episode drafter',
+    (r3.kind === 'go' && r3.task?.id === 'draft-episode') || (r3.kind === 'suggest' && !!r3.suggestions?.some((t) => t.id === 'draft-episode')));
+  check('the topic survives extraction ("…for real estate reel" → "real estate")',
+    reelTopic('lets make an ai video for real estate reel') === 'real estate');
+  check('"a reel about lake geneva" → topic "lake geneva"', reelTopic('lets make a reel about lake geneva') === 'lake geneva');
+  check('an all-shell ask has NO topic (the studio keeps its own seed)', reelTopic('make a reel') === null);
+  check('the courtesy prefix strips too', reelTopic('garvis, make me an ai video about compound interest') === 'compound interest');
+  const noWorld = resolve('lets make an ai video for real estate reel', [WORLDS[0]!], ALL_CONCIERGE_TASKS);
+  check('without a growth world, the reel ask is honest (missingWorld → the Businesses door)',
+    noWorld.kind === 'go' && noWorld.task?.id === 'reel' && noWorld.missingWorld === true && noWorld.route === '/garvis/webs');
 }
 
 // ---- THE SURFACE TIER — the open board/builder claims the ask, conservatively ----

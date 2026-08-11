@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Sparkles, Film, Send, Plus, BookOpenCheck, AlertTriangle, Clapperboard } from 'lucide-react';
 import { readHandoff } from '../ConciergeDock';
+import { reelTopic } from '../../lib/garvis/concierge';
 import {
   parseFactScript, scriptToScenes, scriptTotalSeconds, bandCheck, illustrationPrompt, composeCaption,
   ctaLink, deliveryInstructions, CHANNEL_PRESETS, type FactScript,
@@ -59,12 +60,16 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
   const [topic, setTopic] = useState('');
   const [musicUrl, setMusicUrl] = useState('');
 
-  // Concierge handoff: "draft an episode about compound interest" arrives with the topic already
-  // in the box — Draft stays the explicit press.
+  // Concierge handoff: "draft an episode about compound interest" and "make an ai video for
+  // real estate" both arrive with the topic already in the box — Draft stays the explicit press.
+  // This studio is the growth world's LEADING surface, so it owns the reel handoff too.
   useEffect(() => {
-    const h = readHandoff('draft-episode', 'film-episode');
-    const about = h?.sentence.match(/\babout (.+)$/i)?.[1]?.trim();
-    if (about) setTopic(about.slice(0, 120));
+    const h = readHandoff('draft-episode', 'film-episode', 'reel');
+    if (!h) return;
+    const topic = h.taskId === 'reel'
+      ? reelTopic(h.sentence)
+      : h.sentence.match(/\babout (.+)$/i)?.[1]?.trim();
+    if (topic) setTopic(topic.slice(0, 120));
   }, []);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
@@ -321,7 +326,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
       {channel && (
         <>
           <p className="mt-2 text-[11px] text-forge-dim">
-            {channel.niche} · posts to {channel.platforms.join(', ') || '—'} · voice "{channel.voice}"
+            {channel.niche} · posts to {(channel.platforms ?? []).join(', ') || '—'} · voice "{channel.voice}"
             {perf?.baseline !== null && perf?.baseline !== undefined && <> · baseline {Math.round(perf.baseline).toLocaleString()} views/episode</>}
             {perf?.intel.winningHooks.length ? <> · {perf.intel.winningHooks.length} winning hook{perf.intel.winningHooks.length === 1 ? '' : 's'} feeding new drafts</> : null}
             {cadenceOn !== null && (
@@ -514,7 +519,7 @@ export function FactChannelStudio({ worldId, clusterId, onToast }: {
                         {ep.video_url && <a href={ep.video_url} target="_blank" rel="noreferrer" className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50">watch the mp4</a>}
                         {ep.status === 'rendered' && ep.video_url && (
                           <Button variant='primary' size='sm' onClick={() => void doQueue(ep)} disabled={queueingId === ep.id}>
-                            {queueingId === ep.id ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue to {channel.platforms.join(' + ') || 'social'}
+                            {queueingId === ep.id ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} Queue to {(channel.platforms ?? []).join(' + ') || 'social'}
                           </Button>
                         )}
                         {ep.status === 'rendered' && !ep.variant_of && script.hooks.map((_, i) => i !== ep.hook_index && (
