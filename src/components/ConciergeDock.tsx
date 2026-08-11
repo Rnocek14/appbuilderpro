@@ -9,12 +9,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowRight, Check, GripVertical, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
   aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor, withProjectTasks,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
-import { offerToSurface } from '../lib/garvis/surfaceBridge';
+import { applySuggestion, offerToSurface, onSurfaceChange, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
@@ -48,6 +48,18 @@ interface ActiveGuide { taskId: string; done: number[] }
 
 const ALIAS_KEY = 'ff:concierge-aliases';
 const VOICE_KEY = 'ff:concierge-voice';
+/** Where the operator parked the dock (viewport top-left px). Absent = docked bottom-right. */
+const POS_KEY = 'ff:concierge-pos';
+const loadPos = (): { x: number; y: number } | null => {
+  try {
+    const p = JSON.parse(localStorage.getItem(POS_KEY) || 'null') as { x: number; y: number } | null;
+    return p && typeof p.x === 'number' && typeof p.y === 'number' ? p : null;
+  } catch { return null; }
+};
+const clampPos = (x: number, y: number, w: number, h: number) => ({
+  x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - w - 8)),
+  y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - h - 8)),
+});
 const loadAliases = (): ConciergeAlias[] => {
   try { return (JSON.parse(localStorage.getItem(ALIAS_KEY) || '[]') as ConciergeAlias[]).filter((a) => a?.sentence && a?.taskId); }
   catch { return []; }
@@ -99,6 +111,51 @@ export function ConciergeDock() {
   const tasksRef = useRef<ConciergeTask[]>(ALL_CONCIERGE_TASKS);
   const inputRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<{ stop: () => void } | null>(null);
+
+  // UNLOCKED POSITION — the operator can drag the dock (bubble or panel) anywhere; the parked
+  // spot persists across pages and sessions. Docked (null) keeps the classic bottom-right.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(loadPos);
+  const rootRef = useRef<HTMLDivElement | HTMLButtonElement | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; dx: number; dy: number; moved: boolean } | null>(null);
+  const justDragged = useRef(false);
+  const startDrag = (e: React.PointerEvent) => {
+    const el = rootRef.current;
+    if (!el || e.button !== 0) return;
+    const r = el.getBoundingClientRect();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false };
+    const move = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      // A 5px threshold separates a click (open/toggle) from a drag (move) on the same element.
+      if (!d.moved && Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) < 5) return;
+      d.moved = true;
+      setPos(clampPos(ev.clientX - d.dx, ev.clientY - d.dy, r.width, r.height));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const d = dragRef.current;
+      dragRef.current = null;
+      if (d?.moved) {
+        justDragged.current = true;
+        window.setTimeout(() => { justDragged.current = false; }, 200);
+        setPos((p) => { if (p) { try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch { /* fine */ } } return p; });
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  const redock = () => { setPos(null); try { localStorage.removeItem(POS_KEY); } catch { /* fine */ } };
+  useEffect(() => {
+    const onResize = () => setPos((p) => (p ? clampPos(p.x, p.y, 340, 160) : p));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const posStyle = pos ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' } as const : undefined;
+
+  // Surface chips re-read when a board/builder mounts or unmounts under the dock.
+  const [, setSurfaceNonce] = useState(0);
+  useEffect(() => onSurfaceChange(() => setSurfaceNonce((n) => n + 1)), []);
 
   useEffect(() => { sessionStorage.setItem(OPEN_KEY, open ? '1' : '0'); }, [open]);
   useEffect(() => {
@@ -462,16 +519,28 @@ export function ConciergeDock() {
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} aria-label="Open the concierge — say what you want to do"
+      <button ref={(el) => { rootRef.current = el; }} onPointerDown={startDrag}
+        onClick={() => { if (justDragged.current) return; setOpen(true); }}
+        aria-label="Open the concierge — say what you want to do (drag to move it)"
+        style={posStyle}
         className="fixed bottom-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105">
         <MessageCircle size={19} />
       </button>
     );
   }
 
+  const moves = surfaceSuggestions();
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl">
+    <div ref={(el) => { rootRef.current = el; }} style={posStyle}
+      className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl">
       <div className="flex items-center gap-2">
+        <button onPointerDown={startDrag} onDoubleClick={redock}
+          aria-label="Move the concierge — drag it anywhere; double-click to send it back to the corner"
+          title="Drag to move · double-click to re-dock"
+          className="-ml-1 cursor-grab touch-none rounded p-0.5 text-forge-dim hover:text-forge-ink active:cursor-grabbing">
+          <GripVertical size={13} />
+        </button>
         <Sparkles size={14} className="text-forge-ember" />
         <p className="text-xs font-semibold text-forge-ink">Say what you want to do</p>
         {'speechSynthesis' in window && (
@@ -511,6 +580,20 @@ export function ConciergeDock() {
       </div>
 
       {note && <p className="mt-2 whitespace-pre-line text-[11px] text-forge-dim">{note}</p>}
+
+      {/* NEXT MOVES — tap-to-do chips for the open surface (board/builder). One tap runs the
+          move through the same bridge a spoken ask uses; nothing is pasted for retyping. */}
+      {moves.length > 0 && !doState && !briefText && !pendingCreate && suggestions.length === 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {moves.map((s) => (
+            <button key={s.label}
+              onClick={() => { const n = applySuggestion(s); if (n) { setNote(n); speak(n); } }}
+              className="rounded-full border border-forge-border bg-forge-bg/60 px-2 py-0.5 text-[10px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {briefText && (
         <div className="mt-2 rounded-xl border border-forge-ember/40 bg-forge-bg/60 p-2.5">

@@ -18,6 +18,7 @@ import {
 import { loadBoard, saveBoard } from '../../../lib/garvis/clusterState';
 import { parseBoardCommand } from '../../../lib/garvis/concierge';
 import { registerSurface } from '../../../lib/garvis/surfaceBridge';
+import { nextMoves } from '../../../lib/garvis/suggestionDeck';
 import { Overlay } from '../../ui/Overlay';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -212,6 +213,12 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
   useEffect(() => registerSurface({
     id: `board:${adapter.storageKey}`,
     claims: (s) => parseBoardCommand(s, adapter.voiceNouns ?? []),
+    // Tap-to-do chips in the dock: craft moves for THIS channel, gated on live board state
+    // (an empty board gets start-moves, never a riff at nothing).
+    suggest: () => nextMoves(adapter.storageKey, {
+      hasPieces: boardRef.current.tiles.some((t) => t.group !== ARCHIVE_GROUP),
+      researchTitles: adapter.research?.map((r) => r.title),
+    }),
     handle: (cmd) => {
       if (cmd.kind !== 'riff') { void makeWith(cmd.text); return 'Making it — the new card lands on this board.'; }
       const b = boardRef.current;
