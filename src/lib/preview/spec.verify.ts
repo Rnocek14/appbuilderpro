@@ -3,7 +3,7 @@
 // Run: npm run verify:preview  (mirrors the other *.verify.ts files)
 
 import {
-  parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
+  parseBusinessProfile, displayName, pickRecipe, assembleFallbackSpec, normalizeSpec,
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
   seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats, universalChapter, typeVoice,
   contrastRatio, ensureReadableTheme, hslLuminance,
@@ -616,6 +616,29 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   check('serif displays never get heavy grotesk weights', serifV.every((v) => v.heroWeight <= 500));
   check('type voice is deterministic', JSON.stringify(typeVoice('Alpha Plumbing', 'Sora')) === JSON.stringify(typeVoice('Alpha Plumbing', 'Sora')));
   check('containers vary too', new Set(names.map((n) => typeVoice(n, 'Sora').container)).size >= 2);
+}
+
+// --- displayName: humans never say "Services Co., LLC" --------------------------------------------
+check('displayName strips legal suffixes and long possessive tails',
+  displayName("Tom Hiatt's Plumbing & Excavating Services Co., LLC") === "Tom Hiatt's Plumbing"
+  && displayName('Luna Trattoria') === 'Luna Trattoria'
+  && displayName('Calloway & Reed, Attorneys') === 'Calloway & Reed, Attorneys'
+  && displayName('Redline Auto Care LLC') === 'Redline Auto Care');
+
+// --- thin-scrape floor folds empty sections instead of rendering air ------------------------------
+{
+  const thinScrape = parseBusinessProfile({
+    business_name: "Tom Hiatt's Plumbing & Excavating Services Co., LLC", industry: 'Plumbing',
+    location: 'Findlay, OH', services: ['Plumbing repair', 'Excavating', 'HVAC'], photos: [],
+  }).profile!;
+  const fb = assembleFallbackSpec(thinScrape);
+  check('no About tautology when the profile has no description', !fb.sections.some((s) => s.type === 'about'));
+  check('no one-chip serviceArea section', !fb.sections.some((s) => s.type === 'serviceArea'));
+  check('logo/wordmark uses the human name', fb.logoText === "Tom Hiatt's Plumbing");
+  check('the footer keeps the legal name', fb.footer.line.includes('Services Co., LLC'));
+  const trust = fb.sections.find((s) => s.type === 'trust');
+  const items = (trust?.props.items ?? []) as string[];
+  check('trust strip carries only fact-backed lines (or folds)', !trust || items.every((i) => !/Fast online quotes|Professional plumbing/i.test(i)));
 }
 
 // --- recipe hygiene: every recipe font must exist in the loadable library -------------------------

@@ -1028,7 +1028,7 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   const aiOnlyPhotos = photos.length > 0 && photos.every((p) => p.source_type === 'ai_generated');
   const reviews = usableReviews(profile);
   const loc = profile.location ?? '';
-  const name = profile.business_name;
+  const name = displayName(profile.business_name);
   const cta = recipe.cta;
   // Grief-adjacent categories: every piece of boilerplate below switches to care language —
   // the layout guard alone left "How do I get a quote?" on funeral homes.
@@ -1065,12 +1065,19 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         // HONESTY: every line is either observed (rating, review count, location, phone) or
         // behavioral (what the site itself offers). Never 'Licensed & insured' or 'Satisfaction
         // guaranteed' — claims nobody verified have no place on a pitched demo.
-        sections.push({ type, props: { items: [
-          profile.google_rating ? `${profile.google_rating.toFixed(1)}★ on Google` : `Professional ${profile.industry.toLowerCase()}`,
-          profile.review_count ? `${profile.review_count}+ customer reviews` : (city ? `Serving ${city} & nearby` : 'Serving the local area'),
-          'Free, no-obligation quotes',
-          profile.phone ? `Call ${profile.phone}` : 'Fast online quotes',
-        ] } });
+        {
+          // Only lines with a real fact behind them — padding the strip with air ("Fast online
+          // quotes") was the thin-scrape tell. Fewer than 3 honest lines → no strip at all.
+          const items = [
+            profile.google_rating ? `${profile.google_rating.toFixed(1)}★ on Google` : null,
+            profile.review_count ? `${profile.review_count}+ customer reviews` : null,
+            city ? `Serving ${city} & nearby` : null,
+            profile.phone ? `Call ${profile.phone}` : null,
+            'Free, no-obligation quotes',
+            /24[\s-]?h|emergency/i.test(`${profile.description ?? ''} ${profile.services.join(' ')} ${typeof profile.hours === 'string' ? profile.hours : ''}`) ? '24-hour emergency service' : null,
+          ].filter((x): x is string => !!x);
+          if (items.length >= 3) sections.push({ type, props: { items: items.slice(0, 4) } });
+        }
         break;
       case 'services':
         sections.push({ type, props: {
@@ -1081,6 +1088,7 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'about':
+        if (!profile.description) break; // a tautology About ("X serves Y with Z") is worse than none
         sections.push({ type, props: {
           heading: `About ${name}`,
           body: profile.description ?? `${name} serves ${loc || 'the local community'} with ${profile.services.slice(0, 2).join(' and ').toLowerCase()}. ${profile.brand_style ? `Known for being ${profile.brand_style}.` : ''}`,
@@ -1102,9 +1110,9 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'serviceArea':
-        if (profile.service_area?.length || loc) sections.push({ type, props: {
+        if ((profile.service_area?.length ?? 0) >= 2) sections.push({ type, props: {
           heading: 'Areas we serve',
-          areas: profile.service_area?.length ? profile.service_area : [loc],
+          areas: profile.service_area!,
         } });
         break;
       case 'faq':
@@ -1203,7 +1211,7 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
       description: profile.description ?? `${name} — ${profile.services.slice(0, 3).join(', ')}${loc ? ` in ${loc}` : ''}. ${cta} today.`,
       keywords: profile.seo_keywords?.slice(0, 12) ?? [],
     },
-    footer: { line: `© ${name}. ${loc}` },
+    footer: { line: `© ${profile.business_name}. ${loc}` },
     aiImagery: profile.photos.some((p) => p.source_type === 'ai_generated') || undefined,
   };
   spec.nav = navFor(spec.sections, recipe.cta);
@@ -1236,6 +1244,26 @@ export function typeVoice(businessName: string, displayFont: string): TypeVoice 
     { heroSize: 'clamp(2.3rem, 5.6vw, 4.4rem)', heroWeight: 600, heroTracking: '-0.01em', heroLeading: 1.1, container: 1088 },
   ];
   return voices[nameHash(`${businessName}:voice`) % voices.length];
+}
+
+/** The name a HUMAN uses — legal suffixes stripped ("Tom Hiatt's Plumbing & Excavating
+ *  Services Co., LLC" → "Tom Hiatt's Plumbing"). The full legal name stays in the footer and
+ *  schema; copy, wordmark, and voice use this. Pure + deterministic. */
+export function displayName(businessName: string): string {
+  let n = businessName.trim();
+  for (let i = 0; i < 4; i++) {
+    const next = n.replace(/[,\s]+(?:LLC|L\.L\.C\.?|Inc\.?|Corp\.?|Co\.?|Company|Ltd\.?)\s*$/i, '').trim();
+    if (next === n) break;
+    n = next;
+  }
+  n = n.replace(/[,\s]+(?:Services?|Solutions)\s*$/i, '').trim();
+  // Long possessive names cut after the first trade word: "Tom Hiatt's Plumbing & Excavating" →
+  // "Tom Hiatt's Plumbing" (the & tail is real identity only when the name is already short).
+  if (n.length > 26) {
+    const m = /^(.+?'s\s+\w+)\b/.exec(n);
+    if (m && m[1].length >= 8) n = m[1];
+  }
+  return n || businessName.trim();
 }
 
 /** URL-safe slug for preview routes: "Joe's Roofing" → "joes-roofing". */

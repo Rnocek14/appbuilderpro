@@ -17,12 +17,22 @@ HARD RULES:
   page. If not shown, omit them — do not estimate.
 - reviews_summary: only if real testimonials/reviews appear on the page; paraphrase them. If none, omit.
 - industry is the trade in 1-3 words (e.g. "Roofing", "Dental practice", "Italian restaurant", "Law firm").
+- description: the business's OWN self-description, condensed from their page (2-3 sentences of
+  what they say about themselves — "veteran-owned", specialties, who they serve). Omit if the page
+  says nothing about the business itself.
+- slogan: their tagline VERBATIM if the page shows one (e.g. "Call the best and flush the rest!").
+- differentiators: 1-4 short traits the page itself claims (e.g. "veteran-owned", "24-hour
+  emergency service", "family-run"). Their words, not yours.
+- owner_claims: credentials/tenure THE PAGE ITSELF asserts, verbatim-close (e.g. "licensed and
+  insured", "serving Hancock County since 2007"). These are owner-asserted, not verified — record
+  them only if plainly stated.
 - services: the actual services/offerings named on the page (3-8 short items). If none are named,
   return the single most obvious one for the trade.
 
 Output ONLY this JSON (omit any field you can't ground):
 {"business_name": str, "industry": str, "location": str, "services": [str],
- "hours": str, "reviews_summary": str, "google_rating": number, "review_count": number}`;
+ "hours": str, "reviews_summary": str, "google_rating": number, "review_count": number,
+ "description": str, "slogan": str, "differentiators": [str], "owner_claims": [str]}`;
 
 export interface ExtractedFields {
   business_name: string | null;
@@ -33,6 +43,10 @@ export interface ExtractedFields {
   reviews_summary: string | null;
   google_rating: number | null;
   review_count: number | null;
+  description: string | null;
+  slogan: string | null;
+  differentiators: string[];
+  owner_claims: string[];
 }
 
 const s = (v: unknown, max = 200): string | null => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
@@ -57,6 +71,10 @@ export function extractProfileFields(modelText: string): ExtractedFields {
     reviews_summary: s(p.reviews_summary, 600),
     google_rating: num(p.google_rating),
     review_count: num(p.review_count),
+    description: s(p.description, 500),
+    slogan: s(p.slogan, 120),
+    differentiators: (Array.isArray(p.differentiators) ? p.differentiators : []).map((x) => s(x, 60)).filter((x): x is string => !!x).slice(0, 4),
+    owner_claims: (Array.isArray(p.owner_claims) ? p.owner_claims : []).map((x) => s(x, 120)).filter((x): x is string => !!x).slice(0, 4),
   };
 }
 
@@ -91,5 +109,16 @@ export function buildProfile(fields: ExtractedFields, ctx: ScrapeContext): Recor
   if (ctx.email) raw.email = ctx.email;
   if (ctx.auditScore != null) raw.current_website_score = ctx.auditScore;
   if (ctx.auditIssues.length) raw.issues = ctx.auditIssues.slice(0, 6);
+  // THE PERSONALITY CHANNEL (thin-scrape finding: everything distinctive about the business was
+  // dropped here, so the generated page could only be generic). The owner's own words ride into
+  // description — which both generators read AND the honesty gate treats as grounded, so an
+  // owner-asserted "licensed and insured" or "since 2007" becomes sayable because THEY say it.
+  const descParts = [
+    fields.description,
+    fields.slogan ? `Their slogan: "${fields.slogan}"` : null,
+    fields.owner_claims.length ? `Their site states: ${fields.owner_claims.join('; ')}.` : null,
+  ].filter(Boolean);
+  if (descParts.length) raw.description = descParts.join(' ');
+  if (fields.differentiators.length) raw.brand_style = fields.differentiators.join(', ');
   return raw;
 }

@@ -110,6 +110,10 @@ export function fieldsFromPage(
     location: (location && location.trim()) ? location.trim().slice(0, 120) : null,
     hours: null,
     reviews_summary: null,
+    description: null,
+    slogan: null,
+    differentiators: [],
+    owner_claims: [],
     // Real Google rating when Places returned one THIS run (display-at-use, never persisted).
     google_rating: rating?.rating ?? null,
     review_count: rating?.count ?? null,
