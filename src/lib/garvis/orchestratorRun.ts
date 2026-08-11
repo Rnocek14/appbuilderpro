@@ -28,9 +28,11 @@ async function reason(system: string, context: string, message: string): Promise
   return ((data as { text?: string })?.text ?? '').trim();
 }
 
-/** Intent → compiled plan (reviewable; nothing executes here). */
-export async function compileIntent(intent: string): Promise<ParsePlanResult> {
-  const clean = intent.trim();
+/** Intent → compiled plan (reviewable; nothing executes here). Pass `revise` to apply a spoken
+ *  correction ("actually make it 5 posts") to an existing plan instead of starting over — the
+ *  model keeps unchanged steps identical and returns the full revised plan. */
+export async function compileIntent(intent: string, revise?: { previous: CompiledPlan; note: string }): Promise<ParsePlanResult> {
+  const clean = revise ? `${intent.trim()}\n\nREVISION: ${revise.note.trim()}` : intent.trim();
   if (clean.length < 12) {
     return { plan: null, problems: ['Say the whole thing — a sentence or three about what you want set up.'], warnings: [] };
   }
@@ -40,7 +42,10 @@ export async function compileIntent(intent: string): Promise<ParsePlanResult> {
   // Now the current state (businesses by exact title, live/blocked arcs, clients, the clock)
   // rides along; fail-soft — a broken probe compiles the old way rather than not at all.
   const situation = await assembleSituation().catch(() => '');
-  const raw = await reason(COMPILER_SYSTEM, [catalogContext(specs), situation].filter(Boolean).join('\n\n'), clean);
+  const revision = revise
+    ? `PREVIOUS PLAN (the operator is revising THIS — keep steps they did not mention identical):\n${JSON.stringify(revise.previous)}`
+    : '';
+  const raw = await reason(COMPILER_SYSTEM, [catalogContext(specs), situation, revision].filter(Boolean).join('\n\n'), clean);
   const parsed = parsePlan(raw, specs);
   if (parsed.plan) {
     const { data: auth } = await supabase.auth.getUser();

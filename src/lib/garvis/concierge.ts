@@ -315,6 +315,9 @@ export interface Resolution {
 
 export interface ConciergeAlias { sentence: string; taskId: string }
 
+/** The normalized form used as an alias's identity (also the DB primary-key component). */
+export const aliasKey = (s: string): string => norm(s);
+
 /** Exact-phrase lookup (normalized). Returns the learned task id or null. */
 export function aliasLookup(input: string, aliases: ConciergeAlias[]): string | null {
   const n = norm(input);
@@ -339,6 +342,40 @@ export function parseCommandPrefix(input: string): { sentence: string; execute: 
   const doPrefix = /^(do|run|execute|just do)[,:]?\s+/i;
   if (doPrefix.test(s)) return { sentence: s.replace(doPrefix, '').trim(), execute: true };
   return { sentence: s.trim(), execute: false };
+}
+
+/** While a compiled plan is on screen, sentences like "actually make it 5 posts" are REVISIONS
+ *  of that plan, not new commands. Word-anchored so ordinary asks never trigger it. */
+export function isRevision(input: string): boolean {
+  return /^(actually|instead|change|swap|make it|make that|add|remove|drop|skip|no[,.]|wait[,.]|also add)\b/i.test(input.trim());
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE STATS TIER — number questions answered from REAL rows, free and instant, before the
+// metered AI tier. Pure matching here; the queries live in conciergeStats.ts (impure).
+// ---------------------------------------------------------------------------------------------
+
+export interface StatQuery { id: string; keywords: string[] }
+
+export const STAT_QUERIES: StatQuery[] = [
+  { id: 'approvals_waiting', keywords: ['how many approvals', 'approvals waiting', 'anything waiting', 'pending approvals', 'how many pending', 'how many things are waiting'] },
+  { id: 'episode_stats', keywords: ['how are my episodes', 'episode views', 'how did my videos do', 'channel stats', 'how is the channel doing', 'views this week', 'how many views'] },
+  { id: 'revenue_month', keywords: ['revenue this month', 'how much did i make', 'how much money did i make', 'income this month', 'what did i earn', 'how much have i made'] },
+  { id: 'pipeline_count', keywords: ['how many leads', 'how many prospects', 'pipeline size', 'how big is my pipeline', 'how many businesses have you found'] },
+  { id: 'arcs_running', keywords: ['what are you working on', 'whats running', "what's running", 'running arcs', 'active plans', 'what is in flight', 'what are you doing'] },
+];
+
+/** Match a sentence to ONE stat, or null. Phrase-anchored (multi-word keywords only score when
+ *  present verbatim), so command sentences like "check my money" never become stats. */
+export function statsFor(input: string): string | null {
+  const text = ` ${norm(input)} `;
+  if (text.trim().length < 3) return null;
+  let best: { id: string; score: number } | null = null;
+  for (const q of STAT_QUERIES) {
+    const score = q.keywords.reduce((n, k) => n + (text.includes(` ${norm(k)} `) ? norm(k).split(' ').length : 0), 0);
+    if (score >= 2 && (!best || score > best.score)) best = { id: q.id, score };
+  }
+  return best?.id ?? null;
 }
 
 /** Resolve a task's route against the operator's real worlds — used by resolve() for tier-1 picks

@@ -225,6 +225,19 @@ export const ACTION_SPECS: ActionSpec[] = [
     produces: 'one drafted episode (script + hooks + citations) sitting in the Channel Studio for review',
   },
   {
+    id: 'point_channel_cta',
+    title: "Point a channel's traffic at an asset",
+    category: 'marketing',
+    risk: 'safe',
+    description: 'Set an EXISTING content channel\'s call-to-action link (and label) so every future episode routes its audience to an asset — an app, a landing page, a booking link. The cross-asset move: a channel whose viewers match a product should carry that product\'s link. Changes the CTA only; nothing posts or sends.',
+    params: [
+      { name: 'url', required: true, hint: 'the destination link — must come from the intent or situation, never invented' },
+      { name: 'channel', required: false, hint: 'channel name when the operator runs several — omit for the only channel' },
+      { name: 'label', required: false, hint: 'short button text (default "Learn more")' },
+    ],
+    produces: 'the channel\'s CTA set — every future episode caption carries the link (with UTM tracking)',
+  },
+  {
     id: 'start_idea_stream',
     title: 'Start an idea stream',
     category: 'automation',

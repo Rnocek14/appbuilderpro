@@ -63,6 +63,15 @@ const CASES: Case[] = [
     actions: ['draft_episode'],
   },
   {
+    name: 'strategist: "market my stroke app" wires the matching channel CTA + records the why; Reddit is an honest hole',
+    intent: 'Start marketing my stroke recovery app https://mindweave.app — the caregiver channel audience is exactly who needs it',
+    compile: plan([
+      step('record_thesis', { title: 'Stroke app marketing: route the caregiver audience first', body: 'The caregiver channel audience matches the stroke app: route that attention to the app before buying any new audience.' }, W('the strategy and its reasoning should be a persisted, reviewable record')),
+      step('point_channel_cta', { url: 'https://mindweave.app', channel: 'caregiver', label: 'Try the free tool' }, W('the channel already owns the exact audience the app serves — its CTA is the shortest path'), [0]),
+    ], ['Community threads (e.g. a recovery-milestones post in r/stroke linking the free tool) need human hands — no catalog action posts to Reddit.']),
+    actions: ['record_thesis', 'point_channel_cta'], minHoles: 1,
+  },
+  {
     name: 'the mural hunt (the headline case)',
     intent: 'Find all mural and custom art jobs in Wisconsin',
     compile: plan([step('hunt_opportunities', { focus: 'mural and custom art jobs', region: 'Wisconsin' }, W('finding work is exactly what the hunt does'))]),

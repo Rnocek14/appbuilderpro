@@ -9,11 +9,12 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, X } from 'lucide-react';
+import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasLookup, aliasRemember, parseCommandPrefix, resolve, routeFor,
+  aliasKey, aliasLookup, aliasRemember, isRevision, parseCommandPrefix, resolve, routeFor, statsFor,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
+import { answerStat } from '../lib/garvis/conciergeStats';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
 import { actionById } from '../lib/garvis/actionRegistry';
@@ -45,6 +46,7 @@ export function readHandoff(...taskIds: string[]): ConciergeHandoff | null {
 interface ActiveGuide { taskId: string; done: number[] }
 
 const ALIAS_KEY = 'ff:concierge-aliases';
+const VOICE_KEY = 'ff:concierge-voice';
 const loadAliases = (): ConciergeAlias[] => {
   try { return (JSON.parse(localStorage.getItem(ALIAS_KEY) || '[]') as ConciergeAlias[]).filter((a) => a?.sentence && a?.taskId); }
   catch { return []; }
@@ -87,6 +89,7 @@ export function ConciergeDock() {
   const [doState, setDoState] = useState<DoState | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [listening, setListening] = useState(false);
+  const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
   const aliasesRef = useRef<ConciergeAlias[]>(loadAliases());
   const worldsRef = useRef<ConciergeWorld[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -105,6 +108,40 @@ export function ConciergeDock() {
       .then(({ count, error }) => { if (!dead && !error) setPendingCount(count ?? 0); });
     return () => { dead = true; };
   }, [open]);
+
+  // Cross-device tier 0: learned phrases sync through concierge_aliases (app_0136). DB rows merge
+  // over local on mount (newest wins by construction); saves are fire-and-forget both places.
+  useEffect(() => {
+    let dead = false;
+    void supabase.from('concierge_aliases').select('sentence, task_id').order('created_at', { ascending: false }).limit(50)
+      .then(({ data, error }) => {
+        if (dead || error || !data) return;
+        let merged = aliasesRef.current;
+        for (const r of (data as { sentence: string; task_id: string }[]).reverse()) {
+          merged = aliasRemember(r.sentence, r.task_id, merged);
+        }
+        aliasesRef.current = merged;
+        try { localStorage.setItem(ALIAS_KEY, JSON.stringify(merged)); } catch { /* fine */ }
+      });
+    return () => { dead = true; };
+  }, []);
+
+  // Voice replies: short outcome lines, spoken only when the operator turned the voice on.
+  const speak = (text: string) => {
+    if (!voiceOn || !('speechSynthesis' in window) || !text) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text.slice(0, 300));
+      u.rate = 1.05;
+      window.speechSynthesis.speak(u);
+    } catch { /* voice is best-effort */ }
+  };
+  const toggleVoice = () => {
+    const next = !voiceOn;
+    setVoiceOn(next);
+    try { localStorage.setItem(VOICE_KEY, next ? '1' : '0'); } catch { /* fine */ }
+    if (!next) { try { window.speechSynthesis?.cancel(); } catch { /* fine */ } }
+  };
 
   // ⌘J / Ctrl+J toggles the concierge from anywhere (⌘K stays the command palette's).
   useEffect(() => {
@@ -193,7 +230,9 @@ export function ConciergeDock() {
         act(picked, route, missingWorld, sentence);
         return;
       }
-      setNote(d.answer?.trim() ? d.answer : FALLBACK);
+      const ans = d.answer?.trim() ? d.answer : FALLBACK;
+      setNote(ans);
+      speak(ans);
     } catch {
       setNote(FALLBACK);
     } finally {
@@ -228,6 +267,7 @@ export function ConciergeDock() {
       }
       setNote(null);
       setDoState({ intent: sentence, plan, warnings });
+      speak(`Plan ready: ${plan.summary}`);
     } catch (e) {
       setNote(e instanceof Error && /key|credit/i.test(e.message)
         ? e.message
@@ -251,6 +291,7 @@ export function ConciergeDock() {
           ? `Paused, honestly: ${report.waitingReason ?? 'a step needs you first'} — it resumes on its own after that.`
           : 'A step failed — the notes above say exactly which and why.';
       setDoState((cur) => (cur ? { ...cur, planId, statuses: [...report.statuses], finished: report.state === 'running' ? 'waiting' : report.state, finalNote } : cur));
+      speak(finalNote);
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
     } finally {
@@ -261,19 +302,59 @@ export function ConciergeDock() {
   const rememberAlias = (sentence: string, taskId: string) => {
     aliasesRef.current = aliasRemember(sentence, taskId, aliasesRef.current);
     try { localStorage.setItem(ALIAS_KEY, JSON.stringify(aliasesRef.current)); } catch { /* fine */ }
+    // Cross-device: best-effort upsert; a failure just means this device-only until next time.
+    void supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) return;
+      void supabase.from('concierge_aliases').upsert({
+        owner_id: data.user.id, sentence_norm: aliasKey(sentence), sentence: sentence.trim().slice(0, 200), task_id: taskId,
+      }).then(() => {});
+    });
   };
 
   const submit = async () => {
     const raw = input.trim();
     if (!raw || busy) return;
     setInput('');
-    setDoState(null);
     setPendingCreate(null);
+    // A plan is on screen and the operator is correcting it → revise THAT plan, don't start over.
+    if (doState && !doState.statuses && isRevision(raw)) {
+      const prev = doState;
+      setBusy(true);
+      setNote('Revising the plan…');
+      try {
+        const { compileIntent } = await import('../lib/garvis/orchestratorRun');
+        const { plan, problems, warnings } = await compileIntent(prev.intent, { previous: prev.plan, note: raw });
+        if (!plan) { setNote(problems[0] ?? "I couldn't apply that change — say the whole thing again."); return; }
+        setNote(null);
+        setDoState({ intent: prev.intent, plan, warnings });
+      } catch (e) {
+        setNote(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+        inputRef.current?.focus();
+      }
+      return;
+    }
+    setDoState(null);
     // "garvis" is courtesy; "do/run/execute" is an execution order → straight to the compiler.
     const { sentence: text, execute } = parseCommandPrefix(raw);
     if (!text) return;
     setLastSentence(text);
     if (execute) { await doIt(text); return; }
+    // THE STATS TIER — number questions answered from real rows, free, before anything routes.
+    const stat = statsFor(text);
+    if (stat) {
+      setBusy(true);
+      setNote('Counting…');
+      const a = await answerStat(stat);
+      setBusy(false);
+      setSuggestions([]);
+      setNote(a.text);
+      if (a.link) { const t = ALL_CONCIERGE_TASKS.find((x) => routeFor(x, worldsRef.current ?? []).route === a.link); if (t) setSuggestions([t]); }
+      speak(a.text);
+      inputRef.current?.focus();
+      return;
+    }
     // Tier 0 — the operator's own learned phrasings resolve instantly.
     const learned = aliasLookup(text, aliasesRef.current);
     const learnedTask = learned ? ALL_CONCIERGE_TASKS.find((t) => t.id === learned) : null;
@@ -340,8 +421,14 @@ export function ConciergeDock() {
       <div className="flex items-center gap-2">
         <Sparkles size={14} className="text-forge-ember" />
         <p className="text-xs font-semibold text-forge-ink">Say what you want to do</p>
+        {'speechSynthesis' in window && (
+          <button onClick={toggleVoice} aria-label={voiceOn ? 'Turn voice replies off' : 'Turn voice replies on'}
+            className={cn('ml-auto rounded p-1', voiceOn ? 'text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>
+            {voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}
+          </button>
+        )}
         <button onClick={() => { setOpen(false); }} aria-label="Close the concierge"
-          className="ml-auto rounded p-1 text-forge-dim hover:text-forge-ink"><X size={14} /></button>
+          className={cn('rounded p-1 text-forge-dim hover:text-forge-ink', !('speechSynthesis' in window) && 'ml-auto')}><X size={14} /></button>
       </div>
 
       {pendingCount !== null && pendingCount > 0 && !doState && (
