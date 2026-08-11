@@ -533,7 +533,7 @@ export function ConciergeDock() {
               className="rounded p-0.5 text-forge-dim hover:text-forge-ink"><X size={12} /></button>
           </div>
           <p className="mt-0.5 text-[11px] text-forge-dim">{doState.plan.summary}</p>
-          <ol className="mt-1.5 space-y-1">
+          <ol className="mt-1.5 list-none space-y-1 pl-0">
             {doState.plan.steps.map((s, i) => {
               const spec = actionById(s.action);
               const st = doState.statuses?.[i];
@@ -627,7 +627,7 @@ export function ConciergeDock() {
             <button onClick={() => setGuide(null)} aria-label="Dismiss these steps"
               className="ml-auto rounded p-0.5 text-forge-dim hover:text-forge-ink"><X size={12} /></button>
           </div>
-          <ol className="mt-1 space-y-1">
+          <ol className="mt-1 list-none space-y-1 pl-0">
             {task.steps.map((s, i) => {
               const done = guide!.done.includes(i);
               return (

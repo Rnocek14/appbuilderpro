@@ -6,7 +6,7 @@
 import {
   ARCHETYPES, FLAVORS, TOOL_IDS, makeCharter, parseCharter, toolsFor,
   MOM_REAL_ESTATE_TEMPLATE, APP_LAUNCH_TEMPLATE, WEB_TEMPLATES, templateById, templateForWeb,
-  flattenTemplate, validateTemplate, parseAudienceCsv, rollupWeb, deriveStatus,
+  flattenTemplate, validateTemplate, parseAudienceCsv, rollupWeb, deriveStatus, canvasNodeForArea,
   type Archetype,
 } from './workweb';
 import { PLAYS, LAKEFRONT_SELLER_PLAY, playById, validatePlay, DEFAULT_LAKE_GENEVA_CONTEXT } from './plays';
@@ -111,6 +111,19 @@ check('parseCharter handles null/undefined/strings', parseCharter(null) === null
   check('an app-launch web resolves to app-launch', templateForWeb(launchSlugs)?.id === 'app-launch');
   check('a hand-built web matches no template (no invented play)', templateForWeb(['my-own-area', 'another-area', 'third-area']) === null);
   check('two shared slugs are not enough to claim a template', templateForWeb(['brand', 'results']) === null);
+}
+
+// 10. ?area= deep links onto the marketing canvas — the machine taps the node, never a wrong one.
+{
+  const clusters = flattenTemplate(MOM_REAL_ESTATE_TEMPLATE).map((n) => ({ slug: n.slug, charter: n.charter }));
+  check('direct-mail area opens the postcard node', canvasNodeForArea(clusters, 'direct-mail') === 'postcard');
+  check('mailing-lists area opens the people node', canvasNodeForArea(clusters, 'mailing-lists') === 'people');
+  check('the market-intel area opens the analysis node', canvasNodeForArea(clusters, 'lake-geneva-market') === 'analysis');
+  check('brand area opens the branding node', canvasNodeForArea(clusters, 'brand') === 'branding');
+  check('a flavor with no canvas node opens nothing (crm)', canvasNodeForArea(clusters, 'crm-follow-up') === null);
+  check('an unknown area opens nothing — never a guessed sheet', canvasNodeForArea(clusters, 'not-a-real-area') === null);
+  check('no area requested → nothing auto-opens', canvasNodeForArea(clusters, null) === null);
+  check('a charterless cluster opens nothing', canvasNodeForArea([{ slug: 'x', charter: null }], 'x') === null);
 }
 
 console.log(`\nworkweb.verify: ${passed} passed, ${failed} failed`);

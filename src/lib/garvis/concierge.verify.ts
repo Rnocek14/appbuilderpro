@@ -15,8 +15,8 @@ const WORLDS: ConciergeWorld[] = [
 // ---- THE OPERATOR'S OWN SENTENCES are the acceptance tests ----
 {
   const r = resolve("lets work on moms postcard", WORLDS);
-  check('"lets work on moms postcard" → the mom world, postcard steps',
-    r.kind === 'go' && r.task?.id === 'postcard' && r.route === '/garvis/webs/w-mom' && !r.missingWorld);
+  check('"lets work on moms postcard" → INSIDE the mom world\'s Direct Mail area (the machine taps the node)',
+    r.kind === 'go' && r.task?.id === 'postcard' && r.route === '/garvis/webs/w-mom?area=direct-mail' && !r.missingWorld);
   check('postcard steps end at the approval Queue (nothing mails without you)',
     !!r.task && /Approve in Queue/.test(r.task.steps.join(' ')));
 }
@@ -71,7 +71,7 @@ const WORLDS: ConciergeWorld[] = [
   check('"what\'s waiting on me" → the Queue (the dock\'s own example must work)',
     resolve("what's waiting on me", WORLDS).task?.id === 'approvals');
   const postcard = CONCIERGE_TASKS.find((t) => t.id === 'postcard')!;
-  check('routeFor substitutes the real world id', routeFor(postcard, WORLDS).route === '/garvis/webs/w-mom');
+  check('routeFor substitutes the real world id (area deep-link intact)', routeFor(postcard, WORLDS).route === '/garvis/webs/w-mom?area=direct-mail');
   check('routeFor with no matching world is honest, never a broken route',
     routeFor(postcard, []).missingWorld === true && routeFor(postcard, []).route === '/garvis/webs');
 }
