@@ -437,19 +437,45 @@ function RibbonScene({ p, headline, sub, cta, hue, seed }: {
   );
 }
 
+/** The film stage under a Veo chapter. progress=null → ambient loop; a number → scroll-scrub
+ *  (only armed on fine-pointer desktops — phones seek too poorly for scrubbing to feel good). */
+function VeoStage({ video, progress, children }: {
+  video: { url: string; poster?: string; scrubUrl?: string }; progress: number | null; children: ReactNode;
+}) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [scrub, setScrub] = useState(false);
+  useEffect(() => {
+    if (progress != null && !reduce() && window.matchMedia('(min-width: 768px) and (pointer: fine)').matches) setScrub(true);
+  }, [progress != null]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const v = ref.current;
+    if (!v || !scrub || progress == null || !v.duration || !isFinite(v.duration)) return;
+    const t = Math.min(v.duration - 0.05, Math.max(0, progress * v.duration));
+    if (Math.abs(v.currentTime - t) > 0.02) v.currentTime = t;
+  }, [progress, scrub]);
+  const still = reduce();
+  return (
+    <div className="relative h-full min-h-[82vh] w-full overflow-hidden">
+      <video ref={ref} className="absolute inset-0 h-full w-full object-cover"
+        src={scrub && video.scrubUrl ? video.scrubUrl : video.url} poster={video.poster}
+        autoPlay={!scrub && !still} muted loop={!scrub} playsInline
+        preload={scrub ? 'auto' : 'metadata'} aria-hidden />
+      <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 90% at 50% 60%, rgb(0 0 0 / 0.28), rgb(0 0 0 / 0.62))' }} />
+      {children}
+    </div>
+  );
+}
+
 /** The 'scene' section — normalizeSpec guarantees `scene` is a valid kind for this trade. */
 export function SceneSection(p: { headline?: string; sub?: string; cta?: string; scene?: string; motion?: string;
   stats?: { value: string; label: string }[]; themePrimary?: string; siteName?: string;
-  video?: { url: string; poster?: string } }) {
-  // VEO CHAPTER — an approved scroll_scenes clip becomes the stage itself: a muted, looping
-  // full-bleed film under the punchline. Poster-first so static captures and reduced motion
-  // always show a real finished frame; autoplay is progressive enhancement on top.
+  video?: { url: string; poster?: string; scrubUrl?: string } }) {
+  // VEO CHAPTER — an approved scroll_scenes clip becomes the stage itself. Three tiers from one
+  // clip: scroll-SCRUBBED on fine-pointer desktops when an all-keyframe scrubUrl exists (the
+  // Framer/Apple move — ScrollScene's p drives video.currentTime), ambient muted loop everywhere
+  // else, and the poster for reduced motion / static captures / a clip that never loads.
   if (p.video?.url) {
-    return (
-      <section id="scene" className="relative isolate overflow-hidden" style={{ minHeight: '82vh' }}>
-        <video className="absolute inset-0 h-full w-full object-cover" src={p.video.url}
-          poster={p.video.poster} autoPlay muted loop playsInline preload="metadata" aria-hidden />
-        <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 90% at 50% 60%, rgb(0 0 0 / 0.28), rgb(0 0 0 / 0.62))' }} />
+    const overlay = (
         <div className="relative flex min-h-[82vh] flex-col items-center justify-center px-6 py-24 text-center">
           <h2 className="pv-display max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-6xl" style={{ textWrap: 'balance', textShadow: '0 2px 24px rgb(0 0 0 / 0.45)' }}>{p.headline}</h2>
           {p.sub && <p className="mx-auto mt-4 max-w-xl text-lg text-white/85">{p.sub}</p>}
@@ -461,6 +487,13 @@ export function SceneSection(p: { headline?: string; sub?: string; cta?: string;
             </button>
           )}
         </div>
+    );
+    const stage = (prog: number | null) => <VeoStage video={p.video!} progress={prog}>{overlay}</VeoStage>;
+    return (
+      <section id="scene" className="relative isolate overflow-hidden">
+        {p.motion === 'calm' || !p.video.scrubUrl
+          ? stage(null)
+          : <ScrollScene heightVh={170}>{(prog) => stage(prog)}</ScrollScene>}
       </section>
     );
   }

@@ -627,6 +627,11 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   const sc = withVideo.sections.find((s) => s.type === 'scene');
   check('scene video passes through shape-checked', JSON.stringify(sc?.props.video) === JSON.stringify({ url: 'https://cdn.example/pipe.mp4', poster: 'https://cdn.example/pipe.jpg' }));
   check('a video scene marks the page as AI imagery (footer discloses)', withVideo.aiImagery === true);
+  const scrub = normalizeSpec({ sections: [
+    { type: 'hero', props: {} },
+    { type: 'scene', props: { video: { url: 'https://cdn.example/a.mp4', scrubUrl: 'https://cdn.example/a-allkey.mp4' } } },
+  ] }, ROOFER).sections.find((s) => s.type === 'scene');
+  check('the all-keyframe scrubUrl rides through (https-checked)', (scrub?.props.video as { scrubUrl?: string })?.scrubUrl === 'https://cdn.example/a-allkey.mp4');
   const badVideo = normalizeSpec({ sections: [
     { type: 'hero', props: {} },
     { type: 'scene', props: { video: { url: 'javascript:alert(1)' } } },

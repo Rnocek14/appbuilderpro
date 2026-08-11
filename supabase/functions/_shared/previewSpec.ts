@@ -813,8 +813,15 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     // VEO CLIP PASS-THROUGH: the approved scroll_scenes library rides in as {url, poster} —
     // https-only, shape-checked, and it marks the page as carrying AI imagery (footer discloses).
     const v = s.props.video as { url?: unknown; poster?: unknown } | undefined;
-    const video = v && typeof v.url === 'string' && /^https:\/\//.test(v.url)
-      ? { url: v.url, ...(typeof v.poster === 'string' && /^https:\/\//.test(v.poster) ? { poster: v.poster } : {}) }
+    const vv = v as { url?: unknown; poster?: unknown; scrubUrl?: unknown } | undefined;
+    const video = vv && typeof vv.url === 'string' && /^https:\/\//.test(vv.url)
+      ? {
+          url: vv.url,
+          ...(typeof vv.poster === 'string' && /^https:\/\//.test(vv.poster) ? { poster: vv.poster } : {}),
+          // the all-keyframe re-encode for scroll scrubbing (approve-time transcode writes it);
+          // absent → the renderer stays in ambient-loop mode, never a stuttering seek
+          ...(typeof vv.scrubUrl === 'string' && /^https:\/\//.test(vv.scrubUrl) ? { scrubUrl: vv.scrubUrl } : {}),
+        }
       : undefined;
     if (video) sceneHasVideo = true;
     s.props = {
