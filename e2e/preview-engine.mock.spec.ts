@@ -61,6 +61,16 @@ test('restaurant (no quote section): header dials the real phone, no dead anchor
   // quote section, which the restaurant recipe doesn't have). It must dial the hero's phone.
   await expect(page.locator('header a[href^="tel:"]').first()).toBeVisible();
   expect(await deadAnchors(page)).toEqual([]);
+
+  // The hero's non-call secondary CTA used to hardcode "#quote" — a dead link on this recipe
+  // (benchmark finding). Re-render with a browsing-style secondary CTA and re-assert.
+  const spec2 = assembleFallbackSpec(p);
+  const hero = spec2.sections.find((s) => s.type === 'hero')!;
+  hero.props.secondaryCta = 'See the menu';
+  await page.route('**/rest/v1/rpc/get_preview_by_slug*', (r) => r.fulfill({ json: rowFor('e2e-luna2', p, spec2) }));
+  await page.goto('/preview-site/e2e-luna2', { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.pv-site')).toBeVisible({ timeout: 15_000 });
+  expect(await deadAnchors(page)).toEqual([]);
   expect(errors, errors.join('\n')).toEqual([]);
 });
 

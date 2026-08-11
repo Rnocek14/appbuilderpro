@@ -175,7 +175,7 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
             ? { previewSiteId, submitUrl: leadSubmitUrl } : {};
           // variant/flair/motion/siteName AFTER the props spread: spec-owned knobs, never
           // section-prop-owned (a model-written props.variant must not bypass the whitelist).
-          return C ? <C key={`${s.type}-${i}`} {...s.props} {...extra} variant={s.variant} flair={flair} motion={motion} themePrimary={spec.theme.primary} siteName={spec.business_name} /> : null;
+          return C ? <C key={`${s.type}-${i}`} {...s.props} {...extra} variant={s.variant} flair={flair} motion={motion} themePrimary={spec.theme.primary} siteName={spec.business_name} ctaAnchor={ctaAnchor} /> : null;
         })}
       </main>
 

@@ -98,6 +98,9 @@ interface HeroProps {
   phone?: string; image?: string; bgImage?: string; objectImage?: string;
   rating?: number; reviewCount?: number; variant?: string;
   motion?: string; themePrimary?: string; siteName?: string;
+  /** Where anchor-style CTAs scroll: '#quote' when the page has a quote form, else '#ctaBanner'
+   *  (injected by the renderer — a hardcoded '#quote' was a dead link on quote-less recipes). */
+  ctaAnchor?: string;
 }
 
 /** The observed-proof badge — rating/review count CountUp when the motion tier allows. */
@@ -129,7 +132,8 @@ export function Hero(p: HeroProps) {
   // only a fallback, and a label with no digits ("Call us today") routes to the quote form instead
   // of rendering a dead tel: link.
   const telDigits = (p.phone ?? p.secondaryCta ?? '').replace(/[^\d+]/g, '');
-  const telHref = telDigits.length >= 7 ? `tel:${telDigits}` : '#quote';
+  const anchor = p.ctaAnchor ?? '#quote';
+  const telHref = telDigits.length >= 7 ? `tel:${telDigits}` : anchor;
   const hasImage = !!p.image;
   const cine = p.motion === 'cinematic';
   const lively = p.motion !== 'calm';
@@ -142,7 +146,7 @@ export function Hero(p: HeroProps) {
   // template fingerprint (design-audit finding).
   const secondaryIsCall = telDigits.length >= 7 && /call|phone|dial|\d{3}/i.test(p.secondaryCta ?? '');
   const secondaryBtn = (onDark: boolean) => p.secondaryCta && (
-    <a href={secondaryIsCall ? telHref : '#quote'}
+    <a href={secondaryIsCall ? telHref : anchor}
       className={onDark
         ? 'inline-flex items-center gap-2 rounded-[var(--r)] border border-white/40 px-6 py-3 text-sm font-semibold text-white backdrop-blur transition-colors hover:bg-white/10'
         : 'inline-flex items-center gap-2 rounded-[var(--r)] border border-[hsl(var(--bor))] px-6 py-3 text-sm font-semibold text-[hsl(var(--ink))] transition-colors hover:bg-[hsl(var(--card))]'}>
