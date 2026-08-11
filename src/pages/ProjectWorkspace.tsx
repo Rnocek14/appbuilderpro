@@ -925,6 +925,19 @@ export default function ProjectWorkspace() {
     claims: parseBuilderCommand,
     suggest: () => nextMoves('builder', { hasPieces: true }),
     handle: (cmd) => { void sendRef.current(cmd.text); return 'On it — the edit lands in the chat as a reviewable diff.'; },
+    // A dropped/pasted image rides into the chat as an attachment — same reviewable-diff spine.
+    acceptFile: async (file) => {
+      if (!file.type.startsWith('image/')) return "That file isn't an image — the builder chat takes pictures.";
+      if (file.size > 4 * 1024 * 1024) return 'That image is over 4MB — resize it and drop it again.';
+      const dataUrl = await new Promise<string>((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result));
+        r.onerror = () => rej(new Error('could not read the file'));
+        r.readAsDataURL(file);
+      });
+      void sendRef.current('Here is an image I just dropped in — add it to the site where it fits best and tell me where you put it.', undefined, undefined, undefined, dataUrl);
+      return 'Image sent to the builder chat — the edit arrives as a reviewable diff.';
+    },
   }), [id]);
   const handedOff = useRef(false);
   useEffect(() => {

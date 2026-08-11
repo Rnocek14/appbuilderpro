@@ -17,7 +17,7 @@ import {
 } from '../../../lib/garvis/creativeBoard';
 import { loadBoard, saveBoard } from '../../../lib/garvis/clusterState';
 import { parseBoardCommand } from '../../../lib/garvis/concierge';
-import { registerSurface } from '../../../lib/garvis/surfaceBridge';
+import { offerFileToSurface, registerSurface } from '../../../lib/garvis/surfaceBridge';
 import { nextMoves } from '../../../lib/garvis/suggestionDeck';
 import { Overlay } from '../../ui/Overlay';
 import { Button } from '../../ui';
@@ -72,6 +72,11 @@ export interface CreativeBoardAdapter<C> {
    *  the SAME rail so riffing and researching share one eye-line. Read-only here; the intel
    *  area owns the full documents. */
   research?: { title: string; body: string }[];
+  /** PHOTO DROP — store a dropped/pasted image with the world's real materials (vault +
+   *  references rail) and return where it lives. Present = this board takes photos. */
+  acceptPhoto?: (file: File) => Promise<{ url: string; caption: string | null }>;
+  /** Apply a stored photo to a piece (pure) — the drop lands ON the pointed-at card when set. */
+  applyPhoto?: (content: C, url: string, caption: string | null) => C;
 }
 
 export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 }: {
@@ -210,6 +215,16 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
   const selectedRef = useRef<Set<string>>(new Set());
   focusRef.current = focusId;
   selectedRef.current = selected;
+  // The piece the operator is POINTING at: the focused tile, else a single selection, else the
+  // newest starred, else the newest piece. Shared by riff asks and photo drops.
+  const pointedTile = useCallback(() => {
+    const b = boardRef.current;
+    const pointedId = focusRef.current ?? (selectedRef.current.size === 1 ? [...selectedRef.current][0] : null);
+    const live = b.tiles.filter((t) => t.group !== ARCHIVE_GROUP);
+    return (pointedId ? getTile(b, pointedId) : null)
+      ?? [...live].sort((a, z) => (Number(z.favorite) - Number(a.favorite)) || (z.createdAt - a.createdAt))[0]
+      ?? null;
+  }, []);
   useEffect(() => registerSurface({
     id: `board:${adapter.storageKey}`,
     claims: (s) => parseBoardCommand(s, adapter.voiceNouns ?? []),
@@ -221,18 +236,31 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
     }),
     handle: (cmd) => {
       if (cmd.kind !== 'riff') { void makeWith(cmd.text); return 'Making it — the new card lands on this board.'; }
-      const b = boardRef.current;
-      const pointedId = focusRef.current ?? (selectedRef.current.size === 1 ? [...selectedRef.current][0] : null);
-      const live = b.tiles.filter((t) => t.group !== ARCHIVE_GROUP);
-      const target = (pointedId ? getTile(b, pointedId) : null)
-        ?? [...live].sort((a, z) => (Number(z.favorite) - Number(a.favorite)) || (z.createdAt - a.createdAt))[0]
-        ?? null;
+      const target = pointedTile();
       if (!target) { void makeWith(cmd.text); return 'Nothing here to riff yet — making it fresh instead.'; }
       if (!cmd.text) { setRenditionFor(target.id); setRenditionText(''); return 'Which change? The rendition card is open — type it there.'; }
       void spin(target.id, cmd.text);
       return `Spinning a rendition of "${(adapter.captionOf(target.content) || target.prompt).slice(0, 40)}"…`;
     },
-  }), [adapter, makeWith, spin]);
+    // A dropped/pasted photo becomes a REAL material (vault + references rail) and, when this
+    // board knows how, lands straight on the pointed-at card. Errors come back as words.
+    ...(adapter.acceptPhoto ? {
+      acceptFile: async (file: File) => {
+        if (!file.type.startsWith('image/')) return "That file isn't an image — boards take photos.";
+        try {
+          const up = await adapter.acceptPhoto!(file);
+          const target = pointedTile();
+          if (target && adapter.applyPhoto) {
+            setBoard((b) => setTileContent(b, target.id, adapter.applyPhoto!(target.content, up.url, up.caption)));
+            return 'Photo dropped onto this card — it’s saved with your references too.';
+          }
+          return 'Photo saved with your references — tap a card and pick it, or make a new one.';
+        } catch (e) {
+          return e instanceof Error ? `Could not save the photo: ${e.message}` : 'Could not save the photo.';
+        }
+      },
+    } : {}),
+  }), [adapter, makeWith, spin, pointedTile]);
 
   // ---- zoom + fit-to-view ----------------------------------------------------------------
   const clampZoom = (z: number) => Math.min(1.6, Math.max(0.35, z));
@@ -431,7 +459,16 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
       </div>
 
       {/* the spread */}
-      <div ref={stageRef} className="cb-stage" onPointerDown={onStagePointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      <div ref={stageRef} className="cb-stage" onPointerDown={onStagePointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+        // A photo dragged straight onto the board lands the same place a dock drop does.
+        onDragOver={(e) => { if (adapter.acceptPhoto && e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+        onDrop={(e) => {
+          if (!adapter.acceptPhoto) return;
+          const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/'));
+          if (!f) return;
+          e.preventDefault();
+          void offerFileToSurface(f).then((n) => { if (n) onToast('success', n); });
+        }}>
         {shown.length === 0 && busy.length === 0 && (
           <div className="cb-empty">
             <Wand2 size={22} className="text-forge-ember/70" />

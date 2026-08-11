@@ -18,6 +18,7 @@ import {
 import { loadPostcardMaterials, generateTileImage, logPostcardMailed } from '../../../lib/garvis/postcardBoardRun';
 import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { saveMailerDesign } from '../../../lib/garvis/mailerRun';
+import { uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { inferRealEstate } from '../../../lib/garvis/studioKit';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { Button } from '../../ui';
@@ -88,6 +89,20 @@ export function PostcardBoard({ worldId, clusterId, onToast, realEstate: reProp,
         ...(materials.brand?.palette?.length ? [{ label: 'Brand palette', swatches: materials.brand.palette }] : []),
         ...materials.images.slice(0, 8).map((i) => ({ label: i.caption || i.label || 'your photo', url: i.url })),
       ],
+
+      // A dropped photo becomes a REAL vault material (same store the references rail reads),
+      // then the shell lands it on the pointed-at card via withPhoto — a real photo, honestly
+      // marked, which is exactly what listing kinds require.
+      acceptPhoto: async (file) => {
+        if (!clusterId) throw new Error('this area is still setting up — give it a second and drop it again');
+        const f = await uploadClusterFile(clusterId, file, {
+          caption: file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, 80) || null,
+          label: 'dropped',
+        });
+        setMaterials((m) => (m ? { ...m, images: [{ url: f.url, caption: f.caption, label: f.label }, ...m.images] } : m));
+        return { url: f.url, caption: f.caption };
+      },
+      applyPhoto: (c, url, caption) => withPhoto(c, url, caption),
 
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && kindById(kindId)) || defaultKind(realEstate);

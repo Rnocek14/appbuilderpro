@@ -14,7 +14,7 @@ import {
   aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor, withProjectTasks,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
-import { applySuggestion, offerToSurface, onSurfaceChange, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
+import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
@@ -156,6 +156,30 @@ export function ConciergeDock() {
   // Surface chips re-read when a board/builder mounts or unmounts under the dock.
   const [, setSurfaceNonce] = useState(0);
   useEffect(() => onSurfaceChange(() => setSurfaceNonce((n) => n + 1)), []);
+
+  // PHOTOS INTO THE CHAT — drag a picture onto the dock (or paste one) and it lands on the open
+  // work: the postcard board saves it as a real material and puts it ON the pointed-at card; the
+  // builder sends it into the chat. No surface open = an honest pointer, never a lost drop.
+  const [dropping, setDropping] = useState(false);
+  const handleFiles = async (files: FileList | File[] | null) => {
+    const list = files ? [...files] : [];
+    const img = list.find((f) => f.type.startsWith('image/'));
+    if (!img) {
+      if (list.length) setNote("That file isn't an image — pictures are what land on the work.");
+      return;
+    }
+    if (!surfaceAcceptsFiles()) {
+      setNote('Photos land on the open work — open the postcard board or the builder first, then drop it again.');
+      return;
+    }
+    setBusy(true);
+    setNote('Placing the photo…');
+    const n = await offerFileToSurface(img);
+    setBusy(false);
+    setNote(n ?? 'Could not place the photo — the board may still be loading. Try once more in a second.');
+    if (n) speak(n);
+    if (list.length > 1) setNote((cur) => `${cur ?? ''}${cur ? ' ' : ''}(One photo at a time — the first one was used.)`);
+  };
 
   useEffect(() => { sessionStorage.setItem(OPEN_KEY, open ? '1' : '0'); }, [open]);
   useEffect(() => {
@@ -521,6 +545,7 @@ export function ConciergeDock() {
     return (
       <button ref={(el) => { rootRef.current = el; }} onPointerDown={startDrag}
         onClick={() => { if (justDragged.current) return; setOpen(true); }}
+        onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); setOpen(true); } }}
         aria-label="Open the concierge — say what you want to do (drag to move it)"
         style={posStyle}
         className="fixed bottom-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105">
@@ -533,7 +558,11 @@ export function ConciergeDock() {
 
   return (
     <div ref={(el) => { rootRef.current = el; }} style={posStyle}
-      className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl">
+      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(e) => { e.preventDefault(); setDropping(false); void handleFiles(e.dataTransfer.files); }}
+      className={cn('fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
+        dropping && 'border-forge-ember/70 ring-2 ring-forge-ember/40')}>
       <div className="flex items-center gap-2">
         <button onPointerDown={startDrag} onDoubleClick={redock}
           aria-label="Move the concierge — drag it anywhere; double-click to send it back to the corner"
@@ -564,6 +593,12 @@ export function ConciergeDock() {
         <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
           onPaste={(e) => {
+            // A pasted IMAGE (screenshot, copied photo) lands on the work like a drop does.
+            if ([...e.clipboardData.files].some((f) => f.type.startsWith('image/'))) {
+              e.preventDefault();
+              void handleFiles(e.clipboardData.files);
+              return;
+            }
             const t = e.clipboardData.getData('text');
             if (isBrief(t)) { e.preventDefault(); captureBrief(t); }
           }}
