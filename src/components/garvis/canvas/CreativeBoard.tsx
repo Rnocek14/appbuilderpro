@@ -62,6 +62,10 @@ export interface CreativeBoardAdapter<C> {
   /** REFERENCES — the operator's real photos, logo, palette. Shown in a rail beside the work so
    *  creating never means leaving to go find what the business actually looks like. */
   references?: { label: string; url?: string | null; swatches?: string[] }[];
+  /** RESEARCH — the world's real intel notes (competitor research, category studies), shown in
+   *  the SAME rail so riffing and researching share one eye-line. Read-only here; the intel
+   *  area owns the full documents. */
+  research?: { title: string; body: string }[];
 }
 
 export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 }: {
@@ -392,7 +396,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
         )}
         {/* When the references rail is open, the whole plane shifts right by its width — the rail must
             never sit ON TOP of cards (the first column would become unclickable). */}
-        <div className="cb-plane" style={{ transform: `translate(${pan.x + (refsOpen && (adapter.references?.length ?? 0) > 0 ? 158 : 0)}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'top left' }}>
+        <div className="cb-plane" style={{ transform: `translate(${pan.x + (refsOpen && ((adapter.references?.length ?? 0) + (adapter.research?.length ?? 0)) > 0 ? 158 : 0)}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'top left' }}>
           {/* lineage connectors */}
           <svg className="cb-links" width="100%" height="100%">
             {shown.map((t) => {
@@ -452,7 +456,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
 
         {/* THE REFERENCES RAIL — your real photos, logo, and palette live BESIDE the work, so creating
             never means leaving the board to remember what the business actually looks like. */}
-        {(adapter.references?.length ?? 0) > 0 && (
+        {((adapter.references?.length ?? 0) + (adapter.research?.length ?? 0)) > 0 && (
           <div className="cb-refs" onPointerDown={(e) => e.stopPropagation()}>
             <button className="cb-refs-tab" onClick={() => setRefsOpen((v) => !v)} title={refsOpen ? 'Hide references' : 'References — your real photos & brand'}>
               {refsOpen ? '‹' : '🖼'}
@@ -460,7 +464,7 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
             {refsOpen && (
               <div className="cb-refs-body">
                 <span className="cb-org-label">References</span>
-                {adapter.references!.map((r, i) => (
+                {(adapter.references ?? []).map((r, i) => (
                   <div key={i} className="cb-ref">
                     {r.url && <img src={r.url} alt={r.label} loading="lazy" />}
                     {r.swatches && r.swatches.length > 0 && (
@@ -469,7 +473,18 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
                     <span className="cb-ref-lbl" title={r.label}>{r.label}</span>
                   </div>
                 ))}
-                <p className="cb-refs-note">Your real materials — what the cards are made from.</p>
+                {(adapter.research?.length ?? 0) > 0 && (
+                  <>
+                    <span className="cb-org-label" style={{ marginTop: 10 }}>Research</span>
+                    {adapter.research!.map((r, i) => (
+                      <div key={`rs-${i}`} className="cb-ref" style={{ padding: '6px 8px' }}>
+                        <span className="cb-ref-lbl" title={r.title}>{r.title}</span>
+                        <p style={{ margin: '4px 0 0', fontSize: 10, lineHeight: 1.45, color: 'var(--forge-dim, #8a8f98)', whiteSpace: 'pre-line' }}>{r.body}</p>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <p className="cb-refs-note">Your real materials and research — what the cards are made from.</p>
               </div>
             )}
           </div>

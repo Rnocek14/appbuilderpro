@@ -88,6 +88,37 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
   const [busy, setBusy] = useState<string | null>(null);
   const [whatIf, setWhatIf] = useState<string | null>(null); // null = closed; '' = open, typing
   const [showBench, setShowBench] = useState(false);
+  // "file into a business" — the curiosity→intel bridge. Targets are REAL intel areas.
+  const [fileOpen, setFileOpen] = useState(false);
+  const [fileTargets, setFileTargets] = useState<{ clusterId: string; label: string }[] | null>(null);
+  const [filing, setFiling] = useState(false);
+  const loadFileTargets = async () => {
+    try {
+      const { supabase } = await import('../../lib/supabase');
+      const { data } = await supabase.from('knowledge_clusters')
+        .select('id, title, charter, knowledge_worlds!inner(title)').limit(200);
+      const rows = (data ?? []) as unknown as { id: string; title: string; charter: { archetype?: string } | null; knowledge_worlds: { title: string } }[];
+      setFileTargets(rows.filter((r) => r.charter?.archetype === 'intel')
+        .map((r) => ({ clusterId: r.id, label: `${r.knowledge_worlds?.title ?? 'Business'} → ${r.title}` })).slice(0, 12));
+    } catch { setFileTargets([]); }
+  };
+  const fileInto = async (clusterId: string, label: string) => {
+    if (!focus) return;
+    setFiling(true);
+    try {
+      const { createArtifact } = await import('../../lib/garvis/artifacts');
+      const notes = focus.artifacts.filter((a) => a.detail).slice(0, 3).map((a) => `${a.title}: ${a.detail}`).join('\n\n');
+      await createArtifact({
+        clusterId, kind: 'research',
+        title: `From the universe: ${focus.title}`.slice(0, 80),
+        detail: [focus.summary, notes].filter(Boolean).join('\n\n').slice(0, 4000),
+        source: 'knowledge-universe',
+      });
+      setFileOpen(false);
+    } catch { /* the picker stays open — nothing pretended */ }
+    finally { setFiling(false); }
+    return label;
+  };
   const [pickStatus, setPickStatus] = useState(false);
   const [comparePick, setComparePick] = useState(false);
   const [compareQ, setCompareQ] = useState('');
@@ -431,6 +462,48 @@ export default function IdeaRoom({ graph, setGraph, focusId, setFocusId, onCost,
             <span className="mx-1 inline-block h-3 w-px self-center bg-forge-border" aria-hidden />{/* learn ↑ · test ↓ */}
             <button onClick={() => setWhatIf(whatIf === null ? '' : null)} className={`inline-flex items-center gap-1 ${whatIf !== null ? 'text-orange-400' : 'hover:text-orange-400'}`}><Split size={11} /> what if…</button>
             <button onClick={() => setShowBench((v) => !v)} className={`inline-flex items-center gap-1 ${showBench ? 'text-cyan-300' : 'hover:text-cyan-300'}`}><FlaskConical size={11} /> lab bench</button>
+            {/* THE BRIDGE OUT: an explored idea that crystallizes leaves the universe as a BRIEF —
+                everything gathered here rides into genesis intact; "Draft the web" stays the
+                explicit act, so curiosity never silently becomes commitment. */}
+            <button
+              onClick={() => {
+                const kids = children.slice(0, 8).map((c) => `- ${c.title}: ${c.summary}`).join('\n');
+                const notes = focus.artifacts.filter((a) => a.detail).slice(0, 3).map((a) => `${a.title}: ${a.detail}`).join('\n');
+                const brief = [
+                  `Make "${focus.title}" real — turn this explored idea into a working operation.`,
+                  focus.summary,
+                  focus.trajectory ? `Where it's going: ${focus.trajectory}` : '',
+                  kids ? `Branches explored:\n${kids}` : '',
+                  notes ? `Notes gathered:\n${notes}` : '',
+                ].filter(Boolean).join('\n\n');
+                try {
+                  sessionStorage.setItem('ff:genesis-intent', brief.slice(0, 4000));
+                  sessionStorage.setItem('ff:concierge-task', JSON.stringify({ taskId: 'big-brief', done: [] }));
+                  sessionStorage.setItem('ff:concierge-open', '1');
+                } catch { /* fine */ }
+                window.location.assign('/garvis/webs');
+              }}
+              className="inline-flex items-center gap-1 hover:text-forge-ember"
+            ><Waypoints size={11} /> make this real</button>
+            {/* RESEARCH FLOWS BACK: what curiosity gathered becomes a real intel note in a
+                business the operator PICKS — an explicit press, into a real row, never silent. */}
+            <button onClick={() => { setFileOpen((v) => !v); if (!fileOpen) void loadFileTargets(); }}
+              className={`inline-flex items-center gap-1 ${fileOpen ? 'text-forge-ember' : 'hover:text-forge-ember'}`}
+            ><FolderKanban size={11} /> file into a business</button>
+          </div>
+          {fileOpen && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {fileTargets === null ? <Loader2 size={12} className="animate-spin text-forge-ember" />
+                : fileTargets.length === 0 ? <span className="text-[11px] text-forge-dim">No intel areas yet — a business with an intel area can receive this.</span>
+                : fileTargets.map((t) => (
+                  <button key={t.clusterId} disabled={filing} onClick={() => void fileInto(t.clusterId, t.label)}
+                    className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink disabled:opacity-50">
+                    {t.label}
+                  </button>
+                ))}
+            </div>
+          )}
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-forge-dim/70">
             <button
               onClick={() => {
                 if (picture) { setPicture(null); return; }
