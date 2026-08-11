@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, isGoBack, parseCommandPrefix, reelTopic, resolve, routeFor, smallTalk, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, deriveWorldTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, isGoBack, parseCommandPrefix, reelTopic, resolve, routeFor, smallTalk, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -273,6 +273,37 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('deriveTasks is deterministic', JSON.stringify(a) === JSON.stringify(deriveTasks(CONCIERGE_TASKS, sample)));
   check('a not_built capability is never proposed', !a.some((t) => t.id === 'cap:c2') && a.some((t) => t.id === 'cap:c1'));
   check('a nav item on a handwritten route is skipped', !a.some((t) => t.id === 'nav:/garvis/queue'));
+}
+
+// ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----
+{
+  const MOMV: ConciergeWorld[] = [
+    { id: 'w-mom', title: 'Mom Real Estate Marketing', slugs: ['brand', 'direct-mail', 'video-ideas', 'social-content'] },
+    { id: 'w-como', title: 'Como Country Club', slugs: ['capsule-merch', 'brand'] },
+    { id: 'w-chan', title: 'Caregiver Channel', slugs: ['growth-studio'] },
+  ];
+  const tasks = deriveWorldTasks(ALL_CONCIERGE_TASKS, MOMV);
+  const r = resolve('lets work on video for my mom', MOMV, tasks);
+  check('"lets work on video for my mom" → the mom world\'s VIDEO area (the ask that forced this tier)',
+    r.kind === 'go' && r.task?.id === 'area:w-mom:video-ideas' && r.route === '/garvis/webs/w-mom?area=video-ideas');
+  const social = resolve('lets do moms social posts', MOMV, tasks);
+  check('"moms social posts" reaches the mom world\'s social area',
+    (social.kind === 'go' && social.task?.id === 'area:w-mom:social-content') || (social.kind === 'suggest' && !!social.suggestions?.some((t) => t.id === 'area:w-mom:social-content')));
+  const merch = resolve('work on the como merch', MOMV, tasks);
+  check('"como merch" → the capsule room', merch.kind === 'go' && merch.task?.id === 'area:w-como:capsule-merch');
+  check('a world word alone still belongs to the handwritten door ("moms postcard" stays postcard)',
+    resolve('lets work on moms postcard', MOMV, tasks).task?.id === 'postcard');
+  check('an area word alone NEVER fires a cross task ("start a clothing brand" stays the genesis door)',
+    resolve('lets start a clothing brand', MOMV, tasks).task?.id === 'clothing-brand');
+  check('generic title words never steal ("lets work on the channel" still drafts the episode)',
+    resolve('lets work on the channel', MOMV, tasks).task?.id === 'draft-episode');
+  check('the FULL world title is always a door ("open como country club")',
+    resolve('open como country club', MOMV, tasks).task?.id === 'world:w-como');
+  check('cross tasks never dilute ownership (deriveWorldTasks is additive + deterministic)',
+    JSON.stringify(deriveWorldTasks(ALL_CONCIERGE_TASKS, MOMV)) === JSON.stringify(deriveWorldTasks(ALL_CONCIERGE_TASKS, MOMV))
+    && deriveWorldTasks(ALL_CONCIERGE_TASKS, []).length === ALL_CONCIERGE_TASKS.length);
+  check('areas owned by handwritten tasks are never twinned (no derived direct-mail area)',
+    !tasks.some((t) => t.id === 'area:w-mom:direct-mail'));
 }
 
 // ---- SMALL TALK, HALTS & BACK — chatter never navigates, negations never "do" ----

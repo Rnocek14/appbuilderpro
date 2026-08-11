@@ -33,6 +33,10 @@ export interface ConciergeTask {
   genesisIntent?: string;
   /** For create tasks with a one-click template on the Businesses page. */
   templateId?: string;
+  /** WORLD×AREA cross-match: when a word from EACH set hits ("mom" + "video"), the pairing IS
+   *  the meaning — matchTasks adds a bonus so the operator's own asset graph outranks generic
+   *  doors. Only world-area tasks (deriveWorldTasks) set this. */
+  crossSets?: [string[], string[]];
   steps: string[];           // the walkthrough shown in the dock after arrival (2-6 steps)
 }
 
@@ -332,7 +336,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').replac
  *  real match gets the same boost, the lead between two candidates (the confidence signal) is
  *  never distorted. None of these may appear as a task keyword (the verify suite holds that). */
 export const NAV_VERBS = [
-  'open', 'go to', 'show me', 'take me to', 'where is', 'set up',
+  'open', 'go to', 'show me', 'take me to', 'where is', 'set up', 'work on',
   'check', 'see', 'view', 'look at', 'whats', "what's", 'i want to', 'i need to', 'lets', 'make',
 ];
 
@@ -350,15 +354,24 @@ export function matchTasks(input: string, tasks: ConciergeTask[] = CONCIERGE_TAS
   const text = ` ${norm(input)} `;
   if (text.trim().length < 3) return [];
   const owners = new Map<string, number>();
-  for (const t of tasks) for (const k of new Set(t.keywords.map(norm))) owners.set(k, (owners.get(k) ?? 0) + 1);
+  // Cross-set (world×area) tasks ride on PAIRINGS, not word ownership — they never dilute the
+  // uniqueness of another task's vocabulary ("brand" stays the clothing-brand task's word).
+  for (const t of tasks) { if (t.crossSets) continue; for (const k of new Set(t.keywords.map(norm))) owners.set(k, (owners.get(k) ?? 0) + 1); }
   const verbBoost = NAV_VERBS.reduce((n, v) => n + (text.includes(` ${norm(v)} `) ? norm(v).split(' ').length : 0), 0);
   return tasks
     .map((task) => {
-      const base = task.keywords.reduce((n, k) => {
+      let base = task.keywords.reduce((n, k) => {
         const nk = norm(k);
         if (!text.includes(` ${nk} `)) return n;
         return n + nk.split(' ').length + (owners.get(nk) === 1 ? 1 : 0);
       }, 0);
+      // The WORLD×AREA cross rule: "mom" and "video" are each weak alone, but together they
+      // name exactly one place. A cross task fires ONLY on the pairing (either word alone is
+      // someone else's business), and the pairing earns a bonus beyond the sum of its words.
+      if (task.crossSets) {
+        const hit = (set: string[]) => set.some((w) => text.includes(` ${norm(w)} `));
+        base = hit(task.crossSets[0]) && hit(task.crossSets[1]) ? base + 2 : 0;
+      }
       return { task, score: base > 0 ? base + verbBoost : 0 };
     })
     .filter((m) => m.score >= minScore)
@@ -708,6 +721,99 @@ export function deriveTasks(existing: ConciergeTask[], src: DerivedSources): Con
   }
 
   return [...existing.map(foldKeywords), ...derived];
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE WORLD-KNOWLEDGE TIER — the operator's OWN worlds and areas are the primary vocabulary.
+// "lets work on video for my mom" names a place ("mom" = the Mom world, "video" = its video
+// area) and must land THERE, not in a suggestion list of generic doors. Every world becomes a
+// sayable door; every recognizable area becomes a world×area task whose cross-match bonus makes
+// the pairing beat any single shared word. Title words deliberately BYPASS the word-claim
+// discipline — the operator's names for their own businesses are never strippable — and the
+// acceptance corpus + eval harnesses hold the line that handwritten sentences still win.
+// ---------------------------------------------------------------------------------------------
+
+/** What an area slug is ABOUT, in the operator's words. Checked in order; first match wins. */
+const AREA_VOCAB: [RegExp, string[]][] = [
+  [/video|reel|film/, ['video', 'videos', 'film']],
+  [/social|instagram|posts/, ['social', 'instagram', 'posts']],
+  [/email|newsletter/, ['email', 'emails', 'newsletter']],
+  [/brand/, ['brand', 'branding', 'logo']],
+  [/merch|capsule|apparel/, ['merch', 'shirt', 'tee', 'hat', 'apparel']],
+  [/list|audience|farm/, ['lists', 'audience']],
+  [/market|analysis|intel/, ['market', 'analysis', 'research']],
+  [/crm|follow/, ['crm', 'follow up', 'follow ups']],
+  [/landing|site|web/, ['landing', 'website', 'pages']],
+  [/ads|advert/, ['ads', 'advertising']],
+  [/seo|article/, ['seo', 'articles']],
+];
+
+const prettySlug = (slug: string) => slug.replace(/-/g, ' ');
+
+/** Derive doors from the operator's real worlds: an "Open <world>" task per world, and a
+ *  world×area task for every area whose slug names a known kind of work. Areas already owned by
+ *  a handwritten task (postcard's direct-mail, reel's growth-studio…) are skipped — the
+ *  handwritten steps are better and twins would split the score. */
+export function deriveWorldTasks(existing: ConciergeTask[], worlds: ConciergeWorld[]): ConciergeTask[] {
+  const ownedSlugs = new Set(existing.map((t) => t.worldSlug).filter(Boolean));
+  // "Open <world>" tasks obey the normal claim discipline — a world named with generic words
+  // ("Caregiver Channel") must not steal 'channel' from the episode drafter. The full title
+  // phrase always survives, so the complete name is always a door.
+  const claimedExact = new Set<string>();
+  const claimed = new Set<string>();
+  // Words living ONLY inside multi-word claimed phrases ('real', 'estate' from "real estate")
+  // can't serve as cross words — a title that contains someone's phrase must not intercept that
+  // phrase's asks. Whole claimed keywords ('mom') still can: that overlap is the point.
+  const phrasePart = new Set<string>();
+  const wholeClaimed = new Set<string>();
+  for (const t of existing) for (const k of t.keywords) {
+    const nk = norm(k);
+    claimedExact.add(nk);
+    claimed.add(nk);
+    const words = nk.split(' ');
+    if (words.length === 1) { wholeClaimed.add(nk); wholeClaimed.add(fold(nk)); }
+    for (const wd of words) {
+      claimedExact.add(wd); claimed.add(wd); claimed.add(fold(wd));
+      if (words.length > 1) { phrasePart.add(wd); phrasePart.add(fold(wd)); }
+    }
+  }
+  const out = [...existing];
+  for (const w of worlds.slice(0, 20)) {
+    const title = w.title?.trim();
+    if (!title) continue;
+    const titleWords = significantWords(title);
+    if (!titleWords.length) continue;
+    const phrase = norm(title);
+    const freeWords = titleWords.filter((wd) => !claimed.has(wd));
+    out.push({
+      id: `world:${w.id}`,
+      label: `Open ${title}`,
+      keywords: [...new Set([...(phrase && !claimedExact.has(phrase) ? [phrase] : []), ...freeWords])],
+      kind: 'navigate',
+      route: `/garvis/webs/${w.id}`,
+      steps: [`${title} opens on its main work surface — every area is one tap from there`],
+    });
+    const crossTitleWords = titleWords.filter((wd) => !phrasePart.has(wd) || wholeClaimed.has(wd));
+    for (const slug of [...new Set(w.slugs)].slice(0, 14)) {
+      if (ownedSlugs.has(slug)) continue;
+      if (!crossTitleWords.length) break;
+      const vocab = AREA_VOCAB.find(([re]) => re.test(slug));
+      if (!vocab) continue;
+      out.push({
+        id: `area:${w.id}:${slug}`,
+        label: `${title} — ${prettySlug(slug)}`,
+        keywords: [...new Set([...crossTitleWords, ...vocab[1]])],
+        crossSets: [crossTitleWords, vocab[1]],
+        kind: 'navigate',
+        route: `/garvis/webs/${w.id}?area=${slug}`,
+        steps: [
+          `You're inside ${title} — the ${prettySlug(slug)} work is on screen`,
+          'Anything it wants to send still waits for you in Queue',
+        ],
+      });
+    }
+  }
+  return out;
 }
 
 /** The operator's BUILDER projects become sayable doors ("work on jims site" → that project's

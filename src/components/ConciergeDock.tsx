@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, GripVertical, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isGoBack, isRevision, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
+  aliasKey, aliasLookup, aliasRemember, deriveWorldTasks, exploreDive, isBrief, isGoBack, isRevision, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
 import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
@@ -46,7 +46,9 @@ export function readHandoff(...taskIds: string[]): ConciergeHandoff | null {
   } catch { return null; }
 }
 
-interface ActiveGuide { taskId: string; done: number[] }
+// The snapshot carries a DYNAMIC task's label/steps across the per-page dock remount —
+// world/area/project tasks only exist after loadWorlds runs, but the guide must show at once.
+interface ActiveGuide { taskId: string; done: number[]; snapshot?: { label: string; steps: string[] } }
 
 const ALIAS_KEY = 'ff:concierge-aliases';
 const VOICE_KEY = 'ff:concierge-voice';
@@ -292,15 +294,18 @@ export function ConciergeDock() {
       w.slugs.push(c.slug);
       byWorld.set(c.world_id, w);
     }
-    tasksRef.current = withProjectTasks(ALL_CONCIERGE_TASKS, projs);
+    // The full brain: handwritten + platform-derived + THE OPERATOR'S OWN worlds/areas/projects.
+    tasksRef.current = withProjectTasks(deriveWorldTasks(ALL_CONCIERGE_TASKS, [...byWorld.values()]), projs);
     worldsRef.current = [...byWorld.values()];
     return worldsRef.current;
   };
 
   // Persist SYNCHRONOUSLY before navigating: the route change unmounts this dock (AppShell is
   // per-page) before any effect could run — an effect-based save loses the guide every time.
-  const startGuide = (taskId: string) => {
-    const g: ActiveGuide = { taskId, done: [] };
+  const startGuide = (taskOrId: ConciergeTask | string) => {
+    const g: ActiveGuide = typeof taskOrId === 'string'
+      ? { taskId: taskOrId, done: [] }
+      : { taskId: taskOrId.id, done: [], snapshot: { label: taskOrId.label, steps: taskOrId.steps } };
     try { sessionStorage.setItem(TASK_KEY, JSON.stringify(g)); sessionStorage.setItem(OPEN_KEY, '1'); } catch { /* fine */ }
     setGuide(g);
   };
@@ -316,7 +321,7 @@ export function ConciergeDock() {
     }
     // The operator's words ride along — destinations with a primary input read them once.
     if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); } catch { /* fine */ } }
-    startGuide(task.id);
+    startGuide(task);
     const missing = missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null;
     setNote(missing);
     if (missing) { try { sessionStorage.setItem('ff:concierge-note', missing); } catch { /* fine */ } }
@@ -329,7 +334,7 @@ export function ConciergeDock() {
   const confirmCreate = (task: ConciergeTask) => {
     if (task.genesisIntent) { try { sessionStorage.setItem(GENESIS_PREFILL_KEY, task.genesisIntent); window.dispatchEvent(new Event('ff:genesis-intent')); } catch { /* fine */ } }
     setPendingCreate(null);
-    startGuide(task.id);
+    startGuide(task);
     navigate(task.route);
   };
 
@@ -614,7 +619,8 @@ export function ConciergeDock() {
     rec.start();
   };
 
-  const task = guide ? tasksRef.current.find((t) => t.id === guide.taskId) ?? null : null;
+  const foundTask = guide ? tasksRef.current.find((t) => t.id === guide.taskId) ?? null : null;
+  const task = foundTask ?? (guide?.snapshot ? ({ id: guide.taskId, label: guide.snapshot.label, steps: guide.snapshot.steps, keywords: [], kind: 'navigate', route: '' } as ConciergeTask) : null);
 
   if (!open) {
     return (
