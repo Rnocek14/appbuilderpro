@@ -223,6 +223,13 @@ const ALL = ALL_CONCIERGE_TASKS;
     (() => { const r = resolve('start marketing my stroke app', WORLDS, ALL); return r.task?.id === 'app-marketing' || (r.suggestions ?? []).some((t) => t.id === 'app-marketing'); })());
   check('"work on the marketing plan for my app" reaches it too',
     (() => { const r = resolve('work on the marketing plan for my app', WORLDS, ALL); return r.task?.id === 'app-marketing' || (r.suggestions ?? []).some((t) => t.id === 'app-marketing'); })());
+  // The ideation family lands IN the conversation, never a two-sentence dead end.
+  check('"lets come up with new creative strategies" goes to the brainstorm (Garvis on Home)',
+    resolve('lets come up with new creative strategies', WORLDS, ALL).task?.id === 'brainstorm');
+  check('"new ideas for instagram posts" brainstorms too',
+    resolve('new ideas for instagram posts', WORLDS, ALL).task?.id === 'brainstorm');
+  check('"what worked this week" is the episode-results stat', statsFor('what worked this week') === 'episode_stats');
+  check('"hows the stroke app going" is the portfolio stat', statsFor('hows the stroke app going') === 'portfolio');
 }
 {
   // Determinism + purity of the derivation itself.
