@@ -5,7 +5,7 @@ import {
   scanFindingsParagraph, scanFindingsHtml,
   type HuntProfileInput,
 } from './clientHuntBuild';
-import { SCAN_DISCLOSURE, claimsAreSafe, type PitchFinding } from './prospects/pitchFindings';
+import { scanProvenance, claimsAreSafe, type PitchFinding } from './prospects/pitchFindings';
 import { auditSite, type SiteAudit } from './siteAudit';
 import { parseBusinessProfile, assembleFallbackSpec } from '../preview/spec';
 
@@ -110,6 +110,14 @@ const serper = {
   check('the pitch mentions the current-site concern (a score was observed)', /costing you leads/.test(pitch));
   check('the pitch closes with no pressure', /no obligation/i.test(pitch.toLowerCase()));
   check('no [Name]-style placeholders leak', !/\[[A-Za-z]/.test(pitch));
+
+  // The gated AI opener (pitchCraft seam) outranks the template opening and swaps the bridge.
+  const hook = "Joe's Roofing has re-shingled half of Walworth County, but your website still hides the phone number on a phone.";
+  const withOpener = buildHuntPitch(profile!, url, [], [], null, hook);
+  check('an opener override replaces the template opening', withOpener.includes(hook) && !/I came across/.test(withOpener));
+  check('the override swaps the bridge line so it still parses', withOpener.includes('So I went ahead and built you a new one:') && !/Rather than just tell you that/.test(withOpener));
+  check('the link, close, and greeting survive an override', withOpener.split(url).length === 2 && /no obligation/i.test(withOpener) && withOpener.startsWith("Hi Joe's Roofing team,"));
+  check('a blank override falls back to the template opening', /I came across/.test(buildHuntPitch(profile!, url, [], [], null, '  ')));
 }
 
 // --- buildHuntPitchEmailHtml: SHOW the site (a real screenshot), honest + escaped --------------
@@ -132,7 +140,12 @@ const serper = {
   check('the screenshot is a clickable hero linking to the live preview',
     imgIdx > -1 && heroAnchor > -1 && flat.slice(heroAnchor, imgIdx).includes(`<a href="${url}"`));
   check('names the business (apostrophe HTML-escaped, markup intact)', html.includes('Joe&#39;s Roofing'));
-  check('carries the grounded automation offer (evidence + price)', html.includes('never drop a lead') && html.includes('$300–600/mo'));
+  // Per-line prices are DELIBERATELY absent (a stack of ranges reads as a bill); the single
+  // cheapest-entry anchor rides underneath and the per-item ranges live on the demo page's menu.
+  check('carries the grounded automation offer (evidence, no per-line price)',
+    html.includes('never drop a lead') && !html.includes('(from $') && !html.includes('$300–600/mo'));
+  check('one cheapest-entry price anchor + pick-what-you-want + independence',
+    html.includes('start at $300/mo') && html.includes('you pick only the ones you want') && html.includes('works fine without any of them'));
   check('the email closes with no pressure', /no obligation/i.test(html));
   check('NEVER promises SMS / missed-call text-back (not built)', !/text[-\s]?back|missed[-\s]?call|by text/i.test(html));
   check('no [Name]-style placeholders leak', !/\[[A-Za-z]/.test(html));
@@ -152,6 +165,12 @@ const serper = {
   })).profile;
   const evilHtml = buildHuntPitchEmailHtml(evil!, url, shot, []);
   check('a hostile business name is HTML-escaped (no raw <script>)', !evilHtml.includes('<script>') && evilHtml.includes('&lt;script&gt;'));
+
+  // The opener override rides into the HTML twin — escaped, with the swapped bridge.
+  const htmlOpener = buildHuntPitchEmailHtml(profile!, url, shot, [], null, [], 'Joe\'s Roofing has <great> reviews but your roofing site never shows them.');
+  check('the HTML twin carries the override, escaped', htmlOpener.includes('&lt;great&gt;') && !htmlOpener.includes('<great>') && !/I came across/.test(htmlOpener));
+  check('the HTML twin swaps the bridge under an override', /So I went ahead and built you a new one this week/.test(htmlOpener));
+  check('no override → the template lede, verbatim', /I came across/.test(buildHuntPitchEmailHtml(profile!, url, shot, [])));
 }
 
 // --- escHtml + automationUpsellHtml: escaping + grounding --------------------------------------
@@ -159,7 +178,9 @@ const serper = {
   check('escHtml neutralizes markup-breaking characters', escHtml(`<b>"A&B"'`) === '&lt;b&gt;&quot;A&amp;B&quot;&#39;');
   check('automationUpsellHtml is empty without a grounded upsell', automationUpsellHtml([]) === '' && automationUpsellHtml([{ title: 't', pitch: 'p', monthlyPrice: '$1', evidence: '' }]) === '');
   const h = automationUpsellHtml([{ title: 'X', pitch: 'do X', monthlyPrice: '$200/mo', evidence: 'because Y' }]);
-  check('automationUpsellHtml grounds each line in its observed evidence', h.includes('because Y') && h.includes('do X') && h.includes('$200/mo'));
+  check('automationUpsellHtml grounds each line in its observed evidence (price off the line)',
+    h.includes('because Y') && h.includes('do X') && !h.includes('$200/mo'));
+  check('an unparseable price never invents an anchor number', !/start at \$/.test(h) && h.includes('you pick only the ones you want'));
 }
 
 // --- huntRunLine: the honest daily record (discovered + built + queued) ------------------------
@@ -239,10 +260,13 @@ const serper = {
   check('no findings → the HTML block is omitted too', scanFindingsHtml([]) === '');
 
   const one = [pf({ code: 'conv.no_contact_path' })];
-  const text = scanFindingsParagraph(one);
-  check('a finding renders as a bullet', /• No way to get in touch/.test(text));
-  check('the disclosure always rides with the findings', text.includes(SCAN_DISCLOSURE));
-  check('the HTML twin also carries the disclosure', scanFindingsHtml(one).includes(escHtml(SCAN_DISCLOSURE)));
+  const text = scanFindingsParagraph(one, ['/', '/contact']);
+  check('a mapped finding renders as its owner-voice bullet, not the report sentence',
+    /• No contact form, no email link and no tappable phone number/.test(text));
+  check('the provenance line always rides with the findings', text.includes(scanProvenance(['/', '/contact'])));
+  check('the provenance names the corroborating page', /your contact page/.test(text));
+  check('the HTML twin also carries the provenance', scanFindingsHtml(one, ['/', '/contact']).includes(escHtml(scanProvenance(['/', '/contact']))));
+  check('no corroboration data → the line honestly names the homepage alone', /reading the code of your homepage directly/.test(scanFindingsParagraph(one)));
 
   const many = ['a', 'b', 'c', 'd', 'e'].map((c) => pf({ code: `conv.${c}` }));
   check('at most three findings reach the email', (scanFindingsParagraph(many).match(/•/g) ?? []).length === 3);
@@ -266,9 +290,9 @@ const serper = {
     audit: auditSite({ url: 'http://acmeroofing.com', reachable: true, title: 'x', text: 'thin', hasViewport: false }, 2026),
   }));
   const composed = buildHuntPitch(prof!, 'https://x.test/p/acme', [], one);
-  check('the composed pitch names the finding', /No way to get in touch/.test(composed));
+  check('the composed pitch names the finding', /No contact form, no email link/.test(composed));
   check('the composed pitch passes the claim gate', claimsAreSafe(composed));
-  check('a pitch with no findings is unchanged in shape', !buildHuntPitch(prof!, 'https://x.test/p/acme').includes(SCAN_DISCLOSURE));
+  check('a pitch with no findings carries no provenance line either', !buildHuntPitch(prof!, 'https://x.test/p/acme').includes('reading the code'));
   check('HTML escaping still applies to finding copy',
     !scanFindingsHtml([pf({ code: 'x.y', title: '<script>alert(1)</script>' })]).includes('<script>alert(1)</script>'));
 }

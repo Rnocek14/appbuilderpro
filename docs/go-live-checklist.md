@@ -16,14 +16,19 @@ Secrets go in **Supabase → Project Settings → Edge Functions → Secrets** (
 ## Tier 0 — Ship the code (one-time) — **do this first**
 
 Functions auto-deploy on every merge to `main`, but **migrations do not** — they only apply on a `mode=full`
-deploy. Four recent migrations are waiting:
+deploy. Every migration after the last one you applied is waiting (the series currently runs up to
+`app_0138`; check `supabase/migrations/` for the latest — this file is not the source of truth for the
+list, the directory is).
 
-- [ ] `app_0105` (Veo scenes), `app_0106` (SMS channel), `app_0107` (missed-call), `app_0108` (per-client config)
 - [ ] **Run the Supabase deploy workflow once in `mode=full`** (GitHub → Actions → the deploy-supabase
       workflow → Run with `mode=full`). This applies all pending migrations *and* deploys the full function
-      fleet, including `system-control`, `send-sms`, `voice-inbound`.
+      fleet. Tick **`arm_heartbeat`** in the same run to schedule the daily cron jobs (or arm from the
+      Health page later, Tier 1).
 
-Until this runs, the SMS / missed-call / per-client tables don't exist and those pages will read empty.
+⚠ **Silent pitch-blocker until this runs**: `app_0137` adds `outreach_messages.subject_variant`, which the
+hunt's pitch-queueing insert writes. With the column missing the insert fails and **no pitch is queued at
+all** — demos build, the run reports "built", and nothing ever lands in the Queue. If hunts seem to build
+but never pitch, an unapplied migration is the first suspect.
 
 ---
 
@@ -54,6 +59,7 @@ The daily machine that finds businesses, builds demo sites, and queues pitches f
 - [ ] `APP_ORIGIN` = your deployed app URL. ⚠ **Critical and silent**: with this unset, hunts build demos
       but **no pitch is ever queued** (the demo link would be broken) and you'll see "nothing happened."
 - [ ] `SCREENSHOT_API_KEY` — the screenshot-in-email pitch (optional; falls back to a text+link pitch).
+      ⚠ Not in the deploy workflow's secret-sync list — set it directly (`supabase secrets set`).
 - [ ] Then arm a hunt: **Win clients** → start the daily client hunt (or run "Scrape everything" on demand).
 
 The Setup page's readiness light summarizes this as **canHunt** / **canAutoHunt**.
@@ -71,6 +77,9 @@ chase, and reactivation goes through this one path.
 - [ ] Flip `outbound_enabled` **ON** (the email kill switch, off by default).
 - [ ] `RESEND_WEBHOOK_SECRET` — bounce/open/click tracking (point the Resend webhook at `resend-webhook`).
 - [ ] `INBOUND_SECRET` — reply ingestion (so replies auto-classify + stop the sequence).
+- [ ] **Selling "instantly acknowledged" leads?** Flip `auto_first_touch` ON (Settings) — it's the
+      standing rule that answers a website enquiry within a minute. Off, leads still capture and
+      alert you; nothing acknowledges them automatically.
 
 Setup's readiness light summarizes this as **canSend**.
 
@@ -85,6 +94,8 @@ Requires the biggest external setup (A2P 10DLC has a 1–3 day approval) — **s
 - [ ] Flip `outreach_settings.sms_enabled` **ON** — then an Email/Text toggle appears on each automation.
 - [ ] **Missed-call**: point the Twilio number's **Voice** webhook at `voice-inbound` (copy the URL from the
       Missed-call page), add a number there (Twilio number + the real line to ring), and switch it on.
+- [ ] **STOP handling (every number)**: point each number's **Messaging** webhook at `sms-inbound` so an
+      SMS opt-out is recorded app-side, not just at the carrier — see `docs/twilio-setup.md` §4b.
 
 The new Twilio secrets now show under the **"texting" pillar** on the Health page.
 

@@ -17,33 +17,18 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import {
   buildInboundTwiml, buildHangupTwiml, dialWasMissed, textBackTarget, renderMissedCallSms,
-  twilioSignatureBaseString,
 } from '../../../src/lib/garvis/missedCall.ts';
 import { toE164 } from '../../../src/lib/garvis/sms.ts';
+import { twilioSignatureOk } from '../_shared/twilioSig.ts';
 
 const XML = { 'content-type': 'text/xml; charset=utf-8' };
 
-/** base64(HMAC-SHA1(key, message)) — the Twilio request signature. */
-async function hmacSha1Base64(key: string, message: string): Promise<string> {
-  const enc = new TextEncoder();
-  const cryptoKey = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
-  const sig = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
-  const bytes = new Uint8Array(sig);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
-}
-
-/** Validate against candidate URLs — Twilio signs over the EXACT URL it was configured with, which
- *  behind Supabase's proxy may differ from req.url. We try the request URL and the canonical
- *  functions URL (with + without the ?query), and accept if any matches. Constant work, fail-closed. */
-async function twilioSignatureOk(authToken: string, signature: string, urls: string[], params: Record<string, string>): Promise<boolean> {
-  for (const u of urls) {
-    const expected = await hmacSha1Base64(authToken, twilioSignatureBaseString(u, params));
-    if (expected === signature) return true;
-  }
-  return false;
-}
+// RUNAWAY GUARD: text-backs per config per UTC day. The reply is transactional and caller-initiated
+// (the config row is the pre-authorization, so it deliberately does NOT ride outreach's sms_enabled
+// switch or marketing cap) — but a war-dialer hitting the number would otherwise convert every robo-
+// call into a paid outbound text. No legitimate small business misses 100 calls in a day; past the
+// cap we log honestly and stay quiet.
+const DAILY_TEXTBACK_CAP = 100;
 
 Deno.serve(async (req) => {
   const twiml = (body: string) => new Response(body, { status: 200, headers: XML });
@@ -119,6 +104,17 @@ Deno.serve(async (req) => {
 
     if (!accountSid) { await logEvent({ texted_back: false, note: 'twilio not configured' }); return twiml(buildHangupTwiml()); }
 
+    // Daily cap per config (see DAILY_TEXTBACK_CAP above). Fail-open on a count error — a metrics
+    // hiccup must not silence a real missed caller.
+    const dayStart = new Date(); dayStart.setUTCHours(0, 0, 0, 0);
+    const { count: textedToday, error: capErr } = await admin.from('missed_call_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('config_id', cfg.id).eq('texted_back', true).gte('created_at', dayStart.toISOString());
+    if (!capErr && (textedToday ?? 0) >= DAILY_TEXTBACK_CAP) {
+      await logEvent({ texted_back: false, note: `daily text-back cap reached (${DAILY_TEXTBACK_CAP})` });
+      return twiml(buildHangupTwiml());
+    }
+
     // IDEMPOTENCY on call_sid: Twilio retries a dial-action callback whose 200 it didn't receive in time
     // (a slow response, a network blip) — always sequentially, after a timeout. Without a guard each retry
     // re-sends the text, so the caller gets the same "sorry we missed you" two or three times. Before
@@ -146,6 +142,13 @@ Deno.serve(async (req) => {
       return twiml(buildHangupTwiml());
     }
     await logEvent({ texted_back: true, message_sid: data.sid });
+    // The waking moment's signal: a missed call IS a warm lead — it must never live only in the
+    // missed_call_events ledger where nothing surfaces it. Best-effort, never blocks the call.
+    await admin.from('mind_events').insert({
+      owner_id: cfg.owner_id, event_type: 'note', source: 'sms',
+      subject: `Missed call from ${From} — texted back${cfg.business_name ? ` (${cfg.business_name})` : ''}`,
+      payload: { kind: 'missed_call_textback', from: From, to: To, call_sid: callSid },
+    }).then(() => {}, () => {});
     return twiml(buildHangupTwiml());
   } catch (_e) {
     // Never crash a live phone call — return valid TwiML on any error.

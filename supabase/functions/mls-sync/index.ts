@@ -14,7 +14,10 @@
 // Honesty: a failed probe refuses to save; a partial sync says how far it got; field mapping uses
 // RESO standard names and stores what the feed SAID (status text as-is), never normalized guesses.
 //
-// Deploy: in package.json functions:deploy. No new global secrets — credentials are per-user.
+// Deploy: in package.json functions:deploy:webhooks (--no-verify-jwt — the pg_cron heartbeat POSTs
+// with x-worker-secret and no Authorization header, so a JWT-verified deploy would 401 every
+// scheduled sync at the gateway before this file's own auth ran; browser calls still authenticate
+// below via getUser). No new global secrets — credentials are per-user.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2';

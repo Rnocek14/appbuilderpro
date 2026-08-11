@@ -104,6 +104,16 @@ export function statusLabel(status: DomainStatus): string {
   }
 }
 
+/** The send-path deliverability gate (send-email imports this): the reason a from-domain must not
+ *  send, or null when sending is allowed. A domain the operator is TRACKING in sender_domains but
+ *  hasn't finished verifying is the straight-to-spam path — block with the fix named, before the
+ *  damage. An UNTRACKED domain (no row) passes: the operator may have verified it directly with
+ *  the provider, and Resend enforces its own verification floor for domains it doesn't know. */
+export function senderDomainBlockReason(domain: string, row: { status: DomainStatus } | null): string | null {
+  if (!row || row.status === 'verified') return null;
+  return `Sending domain ${domain} isn’t verified — ${statusLabel(row.status)}. Finish it on the Email domains page before sending from it.`;
+}
+
 const DEFAULT_LOCAL = 'hello';
 
 /** The suggested from-address for a verified domain (hello@domain). The local part is sanitized to a

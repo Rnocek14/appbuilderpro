@@ -2,7 +2,7 @@
 
 import {
   normalizeSenderDomain, coerceStatus, parseResendDomain, domainConnState, isDeliveryReady,
-  summarizeRecords, statusLabel, fromAddressFor,
+  summarizeRecords, statusLabel, fromAddressFor, senderDomainBlockReason,
 } from './senderDomain';
 
 let passed = 0; let failed = 0;
@@ -43,6 +43,13 @@ check('failure + temporary_failure → error', domainConnState('failure') === 'e
 const sum = summarizeRecords(parsed.records);
 check('summary counts verified vs pending', sum.total === 2 && sum.verified === 1 && sum.pending === 1);
 check('a record with no status counts as pending', summarizeRecords([{ name: 'x', type: 'TXT', value: 'v' }]).verified === 0);
+
+// ── the send-path gate (send-email's deliverability block) ───────────────
+check('an untracked domain is allowed (Resend is the backstop)', senderDomainBlockReason('acme.com', null) === null);
+check('a verified domain is allowed', senderDomainBlockReason('acme.com', { status: 'verified' }) === null);
+check('a tracked-but-pending domain blocks, naming the domain', /acme\.com/.test(senderDomainBlockReason('acme.com', { status: 'pending' }) ?? ''));
+check('the block reason says where to fix it', /Email domains/.test(senderDomainBlockReason('acme.com', { status: 'not_started' }) ?? ''));
+check('a failed domain blocks with its status label', /DNS/.test(senderDomainBlockReason('acme.com', { status: 'failure' }) ?? ''));
 
 // ── labels + from-address ────────────────────────────────────────────────
 check('every status has a human label', (['not_started', 'pending', 'verified', 'failure', 'temporary_failure'] as const).every((s) => statusLabel(s).length > 0));

@@ -17,7 +17,7 @@ import { domainOf } from './nationalSweepCore.ts';
 import { auditIssues, type SiteAudit } from './siteAudit.ts';
 import { buildProfile, type ExtractedFields, type ScrapeContext } from '../preview/scrapeProfileCore.ts';
 import { restraintFor } from '../../../supabase/functions/_shared/previewSpec.ts';
-import { findingSentence, claimsAreSafe, SCAN_DISCLOSURE, type PitchFinding } from './prospects/pitchFindings.ts';
+import { pitchSentence, claimsAreSafe, scanProvenance, type PitchFinding } from './prospects/pitchFindings.ts';
 import type { BusinessProfile } from '../preview/spec';
 
 // Big aggregators/directories aren't prospects — we want a business's OWN (beatable) site.
@@ -327,13 +327,44 @@ export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unk
  *  actually observed; the paragraph never claims anything without it. */
 export interface PitchUpsell { title: string; pitch: string; monthlyPrice: string; evidence: string }
 
+/** Parse the registry's honest price-range label ("$300–600/mo") into numbers. Accepts en/em
+ *  dash or hyphen and an optional second dollar sign; anything else → null (a price we can't
+ *  parse is a price we don't do arithmetic on). Shared by the email's cheapest-entry anchor and
+ *  the demo page's pick-your-add-ons total. */
+export function parseMonthlyRange(price: string): { low: number; high: number } | null {
+  const m = /\$\s*([\d,]+)\s*[–—-]\s*\$?\s*([\d,]+)\s*\/mo/.exec(price);
+  if (!m) return null;
+  const low = Number(m[1].replace(/,/g, ''));
+  const high = Number(m[2].replace(/,/g, ''));
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high < low) return null;
+  return { low, high };
+}
+
+/** The cheapest entry point across a set of price labels — the email's single honest anchor. */
+export function cheapestMonthlyLow(prices: string[]): number | null {
+  const lows = prices.map((p) => parseMonthlyRange(p)?.low).filter((n): n is number => n != null);
+  return lows.length ? Math.min(...lows) : null;
+}
+
+/** The one price sentence the email carries. A stack of "(from $300–600/mo)" lines reads as a
+ *  bill — three ranges sum to $900+ in the reader's head before they've clicked anything. One
+ *  cheapest-entry anchor plus "you pick" keeps it honest AND cheap-feeling; the per-item ranges
+ *  live on the demo page's menu where ticking a box justifies them. No parseable price → the
+ *  agency sentence stands alone rather than inventing a number. */
+export function upsellPriceLine(upsells: PitchUpsell[]): string {
+  const min = cheapestMonthlyLow(upsells.map((u) => u.monthlyPrice));
+  const anchor = min != null ? `they start at $${min}/mo, ` : '';
+  return `Each of these is an optional add-on — ${anchor}you pick only the ones you want on the demo page, and the site works fine without any of them.`;
+}
+
 /** The grounded automation upsell paragraph — "website + automation" in one email. Every line is
- *  anchored to an observed signal (the honesty rule); zero upsells → empty string, never filler. */
+ *  anchored to an observed signal (the honesty rule); zero upsells → empty string, never filler.
+ *  Per-line prices deliberately absent (see upsellPriceLine). */
 export function automationUpsellParagraph(upsells: PitchUpsell[]): string {
   const picks = upsells.filter((u) => u.title && u.evidence).slice(0, 2);   // 2 max — an email, not a catalog
   if (!picks.length) return '';
-  const lines = picks.map((u) => `— ${u.evidence} ${u.pitch} (from ${u.monthlyPrice})`);
-  return `\n\nWhile I was looking, I noticed a couple of things the new site could fix on autopilot:\n${lines.join('\n')}`;
+  const lines = picks.map((u) => `— ${u.evidence} ${u.pitch}`);
+  return `\n\nWhile I was looking, I noticed a couple of things the new site could fix on autopilot:\n${lines.join('\n')}\n\n${upsellPriceLine(picks)}`;
 }
 
 /** REPLY-GATED first touch — the deliverability-correct opener. 2025-26 sender data is unambiguous:
@@ -362,6 +393,8 @@ export function buildHuntPitch(
   upsells: PitchUpsell[] = [],
   findings: PitchFinding[] = [],
   cohortLine?: string | null,
+  opening?: string | null,
+  pagesChecked: string[] = [],
 ): string {
   // THE OPENING IS THE WHOLE EMAIL. "I came across you while researching…" is a stranger selling
   // something. "Your site was one of 618 plumber websites in Walworth County we looked at" is a
@@ -369,17 +402,27 @@ export function buildHuntPitch(
   // of the first line. cohortMentionLine returns null unless the study is genuinely publishable —
   // big enough sample, single scan version — so an under-sampled sweep quietly falls back to the
   // honest cold opening rather than dressing itself up as research.
-  const opening = cohortLine
-    ? `${cohortLine}\n\nI was looking at how ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''} handle their websites, and yours came up.`
-    : `I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.`;
+  //
+  // `opening` (from the pitchCraft AI seam, ALREADY through acceptPitchOpener) outranks both: a
+  // hook written about this business beats the template. It arrives only post-gate — this builder
+  // never sees a raw model draft — and it swaps the bridge line too, because "Rather than just
+  // tell you that" only parses after the template's own told-you-something opening.
+  const hook = opening?.trim()
+    ? opening.trim()
+    : cohortLine
+      ? `${cohortLine}\n\nI was looking at how ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''} handle their websites, and yours came up.`
+      : `I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.`;
+  const bridge = opening?.trim()
+    ? 'So I went ahead and built you a new one:'
+    : 'Rather than just tell you that, I built you a new one:';
 
   return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
-${opening}
+${hook}
 
-Rather than just tell you that, I built you a new one:
+${bridge}
 
-${previewUrl}${scanFindingsParagraph(findings)}${automationUpsellParagraph(upsells)}
+${previewUrl}${scanFindingsParagraph(findings, pagesChecked)}${automationUpsellParagraph(upsells)}
 
 If you like it, publishing it takes a day. No obligation either way.`;
 }
@@ -391,10 +434,10 @@ If you like it, publishing it takes a day. No obligation either way.`;
  *  into a compliance salesman. So the demo link stays the headline and this rides underneath as
  *  evidence for why the rebuild is worth opening. Each line carries its own hedge (findingSentence
  *  bakes it in, so it can't be edited out downstream without removing the claim), and the block
- *  always closes with SCAN_DISCLOSURE — an automated screen of one page, not an audit, establishing
- *  nothing about compliance. No findings ⇒ '' — the email simply omits the block rather than
- *  manufacturing a reason to worry. */
-export function scanFindingsParagraph(findings: PitchFinding[]): string {
+ *  always closes with scanProvenance — which pages were read and an offer to point at every
+ *  finding, earned by the siteScan corroboration gates upstream. No findings ⇒ '' — the email
+ *  simply omits the block rather than manufacturing a reason to worry. */
+export function scanFindingsParagraph(findings: PitchFinding[], pagesChecked: string[] = []): string {
   const lines = safeFindingLines(findings);
   if (!lines.length) return '';
   return `
@@ -403,7 +446,7 @@ A few specific things I noticed on your current site while I was there:
 
 ${lines.map((l) => `• ${l}`).join('\n')}
 
-${SCAN_DISCLOSURE}`;
+${scanProvenance(pagesChecked)}`;
 }
 
 /** The findings copy, with the claim gate applied PER LINE.
@@ -420,13 +463,13 @@ ${SCAN_DISCLOSURE}`;
 function safeFindingLines(findings: PitchFinding[]): string[] {
   return findings
     .slice(0, 3)
-    .map((p) => findingSentence(p.finding))
+    .map((p) => pitchSentence(p.finding))
     .filter((line) => claimsAreSafe(line));
 }
 
-/** The HTML twin of scanFindingsParagraph. Same order, same hedges, same mandatory disclosure —
+/** The HTML twin of scanFindingsParagraph. Same order, same hedges, same provenance line —
  *  the two bodies of one email must never disagree about what we claim. */
-export function scanFindingsHtml(findings: PitchFinding[]): string {
+export function scanFindingsHtml(findings: PitchFinding[], pagesChecked: string[] = []): string {
   const lines = safeFindingLines(findings);
   if (!lines.length) return '';
   const items = lines
@@ -434,7 +477,7 @@ export function scanFindingsHtml(findings: PitchFinding[]): string {
     .join('');
   return `<p style="margin:20px 0 6px;font-size:15px;color:#1c1c1e">A few specific things I noticed on your current site while I was there:</p>
 <ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>
-<p style="margin:8px 0 0;font-size:12px;line-height:1.45;color:#8a8a8f">${escHtml(SCAN_DISCLOSURE)}</p>`;
+<p style="margin:8px 0 0;font-size:12px;line-height:1.45;color:#8a8a8f">${escHtml(scanProvenance(pagesChecked))}</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -450,15 +493,18 @@ export function escHtml(s: string): string {
 
 /** The grounded automation offer as an HTML list — the HTML twin of automationUpsellParagraph. Same
  *  honesty rule: every line is anchored to an observed signal (u.evidence); zero upsells → '' (the
- *  email simply omits the block, never shows an empty heading). */
+ *  email simply omits the block, never shows an empty heading). Per-line prices deliberately
+ *  absent — the single cheapest-entry anchor rides underneath (upsellPriceLine), and the per-item
+ *  ranges live on the demo page's pick-what-you-want menu. */
 export function automationUpsellHtml(upsells: PitchUpsell[]): string {
   const picks = upsells.filter((u) => u.title && u.evidence).slice(0, 2);   // 2 max — an email, not a catalog
   if (!picks.length) return '';
   const items = picks.map((u) =>
-    `<li style="margin:0 0 8px">${escHtml(u.evidence)} <strong>${escHtml(u.pitch)}</strong> <span style="color:#8a8a8f">(from ${escHtml(u.monthlyPrice)})</span></li>`,
+    `<li style="margin:0 0 8px">${escHtml(u.evidence)} <strong>${escHtml(u.pitch)}</strong></li>`,
   ).join('');
   return `<p style="margin:20px 0 6px;font-size:15px;color:#1c1c1e">While I was looking, I noticed a couple of things the new site could handle on autopilot:</p>
-<ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>`;
+<ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>
+<p style="margin:8px 0 0;font-size:13.5px;color:#6e6e73">${escHtml(upsellPriceLine(picks))}</p>`;
 }
 
 /** The website-in-the-email pitch as an HTML body — the SCREENSHOT of the actual generated site is
@@ -479,6 +525,8 @@ export function buildHuntPitchEmailHtml(
   upsells: PitchUpsell[] = [],
   beforeShotUrl?: string | null,
   findings: PitchFinding[] = [],
+  opening?: string | null,
+  pagesChecked: string[] = [],
 ): string {
   const name = escHtml(profile.business_name);
   const greetName = profile.business_name ? ` ${name} team` : '';
@@ -489,6 +537,12 @@ export function buildHuntPitchEmailHtml(
     : '';
   const url = escHtml(previewUrl);
 
+  // The same gated opener the plain-text twin uses (the two bodies of one email must never
+  // disagree) — escaped here, with the swapped bridge. No opener → the template line, verbatim.
+  const lede = opening?.trim()
+    ? `${escHtml(opening.trim()).replace(/\n+/g, '<br/>')} So I went ahead and built you a new one this week — here it is:`
+    : `I came across ${name} while researching ${industry} businesses${where}${concern}. Rather than just tell you that, I built you a new one this week — here it is:`;
+
   const before = beforeShotUrl
     ? `<p style="margin:22px 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#8a8a8f">For comparison — your site today</p>
 <img src="${escHtml(beforeShotUrl)}" width="360" alt="${name} — current website" style="display:block;width:100%;max-width:360px;border:1px solid #e0e0e4;border-radius:8px"/>`
@@ -496,7 +550,7 @@ export function buildHuntPitchEmailHtml(
 
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,system-ui,sans-serif;font-size:15px;line-height:1.55;color:#1c1c1e;max-width:600px;margin:0 auto">
 <p style="margin:0 0 12px">Hi${greetName},</p>
-<p style="margin:0 0 16px">I came across ${name} while researching ${industry} businesses${where}${concern}. Rather than just tell you that, I built you a new one this week — here it is:</p>
+<p style="margin:0 0 16px">${lede}</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate"><tr><td style="padding:0">
 <a href="${url}" style="display:block;border:1px solid #dcdce0;border-radius:10px;overflow:hidden;text-decoration:none">
 <img src="${escHtml(screenshotUrl)}" width="600" alt="${name} — new website preview" style="display:block;width:100%;max-width:600px;border:0"/>
@@ -505,7 +559,7 @@ export function buildHuntPitchEmailHtml(
 <a href="${url}" style="display:inline-block;background:#c8501e;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 26px;border-radius:10px">See the full site (mobile too) &rarr;</a>
 </p>
 ${before}
-${scanFindingsHtml(findings)}
+${scanFindingsHtml(findings, pagesChecked)}
 ${automationUpsellHtml(upsells)}
 <p style="margin:18px 0 12px">If you like it, publishing it takes a day. I can also set it up to <strong>answer every new enquiry within a minute and follow up the ones that go quiet</strong> — reply and tell me how you run things and I&#39;ll show you exactly what I&#39;d automate.</p>
 <p style="margin:0 0 4px">No obligation either way.</p>

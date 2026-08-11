@@ -1,8 +1,8 @@
 // src/lib/garvis/prospects/pitchFindings.verify.ts — pitch selection + the claim gate (npm run verify:pitchfindings).
 
 import {
-  selectPitchFindings, canLead, findingSentence, claimViolations, claimsAreSafe,
-  MAX_PITCH_FINDINGS, SCAN_DISCLOSURE,
+  selectPitchFindings, canLead, findingSentence, pitchSentence, claimViolations, claimsAreSafe,
+  MAX_PITCH_FINDINGS, scanProvenance,
 } from './pitchFindings';
 import type { Finding } from '../../../../supabase/functions/_shared/scanTypes.ts';
 
@@ -45,6 +45,15 @@ check('empty scan ⇒ empty selection', selectPitchFindings([]).length === 0);
 const shakySupports = selectPitchFindings([noContact, shaky]);
 check('a needs_review finding may still ride as support', shakySupports.some((p) => p.finding.code === 'conv.form_no_action' && p.role === 'support'));
 
+// ── subsumed claims never repeat ──────────────────────────────────────────
+const noBooking = f({ code: 'conv.no_booking', category: 'conversion', severity: 'med' });
+const noTap = f({ code: 'mobile.no_click_to_call', category: 'mobile', severity: 'med' });
+const withBoth = selectPitchFindings([noContact, noBooking, noTap, altText]);
+check('no_booking is dropped when no_contact_path already says it', !withBoth.some((p) => p.finding.code === 'conv.no_booking'));
+check('an untappable phone is dropped when no_contact_path already says it', !withBoth.some((p) => p.finding.code === 'mobile.no_click_to_call'));
+check('the freed slots go to genuinely different facts', withBoth.some((p) => p.finding.code === 'a11y.img_missing_alt'));
+check('no_booking still stands on its own when nothing subsumes it', selectPitchFindings([noBooking, altText]).some((p) => p.finding.code === 'conv.no_booking'));
+
 // ── determinism ───────────────────────────────────────────────────────────
 const a = selectPitchFindings([canonical, altText, trackers, noViewport, noContact]);
 const b = selectPitchFindings([noContact, trackers, canonical, noViewport, altText]);
@@ -57,6 +66,25 @@ check('an uncounted finding omits the count', !/instance/.test(findingSentence(n
 check('a likely finding is hedged in the sentence itself', /worth confirming/.test(findingSentence(trackers)));
 check('a needs_review finding says it is unconfirmed', /not confirmed/.test(findingSentence(shaky)));
 check('a detected finding is stated plainly', !/confirm/.test(findingSentence(noContact)));
+check('a title that already carries its number is not double-counted',
+  !/instance/.test(findingSentence(f({ code: 'a11y.img_missing_alt', category: 'accessibility', title: '9 images with no alt text', count: 9 }))));
+
+// ── pitch copy: owner-voice, short, gated ─────────────────────────────────
+// The report keeps the scanners' thorough multi-sentence details; the EMAIL gets one checkable
+// fact per bullet. Mapped copy must pass the claim gate and keep every confidence hedge.
+const mappedCodes = ['conv.no_contact_path', 'conv.phone_only', 'conv.no_booking', 'mobile.no_viewport', 'mobile.no_click_to_call'];
+for (const code of mappedCodes) {
+  const sentence = pitchSentence(f({ code, category: 'conversion' }));
+  check(`pitch copy for ${code} passes the claim gate`, claimsAreSafe(sentence));
+  check(`pitch copy for ${code} reads like an email, not a report`, sentence.length < 160);
+}
+const altPitch = pitchSentence(f({ code: 'a11y.img_missing_alt', category: 'accessibility', title: '9 images with no alt text', count: 9 }));
+check('a counted pitch bullet leads with its number, once', /^9 images/.test(altPitch) && !/instance/.test(altPitch));
+check('a likely finding keeps its hedge through the pitch copy',
+  /worth confirming/.test(pitchSentence(f({ code: 'conv.no_booking', category: 'conversion', confidence: 'likely' }))));
+const unmapped = f({ code: 'pres.no_structured_data', category: 'presence',
+  title: 'No structured data', detail: 'First sentence of the report detail. Second sentence that belongs in the report, not an email.' });
+check('an unmapped code falls back to its first report sentence', pitchSentence(unmapped).includes('First sentence') && !pitchSentence(unmapped).includes('Second sentence'));
 
 // ── THE CLAIM GATE — every one of these must be refused ───────────────────
 const BAD = [
@@ -91,7 +119,7 @@ const GOOD = [
   'We rebuilt your home page — here is a working version.',
   'This addresses the barriers this scan detected.',
   'Accessibility improvements also widen who can buy from you.',
-  SCAN_DISCLOSURE,
+  scanProvenance(['/', '/contact']),
 ];
 for (const good of GOOD) {
   check(`gate allows: "${good.slice(0, 44)}"`, claimsAreSafe(good));
@@ -103,9 +131,18 @@ check('gate catches a hyphenated variant', claimViolations('fully ADA-compliant 
 check('gate handles empty input', claimsAreSafe(''));
 check('gate handles non-string input', claimsAreSafe(undefined as unknown as string));
 check('gate scans the whole body, not just the opening', claimsAreSafe(`${'padding. '.repeat(200)}we guarantee results`) === false);
-check('disclosure text is itself safe to send', claimsAreSafe(SCAN_DISCLOSURE));
-check('disclosure states it is not an audit', /not an audit/i.test(SCAN_DISCLOSURE));
-check('disclosure disclaims compliance', /compliance/i.test(SCAN_DISCLOSURE));
+
+// ── the provenance line — earned confidence, not apology ──────────────────
+// This replaced the old three-sentence disclosure. The hedging moved UPSTREAM into the siteScan
+// corroboration gates (an absence only ships when it held on every page read, nothing was left
+// unread, and nothing could mount it after load), so the footer's job is provenance: which pages
+// were read, and an offer to point at every finding.
+check('provenance is itself safe to send', claimsAreSafe(scanProvenance(['/', '/contact'])));
+check('provenance names the pages that were read', /your homepage and your contact page/.test(scanProvenance(['/', '/contact.html'])));
+check('provenance with no corroboration honestly names the homepage alone', /your homepage directly/.test(scanProvenance([])) && !/homepage and /.test(scanProvenance([])));
+check('provenance offers to point at the findings', /point out exactly where/.test(scanProvenance([])));
+check('provenance does not hedge — the gates upstream did that job', !/cannot|not an audit|outside what it checks/i.test(scanProvenance(['/', '/contact'])));
+check('provenance handles garbage input', typeof scanProvenance(undefined as unknown as string[]) === 'string');
 
 console.log(`\n${passed}/${passed + failed} passed`);
 if (failed > 0) throw new Error(`${failed} pitch-findings check(s) failed`);

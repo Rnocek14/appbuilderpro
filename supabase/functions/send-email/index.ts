@@ -16,6 +16,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
+import { senderDomainBlockReason, type DomainStatus } from '../../../src/lib/garvis/email/senderDomain.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -171,6 +172,20 @@ Deno.serve(async (req) => {
 
     if (!fromEmail) return block('Set a from_email in Outreach settings before sending.');
     if (!physicalAddress?.trim()) return block('Missing CAN-SPAM physical address — set it in Outreach settings (or on this business’s sender identity).');
+
+    // DELIVERABILITY GATE (the blind spot named in docs/where-we-stand.md): a from-domain the
+    // operator is TRACKING in sender_domains but hasn't finished verifying sends straight to spam.
+    // Block with the fix named, before the damage. An untracked domain passes — it may be verified
+    // directly with Resend, whose API enforces its own verification floor. A lookup error blocks:
+    // like suppression, this gate fails closed, never open.
+    const fromDomain = fromEmail.split('@')[1]?.trim().toLowerCase() ?? '';
+    if (fromDomain) {
+      const { data: sd, error: sdErr } = await admin.from('sender_domains')
+        .select('status').eq('owner_id', uid).eq('domain', fromDomain).maybeSingle();
+      if (sdErr) return block('Sending-domain status could not be checked — refusing to send.');
+      const domainReason = senderDomainBlockReason(fromDomain, sd as { status: DomainStatus } | null);
+      if (domainReason) return block(domainReason);
+    }
 
     const to = (msg.to_address ?? '').trim().toLowerCase();
     if (!to) return block('Recipient email is missing.');

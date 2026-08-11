@@ -121,7 +121,7 @@ export default function PreviewSite({ shot = false }: { shot?: boolean }) {
         {/* Clearance so the fixed ClaimBar can't occlude AutomationIntake's CTA on narrow phones — the
             template path gets this from its footer; the bespoke path has none, so add it explicitly. */}
         {!shot && <div aria-hidden className="h-28 md:h-16" />}
-        {!shot && <ClaimBar previewSiteId={row.id} businessName={row.business_name} slug={row.slug} />}
+        {!shot && <ClaimBar previewSiteId={row.id} businessName={row.business_name} slug={row.slug} industry={row.industry ?? ''} />}
       </>
     );
   }
@@ -133,7 +133,7 @@ export default function PreviewSite({ shot = false }: { shot?: boolean }) {
           In-flow (not floating), so it never collides with the ClaimBar; never in the email shot. */}
       {!shot && <AutomationIntake previewSiteId={row.id} businessName={row.business_name} theme={row.spec.theme} />}
       {/* The purchase-intent path: a preview with no way to say "yes" converts at zero. */}
-      {!shot && <ClaimBar previewSiteId={row.id} businessName={row.business_name} slug={row.slug} />}
+      {!shot && <ClaimBar previewSiteId={row.id} businessName={row.business_name} slug={row.slug} industry={row.industry ?? ''} />}
     </>
   );
 }
