@@ -187,11 +187,13 @@ export const CAPABILITIES: Capability[] = [
     status: 'beta',
   },
   {
-    // NOT BUILT, and catalogued precisely so that stays visible. Everything it needs exists —
-    // appointments with customer emails (app_0109), a send rail, a heartbeat — except the one
-    // thing that IS the feature: a cron pass that scans tomorrow's confirmed appointments and
-    // sends each customer their reminder. Until that pass exists this must never be pitched;
-    // the registry's proposal path already guarantees that for not_built entries.
+    // BUILT: the reminder pass this entry once waited on exists — drainBookingReminders in the
+    // standing-worker runs every tick, scanning confirmed appointments 3–24h out and sending each
+    // customer their reminder over the booking page's channel (retire-once via reminder_sent).
+    // matchesSignals stays empty on purpose: a reminder only makes sense once the booking rail is
+    // set up for the client, so it's sold alongside online_booking in conversation, never
+    // auto-proposed from a cold scrape. (This entry sat at 'not_built' after the pass shipped —
+    // the registry under-promising is the safe direction of drift, but it hid a sellable rail.)
     id: 'appointment_reminder',
     title: 'Appointment reminders',
     pitch: 'Every booked customer gets a reminder the day before — fewer no-shows without anyone lifting a finger.',
@@ -201,8 +203,8 @@ export const CAPABILITIES: Capability[] = [
     matchesSignals: [],
     verticals: ['any'],
     monthlyPrice: '$150–300/mo',
-    complianceNote: 'Transactional reminder to a customer who booked; rides the booking tables once the reminder pass exists.',
-    status: 'not_built',
+    complianceNote: 'Transactional reminder to a customer who booked; rides the booking tables (app_0109) and the booking page’s confirmation channel.',
+    status: 'beta',
   },
 ];
 

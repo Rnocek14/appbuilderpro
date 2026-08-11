@@ -140,7 +140,12 @@ const serper = {
   check('the screenshot is a clickable hero linking to the live preview',
     imgIdx > -1 && heroAnchor > -1 && flat.slice(heroAnchor, imgIdx).includes(`<a href="${url}"`));
   check('names the business (apostrophe HTML-escaped, markup intact)', html.includes('Joe&#39;s Roofing'));
-  check('carries the grounded automation offer (evidence + price)', html.includes('never drop a lead') && html.includes('$300–600/mo'));
+  // Per-line prices are DELIBERATELY absent (a stack of ranges reads as a bill); the single
+  // cheapest-entry anchor rides underneath and the per-item ranges live on the demo page's menu.
+  check('carries the grounded automation offer (evidence, no per-line price)',
+    html.includes('never drop a lead') && !html.includes('(from $') && !html.includes('$300–600/mo'));
+  check('one cheapest-entry price anchor + pick-what-you-want + independence',
+    html.includes('start at $300/mo') && html.includes('you pick only the ones you want') && html.includes('works fine without any of them'));
   check('the email closes with no pressure', /no obligation/i.test(html));
   check('NEVER promises SMS / missed-call text-back (not built)', !/text[-\s]?back|missed[-\s]?call|by text/i.test(html));
   check('no [Name]-style placeholders leak', !/\[[A-Za-z]/.test(html));
@@ -173,7 +178,9 @@ const serper = {
   check('escHtml neutralizes markup-breaking characters', escHtml(`<b>"A&B"'`) === '&lt;b&gt;&quot;A&amp;B&quot;&#39;');
   check('automationUpsellHtml is empty without a grounded upsell', automationUpsellHtml([]) === '' && automationUpsellHtml([{ title: 't', pitch: 'p', monthlyPrice: '$1', evidence: '' }]) === '');
   const h = automationUpsellHtml([{ title: 'X', pitch: 'do X', monthlyPrice: '$200/mo', evidence: 'because Y' }]);
-  check('automationUpsellHtml grounds each line in its observed evidence', h.includes('because Y') && h.includes('do X') && h.includes('$200/mo'));
+  check('automationUpsellHtml grounds each line in its observed evidence (price off the line)',
+    h.includes('because Y') && h.includes('do X') && !h.includes('$200/mo'));
+  check('an unparseable price never invents an anchor number', !/start at \$/.test(h) && h.includes('you pick only the ones you want'));
 }
 
 // --- huntRunLine: the honest daily record (discovered + built + queued) ------------------------

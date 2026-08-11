@@ -23,6 +23,13 @@ import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
 const MAX_FOLLOWUPS = 2;
 
+// The word caps the prompts promise ("under 50 words" cold, "under 45" warm/engaged) — ENFORCED,
+// not just asked for. A model that rambles past the cap returns null and the followup simply
+// isn't drafted this run (the daily cadence retries tomorrow); a long nudge defeats the entire
+// point of a nudge and must never reach the approval queue wearing an "under 50 words" label.
+const withinWordCap = (body: string, cap: number): boolean =>
+  body.trim().split(/\s+/).filter(Boolean).length <= cap;
+
 // deno-lint-ignore no-explicit-any
 async function draftFollowup(admin: any, ownerId: string, subject: string, body: string, firstName: string, n: number, warm = false): Promise<{ subject: string; body: string } | null> {
   const openai = Deno.env.get('OPENAI_API_KEY');
@@ -63,8 +70,10 @@ async function draftFollowup(admin: any, ownerId: string, subject: string, body:
     });
     const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
     if (!parsed.subject || !parsed.body) return null;
+    const bodyOut = String(parsed.body).replace(/\\n/g, '\n');
+    if (!withinWordCap(bodyOut, warm ? 45 : 50)) return null;
     parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
-    return { subject: String(parsed.subject).slice(0, 200), body: String(parsed.body).replace(/\\n/g, '\n') };
+    return { subject: String(parsed.subject).slice(0, 200), body: bodyOut };
   } catch {
     return null;
   }
@@ -103,8 +112,10 @@ async function draftEngagedFollowup(admin: any, ownerId: string, subject: string
     });
     const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
     if (!parsed.subject || !parsed.body) return null;
+    const bodyOut = String(parsed.body).replace(/\\n/g, '\n');
+    if (!withinWordCap(bodyOut, 45)) return null;
     parsed.subject = String(parsed.subject).startsWith('Re:') ? parsed.subject : `Re: ${subject}`;
-    return { subject: String(parsed.subject).slice(0, 200), body: String(parsed.body).replace(/\\n/g, '\n') };
+    return { subject: String(parsed.subject).slice(0, 200), body: bodyOut };
   } catch {
     return null;
   }

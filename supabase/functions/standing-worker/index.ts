@@ -2266,7 +2266,10 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       });
     }
   }
-  const nonce = Math.random().toString(36).slice(2, 8);   // slug isn't enumerable by guessing names
+  // CSPRNG nonce — the slug is the only thing between the public internet and a prospect's demo,
+  // and Math.random() is predictable from observed outputs; six random base36 chars from
+  // getRandomValues keep the URL unenumerable even when the business-name half is guessed.
+  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => (b % 36).toString(36)).join('');
   const slug = `${previewSlug(profile.business_name)}-${nonce}`;
   const previewUrl = env.appOrigin ? `${env.appOrigin}/preview-site/${slug}` : `/preview-site/${slug}`;
 

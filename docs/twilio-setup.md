@@ -77,6 +77,24 @@ While this registers, keep going — the code is already compliant (STOP/START h
 That's it — the app returns the TwiML that rings the business line and texts back on a miss. Every request
 is signature-validated, so no one can trigger texts by forging calls.
 
+## 4b. Point the number's Messaging webhook at the app (STOP handling — do this for EVERY number)
+
+SMS opt-outs must be recorded app-side, not just at the carrier. Without this webhook, a STOP reply
+blocks that one Twilio number (carrier-level) but the app never learns about it — other numbers and
+future configs could still text the person.
+
+1. Console → **Phone Numbers → Manage → your number → Messaging Configuration**.
+2. Set **"A message comes in"** to **Webhook**, method **HTTP POST**, URL
+   `https://<ref>.supabase.co/functions/v1/sms-inbound`.
+3. Save. Repeat for every number you attach to a client.
+
+A STOP marks the number unsubscribed for **every** contact carrying it (suppression is sacred; one
+human said stop). A START re-consents only the business whose number they texted. Any other reply
+surfaces on the Home waking moment and rings your webhook — an SMS reply never lands silently.
+
+Optional, only if signature validation rejects messages behind a proxy:
+`SMS_WEBHOOK_URL` = the exact URL you pasted in step 4b.
+
 ---
 
 ## 5. Put the secrets into Supabase

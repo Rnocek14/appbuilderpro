@@ -327,13 +327,44 @@ export function buildHuntProfileRaw(input: HuntProfileInput): Record<string, unk
  *  actually observed; the paragraph never claims anything without it. */
 export interface PitchUpsell { title: string; pitch: string; monthlyPrice: string; evidence: string }
 
+/** Parse the registry's honest price-range label ("$300–600/mo") into numbers. Accepts en/em
+ *  dash or hyphen and an optional second dollar sign; anything else → null (a price we can't
+ *  parse is a price we don't do arithmetic on). Shared by the email's cheapest-entry anchor and
+ *  the demo page's pick-your-add-ons total. */
+export function parseMonthlyRange(price: string): { low: number; high: number } | null {
+  const m = /\$\s*([\d,]+)\s*[–—-]\s*\$?\s*([\d,]+)\s*\/mo/.exec(price);
+  if (!m) return null;
+  const low = Number(m[1].replace(/,/g, ''));
+  const high = Number(m[2].replace(/,/g, ''));
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high < low) return null;
+  return { low, high };
+}
+
+/** The cheapest entry point across a set of price labels — the email's single honest anchor. */
+export function cheapestMonthlyLow(prices: string[]): number | null {
+  const lows = prices.map((p) => parseMonthlyRange(p)?.low).filter((n): n is number => n != null);
+  return lows.length ? Math.min(...lows) : null;
+}
+
+/** The one price sentence the email carries. A stack of "(from $300–600/mo)" lines reads as a
+ *  bill — three ranges sum to $900+ in the reader's head before they've clicked anything. One
+ *  cheapest-entry anchor plus "you pick" keeps it honest AND cheap-feeling; the per-item ranges
+ *  live on the demo page's menu where ticking a box justifies them. No parseable price → the
+ *  agency sentence stands alone rather than inventing a number. */
+export function upsellPriceLine(upsells: PitchUpsell[]): string {
+  const min = cheapestMonthlyLow(upsells.map((u) => u.monthlyPrice));
+  const anchor = min != null ? `they start at $${min}/mo, ` : '';
+  return `Each of these is an optional add-on — ${anchor}you pick only the ones you want on the demo page, and the site works fine without any of them.`;
+}
+
 /** The grounded automation upsell paragraph — "website + automation" in one email. Every line is
- *  anchored to an observed signal (the honesty rule); zero upsells → empty string, never filler. */
+ *  anchored to an observed signal (the honesty rule); zero upsells → empty string, never filler.
+ *  Per-line prices deliberately absent (see upsellPriceLine). */
 export function automationUpsellParagraph(upsells: PitchUpsell[]): string {
   const picks = upsells.filter((u) => u.title && u.evidence).slice(0, 2);   // 2 max — an email, not a catalog
   if (!picks.length) return '';
-  const lines = picks.map((u) => `— ${u.evidence} ${u.pitch} (from ${u.monthlyPrice})`);
-  return `\n\nWhile I was looking, I noticed a couple of things the new site could fix on autopilot:\n${lines.join('\n')}`;
+  const lines = picks.map((u) => `— ${u.evidence} ${u.pitch}`);
+  return `\n\nWhile I was looking, I noticed a couple of things the new site could fix on autopilot:\n${lines.join('\n')}\n\n${upsellPriceLine(picks)}`;
 }
 
 /** REPLY-GATED first touch — the deliverability-correct opener. 2025-26 sender data is unambiguous:
@@ -462,15 +493,18 @@ export function escHtml(s: string): string {
 
 /** The grounded automation offer as an HTML list — the HTML twin of automationUpsellParagraph. Same
  *  honesty rule: every line is anchored to an observed signal (u.evidence); zero upsells → '' (the
- *  email simply omits the block, never shows an empty heading). */
+ *  email simply omits the block, never shows an empty heading). Per-line prices deliberately
+ *  absent — the single cheapest-entry anchor rides underneath (upsellPriceLine), and the per-item
+ *  ranges live on the demo page's pick-what-you-want menu. */
 export function automationUpsellHtml(upsells: PitchUpsell[]): string {
   const picks = upsells.filter((u) => u.title && u.evidence).slice(0, 2);   // 2 max — an email, not a catalog
   if (!picks.length) return '';
   const items = picks.map((u) =>
-    `<li style="margin:0 0 8px">${escHtml(u.evidence)} <strong>${escHtml(u.pitch)}</strong> <span style="color:#8a8a8f">(from ${escHtml(u.monthlyPrice)})</span></li>`,
+    `<li style="margin:0 0 8px">${escHtml(u.evidence)} <strong>${escHtml(u.pitch)}</strong></li>`,
   ).join('');
   return `<p style="margin:20px 0 6px;font-size:15px;color:#1c1c1e">While I was looking, I noticed a couple of things the new site could handle on autopilot:</p>
-<ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>`;
+<ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>
+<p style="margin:8px 0 0;font-size:13.5px;color:#6e6e73">${escHtml(upsellPriceLine(picks))}</p>`;
 }
 
 /** The website-in-the-email pitch as an HTML body — the SCREENSHOT of the actual generated site is
