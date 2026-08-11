@@ -93,6 +93,27 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     ],
   },
   {
+    id: 'grow-verticals',
+    label: 'Grow vertical channels (followings that funnel somewhere)',
+    // The STRATEGY ask: "ai slop videos", "instagram verticals", "build a following … to market
+    // my app". The door is Channels — one faceless channel per niche, each CTA pointed at the
+    // thing being marketed. Phrases carry the intent words the app-builder must never steal
+    // ("build a following" is audience work, not software).
+    keywords: [
+      'verticals', 'vertical', 'niches', 'ai slop', 'slop', 'slop videos', 'slop channels',
+      'following', 'followers', 'build a following', 'grow a following', 'build an audience',
+      'grow an audience', 'instagram', 'tiktok',
+    ],
+    kind: 'navigate',
+    route: '/garvis/channels',
+    steps: [
+      'One channel per niche — press "Start a channel" and pick a preset (repeat per vertical)',
+      'Point each channel\'s CTA link at the thing you\'re marketing — every caption carries it',
+      'Draft a cited episode daily per channel; the learning loop steers hooks toward what works',
+      'Everything posts through your Queue — nothing goes out without you',
+    ],
+  },
+  {
     id: 'start-channel',
     label: 'Start a content channel',
     keywords: ['start', 'channel', 'tiktok', 'youtube', 'faceless', 'content channel', 'audience'],
@@ -562,6 +583,9 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   for (const idiom of IDIOMS) cleaned = cleaned.split(` ${idiom} `).join(' ');
   const matches = matchTasks(cleaned.trim(), tasks);
   if (!matches.length) {
+    // A procedural QUESTION never rides the weak tier either — "how do i connect my tiktok
+    // account" wants an ANSWER, not two doors that share the word 'tiktok'.
+    if (PROCEDURAL_QUESTION.test(norm(input))) return { kind: 'none' };
     // Sub-threshold degradation: a single SHARED-word hit ("system health" → the Health page and
     // the health channel preset) is a real signal even though no task clears the bar — offer the
     // hits as suggestions instead of pretending the sentence meant nothing.
