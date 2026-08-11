@@ -2000,6 +2000,10 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   // checkable findings cost no extra request. Absent on an older fetch-url deployment ⇒ null, and
   // the pitch simply omits the findings block rather than inventing one.
   let pageScan: DeepScan | null = null;
+  // The site-level corroboration (siteScan.ts, riding the same call): absence findings that held
+  // on every page read, plus which pages those were — the provenance the email states. Absent on
+  // an older fetch-url deployment ⇒ null, and the pitch falls back to the per-page scan.
+  let pageSite: { pagesChecked?: string[]; findings?: DeepScan['findings'] } | null = null;
 
   if (lead.website) {
     const text = await scrapePage(lead.website, 'text', env);
@@ -2009,6 +2013,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       pageText = (text.text as string) ?? '';
       pageTech = (text.tech as Record<string, unknown> | undefined) ?? null;
       pageScan = (text.scan as DeepScan | undefined) ?? null;
+      pageSite = (text.site as typeof pageSite) ?? null;
       finalUrl = (typeof text.url === 'string' && text.url) || lead.website;
       page = { title: (text.title as string) ?? null, description: (text.description as string) ?? null };
       audit = auditSite({
@@ -2284,8 +2289,12 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   // findings ride underneath as evidence. Leading a cold email with accessibility/legal exposure
   // reads as a threat and mis-positions a web shop as a compliance firm; the same findings placed
   // second do the persuasive work without either problem. Needs-review findings never lead.
-  const pitchFindings = pageScan ? selectPitchFindings(pageScan.findings) : [];
-  const pitch = buildHuntPitch(profile, previewUrl, upsells, pitchFindings, null, aiOpener);
+  // Corroborated site findings when fetch-url provided them (absences verified on every page
+  // read); the per-page scan otherwise — in which case pagesChecked stays empty and the email's
+  // provenance line honestly names the homepage alone.
+  const pitchFindings = selectPitchFindings(pageSite?.findings ?? pageScan?.findings ?? []);
+  const pagesChecked = pageSite?.pagesChecked ?? [];
+  const pitch = buildHuntPitch(profile, previewUrl, upsells, pitchFindings, null, aiOpener, pagesChecked);
 
   const { data: site, error: sErr } = await admin.from('preview_sites').insert({
     user_id: order.owner_id, profile_id: profileRow.id, slug,
@@ -2330,7 +2339,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       : ((audit.reachable && /^https?:\/\//.test(finalUrl))
         ? await genPreviewShot(admin, order.owner_id, finalUrl, `before-${slug}`)
         : null);
-    bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl, pitchFindings, aiOpener);
+    bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl, pitchFindings, aiOpener, pagesChecked);
   }
 
   // Which subject angle this prospect gets is deterministic on their address (a re-queue never

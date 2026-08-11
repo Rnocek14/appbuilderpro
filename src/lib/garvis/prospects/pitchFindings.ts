@@ -29,6 +29,7 @@
 // the run module that calls these.
 
 import type { Finding, ScanCategory } from '../../../../supabase/functions/_shared/scanTypes.ts';
+import { describePages } from '../../../../supabase/functions/_shared/siteScan.ts';
 
 /** How many findings the pitch may name. Three is the honest maximum: enough to be specific,
  *  few enough that every one can be defended on a phone call. */
@@ -61,12 +62,25 @@ export function canLead(f: Finding): boolean {
 }
 
 /**
+ * A finding whose claim is CONTAINED in another finding's claim. "No booking tool and no form" is
+ * already said by "no contact path at all"; "the phone number is not tappable" is a sentence inside
+ * no_contact_path's own detail. Naming both makes the email repeat itself, and a repeated claim
+ * reads as padding — three bullets should be three different facts.
+ */
+const SUBSUMED_BY: Record<string, string[]> = {
+  'conv.no_booking': ['conv.no_contact_path', 'conv.phone_only'],
+  'mobile.no_click_to_call': ['conv.no_contact_path'],
+};
+
+/**
  * Choose the findings to name in an outreach message, revenue-first.
  * Returns at most MAX_PITCH_FINDINGS, the first of which is the lead (when any finding qualifies).
  * An empty or all-weak scan returns [] — we send no pitch rather than manufacture a reason.
  */
 export function selectPitchFindings(findings: Finding[], max = MAX_PITCH_FINDINGS): PitchFinding[] {
-  const ordered = [...findings].sort((a, b) =>
+  const codes = new Set(findings.map((f) => f.code));
+  const distinct = findings.filter((f) => !(SUBSUMED_BY[f.code] ?? []).some((c) => codes.has(c)));
+  const ordered = [...distinct].sort((a, b) =>
     PITCH_CATEGORY_RANK[a.category] - PITCH_CATEGORY_RANK[b.category] ||
     SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
     CONFIDENCE_RANK[a.confidence] - CONFIDENCE_RANK[b.confidence] ||
@@ -85,16 +99,62 @@ export function selectPitchFindings(findings: Finding[], max = MAX_PITCH_FINDING
 
 /**
  * One honest sentence naming a finding, for the body of a pitch. Counts are stated when we have
- * them because a number is checkable and an adjective is not. Confidence is carried in the wording:
- * anything not 'detected' is hedged in the sentence itself, so the hedge can't be edited out
- * downstream without also removing the claim.
+ * them because a number is checkable and an adjective is not — but never twice: a title that
+ * already carries its number ("9 images with no alt text") does not get "(9 instances)" appended,
+ * which read as a machine talking. Confidence is carried in the wording: anything not 'detected'
+ * is hedged in the sentence itself, so the hedge can't be edited out downstream without also
+ * removing the claim.
  */
 export function findingSentence(f: Finding): string {
   const n = typeof f.count === 'number' && f.count > 0 ? f.count : null;
-  const subject = n !== null ? `${f.title} (${n} ${n === 1 ? 'instance' : 'instances'})` : f.title;
-  if (f.confidence === 'detected') return `${subject} — ${f.detail}`;
-  if (f.confidence === 'likely') return `${subject} — ${f.detail} (detected from the page source; worth confirming)`;
-  return `${subject} — ${f.detail} (flagged for review, not confirmed)`;
+  const subject = n !== null && !f.title.includes(String(n))
+    ? `${f.title} (${n} ${n === 1 ? 'instance' : 'instances'})`
+    : f.title;
+  return withHedge(`${subject} — ${f.detail}`, f.confidence);
+}
+
+function withHedge(sentence: string, confidence: Finding['confidence']): string {
+  if (confidence === 'detected') return sentence;
+  if (confidence === 'likely') return `${sentence} (detected from the page source; worth confirming)`;
+  return `${sentence} (flagged for review, not confirmed)`;
+}
+
+/**
+ * OWNER-VOICE COPY for the findings a pitch names most, keyed by code. The scanners' details are
+ * written for the report — thorough, multi-sentence, every caveat inline — and dropping them into
+ * a cold email made each bullet an eighty-word paragraph. A pitch bullet's job is one checkable
+ * fact an owner feels: same claim, same truth, a tenth the words. Every sentence here must pass
+ * the claim gate (pinned in verify) and must never say MORE than the finding it stands for — the
+ * scope ("which pages") lives in the scanProvenance line underneath, not in the bullet.
+ */
+const PITCH_COPY: Record<string, (f: Finding) => string> = {
+  'conv.no_contact_path': () =>
+    'No contact form, no email link and no tappable phone number — an after-hours visitor has nothing that works at 9pm',
+  'conv.phone_only': () =>
+    'The phone is the only way in — anyone who can’t call right now has no second option, and nothing records the enquiry to follow up',
+  'conv.no_booking': () =>
+    'Nothing takes a booking or an enquiry on its own — evenings and weekends go to whoever can be booked on the spot',
+  'mobile.no_viewport': () =>
+    'Not set up for phones — the page loads as a shrunken desktop page a visitor has to pinch and zoom to read',
+  'mobile.no_click_to_call': () =>
+    'The phone number on the page can’t be tapped to dial from a phone',
+  'a11y.img_missing_alt': (f) => {
+    const n = typeof f.count === 'number' && f.count > 0 ? f.count : null;
+    const subject = n ? `${n} image${n === 1 ? '' : 's'}` : 'Images';
+    return `${subject} with no descriptions — screen readers and search engines see nothing where your photos are`;
+  },
+};
+
+/**
+ * The sentence a finding contributes to an EMAIL: the owner-voice copy when the code has one, and
+ * the report sentence cut to its first sentence otherwise — an email stays an email even for a
+ * code nobody wrote pitch copy for yet. The confidence hedge survives both paths, always.
+ */
+export function pitchSentence(f: Finding): string {
+  const mapped = PITCH_COPY[f.code]?.(f);
+  if (mapped) return withHedge(mapped, f.confidence);
+  const firstSentence = /^[\s\S]*?[.!?](?=\s|$)/.exec(f.detail)?.[0] ?? f.detail;
+  return findingSentence({ ...f, detail: firstSentence });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -159,12 +219,25 @@ export function claimsAreSafe(text: string): boolean {
 }
 
 /**
- * The mandatory footer for any message or report that names scan findings. Automated screening has
- * a hard ceiling — it reliably covers only a fraction of accessibility success criteria and reads
- * one page's source, not a rendered browser — and saying so is both the honest disclosure and, per
- * the WebAIM precedent, the thing that makes the numbers credible enough to be quoted.
+ * The footer that rides with any findings block in a pitch: provenance, not apology.
+ *
+ * This replaced a three-sentence hedge ("reads one page… cannot see JavaScript… not an audit"),
+ * and the replacement is EARNED, not cosmetic: findings only reach an email after the site-level
+ * corroboration gates (siteScan.ts) — held on every page read, no contact-shaped page left unread,
+ * nothing on the site that could mount the missing thing after load — and after the claim gate
+ * above has refused every sentence we couldn't stand behind. So the footer's remaining job is to
+ * say exactly where the findings came from and offer to point at them, which is also the strongest
+ * credibility move an email like this can make. The report surfaces keep their full limits
+ * (deepScan.WHOLE_SCAN_LIMITS, cohort caveats); this line is for the pitch, whose every claim has
+ * already been narrowed to what we verified.
+ *
+ * `pagesChecked` is the corroboration's provenance (homepage first). An empty list — an older
+ * fetch-url deployment, or no corroboration data — honestly names the homepage alone, because
+ * that is exactly what was read.
  */
-export const SCAN_DISCLOSURE =
-  'These findings come from an automated screen of your site’s page source. It reads one page and ' +
-  'cannot see everything — colour contrast, keyboard use, and anything loaded by JavaScript are ' +
-  'outside what it checks. It is not an audit and does not establish compliance with any standard.';
+export function scanProvenance(pagesChecked: string[]): string {
+  const others = (Array.isArray(pagesChecked) ? pagesChecked : []).slice(1);
+  const named = describePages(others);
+  const where = named ? `your homepage and ${named}` : 'your homepage';
+  return `Each of these comes from reading the code of ${where} directly — reply and I’ll point out exactly where every one is.`;
+}

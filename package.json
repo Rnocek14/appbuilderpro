@@ -163,6 +163,7 @@
     "verify:presencescan": "tsx supabase/functions/_shared/presenceScan.verify.ts",
     "verify:renderqa": "tsx supabase/functions/_shared/renderQa.verify.ts",
     "verify:deepscan": "tsx supabase/functions/_shared/deepScan.verify.ts",
+    "verify:sitescan": "tsx supabase/functions/_shared/siteScan.verify.ts",
     "verify:pitchfindings": "tsx src/lib/garvis/prospects/pitchFindings.verify.ts",
     "walkthrough:prototypes": "node scripts/prototype-walkthrough.mjs",
     "walkthrough:claims": "node scripts/claims-walkthrough.mjs",

@@ -17,7 +17,7 @@ import { domainOf } from './nationalSweepCore.ts';
 import { auditIssues, type SiteAudit } from './siteAudit.ts';
 import { buildProfile, type ExtractedFields, type ScrapeContext } from '../preview/scrapeProfileCore.ts';
 import { restraintFor } from '../../../supabase/functions/_shared/previewSpec.ts';
-import { findingSentence, claimsAreSafe, SCAN_DISCLOSURE, type PitchFinding } from './prospects/pitchFindings.ts';
+import { pitchSentence, claimsAreSafe, scanProvenance, type PitchFinding } from './prospects/pitchFindings.ts';
 import type { BusinessProfile } from '../preview/spec';
 
 // Big aggregators/directories aren't prospects — we want a business's OWN (beatable) site.
@@ -363,6 +363,7 @@ export function buildHuntPitch(
   findings: PitchFinding[] = [],
   cohortLine?: string | null,
   opening?: string | null,
+  pagesChecked: string[] = [],
 ): string {
   // THE OPENING IS THE WHOLE EMAIL. "I came across you while researching…" is a stranger selling
   // something. "Your site was one of 618 plumber websites in Walworth County we looked at" is a
@@ -390,7 +391,7 @@ ${hook}
 
 ${bridge}
 
-${previewUrl}${scanFindingsParagraph(findings)}${automationUpsellParagraph(upsells)}
+${previewUrl}${scanFindingsParagraph(findings, pagesChecked)}${automationUpsellParagraph(upsells)}
 
 If you like it, publishing it takes a day. No obligation either way.`;
 }
@@ -402,10 +403,10 @@ If you like it, publishing it takes a day. No obligation either way.`;
  *  into a compliance salesman. So the demo link stays the headline and this rides underneath as
  *  evidence for why the rebuild is worth opening. Each line carries its own hedge (findingSentence
  *  bakes it in, so it can't be edited out downstream without removing the claim), and the block
- *  always closes with SCAN_DISCLOSURE — an automated screen of one page, not an audit, establishing
- *  nothing about compliance. No findings ⇒ '' — the email simply omits the block rather than
- *  manufacturing a reason to worry. */
-export function scanFindingsParagraph(findings: PitchFinding[]): string {
+ *  always closes with scanProvenance — which pages were read and an offer to point at every
+ *  finding, earned by the siteScan corroboration gates upstream. No findings ⇒ '' — the email
+ *  simply omits the block rather than manufacturing a reason to worry. */
+export function scanFindingsParagraph(findings: PitchFinding[], pagesChecked: string[] = []): string {
   const lines = safeFindingLines(findings);
   if (!lines.length) return '';
   return `
@@ -414,7 +415,7 @@ A few specific things I noticed on your current site while I was there:
 
 ${lines.map((l) => `• ${l}`).join('\n')}
 
-${SCAN_DISCLOSURE}`;
+${scanProvenance(pagesChecked)}`;
 }
 
 /** The findings copy, with the claim gate applied PER LINE.
@@ -431,13 +432,13 @@ ${SCAN_DISCLOSURE}`;
 function safeFindingLines(findings: PitchFinding[]): string[] {
   return findings
     .slice(0, 3)
-    .map((p) => findingSentence(p.finding))
+    .map((p) => pitchSentence(p.finding))
     .filter((line) => claimsAreSafe(line));
 }
 
-/** The HTML twin of scanFindingsParagraph. Same order, same hedges, same mandatory disclosure —
+/** The HTML twin of scanFindingsParagraph. Same order, same hedges, same provenance line —
  *  the two bodies of one email must never disagree about what we claim. */
-export function scanFindingsHtml(findings: PitchFinding[]): string {
+export function scanFindingsHtml(findings: PitchFinding[], pagesChecked: string[] = []): string {
   const lines = safeFindingLines(findings);
   if (!lines.length) return '';
   const items = lines
@@ -445,7 +446,7 @@ export function scanFindingsHtml(findings: PitchFinding[]): string {
     .join('');
   return `<p style="margin:20px 0 6px;font-size:15px;color:#1c1c1e">A few specific things I noticed on your current site while I was there:</p>
 <ul style="margin:0 0 8px;padding-left:20px;font-size:15px;line-height:1.5;color:#3a3a3c">${items}</ul>
-<p style="margin:8px 0 0;font-size:12px;line-height:1.45;color:#8a8a8f">${escHtml(SCAN_DISCLOSURE)}</p>`;
+<p style="margin:8px 0 0;font-size:12px;line-height:1.45;color:#8a8a8f">${escHtml(scanProvenance(pagesChecked))}</p>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -491,6 +492,7 @@ export function buildHuntPitchEmailHtml(
   beforeShotUrl?: string | null,
   findings: PitchFinding[] = [],
   opening?: string | null,
+  pagesChecked: string[] = [],
 ): string {
   const name = escHtml(profile.business_name);
   const greetName = profile.business_name ? ` ${name} team` : '';
@@ -523,7 +525,7 @@ export function buildHuntPitchEmailHtml(
 <a href="${url}" style="display:inline-block;background:#c8501e;color:#ffffff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 26px;border-radius:10px">See the full site (mobile too) &rarr;</a>
 </p>
 ${before}
-${scanFindingsHtml(findings)}
+${scanFindingsHtml(findings, pagesChecked)}
 ${automationUpsellHtml(upsells)}
 <p style="margin:18px 0 12px">If you like it, publishing it takes a day. I can also set it up to <strong>answer every new enquiry within a minute and follow up the ones that go quiet</strong> — reply and tell me how you run things and I&#39;ll show you exactly what I&#39;d automate.</p>
 <p style="margin:0 0 4px">No obligation either way.</p>

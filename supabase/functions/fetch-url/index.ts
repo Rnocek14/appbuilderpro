@@ -15,6 +15,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { safeFetch, urlAllowed, urlStaticOk } from '../_shared/safeFetch.ts';
 import { fingerprintTech } from '../_shared/techFingerprint.ts';
 import { deepScan, scanFacts } from '../_shared/deepScan.ts';
+import { corroborateScan, siteScanTargets, type SitePage } from '../_shared/siteScan.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -353,15 +354,21 @@ Deno.serve(async (req) => {
     // raw bytes only exist at this point in the pipeline, and folding it into the mode we already
     // call means the audit costs no extra fetch and no extra round trip.
     //
-    // Landing-page only, deliberately — same rule as `checks` and `tech` above. A finding must name
-    // the page it was seen on, and mixing the shallow crawl's section pages in would produce counts
-    // nobody could reproduce by viewing one URL. `scan.limits` states this among its caveats.
+    // `scan` stays landing-page only — same rule as `checks` and `tech` above: a finding must name
+    // the page it was seen on, and a count must be reproducible by viewing one URL. The SITE-level
+    // question ("is this absence true of the site, or just this page?") is answered separately by
+    // `site` below, which reads the crawled pages plus the contact-shaped ones and only lets an
+    // absence through when it held everywhere (siteScan.ts owns those gates).
     const scan = deepScan(bodyRaw);
     const facts = scanFacts(bodyRaw);
 
     // SHALLOW CRAWL: append the services/about/gallery pages' text so extraction sees what the
     // business actually offers (checks/tech stay landing-page-only — those are homepage signals).
-    // Best-effort per page; a slow or dead section page never sinks the scrape.
+    // Best-effort per page; a slow or dead section page never sinks the scrape. The raw HTML of
+    // every page read is kept for the site-level corroboration pass below — same bytes, no refetch.
+    let homePath = '/';
+    try { homePath = new URL(finalUrl).pathname || '/'; } catch { /* keep '/' */ }
+    const sitePages: SitePage[] = [{ path: homePath, html: bodyRaw }];
     let fullText = text;
     const crawled: string[] = [];
     let extraBudget = CRAWL_EXTRA_TEXT;
@@ -375,15 +382,46 @@ Deno.serve(async (req) => {
           rX = await safeFetch(link, { signal: acX.signal, headers: BROWSER_HEADERS });
         } finally { clearTimeout(tX); }
         if (!rX.ok || !/html/.test(rX.headers.get('content-type') ?? '')) continue;
-        const sub = extractText((await rX.text()).slice(0, MAX_BODY)).text.slice(0, extraBudget);
-        if (sub.trim().length < 80) continue;   // nav-only shells add noise, not facts
+        const subHtml = (await rX.text()).slice(0, MAX_BODY);
         const path = new URL(link).pathname || '/';
+        sitePages.push({ path, html: subHtml });
+        const sub = extractText(subHtml).text.slice(0, extraBudget);
+        if (sub.trim().length < 80) continue;   // nav-only shells add noise, not facts
         fullText += `\n\n[${path}]\n${sub}`;
         extraBudget -= sub.length;
         crawled.push(path);
       } catch { /* skip */ }
     }
-    return json({ url: finalUrl, title: title || url.hostname, description, text: fullText, contentType: type, checks, tech, crawled, scan, facts });
+
+    // SITE CORROBORATION: read the contact/booking/quote pages the homepage links (the pages that
+    // falsify "no way in" when it's false), then let siteScan decide which absences held on every
+    // page read. A target that fails to load is recorded as unreached — siteScan then refuses every
+    // absence claim rather than guessing about a door it couldn't open. Bounded: ≤2 extra fetches,
+    // and the whole pass reuses the section pages already in hand.
+    const alreadyRead = new Set(sitePages.map((p) => p.path));
+    const contactPages: SitePage[] = [];
+    const unreached: string[] = [];
+    for (const target of siteScanTargets(bodyRaw, finalUrl)) {
+      let tPath = target;
+      try { tPath = new URL(target).pathname || '/'; } catch { /* keep href */ }
+      if (alreadyRead.has(tPath)) continue;
+      try {
+        const acC = new AbortController();
+        const tC = setTimeout(() => acC.abort(), 8_000);
+        let rC: Response;
+        try {
+          rC = await safeFetch(target, { signal: acC.signal, headers: BROWSER_HEADERS });
+        } finally { clearTimeout(tC); }
+        if (!rC.ok || !/html/.test(rC.headers.get('content-type') ?? '')) { unreached.push(tPath); continue; }
+        contactPages.push({ path: tPath, html: (await rC.text()).slice(0, MAX_BODY) });
+        alreadyRead.add(tPath);
+      } catch { unreached.push(tPath); }
+    }
+    // Contact pages outrank section pages under the cap: an absence claim without the contact page
+    // read is exactly the claim this pass exists to prevent.
+    const site = corroborateScan(
+      [sitePages[0], ...contactPages, ...sitePages.slice(1)].slice(0, 5), unreached);
+    return json({ url: finalUrl, title: title || url.hostname, description, text: fullText, contentType: type, checks, tech, crawled, scan, facts, site });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return json({ error: /abort/i.test(msg) ? 'The page took too long to load.' : msg }, 200);

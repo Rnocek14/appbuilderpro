@@ -527,8 +527,21 @@ const SPA_MOUNT = /<(?:div|main|section)\b[^>]*\bid\s*=\s*["'](?:root|app|__next
  * the markup" describes the framework, not a broken form. The `limits` already say a JS-wired form
  * cannot be verified from markup; this makes the scanner act on its own sentence.
  */
-const JS_APP =
+export const JS_APP =
   /__NEXT_DATA__|window\.__NUXT__|__remixContext|__sveltekit_|data-sveltekit|data-reactroot|data-react-helmet|\bng-version\s*=|\bwire:id\s*=|\bdata-v-[0-9a-f]{6,}|<(?:div|main|section)\b[^>]{0,300}\bid\s*=\s*["'](?:root|app|__next|__nuxt|__gatsby|q-app|svelte)["']/i;
+
+/**
+ * The JavaScript hedges the absence findings carry on a single-page read, as named constants so the
+ * site-level corroboration layer (siteScan.ts) can remove them VERBATIM once it has actually ruled
+ * the blind spot out — every page read, no tag manager, no app framework. A paraphrased removal
+ * would silently drift the moment either sentence is edited; a shared constant cannot.
+ */
+export const JS_INJECTION_HEDGE =
+  ' If any of this is put on the page by JavaScript after it loads, it would not be visible to a scan of the source — worth opening the page to confirm.';
+export const BOOKING_WIDGET_HEDGE =
+  ' A booking widget loaded by a tag manager, or mounted after page load, would not be visible here.';
+export const CONTACT_LINK_HEDGE =
+  ' The page does link to what looks like a contact page elsewhere on the site; only this one page was read, so what is on that one is unknown.';
 /** Enough of a tag vocabulary to say "this is a page", so garbage input never gets an opinion. */
 const LOOKS_LIKE_HTML = /<(?:html|body|div|main|section|article|header|footer|nav|p|h[1-6]|a|form|span|ul|table|img)\b/i;
 
@@ -642,7 +655,7 @@ export function scanConversion(html: string): ScanResult {
       detail += ' The one form on the page is a site-search box, which is not a way to reach the business.';
     }
     if (CONTACT_PAGE_LINK.test(rendered)) {
-      detail += ' The page does link to what looks like a contact page elsewhere on the site; only this one page was read, so what is on that one is unknown.';
+      detail += CONTACT_LINK_HEDGE;
     }
     if (textPhone) {
       detail += ' A phone number does appear in the page text, but it is not a link — on a phone it cannot be tapped to dial, and it cannot be copied by anything that reads the page automatically.';
@@ -653,7 +666,7 @@ export function scanConversion(html: string): ScanResult {
     if (!textPhone && !textEmail) {
       detail += ' No phone number or email address was found written in the page text either.';
     }
-    detail += ' If any of this is put on the page by JavaScript after it loads, it would not be visible to a scan of the source — worth opening the page to confirm.';
+    detail += JS_INJECTION_HEDGE;
     findings.push({
       code: 'conv.no_contact_path',
       category: 'conversion',
@@ -704,8 +717,7 @@ export function scanConversion(html: string): ScanResult {
         // What is actually missing is a way to BOOK, and that is what the sentence now says.
         'Enquiries that arrive outside business hours — evenings and weekends, when people actually sit ' +
         'down to sort a job out — have nothing on this page that books them in, so the work often goes ' +
-        'to whoever can be booked on the spot. A booking widget loaded by a tag manager, or mounted ' +
-        'after page load, would not be visible here.',
+        'to whoever can be booked on the spot.' + BOOKING_WIDGET_HEDGE,
     });
   }
 

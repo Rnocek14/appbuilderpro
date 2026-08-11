@@ -5,7 +5,7 @@ import {
   scanFindingsParagraph, scanFindingsHtml,
   type HuntProfileInput,
 } from './clientHuntBuild';
-import { SCAN_DISCLOSURE, claimsAreSafe, type PitchFinding } from './prospects/pitchFindings';
+import { scanProvenance, claimsAreSafe, type PitchFinding } from './prospects/pitchFindings';
 import { auditSite, type SiteAudit } from './siteAudit';
 import { parseBusinessProfile, assembleFallbackSpec } from '../preview/spec';
 
@@ -253,10 +253,13 @@ const serper = {
   check('no findings → the HTML block is omitted too', scanFindingsHtml([]) === '');
 
   const one = [pf({ code: 'conv.no_contact_path' })];
-  const text = scanFindingsParagraph(one);
-  check('a finding renders as a bullet', /• No way to get in touch/.test(text));
-  check('the disclosure always rides with the findings', text.includes(SCAN_DISCLOSURE));
-  check('the HTML twin also carries the disclosure', scanFindingsHtml(one).includes(escHtml(SCAN_DISCLOSURE)));
+  const text = scanFindingsParagraph(one, ['/', '/contact']);
+  check('a mapped finding renders as its owner-voice bullet, not the report sentence',
+    /• No contact form, no email link and no tappable phone number/.test(text));
+  check('the provenance line always rides with the findings', text.includes(scanProvenance(['/', '/contact'])));
+  check('the provenance names the corroborating page', /your contact page/.test(text));
+  check('the HTML twin also carries the provenance', scanFindingsHtml(one, ['/', '/contact']).includes(escHtml(scanProvenance(['/', '/contact']))));
+  check('no corroboration data → the line honestly names the homepage alone', /reading the code of your homepage directly/.test(scanFindingsParagraph(one)));
 
   const many = ['a', 'b', 'c', 'd', 'e'].map((c) => pf({ code: `conv.${c}` }));
   check('at most three findings reach the email', (scanFindingsParagraph(many).match(/•/g) ?? []).length === 3);
@@ -280,9 +283,9 @@ const serper = {
     audit: auditSite({ url: 'http://acmeroofing.com', reachable: true, title: 'x', text: 'thin', hasViewport: false }, 2026),
   }));
   const composed = buildHuntPitch(prof!, 'https://x.test/p/acme', [], one);
-  check('the composed pitch names the finding', /No way to get in touch/.test(composed));
+  check('the composed pitch names the finding', /No contact form, no email link/.test(composed));
   check('the composed pitch passes the claim gate', claimsAreSafe(composed));
-  check('a pitch with no findings is unchanged in shape', !buildHuntPitch(prof!, 'https://x.test/p/acme').includes(SCAN_DISCLOSURE));
+  check('a pitch with no findings carries no provenance line either', !buildHuntPitch(prof!, 'https://x.test/p/acme').includes('reading the code'));
   check('HTML escaping still applies to finding copy',
     !scanFindingsHtml([pf({ code: 'x.y', title: '<script>alert(1)</script>' })]).includes('<script>alert(1)</script>'));
 }
