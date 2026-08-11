@@ -20,6 +20,10 @@ export interface Surface {
   /** Tap-to-do next moves for THIS surface right now (suggestionDeck). Optional — a surface
    *  without a deck just shows no chips. Read fresh on every call, so state gating is live. */
   suggest?: () => SurfaceSuggestion[];
+  /** Take a dropped/pasted file (a photo onto the postcard, an image into the builder chat).
+   *  Returns the note the dock shows. Optional — absent means this surface doesn't take files
+   *  and the dock says so honestly instead of losing the drop. */
+  acceptFile?: (file: File) => Promise<string>;
 }
 
 let active: Surface | null = null;
@@ -61,4 +65,16 @@ export function surfaceSuggestions(): SurfaceSuggestion[] {
 export function applySuggestion(s: SurfaceSuggestion): string | null {
   if (!active) return null;
   try { return active.handle(s.cmd); } catch { return null; }
+}
+
+/** Does the open surface take files? (The dock uses this for an honest pre-drop answer.) */
+export function surfaceAcceptsFiles(): boolean {
+  return !!active?.acceptFile;
+}
+
+/** Hand a dropped/pasted file to the active surface. Null = no surface / no file handler /
+ *  the handler threw — the dock explains instead of silently eating the drop. */
+export async function offerFileToSurface(file: File): Promise<string | null> {
+  if (!active?.acceptFile) return null;
+  try { return await active.acceptFile(file); } catch { return null; }
 }
