@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, deriveTasks, matchTasks, resolve, routeFor, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, aliasLookup, aliasRemember, deriveTasks, matchTasks, parseCommandPrefix, resolve, routeFor, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -178,6 +178,29 @@ const ALL = ALL_CONCIERGE_TASKS;
     resolve('set up review requests', WORLDS, ALL).task?.id === 'cap:review_request');
   check('time-generic words never become derived keywords ("how much did i make this month" → AI tier)',
     resolve('how much did i make this month', WORLDS, ALL).kind === 'none');
+}
+// ---- Tier 0 (learned shortcuts) + the Stark prefix ----
+{
+  let a = aliasRemember('open the postcard thing', 'postcard', []);
+  check('an AI-tier pick is remembered and replays exactly', aliasLookup('open the postcard thing', a) === 'postcard');
+  check('lookup is normalized (case/punctuation-insensitive)', aliasLookup('  Open the POSTCARD thing! ', a) === 'postcard');
+  check('unknown phrasing returns null, never a guess', aliasLookup('something else entirely', a) === null);
+  a = aliasRemember('open the postcard thing', 'money', a);
+  check('re-learning the same phrase replaces, never duplicates', a.length === 1 && aliasLookup('open the postcard thing', a) === 'money');
+  for (let i = 0; i < 60; i++) a = aliasRemember(`sentence number ${i}`, 'money', a);
+  check('the alias store is capped at 50', a.length === 50);
+  check('empty/short inputs are never learned', aliasRemember('a', 'x', []).length === 0);
+
+  check('"garvis, do draft an episode" strips courtesy AND flags execution',
+    JSON.stringify(parseCommandPrefix('garvis, do draft an episode')) === JSON.stringify({ sentence: 'draft an episode', execute: true }));
+  check('"hey garvis whats next" is courtesy only — no execution flag',
+    JSON.stringify(parseCommandPrefix('hey garvis whats next')) === JSON.stringify({ sentence: 'whats next', execute: false }));
+  check('"do the mailing" is an execution order',
+    parseCommandPrefix('do the mailing').execute === true && parseCommandPrefix('do the mailing').sentence === 'the mailing');
+  check('a plain sentence passes through untouched',
+    JSON.stringify(parseCommandPrefix('lets work on moms postcard')) === JSON.stringify({ sentence: 'lets work on moms postcard', execute: false }));
+  check('"double check my money" is NOT an execution order (prefix is word-anchored)',
+    parseCommandPrefix('double check my money').execute === false);
 }
 {
   // Determinism + purity of the derivation itself.
