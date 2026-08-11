@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, parseCommandPrefix, reelTopic, resolve, routeFor, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, isGoBack, parseCommandPrefix, reelTopic, resolve, routeFor, smallTalk, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -273,6 +273,24 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('deriveTasks is deterministic', JSON.stringify(a) === JSON.stringify(deriveTasks(CONCIERGE_TASKS, sample)));
   check('a not_built capability is never proposed', !a.some((t) => t.id === 'cap:c2') && a.some((t) => t.id === 'cap:c1'));
   check('a nav item on a handwritten route is skipped', !a.some((t) => t.id === 'nav:/garvis/queue'));
+}
+
+// ---- SMALL TALK, HALTS & BACK — chatter never navigates, negations never "do" ----
+{
+  check('"never mind" is CLOSURE — it must never open a project named Mind Weave', smallTalk('never mind')?.kind === 'closure');
+  check('"cancel the mail run" is a HALT — a negation is the opposite of intent', smallTalk('cancel the mail run')?.kind === 'halt');
+  check('"dont send anything" halts too', smallTalk('dont send anything')?.kind === 'halt');
+  check('a halt names the real levers (Queue, Missions, Master Switch)',
+    /Queue/.test(smallTalk('stop everything')!.text) && /Master Switch/.test(smallTalk('stop everything')!.text));
+  check('greetings, thanks, and affirmations each get their own free line',
+    smallTalk('good morning')?.kind === 'greet' && smallTalk('thanks')?.kind === 'thanks' && smallTalk('good job')?.kind === 'affirm');
+  check('real asks are NEVER chatter ("lets work on moms postcard", "check my money")',
+    smallTalk('lets work on moms postcard') === null && smallTalk('check my money') === null);
+  check('"no pressure lets do the postcard" is not a closure (anchored, not prefix)', smallTalk('no pressure lets do the postcard') === null);
+  check('"go back" steps back a page; "go back to the queue" is a destination, not a step',
+    isGoBack('go back') && isGoBack('take me back') && !isGoBack('go back to the queue'));
+  check('bare "another one" at a board just makes another', parseBoardCommand('another one', ['post'])?.kind === 'make'
+    && parseBoardCommand('one more', [])?.kind === 'make' && parseBoardCommand('another one', ['post'])?.text === '');
 }
 
 // ---- THE REEL DOOR — "make an ai video for X" lands in the reel studio ABOUT X ----

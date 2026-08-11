@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, GripVertical, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor, withProjectTasks,
+  aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isGoBack, isRevision, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
 import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
@@ -505,6 +505,27 @@ export function ConciergeDock() {
       setCompound(false);
       setNote(surfaceNote);
       speak(surfaceNote);
+      inputRef.current?.focus();
+      return;
+    }
+    // "Go back" is a browser verb, not a destination.
+    if (isGoBack(text)) {
+      setSuggestions([]);
+      setCompound(false);
+      setNote('Back you go.');
+      navigate(-1);
+      return;
+    }
+    // SMALL TALK & HALTS — chatter and stop-words get a free honest answer, never a navigation
+    // guess ("never mind" must not open a project named Mind Weave) and never a metered AI call.
+    const chat = smallTalk(text);
+    if (chat) {
+      setCompound(false);
+      // A halt points at the real levers — the Queue chip is one tap.
+      const queueTask = chat.kind === 'halt' ? tasksRef.current.find((t) => t.id === 'approvals') : null;
+      setSuggestions(queueTask ? [queueTask] : []);
+      setNote(chat.text);
+      speak(chat.text);
       inputRef.current?.focus();
       return;
     }

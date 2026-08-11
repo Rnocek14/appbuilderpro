@@ -429,6 +429,41 @@ export function exploreDive(sentence: string): string | null {
   return stripped.slice(0, 120);
 }
 
+// ---------------------------------------------------------------------------------------------
+// SMALL TALK & HALTS — polite noise and stop-words deserve a FREE, honest, instant answer, never
+// a navigation guess or a metered AI call. Two real misroutes forced this tier: "never mind"
+// confidently opened a project named Mind Weave, and "cancel the mail run" opened the postcard
+// page as if asked to make one. Negations are the opposite of intent.
+// ---------------------------------------------------------------------------------------------
+
+export interface SmallTalk { kind: 'greet' | 'thanks' | 'affirm' | 'closure' | 'halt'; text: string }
+
+const GREET_RE = /^(hi|hello|hey|yo|sup|good (morning|afternoon|evening))( garvis)?[.!]*$/;
+const THANKS_RE = /^(thanks|thank you|thank u|ty|thx|appreciate (it|you))( garvis)?( so much)?[.!]*$/;
+const AFFIRM_RE = /^(ok|okay|k|yes|yep|yeah|cool|nice|great|perfect|awesome|good job|well done|love it|lol)[.!]*$/;
+const CLOSURE_RE = /^(no|nope|nevermind|never mind|forget it|nothing|nah|na)[.!]*$/;
+const HALT_RE = /^(stop|cancel|halt|abort|pause)\b|^(dont|don't|do not)\b/;
+
+/** Classify chatter and halts. Null = a real ask — the tiers proceed. Deterministic. */
+export function smallTalk(input: string): SmallTalk | null {
+  const t = input.trim().toLowerCase();
+  if (!t) return null;
+  if (GREET_RE.test(t)) return { kind: 'greet', text: "Hey. Say a door (“queue”), ask a number (“how many approvals”), or tell me what to make." };
+  if (THANKS_RE.test(t)) return { kind: 'thanks', text: 'Anytime.' };
+  if (AFFIRM_RE.test(t)) return { kind: 'affirm', text: 'Good. Next?' };
+  if (CLOSURE_RE.test(t)) return { kind: 'closure', text: 'Dropped it — nothing was created.' };
+  if (HALT_RE.test(t)) return {
+    kind: 'halt',
+    text: 'Nothing is mid-flight from this box. Anything outbound is still WAITING in your Queue (reject it there); running arcs live on Missions; the whole system’s Master Switch is on Mission Control.',
+  };
+  return null;
+}
+
+/** "go back" is a browser verb, not a destination. The dock steps back one page. */
+export function isGoBack(input: string): boolean {
+  return /^(go back|take me back|back)[.!]*$/.test(input.trim().toLowerCase());
+}
+
 /** The reel bridge: "lets make an ai video for real estate" carries its TOPIC into the reel
  *  studio's idea box, so the format's idea cards appear already about the right thing. Strips
  *  the ask-shell (verbs, articles, the video/reel nouns and their connectors) and returns what
@@ -771,6 +806,8 @@ function makePrompt(sentence: string, nouns: string[]): string {
 export function parseBoardCommand(sentence: string, nouns: string[]): SurfaceAsk | null {
   const t = sentence.trim();
   if (!t) return null;
+  // Bare "another one" at a board means exactly that — make another (current kind, no prompt).
+  if (/^(another( one)?|one more|do another|make another( one)?)$/.test(norm(t))) return { kind: 'make', text: '' };
   const lower = ` ${norm(t)} `;
   if (RIFF_DEIXIS.test(lower) || RIFF_WORD.test(lower)) return { kind: 'riff', text: riffInstruction(t) };
   const m = MAKE_LEAD.exec(norm(t));
