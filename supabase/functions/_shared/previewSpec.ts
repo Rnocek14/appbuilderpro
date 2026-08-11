@@ -805,15 +805,24 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
     ? universalChapter(profile.business_name, uniStats?.length ?? 0)
     : tradeKind;
   let sceneSeen = false;
+  let sceneHasVideo = false;
   sections = sections.filter((s) => {
     if (s.type !== 'scene') return true;
     if (!sceneKind || sceneSeen) return false;
     sceneSeen = true;
+    // VEO CLIP PASS-THROUGH: the approved scroll_scenes library rides in as {url, poster} —
+    // https-only, shape-checked, and it marks the page as carrying AI imagery (footer discloses).
+    const v = s.props.video as { url?: unknown; poster?: unknown } | undefined;
+    const video = v && typeof v.url === 'string' && /^https:\/\//.test(v.url)
+      ? { url: v.url, ...(typeof v.poster === 'string' && /^https:\/\//.test(v.poster) ? { poster: v.poster } : {}) }
+      : undefined;
+    if (video) sceneHasVideo = true;
     s.props = {
       headline: str(s.props.headline, SCENE_COPY[sceneKind].headline),
       sub: str(s.props.sub, SCENE_COPY[sceneKind].sub),
       cta: str(s.props.cta, recipe.cta),
       scene: sceneKind,
+      ...(video ? { video } : {}),
       ...(sceneKind === 'glass' ? { stats: uniStats } : {}),
     };
     return true;
@@ -847,7 +856,7 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
       keywords: Array.isArray(seoRaw.keywords) ? (seoRaw.keywords as unknown[]).filter((k): k is string => typeof k === 'string').slice(0, 12) : fallback.seo.keywords,
     },
     footer: { line: str((r.footer as Record<string, unknown>)?.line, fallback.footer.line) },
-    aiImagery: profile.photos.some((p) => p.source_type === 'ai_generated') || undefined,
+    aiImagery: profile.photos.some((p) => p.source_type === 'ai_generated') || sceneHasVideo || undefined,
   };
 }
 

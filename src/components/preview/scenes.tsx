@@ -439,7 +439,31 @@ function RibbonScene({ p, headline, sub, cta, hue, seed }: {
 
 /** The 'scene' section — normalizeSpec guarantees `scene` is a valid kind for this trade. */
 export function SceneSection(p: { headline?: string; sub?: string; cta?: string; scene?: string; motion?: string;
-  stats?: { value: string; label: string }[]; themePrimary?: string; siteName?: string }) {
+  stats?: { value: string; label: string }[]; themePrimary?: string; siteName?: string;
+  video?: { url: string; poster?: string } }) {
+  // VEO CHAPTER — an approved scroll_scenes clip becomes the stage itself: a muted, looping
+  // full-bleed film under the punchline. Poster-first so static captures and reduced motion
+  // always show a real finished frame; autoplay is progressive enhancement on top.
+  if (p.video?.url) {
+    return (
+      <section id="scene" className="relative isolate overflow-hidden" style={{ minHeight: '82vh' }}>
+        <video className="absolute inset-0 h-full w-full object-cover" src={p.video.url}
+          poster={p.video.poster} autoPlay muted loop playsInline preload="metadata" aria-hidden />
+        <div className="absolute inset-0" style={{ background: 'radial-gradient(120% 90% at 50% 60%, rgb(0 0 0 / 0.28), rgb(0 0 0 / 0.62))' }} />
+        <div className="relative flex min-h-[82vh] flex-col items-center justify-center px-6 py-24 text-center">
+          <h2 className="pv-display max-w-3xl text-4xl font-semibold tracking-tight text-white sm:text-6xl" style={{ textWrap: 'balance', textShadow: '0 2px 24px rgb(0 0 0 / 0.45)' }}>{p.headline}</h2>
+          {p.sub && <p className="mx-auto mt-4 max-w-xl text-lg text-white/85">{p.sub}</p>}
+          {p.cta && (
+            <button type="button"
+              onClick={() => (document.getElementById('quote') ?? document.getElementById('ctaBanner'))?.scrollIntoView({ behavior: 'smooth' })}
+              className="mt-7 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-neutral-900 shadow-xl transition-transform hover:-translate-y-0.5">
+              {p.cta}
+            </button>
+          )}
+        </div>
+      </section>
+    );
+  }
   const hue = parseInt((p.themePrimary ?? '220 50% 40%').split(/\s+/)[0], 10) || 220;
   // The ribbon chapter: drifting paper strips behind the poster claim, seeded by the business.
   if (p.scene === 'ribbon') {

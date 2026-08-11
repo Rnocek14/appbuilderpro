@@ -535,6 +535,44 @@ function ForwardInCard() {
   );
 }
 
+function PlatformConnectionsCard() {
+  const [rows, setRows] = useState<{ label: string; key: string; set: boolean }[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void supabase.functions.invoke('connections', { body: { action: 'platform' } })
+      .then(({ data, error }) => {
+        if (!live) return;
+        if (error || !(data as { platform?: unknown })?.platform) { setErr('Could not reach the connections service.'); return; }
+        setRows((data as { platform: { label: string; key: string; set: boolean }[] }).platform);
+      });
+    return () => { live = false; };
+  }, []);
+  return (
+    <Card className="mt-4 p-5">
+      <p className="text-sm font-medium text-forge-ink">Platform connections</p>
+      <p className="mt-1 text-xs text-forge-dim">
+        Which platform keys are live right now — set once with <code>supabase secrets set KEY=…</code> and
+        they stay set for every feature. Values never leave the server; this shows only set / not set.
+      </p>
+      {err && <p className="mt-3 text-xs text-forge-dim">{err}</p>}
+      {!rows && !err && <p className="mt-3 text-xs text-forge-dim">Checking…</p>}
+      {rows && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {rows.map((r) => (
+            <span key={r.key} title={r.key}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${r.set
+                ? 'border-emerald-700/30 bg-emerald-500/10 text-emerald-600'
+                : 'border-forge-line bg-forge-panel text-forge-dim'}`}>
+              <span aria-hidden>{r.set ? '●' : '○'}</span> {r.label}{r.set ? '' : ' — not set'}
+            </span>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { profile, refreshProfile } = useAuth();
   const { toast } = useToast();
@@ -631,6 +669,7 @@ export default function Settings() {
         </Card>
 
         <AIProviderCard />
+        <PlatformConnectionsCard />
 
         <OutreachCard />
 

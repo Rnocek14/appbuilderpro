@@ -31,6 +31,25 @@ Deno.serve(async (req) => {
       action?: string; provider?: string; token?: string; accountLabel?: string;
     };
 
+    if (action === 'platform') {
+      // WHICH platform integrations are live — set/unset only, values never leave the server.
+      // This is the Settings "is Veo/Stripe/Resend actually connected?" panel's data source.
+      const PLATFORM: [string, string][] = [
+        ['Claude (site copy & specs)', 'ANTHROPIC_API_KEY'],
+        ['Gemini / Veo video', 'GEMINI_API_KEY'],
+        ['Netlify publishing', 'NETLIFY_AUTH_TOKEN'],
+        ['Screenshots', 'SCREENSHOT_API_KEY'],
+        ['Resend email', 'RESEND_API_KEY'],
+        ['Serper search', 'SERPER_API_KEY'],
+        ['Google Places', 'GOOGLE_PLACES_API_KEY'],
+        ['Stripe payments', 'STRIPE_SECRET_KEY'],
+        ['Twilio SMS/voice', 'TWILIO_AUTH_TOKEN'],
+        ['ElevenLabs voice', 'ELEVENLABS_API_KEY'],
+        ['Shotstack video renders', 'SHOTSTACK_API_KEY'],
+      ];
+      return json({ platform: PLATFORM.map(([label, key]) => ({ label, key, set: !!Deno.env.get(key)?.trim() })) });
+    }
+
     if (action === 'list') {
       const { data } = await admin.from('provider_connections')
         .select('provider, account_label, expires_at').eq('user_id', user.id);

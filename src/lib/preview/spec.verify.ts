@@ -618,6 +618,22 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   check('containers vary too', new Set(names.map((n) => typeVoice(n, 'Sora').container)).size >= 2);
 }
 
+// --- Veo clip pass-through: https-only, disclosure flag set ---------------------------------------
+{
+  const withVideo = normalizeSpec({ sections: [
+    { type: 'hero', props: {} },
+    { type: 'scene', props: { video: { url: 'https://cdn.example/pipe.mp4', poster: 'https://cdn.example/pipe.jpg' } } },
+  ] }, ROOFER);
+  const sc = withVideo.sections.find((s) => s.type === 'scene');
+  check('scene video passes through shape-checked', JSON.stringify(sc?.props.video) === JSON.stringify({ url: 'https://cdn.example/pipe.mp4', poster: 'https://cdn.example/pipe.jpg' }));
+  check('a video scene marks the page as AI imagery (footer discloses)', withVideo.aiImagery === true);
+  const badVideo = normalizeSpec({ sections: [
+    { type: 'hero', props: {} },
+    { type: 'scene', props: { video: { url: 'javascript:alert(1)' } } },
+  ] }, ROOFER);
+  check('non-https video URLs are dropped', badVideo.sections.find((s) => s.type === 'scene')?.props.video === undefined);
+}
+
 // --- displayName: humans never say "Services Co., LLC" --------------------------------------------
 check('displayName strips legal suffixes and long possessive tails',
   displayName("Tom Hiatt's Plumbing & Excavating Services Co., LLC") === "Tom Hiatt's Plumbing"
