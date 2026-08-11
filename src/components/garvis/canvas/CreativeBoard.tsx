@@ -16,6 +16,8 @@ import {
   type Board, type BoardMetrics, type BoardView,
 } from '../../../lib/garvis/creativeBoard';
 import { loadBoard, saveBoard } from '../../../lib/garvis/clusterState';
+import { parseBoardCommand } from '../../../lib/garvis/concierge';
+import { registerSurface } from '../../../lib/garvis/surfaceBridge';
 import { Overlay } from '../../ui/Overlay';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -45,6 +47,9 @@ export interface CreativeBoardAdapter<C> {
   metrics: BoardMetrics;              // tile w/h/gap/cols
   designWidth: number;                // px the thumb is authored at, then scaled to metrics.w
   kinds: BoardKind[];                 // "make" chips
+  /** The board's OWN nouns for the concierge's surface tier ("make a postcard…" claims the
+   *  postcard board; "make a video" there does not). Singulars — plurals fold automatically. */
+  voiceNouns?: string[];
   promptPlaceholder: string;
   emptyHint: string;
   banner?: ReactNode;                 // honesty / availability line under the make bar
@@ -157,13 +162,12 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
   const ghostBoxes = () => busyRef.current.map((g) => ({ x: g.x, y: g.y }));
 
   // ---- make a new piece — non-blocking, several can run at once ---------------------------
-  const make = useCallback(async () => {
+  const makeWith = useCallback(async (promptText: string) => {
     if (busyRef.current.length >= MAX_CONCURRENT) { onToast('info', 'A few are already generating — give them a second.'); return; }
-    const p = prompt.trim();
+    const p = promptText.trim();
     const gid = newId();
     const pos = nextRootPosition(boardRef.current, M, ghostBoxes());   // dodge existing tiles AND in-flight ghosts
     addGhost({ id: gid, x: pos.x, y: pos.y, label: 'Making…' });
-    setPrompt('');               // clear immediately so the next idea can be typed while this one renders
     setFavOnly(false);           // the new (unstarred) card must be visible, not hidden by the ⭐ filter
     try {
       const content = await adapter.generate({ prompt: p, kindId: kind });
@@ -172,7 +176,12 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
       if (view === ARCHIVE_GROUP) setView('all');
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not make that.'); }
     finally { dropGhost(gid); }
-  }, [M, adapter, prompt, kind, view, onToast]);
+  }, [M, adapter, kind, view, onToast]);
+  const make = useCallback(() => {
+    const p = prompt;
+    setPrompt('');               // clear immediately so the next idea can be typed while this one renders
+    return makeWith(p);
+  }, [prompt, makeWith]);
 
   // ---- spin a rendition from a tile — also non-blocking ----------------------------------
   const spin = useCallback(async (parentId: string, instruction: string) => {
@@ -189,6 +198,34 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not spin a rendition.'); }
     finally { dropGhost(gid); }
   }, [M, adapter, onToast]);
+
+  // ---- THE VOICE WIRE — the concierge's surface tier lands here while this board is open -----
+  // "Make one with a lake background" makes it on THIS board; "another rendition … add text
+  // saying X" spins the piece you're pointing at. Refs (not deps) read the live focus/selection
+  // so pointing follows the operator's eye: the focused tile, else a single selection, else the
+  // newest starred, else the newest piece. Claims are conservative (parseBoardCommand) so asks
+  // for other doors keep routing normally.
+  const focusRef = useRef<string | null>(null);
+  const selectedRef = useRef<Set<string>>(new Set());
+  focusRef.current = focusId;
+  selectedRef.current = selected;
+  useEffect(() => registerSurface({
+    id: `board:${adapter.storageKey}`,
+    claims: (s) => parseBoardCommand(s, adapter.voiceNouns ?? []),
+    handle: (cmd) => {
+      if (cmd.kind !== 'riff') { void makeWith(cmd.text); return 'Making it — the new card lands on this board.'; }
+      const b = boardRef.current;
+      const pointedId = focusRef.current ?? (selectedRef.current.size === 1 ? [...selectedRef.current][0] : null);
+      const live = b.tiles.filter((t) => t.group !== ARCHIVE_GROUP);
+      const target = (pointedId ? getTile(b, pointedId) : null)
+        ?? [...live].sort((a, z) => (Number(z.favorite) - Number(a.favorite)) || (z.createdAt - a.createdAt))[0]
+        ?? null;
+      if (!target) { void makeWith(cmd.text); return 'Nothing here to riff yet — making it fresh instead.'; }
+      if (!cmd.text) { setRenditionFor(target.id); setRenditionText(''); return 'Which change? The rendition card is open — type it there.'; }
+      void spin(target.id, cmd.text);
+      return `Spinning a rendition of "${(adapter.captionOf(target.content) || target.prompt).slice(0, 40)}"…`;
+    },
+  }), [adapter, makeWith, spin]);
 
   // ---- zoom + fit-to-view ----------------------------------------------------------------
   const clampZoom = (z: number) => Math.min(1.6, Math.max(0.35, z));

@@ -11,9 +11,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor,
+  aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor, withProjectTasks,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
+import { offerToSurface } from '../lib/garvis/surfaceBridge';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
@@ -93,6 +94,9 @@ export function ConciergeDock() {
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
   const aliasesRef = useRef<ConciergeAlias[]>(loadAliases());
   const worldsRef = useRef<ConciergeWorld[] | null>(null);
+  // The full task list including the operator's own builder projects ("work on jims site").
+  // Starts as the static registry; loadWorlds composes the real one alongside the worlds fetch.
+  const tasksRef = useRef<ConciergeTask[]>(ALL_CONCIERGE_TASKS);
   const inputRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<{ stop: () => void } | null>(null);
 
@@ -159,8 +163,12 @@ export function ConciergeDock() {
 
   const loadWorlds = async (): Promise<ConciergeWorld[]> => {
     if (worldsRef.current) return worldsRef.current;
-    const { data } = await supabase.from('knowledge_clusters')
-      .select('slug, world_id, knowledge_worlds!inner(id, title)').limit(200);
+    const [{ data }, projs] = await Promise.all([
+      supabase.from('knowledge_clusters').select('slug, world_id, knowledge_worlds!inner(id, title)').limit(200),
+      // Builder projects become sayable doors too — a failed fetch just means no project tasks.
+      supabase.from('projects').select('id, name').order('updated_at', { ascending: false }).limit(40)
+        .then(({ data: p }) => (p ?? []) as { id: string; name: string }[], () => [] as { id: string; name: string }[]),
+    ]);
     const byWorld = new Map<string, ConciergeWorld>();
     for (const c of (data ?? []) as unknown as { slug: string; world_id: string; knowledge_worlds: { id: string; title: string } }[]) {
       if (!c.world_id) continue;
@@ -168,6 +176,7 @@ export function ConciergeDock() {
       w.slugs.push(c.slug);
       byWorld.set(c.world_id, w);
     }
+    tasksRef.current = withProjectTasks(ALL_CONCIERGE_TASKS, projs);
     worldsRef.current = [...byWorld.values()];
     return worldsRef.current;
   };
@@ -221,13 +230,13 @@ export function ConciergeDock() {
         body: {
           sentence,
           context: window.location.pathname,
-          tasks: ALL_CONCIERGE_TASKS.map(({ id, label }) => ({ id, label })),
+          tasks: tasksRef.current.map(({ id, label }) => ({ id, label })),
         },
       });
       if (error || !data) { setNote(FALLBACK); return; }
       const d = data as { available?: boolean; setup?: string[]; taskId?: string | null; answer?: string | null };
       if (d.available === false) { setNote(d.setup?.[0] ?? FALLBACK); return; }
-      const picked = d.taskId ? ALL_CONCIERGE_TASKS.find((t) => t.id === d.taskId) ?? null : null;
+      const picked = d.taskId ? tasksRef.current.find((t) => t.id === d.taskId) ?? null : null;
       if (picked) {
         rememberAlias(sentence, picked.id);   // tier 0 learns — next time this phrasing is instant
         const { route, missingWorld } = routeFor(picked, worlds);
@@ -372,6 +381,18 @@ export function ConciergeDock() {
     if (!text) return;
     setLastSentence(text);
     if (execute) { await doIt(text); return; }
+    // THE SURFACE TIER — the open working surface (a creative board room, the builder) claims
+    // the ask first: "make one with a lake background" acts HERE instead of navigating away.
+    // Claims are conservative pure parsers, so asks for other doors fall straight through.
+    const surfaceNote = offerToSurface(text);
+    if (surfaceNote) {
+      setSuggestions([]);
+      setCompound(false);
+      setNote(surfaceNote);
+      speak(surfaceNote);
+      inputRef.current?.focus();
+      return;
+    }
     // THE STATS TIER — number questions answered from real rows, free, before anything routes.
     const stat = statsFor(text);
     if (stat) {
@@ -389,7 +410,7 @@ export function ConciergeDock() {
     }
     // Tier 0 — the operator's own learned phrasings resolve instantly.
     const learned = aliasLookup(text, aliasesRef.current);
-    const learnedTask = learned ? ALL_CONCIERGE_TASKS.find((t) => t.id === learned) : null;
+    const learnedTask = learned ? tasksRef.current.find((t) => t.id === learned) : null;
     const worlds = await loadWorlds().catch(() => [] as ConciergeWorld[]);
     inputRef.current?.focus();
     if (learnedTask) {
@@ -397,7 +418,7 @@ export function ConciergeDock() {
       act(learnedTask, route, missingWorld, text);
       return;
     }
-    const r = resolve(text, worlds, ALL_CONCIERGE_TASKS);
+    const r = resolve(text, worlds, tasksRef.current);
     if (r.kind === 'go' && r.task && r.route) { act(r.task, r.route, r.missingWorld, text); return; }
     if (r.kind === 'compound' && r.suggestions?.length) {
       setCompound(true);
@@ -437,7 +458,7 @@ export function ConciergeDock() {
     rec.start();
   };
 
-  const task = guide ? ALL_CONCIERGE_TASKS.find((t) => t.id === guide.taskId) ?? null : null;
+  const task = guide ? tasksRef.current.find((t) => t.id === guide.taskId) ?? null : null;
 
   if (!open) {
     return (
