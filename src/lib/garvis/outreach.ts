@@ -6,6 +6,7 @@
 
 import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
+import { subjectVariants, pickSubjectVariant } from './prospects/pitchCraft.ts';
 
 export interface QueuePitchInput {
   previewSiteId: string;
@@ -68,12 +69,16 @@ export async function queuePitch(input: QueuePitchInput): Promise<{ approvalId: 
   if (campErr) throw new Error(campErr.message);
   const campaignId = (camp as { id: string }).id;
 
-  const subject = `A new website for ${input.businessName}`;
+  // The same subject-angle deck the worker path uses (pitchCraft), seeded by the recipient so a
+  // re-queue never flip-flops. hasFindings stays false here — the interactive pitch body carries
+  // no findings block, so the question angle has nothing to cash and is never offered.
+  const sv = pickSubjectVariant(subjectVariants({ businessName: input.businessName, industry: input.industry }), to);
+  const subject = sv.subject;
   const body = `${input.pitch.trim()}\n\nTake a look: ${input.previewUrl}`;
 
   const { data: msg, error: msgErr } = await supabase.from('outreach_messages').insert({
     owner_id: uid, campaign_id: campaignId, contact_id: contactId, preview_site_id: input.previewSiteId,
-    sequence_step: 0, subject, body_text: body, to_address: to, status: 'draft',
+    sequence_step: 0, subject, subject_variant: sv.id, body_text: body, to_address: to, status: 'draft',
   }).select('id').single();
   if (msgErr) throw new Error(msgErr.message);
   const messageId = (msg as { id: string }).id;

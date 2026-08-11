@@ -362,6 +362,7 @@ export function buildHuntPitch(
   upsells: PitchUpsell[] = [],
   findings: PitchFinding[] = [],
   cohortLine?: string | null,
+  opening?: string | null,
 ): string {
   // THE OPENING IS THE WHOLE EMAIL. "I came across you while researching…" is a stranger selling
   // something. "Your site was one of 618 plumber websites in Walworth County we looked at" is a
@@ -369,15 +370,25 @@ export function buildHuntPitch(
   // of the first line. cohortMentionLine returns null unless the study is genuinely publishable —
   // big enough sample, single scan version — so an under-sampled sweep quietly falls back to the
   // honest cold opening rather than dressing itself up as research.
-  const opening = cohortLine
-    ? `${cohortLine}\n\nI was looking at how ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''} handle their websites, and yours came up.`
-    : `I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.`;
+  //
+  // `opening` (from the pitchCraft AI seam, ALREADY through acceptPitchOpener) outranks both: a
+  // hook written about this business beats the template. It arrives only post-gate — this builder
+  // never sees a raw model draft — and it swaps the bridge line too, because "Rather than just
+  // tell you that" only parses after the template's own told-you-something opening.
+  const hook = opening?.trim()
+    ? opening.trim()
+    : cohortLine
+      ? `${cohortLine}\n\nI was looking at how ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''} handle their websites, and yours came up.`
+      : `I came across ${profile.business_name} while researching ${profile.industry.toLowerCase()} businesses${profile.location ? ` in ${profile.location}` : ''}${profile.current_website_score != null ? ` and noticed your current website may be costing you leads` : ''}.`;
+  const bridge = opening?.trim()
+    ? 'So I went ahead and built you a new one:'
+    : 'Rather than just tell you that, I built you a new one:';
 
   return `Hi${profile.business_name ? ` ${profile.business_name} team` : ''},
 
-${opening}
+${hook}
 
-Rather than just tell you that, I built you a new one:
+${bridge}
 
 ${previewUrl}${scanFindingsParagraph(findings)}${automationUpsellParagraph(upsells)}
 
@@ -479,6 +490,7 @@ export function buildHuntPitchEmailHtml(
   upsells: PitchUpsell[] = [],
   beforeShotUrl?: string | null,
   findings: PitchFinding[] = [],
+  opening?: string | null,
 ): string {
   const name = escHtml(profile.business_name);
   const greetName = profile.business_name ? ` ${name} team` : '';
@@ -489,6 +501,12 @@ export function buildHuntPitchEmailHtml(
     : '';
   const url = escHtml(previewUrl);
 
+  // The same gated opener the plain-text twin uses (the two bodies of one email must never
+  // disagree) — escaped here, with the swapped bridge. No opener → the template line, verbatim.
+  const lede = opening?.trim()
+    ? `${escHtml(opening.trim()).replace(/\n+/g, '<br/>')} So I went ahead and built you a new one this week — here it is:`
+    : `I came across ${name} while researching ${industry} businesses${where}${concern}. Rather than just tell you that, I built you a new one this week — here it is:`;
+
   const before = beforeShotUrl
     ? `<p style="margin:22px 0 6px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#8a8a8f">For comparison — your site today</p>
 <img src="${escHtml(beforeShotUrl)}" width="360" alt="${name} — current website" style="display:block;width:100%;max-width:360px;border:1px solid #e0e0e4;border-radius:8px"/>`
@@ -496,7 +514,7 @@ export function buildHuntPitchEmailHtml(
 
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,system-ui,sans-serif;font-size:15px;line-height:1.55;color:#1c1c1e;max-width:600px;margin:0 auto">
 <p style="margin:0 0 12px">Hi${greetName},</p>
-<p style="margin:0 0 16px">I came across ${name} while researching ${industry} businesses${where}${concern}. Rather than just tell you that, I built you a new one this week — here it is:</p>
+<p style="margin:0 0 16px">${lede}</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate"><tr><td style="padding:0">
 <a href="${url}" style="display:block;border:1px solid #dcdce0;border-radius:10px;overflow:hidden;text-decoration:none">
 <img src="${escHtml(screenshotUrl)}" width="600" alt="${name} — new website preview" style="display:block;width:100%;max-width:600px;border:0"/>

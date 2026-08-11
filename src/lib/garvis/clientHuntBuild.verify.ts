@@ -110,6 +110,14 @@ const serper = {
   check('the pitch mentions the current-site concern (a score was observed)', /costing you leads/.test(pitch));
   check('the pitch closes with no pressure', /no obligation/i.test(pitch.toLowerCase()));
   check('no [Name]-style placeholders leak', !/\[[A-Za-z]/.test(pitch));
+
+  // The gated AI opener (pitchCraft seam) outranks the template opening and swaps the bridge.
+  const hook = "Joe's Roofing has re-shingled half of Walworth County, but your website still hides the phone number on a phone.";
+  const withOpener = buildHuntPitch(profile!, url, [], [], null, hook);
+  check('an opener override replaces the template opening', withOpener.includes(hook) && !/I came across/.test(withOpener));
+  check('the override swaps the bridge line so it still parses', withOpener.includes('So I went ahead and built you a new one:') && !/Rather than just tell you that/.test(withOpener));
+  check('the link, close, and greeting survive an override', withOpener.split(url).length === 2 && /no obligation/i.test(withOpener) && withOpener.startsWith("Hi Joe's Roofing team,"));
+  check('a blank override falls back to the template opening', /I came across/.test(buildHuntPitch(profile!, url, [], [], null, '  ')));
 }
 
 // --- buildHuntPitchEmailHtml: SHOW the site (a real screenshot), honest + escaped --------------
@@ -152,6 +160,12 @@ const serper = {
   })).profile;
   const evilHtml = buildHuntPitchEmailHtml(evil!, url, shot, []);
   check('a hostile business name is HTML-escaped (no raw <script>)', !evilHtml.includes('<script>') && evilHtml.includes('&lt;script&gt;'));
+
+  // The opener override rides into the HTML twin — escaped, with the swapped bridge.
+  const htmlOpener = buildHuntPitchEmailHtml(profile!, url, shot, [], null, [], 'Joe\'s Roofing has <great> reviews but your roofing site never shows them.');
+  check('the HTML twin carries the override, escaped', htmlOpener.includes('&lt;great&gt;') && !htmlOpener.includes('<great>') && !/I came across/.test(htmlOpener));
+  check('the HTML twin swaps the bridge under an override', /So I went ahead and built you a new one this week/.test(htmlOpener));
+  check('no override → the template lede, verbatim', /I came across/.test(buildHuntPitchEmailHtml(profile!, url, shot, [])));
 }
 
 // --- escHtml + automationUpsellHtml: escaping + grounding --------------------------------------

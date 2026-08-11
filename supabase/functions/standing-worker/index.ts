@@ -38,6 +38,9 @@ import { buildQueries, parseOpportunities, dedupeKey, huntLine, EXTRACT_SYSTEM, 
 import { orderSteps, stepSucceeded, derivePlanStatus, type StepStatus, type PlanStep } from '../../../src/lib/garvis/orchestrator.ts';
 import { buildHuntProfileRaw, buildHuntPitch, buildHuntPitchEmailHtml, huntRunLine, extractSiteFacts, huntImagePrompts, huntArtPrompts } from '../../../src/lib/garvis/clientHuntBuild.ts';
 import { selectPitchFindings } from '../../../src/lib/garvis/prospects/pitchFindings.ts';
+// THE CREATIVE LAYER (pitchCraft): honest subject-line angles + the gated AI-opener seam. The
+// worker only ever sees a post-gate opener; a rejected or failed draft leaves the template intact.
+import { subjectVariants, pickSubjectVariant, openerSystemPrompt, openerUserPrompt, acceptPitchOpener } from '../../../src/lib/garvis/prospects/pitchCraft.ts';
 import type { DeepScan } from '../_shared/scanTypes.ts';
 // THE INTELLIGENCE CHAIN (strategist → art director → simulated owner → refine) — the same brief
 // the browser preview engine runs, so hunted prospects get the crafted site, not the template.
@@ -2060,6 +2063,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   let specSource: 'ai' | 'fallback' = 'fallback';
   let strategy: Record<string, unknown> | null = null;
   let critique: Record<string, unknown> | null = null;
+  let aiOpener: string | null = null;   // the gated creative hook — null ⇒ the template opening stands
   // Build log — the answer to "why is this demo a template?" without usage-event archaeology.
   const buildLog: Record<string, unknown> = { stage: 'start', imagery: 0 };
   {
@@ -2231,6 +2235,20 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
           }
         } catch (e) { buildLog.bespoke_error = String((e as Error)?.message ?? e).slice(0, 200); }
       }
+      // CREATIVE OPENER — one small call writes THE HOOK (the lines under "Hi X team,"); every
+      // load-bearing part of the email (the link, findings, upsells, disclosure, close) stays
+      // deterministic with its existing gates. acceptPitchOpener is the contract: a draft with a
+      // URL, placeholder, hype, an unsafe claim, or no grounding in THIS business comes back null
+      // and buildHuntPitch's honest template opening stands. Fails soft like every chain stage.
+      try {
+        const or = await complete([
+          { role: 'system', content: openerSystemPrompt() },
+          { role: 'user', content: openerUserPrompt(profile) },
+        ], { provider: m.provider, model: m.model, maxTokens: 300 });
+        track(or);
+        aiOpener = acceptPitchOpener(or.text, { businessName: profile.business_name, industry: profile.industry });
+        buildLog.opener = aiOpener ? 'ai' : 'rejected';
+      } catch (e) { buildLog.opener_error = String((e as Error)?.message ?? e).slice(0, 160); }
     } catch (e) {
       // The deterministic recipe spec stands — and the log says WHY it's a template.
       buildLog.chain_error = String((e as Error)?.message ?? e).slice(0, 200);
@@ -2267,7 +2285,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   // reads as a threat and mis-positions a web shop as a compliance firm; the same findings placed
   // second do the persuasive work without either problem. Needs-review findings never lead.
   const pitchFindings = pageScan ? selectPitchFindings(pageScan.findings) : [];
-  const pitch = buildHuntPitch(profile, previewUrl, upsells, pitchFindings);
+  const pitch = buildHuntPitch(profile, previewUrl, upsells, pitchFindings, null, aiOpener);
 
   const { data: site, error: sErr } = await admin.from('preview_sites').insert({
     user_id: order.owner_id, profile_id: profileRow.id, slug,
@@ -2312,12 +2330,20 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       : ((audit.reachable && /^https?:\/\//.test(finalUrl))
         ? await genPreviewShot(admin, order.owner_id, finalUrl, `before-${slug}`)
         : null);
-    bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl, pitchFindings);
+    bodyHtml = buildHuntPitchEmailHtml(profile, previewUrl, shotUrl, upsells, beforeUrl, pitchFindings, aiOpener);
   }
+
+  // Which subject angle this prospect gets is deterministic on their address (a re-queue never
+  // flip-flops); the variant id is persisted so opens-per-angle is a query, not a guess. The
+  // question angle is only in the deck when the body actually names findings to cash it.
+  const sv = pickSubjectVariant(
+    subjectVariants({ businessName: profile.business_name, industry: profile.industry, hasFindings: pitchFindings.length > 0 }),
+    email);
 
   const ok = await queueHuntPitch(admin, order.owner_id, {
     previewSiteId: siteId, businessProfileId: (profileRow as { id: string }).id,
     businessName: profile.business_name, pitch, previewUrl, toEmail: email, bodyHtml,
+    subject: sv.subject, subjectVariant: sv.id,
   });
   // ONE-CLICK SEND — the operator pressed "Build & send", so we approve the just-queued pitch and
   // fire it through send-email now (the same approval-gated path the operator would click through).
@@ -2474,6 +2500,7 @@ async function genPreviewShot(admin: any, ownerId: string, target: string, label
 // deno-lint-ignore no-explicit-any
 async function queueHuntPitch(admin: any, uid: string, input: {
   previewSiteId: string; businessProfileId: string; businessName: string; pitch: string; previewUrl: string; toEmail: string; bodyHtml?: string;
+  subject?: string; subjectVariant?: string;   // a pitchCraft angle; absent ⇒ the control subject
 }): Promise<string | null> {   // returns the pending approval's id (for one-click auto-send), or null
   const to = input.toEmail.toLowerCase().trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)) return null;
@@ -2503,11 +2530,12 @@ async function queueHuntPitch(admin: any, uid: string, input: {
   }).select('id').single();
   if (!camp) return null;
 
-  const subject = `A new website for ${input.businessName}`;
+  const subject = input.subject?.trim() || `A new website for ${input.businessName}`;
   const body = `${input.pitch.trim()}\n\nTake a look: ${input.previewUrl}`;
   const { data: msg } = await admin.from('outreach_messages').insert({
     owner_id: uid, campaign_id: (camp as { id: string }).id, contact_id: contactId, preview_site_id: input.previewSiteId,
-    sequence_step: 0, subject, body_text: body, body_html: input.bodyHtml ?? null, to_address: to, status: 'draft',
+    sequence_step: 0, subject, subject_variant: input.subjectVariant ?? 'control',
+    body_text: body, body_html: input.bodyHtml ?? null, to_address: to, status: 'draft',
   }).select('id').single();
   if (!msg) return null;
 
