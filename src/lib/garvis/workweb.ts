@@ -302,6 +302,24 @@ export function templateById(id: string): WebTemplate | null {
   return WEB_TEMPLATES.find((t) => t.id === id) ?? null;
 }
 
+/** On a marketing-canvas world the areas hide behind "Advanced", so a `?area=` deep link must open
+ *  the matching canvas NODE's sheet instead — otherwise "take me to the postcard" lands on the
+ *  canvas with nothing open and the operator still has to tap. Flavor decides the node because
+ *  slugs are world-specific; flavors are the stable vocabulary. Unknown flavor/area → null (the
+ *  canvas opens plain, never a wrong sheet). */
+export type CanvasNodeKey = 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding';
+const NODE_FOR_FLAVOR: Partial<Record<Flavor, CanvasNodeKey>> = {
+  direct_mail: 'postcard', social: 'social', email: 'email', lists: 'people',
+  video: 'video', market: 'analysis', brand: 'branding',
+};
+export function canvasNodeForArea(
+  clusters: { slug: string; charter: Charter | null }[], area: string | null | undefined,
+): CanvasNodeKey | null {
+  if (!area) return null;
+  const c = clusters.find((x) => x.slug === area);
+  return c?.charter ? NODE_FOR_FLAVOR[c.charter.flavor] ?? null : null;
+}
+
 /** Resolve which template a loaded web was instantiated from by its STRUCTURE, not its title —
  *  slugs are stable identity, titles are user-editable. The template wins when at least 3 of its
  *  node slugs exist in the web AND at least half its structure is present; ties go to the higher

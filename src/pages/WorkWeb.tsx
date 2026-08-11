@@ -500,7 +500,7 @@ export default function WorkWeb() {
         {hasCampaign && (
           <div className="mb-5">
             <PanelBoundary name="marketing canvas">
-              <MarketingCanvas worldId={worldId} realEstate={realEstate} onToast={(k, m) => toast(k, m)} />
+              <MarketingCanvas worldId={worldId} realEstate={realEstate} initialArea={requestedArea} onToast={(k, m) => toast(k, m)} />
             </PanelBoundary>
             <button
               onClick={() => setShowAdvanced((v) => !v)}

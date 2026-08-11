@@ -41,6 +41,7 @@ import { SocialBoard } from './SocialBoard';
 import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
+import { canvasNodeForArea } from '../../../lib/garvis/workweb';
 import type { MailerBrand } from '../../../lib/garvis/mailer';
 import { cn } from '../../../lib/utils';
 
@@ -51,7 +52,7 @@ type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' |
 // storyboard, image prompts) that can't read the --gv-ember CSS token. Kept in lockstep with it.
 const DEFAULT_ACCENT = '#FF8A3D';
 
-export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worldId: string; realEstate?: boolean; onToast: Toast }) {
+export function MarketingCanvas({ worldId, realEstate = false, initialArea = null, onToast }: { worldId: string; realEstate?: boolean; initialArea?: string | null; onToast: Toast }) {
   const [targetCluster, setTargetCluster] = useState<string | null>(null);
   const [brand, setBrand] = useState<MailerBrand | null>(null);
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
@@ -72,6 +73,10 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
         ?? w.clusters.find((x) => x.charter?.archetype === 'studio') ?? w.clusters.find((x) => x.charter);
       const cid = c?.id ?? null;
       setTargetCluster(cid);
+      // A ?area= deep link (the concierge's "take me there") means the machine taps the node:
+      // the matching sheet opens as if the operator clicked it. Never stomps a sheet already open.
+      const node = canvasNodeForArea(w.clusters, initialArea);
+      if (node) setOpen((o) => o ?? node);
       // REHYDRATE the campaign you were working on — so reopening this business shows your real work,
       // not a blank "set up your announcement" every visit (the "it feels empty" complaint).
       if (cid) {
@@ -93,7 +98,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
       if (k.name) setAgent((a) => a || (k.name as string));
     }).catch(() => {});
     return () => { live = false; };
-  }, [worldId]);
+  }, [worldId, initialArea]);
 
   const ready = !!details;
 

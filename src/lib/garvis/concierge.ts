@@ -42,13 +42,13 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     label: 'Get a postcard ready to mail',
     keywords: ['postcard', 'post card', 'mail', 'mailer', 'direct mail', 'moms', "mom's", 'mom', 'real estate', 'card', 'just sold', 'just listed'],
     kind: 'navigate',
-    route: '/garvis/webs/{worldId}',
+    // Deep-links INTO the area (?area= auto-opens it) — the machine taps the node, not you.
+    route: '/garvis/webs/{worldId}?area=direct-mail',
     worldSlug: 'direct-mail',
     steps: [
-      'Tap the Postcard node on the canvas (center of the page)',
-      'Pick the listing and look — the sheet builds the postcard from real details',
-      'Save it; the print-and-mail run lands in your Queue',
-      'Approve in Queue — nothing mails without you',
+      "You're already on the Postcard board — pick a kind, type the idea, hit Make; real facts fill in",
+      'Compare the versions, star the keeper, Print',
+      'Mail runs need your Approve in Queue — nothing sends without you',
     ],
   },
   {
@@ -158,7 +158,7 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     label: 'Work the mailing lists / neighborhood farm',
     keywords: ['mailing list', 'mailing lists', 'mailing', 'farm', 'farming', 'neighborhood farm', 'owner list'],
     kind: 'navigate',
-    route: '/garvis/webs/{worldId}',
+    route: '/garvis/webs/{worldId}?area=mailing-lists',
     worldSlug: 'mailing-lists',
     steps: [
       'The lists desk opens on the real audience — every contact is a stored row, never invented',
@@ -235,7 +235,7 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     label: 'Pull the housing market / listings data',
     keywords: ['listings', 'houses', 'mls', 'housing', 'sold', 'market data', 'market', 'lake geneva', 'properties', 'scraper'],
     kind: 'navigate',
-    route: '/garvis/webs/{worldId}',
+    route: '/garvis/webs/{worldId}?area=lake-geneva-market',
     worldSlug: 'lake-geneva-market',
     steps: [
       'This is the Market area — its numbers come from the real MLS/RESO feed, never invented',
