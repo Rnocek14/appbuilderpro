@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, isBrief, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, statsFor, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, statsFor, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -252,6 +252,14 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('"make a moodboard" reaches the board', (() => { const r = resolve('make a moodboard', WORLDS, ALL); return r.task?.id === 'design-board'; })());
   check('the board steps teach the riff loop (say what to change)',
     CONCIERGE_TASKS.find((t) => t.id === 'design-board')!.steps.join(' ').includes('SAY what to change'));
+}
+// ---- The Explore bridge: "explore X" falls INTO a galaxy of X ----
+{
+  check('"explore lakefront resort branding" dives on the topic', exploreDive('explore lakefront resort branding') === 'lakefront resort branding');
+  check('"lets explore black holes" strips the courtesy too', exploreDive('lets explore black holes') === 'black holes');
+  check('"im curious about roman concrete" dives on the topic', exploreDive('im curious about roman concrete') === 'roman concrete');
+  check('a bare "lets explore" yields NO topic — the open page is the honest landing', exploreDive('lets explore') === null);
+  check('a keyword-only match never invents a dive', exploreDive('down the rabbit hole') === null);
 }
 {
   // Determinism + purity of the derivation itself.

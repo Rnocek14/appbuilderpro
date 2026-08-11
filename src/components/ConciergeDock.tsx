@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasKey, aliasLookup, aliasRemember, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor,
+  aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
 import { answerStat } from '../lib/garvis/conciergeStats';
@@ -193,7 +193,10 @@ export function ConciergeDock() {
     if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); } catch { /* fine */ } }
     startGuide(task.id);
     setNote(missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null);
-    navigate(route);
+    // The Explore bridge: "explore lakefront resort branding" FALLS INTO a galaxy of the topic
+    // (the page's live ?dive= mechanism), instead of landing on an empty prompt.
+    const dive = task.id === 'explore' && sentence ? exploreDive(sentence) : null;
+    navigate(dive ? `${route}?dive=${encodeURIComponent(dive)}` : route);
   };
 
   const confirmCreate = (task: ConciergeTask) => {
