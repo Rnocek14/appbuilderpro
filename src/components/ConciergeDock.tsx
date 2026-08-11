@@ -18,6 +18,24 @@ import { cn } from '../lib/utils';
 const OPEN_KEY = 'ff:concierge-open';
 const TASK_KEY = 'ff:concierge-task';
 export const GENESIS_PREFILL_KEY = 'ff:genesis-intent';
+/** The sentence handoff: whatever the operator SAID rides along to the destination, so pages
+ *  with a primary input (Orchestrate's intent box, the studio's topic) open already filled in.
+ *  Read once and clear — a stale sentence must never prefill a later visit. */
+export const HANDOFF_KEY = 'ff:concierge-handoff';
+
+export interface ConciergeHandoff { taskId: string; sentence: string }
+
+/** Destination-side helper: consume the handoff if it came from the given task(s). */
+export function readHandoff(...taskIds: string[]): ConciergeHandoff | null {
+  try {
+    const raw = sessionStorage.getItem(HANDOFF_KEY);
+    if (!raw) return null;
+    const h = JSON.parse(raw) as ConciergeHandoff;
+    if (!h?.sentence || (taskIds.length && !taskIds.includes(h.taskId))) return null;
+    sessionStorage.removeItem(HANDOFF_KEY);
+    return h;
+  } catch { return null; }
+}
 
 interface ActiveGuide { taskId: string; done: number[] }
 
@@ -28,16 +46,31 @@ export function ConciergeDock() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<ConciergeTask[]>([]);
+  const [lastSentence, setLastSentence] = useState('');
+  const [compound, setCompound] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<ConciergeTask | null>(null);
   const [guide, setGuide] = useState<ActiveGuide | null>(() => {
     try { return JSON.parse(sessionStorage.getItem(TASK_KEY) || 'null') as ActiveGuide | null; } catch { return null; }
   });
   const worldsRef = useRef<ConciergeWorld[] | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { sessionStorage.setItem(OPEN_KEY, open ? '1' : '0'); }, [open]);
   useEffect(() => {
     try { sessionStorage.setItem(TASK_KEY, JSON.stringify(guide)); } catch { /* session-only */ }
   }, [guide]);
+  // ⌘J / Ctrl+J toggles the concierge from anywhere (⌘K stays the command palette's).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setOpen((o) => !o);
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const loadWorlds = async (): Promise<ConciergeWorld[]> => {
     if (worldsRef.current) return worldsRef.current;
@@ -62,14 +95,17 @@ export function ConciergeDock() {
     setGuide(g);
   };
 
-  const act = (task: ConciergeTask, route: string, missingWorld?: boolean) => {
+  const act = (task: ConciergeTask, route: string, missingWorld?: boolean, sentence?: string) => {
     setSuggestions([]);
+    setCompound(false);
     if (task.kind === 'create') {
       // Creation is confirmed, never silent — show the one-tap confirm.
       setPendingCreate(task);
       setNote(null);
       return;
     }
+    // The operator's words ride along — destinations with a primary input read them once.
+    if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); } catch { /* fine */ } }
     startGuide(task.id);
     setNote(missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null);
     navigate(route);
@@ -89,10 +125,16 @@ export function ConciergeDock() {
   const FALLBACK = "I don't have a shortcut for that — Garvis on Home handles anything free-form.";
   const askBrain = async (sentence: string, worlds: ConciergeWorld[]) => {
     setBusy(true);
+    setSuggestions([]);
+    setCompound(false);
     setNote('Thinking…');
     try {
       const { data, error } = await supabase.functions.invoke('concierge', {
-        body: { sentence, tasks: ALL_CONCIERGE_TASKS.map(({ id, label }) => ({ id, label })) },
+        body: {
+          sentence,
+          context: window.location.pathname,
+          tasks: ALL_CONCIERGE_TASKS.map(({ id, label }) => ({ id, label })),
+        },
       });
       if (error || !data) { setNote(FALLBACK); return; }
       const d = data as { available?: boolean; setup?: string[]; taskId?: string | null; answer?: string | null };
@@ -100,7 +142,7 @@ export function ConciergeDock() {
       const picked = d.taskId ? ALL_CONCIERGE_TASKS.find((t) => t.id === d.taskId) ?? null : null;
       if (picked) {
         const { route, missingWorld } = routeFor(picked, worlds);
-        act(picked, route, missingWorld);
+        act(picked, route, missingWorld, sentence);
         return;
       }
       setNote(d.answer?.trim() ? d.answer : FALLBACK);
@@ -108,18 +150,35 @@ export function ConciergeDock() {
       setNote(FALLBACK);
     } finally {
       setBusy(false);
+      inputRef.current?.focus();
     }
+  };
+
+  // Compound intent → Orchestrate, sentence riding along; Compile stays the explicit press.
+  const goOrchestrate = (sentence: string) => {
+    const orch = ALL_CONCIERGE_TASKS.find((t) => t.id === 'orchestrate');
+    if (!orch) return;
+    act(orch, orch.route, false, sentence);
   };
 
   const submit = async () => {
     const text = input.trim();
     if (!text || busy) return;
     setInput('');
+    setLastSentence(text);
     setPendingCreate(null);
     const worlds = await loadWorlds().catch(() => [] as ConciergeWorld[]);
     const r = resolve(text, worlds, ALL_CONCIERGE_TASKS);
-    if (r.kind === 'go' && r.task && r.route) { act(r.task, r.route, r.missingWorld); return; }
+    inputRef.current?.focus();
+    if (r.kind === 'go' && r.task && r.route) { act(r.task, r.route, r.missingWorld, text); return; }
+    if (r.kind === 'compound' && r.suggestions?.length) {
+      setCompound(true);
+      setSuggestions(r.suggestions);
+      setNote("That's a multi-part ask — Orchestrate compiles it into ONE reviewable plan:");
+      return;
+    }
     if (r.kind === 'suggest' && r.suggestions?.length) {
+      setCompound(false);
       setSuggestions(r.suggestions);
       setNote('Closest matches — tap one:');
       return;
@@ -150,9 +209,9 @@ export function ConciergeDock() {
       </div>
 
       <div className="mt-2 flex gap-1.5">
-        <input value={input} onChange={(e) => setInput(e.target.value)}
+        <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-          placeholder={'"moms postcard" · "start a clothing brand" · "what\'s waiting on me"'}
+          placeholder={'"moms postcard" · "scrape houses in williams bay" · "what\'s next"'}
           className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
         <button onClick={() => void submit()} aria-label="Go" disabled={busy}
           className="rounded-lg border border-forge-ember/50 px-2.5 text-forge-ember hover:bg-forge-ember/10 disabled:opacity-50"><ArrowRight size={14} /></button>
@@ -160,14 +219,28 @@ export function ConciergeDock() {
 
       {note && <p className="mt-2 text-[11px] text-forge-dim">{note}</p>}
 
+      {compound && (
+        <button onClick={() => goOrchestrate(lastSentence)}
+          className="mt-1.5 w-full rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20">
+          Compile the whole plan in Orchestrate →
+        </button>
+      )}
+
       {suggestions.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {compound && <span className="w-full text-[10px] text-forge-dim">…or take one piece:</span>}
           {suggestions.map((s) => (
-            <button key={s.id} onClick={() => { const { route, missingWorld } = routeFor(s, worldsRef.current ?? []); act(s, route, missingWorld); }}
+            <button key={s.id} onClick={() => { const { route, missingWorld } = routeFor(s, worldsRef.current ?? []); act(s, route, missingWorld, lastSentence); }}
               className="rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
               {s.label}
             </button>
           ))}
+          {!compound && (
+            <button onClick={() => void loadWorlds().catch(() => [] as ConciergeWorld[]).then((w) => askBrain(lastSentence, w))}
+              className="rounded-lg border border-dashed border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+              None of these — ask the brain
+            </button>
+          )}
         </div>
       )}
 
