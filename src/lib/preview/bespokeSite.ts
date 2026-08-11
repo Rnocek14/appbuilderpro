@@ -34,6 +34,11 @@ OUTPUT
   is encouraged (for motion). NO external stylesheets, fonts, images, or scripts from other hosts — they
   are blocked. Use system font stacks. Use only image URLs explicitly provided in the brief; if none,
   design with CSS/type only — never hotlink or invent an image.
+- IMAGES come in two lists: publishable_photo_urls are REAL photos of this business — use them anywhere.
+  ai_concept_photo_urls are AI-GENERATED concept imagery: usable as atmosphere, backdrops, and
+  still-lifes, but NEVER captioned as the business's own work ("Recent work"/"Our portfolio" over
+  concept art is a lie — "The look and feel" is honest), and if you use ANY of them the footer MUST
+  contain the exact line: Imagery is AI-generated concept art.
 - Responsive (mobile-first, flexbox/grid), accessible (labels, visible focus, good contrast), and it must
   look like a real $3–5k agency site, not a page builder.
 
@@ -76,6 +81,14 @@ export function buildBespokePrompt(profile: BusinessProfile): string {
   const pubPhotos = (profile.photos ?? [])
     .filter((p) => p.can_use_in_preview !== false && p.can_publish === true && p.source_type !== 'ai_generated')
     .map((p) => p.url).slice(0, 8);
+  // AI concept imagery raises the visual ceiling of a photo-less brief (the benchmark's #1 cap on
+  // bespoke) — offered separately so the model can never mistake it for the business's own photos,
+  // with the disclosure line enforced by the gate below. Role assets (backdrop/object) stay out:
+  // they belong to the spec renderer's layers hero, not free-form composition.
+  const aiPhotos = (profile.photos ?? [])
+    .filter((p) => p.can_use_in_preview !== false && p.source_type === 'ai_generated'
+      && p.alt !== 'ai-backdrop' && p.alt !== 'ai-object')
+    .map((p) => p.url).slice(0, 6);
   const brief: Record<string, unknown> = {
     business_name: profile.business_name,
     industry: profile.industry,
@@ -89,7 +102,8 @@ export function buildBespokePrompt(profile: BusinessProfile): string {
     google_rating: profile.google_rating ?? null,     // use ONLY if present
     review_count: profile.review_count ?? null,        // use ONLY if present
     review_snippets: (profile.review_snippets ?? []).filter((r) => r.can_use_in_preview !== false).slice(0, 4).map((r) => ({ author: r.author ?? 'Customer', text: r.text })),
-    publishable_photo_urls: pubPhotos,                 // the ONLY images you may use; [] ⇒ CSS/type only
+    publishable_photo_urls: pubPhotos,                 // real photos — usable anywhere
+    ai_concept_photo_urls: aiPhotos,                   // concept art — honest framing + footer disclosure required
   };
   return `Design a bespoke landing page for this business. Use ONLY these facts — anything not here is
 unknown, so do not state it (re-read the honesty contract). A screenshot of the business's CURRENT
@@ -154,6 +168,13 @@ export function bespokeHonest(html: string, profile: BusinessProfile): HonestyRe
   if (/#\s?1\b/.test(html) && !/#\s?1\b/.test(grounded)) v.push('unverified claim: "#1"');
   if (/\bvoted\s+(?:best|#\s?1)\b/i.test(hay) && !grounded.includes('voted')) v.push('unverified claim: "voted best"');
   if (/\btrusted by\s+[\d,]+/i.test(hay) && !(profile.review_count && profile.review_count > 0)) v.push('invented trust count');
+  // 7. AI concept imagery used without the disclosure line (the spec renderer's footer gate,
+  //    re-imposed on free-form HTML). Matching is by URL: any ai_generated profile photo that
+  //    appears in the document requires the disclosure somewhere in the page.
+  const aiUrls = (profile.photos ?? []).filter((p) => p.source_type === 'ai_generated').map((p) => p.url);
+  if (aiUrls.some((u) => html.includes(u)) && !/ai[-\s]generated/i.test(html)) {
+    v.push('undisclosed AI imagery (footer must state it is AI-generated concept art)');
+  }
 
   // de-dupe while preserving order
   const seen = new Set<string>();

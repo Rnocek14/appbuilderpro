@@ -5,6 +5,7 @@
 // registry, footer. `shot` mode renders a stripped, animation-free version for email screenshots.
 
 import { useEffect, useMemo, useState } from 'react';
+import { typeVoice } from '../../lib/preview/spec';
 import type { SiteSpec } from '../../lib/preview/spec';
 import { SECTION_COMPONENTS } from './sections';
 import { ScrollProgress } from './motion';
@@ -41,6 +42,7 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
   previewSiteId?: string; leadSubmitUrl?: string;
 }) {
   useGoogleFonts(spec.theme.displayFont, spec.theme.bodyFont);
+  const voice = typeVoice(spec.business_name, spec.theme.displayFont);
   const [menuOpen, setMenuOpen] = useState(false);
   // The generated SEO was being produced then thrown away — title only. Write description + OG
   // so a shared preview link unfurls as the business, not as the platform.
@@ -105,8 +107,12 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
         .pv-site::-webkit-scrollbar-thumb { background: hsl(${spec.theme.border}); border-radius: 6px; }
         @keyframes pv-kenburns { from { transform: scale(1); } to { transform: scale(1.09); } }
         .pv-site .pv-kenburns { animation: pv-kenburns 18s ease-out forwards; }
-        /* Oversized display type for the hero headline — clamp() so it stays composed on phones. */
-        .pv-site .pv-hero-display { font-size: clamp(2.5rem, 6.2vw, 4.9rem); line-height: 1.02; letter-spacing: -0.02em; }
+        /* Oversized display type for the hero headline — the TYPE VOICE rotates scale, weight,
+           tracking, and leading per business (benchmark: every page used to measure identical). */
+        .pv-site .pv-hero-display { font-size: ${voice.heroSize}; line-height: ${voice.heroLeading}; letter-spacing: ${voice.heroTracking}; font-weight: ${voice.heroWeight}; }
+        /* The container breathes with the voice too — one fixed 1152px width was part of the
+           measured template fingerprint. */
+        .pv-site :is(.max-w-6xl) { max-width: ${voice.container}px; }
         /* Card hover lift — compositor-friendly, snappy spring curve. */
         .pv-site .pv-lift { transition: transform 0.22s cubic-bezier(0.16,1,0.3,1), box-shadow 0.22s cubic-bezier(0.16,1,0.3,1); }
         .pv-site .pv-lift:hover { transform: translateY(-3px); box-shadow: 0 12px 28px -10px hsl(${spec.theme.ink} / 0.18); }

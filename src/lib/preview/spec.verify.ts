@@ -5,7 +5,7 @@
 import {
   parseBusinessProfile, pickRecipe, assembleFallbackSpec, normalizeSpec,
   usablePhotos, usableReviews, previewSlug, navFor, RECIPES, FLAIR_DEVICES, sceneKindFor, restraintFor,
-  seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats, universalChapter,
+  seededVariant, SECTION_VARIANTS, FONT_LIBRARY, glassStats, universalChapter, typeVoice,
   contrastRatio, ensureReadableTheme, hslLuminance,
   type BusinessProfile,
 } from './spec';
@@ -605,6 +605,17 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   const heading = String(assembleFallbackSpec(street).sections.find((s) => s.type === 'hero')?.props.heading);
   check('fallback voice never puts a street address in the headline', !/412|Main St/i.test(heading));
   check('fallback voice found the actual city', /Asheville/.test(heading) || !/\bin\b/.test(heading));
+}
+
+// --- TYPE VOICE: seeded structural variance (benchmark: every spec page measured identical) -------
+{
+  const names = ['Alpha Plumbing', 'Bravo Bakery', 'Cider House', 'Delta Dental', 'Echo Fitness', 'Foxtrot Films', 'Golf Realty', 'Hotel Salon'];
+  const grotesk = new Set(names.map((n) => JSON.stringify(typeVoice(n, 'Sora'))));
+  check('type voice varies across businesses (grotesk)', grotesk.size >= 2);
+  const serifV = names.map((n) => typeVoice(n, 'Playfair Display'));
+  check('serif displays never get heavy grotesk weights', serifV.every((v) => v.heroWeight <= 500));
+  check('type voice is deterministic', JSON.stringify(typeVoice('Alpha Plumbing', 'Sora')) === JSON.stringify(typeVoice('Alpha Plumbing', 'Sora')));
+  check('containers vary too', new Set(names.map((n) => typeVoice(n, 'Sora').container)).size >= 2);
 }
 
 // --- recipe hygiene: every recipe font must exist in the loadable library -------------------------

@@ -1210,6 +1210,34 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   return spec;
 }
 
+// ---------------------------------------------------------------------------
+// TYPE VOICE — seeded structural variance for the renderer. The 30-site benchmark measured
+// every spec page IDENTICAL (78.4px/600/1.02/-1.57px on a 1152px container, fonts aside) —
+// the quantitative fingerprint of "one template reskinned". The hero's scale, weight,
+// tracking, leading, and the page container now rotate deterministically per BUSINESS,
+// with serif displays getting serif-appropriate weights. Pure + unit-tested.
+// ---------------------------------------------------------------------------
+
+export interface TypeVoice {
+  heroSize: string; heroWeight: number; heroTracking: string; heroLeading: number; container: number;
+}
+
+const SERIF_DISPLAY_RE = /Playfair|Cormorant|Fraunces|DM Serif|Newsreader|Gloock|Caslon|Lora|Bitter|Source Serif|Spectral|Marcellus|Bodoni|Instrument Serif|Young Serif|Abril|Zilla/i;
+
+export function typeVoice(businessName: string, displayFont: string): TypeVoice {
+  const serif = SERIF_DISPLAY_RE.test(displayFont);
+  const voices: TypeVoice[] = serif ? [
+    { heroSize: 'clamp(2.8rem, 7vw, 5.6rem)', heroWeight: 400, heroTracking: '-0.01em', heroLeading: 1.05, container: 1088 },
+    { heroSize: 'clamp(2.5rem, 6.2vw, 4.9rem)', heroWeight: 500, heroTracking: '-0.015em', heroLeading: 1.08, container: 1152 },
+    { heroSize: 'clamp(3rem, 7.6vw, 6rem)', heroWeight: 400, heroTracking: '0em', heroLeading: 1.02, container: 1024 },
+  ] : [
+    { heroSize: 'clamp(2.5rem, 6.2vw, 4.9rem)', heroWeight: 700, heroTracking: '-0.02em', heroLeading: 1.02, container: 1152 },
+    { heroSize: 'clamp(2.9rem, 7.4vw, 5.8rem)', heroWeight: 800, heroTracking: '-0.025em', heroLeading: 0.98, container: 1216 },
+    { heroSize: 'clamp(2.3rem, 5.6vw, 4.4rem)', heroWeight: 600, heroTracking: '-0.01em', heroLeading: 1.1, container: 1088 },
+  ];
+  return voices[nameHash(`${businessName}:voice`) % voices.length];
+}
+
 /** URL-safe slug for preview routes: "Joe's Roofing" → "joes-roofing". */
 export function previewSlug(name: string): string {
   return name.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'preview';

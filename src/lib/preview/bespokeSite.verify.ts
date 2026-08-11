@@ -29,7 +29,17 @@ const withPhotos: BusinessProfile = { ...base, photos: [
   { url: 'https://ex.com/owned.jpg', can_publish: true, source_type: 'owner' },
 ] };
 const p2 = buildBespokePrompt(withPhotos);
-check('only can_publish, non-AI photos are offered to the model', p2.includes('owned.jpg') && !p2.includes('scraped.jpg') && !p2.includes('ai.jpg'));
+check('only can_publish, non-AI photos are offered as REAL photos', p2.includes('owned.jpg') && !p2.includes('scraped.jpg'));
+check('AI concept photos ride in their own labeled list', /ai_concept_photo_urls[^\]]*ai\.jpg/s.test(p2));
+check('the system prompt demands the AI-imagery disclosure', /AI-generated concept art/.test(BESPOKE_SYSTEM));
+
+// AI imagery in the DOCUMENT requires the disclosure line — gate-enforced, not hoped for.
+const aiProfile: BusinessProfile = { ...base, photos: [{ url: 'https://ex.com/concept.jpg', source_type: 'ai_generated', can_use_in_preview: true }] };
+const undisclosed = '<!doctype html><html><body><img src="https://ex.com/concept.jpg"><a href="tel:1">c</a></body></html>';
+check('AI imagery without the disclosure is rejected', bespokeHonest(undisclosed, aiProfile).violations.some((x) => /undisclosed AI imagery/.test(x)));
+const disclosed = '<!doctype html><html><body><img src="https://ex.com/concept.jpg"><footer>Imagery is AI-generated concept art.</footer></body></html>';
+check('AI imagery WITH the disclosure passes', bespokeHonest(disclosed, aiProfile).ok === true);
+check('no AI imagery used → no disclosure needed', bespokeHonest('<!doctype html><html><body><p>Leak repair for Fair Oaks.</p><a href="tel:1">c</a></body></html>', aiProfile).ok === true);
 
 // ── THE HONESTY GATE — the whole point ─────────────────────────────────────
 const copperlineLies = `<!doctype html><html><body>
