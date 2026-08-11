@@ -74,6 +74,9 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
   const [logoMain, logoAccent] = spec.logoText.includes('|')
     ? spec.logoText.split('|', 2)
     : [spec.logoText, ''];
+  // "The Foundry|Event Hall" must render with a space ("The FoundryEvent Hall" was real);
+  // "Iron|works" stays fused. Heuristic: word-start accents get the gap, lowercase fuses.
+  const logoGap = logoAccent && !/\s$/.test(logoMain) && /^[A-Z&(]/.test(logoAccent) ? ' ' : '';
   // The phone lives on whichever section carries it. Recipes without a quote section
   // (restaurant, retail) used to leave this undefined — no header phone, no mobile call bar,
   // and a dead "#quote" header link, on exactly the verticals where calling IS the conversion.
@@ -114,7 +117,7 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
         .pv-f-grain .pv-grain-host { position: relative; isolation: isolate; }
         .pv-f-grain .pv-grain-host::after { content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0.06; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); }
         .pv-f-dots .pv-alt { background-image: radial-gradient(hsl(${spec.theme.ink} / 0.07) 1px, transparent 1px); background-size: 22px 22px; }
-        .pv-f-ruled .pv-alt { background-image: repeating-linear-gradient(to bottom, transparent, transparent 31px, hsl(${spec.theme.border}) 31px, hsl(${spec.theme.border}) 32px); }
+        .pv-f-ruled .pv-alt { background-image: repeating-linear-gradient(to bottom, transparent, transparent 31px, hsl(${spec.theme.border} / 0.55) 31px, hsl(${spec.theme.border} / 0.55) 32px); }
         /* outline type keeps a faint fill — pure transparent read as a rendering error, and any
            engine without text-stroke support would show an invisible headline. */
         .pv-f-outline #ctaBanner h2 { color: hsl(${spec.theme.primaryInk} / 0.22); font-size: clamp(2.2rem, 5vw, 4rem); line-height: 1.04; }
@@ -134,7 +137,7 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
         <header className="sticky top-0 z-40 border-b border-[hsl(var(--bor))] bg-[hsl(var(--bg)/0.92)] backdrop-blur">
           <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
             <a href="#hero" className="pv-display text-lg font-bold tracking-tight text-[hsl(var(--ink))]">
-              {logoMain}{logoAccent && <span className="text-[hsl(var(--p))]">{logoAccent}</span>}
+              {logoMain}{logoGap}{logoAccent && <span className="text-[hsl(var(--p))]">{logoAccent}</span>}
             </a>
             <nav className="hidden items-center gap-6 md:flex">
               {spec.nav.map((n) => (
@@ -202,7 +205,7 @@ export function PreviewSiteRenderer({ spec, shot = false, previewSiteId, leadSub
       {!shot && (
         <footer className={`border-t border-[hsl(var(--bor))] bg-[hsl(var(--card))] py-10 ${phone ? 'pb-44 md:pb-10' : ''}`}>
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-5 sm:px-8">
-            <p className="pv-display text-base font-bold text-[hsl(var(--ink))]">{logoMain}{logoAccent && <span className="text-[hsl(var(--p))]">{logoAccent}</span>}</p>
+            <p className="pv-display text-base font-bold text-[hsl(var(--ink))]">{logoMain}{logoGap}{logoAccent && <span className="text-[hsl(var(--p))]">{logoAccent}</span>}</p>
             <p className="text-xs text-[hsl(var(--mut))]">{spec.footer.line}</p>
             <p className="mt-2 text-[10px] uppercase tracking-wider text-[hsl(var(--mut))]/70">
               Concept preview — not yet published{spec.aiImagery ? ' · imagery is AI-generated concept art' : ''}

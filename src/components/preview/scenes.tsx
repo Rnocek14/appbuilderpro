@@ -269,10 +269,12 @@ function GlassScene({ p, stats, headline, sub, cta, hue }: {
   p: number; stats: { value: string; label: string }[];
   headline: string; sub?: string; cta?: string; hue: number;
 }) {
-  // Asymmetric settle positions (percent offsets from center) for up to 4 cards.
+  // Asymmetric settle positions (percent offsets from center) for up to 4 cards. Lower slots
+  // stay in the upper two-thirds — the settled frame used to drop a chip into the punchline's
+  // band and the two collided (benchmark finding: chip over headline on every dark site).
   const SLOTS = [
-    { x: -26, y: -18, r: -5 }, { x: 24, y: -26, r: 6 },
-    { x: -20, y: 16, r: 4 }, { x: 26, y: 12, r: -6 },
+    { x: -24, y: -20, r: -5 }, { x: 24, y: -28, r: 6 },
+    { x: -21, y: 6, r: 4 }, { x: 27, y: 2, r: -6 },
   ];
   const ease = (t: number) => 1 - Math.pow(1 - t, 3);
   return (
@@ -281,10 +283,12 @@ function GlassScene({ p, stats, headline, sub, cta, hue }: {
     <div className="relative h-full min-h-[80vh] w-full overflow-hidden" style={{ perspective: '1200px' }}>
       {/* the stage: deep brand-hue field, drifting slightly as the chapter plays */}
       <div className="absolute inset-0" style={{
-        background: `radial-gradient(120% 90% at ${18 + p * 10}% 8%, hsl(${hue} 82% ${36 - p * 7}%), hsl(${hue} 85% 10%) 72%), hsl(${hue} 85% 10%)`,
+        background: `radial-gradient(120% 90% at ${18 + p * 10}% 8%, hsl(${hue} 78% ${31 - p * 5}%), hsl(${hue} 80% 9%) 72%), hsl(${hue} 80% 9%)`,
       }} />
+      {/* accent glow: warm brand hues rotate DOWN toward ember — +34 pushed golds into an
+          olive-green that read as mud on the dark stage (benchmark finding) */}
       <div className="absolute inset-0" style={{
-        background: `radial-gradient(58% 48% at ${78 - p * 12}% ${86 - p * 20}%, hsl(${(hue + 34) % 360} 80% 50% / 0.5), transparent 70%)`,
+        background: `radial-gradient(58% 48% at ${78 - p * 12}% ${86 - p * 20}%, hsl(${hue >= 20 && hue <= 80 ? hue - 26 : (hue + 34) % 360} 80% 50% / 0.35), transparent 70%)`,
       }} />
       {/* corner vignette keeps the glass edges reading crisp against the color field */}
       <div className="absolute inset-0" style={{ background: 'radial-gradient(140% 110% at 50% 50%, transparent 55%, rgb(0 0 0 / 0.45))' }} />
@@ -310,7 +314,7 @@ function GlassScene({ p, stats, headline, sub, cta, hue }: {
         {cta && (
           <button type="button"
             onClick={() => (document.getElementById('quote') ?? document.getElementById('ctaBanner'))?.scrollIntoView({ behavior: 'smooth' })}
-            className="mt-6 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-[hsl(var(--ink))] shadow-xl transition-transform hover:-translate-y-0.5">
+            className="mt-6 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-neutral-900 shadow-xl transition-transform hover:-translate-y-0.5">
             {cta}
           </button>
         )}
@@ -423,7 +427,7 @@ function RibbonScene({ p, headline, sub, cta, hue, seed }: {
           <div style={{ opacity: ctaShow, transform: `translateY(${(1 - ctaShow) * 18}px)` }}>
             <button type="button"
               onClick={() => (document.getElementById('quote') ?? document.getElementById('ctaBanner'))?.scrollIntoView({ behavior: 'smooth' })}
-              className="mt-7 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-[hsl(var(--ink))] shadow-xl transition-transform hover:-translate-y-0.5">
+              className="mt-7 rounded-[var(--r)] bg-white px-7 py-3.5 text-sm font-bold text-neutral-900 shadow-xl transition-transform hover:-translate-y-0.5">
               {cta}
             </button>
           </div>

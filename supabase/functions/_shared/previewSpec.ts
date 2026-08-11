@@ -210,9 +210,8 @@ export function glassStats(profile: BusinessProfile): { value: string; label: st
   }
   const since = /\bsince\s+((?:19|20)\d{2})\b/i.exec(profile.description ?? '')?.[1];
   if (since) out.push({ value: `Since ${since}`, label: 'serving the area' });
-  if (profile.services.length >= 3) {
-    out.push({ value: String(profile.services.length), label: 'services offered' });
-  }
+  // NOTE: a services count is NOT proof — "4 services offered" staged as a glass stat read as
+  // filler (benchmark finding). Only social/tenure/coverage facts earn the stage.
   if (profile.service_area && profile.service_area.length >= 2) {
     out.push({ value: String(profile.service_area.length), label: 'communities served' });
   }
@@ -716,12 +715,14 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   }
 
   // enforce usage-flag data on the sections that show scraped content
+  let heroImgUsed: string | undefined;
   for (const s of sections) {
     if (s.type === 'hero') {
       const img = typeof s.props.image === 'string' ? s.props.image : undefined;
       s.props.image = img && (contentPhotos.some((p) => p.url === img) || img === heroBackdrop?.url)
         ? img
         : contentPhotos[0]?.url ?? heroBackdrop?.url;
+      heroImgUsed = s.props.image as string | undefined;
       // Layered depth-sandwich assets ride in by ROLE, never by model-supplied URL: the worker
       // tags the generated pair alt 'ai-backdrop'/'ai-object'; both present → the 'layers' hero
       // can render. A layers variant without both falls back in the renderer.
@@ -739,7 +740,12 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
         : contentPhotos[1]?.url ?? contentPhotos[0]?.url;
     }
     if (s.type === 'gallery' || s.type === 'showcase') {
-      s.props.photos = contentPhotos.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
+      // The hero's photo must not reappear as a gallery tile (benchmark: "hero re-pasted into
+      // the gallery") — excluded whenever enough photos remain to fill the section without it.
+      const pool = contentPhotos.length >= 3 && heroImgUsed
+        ? contentPhotos.filter((p) => p.url !== heroImgUsed)
+        : contentPhotos;
+      s.props.photos = pool.map((p) => ({ url: p.url, alt: p.alt ?? profile.business_name }));
       // Honesty: don't let a model-written "Recent work"/"Gallery" heading sit over AI CONCEPT art (not
       // the business's real portfolio) — mirror assembleFallbackSpec's aiOnlyPhotos guard on this path.
       if (contentPhotos.length > 0 && contentPhotos.every((p) => p.source_type === 'ai_generated')) {
@@ -1037,6 +1043,9 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
 
   const voice = voiceFor(profile.industry, name, city);
 
+  // The hero takes photos[0]; galleries skip it when enough photos remain (no repeats on-page).
+  const portfolioPhotos = photos.length >= 3 ? photos.slice(1) : photos;
+
   const sections: SectionSpec[] = [];
   for (const type of recipe.sections) {
     switch (type) {
@@ -1079,10 +1088,10 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
         } });
         break;
       case 'showcase':
-        if (photos.length) sections.push({ type, props: { heading: aiOnlyPhotos ? 'The look and feel' : 'Recent work', photos: photos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
+        if (photos.length) sections.push({ type, props: { heading: aiOnlyPhotos ? 'The look and feel' : 'Recent work', photos: portfolioPhotos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
         break;
       case 'gallery':
-        if (photos.length) sections.push({ type, props: { heading: aiOnlyPhotos ? 'The look and feel' : 'Gallery', photos: photos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
+        if (photos.length) sections.push({ type, props: { heading: aiOnlyPhotos ? 'The look and feel' : 'Gallery', photos: portfolioPhotos.map((p) => ({ url: p.url, alt: p.alt ?? name })) } });
         break;
       case 'reviews':
         if (reviews.length || profile.reviews_summary) sections.push({ type, props: {

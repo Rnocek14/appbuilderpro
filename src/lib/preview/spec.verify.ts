@@ -555,7 +555,8 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
       const a = ((parts[0].props.photos ?? []) as { url: string }[]).map((p) => p.url);
       const b = ((parts[1].props.photos ?? []) as { url: string }[]).map((p) => p.url);
       check('portfolio split: no photo appears in both sections', a.every((u) => !b.includes(u)));
-      check('portfolio split: every photo still appears once', a.length + b.length === 6 && a.length > 0 && b.length > 0);
+      // 6 photos: the hero takes one (excluded from tiles), the remaining 5 split disjointly.
+      check('portfolio split: every non-hero photo appears exactly once', a.length + b.length === 5 && a.length > 0 && b.length > 0);
     } else {
       check('portfolio split: with both sections in the recipe, two must survive on 6 photos', false);
     }
@@ -566,6 +567,21 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
   const thinSpec = assembleFallbackSpec(thin);
   check('portfolio split: too few photos → only one portfolio section survives',
     thinSpec.sections.filter((s) => s.type === 'gallery' || s.type === 'showcase').length === 1);
+}
+
+// --- the hero photo never repeats as a gallery tile (with enough photos to spare) -----------------
+{
+  const rich = parseBusinessProfile({
+    business_name: 'Golden Hour Studios', industry: 'Wedding Photography', services: ['Weddings'],
+    photos: [1, 2, 3, 4].map((n) => ({ url: `https://x/g${n}.jpg` })),
+  }).profile!;
+  for (const spec of [assembleFallbackSpec(rich), normalizeSpec({}, rich)]) {
+    const heroImg = spec.sections.find((s) => s.type === 'hero')?.props.image;
+    const tiles = spec.sections.filter((s) => s.type === 'gallery' || s.type === 'showcase')
+      .flatMap((s) => ((s.props.photos ?? []) as { url: string }[]).map((p) => p.url));
+    check('hero photo excluded from portfolio tiles', !!heroImg && !tiles.includes(heroImg as string));
+    check('portfolio still has tiles after the exclusion', tiles.length >= 2);
+  }
 }
 
 // --- a 2-item services list never renders as sparse editorial rows --------------------------------

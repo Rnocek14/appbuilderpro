@@ -616,7 +616,8 @@ export function Faq(p: { heading?: string; faqs?: { q: string; a: string }[] }) 
   return (
     <SectionShell id="faq">
       <Heading heading={p.heading} />
-      <div className="mt-8 max-w-3xl divide-y divide-[hsl(var(--bor))] rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))]">
+      {/* centered — a left-pinned column left a dead right half on wide screens (benchmark) */}
+      <div className="mx-auto mt-8 max-w-3xl divide-y divide-[hsl(var(--bor))] rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--card))]">
         {faqs.map((f, i) => (
           <details key={i} className="group px-6 py-4">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-semibold text-[hsl(var(--ink))]">
@@ -722,7 +723,7 @@ export function Quote(p: { heading?: string; sub?: string; phone?: string; email
               </label>
             </div>
             <label className="grid gap-1.5 text-xs font-medium text-[hsl(var(--mut))]">What do you need?
-              <textarea ref={msg} required placeholder="Tell us a little about the job…" rows={4} className="resize-none rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none transition-colors focus:border-[hsl(var(--p))] focus:ring-2 focus:ring-[hsl(var(--p)/0.25)]" />
+              <textarea ref={msg} required placeholder="Tell us a little about what you need…" rows={4} className="resize-none rounded-[var(--r)] border border-[hsl(var(--bor))] bg-[hsl(var(--bg))] px-4 py-3 text-sm text-[hsl(var(--ink))] outline-none transition-colors focus:border-[hsl(var(--p))] focus:ring-2 focus:ring-[hsl(var(--p)/0.25)]" />
             </label>
             <button type="submit" disabled={sending} className="inline-flex w-fit items-center gap-2 rounded-[var(--r)] bg-[hsl(var(--p))] px-6 py-3 text-sm font-semibold text-[hsl(var(--pi))] shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-60">
               {p.cta ?? 'Send'} <ArrowRight size={15} />
