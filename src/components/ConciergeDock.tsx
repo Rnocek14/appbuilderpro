@@ -17,6 +17,7 @@ import {
 import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
+import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
 import { actionById } from '../lib/garvis/actionRegistry';
@@ -238,8 +239,10 @@ export function ConciergeDock() {
   }, []);
 
   // Voice replies: short outcome lines, spoken only when the operator turned the voice on.
-  const speak = (text: string) => {
-    if (!voiceOn || !('speechSynthesis' in window) || !text) return;
+  // ElevenLabs first (the speak seam — real voice, cached lines); the browser voice is the
+  // honest fallback so a missing key never silences the talk-back.
+  const browserSpeak = (text: string) => {
+    if (!('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text.slice(0, 300));
@@ -247,11 +250,18 @@ export function ConciergeDock() {
       window.speechSynthesis.speak(u);
     } catch { /* voice is best-effort */ }
   };
+  const speak = (text: string) => {
+    if (!voiceOn || !text) return;
+    void speakEleven(text).then((ok) => { if (!ok) browserSpeak(text); });
+  };
   const toggleVoice = () => {
     const next = !voiceOn;
     setVoiceOn(next);
     try { localStorage.setItem(VOICE_KEY, next ? '1' : '0'); } catch { /* fine */ }
-    if (!next) { try { window.speechSynthesis?.cancel(); } catch { /* fine */ } }
+    if (!next) {
+      stopSpeaking();
+      try { window.speechSynthesis?.cancel(); } catch { /* fine */ }
+    }
   };
 
   // ⌘J / Ctrl+J toggles the concierge from anywhere (⌘K stays the command palette's).
@@ -637,14 +647,13 @@ export function ConciergeDock() {
         </button>
         <Sparkles size={14} className="text-forge-ember" />
         <p className="text-xs font-semibold text-forge-ink">Say what you want to do</p>
-        {'speechSynthesis' in window && (
-          <button onClick={toggleVoice} aria-label={voiceOn ? 'Turn voice replies off' : 'Turn voice replies on'}
-            className={cn('ml-auto rounded p-1', voiceOn ? 'text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>
-            {voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}
-          </button>
-        )}
+        {/* Always shown: the ElevenLabs seam carries the voice; speechSynthesis is only the fallback. */}
+        <button onClick={toggleVoice} aria-label={voiceOn ? 'Turn voice replies off' : 'Turn voice replies on'}
+          className={cn('ml-auto rounded p-1', voiceOn ? 'text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>
+          {voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}
+        </button>
         <button onClick={() => { setOpen(false); }} aria-label="Close the concierge"
-          className={cn('rounded p-1 text-forge-dim hover:text-forge-ink', !('speechSynthesis' in window) && 'ml-auto')}><X size={14} /></button>
+          className="rounded p-1 text-forge-dim hover:text-forge-ink"><X size={14} /></button>
       </div>
 
       {pendingCount !== null && pendingCount > 0 && !doState && (
