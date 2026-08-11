@@ -17,6 +17,7 @@ import {
 import { loadSocialMaterials, generateSocialTileImage, queueSocialTile } from '../../../lib/garvis/socialBoardRun';
 import { generateBoardCopy, explainCopyMiss } from '../../../lib/garvis/boardCopyRun';
 import { PLATFORM_LABEL } from '../../../lib/garvis/campaignCore';
+import { uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { CreativeBoard, type CreativeBoardAdapter, type FocusApi } from './CreativeBoard';
 import { ContentWeekToggle } from './ContentWeekToggle';
 import { Button } from '../../ui';
@@ -58,6 +59,7 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
 
     return {
       storageKey: 'social',
+      voiceNouns: ['post', 'social', 'instagram', 'ig', 'caption'],
       title: 'Social board',
       subtitle: 'Make posts for any platform — spread them out, compare, restyle, then queue to your publisher.',
       metrics: { w: 248, h: 320, gap: 26, cols: 3, pad: 40 },
@@ -87,6 +89,19 @@ export function SocialBoard({ worldId, clusterId, onToast, realEstate: reProp, m
         { label: 'Brand color', swatches: [materials.accent] },
         ...materials.images.slice(0, 8).map((i) => ({ label: i.caption || i.label || 'your photo', url: i.url })),
       ],
+
+      // A dropped photo becomes a REAL vault material and lands ON the pointed-at post via the
+      // pure withPhoto — a real photograph, honestly marked, same gate as the postcard board.
+      acceptPhoto: async (file) => {
+        if (!clusterId) throw new Error('this area is still setting up — give it a second and drop it again');
+        const f = await uploadClusterFile(clusterId, file, {
+          caption: file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').slice(0, 80) || null,
+          label: 'dropped',
+        });
+        setMaterials((m) => (m ? { ...m, images: [{ url: f.url, caption: f.caption, label: f.label }, ...m.images] } : m));
+        return { url: f.url, caption: f.caption };
+      },
+      applyPhoto: (c, url) => withPhoto(c, url),
 
       generate: async ({ prompt, kindId }) => {
         const kind = (kindId && socialKindById(kindId)) || defaultSocialKind(realEstate);

@@ -33,6 +33,10 @@ export interface ConciergeTask {
   genesisIntent?: string;
   /** For create tasks with a one-click template on the Businesses page. */
   templateId?: string;
+  /** WORLD×AREA cross-match: when a word from EACH set hits ("mom" + "video"), the pairing IS
+   *  the meaning — matchTasks adds a bonus so the operator's own asset graph outranks generic
+   *  doors. Only world-area tasks (deriveWorldTasks) set this. */
+  crossSets?: [string[], string[]];
   steps: string[];           // the walkthrough shown in the dock after arrival (2-6 steps)
 }
 
@@ -42,13 +46,13 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     label: 'Get a postcard ready to mail',
     keywords: ['postcard', 'post card', 'mail', 'mailer', 'direct mail', 'moms', "mom's", 'mom', 'real estate', 'card', 'just sold', 'just listed'],
     kind: 'navigate',
-    route: '/garvis/webs/{worldId}',
+    // Deep-links INTO the area (?area= auto-opens it) — the machine taps the node, not you.
+    route: '/garvis/webs/{worldId}?area=direct-mail',
     worldSlug: 'direct-mail',
     steps: [
-      'Tap the Postcard node on the canvas (center of the page)',
-      'Pick the listing and look — the sheet builds the postcard from real details',
-      'Save it; the print-and-mail run lands in your Queue',
-      'Approve in Queue — nothing mails without you',
+      "You're already on the Postcard board — pick a kind, type the idea, hit Make; real facts fill in",
+      'Compare the versions, star the keeper, Print',
+      'Mail runs need your Approve in Queue — nothing sends without you',
     ],
   },
   {
@@ -71,6 +75,21 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
       'Press "Draft a cited episode" — topic optional',
       'Review the script and hooks; Produce it, or download the shot list and film it',
       'Approve the post in Queue',
+    ],
+  },
+  {
+    id: 'reel',
+    label: 'Make an AI reel',
+    // 'reel about/on/for' phrases outvote a topic's own place-words ("a reel about lake geneva"
+    // must open the reel studio with lake geneva as the TOPIC, not the market page).
+    keywords: ['reel', 'reels', 'ai video', 'ai videos', 'faceless video', 'vertical video', 'short video', 'reel about', 'reel on', 'reel for'],
+    kind: 'navigate',
+    route: '/garvis/webs/{worldId}?area=growth-studio',
+    worldSlug: 'growth-studio',
+    steps: [
+      "You're in the channel studio — your topic rode into the box; press Draft a cited episode",
+      'Hook variants come back — pick one, produce it faceless, or film the shot list yourself',
+      'The post waits for your approval in Queue — nothing publishes itself',
     ],
   },
   {
@@ -158,7 +177,7 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     label: 'Work the mailing lists / neighborhood farm',
     keywords: ['mailing list', 'mailing lists', 'mailing', 'farm', 'farming', 'neighborhood farm', 'owner list'],
     kind: 'navigate',
-    route: '/garvis/webs/{worldId}',
+    route: '/garvis/webs/{worldId}?area=mailing-lists',
     worldSlug: 'mailing-lists',
     steps: [
       'The lists desk opens on the real audience — every contact is a stored row, never invented',
@@ -235,7 +254,7 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
     label: 'Pull the housing market / listings data',
     keywords: ['listings', 'houses', 'mls', 'housing', 'sold', 'market data', 'market', 'lake geneva', 'properties', 'scraper'],
     kind: 'navigate',
-    route: '/garvis/webs/{worldId}',
+    route: '/garvis/webs/{worldId}?area=lake-geneva-market',
     worldSlug: 'lake-geneva-market',
     steps: [
       'This is the Market area — its numbers come from the real MLS/RESO feed, never invented',
@@ -317,7 +336,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').replac
  *  real match gets the same boost, the lead between two candidates (the confidence signal) is
  *  never distorted. None of these may appear as a task keyword (the verify suite holds that). */
 export const NAV_VERBS = [
-  'open', 'go to', 'show me', 'take me to', 'where is', 'set up',
+  'open', 'go to', 'show me', 'take me to', 'where is', 'set up', 'work on',
   'check', 'see', 'view', 'look at', 'whats', "what's", 'i want to', 'i need to', 'lets', 'make',
 ];
 
@@ -335,15 +354,24 @@ export function matchTasks(input: string, tasks: ConciergeTask[] = CONCIERGE_TAS
   const text = ` ${norm(input)} `;
   if (text.trim().length < 3) return [];
   const owners = new Map<string, number>();
-  for (const t of tasks) for (const k of new Set(t.keywords.map(norm))) owners.set(k, (owners.get(k) ?? 0) + 1);
+  // Cross-set (world×area) tasks ride on PAIRINGS, not word ownership — they never dilute the
+  // uniqueness of another task's vocabulary ("brand" stays the clothing-brand task's word).
+  for (const t of tasks) { if (t.crossSets) continue; for (const k of new Set(t.keywords.map(norm))) owners.set(k, (owners.get(k) ?? 0) + 1); }
   const verbBoost = NAV_VERBS.reduce((n, v) => n + (text.includes(` ${norm(v)} `) ? norm(v).split(' ').length : 0), 0);
   return tasks
     .map((task) => {
-      const base = task.keywords.reduce((n, k) => {
+      let base = task.keywords.reduce((n, k) => {
         const nk = norm(k);
         if (!text.includes(` ${nk} `)) return n;
         return n + nk.split(' ').length + (owners.get(nk) === 1 ? 1 : 0);
       }, 0);
+      // The WORLD×AREA cross rule: "mom" and "video" are each weak alone, but together they
+      // name exactly one place. A cross task fires ONLY on the pairing (either word alone is
+      // someone else's business), and the pairing earns a bonus beyond the sum of its words.
+      if (task.crossSets) {
+        const hit = (set: string[]) => set.some((w) => text.includes(` ${norm(w)} `));
+        base = hit(task.crossSets[0]) && hit(task.crossSets[1]) ? base + 2 : 0;
+      }
       return { task, score: base > 0 ? base + verbBoost : 0 };
     })
     .filter((m) => m.score >= minScore)
@@ -412,6 +440,59 @@ export function exploreDive(sentence: string): string | null {
   // matched on a bare keyword ("rabbit hole") — the open page is the honest landing.
   if (!stripped || norm(stripped) === norm(sentence)) return null;
   return stripped.slice(0, 120);
+}
+
+// ---------------------------------------------------------------------------------------------
+// SMALL TALK & HALTS — polite noise and stop-words deserve a FREE, honest, instant answer, never
+// a navigation guess or a metered AI call. Two real misroutes forced this tier: "never mind"
+// confidently opened a project named Mind Weave, and "cancel the mail run" opened the postcard
+// page as if asked to make one. Negations are the opposite of intent.
+// ---------------------------------------------------------------------------------------------
+
+export interface SmallTalk { kind: 'greet' | 'thanks' | 'affirm' | 'closure' | 'halt'; text: string }
+
+const GREET_RE = /^(hi|hello|hey|yo|sup|good (morning|afternoon|evening))( garvis)?[.!]*$/;
+const THANKS_RE = /^(thanks|thank you|thank u|ty|thx|appreciate (it|you))( garvis)?( so much)?[.!]*$/;
+const AFFIRM_RE = /^(ok|okay|k|yes|yep|yeah|cool|nice|great|perfect|awesome|good job|well done|love it|lol)[.!]*$/;
+const CLOSURE_RE = /^(no|nope|nevermind|never mind|forget it|nothing|nah|na)[.!]*$/;
+const HALT_RE = /^(stop|cancel|halt|abort|pause)\b|^(dont|don't|do not)\b/;
+
+/** Classify chatter and halts. Null = a real ask — the tiers proceed. Deterministic. */
+export function smallTalk(input: string): SmallTalk | null {
+  const t = input.trim().toLowerCase();
+  if (!t) return null;
+  if (GREET_RE.test(t)) return { kind: 'greet', text: "Hey. Say a door (“queue”), ask a number (“how many approvals”), or tell me what to make." };
+  if (THANKS_RE.test(t)) return { kind: 'thanks', text: 'Anytime.' };
+  if (AFFIRM_RE.test(t)) return { kind: 'affirm', text: 'Good. Next?' };
+  if (CLOSURE_RE.test(t)) return { kind: 'closure', text: 'Dropped it — nothing was created.' };
+  if (HALT_RE.test(t)) return {
+    kind: 'halt',
+    text: 'Nothing is mid-flight from this box. Anything outbound is still WAITING in your Queue (reject it there); running arcs live on Missions; the whole system’s Master Switch is on Mission Control.',
+  };
+  return null;
+}
+
+/** "go back" is a browser verb, not a destination. The dock steps back one page. */
+export function isGoBack(input: string): boolean {
+  return /^(go back|take me back|back)[.!]*$/.test(input.trim().toLowerCase());
+}
+
+/** The reel bridge: "lets make an ai video for real estate" carries its TOPIC into the reel
+ *  studio's idea box, so the format's idea cards appear already about the right thing. Strips
+ *  the ask-shell (verbs, articles, the video/reel nouns and their connectors) and returns what
+ *  remains, or null when the sentence was all shell ("make a reel") — the studio then opens on
+ *  its own seeded topic, honestly. */
+export function reelTopic(sentence: string): string | null {
+  let s = sentence.trim()
+    .replace(/^(hey |ok |okay )?garvis[,:]?\s+/i, '')
+    .replace(/^(lets |let's |can we |i want to |i need to |please )+/i, '')
+    .replace(/^(make|create|draft|generate|do|shoot)\s+(me\s+)?(an?\s+)?/i, '')
+    .replace(/^(ai|faceless|vertical|short)\s+/i, '')
+    .replace(/^(video|videos|reel|reels)\s*(for|about|on|of)?\s*/i, '')
+    .trim();
+  s = s.replace(/\s+(reel|reels|video|videos)$/i, '').trim();
+  if (!s || norm(s) === norm(sentence)) return null;
+  return s.slice(0, 120);
 }
 
 /** A pasted BRIEF (a whole project written out — sections, paragraphs, a wall of thinking) is
@@ -640,4 +721,214 @@ export function deriveTasks(existing: ConciergeTask[], src: DerivedSources): Con
   }
 
   return [...existing.map(foldKeywords), ...derived];
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE WORLD-KNOWLEDGE TIER — the operator's OWN worlds and areas are the primary vocabulary.
+// "lets work on video for my mom" names a place ("mom" = the Mom world, "video" = its video
+// area) and must land THERE, not in a suggestion list of generic doors. Every world becomes a
+// sayable door; every recognizable area becomes a world×area task whose cross-match bonus makes
+// the pairing beat any single shared word. Title words deliberately BYPASS the word-claim
+// discipline — the operator's names for their own businesses are never strippable — and the
+// acceptance corpus + eval harnesses hold the line that handwritten sentences still win.
+// ---------------------------------------------------------------------------------------------
+
+/** What an area slug is ABOUT, in the operator's words. Checked in order; first match wins. */
+const AREA_VOCAB: [RegExp, string[]][] = [
+  [/video|reel|film/, ['video', 'videos', 'film']],
+  [/social|instagram|posts/, ['social', 'instagram', 'posts']],
+  [/email|newsletter/, ['email', 'emails', 'newsletter']],
+  [/brand/, ['brand', 'branding', 'logo']],
+  [/merch|capsule|apparel/, ['merch', 'shirt', 'tee', 'hat', 'apparel']],
+  [/list|audience|farm/, ['lists', 'audience']],
+  [/market|analysis|intel/, ['market', 'analysis', 'research']],
+  [/crm|follow/, ['crm', 'follow up', 'follow ups']],
+  [/landing|site|web/, ['landing', 'website', 'pages']],
+  [/ads|advert/, ['ads', 'advertising']],
+  [/seo|article/, ['seo', 'articles']],
+];
+
+const prettySlug = (slug: string) => slug.replace(/-/g, ' ');
+
+/** Derive doors from the operator's real worlds: an "Open <world>" task per world, and a
+ *  world×area task for every area whose slug names a known kind of work. Areas already owned by
+ *  a handwritten task (postcard's direct-mail, reel's growth-studio…) are skipped — the
+ *  handwritten steps are better and twins would split the score. */
+export function deriveWorldTasks(existing: ConciergeTask[], worlds: ConciergeWorld[]): ConciergeTask[] {
+  const ownedSlugs = new Set(existing.map((t) => t.worldSlug).filter(Boolean));
+  // "Open <world>" tasks obey the normal claim discipline — a world named with generic words
+  // ("Caregiver Channel") must not steal 'channel' from the episode drafter. The full title
+  // phrase always survives, so the complete name is always a door.
+  const claimedExact = new Set<string>();
+  const claimed = new Set<string>();
+  // Words living ONLY inside multi-word claimed phrases ('real', 'estate' from "real estate")
+  // can't serve as cross words — a title that contains someone's phrase must not intercept that
+  // phrase's asks. Whole claimed keywords ('mom') still can: that overlap is the point.
+  const phrasePart = new Set<string>();
+  const wholeClaimed = new Set<string>();
+  for (const t of existing) for (const k of t.keywords) {
+    const nk = norm(k);
+    claimedExact.add(nk);
+    claimed.add(nk);
+    const words = nk.split(' ');
+    if (words.length === 1) { wholeClaimed.add(nk); wholeClaimed.add(fold(nk)); }
+    for (const wd of words) {
+      claimedExact.add(wd); claimed.add(wd); claimed.add(fold(wd));
+      if (words.length > 1) { phrasePart.add(wd); phrasePart.add(fold(wd)); }
+    }
+  }
+  const out = [...existing];
+  for (const w of worlds.slice(0, 20)) {
+    const title = w.title?.trim();
+    if (!title) continue;
+    const titleWords = significantWords(title);
+    if (!titleWords.length) continue;
+    const phrase = norm(title);
+    const freeWords = titleWords.filter((wd) => !claimed.has(wd));
+    out.push({
+      id: `world:${w.id}`,
+      label: `Open ${title}`,
+      keywords: [...new Set([...(phrase && !claimedExact.has(phrase) ? [phrase] : []), ...freeWords])],
+      kind: 'navigate',
+      route: `/garvis/webs/${w.id}`,
+      steps: [`${title} opens on its main work surface — every area is one tap from there`],
+    });
+    const crossTitleWords = titleWords.filter((wd) => !phrasePart.has(wd) || wholeClaimed.has(wd));
+    for (const slug of [...new Set(w.slugs)].slice(0, 14)) {
+      if (ownedSlugs.has(slug)) continue;
+      if (!crossTitleWords.length) break;
+      const vocab = AREA_VOCAB.find(([re]) => re.test(slug));
+      if (!vocab) continue;
+      out.push({
+        id: `area:${w.id}:${slug}`,
+        label: `${title} — ${prettySlug(slug)}`,
+        keywords: [...new Set([...crossTitleWords, ...vocab[1]])],
+        crossSets: [crossTitleWords, vocab[1]],
+        kind: 'navigate',
+        route: `/garvis/webs/${w.id}?area=${slug}`,
+        steps: [
+          `You're inside ${title} — the ${prettySlug(slug)} work is on screen`,
+          'Anything it wants to send still waits for you in Queue',
+        ],
+      });
+    }
+  }
+  return out;
+}
+
+/** The operator's BUILDER projects become sayable doors ("work on jims site" → that project's
+ *  workspace). Same word-claim discipline as deriveTasks: existing tasks own their vocabulary,
+ *  so a project can never outrank an acceptance-tested match — projects ride on their NAME
+ *  words (plus 'site', when free). Two projects sharing every free word tie into an honest
+ *  suggest, never a guess. */
+export function withProjectTasks(tasks: ConciergeTask[], projects: { id: string; name: string }[]): ConciergeTask[] {
+  if (!projects.length) return tasks;
+  const claimedExact = new Set<string>();
+  const claimed = new Set<string>();
+  for (const t of tasks) for (const k of t.keywords) {
+    claimedExact.add(norm(k));
+    claimed.add(norm(k));
+    for (const w of norm(k).split(' ')) { claimedExact.add(w); claimed.add(w); claimed.add(fold(w)); }
+  }
+  const out = [...tasks];
+  for (const p of projects.slice(0, 40)) {
+    if (!p.id || !p.name?.trim()) continue;
+    const phrase = norm(p.name);
+    const words = [...new Set([...significantWords(p.name), 'site', 'sites'].filter((w) => w && !claimed.has(w)))];
+    out.push({
+      id: `proj:${p.id}`,
+      label: `Work on "${p.name.trim()}" in the builder`,
+      keywords: phrase && !claimedExact.has(phrase) ? [...new Set([phrase, ...words])] : words,
+      kind: 'navigate',
+      route: `/project/${p.id}`,
+      steps: [
+        'The builder is open on this project — say the change in its chat',
+        'Edits arrive as a reviewable diff; nothing applies until you press Apply',
+      ],
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------
+// THE SURFACE TIER — when a working surface is mounted (a creative board, the site builder),
+// it gets FIRST CLAIM on the sentence: "make one with a lake background" acts here, it doesn't
+// navigate away. Pure parsers only; the registry the surfaces register into lives in
+// surfaceBridge.ts (impure), and the claims stay conservative on purpose — a sentence naming a
+// DIFFERENT door ("make a video for the channel" on the postcard board) is left unclaimed.
+// ---------------------------------------------------------------------------------------------
+
+export interface SurfaceAsk { kind: 'make' | 'riff' | 'instruct'; text: string }
+
+// Deixis — the sentence points AT a piece on screen ("on this one"), typos in the noun and all.
+// Bare "this/that" counts only when the sentence ends there or a clause break follows — "a post
+// of this quarter's numbers" is a subject, not a pointer. (Tested against norm'd text: no punctuation.)
+const RIFF_DEIXIS = /\bthis one\b|\b(on|of|off|from|like)\s+(this|that)(?=\s*$|\s+(but|and|so|then)\b)/;
+const RIFF_WORD = /\b(rendition|version|variation|remix|riff)\b/;
+const MAKE_LEAD = /^(make|create|generate|draft|design|do|give me)\s+(me\s+)?(one|another|a|an|some|\d+)\b/;
+const ANCHOR = /\b(this one|this|that one|rendition\w*|version|variation|remix|riff)\b/gi;
+
+/** What to change, pulled out of a riff sentence. The instruction usually FOLLOWS the pointing
+ *  phrase ("…on this one but add text saying X" → "add text saying X"); when the sentence ends
+ *  on the anchor ("make the sky pink on this one"), the instruction is what came before. Empty
+ *  is honest — the board opens its rendition input instead of inventing a change. */
+function riffInstruction(sentence: string): string {
+  const s = sentence.trim();
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  ANCHOR.lastIndex = 0;
+  while ((m = ANCHOR.exec(s))) last = m;
+  const lead = (x: string) => x
+    .replace(/^[\s,.;:—–-]+/, '')
+    .replace(/^(but|and|so|then)\s+/i, '')
+    .replace(/^(i want to|i want|i wanna|i'd like to|id like to|please|can you|could you)\s+/i, '')
+    .replace(/^(but|and|so|then|on|off)\s+/i, '');
+  const after = last ? lead(s.slice(last.index + last[0].length)).trim() : '';
+  if (after) return after;
+  const before = last ? s.slice(0, last.index) : s;
+  return before
+    .replace(/[\s,.;:—–-]+$/, '')
+    .replace(/\s+(on|of|off|from|like|to|but|and|for)$/i, '')
+    // Strip a riff LEAD ("spin a version of…") — but only with the riff word present: in
+    // "make the sky pink on this one" the verb phrase IS the instruction and must survive.
+    .replace(/^(make|spin|create|do|give me)\s+(me\s+)?(another|a|an|one)?\s*(rendition\w*|version|variation|remix|riff)\s*(on|of)?\s*/i, '')
+    .trim();
+}
+
+/** The make-ask's payload, stripped of its lead ("make one with a background of lake" → "a
+ *  background of lake"), the board's own noun, and the connector — what lands in the prompt box. */
+function makePrompt(sentence: string, nouns: string[]): string {
+  let s = sentence.trim().replace(/^(make|create|generate|draft|design|do|give me)\s+(me\s+)?(one|another|a couple of|a few|some|a|an|\d+)(\s+|$)/i, '');
+  for (const n of nouns) {
+    const re = new RegExp(`^${n.replace(/[^a-z0-9 ]/gi, '')}s?\\s+`, 'i');
+    if (re.test(s)) { s = s.replace(re, ''); break; }
+  }
+  return s.replace(/^(with|about|of|for|that says|that say|saying|showing|featuring)\s+/i, '').trim();
+}
+
+/** Parse a sentence as a command for the OPEN creative board. Riff wins over make (riff asks
+ *  often start with "make another…"); make claims only pure deixis ("one", "another", "some")
+ *  or the board's own nouns — a plural like "posts" folds onto the noun "post". */
+export function parseBoardCommand(sentence: string, nouns: string[]): SurfaceAsk | null {
+  const t = sentence.trim();
+  if (!t) return null;
+  // Bare "another one" at a board means exactly that — make another (current kind, no prompt).
+  if (/^(another( one)?|one more|do another|make another( one)?)$/.test(norm(t))) return { kind: 'make', text: '' };
+  const lower = ` ${norm(t)} `;
+  if (RIFF_DEIXIS.test(lower) || RIFF_WORD.test(lower)) return { kind: 'riff', text: riffInstruction(t) };
+  const m = MAKE_LEAD.exec(norm(t));
+  if (!m) return null;
+  const hasNoun = nouns.some((n) => lower.includes(` ${norm(n)} `) || lower.includes(` ${fold(norm(n))} `));
+  if (!(m[3] === 'one' || m[3] === 'another' || m[3] === 'some' || hasNoun)) return null;
+  return { kind: 'make', text: makePrompt(t, nouns) };
+}
+
+/** Parse a sentence as an instruction for the OPEN builder project. Imperative build-verbs only —
+ *  navigation ("open the queue"), questions ("how do i…"), and creation asks for OTHER doors are
+ *  all left unclaimed so the normal tiers still work from inside the builder. */
+const BUILDER_LEAD = /^(add|change|update|remove|delete|fix|redesign|restyle|rebuild|rework|implement|wire up|hook up|integrate|install|swap|replace|tweak|adjust|animate|automate|embed|connect|rename|restructure)\b/;
+export function parseBuilderCommand(sentence: string): SurfaceAsk | null {
+  const t = sentence.trim();
+  if (t.length < 8 || !BUILDER_LEAD.test(norm(t))) return null;
+  return { kind: 'instruct', text: t };
 }

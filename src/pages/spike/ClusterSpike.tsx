@@ -11,6 +11,7 @@ import {
   GitBranch, RefreshCw, Plus, ChevronRight, Orbit, ListTree, Sparkles, ArrowRight, RotateCcw, FlaskConical, Check, Globe2, Cloud, Loader2, Sprout, DoorOpen,
 } from 'lucide-react';
 import { Button, Card } from '../../components/ui';
+import { ConciergeDock } from '../../components/ConciergeDock';
 import GalaxyView from './GalaxyView';
 import IdeaRoom from './IdeaRoom';
 import { CLUSTER_SAMPLES } from '../../data/clusterSamples';
@@ -253,6 +254,10 @@ export default function ClusterSpike({ embedded = false, seed: seedProp }: { emb
   if (!graph) {
     return (
       <div className={`relative flex ${embedded ? 'h-full' : 'h-screen'} w-full flex-col items-center justify-center overflow-hidden px-6`}>
+        {/* The concierge rides along even in the immersive room — you can say your way OUT of
+            explore ("open the queue") the same way you said your way in. Not when embedded —
+            the hosting page already carries its own dock. */}
+        {!embedded && <ConciergeDock />}
         <style>{`@keyframes ku-cs-glow{0%,100%{box-shadow:0 0 0 1px rgba(233,162,59,.25),0 0 40px -8px rgba(233,162,59,.5)}50%{box-shadow:0 0 0 1px rgba(233,162,59,.4),0 0 70px -6px rgba(233,162,59,.8)}}`}</style>
         <div className="pointer-events-none absolute inset-0" style={{ background: 'radial-gradient(900px 600px at 50% 40%, rgba(233,162,59,0.12), transparent 70%), radial-gradient(circle at 50% 50%, #0c0a14, #060509 85%)' }} />
         <div className="pointer-events-none absolute inset-0" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.35) 1px, transparent 1px)', backgroundSize: '60px 60px', opacity: 0.5 }} />
@@ -345,6 +350,7 @@ export default function ClusterSpike({ embedded = false, seed: seedProp }: { emb
   // ---------- THE UNIVERSE ----------
   return (
     <div className={`relative flex ${embedded ? 'h-full' : 'h-screen'} w-full flex-col bg-forge-bg`}>
+      {!embedded && <ConciergeDock />}
       <div className="flex flex-wrap items-center gap-2 border-b border-forge-border px-4 py-2">
         <Sparkles size={16} className="text-forge-ember" />
         <h1 className="font-display text-base font-semibold text-forge-ink">{title || 'Your world'}</h1>

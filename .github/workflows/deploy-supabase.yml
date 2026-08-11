@@ -306,7 +306,7 @@ jobs:
           set -e
           fail=0
           echo "— function probes —"
-          for fn in board-copy generate-image discover-media fetch-url ingest-profile inbox-draft standing-worker concierge send-email unsubscribe resend-webhook lead-ingest mls-sync system-control; do
+          for fn in board-copy generate-image discover-media fetch-url ingest-profile inbox-draft standing-worker concierge speak send-email unsubscribe resend-webhook lead-ingest mls-sync system-control; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -X OPTIONS "https://${PROJECT_REF}.supabase.co/functions/v1/${fn}")
             if [ "$code" = "404" ]; then echo "::error::$fn NOT deployed (404)"; fail=1; else echo "$fn: $code (live)"; fi
           done

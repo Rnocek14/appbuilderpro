@@ -532,11 +532,30 @@ The plan behind this market: docs/lead-engine-master-plan.md.${NOTE}`,
 // The registry
 // ---------------------------------------------------------------------------
 
+const MERCH_STUDIO: SeedArtifact[] = [
+  {
+    slug: 'merch-capsule-playbook', kind: 'doc', title: 'Merch capsule playbook',
+    detail: `${H('A capsule that sells — garments, placements, and honest unit math')}
+PLACEMENT RULES: hats and polos carry SMALL marks (left chest / front panel — 3-4" wide);
+tees and crews carry the statement (full front or large back print); one placement per
+garment beats three. COLOR DISCIPLINE: every print color adds a screen charge — a 1-2 color
+design on a colored blank looks premium AND prints cheap; save full-color for direct-to-garment
+short runs. BLANK QUALITY IS THE PRODUCT: people judge the fabric before the design — a
+premium blank at +$3 landed beats a cheap one at any price point. RUN MATH before ordering:
+landed cost = blank + decoration + (fixed setup ÷ units); price from the LANDED number, not
+the blank; know how many sold pays the run back (the cost sheet on each card computes this
+from YOUR printer's quote — the defaults are placeholders, never order from them).
+SIZING SPLIT for a first run: S 10% / M 25% / L 30% / XL 25% / 2XL 10% — adjust from real
+sell-through, not guesses.${NOTE}`,
+  },
+];
+
 const STUDIO_PACKS: Partial<Record<Flavor, SeedArtifact[]>> = {
   social: SOCIAL, direct_mail: DIRECT_MAIL, email: EMAIL_PACK, video: VIDEO_PACK, landing: LANDING_PACK,
   brand: BRAND_STUDIO, market: MARKET_STUDIO, crm: CRM_STUDIO, lists: LISTS_STUDIO, ads: ADS_STUDIO,
   feature_lab: FEATURE_LAB_PACK, assist: ASSIST_PACK, deliver: DELIVER_PACK, data: DATA_PACK,
   tracker: TRACKER_PACK, content_growth: CONTENT_GROWTH_PACK, lead_engine: LEAD_ENGINE_PACK,
+  merch: MERCH_STUDIO,
 };
 
 /** The FUNCTIONAL pack — what this kind of area knows how to do, regardless of industry. */

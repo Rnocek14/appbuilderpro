@@ -16,6 +16,9 @@ import {
   type Board, type BoardMetrics, type BoardView,
 } from '../../../lib/garvis/creativeBoard';
 import { loadBoard, saveBoard } from '../../../lib/garvis/clusterState';
+import { parseBoardCommand } from '../../../lib/garvis/concierge';
+import { offerFileToSurface, registerSurface, surfaceStateChanged } from '../../../lib/garvis/surfaceBridge';
+import { nextMoves } from '../../../lib/garvis/suggestionDeck';
 import { Overlay } from '../../ui/Overlay';
 import { Button } from '../../ui';
 import { cn } from '../../../lib/utils';
@@ -45,6 +48,9 @@ export interface CreativeBoardAdapter<C> {
   metrics: BoardMetrics;              // tile w/h/gap/cols
   designWidth: number;                // px the thumb is authored at, then scaled to metrics.w
   kinds: BoardKind[];                 // "make" chips
+  /** The board's OWN nouns for the concierge's surface tier ("make a postcard…" claims the
+   *  postcard board; "make a video" there does not). Singulars — plurals fold automatically. */
+  voiceNouns?: string[];
   promptPlaceholder: string;
   emptyHint: string;
   banner?: ReactNode;                 // honesty / availability line under the make bar
@@ -66,6 +72,11 @@ export interface CreativeBoardAdapter<C> {
    *  the SAME rail so riffing and researching share one eye-line. Read-only here; the intel
    *  area owns the full documents. */
   research?: { title: string; body: string }[];
+  /** PHOTO DROP — store a dropped/pasted image with the world's real materials (vault +
+   *  references rail) and return where it lives. Present = this board takes photos. */
+  acceptPhoto?: (file: File) => Promise<{ url: string; caption: string | null }>;
+  /** Apply a stored photo to a piece (pure) — the drop lands ON the pointed-at card when set. */
+  applyPhoto?: (content: C, url: string, caption: string | null) => C;
 }
 
 export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 }: {
@@ -157,13 +168,12 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
   const ghostBoxes = () => busyRef.current.map((g) => ({ x: g.x, y: g.y }));
 
   // ---- make a new piece — non-blocking, several can run at once ---------------------------
-  const make = useCallback(async () => {
+  const makeWith = useCallback(async (promptText: string) => {
     if (busyRef.current.length >= MAX_CONCURRENT) { onToast('info', 'A few are already generating — give them a second.'); return; }
-    const p = prompt.trim();
+    const p = promptText.trim();
     const gid = newId();
     const pos = nextRootPosition(boardRef.current, M, ghostBoxes());   // dodge existing tiles AND in-flight ghosts
     addGhost({ id: gid, x: pos.x, y: pos.y, label: 'Making…' });
-    setPrompt('');               // clear immediately so the next idea can be typed while this one renders
     setFavOnly(false);           // the new (unstarred) card must be visible, not hidden by the ⭐ filter
     try {
       const content = await adapter.generate({ prompt: p, kindId: kind });
@@ -172,7 +182,12 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
       if (view === ARCHIVE_GROUP) setView('all');
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not make that.'); }
     finally { dropGhost(gid); }
-  }, [M, adapter, prompt, kind, view, onToast]);
+  }, [M, adapter, kind, view, onToast]);
+  const make = useCallback(() => {
+    const p = prompt;
+    setPrompt('');               // clear immediately so the next idea can be typed while this one renders
+    return makeWith(p);
+  }, [prompt, makeWith]);
 
   // ---- spin a rendition from a tile — also non-blocking ----------------------------------
   const spin = useCallback(async (parentId: string, instruction: string) => {
@@ -189,6 +204,65 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not spin a rendition.'); }
     finally { dropGhost(gid); }
   }, [M, adapter, onToast]);
+
+  // ---- THE VOICE WIRE — the concierge's surface tier lands here while this board is open -----
+  // "Make one with a lake background" makes it on THIS board; "another rendition … add text
+  // saying X" spins the piece you're pointing at. Refs (not deps) read the live focus/selection
+  // so pointing follows the operator's eye: the focused tile, else a single selection, else the
+  // newest starred, else the newest piece. Claims are conservative (parseBoardCommand) so asks
+  // for other doors keep routing normally.
+  const focusRef = useRef<string | null>(null);
+  const selectedRef = useRef<Set<string>>(new Set());
+  focusRef.current = focusId;
+  selectedRef.current = selected;
+  // The piece the operator is POINTING at: the focused tile, else a single selection, else the
+  // newest starred, else the newest piece. Shared by riff asks and photo drops.
+  // The dock's chips gate on "has pieces" — tell it when that flips (it can't see in here).
+  useEffect(() => { surfaceStateChanged(); }, [board.tiles.length]);
+  const pointedTile = useCallback(() => {
+    const b = boardRef.current;
+    const pointedId = focusRef.current ?? (selectedRef.current.size === 1 ? [...selectedRef.current][0] : null);
+    const live = b.tiles.filter((t) => t.group !== ARCHIVE_GROUP);
+    return (pointedId ? getTile(b, pointedId) : null)
+      ?? [...live].sort((a, z) => (Number(z.favorite) - Number(a.favorite)) || (z.createdAt - a.createdAt))[0]
+      ?? null;
+  }, []);
+  useEffect(() => registerSurface({
+    id: `board:${adapter.storageKey}`,
+    claims: (s) => parseBoardCommand(s, adapter.voiceNouns ?? []),
+    // Tap-to-do chips in the dock: craft moves for THIS channel, gated on live board state
+    // (an empty board gets start-moves, never a riff at nothing).
+    suggest: () => nextMoves(adapter.storageKey, {
+      hasPieces: boardRef.current.tiles.some((t) => t.group !== ARCHIVE_GROUP),
+      researchTitles: adapter.research?.map((r) => r.title),
+    }),
+    handle: (cmd) => {
+      if (cmd.kind !== 'riff') { void makeWith(cmd.text); return 'Making it — the new card lands on this board.'; }
+      const target = pointedTile();
+      if (!target) { void makeWith(cmd.text); return 'Nothing here to riff yet — making it fresh instead.'; }
+      if (!cmd.text) { setRenditionFor(target.id); setRenditionText(''); return 'Which change? The rendition card is open — type it there.'; }
+      void spin(target.id, cmd.text);
+      return `Spinning a rendition of "${(adapter.captionOf(target.content) || target.prompt).slice(0, 40)}"…`;
+    },
+    // A dropped/pasted photo becomes a REAL material (vault + references rail) and, when this
+    // board knows how, lands straight on the pointed-at card. Errors come back as words.
+    ...(adapter.acceptPhoto ? {
+      acceptFile: async (file: File) => {
+        if (!file.type.startsWith('image/')) return "That file isn't an image — boards take photos.";
+        try {
+          const up = await adapter.acceptPhoto!(file);
+          const target = pointedTile();
+          if (target && adapter.applyPhoto) {
+            setBoard((b) => setTileContent(b, target.id, adapter.applyPhoto!(target.content, up.url, up.caption)));
+            return 'Photo dropped onto this card — it’s saved with your references too.';
+          }
+          return 'Photo saved with your references — tap a card and pick it, or make a new one.';
+        } catch (e) {
+          return e instanceof Error ? `Could not save the photo: ${e.message}` : 'Could not save the photo.';
+        }
+      },
+    } : {}),
+  }), [adapter, makeWith, spin, pointedTile]);
 
   // ---- zoom + fit-to-view ----------------------------------------------------------------
   const clampZoom = (z: number) => Math.min(1.6, Math.max(0.35, z));
@@ -387,7 +461,16 @@ export function CreativeBoard<C>({ adapter, clusterId, onToast, reloadNonce = 0 
       </div>
 
       {/* the spread */}
-      <div ref={stageRef} className="cb-stage" onPointerDown={onStagePointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      <div ref={stageRef} className="cb-stage" onPointerDown={onStagePointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+        // A photo dragged straight onto the board lands the same place a dock drop does.
+        onDragOver={(e) => { if (adapter.acceptPhoto && e.dataTransfer.types.includes('Files')) e.preventDefault(); }}
+        onDrop={(e) => {
+          if (!adapter.acceptPhoto) return;
+          const f = [...e.dataTransfer.files].find((x) => x.type.startsWith('image/'));
+          if (!f) return;
+          e.preventDefault();
+          void offerFileToSurface(f).then((n) => { if (n) onToast('success', n); });
+        }}>
         {shown.length === 0 && busy.length === 0 && (
           <div className="cb-empty">
             <Wand2 size={22} className="text-forge-ember/70" />

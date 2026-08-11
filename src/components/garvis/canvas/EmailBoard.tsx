@@ -51,6 +51,7 @@ export function EmailBoard({ worldId, clusterId, onToast, realEstate: reProp, ma
     });
     return {
       storageKey: 'email',
+      voiceNouns: ['email', 'newsletter'],
       title: 'Email board',
       subtitle: 'Make drafts, compare subject-line angles, spin renditions, then send to a segment.',
       metrics: { w: 270, h: 300, gap: 26, cols: 3, pad: 40 },

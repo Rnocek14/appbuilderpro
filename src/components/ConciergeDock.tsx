@@ -9,12 +9,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowRight, Check, GripVertical, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasKey, aliasLookup, aliasRemember, exploreDive, isBrief, isRevision, parseCommandPrefix, resolve, routeFor, statsFor,
+  aliasKey, aliasLookup, aliasRemember, deriveWorldTasks, exploreDive, isBrief, isGoBack, isRevision, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
+import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
+import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
+import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
 import { actionById } from '../lib/garvis/actionRegistry';
@@ -43,10 +46,32 @@ export function readHandoff(...taskIds: string[]): ConciergeHandoff | null {
   } catch { return null; }
 }
 
-interface ActiveGuide { taskId: string; done: number[] }
+// The snapshot carries a DYNAMIC task's label/steps across the per-page dock remount —
+// world/area/project tasks only exist after loadWorlds runs, but the guide must show at once.
+interface ActiveGuide { taskId: string; done: number[]; snapshot?: { label: string; steps: string[] } }
 
 const ALIAS_KEY = 'ff:concierge-aliases';
 const VOICE_KEY = 'ff:concierge-voice';
+/** Where the operator parked the dock (viewport top-left px). Absent = docked bottom-right. */
+const POS_KEY = 'ff:concierge-pos';
+const loadPos = (): { x: number; y: number } | null => {
+  try {
+    const p = JSON.parse(localStorage.getItem(POS_KEY) || 'null') as { x: number; y: number } | null;
+    return p && typeof p.x === 'number' && typeof p.y === 'number' ? p : null;
+  } catch { return null; }
+};
+const clampPos = (x: number, y: number, w: number, h: number) => ({
+  x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - w - 8)),
+  y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - h - 8)),
+});
+/** Chip-tap counts (label → taps) — the deck learns which moves this operator actually uses. */
+const TAPS_KEY = 'ff:chip-taps';
+const loadTaps = (): Record<string, number> => {
+  try {
+    const t = JSON.parse(localStorage.getItem(TAPS_KEY) || '{}') as Record<string, number>;
+    return t && typeof t === 'object' && !Array.isArray(t) ? t : {};
+  } catch { return {}; }
+};
 const loadAliases = (): ConciergeAlias[] => {
   try { return (JSON.parse(localStorage.getItem(ALIAS_KEY) || '[]') as ConciergeAlias[]).filter((a) => a?.sentence && a?.taskId); }
   catch { return []; }
@@ -78,7 +103,14 @@ export function ConciergeDock() {
   const [open, setOpen] = useState(() => sessionStorage.getItem(OPEN_KEY) === '1');
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  // A note written just before a navigation (the missing-world explanation) must survive the
+  // remount — AppShell is per-page, so plain state would vanish before the operator reads it.
+  // Read here, clear in an effect: StrictMode runs initializers twice, and a clearing read
+  // would eat the note on the throwaway first pass.
+  const [note, setNote] = useState<string | null>(() => {
+    try { return sessionStorage.getItem('ff:concierge-note'); } catch { return null; }
+  });
+  useEffect(() => { try { sessionStorage.removeItem('ff:concierge-note'); } catch { /* fine */ } }, []);
   const [suggestions, setSuggestions] = useState<ConciergeTask[]>([]);
   const [lastSentence, setLastSentence] = useState('');
   const [compound, setCompound] = useState(false);
@@ -93,8 +125,89 @@ export function ConciergeDock() {
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
   const aliasesRef = useRef<ConciergeAlias[]>(loadAliases());
   const worldsRef = useRef<ConciergeWorld[] | null>(null);
+  // The full task list including the operator's own builder projects ("work on jims site").
+  // Starts as the static registry; loadWorlds composes the real one alongside the worlds fetch.
+  const tasksRef = useRef<ConciergeTask[]>(ALL_CONCIERGE_TASKS);
   const inputRef = useRef<HTMLInputElement>(null);
   const recRef = useRef<{ stop: () => void } | null>(null);
+
+  // UNLOCKED POSITION — the operator can drag the dock (bubble or panel) anywhere; the parked
+  // spot persists across pages and sessions. Docked (null) keeps the classic bottom-right.
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(loadPos);
+  const rootRef = useRef<HTMLDivElement | HTMLButtonElement | null>(null);
+  const dragRef = useRef<{ startX: number; startY: number; dx: number; dy: number; moved: boolean } | null>(null);
+  const justDragged = useRef(false);
+  const startDrag = (e: React.PointerEvent) => {
+    const el = rootRef.current;
+    if (!el || e.button !== 0) return;
+    const r = el.getBoundingClientRect();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false };
+    const move = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      // A 5px threshold separates a click (open/toggle) from a drag (move) on the same element.
+      if (!d.moved && Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY) < 5) return;
+      d.moved = true;
+      setPos(clampPos(ev.clientX - d.dx, ev.clientY - d.dy, r.width, r.height));
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      const d = dragRef.current;
+      dragRef.current = null;
+      if (d?.moved) {
+        justDragged.current = true;
+        window.setTimeout(() => { justDragged.current = false; }, 200);
+        setPos((p) => { if (p) { try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch { /* fine */ } } return p; });
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  const redock = () => { setPos(null); try { localStorage.removeItem(POS_KEY); } catch { /* fine */ } };
+  useEffect(() => {
+    const onResize = () => setPos((p) => (p ? clampPos(p.x, p.y, 340, 160) : p));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const posStyle = pos ? { left: pos.x, top: pos.y, right: 'auto', bottom: 'auto' } as const : undefined;
+
+  // Surface chips re-read when a board/builder mounts or unmounts under the dock.
+  const [, setSurfaceNonce] = useState(0);
+  useEffect(() => onSurfaceChange(() => setSurfaceNonce((n) => n + 1)), []);
+  const tapsRef = useRef<Record<string, number>>(loadTaps());
+  const recordTap = (label: string) => {
+    const t = { ...tapsRef.current, [label]: (tapsRef.current[label] ?? 0) + 1 };
+    // Cap the ledger — drop the least-used entries, never the fresh tap.
+    const keys = Object.keys(t);
+    if (keys.length > 100) for (const k of keys.sort((a, b) => t[a] - t[b]).slice(0, keys.length - 100)) { if (k !== label) delete t[k]; }
+    tapsRef.current = t;
+    try { localStorage.setItem(TAPS_KEY, JSON.stringify(t)); } catch { /* fine */ }
+  };
+
+  // PHOTOS INTO THE CHAT — drag a picture onto the dock (or paste one) and it lands on the open
+  // work: the postcard board saves it as a real material and puts it ON the pointed-at card; the
+  // builder sends it into the chat. No surface open = an honest pointer, never a lost drop.
+  const [dropping, setDropping] = useState(false);
+  const handleFiles = async (files: FileList | File[] | null) => {
+    const list = files ? [...files] : [];
+    const img = list.find((f) => f.type.startsWith('image/'));
+    if (!img) {
+      if (list.length) setNote("That file isn't an image — pictures are what land on the work.");
+      return;
+    }
+    if (!surfaceAcceptsFiles()) {
+      setNote('Photos land on the open work — open the postcard board or the builder first, then drop it again.');
+      return;
+    }
+    setBusy(true);
+    setNote('Placing the photo…');
+    const n = await offerFileToSurface(img);
+    setBusy(false);
+    setNote(n ?? 'Could not place the photo — the board may still be loading. Try once more in a second.');
+    if (n) speak(n);
+    if (list.length > 1) setNote((cur) => `${cur ?? ''}${cur ? ' ' : ''}(One photo at a time — the first one was used.)`);
+  };
 
   useEffect(() => { sessionStorage.setItem(OPEN_KEY, open ? '1' : '0'); }, [open]);
   useEffect(() => {
@@ -128,8 +241,10 @@ export function ConciergeDock() {
   }, []);
 
   // Voice replies: short outcome lines, spoken only when the operator turned the voice on.
-  const speak = (text: string) => {
-    if (!voiceOn || !('speechSynthesis' in window) || !text) return;
+  // ElevenLabs first (the speak seam — real voice, cached lines); the browser voice is the
+  // honest fallback so a missing key never silences the talk-back.
+  const browserSpeak = (text: string) => {
+    if (!('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text.slice(0, 300));
@@ -137,11 +252,18 @@ export function ConciergeDock() {
       window.speechSynthesis.speak(u);
     } catch { /* voice is best-effort */ }
   };
+  const speak = (text: string) => {
+    if (!voiceOn || !text) return;
+    void speakEleven(text).then((ok) => { if (!ok) browserSpeak(text); });
+  };
   const toggleVoice = () => {
     const next = !voiceOn;
     setVoiceOn(next);
     try { localStorage.setItem(VOICE_KEY, next ? '1' : '0'); } catch { /* fine */ }
-    if (!next) { try { window.speechSynthesis?.cancel(); } catch { /* fine */ } }
+    if (!next) {
+      stopSpeaking();
+      try { window.speechSynthesis?.cancel(); } catch { /* fine */ }
+    }
   };
 
   // ⌘J / Ctrl+J toggles the concierge from anywhere (⌘K stays the command palette's).
@@ -159,8 +281,12 @@ export function ConciergeDock() {
 
   const loadWorlds = async (): Promise<ConciergeWorld[]> => {
     if (worldsRef.current) return worldsRef.current;
-    const { data } = await supabase.from('knowledge_clusters')
-      .select('slug, world_id, knowledge_worlds!inner(id, title)').limit(200);
+    const [{ data }, projs] = await Promise.all([
+      supabase.from('knowledge_clusters').select('slug, world_id, knowledge_worlds!inner(id, title)').limit(200),
+      // Builder projects become sayable doors too — a failed fetch just means no project tasks.
+      supabase.from('projects').select('id, name').order('updated_at', { ascending: false }).limit(40)
+        .then(({ data: p }) => (p ?? []) as { id: string; name: string }[], () => [] as { id: string; name: string }[]),
+    ]);
     const byWorld = new Map<string, ConciergeWorld>();
     for (const c of (data ?? []) as unknown as { slug: string; world_id: string; knowledge_worlds: { id: string; title: string } }[]) {
       if (!c.world_id) continue;
@@ -168,14 +294,18 @@ export function ConciergeDock() {
       w.slugs.push(c.slug);
       byWorld.set(c.world_id, w);
     }
+    // The full brain: handwritten + platform-derived + THE OPERATOR'S OWN worlds/areas/projects.
+    tasksRef.current = withProjectTasks(deriveWorldTasks(ALL_CONCIERGE_TASKS, [...byWorld.values()]), projs);
     worldsRef.current = [...byWorld.values()];
     return worldsRef.current;
   };
 
   // Persist SYNCHRONOUSLY before navigating: the route change unmounts this dock (AppShell is
   // per-page) before any effect could run — an effect-based save loses the guide every time.
-  const startGuide = (taskId: string) => {
-    const g: ActiveGuide = { taskId, done: [] };
+  const startGuide = (taskOrId: ConciergeTask | string) => {
+    const g: ActiveGuide = typeof taskOrId === 'string'
+      ? { taskId: taskOrId, done: [] }
+      : { taskId: taskOrId.id, done: [], snapshot: { label: taskOrId.label, steps: taskOrId.steps } };
     try { sessionStorage.setItem(TASK_KEY, JSON.stringify(g)); sessionStorage.setItem(OPEN_KEY, '1'); } catch { /* fine */ }
     setGuide(g);
   };
@@ -191,8 +321,10 @@ export function ConciergeDock() {
     }
     // The operator's words ride along — destinations with a primary input read them once.
     if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); } catch { /* fine */ } }
-    startGuide(task.id);
-    setNote(missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null);
+    startGuide(task);
+    const missing = missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null;
+    setNote(missing);
+    if (missing) { try { sessionStorage.setItem('ff:concierge-note', missing); } catch { /* fine */ } }
     // The Explore bridge: "explore lakefront resort branding" FALLS INTO a galaxy of the topic
     // (the page's live ?dive= mechanism), instead of landing on an empty prompt.
     const dive = task.id === 'explore' && sentence ? exploreDive(sentence) : null;
@@ -200,9 +332,9 @@ export function ConciergeDock() {
   };
 
   const confirmCreate = (task: ConciergeTask) => {
-    if (task.genesisIntent) { try { sessionStorage.setItem(GENESIS_PREFILL_KEY, task.genesisIntent); } catch { /* fine */ } }
+    if (task.genesisIntent) { try { sessionStorage.setItem(GENESIS_PREFILL_KEY, task.genesisIntent); window.dispatchEvent(new Event('ff:genesis-intent')); } catch { /* fine */ } }
     setPendingCreate(null);
-    startGuide(task.id);
+    startGuide(task);
     navigate(task.route);
   };
 
@@ -221,13 +353,13 @@ export function ConciergeDock() {
         body: {
           sentence,
           context: window.location.pathname,
-          tasks: ALL_CONCIERGE_TASKS.map(({ id, label }) => ({ id, label })),
+          tasks: tasksRef.current.map(({ id, label }) => ({ id, label })),
         },
       });
       if (error || !data) { setNote(FALLBACK); return; }
       const d = data as { available?: boolean; setup?: string[]; taskId?: string | null; answer?: string | null };
       if (d.available === false) { setNote(d.setup?.[0] ?? FALLBACK); return; }
-      const picked = d.taskId ? ALL_CONCIERGE_TASKS.find((t) => t.id === d.taskId) ?? null : null;
+      const picked = d.taskId ? tasksRef.current.find((t) => t.id === d.taskId) ?? null : null;
       if (picked) {
         rememberAlias(sentence, picked.id);   // tier 0 learns — next time this phrasing is instant
         const { route, missingWorld } = routeFor(picked, worlds);
@@ -265,7 +397,8 @@ export function ConciergeDock() {
   };
   const briefToGenesis = () => {
     if (!briefText) return;
-    try { sessionStorage.setItem(GENESIS_PREFILL_KEY, briefText); } catch { /* fine */ }
+    // The event covers the already-on-the-page case — navigate() to the same route never remounts.
+    try { sessionStorage.setItem(GENESIS_PREFILL_KEY, briefText); window.dispatchEvent(new Event('ff:genesis-intent')); } catch { /* fine */ }
     setBriefText(null);
     startGuide('big-brief');
     navigate('/garvis/webs');
@@ -340,10 +473,16 @@ export function ConciergeDock() {
     });
   };
 
-  const submit = async () => {
+  const submit = () => {
     const raw = input.trim();
     if (!raw || busy) return;
     setInput('');
+    return submitText(raw);
+  };
+  // The tier walk, separated from the input box so the mic's hands-free path can submit a
+  // finished utterance directly (the box may already be cleared by then).
+  const submitText = async (raw: string) => {
+    if (!raw || busy) return;
     setPendingCreate(null);
     // A plan is on screen and the operator is correcting it → revise THAT plan, don't start over.
     if (doState && !doState.statuses && isRevision(raw)) {
@@ -372,6 +511,39 @@ export function ConciergeDock() {
     if (!text) return;
     setLastSentence(text);
     if (execute) { await doIt(text); return; }
+    // THE SURFACE TIER — the open working surface (a creative board room, the builder) claims
+    // the ask first: "make one with a lake background" acts HERE instead of navigating away.
+    // Claims are conservative pure parsers, so asks for other doors fall straight through.
+    const surfaceNote = offerToSurface(text);
+    if (surfaceNote) {
+      setSuggestions([]);
+      setCompound(false);
+      setNote(surfaceNote);
+      speak(surfaceNote);
+      inputRef.current?.focus();
+      return;
+    }
+    // "Go back" is a browser verb, not a destination.
+    if (isGoBack(text)) {
+      setSuggestions([]);
+      setCompound(false);
+      setNote('Back you go.');
+      navigate(-1);
+      return;
+    }
+    // SMALL TALK & HALTS — chatter and stop-words get a free honest answer, never a navigation
+    // guess ("never mind" must not open a project named Mind Weave) and never a metered AI call.
+    const chat = smallTalk(text);
+    if (chat) {
+      setCompound(false);
+      // A halt points at the real levers — the Queue chip is one tap.
+      const queueTask = chat.kind === 'halt' ? tasksRef.current.find((t) => t.id === 'approvals') : null;
+      setSuggestions(queueTask ? [queueTask] : []);
+      setNote(chat.text);
+      speak(chat.text);
+      inputRef.current?.focus();
+      return;
+    }
     // THE STATS TIER — number questions answered from real rows, free, before anything routes.
     const stat = statsFor(text);
     if (stat) {
@@ -389,7 +561,7 @@ export function ConciergeDock() {
     }
     // Tier 0 — the operator's own learned phrasings resolve instantly.
     const learned = aliasLookup(text, aliasesRef.current);
-    const learnedTask = learned ? ALL_CONCIERGE_TASKS.find((t) => t.id === learned) : null;
+    const learnedTask = learned ? tasksRef.current.find((t) => t.id === learned) : null;
     const worlds = await loadWorlds().catch(() => [] as ConciergeWorld[]);
     inputRef.current?.focus();
     if (learnedTask) {
@@ -397,7 +569,7 @@ export function ConciergeDock() {
       act(learnedTask, route, missingWorld, text);
       return;
     }
-    const r = resolve(text, worlds, ALL_CONCIERGE_TASKS);
+    const r = resolve(text, worlds, tasksRef.current);
     if (r.kind === 'go' && r.task && r.route) { act(r.task, r.route, r.missingWorld, text); return; }
     if (r.kind === 'compound' && r.suggestions?.length) {
       setCompound(true);
@@ -420,47 +592,74 @@ export function ConciergeDock() {
   // get the button — no fake affordance.
   const SpeechRec = (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike; SpeechRecognition?: new () => SpeechRecognitionLike });
   const SpeechCtor = SpeechRec.SpeechRecognition ?? SpeechRec.webkitSpeechRecognition;
+  const micText = useRef('');
   const toggleMic = () => {
     if (listening) { recRef.current?.stop(); setListening(false); return; }
     if (!SpeechCtor) return;
     const rec = new SpeechCtor();
     rec.lang = 'en-US';
     rec.interimResults = true;
+    micText.current = '';
     rec.onresult = (ev) => {
       const t = Array.from(ev.results).map((r) => r[0]?.transcript ?? '').join(' ').trim();
-      if (t) setInput(t);
+      if (t) { setInput(t); micText.current = t; }
     };
-    rec.onend = () => { setListening(false); inputRef.current?.focus(); };
+    rec.onend = () => {
+      setListening(false);
+      // HANDS-FREE: with voice replies on, finishing speaking IS the submit — say it, done.
+      // Voice off keeps the review-before-send behavior (the box holds the transcript).
+      const t = micText.current.trim();
+      micText.current = '';
+      if (voiceOn && t) { setInput(''); void submitText(t); return; }
+      inputRef.current?.focus();
+    };
     rec.onerror = () => setListening(false);
     recRef.current = rec;
     setListening(true);
     rec.start();
   };
 
-  const task = guide ? ALL_CONCIERGE_TASKS.find((t) => t.id === guide.taskId) ?? null : null;
+  const foundTask = guide ? tasksRef.current.find((t) => t.id === guide.taskId) ?? null : null;
+  const task = foundTask ?? (guide?.snapshot ? ({ id: guide.taskId, label: guide.snapshot.label, steps: guide.snapshot.steps, keywords: [], kind: 'navigate', route: '' } as ConciergeTask) : null);
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} aria-label="Open the concierge — say what you want to do"
+      <button ref={(el) => { rootRef.current = el; }} onPointerDown={startDrag}
+        onClick={() => { if (justDragged.current) return; setOpen(true); }}
+        onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); setOpen(true); } }}
+        aria-label="Open the concierge — say what you want to do (drag to move it)"
+        style={posStyle}
         className="fixed bottom-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105">
         <MessageCircle size={19} />
       </button>
     );
   }
 
+  const moves = rankMoves(surfaceSuggestions(), tapsRef.current);
+
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl">
+    <div ref={(el) => { rootRef.current = el; }} style={posStyle}
+      onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(e) => { e.preventDefault(); setDropping(false); void handleFiles(e.dataTransfer.files); }}
+      className={cn('fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
+        dropping && 'border-forge-ember/70 ring-2 ring-forge-ember/40')}>
       <div className="flex items-center gap-2">
+        <button onPointerDown={startDrag} onDoubleClick={redock}
+          aria-label="Move the concierge — drag it anywhere; double-click to send it back to the corner"
+          title="Drag to move · double-click to re-dock"
+          className="-ml-1 cursor-grab touch-none rounded p-0.5 text-forge-dim hover:text-forge-ink active:cursor-grabbing">
+          <GripVertical size={13} />
+        </button>
         <Sparkles size={14} className="text-forge-ember" />
         <p className="text-xs font-semibold text-forge-ink">Say what you want to do</p>
-        {'speechSynthesis' in window && (
-          <button onClick={toggleVoice} aria-label={voiceOn ? 'Turn voice replies off' : 'Turn voice replies on'}
-            className={cn('ml-auto rounded p-1', voiceOn ? 'text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>
-            {voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}
-          </button>
-        )}
+        {/* Always shown: the ElevenLabs seam carries the voice; speechSynthesis is only the fallback. */}
+        <button onClick={toggleVoice} aria-label={voiceOn ? 'Turn voice replies off' : 'Turn voice replies on'}
+          className={cn('ml-auto rounded p-1', voiceOn ? 'text-forge-ember' : 'text-forge-dim hover:text-forge-ink')}>
+          {voiceOn ? <Volume2 size={13} /> : <VolumeX size={13} />}
+        </button>
         <button onClick={() => { setOpen(false); }} aria-label="Close the concierge"
-          className={cn('rounded p-1 text-forge-dim hover:text-forge-ink', !('speechSynthesis' in window) && 'ml-auto')}><X size={14} /></button>
+          className="rounded p-1 text-forge-dim hover:text-forge-ink"><X size={14} /></button>
       </div>
 
       {pendingCount !== null && pendingCount > 0 && !doState && (
@@ -474,13 +673,19 @@ export function ConciergeDock() {
         <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
           onPaste={(e) => {
+            // A pasted IMAGE (screenshot, copied photo) lands on the work like a drop does.
+            if ([...e.clipboardData.files].some((f) => f.type.startsWith('image/'))) {
+              e.preventDefault();
+              void handleFiles(e.clipboardData.files);
+              return;
+            }
             const t = e.clipboardData.getData('text');
             if (isBrief(t)) { e.preventDefault(); captureBrief(t); }
           }}
           placeholder={'"moms postcard" · "do draft an episode about rates" · "what\'s next"'}
           className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
         {SpeechCtor && (
-          <button onClick={toggleMic} aria-label={listening ? 'Stop listening' : 'Speak instead of typing'}
+          <button onClick={toggleMic} aria-label={listening ? 'Stop listening' : voiceOn ? 'Speak — hands-free: it runs when you stop talking' : 'Speak instead of typing'}
             className={cn('rounded-lg border px-2', listening ? 'border-forge-ember bg-forge-ember/20 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink')}>
             <Mic size={14} />
           </button>
@@ -490,6 +695,20 @@ export function ConciergeDock() {
       </div>
 
       {note && <p className="mt-2 whitespace-pre-line text-[11px] text-forge-dim">{note}</p>}
+
+      {/* NEXT MOVES — tap-to-do chips for the open surface (board/builder). One tap runs the
+          move through the same bridge a spoken ask uses; nothing is pasted for retyping. */}
+      {moves.length > 0 && !doState && !briefText && !pendingCreate && suggestions.length === 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {moves.map((s) => (
+            <button key={s.label}
+              onClick={() => { recordTap(s.label); const n = applySuggestion(s); if (n) { setNote(n); speak(n); } }}
+              className="rounded-full border border-forge-border bg-forge-bg/60 px-2 py-0.5 text-[10px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {briefText && (
         <div className="mt-2 rounded-xl border border-forge-ember/40 bg-forge-bg/60 p-2.5">
@@ -533,7 +752,7 @@ export function ConciergeDock() {
               className="rounded p-0.5 text-forge-dim hover:text-forge-ink"><X size={12} /></button>
           </div>
           <p className="mt-0.5 text-[11px] text-forge-dim">{doState.plan.summary}</p>
-          <ol className="mt-1.5 space-y-1">
+          <ol className="mt-1.5 list-none space-y-1 pl-0">
             {doState.plan.steps.map((s, i) => {
               const spec = actionById(s.action);
               const st = doState.statuses?.[i];
@@ -627,7 +846,7 @@ export function ConciergeDock() {
             <button onClick={() => setGuide(null)} aria-label="Dismiss these steps"
               className="ml-auto rounded p-0.5 text-forge-dim hover:text-forge-ink"><X size={12} /></button>
           </div>
-          <ol className="mt-1 space-y-1">
+          <ol className="mt-1 list-none space-y-1 pl-0">
             {task.steps.map((s, i) => {
               const done = guide!.done.includes(i);
               return (

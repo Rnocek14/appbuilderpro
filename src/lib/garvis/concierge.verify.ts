@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, exploreDive, isBrief, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, statsFor, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, deriveWorldTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, isGoBack, parseCommandPrefix, reelTopic, resolve, routeFor, smallTalk, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -15,8 +15,8 @@ const WORLDS: ConciergeWorld[] = [
 // ---- THE OPERATOR'S OWN SENTENCES are the acceptance tests ----
 {
   const r = resolve("lets work on moms postcard", WORLDS);
-  check('"lets work on moms postcard" → the mom world, postcard steps',
-    r.kind === 'go' && r.task?.id === 'postcard' && r.route === '/garvis/webs/w-mom' && !r.missingWorld);
+  check('"lets work on moms postcard" → INSIDE the mom world\'s Direct Mail area (the machine taps the node)',
+    r.kind === 'go' && r.task?.id === 'postcard' && r.route === '/garvis/webs/w-mom?area=direct-mail' && !r.missingWorld);
   check('postcard steps end at the approval Queue (nothing mails without you)',
     !!r.task && /Approve in Queue/.test(r.task.steps.join(' ')));
 }
@@ -71,7 +71,7 @@ const WORLDS: ConciergeWorld[] = [
   check('"what\'s waiting on me" → the Queue (the dock\'s own example must work)',
     resolve("what's waiting on me", WORLDS).task?.id === 'approvals');
   const postcard = CONCIERGE_TASKS.find((t) => t.id === 'postcard')!;
-  check('routeFor substitutes the real world id', routeFor(postcard, WORLDS).route === '/garvis/webs/w-mom');
+  check('routeFor substitutes the real world id (area deep-link intact)', routeFor(postcard, WORLDS).route === '/garvis/webs/w-mom?area=direct-mail');
   check('routeFor with no matching world is honest, never a broken route',
     routeFor(postcard, []).missingWorld === true && routeFor(postcard, []).route === '/garvis/webs');
 }
@@ -273,6 +273,127 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('deriveTasks is deterministic', JSON.stringify(a) === JSON.stringify(deriveTasks(CONCIERGE_TASKS, sample)));
   check('a not_built capability is never proposed', !a.some((t) => t.id === 'cap:c2') && a.some((t) => t.id === 'cap:c1'));
   check('a nav item on a handwritten route is skipped', !a.some((t) => t.id === 'nav:/garvis/queue'));
+}
+
+// ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----
+{
+  const MOMV: ConciergeWorld[] = [
+    { id: 'w-mom', title: 'Mom Real Estate Marketing', slugs: ['brand', 'direct-mail', 'video-ideas', 'social-content'] },
+    { id: 'w-como', title: 'Como Country Club', slugs: ['capsule-merch', 'brand'] },
+    { id: 'w-chan', title: 'Caregiver Channel', slugs: ['growth-studio'] },
+  ];
+  const tasks = deriveWorldTasks(ALL_CONCIERGE_TASKS, MOMV);
+  const r = resolve('lets work on video for my mom', MOMV, tasks);
+  check('"lets work on video for my mom" → the mom world\'s VIDEO area (the ask that forced this tier)',
+    r.kind === 'go' && r.task?.id === 'area:w-mom:video-ideas' && r.route === '/garvis/webs/w-mom?area=video-ideas');
+  const social = resolve('lets do moms social posts', MOMV, tasks);
+  check('"moms social posts" reaches the mom world\'s social area',
+    (social.kind === 'go' && social.task?.id === 'area:w-mom:social-content') || (social.kind === 'suggest' && !!social.suggestions?.some((t) => t.id === 'area:w-mom:social-content')));
+  const merch = resolve('work on the como merch', MOMV, tasks);
+  check('"como merch" → the capsule room', merch.kind === 'go' && merch.task?.id === 'area:w-como:capsule-merch');
+  check('a world word alone still belongs to the handwritten door ("moms postcard" stays postcard)',
+    resolve('lets work on moms postcard', MOMV, tasks).task?.id === 'postcard');
+  check('an area word alone NEVER fires a cross task ("start a clothing brand" stays the genesis door)',
+    resolve('lets start a clothing brand', MOMV, tasks).task?.id === 'clothing-brand');
+  check('generic title words never steal ("lets work on the channel" still drafts the episode)',
+    resolve('lets work on the channel', MOMV, tasks).task?.id === 'draft-episode');
+  check('the FULL world title is always a door ("open como country club")',
+    resolve('open como country club', MOMV, tasks).task?.id === 'world:w-como');
+  check('cross tasks never dilute ownership (deriveWorldTasks is additive + deterministic)',
+    JSON.stringify(deriveWorldTasks(ALL_CONCIERGE_TASKS, MOMV)) === JSON.stringify(deriveWorldTasks(ALL_CONCIERGE_TASKS, MOMV))
+    && deriveWorldTasks(ALL_CONCIERGE_TASKS, []).length === ALL_CONCIERGE_TASKS.length);
+  check('areas owned by handwritten tasks are never twinned (no derived direct-mail area)',
+    !tasks.some((t) => t.id === 'area:w-mom:direct-mail'));
+}
+
+// ---- SMALL TALK, HALTS & BACK — chatter never navigates, negations never "do" ----
+{
+  check('"never mind" is CLOSURE — it must never open a project named Mind Weave', smallTalk('never mind')?.kind === 'closure');
+  check('"cancel the mail run" is a HALT — a negation is the opposite of intent', smallTalk('cancel the mail run')?.kind === 'halt');
+  check('"dont send anything" halts too', smallTalk('dont send anything')?.kind === 'halt');
+  check('a halt names the real levers (Queue, Missions, Master Switch)',
+    /Queue/.test(smallTalk('stop everything')!.text) && /Master Switch/.test(smallTalk('stop everything')!.text));
+  check('greetings, thanks, and affirmations each get their own free line',
+    smallTalk('good morning')?.kind === 'greet' && smallTalk('thanks')?.kind === 'thanks' && smallTalk('good job')?.kind === 'affirm');
+  check('real asks are NEVER chatter ("lets work on moms postcard", "check my money")',
+    smallTalk('lets work on moms postcard') === null && smallTalk('check my money') === null);
+  check('"no pressure lets do the postcard" is not a closure (anchored, not prefix)', smallTalk('no pressure lets do the postcard') === null);
+  check('"go back" steps back a page; "go back to the queue" is a destination, not a step',
+    isGoBack('go back') && isGoBack('take me back') && !isGoBack('go back to the queue'));
+  check('bare "another one" at a board just makes another', parseBoardCommand('another one', ['post'])?.kind === 'make'
+    && parseBoardCommand('one more', [])?.kind === 'make' && parseBoardCommand('another one', ['post'])?.text === '');
+}
+
+// ---- THE REEL DOOR — "make an ai video for X" lands in the reel studio ABOUT X ----
+{
+  const REEL_WORLDS: ConciergeWorld[] = [...WORLDS, { id: 'w-chan', title: 'Caregiver Channel', slugs: ['channel-brand'] }];
+  const r1 = resolve('lets make an ai video for real estate reel', REEL_WORLDS, ALL_CONCIERGE_TASKS);
+  check('"lets make an ai video for real estate reel" → the reel studio, inside its area',
+    r1.kind === 'go' && r1.task?.id === 'reel' && r1.route === '/garvis/webs/w-growth?area=growth-studio');
+  const r2 = resolve('lets make a reel about lake geneva', REEL_WORLDS, ALL_CONCIERGE_TASKS);
+  check('"a reel about lake geneva" is a REEL with a topic, not the market page (payload words never outvote the action)',
+    r2.kind === 'go' && r2.task?.id === 'reel');
+  const r3 = resolve('make a video for the channel', REEL_WORLDS, ALL_CONCIERGE_TASKS);
+  check('"make a video for the channel" still reaches the episode drafter',
+    (r3.kind === 'go' && r3.task?.id === 'draft-episode') || (r3.kind === 'suggest' && !!r3.suggestions?.some((t) => t.id === 'draft-episode')));
+  check('the topic survives extraction ("…for real estate reel" → "real estate")',
+    reelTopic('lets make an ai video for real estate reel') === 'real estate');
+  check('"a reel about lake geneva" → topic "lake geneva"', reelTopic('lets make a reel about lake geneva') === 'lake geneva');
+  check('an all-shell ask has NO topic (the studio keeps its own seed)', reelTopic('make a reel') === null);
+  check('the courtesy prefix strips too', reelTopic('garvis, make me an ai video about compound interest') === 'compound interest');
+  const noWorld = resolve('lets make an ai video for real estate reel', [WORLDS[0]!], ALL_CONCIERGE_TASKS);
+  check('without a growth world, the reel ask is honest (missingWorld → the Businesses door)',
+    noWorld.kind === 'go' && noWorld.task?.id === 'reel' && noWorld.missingWorld === true && noWorld.route === '/garvis/webs');
+}
+
+// ---- THE SURFACE TIER — the open board/builder claims the ask, conservatively ----
+{
+  const SOCIAL = ['post', 'social', 'instagram', 'ig', 'caption'];
+  // The operator's own sentences, typo and all.
+  const make = parseBoardCommand('make one with a background of lake', SOCIAL);
+  check('"make one with a background of lake" → MAKE on the open board', make?.kind === 'make');
+  check('…and the payload is the idea, not the command words', make?.text === 'a background of lake');
+  const riff = parseBoardCommand("make another rendidtiion on this one but i want to add text saying 'love lake geneva'", SOCIAL);
+  check('"another rendidtiion on this one but…" (typo and all) → RIFF', riff?.kind === 'riff');
+  check("…instruction extracted intact: add text saying 'love lake geneva'", riff?.text === "add text saying 'love lake geneva'");
+  const before = parseBoardCommand('make the sky pink on this one', SOCIAL);
+  check('an instruction BEFORE the pointer survives ("make the sky pink on this one")',
+    before?.kind === 'riff' && before.text === 'make the sky pink');
+  check('a bare riff opens the rendition input (empty instruction is honest)',
+    parseBoardCommand('make another version of this', SOCIAL)?.kind === 'riff' && parseBoardCommand('make another version of this', SOCIAL)?.text === '');
+  check('the board noun claims MAKE ("make a post about the fall market" → "the fall market")',
+    parseBoardCommand('make a post about the fall market', SOCIAL)?.text === 'the fall market');
+  check('plurals fold onto the noun ("make some posts…")', parseBoardCommand('make some posts for the weekend', SOCIAL)?.kind === 'make');
+  check('a DIFFERENT door is never claimed ("make a video for the channel" on the postcard board)',
+    parseBoardCommand('make a video for the channel', ['postcard', 'card', 'mailer']) === null);
+  check('navigation is never claimed ("open the queue")', parseBoardCommand('open the queue', SOCIAL) === null);
+  check('a subject "this" is not a pointer ("make a post of this quarters numbers" → MAKE, not riff)',
+    parseBoardCommand('make a post of this quarters numbers', SOCIAL)?.kind === 'make');
+
+  check('builder verbs claim ("add a custom automation that emails new leads")',
+    parseBuilderCommand('add a custom automation that emails new leads')?.kind === 'instruct');
+  check('…and the instruction rides INTACT', parseBuilderCommand('add a custom automation that emails new leads')?.text === 'add a custom automation that emails new leads');
+  check('builder never claims navigation ("open the queue")', parseBuilderCommand('open the queue') === null);
+  check('builder never claims questions ("how do i add a page")', parseBuilderCommand('how do i add a page') === null);
+  check('too-short imperatives fall through ("add it")', parseBuilderCommand('add it') === null);
+}
+
+// ---- PROJECT DOORS — the operator's builder projects are sayable, claims respected ----
+{
+  const tasks = withProjectTasks(ALL_CONCIERGE_TASKS, [
+    { id: 'p1', name: 'Jims Landscaping' },
+    { id: 'p2', name: 'Idea Digest Spark' },
+  ]);
+  const r1 = resolve('work on jims website', WORLDS, tasks);
+  check('"work on jims website" reaches the jims project (go or suggested)',
+    (r1.kind === 'go' && r1.task?.id === 'proj:p1') || (r1.kind === 'suggest' && !!r1.suggestions?.some((t) => t.id === 'proj:p1')));
+  const r2 = resolve('open idea digest spark', WORLDS, tasks);
+  check('a project NAME is a confident door ("open idea digest spark")', r2.kind === 'go' && r2.task?.id === 'proj:p2' && r2.route === '/project/p2');
+  check('claimed words never leak to projects (no project task carries "website")',
+    tasks.filter((t) => t.id.startsWith('proj:')).every((t) => !t.keywords.includes('website')));
+  check('withProjectTasks is deterministic and additive',
+    tasks.length === ALL_CONCIERGE_TASKS.length + 2 && JSON.stringify(tasks) === JSON.stringify(withProjectTasks(ALL_CONCIERGE_TASKS, [{ id: 'p1', name: 'Jims Landscaping' }, { id: 'p2', name: 'Idea Digest Spark' }])));
+  check('no projects, no change', withProjectTasks(ALL_CONCIERGE_TASKS, []) === ALL_CONCIERGE_TASKS);
 }
 
 console.log(`\nconcierge.verify: ${passed} passed, ${failed} failed`);

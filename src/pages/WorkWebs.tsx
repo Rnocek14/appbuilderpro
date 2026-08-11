@@ -27,11 +27,18 @@ export default function WorkWebs() {
   const [intent, setIntent] = useState('');
   // The concierge's creation handoff: "start a clothing brand" in the corner agent lands here
   // with the intent prefilled — the human finishes the sentence and presses Draft. Never silent.
+  // Also listens for the dock's signal, because a brief typed while ALREADY on this page
+  // navigates nowhere — without the event, the prefill would sit unread until a remount.
   useEffect(() => {
-    try {
-      const prefill = sessionStorage.getItem('ff:genesis-intent');
-      if (prefill) { setIntent(prefill); sessionStorage.removeItem('ff:genesis-intent'); }
-    } catch { /* private mode */ }
+    const read = () => {
+      try {
+        const prefill = sessionStorage.getItem('ff:genesis-intent');
+        if (prefill) { setIntent(prefill); sessionStorage.removeItem('ff:genesis-intent'); }
+      } catch { /* private mode */ }
+    };
+    read();
+    window.addEventListener('ff:genesis-intent', read);
+    return () => window.removeEventListener('ff:genesis-intent', read);
   }, []);
   const [drafting, setDrafting] = useState(false);
   const [repoUrl, setRepoUrl] = useState('');

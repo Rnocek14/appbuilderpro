@@ -48,6 +48,7 @@ export function BrandBoard({ worldId, clusterId, onToast, materialsOverride }: {
 
     return {
       storageKey: 'brand',
+      voiceNouns: ['logo', 'brand', 'branding', 'mark'],
       title: 'Branding board',
       subtitle: 'Generate logo concepts from your palette — spread them out, restyle, star a keeper, set it as your logo.',
       metrics: { w: 200, h: 200, gap: 26, cols: 4, pad: 40 },

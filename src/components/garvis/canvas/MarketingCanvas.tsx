@@ -36,23 +36,27 @@ import { listingChoices, listingFill, choiceLabel } from '../../../lib/garvis/ml
 import { supabase } from '../../../lib/supabase';
 import { EmailBoard } from './EmailBoard';
 import { BrandBoard } from './BrandBoard';
+import { MerchBoard } from './MerchBoard';
 import { PostcardBoard } from './PostcardBoard';
 import { SocialBoard } from './SocialBoard';
 import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
+import { canvasNodeForArea } from '../../../lib/garvis/workweb';
 import type { MailerBrand } from '../../../lib/garvis/mailer';
 import { cn } from '../../../lib/utils';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
-type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding';
+type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding' | 'merch';
 
 // The brand ember, as a concrete value for the JS-side rendering paths (postcard designer, video
 // storyboard, image prompts) that can't read the --gv-ember CSS token. Kept in lockstep with it.
 const DEFAULT_ACCENT = '#FF8A3D';
 
-export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worldId: string; realEstate?: boolean; onToast: Toast }) {
+export function MarketingCanvas({ worldId, realEstate = false, initialArea = null, onToast }: { worldId: string; realEstate?: boolean; initialArea?: string | null; onToast: Toast }) {
   const [targetCluster, setTargetCluster] = useState<string | null>(null);
+  // The merch node only exists when this world actually HAS a merch area — no dead doors.
+  const [merchCluster, setMerchCluster] = useState<string | null>(null);
   const [brand, setBrand] = useState<MailerBrand | null>(null);
   const [accent, setAccent] = useState(DEFAULT_ACCENT);
   const [agent, setAgent] = useState('');
@@ -72,6 +76,11 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
         ?? w.clusters.find((x) => x.charter?.archetype === 'studio') ?? w.clusters.find((x) => x.charter);
       const cid = c?.id ?? null;
       setTargetCluster(cid);
+      setMerchCluster(w.clusters.find((x) => x.charter?.flavor === 'merch')?.id ?? null);
+      // A ?area= deep link (the concierge's "take me there") means the machine taps the node:
+      // the matching sheet opens as if the operator clicked it. Never stomps a sheet already open.
+      const node = canvasNodeForArea(w.clusters, initialArea);
+      if (node) setOpen((o) => o ?? node);
       // REHYDRATE the campaign you were working on — so reopening this business shows your real work,
       // not a blank "set up your announcement" every visit (the "it feels empty" complaint).
       if (cid) {
@@ -93,7 +102,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
       if (k.name) setAgent((a) => a || (k.name as string));
     }).catch(() => {});
     return () => { live = false; };
-  }, [worldId]);
+  }, [worldId, initialArea]);
 
   const ready = !!details;
 
@@ -109,6 +118,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
     { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers' },
     { key: 'branding', emoji: '🎨', label: 'Branding', sub: 'logo concepts' },
+    ...(merchCluster ? [{ key: 'merch', emoji: '🧢', label: 'Merch', sub: 'the capsule' } as CanvasNode] : []),
   ];
 
   const addSat = (nodeKey: string) => setSats((s) => [...s, { nodeKey, id: `${nodeKey}-${s.length}-${(s.length * 7 + 3) % 97}` }]);
@@ -120,7 +130,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
   // THE ROOM — a board node doesn't open a popup; you go INTO the node and it expands on the canvas
   // as the workspace. The orbit view swaps out, the board takes the whole canvas region at viewport
   // height, and "‹ Canvas" (or Esc) walks you back out. No scrim, no shrunken floating window.
-  const boardKey = open === 'postcard' || open === 'social' || open === 'email' || open === 'branding' ? open : null;
+  const boardKey = open === 'postcard' || open === 'social' || open === 'email' || open === 'branding' || open === 'merch' ? open : null;
   const roomRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!boardKey) return;
@@ -149,6 +159,7 @@ export function MarketingCanvas({ worldId, realEstate = false, onToast }: { worl
             {boardKey === 'social' && <SocialBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />}
             {boardKey === 'email' && <EmailBoard worldId={worldId} clusterId={targetCluster} realEstate={realEstate} onToast={onToast} />}
             {boardKey === 'branding' && <BrandBoard worldId={worldId} clusterId={targetCluster} onToast={onToast} />}
+            {boardKey === 'merch' && <MerchBoard worldId={worldId} clusterId={merchCluster} onToast={onToast} />}
           </div>
         </div>
       )}
