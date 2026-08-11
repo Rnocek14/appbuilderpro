@@ -568,6 +568,18 @@ check('navFor caps at 6 entries', navFor(RECIPES[0].sections.map((type) => ({ ty
     thinSpec.sections.filter((s) => s.type === 'gallery' || s.type === 'showcase').length === 1);
 }
 
+// --- a 2-item services list never renders as sparse editorial rows --------------------------------
+{
+  const tiny = parseBusinessProfile({
+    business_name: "Mike's Handyman Service", industry: 'Handyman', services: ['General repairs', 'Odd jobs'],
+  }).profile!;
+  const fbSvc = assembleFallbackSpec(tiny).sections.find((s) => s.type === 'services');
+  check('thin services list upgrades rows → cards in the fallback', fbSvc?.variant !== 'rows');
+  const nSvc = normalizeSpec({ sections: [{ type: 'hero', props: {} }, { type: 'services', variant: 'rows', props: {} }] }, tiny)
+    .sections.find((s) => s.type === 'services');
+  check('thin services list upgrades rows → cards in the normalizer', nSvc?.variant !== 'rows');
+}
+
 // --- copy uses the CITY, never a street address ("done right in 412 Main St." was real) -----------
 {
   const street = parseBusinessProfile({

@@ -779,6 +779,16 @@ export function normalizeSpec(raw: unknown, profile: BusinessProfile): SiteSpec 
   // gallery + showcase on one page must not repeat the same photos
   sections = splitPortfolio(sections);
 
+  // The indexed "rows" services menu needs list length to read as designed — with fewer than
+  // three services it renders as a sparse, lopsided band (thin-profile finding). Cards carry
+  // a short list with far more presence. Count from the section's own list when the model
+  // wrote one, else from the profile (the renderer draws props.services).
+  const svcSec = sections.find((s) => s.type === 'services');
+  if (svcSec?.variant === 'rows') {
+    const n = Array.isArray(svcSec.props.services) ? (svcSec.props.services as unknown[]).length : profile.services.length;
+    if (n < 3) svcSec.variant = 'cards';
+  }
+
   // TRADE SCENE: the visual is never model-chosen — the deterministic kind for this trade is
   // stamped onto the props; no scene exists for the trade (or a second scene appears) → dropped.
   // Trade vignettes win; 'glass' from sceneKindFor is the UNIVERSAL marker, resolved by name
@@ -1155,6 +1165,12 @@ export function assembleFallbackSpec(profile: BusinessProfile): SiteSpec {
   // Seeded structural compositions ride into the fallback — the floor is architecturally
   // distinct per BUSINESS, not one skeleton per vertical with different paint.
   for (const s of dedupedSections) s.variant = s.variant ?? seededVariant(name, s.type, recipe);
+
+  // Same floor as the normalizer: a sub-3-item services list never renders as sparse rows.
+  const fbSvc = dedupedSections.find((s) => s.type === 'services');
+  if (fbSvc?.variant === 'rows' && Array.isArray(fbSvc.props.services) && (fbSvc.props.services as unknown[]).length < 3) {
+    fbSvc.variant = 'cards';
+  }
 
   const fbTheme: ThemeSpec = { ...recipe.theme };
   const restrainedSections = applyRestraint(fbTheme, dedupedSections, profile.industry);
