@@ -2003,7 +2003,11 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
   // The site-level corroboration (siteScan.ts, riding the same call): absence findings that held
   // on every page read, plus which pages those were — the provenance the email states. Absent on
   // an older fetch-url deployment ⇒ null, and the pitch falls back to the per-page scan.
-  let pageSite: { pagesChecked?: string[]; findings?: DeepScan['findings'] } | null = null;
+  // (Named type, not `typeof pageSite`, in the assignment below: typeof on the variable inside its
+  // own assignment resolves to the flow-NARROWED type — null at that point — freezing the variable
+  // at never for every later read.)
+  interface CorroboratedSite { pagesChecked?: string[]; findings?: DeepScan['findings'] }
+  let pageSite: CorroboratedSite | null = null;
 
   if (lead.website) {
     const text = await scrapePage(lead.website, 'text', env);
@@ -2013,7 +2017,7 @@ async function buildDemoForLead(admin: any, order: OrderRow, lead: LeadRow, env:
       pageText = (text.text as string) ?? '';
       pageTech = (text.tech as Record<string, unknown> | undefined) ?? null;
       pageScan = (text.scan as DeepScan | undefined) ?? null;
-      pageSite = (text.site as typeof pageSite) ?? null;
+      pageSite = (text.site as CorroboratedSite | undefined) ?? null;
       finalUrl = (typeof text.url === 'string' && text.url) || lead.website;
       page = { title: (text.title as string) ?? null, description: (text.description as string) ?? null };
       audit = auditSite({
