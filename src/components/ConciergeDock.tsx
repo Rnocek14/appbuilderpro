@@ -9,9 +9,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, MessageCircle, Sparkles, X } from 'lucide-react';
-import { resolve, routeFor, type ConciergeTask, type ConciergeWorld } from '../lib/garvis/concierge';
+import { ArrowRight, Check, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, X } from 'lucide-react';
+import {
+  aliasLookup, aliasRemember, parseCommandPrefix, resolve, routeFor,
+  type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
+} from '../lib/garvis/concierge';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
+import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
+import { actionById } from '../lib/garvis/actionRegistry';
 import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
 
@@ -39,6 +44,33 @@ export function readHandoff(...taskIds: string[]): ConciergeHandoff | null {
 
 interface ActiveGuide { taskId: string; done: number[] }
 
+const ALIAS_KEY = 'ff:concierge-aliases';
+const loadAliases = (): ConciergeAlias[] => {
+  try { return (JSON.parse(localStorage.getItem(ALIAS_KEY) || '[]') as ConciergeAlias[]).filter((a) => a?.sentence && a?.taskId); }
+  catch { return []; }
+};
+
+interface SpeechRecognitionLike {
+  lang: string;
+  interimResults: boolean;
+  onresult: ((ev: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+/** The Do-engine's in-dock state: a compiled plan awaiting the Run press, or a live run. */
+interface DoState {
+  intent: string;
+  plan: CompiledPlan;
+  warnings: string[];
+  planId?: string;
+  statuses?: StepStatus[];
+  finished?: 'done' | 'waiting' | 'failed';
+  finalNote?: string;
+}
+
 export function ConciergeDock() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(() => sessionStorage.getItem(OPEN_KEY) === '1');
@@ -52,13 +84,28 @@ export function ConciergeDock() {
   const [guide, setGuide] = useState<ActiveGuide | null>(() => {
     try { return JSON.parse(sessionStorage.getItem(TASK_KEY) || 'null') as ActiveGuide | null; } catch { return null; }
   });
+  const [doState, setDoState] = useState<DoState | null>(null);
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [listening, setListening] = useState(false);
+  const aliasesRef = useRef<ConciergeAlias[]>(loadAliases());
   const worldsRef = useRef<ConciergeWorld[] | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const recRef = useRef<{ stop: () => void } | null>(null);
 
   useEffect(() => { sessionStorage.setItem(OPEN_KEY, open ? '1' : '0'); }, [open]);
   useEffect(() => {
     try { sessionStorage.setItem(TASK_KEY, JSON.stringify(guide)); } catch { /* session-only */ }
   }, [guide]);
+  // Zero-input value: the dock opens knowing the ONE number that matters — approvals waiting.
+  // A failed count hides the line (honest silence), never a fake zero.
+  useEffect(() => {
+    if (!open) return;
+    let dead = false;
+    void supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('status', 'pending')
+      .then(({ count, error }) => { if (!dead && !error) setPendingCount(count ?? 0); });
+    return () => { dead = true; };
+  }, [open]);
+
   // ⌘J / Ctrl+J toggles the concierge from anywhere (⌘K stays the command palette's).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -141,6 +188,7 @@ export function ConciergeDock() {
       if (d.available === false) { setNote(d.setup?.[0] ?? FALLBACK); return; }
       const picked = d.taskId ? ALL_CONCIERGE_TASKS.find((t) => t.id === d.taskId) ?? null : null;
       if (picked) {
+        rememberAlias(sentence, picked.id);   // tier 0 learns — next time this phrasing is instant
         const { route, missingWorld } = routeFor(picked, worlds);
         act(picked, route, missingWorld, sentence);
         return;
@@ -161,20 +209,87 @@ export function ConciergeDock() {
     act(orch, orch.route, false, sentence);
   };
 
+  // THE DO-ENGINE — "garvis, do X" without leaving the corner. Reuses the Orchestrator wholesale:
+  // compile → the SAME reviewable contract (steps, risks, holes, questions) rendered small →
+  // "Run it" is the explicit press → the arc executes live with per-step outcomes. Nothing runs
+  // from words alone, and outbound steps still land in Queue behind their own approvals.
+  const doIt = async (sentence: string) => {
+    setBusy(true);
+    setSuggestions([]);
+    setCompound(false);
+    setDoState(null);
+    setNote('Compiling the plan…');
+    try {
+      const { compileIntent } = await import('../lib/garvis/orchestratorRun');
+      const { plan, problems, warnings } = await compileIntent(sentence);
+      if (!plan) {
+        setNote(problems[0] ?? "I couldn't compile that — Orchestrate has the full composer.");
+        return;
+      }
+      setNote(null);
+      setDoState({ intent: sentence, plan, warnings });
+    } catch (e) {
+      setNote(e instanceof Error && /key|credit/i.test(e.message)
+        ? e.message
+        : "The compiler isn't reachable — is an AI key set? Orchestrate shows the same composer with setup notes.");
+    } finally {
+      setBusy(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  const runIt = async (ds: DoState) => {
+    setBusy(true);
+    try {
+      const { savePlan, runArc } = await import('../lib/garvis/orchestratorRun');
+      const planId = ds.planId ?? await savePlan(ds.intent, ds.plan);
+      setDoState({ ...ds, planId, statuses: ds.plan.steps.map(() => ({ kind: 'pending', note: '' })) });
+      const report = await runArc(planId, (statuses) => setDoState((cur) => (cur ? { ...cur, planId, statuses: [...statuses] } : cur)));
+      const finalNote = report.state === 'done'
+        ? 'Done. Anything outbound is waiting for your approval in Queue.'
+        : report.state === 'waiting'
+          ? `Paused, honestly: ${report.waitingReason ?? 'a step needs you first'} — it resumes on its own after that.`
+          : 'A step failed — the notes above say exactly which and why.';
+      setDoState((cur) => (cur ? { ...cur, planId, statuses: [...report.statuses], finished: report.state === 'running' ? 'waiting' : report.state, finalNote } : cur));
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rememberAlias = (sentence: string, taskId: string) => {
+    aliasesRef.current = aliasRemember(sentence, taskId, aliasesRef.current);
+    try { localStorage.setItem(ALIAS_KEY, JSON.stringify(aliasesRef.current)); } catch { /* fine */ }
+  };
+
   const submit = async () => {
-    const text = input.trim();
-    if (!text || busy) return;
+    const raw = input.trim();
+    if (!raw || busy) return;
     setInput('');
-    setLastSentence(text);
+    setDoState(null);
     setPendingCreate(null);
+    // "garvis" is courtesy; "do/run/execute" is an execution order → straight to the compiler.
+    const { sentence: text, execute } = parseCommandPrefix(raw);
+    if (!text) return;
+    setLastSentence(text);
+    if (execute) { await doIt(text); return; }
+    // Tier 0 — the operator's own learned phrasings resolve instantly.
+    const learned = aliasLookup(text, aliasesRef.current);
+    const learnedTask = learned ? ALL_CONCIERGE_TASKS.find((t) => t.id === learned) : null;
     const worlds = await loadWorlds().catch(() => [] as ConciergeWorld[]);
-    const r = resolve(text, worlds, ALL_CONCIERGE_TASKS);
     inputRef.current?.focus();
+    if (learnedTask) {
+      const { route, missingWorld } = routeFor(learnedTask, worlds);
+      act(learnedTask, route, missingWorld, text);
+      return;
+    }
+    const r = resolve(text, worlds, ALL_CONCIERGE_TASKS);
     if (r.kind === 'go' && r.task && r.route) { act(r.task, r.route, r.missingWorld, text); return; }
     if (r.kind === 'compound' && r.suggestions?.length) {
       setCompound(true);
       setSuggestions(r.suggestions);
-      setNote("That's a multi-part ask — Orchestrate compiles it into ONE reviewable plan:");
+      setNote("That's a multi-part ask — I can run it as ONE reviewable plan:");
       return;
     }
     if (r.kind === 'suggest' && r.suggestions?.length) {
@@ -186,6 +301,27 @@ export function ConciergeDock() {
     setGuide(null);
     setSuggestions([]);
     await askBrain(text, worlds);
+  };
+
+  // Mic input (Web Speech API): fills the box, never auto-submits; absent browsers just don't
+  // get the button — no fake affordance.
+  const SpeechRec = (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike; SpeechRecognition?: new () => SpeechRecognitionLike });
+  const SpeechCtor = SpeechRec.SpeechRecognition ?? SpeechRec.webkitSpeechRecognition;
+  const toggleMic = () => {
+    if (listening) { recRef.current?.stop(); setListening(false); return; }
+    if (!SpeechCtor) return;
+    const rec = new SpeechCtor();
+    rec.lang = 'en-US';
+    rec.interimResults = true;
+    rec.onresult = (ev) => {
+      const t = Array.from(ev.results).map((r) => r[0]?.transcript ?? '').join(' ').trim();
+      if (t) setInput(t);
+    };
+    rec.onend = () => { setListening(false); inputRef.current?.focus(); };
+    rec.onerror = () => setListening(false);
+    recRef.current = rec;
+    setListening(true);
+    rec.start();
   };
 
   const task = guide ? ALL_CONCIERGE_TASKS.find((t) => t.id === guide.taskId) ?? null : null;
@@ -208,11 +344,24 @@ export function ConciergeDock() {
           className="ml-auto rounded p-1 text-forge-dim hover:text-forge-ink"><X size={14} /></button>
       </div>
 
+      {pendingCount !== null && pendingCount > 0 && !doState && (
+        <button onClick={() => { const t = ALL_CONCIERGE_TASKS.find((x) => x.id === 'approvals'); if (t) act(t, t.route); }}
+          className="mt-1.5 w-full rounded-lg border border-forge-border bg-forge-bg/60 px-2.5 py-1 text-left text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+          {pendingCount} approval{pendingCount === 1 ? '' : 's'} waiting on you — tap to review
+        </button>
+      )}
+
       <div className="mt-2 flex gap-1.5">
         <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-          placeholder={'"moms postcard" · "scrape houses in williams bay" · "what\'s next"'}
+          placeholder={'"moms postcard" · "do draft an episode about rates" · "what\'s next"'}
           className="min-w-0 flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink placeholder:text-forge-dim/60 focus:border-forge-ember/60 focus:outline-none" />
+        {SpeechCtor && (
+          <button onClick={toggleMic} aria-label={listening ? 'Stop listening' : 'Speak instead of typing'}
+            className={cn('rounded-lg border px-2', listening ? 'border-forge-ember bg-forge-ember/20 text-forge-ember' : 'border-forge-border text-forge-dim hover:text-forge-ink')}>
+            <Mic size={14} />
+          </button>
+        )}
         <button onClick={() => void submit()} aria-label="Go" disabled={busy}
           className="rounded-lg border border-forge-ember/50 px-2.5 text-forge-ember hover:bg-forge-ember/10 disabled:opacity-50"><ArrowRight size={14} /></button>
       </div>
@@ -220,10 +369,73 @@ export function ConciergeDock() {
       {note && <p className="mt-2 text-[11px] text-forge-dim">{note}</p>}
 
       {compound && (
-        <button onClick={() => goOrchestrate(lastSentence)}
-          className="mt-1.5 w-full rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20">
-          Compile the whole plan in Orchestrate →
-        </button>
+        <div className="mt-1.5 flex gap-1.5">
+          <button onClick={() => void doIt(lastSentence)} disabled={busy}
+            className="flex-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-left text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">
+            Do it now — compile &amp; run here
+          </button>
+          <button onClick={() => goOrchestrate(lastSentence)}
+            className="rounded-lg border border-forge-border px-2.5 py-1.5 text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+            Open Orchestrate
+          </button>
+        </div>
+      )}
+
+      {doState && (
+        <div className="mt-2 rounded-xl border border-forge-border bg-forge-bg/60 p-2.5">
+          <div className="flex items-center gap-1.5">
+            <p className="min-w-0 flex-1 truncate text-[11px] font-semibold text-forge-ink">{doState.plan.title}</p>
+            <button onClick={() => setDoState(null)} aria-label="Dismiss this plan"
+              className="rounded p-0.5 text-forge-dim hover:text-forge-ink"><X size={12} /></button>
+          </div>
+          <p className="mt-0.5 text-[11px] text-forge-dim">{doState.plan.summary}</p>
+          <ol className="mt-1.5 space-y-1">
+            {doState.plan.steps.map((s, i) => {
+              const spec = actionById(s.action);
+              const st = doState.statuses?.[i];
+              return (
+                <li key={i} className="flex items-start gap-1.5 text-[11px]">
+                  <span className="mt-0.5 shrink-0">
+                    {st?.kind === 'running' ? <Loader2 size={11} className="animate-spin text-forge-ember" />
+                      : st && (st.kind === 'done' || st.kind === 'needs_review' || st.kind === 'handoff') ? <Check size={11} className="text-forge-ok" />
+                        : st?.kind === 'failed' ? <X size={11} className="text-forge-err" />
+                          : st?.kind === 'waiting' ? <TriangleAlert size={11} className="text-forge-warn" />
+                            : <span className="block h-[11px] w-[11px] rounded-full border border-forge-border" />}
+                  </span>
+                  <span className="min-w-0 flex-1 text-forge-dim">
+                    <span className="text-forge-ink">{spec?.title ?? s.action}</span>
+                    {spec && spec.risk !== 'safe' && (
+                      <span className={cn('ml-1 rounded px-1 text-[9px]', spec.risk === 'outbound' ? 'bg-forge-warn/15 text-forge-warn' : 'bg-forge-ember/15 text-forge-ember')}>
+                        {spec.risk === 'outbound' ? 'can send — Queue-gated' : 'uses credits'}
+                      </span>
+                    )}
+                    {st?.note && <span className="block text-forge-dim">{st.note}{st.link && <button onClick={() => navigate(st.link!)} className="ml-1 text-forge-ember hover:underline">open →</button>}</span>}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+          {doState.plan.holes.length > 0 && (
+            <p className="mt-1.5 text-[11px] text-forge-warn">Can't do yet: {doState.plan.holes.join(' · ')}</p>
+          )}
+          {doState.plan.questions.length > 0 && (
+            <p className="mt-1 text-[11px] text-forge-dim">It will ask: {doState.plan.questions[0]}</p>
+          )}
+          {doState.finalNote
+            ? <p className={cn('mt-1.5 text-[11px] font-medium', doState.finished === 'done' ? 'text-forge-ok' : doState.finished === 'failed' ? 'text-forge-err' : 'text-forge-warn')}>{doState.finalNote}</p>
+            : !doState.statuses && (
+              <div className="mt-2 flex gap-1.5">
+                <button onClick={() => void runIt(doState)} disabled={busy}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1.5 text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">
+                  <Play size={11} /> Run it
+                </button>
+                <button onClick={() => { goOrchestrate(doState.intent); }}
+                  className="rounded-lg border border-forge-border px-2.5 py-1.5 text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+                  Review big
+                </button>
+              </div>
+            )}
+        </div>
       )}
 
       {suggestions.length > 0 && (

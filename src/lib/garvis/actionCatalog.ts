@@ -213,6 +213,18 @@ export const ACTION_SPECS: ActionSpec[] = [
     produces: 'an armed weekly content order — each week lands as one reviewable approval (auto-mode is EARNED later via 3 clean approvals)',
   },
   {
+    id: 'draft_episode',
+    title: 'Draft a channel episode now',
+    category: 'marketing',
+    risk: 'spend',
+    description: 'One-shot: draft ONE cited short-video episode for an EXISTING content channel right now — script, hooks, citations — left as a reviewable draft in the Channel Studio (nothing renders or posts by itself). Use for "draft an episode about X", "make todays episode". For recurring weekly content use start_content_week instead.',
+    params: [
+      { name: 'topic', required: false, hint: 'what the episode is about — omit to let the channel pick within its niche' },
+      { name: 'channel', required: false, hint: 'channel name when the operator runs several — omit for the only channel' },
+    ],
+    produces: 'one drafted episode (script + hooks + citations) sitting in the Channel Studio for review',
+  },
+  {
     id: 'start_idea_stream',
     title: 'Start an idea stream',
     category: 'automation',

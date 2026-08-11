@@ -258,6 +258,19 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     return { kind: 'done', note: `"${order.label}" armed for ${w.title} — each week stages as ONE approval; auto-mode is earned after 3 clean weeks.`, link: '/garvis/automations' };
   },
 
+  draft_episode: async (p) => {
+    const { listChannels, draftEpisode } = await import('./channelsRun');
+    const channels = await listChannels();
+    if (!channels.length) {
+      throw new WaitingError('No content channel exists yet — press "Start a channel" on Channels, then resume this arc.');
+    }
+    const wanted = (p.channel ?? '').trim().toLowerCase();
+    const channel = (wanted ? channels.find((c) => c.name.toLowerCase().includes(wanted)) : null) ?? channels[0];
+    const { episode, warnings } = await draftEpisode(channel, p.topic?.trim() || undefined);
+    const warn = warnings.length ? ` (${warnings[0]})` : '';
+    return { kind: 'needs_review', note: `Episode "${episode.title}" drafted for ${channel.name}${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
+  },
+
   start_idea_stream: async (p) => {
     const w = await resolveWorld(p.world);
     const { createOrder } = await import('./standingRun');

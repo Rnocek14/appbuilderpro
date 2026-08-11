@@ -307,6 +307,40 @@ export interface Resolution {
   suggestions?: ConciergeTask[];
 }
 
+// ---------------------------------------------------------------------------------------------
+// TIER 0 — LEARNED SHORTCUTS. When the AI tier resolves a sentence, the dock remembers the
+// mapping (localStorage, exact normalized sentence → task id), so the operator's own phrasing
+// becomes instant and free the second time. Pure helpers; the dock owns storage.
+// ---------------------------------------------------------------------------------------------
+
+export interface ConciergeAlias { sentence: string; taskId: string }
+
+/** Exact-phrase lookup (normalized). Returns the learned task id or null. */
+export function aliasLookup(input: string, aliases: ConciergeAlias[]): string | null {
+  const n = norm(input);
+  if (!n) return null;
+  return aliases.find((a) => norm(a.sentence) === n)?.taskId ?? null;
+}
+
+/** Remember a resolution, newest first, deduped by normalized sentence, capped. */
+export function aliasRemember(input: string, taskId: string, aliases: ConciergeAlias[], cap = 50): ConciergeAlias[] {
+  const n = norm(input);
+  if (!n || n.length < 3 || !taskId) return aliases;
+  const rest = aliases.filter((a) => norm(a.sentence) !== n);
+  return [{ sentence: input.trim().slice(0, 200), taskId }, ...rest].slice(0, cap);
+}
+
+/** The Stark prefix: "garvis …" / "hey garvis …" is courtesy, "do …" is an execution order.
+ *  Returns the stripped sentence and whether the operator explicitly asked for EXECUTION. */
+export function parseCommandPrefix(input: string): { sentence: string; execute: boolean } {
+  let s = input.trim();
+  const courtesy = /^(hey |ok |okay )?garvis[,:]?\s+/i;
+  if (courtesy.test(s)) s = s.replace(courtesy, '');
+  const doPrefix = /^(do|run|execute|just do)[,:]?\s+/i;
+  if (doPrefix.test(s)) return { sentence: s.replace(doPrefix, '').trim(), execute: true };
+  return { sentence: s.trim(), execute: false };
+}
+
 /** Resolve a task's route against the operator's real worlds — used by resolve() for tier-1 picks
  *  and by the dock for AI-tier picks and tapped suggestions (which skip keyword matching). */
 export function routeFor(task: ConciergeTask, worlds: ConciergeWorld[]): { route: string; missingWorld: boolean } {

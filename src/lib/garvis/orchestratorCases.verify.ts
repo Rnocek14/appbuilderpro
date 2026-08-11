@@ -57,6 +57,12 @@ const CASES: Case[] = [
     actions: ['research_market', 'business_plan'],
   },
   {
+    name: 'one-shot episode: "draft an episode about X" compiles to draft_episode, not a weekly order',
+    intent: 'Draft an episode about why mortgage rates move for my channel',
+    compile: plan([step('draft_episode', { topic: 'why mortgage rates move' }, W('the operator wants ONE cited episode drafted now, not a recurring order'))]),
+    actions: ['draft_episode'],
+  },
+  {
     name: 'the mural hunt (the headline case)',
     intent: 'Find all mural and custom art jobs in Wisconsin',
     compile: plan([step('hunt_opportunities', { focus: 'mural and custom art jobs', region: 'Wisconsin' }, W('finding work is exactly what the hunt does'))]),
