@@ -271,6 +271,21 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     return { kind: 'needs_review', note: `Episode "${episode.title}" drafted for ${channel.name}${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
   },
 
+  point_channel_cta: async (p) => {
+    const { listChannels, setChannelCta } = await import('./channelsRun');
+    const url = (p.url ?? '').trim();
+    if (!/^https?:\/\//i.test(url)) throw new Error(`"${url || '(empty)'}" is not a usable link — the CTA needs a full https:// URL.`);
+    const channels = await listChannels();
+    if (!channels.length) {
+      throw new WaitingError('No content channel exists yet — press "Start a channel" on Channels, then resume this arc.');
+    }
+    const wanted = (p.channel ?? '').trim().toLowerCase();
+    const channel = (wanted ? channels.find((c) => c.name.toLowerCase().includes(wanted)) : null) ?? channels[0];
+    const label = (p.label ?? '').trim() || 'Learn more';
+    await setChannelCta(channel.id, url, label);
+    return { kind: 'done', note: `"${channel.name}" now routes its audience to ${url} ("${label}") — every future episode carries it.`, link: '/garvis/channels' };
+  },
+
   start_idea_stream: async (p) => {
     const w = await resolveWorld(p.world);
     const { createOrder } = await import('./standingRun');

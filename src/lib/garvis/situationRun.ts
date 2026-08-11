@@ -14,7 +14,7 @@ async function slice<T>(p: PromiseLike<T>, fallback: T): Promise<T> {
 }
 
 export async function assembleSituation(): Promise<string> {
-  const [worlds, arcs, engagements, orders, approvals, opps, invoices, clock] = await Promise.all([
+  const [worlds, arcs, engagements, orders, approvals, opps, invoices, clock, apps, channels] = await Promise.all([
     slice(supabase.from('knowledge_worlds').select('title').order('created_at', { ascending: false }).limit(12)
       .then(({ data }) => (data ?? []) as { title: string }[]), []),
     slice(supabase.from('orchestrator_plans').select('title, status, waiting_reason')
@@ -37,6 +37,12 @@ export async function assembleSituation(): Promise<string> {
     slice(supabase.from('invoices').select('amount_usd').eq('status', 'sent').limit(200)
       .then(({ data }) => ((data ?? []) as { amount_usd: number }[]).reduce((s, r) => s + Number(r.amount_usd || 0), 0)), 0),
     slice(clockState().then((c) => c.state), 'never' as const),
+    // The operator's built apps — assets a strategic plan can market or point traffic at.
+    slice(supabase.from('projects').select('name, description').order('updated_at', { ascending: false }).limit(8)
+      .then(({ data }) => (data ?? []) as { name: string; description: string | null }[]), []),
+    // Their content channels — audiences whose CTA can route to an asset.
+    slice(supabase.from('growth_channels').select('name, niche, cta_url').eq('status', 'active').limit(6)
+      .then(({ data }) => (data ?? []) as { name: string; niche: string; cta_url: string }[]), []),
   ]);
 
   const inputs: SituationInputs = {
@@ -44,6 +50,7 @@ export async function assembleSituation(): Promise<string> {
     pendingApprovals: approvals, newOpportunities: opps, outstandingInvoicesUsd: invoices,
     // 'never' can mean "not armed yet" OR "probe unreachable" — treat as unknown, not dead.
     clockAlive: clock === 'alive' ? true : clock === 'stale' ? false : null,
+    apps, channels,
   };
   return compileSituation(inputs);
 }

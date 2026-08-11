@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, aliasLookup, aliasRemember, deriveTasks, matchTasks, parseCommandPrefix, resolve, routeFor, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, statsFor, type ConciergeWorld } from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -201,6 +201,23 @@ const ALL = ALL_CONCIERGE_TASKS;
     JSON.stringify(parseCommandPrefix('lets work on moms postcard')) === JSON.stringify({ sentence: 'lets work on moms postcard', execute: false }));
   check('"double check my money" is NOT an execution order (prefix is word-anchored)',
     parseCommandPrefix('double check my money').execute === false);
+
+  // Revision detection — only correction-shaped sentences, only word-anchored.
+  check('"actually make it 5 posts" is a revision', isRevision('actually make it 5 posts'));
+  check('"remove the email step" is a revision', isRevision('remove the email step'));
+  check('"lets work on moms postcard" is NOT a revision', !isRevision('lets work on moms postcard'));
+  check('"add another real estate agent" IS revision-shaped — the dock only consults it while a plan is on screen',
+    isRevision('add another real estate agent'));
+
+  // The stats tier — phrase-anchored so commands never become numbers.
+  check('"how many approvals are waiting" is a stat', statsFor('how many approvals are waiting') === 'approvals_waiting');
+  check('"how much did i make this month" is a stat', statsFor('how much did i make this month') === 'revenue_month');
+  check('"how are my episodes doing" is a stat', statsFor('how are my episodes doing') === 'episode_stats');
+  check('"what are you working on" is a stat (arcs in flight)', statsFor('what are you working on') === 'arcs_running');
+  check('"check my money" is a COMMAND, not a stat', statsFor('check my money') === null);
+  check('"whats waiting on me" stays a command (Queue)', statsFor('whats waiting on me') === null);
+  check('gibberish is never a stat', statsFor('asdf jkl') === null);
+  check('every stat query id is unique', new Set(STAT_QUERIES.map((q) => q.id)).size === STAT_QUERIES.length);
 }
 {
   // Determinism + purity of the derivation itself.

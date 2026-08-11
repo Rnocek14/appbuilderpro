@@ -20,6 +20,11 @@ export interface SituationInputs {
   newOpportunities: number;
   outstandingInvoicesUsd: number;
   clockAlive: boolean | null; // null = unknown (probe unavailable) — say so, never guess
+  /** The operator's built APPS (their generated projects) — strategic assets a plan can market,
+   *  connect, or point traffic at. Optional so existing callers/tests stay valid. */
+  apps?: { name: string; description: string | null }[];
+  /** The operator's content CHANNELS — audiences a plan can route toward an asset via the CTA. */
+  channels?: { name: string; niche: string; cta_url: string }[];
 }
 
 export const SITUATION_BUDGET = 3000;
@@ -53,6 +58,14 @@ export function compileSituation(s: SituationInputs): string {
   const activeOrders = s.standingOrders.filter((o) => o.status === 'active');
   if (activeOrders.length) {
     lines.push(`- Standing orders (${activeOrders.length} active): ${activeOrders.map((o) => `${o.label} [${o.kind}]`).join('; ')}.`);
+  }
+
+  // THE ASSET INVENTORY — what a strategic plan can market, connect, and route between.
+  if (s.apps?.length) {
+    lines.push(`- Apps the operator has BUILT (assets to market/connect): ${s.apps.map((a) => `"${a.name}"${a.description ? ` — ${a.description.slice(0, 90)}` : ''}`).join('; ')}.`);
+  }
+  if (s.channels?.length) {
+    lines.push(`- Content channels (audiences; each has a CTA that can point at an asset): ${s.channels.map((c) => `"${c.name}" (${c.niche})${c.cta_url ? ` → currently ${c.cta_url}` : ' → CTA unset'}`).join('; ')}.`);
   }
 
   if (s.pendingApprovals > 0) lines.push(`- ${s.pendingApprovals} approval(s) pending in the Queue.`);
