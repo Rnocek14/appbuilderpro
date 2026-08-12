@@ -14,6 +14,7 @@
 // Pure + deterministic: same input, same resolution.
 
 import { verticalCount } from './verticalPlan';
+import { matchPlanShape } from './masterPlan';
 
 export interface ConciergeWorld {
   id: string;
@@ -250,12 +251,15 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
   },
   {
     id: 'orchestrate',
-    label: 'Do a whole multi-part thing (one reviewable plan)',
-    keywords: ['orchestrate', 'whole plan', 'big plan', 'everything at once', 'multiple things', 'compile'],
+    label: 'Make me a plan (one reviewable plan over everything Garvis can do)',
+    keywords: [
+      'orchestrate', 'whole plan', 'big plan', 'everything at once', 'multiple things', 'compile',
+      'plan out', 'plan how', 'make a plan', 'make me a plan', 'game plan', 'strategy', 'roadmap',
+    ],
     kind: 'navigate',
     route: '/garvis/orchestrate',
     steps: [
-      'Your sentence is already in the intent box — press "Compile the plan"',
+      'A known play arrives already compiled — anything else, press "Compile the plan"',
       'Review each step: its why, its risk, what it produces; holes and questions show honestly',
       'Approve to run — anything outbound still waits for you in Queue',
     ],
@@ -606,6 +610,13 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   const counted = matches.slice(0, 2).find((m) => m.task.id === 'grow-verticals');
   if (counted && verticalCount(input) !== null) {
     return { kind: 'go', task: counted.task, route: routeFor(counted.task, worlds).route };
+  }
+  // A plan-shaped sentence whose TOP door is already the planner goes CONFIDENTLY: the known
+  // play compiles itself the moment Orchestrate opens (deterministic tier — no AI, no key), so
+  // the door is not one option among three, it IS the answer. Scoped to top-match-only so the
+  // prospect/genesis doors keep every sentence they own today.
+  if (top.task.id === 'orchestrate' && matchPlanShape(input)) {
+    return { kind: 'go', task: top.task, route: routeFor(top.task, worlds).route };
   }
   const distinctRoutes = new Set(matches.map((m) => m.task.route));
   if (CONJUNCTION.test(norm(input)) && distinctRoutes.size >= 2 && top.task.route !== '/garvis/orchestrate') {

@@ -17,6 +17,7 @@ import { cn, timeAgo } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 import { planProgress, type CompiledPlan, type StepStatus } from '../lib/garvis/orchestrator';
 import { compileIntent, savePlan, runArc, listArcs, abandonArc, type RunReport, type ArcRow } from '../lib/garvis/orchestratorRun';
+import { matchPlanShape } from '../lib/garvis/masterPlan';
 import { readHandoff } from '../components/ConciergeDock';
 import { actionById } from '../lib/garvis/actionRegistry';
 
@@ -52,12 +53,18 @@ export default function Orchestrate() {
   const refreshArcs = () => { void listArcs().then(setArcs).catch(() => {}); };
   useEffect(refreshArcs, []);
 
-  // THE CONCIERGE HANDOFF: "work on my website builder and send some emails" said to the corner
-  // agent arrives here with the sentence already in the intent box — Compile stays the explicit
-  // press, so nothing runs from the handoff alone.
+  // THE CONCIERGE HANDOFF: the sentence arrives already in the intent box — and when it is a
+  // KNOWN PLAY (deterministic tier: no AI, no key, no spend) the plan compiles itself so
+  // arriving means SEEING the structured plan, the vertical-planner way. Unknown plays keep
+  // Compile as the explicit press (that one costs a model call), and nothing RUNS either way
+  // until Approve.
   useEffect(() => {
     const h = readHandoff('orchestrate', 'send-emails', 'app-marketing');
-    if (h) setIntent(h.sentence);
+    if (h) {
+      setIntent(h.sentence);
+      if (matchPlanShape(h.sentence)) void compile(h.sentence);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // AUTO-RESUME (app_0095): the worker's wake sweep flips unblocked arcs to 'ready'; the moment
@@ -79,12 +86,12 @@ export default function Orchestrate() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [arcs]);
 
-  const compile = async () => {
+  const compile = async (text?: string) => {
     if (compiling || running) return;
     setCompiling(true);
     setPlan(null); setStatuses(null); setReport(null); setWarnings([]);
     try {
-      const res = await compileIntent(intent);
+      const res = await compileIntent(text ?? intent);
       setWarnings(res.warnings);
       if (!res.plan) { toast('error', res.problems[0] ?? 'Could not compile that — say more.'); return; }
       setPlan(res.plan);
@@ -160,7 +167,7 @@ export default function Orchestrate() {
             disabled={running}
           />
           <div className="mt-2 flex items-center gap-2">
-            <Button size="sm" onClick={compile} loading={compiling} disabled={running}>
+            <Button size="sm" onClick={() => void compile()} loading={compiling} disabled={running}>
               <Wand2 size={13} /> Compile the plan
             </Button>
             {plan && !running && (
