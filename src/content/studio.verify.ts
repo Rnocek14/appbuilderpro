@@ -2,7 +2,7 @@
 // The public page is outbound copy with a URL: it gets the same discipline as the cold email.
 // Run: npx tsx src/content/studio.verify.ts
 
-import { STUDIO, HOW_IT_WORKS, CANDOR, MENU_INDUSTRIES } from './studio';
+import { STUDIO, HOW_IT_WORKS, CANDOR, MENU_INDUSTRIES, SCAN_LOOKFORS } from './studio';
 import { claimViolations } from '../lib/garvis/prospects/pitchFindings';
 import { menuForIndustry } from '../lib/preview/automationMenu';
 import { CAPABILITIES } from '../lib/garvis/automation/registry';
@@ -18,6 +18,7 @@ const ALL_COPY = [
   STUDIO.tagline,
   ...HOW_IT_WORKS.flatMap((s) => [s.title, s.body]),
   CANDOR.heading, ...CANDOR.lines,
+  ...SCAN_LOOKFORS,
 ];
 
 // ── the claims gate — same one the cold email passes ───────────────────────

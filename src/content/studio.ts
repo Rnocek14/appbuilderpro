@@ -70,3 +70,16 @@ export const CANDOR = {
 export const MENU_INDUSTRIES = [
   'Plumbing', 'Roofing', 'HVAC', 'Landscaping', 'Dental', 'Salon & Spa', 'Restaurant', 'Other',
 ] as const;
+
+/** The exhibit's floating chips + the "what we look for" strip — each names a category the real
+ *  scanner detects (conversionScan/deepScan codes), phrased as the problem an owner recognizes.
+ *  Decoration grounded in the product: nothing here is a category we can't actually find. */
+export const SCAN_LOOKFORS = [
+  'No contact form',
+  'No tap-to-call on mobile',
+  'Not built for phones',
+  'No way to book online',
+  'Photos search engines can’t read',
+  'No HTTPS padlock',
+  'No hours or service area listed',
+] as const;

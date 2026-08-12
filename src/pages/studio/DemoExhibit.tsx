@@ -24,7 +24,7 @@ export default function DemoExhibit() {
   if (!spec) return null;
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#e7ddd1] bg-white shadow-[0_24px_80px_-24px_rgba(40,25,10,0.35)]">
+    <div className="overflow-hidden rounded-3xl border border-[#e6dbc9] bg-white shadow-[0_40px_110px_-32px_rgba(40,25,10,0.42)]">
       {/* Browser chrome — frames the demo as a website, not a page section. */}
       <div className="flex items-center gap-2 border-b border-[#e7ddd1] bg-[#f2ede6] px-4 py-2.5">
         <span className="h-2.5 w-2.5 rounded-full bg-[#d9cfc1]" />
