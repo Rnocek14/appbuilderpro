@@ -179,7 +179,8 @@
     "verify:costsheet": "tsx src/lib/garvis/costSheet.verify.ts",
     "verify:discover": "tsx src/lib/garvis/discover.verify.ts",
     "verify:suggestions": "tsx src/lib/garvis/suggestionDeck.verify.ts",
-    "verify:merchboard": "tsx src/lib/garvis/merchBoard.verify.ts"
+    "verify:merchboard": "tsx src/lib/garvis/merchBoard.verify.ts",
+    "verify:verticalplan": "tsx src/lib/garvis/verticalPlan.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

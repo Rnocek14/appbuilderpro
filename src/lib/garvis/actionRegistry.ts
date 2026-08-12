@@ -281,6 +281,40 @@ const EXECUTORS: Record<string, ActionDef['execute']> = {
     return { kind: 'done', note: `"${title}" stands — the canvas IS the plan: competitor intel, SEO articles, social, video ideas, results. Later steps (and you) fill the areas.`, link: `/garvis/webs/${web.worldId}` };
   },
 
+  launch_vertical: async (p) => {
+    const name = (p.name ?? '').trim();
+    const niche = (p.niche ?? '').trim();
+    if (!name || !niche) throw new Error('A vertical needs a channel name and a niche in plain words.');
+    const { VERTICAL_LIBRARY } = await import('./verticalPlan');
+    const lib = VERTICAL_LIBRARY.find((v) => v.libId === (p.vertical ?? '').trim()) ?? null;
+    const { instantiateWeb } = await import('./workwebRun');
+    const { createChannel, setChannelCta, setChannelCadence, draftEpisode } = await import('./channelsRun');
+    // One WORLD per vertical — every downstream surface (studio, pulse, learning loop, the
+    // concierge's world-knowledge tier) works because the channel lives where channels live.
+    const web = await instantiateWeb('content-channel');
+    await supabase.from('knowledge_worlds').update({ title: name }).eq('id', web.worldId);
+    const { data: cluster } = await supabase.from('knowledge_clusters')
+      .select('id').eq('world_id', web.worldId).eq('slug', 'growth-studio').maybeSingle();
+    const channel = await createChannel({
+      worldId: web.worldId, clusterId: (cluster as { id: string } | null)?.id ?? null,
+      name, niche, persona: lib?.persona ?? 'clear, cited, no hype',
+      platforms: ['tiktok', 'youtube', 'instagram'],
+      visualStyle: lib?.visualStyle ?? 'clean caption cards', voice: lib?.voice, musicMood: lib?.mood,
+    });
+    const url = (p.cta_url ?? '').trim();
+    if (/^https?:\/\//i.test(url)) await setChannelCta(channel.id, url, (p.cta_label ?? '').trim() || 'Learn more');
+    await setChannelCadence(channel, true).catch(() => { /* the clock can be armed later from the studio */ });
+    // Episode one: best-effort — with no AI key the channel still STANDS and the daily clock
+    // drafts once the key arrives. The note tells the truth either way.
+    try {
+      const { episode } = await draftEpisode(channel, (p.first_topic ?? '').trim() || undefined);
+      return { kind: 'needs_review', note: `"${name}" is live: world + channel + ${url ? 'CTA wired' : 'CTA open'} + daily clock. Episode one "${episode.title}" is drafted — review, produce, approve.`, link: `/garvis/webs/${web.worldId}` };
+    } catch (e) {
+      const why = e instanceof Error ? e.message : 'drafting is unavailable';
+      return { kind: 'done', note: `"${name}" is live: world + channel + ${url ? 'CTA wired' : 'CTA open'} + daily clock armed. Episode one waits (${why}) — the clock drafts as soon as the AI key is set.`, link: `/garvis/webs/${web.worldId}` };
+    }
+  },
+
   point_channel_cta: async (p) => {
     const { listChannels, setChannelCta } = await import('./channelsRun');
     const url = (p.url ?? '').trim();

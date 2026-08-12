@@ -286,6 +286,22 @@ export const ACTION_SPECS: ActionSpec[] = [
     produces: 'the app embedded as a room on that business\'s pages — used without leaving Garvis',
   },
   {
+    id: 'launch_vertical',
+    title: 'Launch a vertical channel',
+    category: 'marketing',
+    risk: 'spend',
+    description: 'Stand up ONE complete faceless-channel operation for a niche: its own world, the channel (persona/look/voice from the vertical library or a custom niche), the CTA link pointed at whatever is being marketed, the daily draft clock armed, and episode one drafted. Use once per vertical when the intent is "build followings in N niches to funnel somewhere" — the vertical planner compiles one of these per niche. Nothing renders or posts from this step.',
+    params: [
+      { name: 'vertical', required: false, hint: 'a vertical library id (finance_facts, caregiver_health…) — omit for a custom niche' },
+      { name: 'name', required: true, hint: 'the channel\'s name' },
+      { name: 'niche', required: true, hint: 'what the channel is about, in plain words' },
+      { name: 'cta_url', required: false, hint: 'where this audience funnels (https:// link) — omit to leave the CTA open' },
+      { name: 'cta_label', required: false, hint: 'the CTA button text (default "Learn more")' },
+      { name: 'first_topic', required: false, hint: 'episode one\'s topic — omit to let the niche pick' },
+    ],
+    produces: 'a standing channel operation: world + channel + CTA (when given) + daily draft clock + episode one drafted for review',
+  },
+  {
     id: 'add_contact',
     title: 'Add a contact',
     category: 'company',

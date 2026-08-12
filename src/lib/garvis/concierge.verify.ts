@@ -279,7 +279,7 @@ const ALL = ALL_CONCIERGE_TASKS;
 {
   const full = resolve('i want to work on some ai slop videos or different instagram verticals so i can build following in verical areas where i can market my app', WORLDS, ALL_CONCIERGE_TASKS);
   check('the operator\'s FULL strategy sentence (typos and all) → the verticals door, confidently',
-    full.kind === 'go' && full.task?.id === 'grow-verticals' && full.route === '/garvis/channels');
+    full.kind === 'go' && full.task?.id === 'grow-verticals' && full.route === '/garvis/channels?plan=verticals');
   check('"ai slop videos" is audience work, not an episode', resolve('i want to work on some ai slop videos', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'grow-verticals');
   check('"build a following" is audience work, NOT software (the new-app misroute is dead)',
     resolve('lets build a following in different verticals', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'grow-verticals');
@@ -287,6 +287,20 @@ const ALL = ALL_CONCIERGE_TASKS;
     (() => { const t = CONCIERGE_TASKS.find((x) => x.id === 'grow-verticals')!; const s = t.steps.join(' '); return /per niche/.test(s) && /CTA/.test(s) && /Queue/.test(s); })());
   check('"start a new channel" still belongs to the handwritten channel task',
     (() => { const r = resolve('start a new channel', WORLDS, ALL_CONCIERGE_TASKS); return (r.kind === 'go' && r.task?.id === 'start-channel') || (r.kind === 'suggest' && !!r.suggestions?.some((t) => t.id === 'start-channel')); })());
+}
+
+// THE PLANNER SENTENCE — a counted-verticals ask is ONE intent, never a compound. "plan seven
+// verticals AND make a structured plan" restates the same artifact; the conjunction must not
+// split it into the orchestrate handoff (the trap the live proof caught).
+{
+  const r = resolve('plan seven verticals and make a structured plan', WORLDS, ALL_CONCIERGE_TASKS);
+  check('"plan seven verticals and make a structured plan" → the planner door, confidently',
+    r.kind === 'go' && r.task?.id === 'grow-verticals' && r.route === '/garvis/channels?plan=verticals');
+  check('"give me 3 verticals" goes to the same door', resolve('give me 3 verticals', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'grow-verticals');
+  check('a REAL compound still compounds ("find leads then email them")',
+    resolve('find leads then email them', WORLDS, ALL_CONCIERGE_TASKS).kind === 'compound');
+  check('an uncounted plan ask still belongs to the business-plan door',
+    (() => { const p = resolve('write a business plan for Northstar', WORLDS, ALL_CONCIERGE_TASKS); return p.task?.id !== 'grow-verticals'; })());
 }
 
 // ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----

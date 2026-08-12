@@ -13,6 +13,8 @@
 //   - Steps are the walkthrough (the standing-card SOP pattern applied to the HUMAN's clicks).
 // Pure + deterministic: same input, same resolution.
 
+import { verticalCount } from './verticalPlan';
+
 export interface ConciergeWorld {
   id: string;
   title: string;
@@ -105,11 +107,11 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
       'grow an audience', 'instagram', 'tiktok',
     ],
     kind: 'navigate',
-    route: '/garvis/channels',
+    route: '/garvis/channels?plan=verticals',
     steps: [
-      'One channel per niche — press "Start a channel" and pick a preset (repeat per vertical)',
-      'Point each channel\'s CTA link at the thing you\'re marketing — every caption carries it',
-      'Draft a cited episode daily per channel; the learning loop steers hooks toward what works',
+      'The planner is open — one channel per niche, each with its persona, look, and first episodes',
+      'Point the CTA link at the thing you\'re marketing — every channel funnels there',
+      'Press Implement — channels, the daily draft clock, and episode one land in one run',
       'Everything posts through your Queue — nothing goes out without you',
     ],
   },
@@ -597,6 +599,14 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   // A procedural QUESTION with only a weak match wants an ANSWER, not a page — hand it to the
   // AI tier ("how do i connect my tiktok account" should be explained, not routed on 'tiktok').
   if (PROCEDURAL_QUESTION.test(norm(input)) && top.score < 4) return { kind: 'none' };
+  // "plan seven verticals and make a structured plan" is ONE intent, not a compound: a sentence
+  // that COUNTS its verticals/niches/channels is the vertical planner's signature, and the
+  // planning clause restates the same artifact ('plan' alone would tie this into the
+  // business-plan door). The counted door outranks the conjunction.
+  const counted = matches.slice(0, 2).find((m) => m.task.id === 'grow-verticals');
+  if (counted && verticalCount(input) !== null) {
+    return { kind: 'go', task: counted.task, route: routeFor(counted.task, worlds).route };
+  }
   const distinctRoutes = new Set(matches.map((m) => m.task.route));
   if (CONJUNCTION.test(norm(input)) && distinctRoutes.size >= 2 && top.task.route !== '/garvis/orchestrate') {
     return { kind: 'compound', route: '/garvis/orchestrate', suggestions: matches.slice(0, 3).map((m) => m.task) };
