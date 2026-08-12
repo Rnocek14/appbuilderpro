@@ -350,6 +350,15 @@ const CASES: Case[] = [
     compile: plan([step('add_contact', { name: 'Sam Ortiz', email: 'sam@ortizbuilds.com', world: 'Northstar' }, W('a real person from the intent belongs in the CRM'))]),
     actions: ['add_contact'],
   },
+  {
+    name: 'the vertical empire: one launch_vertical per niche, sequential, CTA riding every step; production is an honest hole',
+    intent: 'Build followings in two niches — money facts and pet care — and funnel them both at https://mindweave.app',
+    compile: plan([
+      step('launch_vertical', { vertical: 'finance_facts', name: 'Money Facts', niche: 'personal finance and money facts', cta_url: 'https://mindweave.app', first_topic: 'the rule of 72 in 30 seconds' }, W('one complete standing channel operation per niche is the vertical planner\'s unit')),
+      step('launch_vertical', { vertical: 'pet_care', name: 'Good Dog Facts', niche: 'evidence-based pet care and behavior facts', cta_url: 'https://mindweave.app', first_topic: 'why dogs tilt their heads' }, W('the second niche gets its own operation, paced after the first — sequential spend, not a burst'), [0]),
+    ], ['Rendering and posting are NOT in this run: episodes arrive as drafted scripts; Produce happens per-episode in each studio and every post waits in the Queue.']),
+    actions: ['launch_vertical', 'launch_vertical'], minHoles: 1,
+  },
 ];
 
 for (const c of CASES) {

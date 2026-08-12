@@ -6,7 +6,7 @@
 // lands on the studio itself — this page is a directory, not another workspace.
 
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Clapperboard, Loader2, Plus } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { Button, Card } from '../components/ui';
@@ -14,6 +14,9 @@ import { useToast } from '../context/ToastContext';
 import { supabase } from '../lib/supabase';
 import { instantiateWeb } from '../lib/garvis/workwebRun';
 import { channelPulse } from '../lib/garvis/channelPulse';
+import { VerticalPlanner } from '../components/garvis/VerticalPlanner';
+import { verticalCount } from '../lib/garvis/verticalPlan';
+import { readHandoff } from '../components/ConciergeDock';
 
 interface ChannelRow { id: string; name: string; niche: string; created_at: string; world_id: string | null }
 interface GrowthWorld { worldId: string; title: string; channels: ChannelRow[] }
@@ -21,6 +24,20 @@ interface GrowthWorld { worldId: string; title: string; channels: ChannelRow[] }
 export function Channels() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
+  // The concierge's verticals door opens the PLANNER, prefilled from what was said —
+  // "plan seven verticals" arrives with seven laid out. The chip opens it any other day.
+  const [planOpen, setPlanOpen] = useState(() => searchParams.get('plan') === 'verticals');
+  const [planCount, setPlanCount] = useState(7);
+  useEffect(() => {
+    const h = readHandoff('grow-verticals');
+    if (h) {
+      setPlanOpen(true);
+      const n = verticalCount(h.sentence);
+      if (n) setPlanCount(n);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [worlds, setWorlds] = useState<GrowthWorld[] | null>(null);
   const [pulses, setPulses] = useState<Map<string, string>>(new Map());
   const [creating, setCreating] = useState(false);
@@ -95,12 +112,18 @@ export function Channels() {
             <h1 className="text-xl font-semibold text-forge-ink">Channels</h1>
             <p className="text-sm text-forge-dim">Your content channels — the daily loop: draft, produce or film, approve, and let the numbers steer.</p>
           </div>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={() => setPlanOpen((v) => !v)}
+              className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
+              {planOpen ? 'Hide the plan' : 'Plan verticals'}
+            </button>
             <Button onClick={() => void startOne()} loading={creating}>
               <Plus size={14} /> Start a channel
             </Button>
           </div>
         </div>
+
+        {planOpen && <VerticalPlanner initialCount={planCount} onToast={(k, m) => toast(k, m)} />}
 
         {worlds === null && <p className="flex items-center gap-2 text-sm text-forge-dim"><Loader2 size={14} className="animate-spin" /> Loading…</p>}
 
