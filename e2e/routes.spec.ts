@@ -26,7 +26,7 @@ async function blockExternal(page: Page): Promise<void> {
   await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, (r) => r.abort());
 }
 
-const PUBLIC_ROUTES = ['/', '/auth', '/pricing'];
+const PUBLIC_ROUTES = ['/', '/auth', '/pricing', '/platform'];
 
 // Every protected destination in App.tsx — builder + the whole Garvis surface, including the
 // session's new pages (orchestrate, opportunity-feed, client-book). Signed out, each must land
@@ -58,6 +58,29 @@ test('every protected route redirects to /auth signed out, without crashing', as
     await page.goto(route, { waitUntil: 'domcontentloaded' });
     await page.waitForURL(/\/auth/, { timeout: 15_000 });
   }
+  expect(errors, `unexpected errors:\n${errors.join('\n')}`).toEqual([]);
+});
+
+// ── the studio site (the prospect-facing "/" — what a cold-pitch recipient googles into) ──
+test('studio site: hero, pick-a-la-carte menu totals live, contact never fake-submits', async ({ page }) => {
+  const errors = trackErrors(page);
+  await blockExternal(page);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  // Zero-input value: tagline + pricing render before any interaction.
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: 'Plain prices, picked à la carte' })).toBeVisible();
+
+  // The menu is real registry data: ticking a box changes the live total.
+  const before = await page.getByText(/once/).last().textContent();
+  await page.getByRole('checkbox').first().check();
+  await expect(page.getByText(/once \+ \$\d/).last()).toBeVisible();
+  const after = await page.getByText(/once \+ \$\d/).last().textContent();
+  expect(after).not.toBe(before);
+
+  // With no channel token configured (this hermetic run), the contact section must show the
+  // honest email panel — never a form that pretends to submit.
+  await expect(page.locator('#contact').getByRole('link', { name: /@/ })).toBeVisible();
   expect(errors, `unexpected errors:\n${errors.join('\n')}`).toEqual([]);
 });
 

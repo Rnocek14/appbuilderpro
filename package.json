@@ -88,6 +88,7 @@
     "verify:gardener": "tsx src/lib/garvis/gardener.verify.ts",
     "verify:automation": "tsx src/lib/garvis/automation/detect.verify.ts",
     "verify:automationmenu": "tsx src/lib/preview/automationMenu.verify.ts",
+    "verify:studiosite": "tsx src/content/studio.verify.ts",
     "verify:techfingerprint": "tsx supabase/functions/_shared/techFingerprint.verify.ts",
     "verify:triggers": "tsx src/lib/garvis/automation/triggers.verify.ts",
     "verify:breaker": "tsx src/lib/garvis/automation/breaker.verify.ts",

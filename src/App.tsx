@@ -6,6 +6,9 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { Spinner } from './components/ui';
 
 // The unauthenticated entry surface stays eager — it's the first paint and must not flash a spinner.
+// "/" is the STUDIO's public site (what a cold-pitch prospect finds when they google the sender);
+// the Garvis platform pitch lives on at /platform for people evaluating the tool itself.
+import StudioSite from './pages/StudioSite';
 import Landing from './pages/Landing';
 import Auth from './pages/Auth';
 import OAuthCallback from './pages/OAuthCallback';
@@ -103,7 +106,8 @@ function AppRoutes() {
     <ErrorBoundary resetKey={location.pathname}>
       <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Spinner label="Loading…" /></div>}>
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route path="/" element={<StudioSite />} />
+          <Route path="/platform" element={<Landing />} />
           <Route path="/auth" element={<Auth />} />
           <Route path="/oauth/callback" element={<OAuthCallback />} />
           <Route path="/pricing" element={<Pricing />} />
