@@ -15,6 +15,7 @@ import {
 } from './orchestrator';
 import { actionSpecs } from './actionCatalog';
 import { actionById } from './actionRegistry';
+import { matchPlanShape } from './masterPlan';
 import { recordMindEvent } from './mindStore';
 import { assembleSituation } from './situationRun';
 
@@ -37,6 +38,27 @@ export async function compileIntent(intent: string, revise?: { previous: Compile
     return { plan: null, problems: ['Say the whole thing — a sentence or three about what you want set up.'], warnings: [] };
   }
   const specs = actionSpecs();
+  // DETERMINISTIC TIER FIRST (the vertical-planner pattern, generalized): a KNOWN PLAY compiles
+  // instantly — no AI round-trip, no key, no spend — through the SAME parsePlan gauntlet, so one
+  // validation path grades both tiers. Revisions always go to the model (it holds the diff
+  // discipline), and an unknown play falls through to the AI compiler below.
+  if (!revise) {
+    const shaped = matchPlanShape(clean);
+    if (shaped) {
+      const instant = parsePlan(JSON.stringify(shaped.plan), specs);
+      if (instant.plan) {
+        const { data: auth } = await supabase.auth.getUser();
+        if (auth.user) {
+          void recordMindEvent(auth.user.id, {
+            event_type: 'note', source: 'orchestrator',
+            subject: `Compiled plan "${instant.plan.title}" instantly (known play: ${shaped.shapeId})`,
+            payload: { intent: clean.slice(0, 300), steps: instant.plan.steps.map((s) => s.action) },
+          });
+        }
+        return instant;
+      }
+    }
+  }
   // SITUATION-AWARE COMPILES (holy-grail gap 3): the compiler used to see only the catalog and
   // the sentence — "the t-shirt company" was planned blind and discovered reality at runtime.
   // Now the current state (businesses by exact title, live/blocked arcs, clients, the clock)

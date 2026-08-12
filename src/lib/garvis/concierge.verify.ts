@@ -303,6 +303,18 @@ const ALL = ALL_CONCIERGE_TASKS;
     (() => { const p = resolve('write a business plan for Northstar', WORLDS, ALL_CONCIERGE_TASKS); return p.task?.id !== 'grow-verticals'; })());
 }
 
+// THE PLAN DOOR — a plan-shaped ask goes CONFIDENTLY to Orchestrate, where the known play has
+// already compiled itself (deterministic tier). No suggestion list for the flagship sentences.
+{
+  const go = (s: string) => { const r = resolve(s, WORLDS, ALL_CONCIERGE_TASKS); return r.kind === 'go' && r.task?.id === 'orchestrate'; };
+  check('"plan out how to market my stroke app" → the planner, confidently', go('plan out how to market my stroke app mindweave'));
+  check('"plan how to get more clients" → the planner, confidently', go('plan how to get more clients'));
+  check('"whats our strategy for growing this" → the planner', go('whats our strategy for growing this'));
+  check('"write a business plan for Northstar" STAYS the business-plan door',
+    resolve('write a business plan for Northstar', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'business-plan');
+  check('"plan my day" STAYS the home door', resolve('plan my day', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'whats-next');
+}
+
 // ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----
 {
   const MOMV: ConciergeWorld[] = [
