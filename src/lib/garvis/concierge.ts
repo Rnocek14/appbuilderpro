@@ -479,7 +479,7 @@ export function exploreDive(sentence: string): string | null {
 export interface SmallTalk { kind: 'greet' | 'thanks' | 'affirm' | 'closure' | 'halt'; text: string }
 
 const GREET_RE = /^(hi|hello|hey|yo|sup|good (morning|afternoon|evening))( garvis)?[.!]*$/;
-const THANKS_RE = /^(thanks|thank you|thank u|ty|thx|appreciate (it|you))( garvis)?( so much)?[.!]*$/;
+const THANKS_RE = /^(thanks|thank you|thank u|ty|thx|appreciate (it|you))( garvis| man| dude| bro| buddy)?( so much| a lot)?[.!]*$/;
 const AFFIRM_RE = /^(ok|okay|k|yes|yep|yeah|cool|nice|great|perfect|awesome|good job|well done|love it|lol)[.!]*$/;
 const CLOSURE_RE = /^(no|nope|nevermind|never mind|forget it|nothing|nah|na)[.!]*$/;
 const HALT_RE = /^(stop|cancel|halt|abort|pause)\b|^(dont|don't|do not)\b/;
@@ -572,7 +572,13 @@ export function routeFor(task: ConciergeTask, worlds: ConciergeWorld[]): { route
 }
 
 const CONJUNCTION = /\b(and|then|also|plus|after that)\b/;
-const PROCEDURAL_QUESTION = /^(how do i|how to|can i|can you)\b/;
+// Negative "why" forms are TROUBLESHOOTING (answer them); analytical "why is revenue down"
+// stays routable — the page with the numbers is a fine answer to that one.
+const PROCEDURAL_QUESTION = /^(how do i|how to|can i|can you|why (isnt|isn't|wont|won't|doesnt|doesn't|didnt|didn't|cant|can't)|whats wrong|what's wrong|what happens)\b/;
+// Destructive verbs never navigate on a weak match: "delete all my worlds" must get an honest
+// ANSWER (there is no spoken bulk-delete; the brain explains where deleting lives), never a
+// confident hop to whatever door shares a word.
+const DESTRUCTIVE = /\b(delete|remove|wipe|erase|destroy|uninstall)\b/;
 // Idioms where verb+noun means a DIFFERENT thing than the words: "open house" is a real-estate
 // event, not "open the houses page". Stripped from the sentence before matching, so these asks
 // reach the AI tier and get an honest answer instead of a confident misroute.
@@ -603,6 +609,15 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   // A procedural QUESTION with only a weak match wants an ANSWER, not a page — hand it to the
   // AI tier ("how do i connect my tiktok account" should be explained, not routed on 'tiktok').
   if (PROCEDURAL_QUESTION.test(norm(input)) && top.score < 4) return { kind: 'none' };
+  // Destructive asks on weak matches get an honest ANSWER, never a shared-word door.
+  if (DESTRUCTIVE.test(norm(input)) && top.score < 4) return { kind: 'none' };
+  // An EXACT world-title hit is decisive: "open money facts" NAMES the world verbatim — a page
+  // that happens to share a word never outranks the thing the operator named. Requires the full
+  // multi-word title phrase in the sentence AND the world already leading (no tie-jumping).
+  if (top.task.id.startsWith('world:') && top.score > (second?.score ?? 0)
+    && top.task.keywords.some((k) => k.includes(' ') && ` ${norm(input)} `.includes(` ${norm(k)} `))) {
+    return { kind: 'go', task: top.task, route: routeFor(top.task, worlds).route };
+  }
   // "plan seven verticals and make a structured plan" is ONE intent, not a compound: a sentence
   // that COUNTS its verticals/niches/channels is the vertical planner's signature, and the
   // planning clause restates the same artifact ('plan' alone would tie this into the
@@ -611,12 +626,15 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   if (counted && verticalCount(input) !== null) {
     return { kind: 'go', task: counted.task, route: routeFor(counted.task, worlds).route };
   }
-  // A plan-shaped sentence whose TOP door is already the planner goes CONFIDENTLY: the known
+  // A plan-shaped sentence with the planner door in its TOP TWO goes CONFIDENTLY: the known
   // play compiles itself the moment Orchestrate opens (deterministic tier — no AI, no key), so
-  // the door is not one option among three, it IS the answer. Scoped to top-match-only so the
-  // prospect/genesis doors keep every sentence they own today.
-  if (top.task.id === 'orchestrate' && matchPlanShape(input, worlds.map((w) => w.title))) {
-    return { kind: 'go', task: top.task, route: routeFor(top.task, worlds).route };
+  // the door is not one option among three, it IS the answer. Top-two (like the counted guard)
+  // so "make me a plan to promote threadline" survives a world-area task edging the score —
+  // while the prospect/genesis doors keep every sentence they own (the play never fires
+  // without plan vocabulary putting orchestrate near the top).
+  const planDoor = matches.slice(0, 2).find((m) => m.task.id === 'orchestrate');
+  if (planDoor && matchPlanShape(input, worlds.map((w) => w.title))) {
+    return { kind: 'go', task: planDoor.task, route: routeFor(planDoor.task, worlds).route };
   }
   const distinctRoutes = new Set(matches.map((m) => m.task.route));
   if (CONJUNCTION.test(norm(input)) && distinctRoutes.size >= 2 && top.task.route !== '/garvis/orchestrate') {

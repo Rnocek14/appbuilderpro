@@ -315,6 +315,27 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('"plan my day" STAYS the home door', resolve('plan my day', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'whats-next');
 }
 
+// THE GARVIS-LEVEL GAUNTLET PINS (Aug 2026 corpus findings) — each of these was a live misroute.
+{
+  const W2 = [
+    { id: 'w-money', title: 'Money Facts', slugs: ['growth-studio'] },
+    { id: 'w-thread', title: 'Threadline', slugs: ['brand'] },
+  ];
+  const T2 = deriveWorldTasks(ALL_CONCIERGE_TASKS, W2);
+  check('"open money facts" — an EXACT title hit is decisive, no tie with the money page',
+    (() => { const r = resolve('open money facts', W2, T2); return r.kind === 'go' && r.task?.id === 'world:w-money'; })());
+  check('"why isnt my video rendering" gets an ANSWER, never the draft door',
+    resolve('why isnt my video rendering', W2, T2).kind === 'none');
+  check('"what happens when i hit implement" gets an ANSWER',
+    resolve('what happens when i hit implement', W2, T2).kind === 'none');
+  check('"delete all my worlds" never navigates on a weak shared word',
+    resolve('delete all my worlds', W2, T2).kind === 'none');
+  check('"thanks man" is chatter', smallTalk('thanks man')?.kind === 'thanks');
+  check('"thank you so much" still lands', smallTalk('thank you so much')?.kind === 'thanks');
+  check('"make me a plan to promote my clothing brand threadline" → the planner (top-2 guard)',
+    (() => { const r = resolve('make me a plan to promote my clothing brand threadline', W2, T2); return r.kind === 'go' && r.task?.id === 'orchestrate'; })());
+}
+
 // ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----
 {
   const MOMV: ConciergeWorld[] = [
