@@ -181,7 +181,8 @@
     "verify:suggestions": "tsx src/lib/garvis/suggestionDeck.verify.ts",
     "verify:merchboard": "tsx src/lib/garvis/merchBoard.verify.ts",
     "verify:verticalplan": "tsx src/lib/garvis/verticalPlan.verify.ts",
-    "verify:masterplan": "tsx src/lib/garvis/masterPlan.verify.ts"
+    "verify:masterplan": "tsx src/lib/garvis/masterPlan.verify.ts",
+    "verify:briefing": "tsx src/lib/garvis/briefing.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

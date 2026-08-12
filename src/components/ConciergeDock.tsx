@@ -15,6 +15,7 @@ import {
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
 import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
+import { composeBriefing, isBriefingAsk, type Briefing } from '../lib/garvis/briefing';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
@@ -121,6 +122,7 @@ export function ConciergeDock() {
   const [doState, setDoState] = useState<DoState | null>(null);
   const [briefText, setBriefText] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [sitrep, setSitrep] = useState<Briefing | null>(null);
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
   const aliasesRef = useRef<ConciergeAlias[]>(loadAliases());
@@ -221,6 +223,24 @@ export function ConciergeDock() {
     void supabase.from('approvals').select('id', { count: 'exact', head: true }).eq('status', 'pending')
       .then(({ count, error }) => { if (!dead && !error) setPendingCount(count ?? 0); });
     return () => { dead = true; };
+  }, [open]);
+
+  // SPEAK FIRST: the first open of the day reports without being asked — what the machines
+  // produced overnight, what waits, what runs. Once per calendar day; a quiet day stays out of
+  // the way (one honest line, no card); a failed gather never blocks the dock.
+  useEffect(() => {
+    if (!open) return;
+    let dead = false;
+    void import('../lib/garvis/briefingRun').then(async (m) => {
+      if (!m.briefingDue()) return;
+      const b = composeBriefing(await m.gatherBriefing());
+      if (dead) return;
+      m.markBriefed();
+      if (b.quiet) setNote(b.headline);
+      else { setSitrep(b); speak(b.headline); }
+    }).catch(() => { /* the briefing is a bonus, never a blocker */ });
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // Cross-device tier 0: learned phrases sync through concierge_aliases (app_0136). DB rows merge
@@ -504,6 +524,7 @@ export function ConciergeDock() {
       return;
     }
     setDoState(null);
+    setSitrep(null);
     // A typed-out wall of thinking is a brief too — same intact-capture door as a paste.
     if (isBrief(raw)) { captureBrief(raw); return; }
     // "garvis" is courtesy; "do/run/execute" is an execution order → straight to the compiler.
@@ -529,6 +550,29 @@ export function ConciergeDock() {
       setCompound(false);
       setNote('Back you go.');
       navigate(-1);
+      return;
+    }
+    // THE BRIEFING — "good morning" / "status report" / "what did i miss" gets the state of the
+    // operation, spoken first the way it should be: what the machines produced, what waits, what
+    // runs. Real rows, no AI, and a quiet day is an honest answer.
+    if (isBriefingAsk(text)) {
+      setBusy(true);
+      setSuggestions([]);
+      setCompound(false);
+      setNote('Reading the state of things…');
+      try {
+        const m = await import('../lib/garvis/briefingRun');
+        const b = composeBriefing(await m.gatherBriefing());
+        m.markBriefed();
+        setSitrep(b);
+        setNote(null);
+        speak(b.headline);
+      } catch {
+        setNote('Could not read the state right now — the Queue and Missions pages have the live view.');
+      } finally {
+        setBusy(false);
+        inputRef.current?.focus();
+      }
       return;
     }
     // SMALL TALK & HALTS — chatter and stop-words get a free honest answer, never a navigation
@@ -695,6 +739,24 @@ export function ConciergeDock() {
       </div>
 
       {note && <p className="mt-2 whitespace-pre-line text-[11px] text-forge-dim">{note}</p>}
+
+      {/* THE BRIEFING — Garvis speaks first: the state of the operation on the first open of
+          the day, or whenever asked ("good morning", "status report"). Real rows only. */}
+      {sitrep && (
+        <div className="mt-2 rounded-xl border border-forge-ember/40 bg-forge-bg/60 p-2.5">
+          <div className="flex items-start gap-1.5">
+            <Sparkles size={12} className="mt-0.5 shrink-0 text-forge-ember" />
+            <p className="min-w-0 flex-1 text-[11px] font-semibold text-forge-ink">{sitrep.headline}</p>
+            <button onClick={() => setSitrep(null)} aria-label="Dismiss the briefing"
+              className="rounded p-0.5 text-forge-dim hover:text-forge-ink"><X size={12} /></button>
+          </div>
+          {sitrep.lines.length > 0 && (
+            <ul className="mt-1.5 space-y-1 pl-4">
+              {sitrep.lines.map((l, i) => <li key={i} className="text-[11px] leading-snug text-forge-dim">· {l}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* NEXT MOVES — tap-to-do chips for the open surface (board/builder). One tap runs the
           move through the same bridge a spoken ask uses; nothing is pasted for retyping. */}
