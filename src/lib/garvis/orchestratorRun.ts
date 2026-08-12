@@ -43,7 +43,11 @@ export async function compileIntent(intent: string, revise?: { previous: Compile
   // validation path grades both tiers. Revisions always go to the model (it holds the diff
   // discipline), and an unknown play falls through to the AI compiler below.
   if (!revise) {
-    const shaped = matchPlanShape(clean);
+    // World-aware: spoken names snap to the worlds that actually exist (fail-soft — no titles
+    // just means no snapping, the play still compiles with the words as said).
+    const titles = await supabase.from('knowledge_worlds').select('title').limit(100)
+      .then(({ data }) => ((data ?? []) as { title: string }[]).map((t) => t.title), () => [] as string[]);
+    const shaped = matchPlanShape(clean, titles);
     if (shaped) {
       const instant = parsePlan(JSON.stringify(shaped.plan), specs);
       if (instant.plan) {

@@ -87,6 +87,25 @@ const gauntlet = (plan: NonNullable<ReturnType<typeof matchPlanShape>>['plan']) 
   check('a spoken post count rides in', p?.plan.steps[0]?.params.posts_per_week === '5');
 }
 
+// WORLD-AWARENESS — spoken names snap to the worlds that actually exist (executors need exact
+// titles); no match keeps the words as said, and a spoken cadence rides the hunt.
+{
+  const worlds = ["Mom's Real Estate", 'Northstar Media', 'Mural Co'];
+  const snap = matchPlanShape('keep moms real estate socials active', worlds);
+  check('"moms real estate" snaps to the EXACT existing title',
+    snap?.plan.steps.every((s) => s.params.world === "Mom's Real Estate") === true);
+  const partial = matchPlanShape('keep northstars socials active', worlds);
+  check('a partial name snaps by containment ("northstars" → "Northstar Media")',
+    partial?.plan.steps[0]?.params.world === 'Northstar Media');
+  const stranger = matchPlanShape('keep glacier point socials active', worlds);
+  check('an unknown name stays AS SAID (the executor fails honestly, nothing silently retargets)',
+    stranger?.plan.steps[0]?.params.world === 'glacier point');
+  const weekly = matchPlanShape('find me mural commissions and public art jobs weekly');
+  check('a spoken "weekly" rides the hunt cadence', weekly?.plan.steps[0]?.params.cadence === 'weekly');
+  check('no cadence spoken → no cadence param (the action default rules)',
+    !('cadence' in (matchPlanShape('find all mural and custom art jobs in Wisconsin')?.plan.steps[0]?.params ?? {})));
+}
+
 // HONESTY OF THE BOUNDARY — what is NOT a known play returns null for the AI tier.
 {
   for (const s of [
