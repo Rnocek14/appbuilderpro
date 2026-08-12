@@ -59,11 +59,18 @@ export default function Orchestrate() {
   // Compile as the explicit press (that one costs a model call), and nothing RUNS either way
   // until Approve.
   useEffect(() => {
-    const h = readHandoff('orchestrate', 'send-emails', 'app-marketing');
-    if (h) {
-      setIntent(h.sentence);
-      if (matchPlanShape(h.sentence)) void compile(h.sentence);
-    }
+    const read = () => {
+      const h = readHandoff('orchestrate', 'send-emails', 'app-marketing');
+      if (h) {
+        setIntent(h.sentence);
+        if (matchPlanShape(h.sentence)) void compile(h.sentence);
+      }
+    };
+    read();
+    // Same-page handoffs ("do that for X" while already on Orchestrate) arrive as an event —
+    // navigate() to the current route never remounts this component.
+    window.addEventListener('ff:concierge-handoff', read);
+    return () => window.removeEventListener('ff:concierge-handoff', read);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

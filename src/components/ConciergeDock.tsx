@@ -16,6 +16,8 @@ import {
 } from '../lib/garvis/concierge';
 import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
 import { composeBriefing, isBriefingAsk, type Briefing } from '../lib/garvis/briefing';
+import { applyFollowupAsk, parseFollowupAsk, type AskMemory } from '../lib/garvis/conversationMemory';
+import { matchPlanShape } from '../lib/garvis/masterPlan';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
@@ -32,6 +34,7 @@ export const GENESIS_PREFILL_KEY = 'ff:genesis-intent';
  *  with a primary input (Orchestrate's intent box, the studio's topic) open already filled in.
  *  Read once and clear — a stale sentence must never prefill a later visit. */
 export const HANDOFF_KEY = 'ff:concierge-handoff';
+const MEM_KEY = 'ff:concierge-memory';
 
 export interface ConciergeHandoff { taskId: string; sentence: string }
 
@@ -123,6 +126,16 @@ export function ConciergeDock() {
   const [briefText, setBriefText] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const [sitrep, setSitrep] = useState<Briefing | null>(null);
+  // CONVERSATIONAL MEMORY — the last real ask + its swappable subject ("do that for X").
+  // Session-persisted because the dock remounts on every navigation.
+  const askMemRef = useRef<AskMemory | null>(((): AskMemory | null => {
+    try { return JSON.parse(sessionStorage.getItem(MEM_KEY) ?? 'null') as AskMemory | null; } catch { return null; }
+  })());
+  const rememberAsk = (sentence: string) => {
+    const mem: AskMemory = { sentence, subject: matchPlanShape(sentence)?.subject ?? null };
+    askMemRef.current = mem;
+    try { sessionStorage.setItem(MEM_KEY, JSON.stringify(mem)); } catch { /* session-only */ }
+  };
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
   const aliasesRef = useRef<ConciergeAlias[]>(loadAliases());
@@ -340,7 +353,9 @@ export function ConciergeDock() {
       return;
     }
     // The operator's words ride along — destinations with a primary input read them once.
-    if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); } catch { /* fine */ } }
+    // The event covers the already-on-the-page case — navigate() to the same route never
+    // remounts, so destinations also LISTEN for a fresh handoff (the genesis-prefill pattern).
+    if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); window.dispatchEvent(new Event('ff:concierge-handoff')); } catch { /* fine */ } }
     startGuide(task);
     const missing = missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null;
     setNote(missing);
@@ -449,6 +464,7 @@ export function ConciergeDock() {
       }
       setNote(null);
       setDoState({ intent: sentence, plan, warnings });
+      rememberAsk(sentence);
       speak(`Plan ready: ${plan.summary}`);
     } catch (e) {
       setNote(e instanceof Error && /key|credit/i.test(e.message)
@@ -527,6 +543,26 @@ export function ConciergeDock() {
     setSitrep(null);
     // A typed-out wall of thinking is a brief too — same intact-capture door as a paste.
     if (isBrief(raw)) { captureBrief(raw); return; }
+    // CONVERSATIONAL MEMORY — "again" / "do that for X" resolves against the remembered ask and
+    // re-runs the full sentence through every tier. This runs BEFORE the command prefix so
+    // "do that for X" reads as a follow-up, not as an execution order for "that for X".
+    // Conservative forms only; with nothing remembered, the dock says so instead of guessing.
+    const fu = parseFollowupAsk(raw);
+    if (fu) {
+      const resolved = applyFollowupAsk(fu, askMemRef.current);
+      if (resolved) {
+        setNote(fu.kind === 'again' ? 'Running it again.' : `Same play — now for ${fu.target}.`);
+        await submitText(resolved);
+        return;
+      }
+      setSuggestions([]);
+      setCompound(false);
+      setNote(fu.kind === 'again'
+        ? "Nothing to repeat yet — say the whole thing once and I'll remember it."
+        : "I don't know what to swap yet — say the whole ask once and I'll remember its shape.");
+      inputRef.current?.focus();
+      return;
+    }
     // "garvis" is courtesy; "do/run/execute" is an execution order → straight to the compiler.
     const { sentence: text, execute } = parseCommandPrefix(raw);
     if (!text) return;
@@ -610,11 +646,12 @@ export function ConciergeDock() {
     inputRef.current?.focus();
     if (learnedTask) {
       const { route, missingWorld } = routeFor(learnedTask, worlds);
+      rememberAsk(text);
       act(learnedTask, route, missingWorld, text);
       return;
     }
     const r = resolve(text, worlds, tasksRef.current);
-    if (r.kind === 'go' && r.task && r.route) { act(r.task, r.route, r.missingWorld, text); return; }
+    if (r.kind === 'go' && r.task && r.route) { rememberAsk(text); act(r.task, r.route, r.missingWorld, text); return; }
     if (r.kind === 'compound' && r.suggestions?.length) {
       setCompound(true);
       setSuggestions(r.suggestions);

@@ -20,6 +20,9 @@ import { buildVerticalPlan, planToArc, verticalCount } from './verticalPlan';
 export interface ShapedPlan {
   shapeId: string;
   plan: CompiledPlan;
+  /** The play's extracted subject (the marketed thing, the world, the niche, the focus) — what
+   *  a follow-up like "same but for X" swaps. Null when the play has no swappable subject. */
+  subject: string | null;
 }
 
 const step = (action: string, params: Record<string, string>, why: string, after: number[] = []): PlanStep =>
@@ -39,10 +42,35 @@ export function marketSubject(sentence: string): string | null {
   return subject;
 }
 
+const presenceWorld = (s: string): string | null => {
+  const world = (/\bkeep\s+(.+?)(?:'s|s')?\s+(?:socials?|social media|instagram|presence)\s+(?:active|alive|going|fresh|warm)/i.exec(s)?.[1]
+    ?? /\b(?:weekly|regular)\s+(?:content|posts)\s+for\s+(.+?)(?=\s+(?:and|so|then)\b|[.,;!?]|$)/i.exec(s)?.[1])?.trim();
+  return world && world.length >= 2 && world.length <= 40 ? world : null;
+};
+
+const clientNiche = (s: string): string | null =>
+  (/\bgo after\s+([a-z][\w\s-]{2,30}?)(?=[.,;!?]|$)/i.exec(s)?.[1]
+    ?? /\b(?:find|get|land|win|book)\s+(?:me\s+)?(?:more\s+|some\s+|new\s+)?([a-z][\w\s-]{2,30}?)\s+clients\b/i.exec(s)?.[1])?.trim() ?? null;
+
+const huntFocus = (s: string): string | null => {
+  const focus = /\b(?:find|hunt(?:\s+for)?|look for)\s+(?:all\s+|me\s+|some\s+)?(.+?\b(?:jobs|gigs|commissions|rfps|grants|open calls)\b)/i.exec(s)?.[1]?.trim();
+  return focus && focus.length >= 8 && focus.length <= 60 ? focus : null;
+};
+
 interface Shape {
   id: string;
   match(sentence: string): CompiledPlan | null;
 }
+
+/** What "same but for X" swaps, per play. */
+const SUBJECT_OF: Record<string, (s: string) => string | null> = {
+  'vertical-empire': marketSubject,
+  'weekly-presence': presenceWorld,
+  'client-machine': clientNiche,
+  'work-hunt': huntFocus,
+  'found-business': () => null,
+  'market': marketSubject,
+};
 
 /** Ordered most-specific first — a counted-verticals ask wins over its 'market …' tail. */
 const SHAPES: Shape[] = [
@@ -59,9 +87,8 @@ const SHAPES: Shape[] = [
     // "keep Northstar's socials active" / "weekly content for Mural Co"
     id: 'weekly-presence',
     match(s) {
-      const world = (/\bkeep\s+(.+?)(?:'s|s')?\s+(?:socials?|social media|instagram|presence)\s+(?:active|alive|going|fresh|warm)/i.exec(s)?.[1]
-        ?? /\b(?:weekly|regular)\s+(?:content|posts)\s+for\s+(.+?)(?=\s+(?:and|so|then)\b|[.,;!?]|$)/i.exec(s)?.[1])?.trim();
-      if (!world || world.length < 2 || world.length > 40) return null;
+      const world = presenceWorld(s);
+      if (!world) return null;
       const perWeek = /(\d)\s*posts?/i.exec(s)?.[1];
       return {
         title: `Weekly presence for ${world}`,
@@ -82,8 +109,7 @@ const SHAPES: Shape[] = [
     id: 'client-machine',
     match(s) {
       if (!/\b(?:find|get|land|win|book)\s+(?:me\s+)?(?:more\s+|some\s+|new\s+)?(?:[\w-]+\s+){0,4}?clients?\b/i.test(s) && !/\bfill (?:the|my) pipeline\b/i.test(s)) return null;
-      const niche = (/\bgo after\s+([a-z][\w\s-]{2,30}?)(?=[.,;!?]|$)/i.exec(s)?.[1]
-        ?? /\b(?:find|get|land|win|book)\s+(?:me\s+)?(?:more\s+|some\s+|new\s+)?([a-z][\w\s-]{2,30}?)\s+clients\b/i.exec(s)?.[1])?.trim();
+      const niche = clientNiche(s);
       return {
         title: niche ? `The client machine: ${niche}` : 'The client machine',
         summary: 'The daily acquisition loop: discover real local businesses, audit their sites, build demo previews, and stage pitch emails as pending approvals — nothing sends without you.',
@@ -98,9 +124,8 @@ const SHAPES: Shape[] = [
     // "find all mural and custom art jobs in wisconsin"
     id: 'work-hunt',
     match(s) {
-      const m = /\b(?:find|hunt(?:\s+for)?|look for)\s+(?:all\s+|me\s+|some\s+)?(.+?\b(?:jobs|gigs|commissions|rfps|grants|open calls)\b)/i.exec(s);
-      const focus = m?.[1]?.trim();
-      if (!focus || focus.length < 8 || focus.length > 60) return null;
+      const focus = huntFocus(s);
+      if (!focus) return null;
       const region = new RegExp(`\\b${focus.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+in\\s+([\\w\\s]{2,30}?)(?=[.,;!?]|$)`, 'i').exec(s)?.[1]?.trim();
       return {
         title: `Standing hunt: ${focus}`,
@@ -169,7 +194,7 @@ export function matchPlanShape(sentence: string): ShapedPlan | null {
   if (s.length < 12) return null;
   for (const shape of SHAPES) {
     const plan = shape.match(s);
-    if (plan) return { shapeId: shape.id, plan };
+    if (plan) return { shapeId: shape.id, plan, subject: SUBJECT_OF[shape.id]?.(s) ?? null };
   }
   return null;
 }
