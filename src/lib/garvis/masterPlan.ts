@@ -57,9 +57,25 @@ const huntFocus = (s: string): string | null => {
   return focus && focus.length >= 8 && focus.length <= 60 ? focus : null;
 };
 
+// WORLD-AWARENESS: what the operator SAYS ("moms real estate", "northstars") snaps to the world
+// that actually EXISTS ("Mom's Real Estate", "Northstar Media") — executors need exact titles.
+// Token-folded (apostrophes dropped, plural-s folded) subset match either way; no match keeps
+// the words as said (the executor then fails honestly, never silently retargeting).
+const fold = (s: string): string[] =>
+  s.toLowerCase().replace(/'/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean).map((t) => t.replace(/s$/, ''));
+const snapWorld = (said: string, worlds: string[]): string => {
+  const st = fold(said);
+  if (!st.length) return said;
+  const hit = worlds.find((w) => {
+    const wt = fold(w);
+    return wt.length > 0 && (st.every((t) => wt.includes(t)) || wt.every((t) => st.includes(t)));
+  });
+  return hit ?? said;
+};
+
 interface Shape {
   id: string;
-  match(sentence: string): CompiledPlan | null;
+  match(sentence: string, worlds: string[]): CompiledPlan | null;
 }
 
 /** What "same but for X" swaps, per play. */
@@ -86,9 +102,10 @@ const SHAPES: Shape[] = [
   {
     // "keep Northstar's socials active" / "weekly content for Mural Co"
     id: 'weekly-presence',
-    match(s) {
-      const world = presenceWorld(s);
-      if (!world) return null;
+    match(s, worlds) {
+      const said = presenceWorld(s);
+      if (!said) return null;
+      const world = snapWorld(said, worlds);
       const perWeek = /(\d)\s*posts?/i.exec(s)?.[1];
       return {
         title: `Weekly presence for ${world}`,
@@ -127,10 +144,11 @@ const SHAPES: Shape[] = [
       const focus = huntFocus(s);
       if (!focus) return null;
       const region = new RegExp(`\\b${focus.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+in\\s+([\\w\\s]{2,30}?)(?=[.,;!?]|$)`, 'i').exec(s)?.[1]?.trim();
+      const weekly = /\b(?:weekly|every week|once a week)\b/i.test(s);
       return {
         title: `Standing hunt: ${focus}`,
         summary: `Scheduled web sweeps that read real listings and file only opportunities the pages actually describe — deduped into your Opportunity feed for triage${region ? `, preferring ${region}` : ''}.`,
-        steps: [step('hunt_opportunities', { focus, ...(region ? { region } : {}) },
+        steps: [step('hunt_opportunities', { focus, ...(region ? { region } : {}), ...(weekly ? { cadence: 'weekly' } : {}) },
           'finding real work on a standing cadence is exactly what the hunt does — triage stays yours')],
         holes: [],
         questions: [],
@@ -188,12 +206,13 @@ const SHAPES: Shape[] = [
 ];
 
 /** The deterministic tier of the plan compiler: a known play compiles instantly (no AI, no key,
- *  no spend); anything else returns null and the AI compiler takes the sentence. */
-export function matchPlanShape(sentence: string): ShapedPlan | null {
+ *  no spend); anything else returns null and the AI compiler takes the sentence. Pass the
+ *  operator's world TITLES to let plays snap spoken names to the worlds that actually exist. */
+export function matchPlanShape(sentence: string, worlds: string[] = []): ShapedPlan | null {
   const s = sentence.trim();
   if (s.length < 12) return null;
   for (const shape of SHAPES) {
-    const plan = shape.match(s);
+    const plan = shape.match(s, worlds);
     if (plan) return { shapeId: shape.id, plan, subject: SUBJECT_OF[shape.id]?.(s) ?? null };
   }
   return null;

@@ -615,7 +615,7 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   // play compiles itself the moment Orchestrate opens (deterministic tier — no AI, no key), so
   // the door is not one option among three, it IS the answer. Scoped to top-match-only so the
   // prospect/genesis doors keep every sentence they own today.
-  if (top.task.id === 'orchestrate' && matchPlanShape(input)) {
+  if (top.task.id === 'orchestrate' && matchPlanShape(input, worlds.map((w) => w.title))) {
     return { kind: 'go', task: top.task, route: routeFor(top.task, worlds).route };
   }
   const distinctRoutes = new Set(matches.map((m) => m.task.route));
