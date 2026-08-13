@@ -84,6 +84,40 @@ test('studio site: hero, pick-a-la-carte menu totals live, contact never fake-su
   expect(errors, `unexpected errors:\n${errors.join('\n')}`).toEqual([]);
 });
 
+// The showpiece exhibit: scan → build → finished, performed live. This test is the regression
+// guard on the state machine (a stall would leave a prospect staring at a dated site forever).
+test('studio exhibit performs scan → build → finished site', async ({ page }) => {
+  const errors = trackErrors(page);
+  await blockExternal(page);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByText(/Watch it happen/i).scrollIntoViewIfNeeded();
+
+  // Act 1 — reading their current site, with the honest recreation caption.
+  await expect(page.getByText(/A recreation of where most of our clients start/i)).toBeVisible({ timeout: 15_000 });
+
+  // Act 3 — the build ran to completion and offers a replay. Generous timeout: the performance
+  // is ~10s by design, and CI runners are slower than a laptop.
+  await expect(page.getByRole('button', { name: /Replay the build/i })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText(/assembled by our engine in your browser/i)).toBeVisible();
+  expect(errors, `unexpected errors:\n${errors.join('\n')}`).toEqual([]);
+});
+
+test('studio exhibit honors reduced motion — finished site, no performance', async ({ browser }) => {
+  const context = await browser.newContext({ reducedMotion: 'reduce' });
+  const page = await context.newPage();
+  const errors = trackErrors(page);
+  await blockExternal(page);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByText(/Watch it happen/i).scrollIntoViewIfNeeded();
+
+  // Straight to the finished demo: no scan act, and no replay control to invite one.
+  await expect(page.getByText(/assembled by our engine in your browser/i)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/A recreation of where most of our clients start/i)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Replay the build/i })).toHaveCount(0);
+  expect(errors, `unexpected errors:\n${errors.join('\n')}`).toEqual([]);
+  await context.close();
+});
+
 test('an unknown route lands somewhere real, not a blank crash', async ({ page }) => {
   const errors = trackErrors(page);
   await blockExternal(page);

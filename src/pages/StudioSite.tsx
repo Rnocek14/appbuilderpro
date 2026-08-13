@@ -154,7 +154,6 @@ export default function StudioSite() {
         .studio-check:checked{background:var(--accent);border-color:var(--accent)}
         .studio-check:checked::before{transform:scale(1)}
         .studio-check:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-        .studio-chip{box-shadow:0 10px 26px -14px rgba(40,25,10,.4)}
         .studio-ticker{display:flex;gap:0;overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)}
         .studio-ticker-track{display:flex;flex-shrink:0;gap:0;animation:studio-scroll 36s linear infinite}
         @keyframes studio-scroll{to{transform:translateX(-50%)}}
@@ -230,20 +229,16 @@ export default function StudioSite() {
         <section ref={exhibitSlot} className="mx-auto max-w-6xl px-6 pb-24 pt-14">
           <Rise>
             <div className="relative">
-              {/* scanner-grounded chips floating off the frame — decoration that names real detections */}
-              <div className="pointer-events-none absolute -top-5 right-8 z-10 hidden rotate-2 lg:block">
-                <span className="studio-chip inline-block rounded-full border border-[var(--line)] bg-white px-4 py-2 text-[12px] font-medium" style={{ color: 'var(--mut)' }}>
-                  {SCAN_LOOKFORS[0]} → <span style={{ color: 'var(--accent)' }}>fixed</span>
-                </span>
+              {/* The exhibit performs the scan→build itself; nothing floats around it competing
+                  for the eye. The label sets the frame and then gets out of the way. */}
+              <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-[12px] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--accent)' }}>
+                  Watch it happen — running in your browser
+                </p>
+                <p className="text-[12.5px]" style={{ color: 'var(--mut)' }}>
+                  Their real site, read and rebuilt — the same two minutes we spend on yours.
+                </p>
               </div>
-              <div className="pointer-events-none absolute -left-4 top-24 z-10 hidden -rotate-2 xl:block">
-                <span className="studio-chip inline-block rounded-full border border-[var(--line)] bg-white px-4 py-2 text-[12px] font-medium" style={{ color: 'var(--mut)' }}>
-                  {SCAN_LOOKFORS[2]} → <span style={{ color: 'var(--accent)' }}>fixed</span>
-                </span>
-              </div>
-              <p className="mb-4 text-[12px] font-semibold uppercase tracking-[0.22em]" style={{ color: 'var(--accent)' }}>
-                Live demonstration — assembled in your browser
-              </p>
               {showExhibit ? (
                 <Suspense fallback={<div className="flex h-[580px] items-center justify-center rounded-3xl border border-[var(--line)] bg-white text-sm" style={{ color: 'var(--mut)' }}>Assembling the demo…</div>}>
                   <DemoExhibit />
