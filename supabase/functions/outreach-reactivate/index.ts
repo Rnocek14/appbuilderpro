@@ -21,6 +21,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { expiresAtFor } from '../_shared/approvalTtl.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-cron-secret, x-worker-secret' };
@@ -140,6 +141,7 @@ Deno.serve(async (req) => {
           title: `Reactivation draft → ${email}`,
           preview: `${subject}\n\n${body.slice(0, 400)}`,
           payload: apPayload, payload_hash: await hashPayload(apPayload),
+        expires_at: expiresAtFor('send_email', new Date().toISOString()),
         }).select('id').maybeSingle();
         if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
         made++; drafted++;

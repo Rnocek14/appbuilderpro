@@ -26,6 +26,7 @@ import {
   listApprovals, approveAndExecute, rejectApproval, reopenApproval, listExecutionRuns, worldTitlesFor,
   type Approval, type ExecutionRun,
 } from '../lib/garvis/execution';
+import { expiryCountdown } from '../lib/garvis/approvalTtl';
 import {
   loadInbox, composeReply, markLeadAnswered, markReplyHandled, unmarkReplyHandled, reopenLead,
   markMailHandled, unmarkMailHandled, draftContext, type InboxItem,
@@ -385,6 +386,11 @@ export default function Queue() {
                       </span>
                     )}
                     <span className="min-w-0 flex-1 truncate text-sm text-forge-ink">{a.title}</span>
+                    {/* The decision clock (app_0141): honest countdown from the stamped window.
+                        Rows minted before stamping render no clock — never an invented one. */}
+                    {(() => { const c = expiryCountdown(a.expires_at, new Date().toISOString()); return c
+                      ? <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] ${c === 'past its window' ? 'bg-forge-warn/15 text-forge-warn' : 'border border-forge-border text-forge-dim'}`}>{c}</span>
+                      : null; })()}
                     <span className="text-[10px] text-forge-dim">{timeAgo(a.created_at)}</span>
                     <button onClick={() => void decide(a, true)} disabled={actingId === a.id}
                       className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1 text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">

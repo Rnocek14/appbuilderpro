@@ -20,6 +20,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { expiresAtFor } from '../_shared/approvalTtl.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 import { complete, modelForPlan, getProviderConfig, type AIProvider } from '../_shared/ai.ts';
 import { checkCredits, getUserPlan, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
@@ -216,6 +217,7 @@ Deno.serve(async (req) => {
         title: `Reply draft → ${r.from_address ?? prior.to_address} (they wrote back)`,
         preview: `THEY SAID: ${(r.body_text ?? '').slice(0, 200)}\n\nDRAFT:\n${draft.subject}\n\n${draft.body}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
+        expires_at: expiresAtFor('send_email', new Date().toISOString()),
       }).select('id').single();
       if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       drafted++;

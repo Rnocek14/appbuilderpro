@@ -17,6 +17,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { cronAuthorized } from '../_shared/cronGate.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { hashPayload } from '../_shared/payloadHash.ts';
+import { expiresAtFor } from '../_shared/approvalTtl.ts';
 import { autonomyAllowed, executeSendNow } from '../_shared/autonomyGate.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 
@@ -206,6 +207,7 @@ Deno.serve(async (req) => {
         title: `Follow-up #${n} to ${first.to_address}`,
         preview: `${draft.subject}\n\n${draft.body}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
+        expires_at: expiresAtFor('send_email', new Date().toISOString()),
       }).select('id').single();
       if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       drafted++;
@@ -281,6 +283,7 @@ Deno.serve(async (req) => {
         title: `Follow-up (opened ${m.open_count}×, no reply) to ${m.to_address}`,
         preview: `SIGNAL: they opened the last email ${m.open_count} times and never replied.\n\n${draft.subject}\n\n${draft.body}`,
         payload: apPayload, payload_hash: await hashPayload(apPayload),
+        expires_at: expiresAtFor('send_email', new Date().toISOString()),
       }).select('id').single();
       if (auto && apRow) await executeSendNow((apRow as { id: string }).id);
       hotDrafted++;

@@ -8,6 +8,7 @@
 import { supabase } from '../supabase';
 import { markProjectAppLaunched } from './productLifecycle';
 import { hashPayload } from './payloadHash';
+import { expiresAtFor } from './approvalTtl';
 
 export type ApprovalKind =
   | 'send_email' | 'send_sms' | 'publish_post' | 'deploy_site' | 'deploy_backend'
@@ -27,6 +28,8 @@ export interface Approval {
   world_id?: string | null;
   created_at: string;
   decided_at: string | null;
+  /** The decision window's end (app_0141) — display-only until the SW5.1 sweep lands. */
+  expires_at?: string | null;
 }
 
 export interface ExecutionRun {
@@ -66,6 +69,8 @@ export async function enqueueApproval(input: {
     payload_hash,
     requested_by: input.requestedBy ?? 'user',
     world_id: input.worldId ?? null,
+    // The decision clock (app_0141): a per-kind window, rendered as a countdown on the card.
+    expires_at: expiresAtFor(input.kind, new Date().toISOString()),
   }).select('id').single();
   if (error) throw new Error(error.message);
   return (data as { id: string }).id;
@@ -74,7 +79,7 @@ export async function enqueueApproval(input: {
 export async function listApprovals(status: ApprovalStatus | 'all' = 'pending', limit = 50): Promise<Approval[]> {
   let q = supabase
     .from('approvals')
-    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at, world_id')
+    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at, world_id, expires_at')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (status !== 'all') q = q.eq('status', status);

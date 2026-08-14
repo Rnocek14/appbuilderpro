@@ -25,6 +25,7 @@ import { FACT_SCRIPT_SYSTEM, buildFactScriptUser } from '../_shared/factScriptCo
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, breakerTrips, ORDER_BREAKER_LIMIT, type WatchResult } from '../_shared/standingCore.ts';
+import { expiresAtFor } from '../_shared/approvalTtl.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
 import { sendBookingNotice } from '../_shared/bookingNotify.ts';
@@ -633,6 +634,7 @@ Deno.serve(async (req) => {
               // line makes the whole downstream ledger client-attributable.
               world_id: client?.worldId ?? null,
               payload, payload_hash, requested_by: 'garvis-auto',
+              expires_at: expiresAtFor(isSms ? 'send_sms' : 'send_email', new Date().toISOString()),
             }).select('id').single();
             if (apErr || !ap) throw new Error(apErr?.message ?? 'approval insert failed');
 
@@ -2615,6 +2617,7 @@ async function queueHuntPitch(admin: any, uid: string, input: {
     title: `Pitch "${input.businessName}" → ${to}`,
     preview: `${subject}\n\n${body}${shotNote}`,
     payload, payload_hash, requested_by: 'garvis-auto',
+    expires_at: expiresAtFor('send_email', new Date().toISOString()),
   }).select('id').single();
   return apErr || !ap ? null : (ap as { id: string }).id;
 }
