@@ -6,6 +6,9 @@
 // own confirmation, and every outgoing email waits in the queue.
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { ClientBillingContent } from './ClientBilling';
+import { cn } from '../lib/utils';
 import { ClockStatus } from '../components/garvis/ClockStatus';
 import { CircleDollarSign, Plus, Send, Check, Ban, Loader2 } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
@@ -20,6 +23,32 @@ const usd = (n: number) => `$${Number(n).toFixed(2)}`;
 const STAGE_LABEL = ['', 'reminder queued window', 'due', 'past due', 'final notice'];
 
 export default function Money() {
+  // ONE revenue room (SW2.6): personal invoices and the client book are two tabs of one Money
+  // door (the Memory.tsx merge pattern). ?tab=clients deep-links the book; the old
+  // /garvis/client-billing route redirects here with its prefills intact.
+  const [params, setParams] = useSearchParams();
+  const [tab, setTabState] = useState<'invoices' | 'clients'>(params.get('tab') === 'clients' ? 'clients' : 'invoices');
+  useEffect(() => {
+    const t = params.get('tab');
+    if (t === 'clients' || t === 'invoices') setTabState(t);
+    else if (t === null) setTabState('invoices');
+  }, [params]);
+  const setTab = (t: 'invoices' | 'clients') => {
+    setTabState(t);
+    const next = new URLSearchParams(params);
+    if (t === 'clients') next.set('tab', 'clients'); else next.delete('tab');
+    setParams(next, { replace: true });
+  };
+  const tabStrip = (
+    <div className="flex shrink-0 rounded-lg border border-forge-border p-0.5 text-xs">
+      {([['invoices', 'Invoices'], ['clients', 'Client book']] as const).map(([key, label]) => (
+        <button key={key} onClick={() => setTab(key)}
+          className={cn('rounded-md px-3 py-1.5', tab === key ? 'bg-forge-raised text-forge-ink' : 'text-forge-dim hover:text-forge-ink')}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
   const { toast } = useToast();
   const { offerUndo, undoBar } = useUndoBar((e) => toast('error', e instanceof Error ? e.message : 'Could not undo that.'));
   const [rows, setRows] = useState<InvoiceRow[]>([]);
@@ -80,6 +109,26 @@ export default function Money() {
   const outstanding = rows.filter((r) => r.status === 'sent').reduce((s, r) => s + Number(r.amount_usd), 0);
   const collected = rows.filter((r) => r.status === 'paid').reduce((s, r) => s + Number(r.amount_usd), 0);
 
+  if (tab === 'clients') {
+    return (
+      <AppShell>
+        <div className="mx-auto max-w-4xl px-4 pt-8">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-forge-border bg-forge-panel">
+              <CircleDollarSign size={20} className="text-forge-ember" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-xl font-semibold text-forge-ink">Money</h1>
+              <p className="text-sm text-forge-dim">Your client book — subscriptions, payment links, MRR.</p>
+            </div>
+            {tabStrip}
+          </div>
+        </div>
+        <ClientBillingContent />
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell>
       <div className="mx-auto max-w-4xl px-4 py-8">
@@ -91,6 +140,7 @@ export default function Money() {
             <h1 className="text-xl font-semibold text-forge-ink">Money</h1>
             <p className="text-sm text-forge-dim">Invoice → gated send → the chaser asks so you don't have to → paid = real revenue.</p>
           </div>
+          {tabStrip}
 
         {/* The chase ladder runs on the clock — if the clock is dead, say so here (quiet when healthy). */}
         <ClockStatus quiet />

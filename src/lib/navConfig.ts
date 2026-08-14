@@ -7,7 +7,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   BookOpen,
-  Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap, Receipt,
+  Sparkles, Compass, KeyRound, MessageSquare, Waypoints, Rocket, Zap,
   CircleDollarSign, Users, BrainCircuit, Telescope, LayoutGrid, Plus, FolderDown, Bot, Globe,
   CreditCard, Settings, Activity, Wand2, Crosshair, BookUser,
   Hammer, PhoneMissed, Target, Film, HeartPulse, CalendarClock, MailCheck, Radar, Clapperboard, Satellite,
@@ -62,9 +62,8 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'Money',
     items: [
-      // Renamed from "Client billing" so it stops colliding with "Money" and account "Billing":
-      // three money doors, three distinct names — agency MRR vs personal invoices vs the app's own bill.
-      { to: '/garvis/client-billing', label: 'Client revenue', icon: Receipt },
+      // ONE revenue room (SW2.6): the client book merged into Money as a tab; the old
+      // /garvis/client-billing route redirects there. Account /billing stays separate — plumbing.
       { to: '/garvis/money', label: 'Money', icon: CircleDollarSign },
     ],
   },
