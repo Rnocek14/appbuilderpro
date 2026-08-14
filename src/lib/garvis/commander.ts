@@ -6,13 +6,31 @@
 
 import { BRAIN_WINDOW } from './thread';
 
+/** The Intention Router's second axis (SW4.1, docs/garvis-first-principles.md §5): every
+ *  utterance is an intent AND a mode. Postures are VERBS, not places — think (weighing,
+ *  answering), create (making something new), execute (running real work), observe (checking
+ *  state). Carried optionally so older model replies and every existing fixture stay valid;
+ *  postureOf() resolves the default by kind. */
+export type Posture = 'think' | 'create' | 'execute' | 'observe';
+
 export type Command =
-  | { kind: 'reply'; text: string }
-  | { kind: 'mission'; preface: string; objective: string; subject: string; app: string | null }
-  | { kind: 'act'; preface: string; instruction: string }
-  | { kind: 'open'; preface: string; surface: 'mailer' | 'video'; world: string | null }
-  | { kind: 'build'; preface: string; prompt: string }
-  | { kind: 'explore'; preface: string; query: string };
+  | { kind: 'reply'; text: string; posture?: Posture }
+  | { kind: 'mission'; preface: string; objective: string; subject: string; app: string | null; posture?: Posture }
+  | { kind: 'act'; preface: string; instruction: string; posture?: Posture }
+  | { kind: 'open'; preface: string; surface: 'mailer' | 'video'; world: string | null; posture?: Posture }
+  | { kind: 'build'; preface: string; prompt: string; posture?: Posture }
+  | { kind: 'explore'; preface: string; query: string; posture?: Posture };
+
+const POSTURES = new Set<Posture>(['think', 'create', 'execute', 'observe']);
+const DEFAULT_POSTURE: Record<Command['kind'], Posture> = {
+  reply: 'think', mission: 'execute', act: 'execute', open: 'create', build: 'create', explore: 'think',
+};
+
+/** The resolved posture — the model's classification when it gave a valid one, the kind's
+ *  natural default when it didn't. Total: every Command has exactly one posture. */
+export function postureOf(cmd: Command): Posture {
+  return cmd.posture && POSTURES.has(cmd.posture) ? cmd.posture : DEFAULT_POSTURE[cmd.kind];
+}
 
 export const COMMANDER_SYSTEM = `You are Garvis — a solo founder's AI chief of staff. You speak like a sharp, calm, capable operator:
 warm, brief, never fluffy. The founder talks to you in plain language; you decide what to DO.
@@ -102,13 +120,18 @@ rabbit hole (explore), or make it real (build/mission)?" Exploration is a conver
 
 When unsure, REPLY and offer to run a mission. Prefer REPLY for anything answerable in a sentence or two.
 
+Every object ALSO carries "posture" — the MODE of this exchange, one of exactly:
+"think" (answering, weighing, exploring an idea) · "create" (making something new) ·
+"execute" (running real work) · "observe" (checking state: numbers, status, what's live).
+A question about metrics is think+reply with posture "observe"; "build me X" is "create".
+
 OUTPUT exactly one JSON object, no prose, no fences:
-{"kind":"reply","text":"…"}
-{"kind":"mission","preface":"…","objective":"…","subject":"…","app":"<exact portfolio app name or null>"}
-{"kind":"act","preface":"…","instruction":"…"}
-{"kind":"open","preface":"…","surface":"mailer|video","world":"<venture/world name or null>"}
-{"kind":"build","preface":"…","prompt":"…"}
-{"kind":"explore","preface":"…","query":"…"}`;
+{"kind":"reply","text":"…","posture":"…"}
+{"kind":"mission","preface":"…","objective":"…","subject":"…","app":"<exact portfolio app name or null>","posture":"…"}
+{"kind":"act","preface":"…","instruction":"…","posture":"…"}
+{"kind":"open","preface":"…","surface":"mailer|video","world":"<venture/world name or null>","posture":"…"}
+{"kind":"build","preface":"…","prompt":"…","posture":"…"}
+{"kind":"explore","preface":"…","query":"…","posture":"…"}`;
 
 export function buildCommanderUser(
   message: string,
@@ -164,30 +187,34 @@ export function commanderSnag(e: unknown): string {
 export function parseCommand(raw: string): Command {
   const o = extractJson(raw);
   if (!o) return { kind: 'reply', text: raw.trim() || "I didn't catch that — try rephrasing?" };
+  // Tolerant posture pickup: a valid classification rides along; anything else is dropped and
+  // postureOf() supplies the kind's default — an older model reply can never break a surface.
+  const posture = POSTURES.has(o.posture as Posture) ? (o.posture as Posture) : undefined;
+  const withPosture = <T extends Command>(cmd: T): T => (posture ? { ...cmd, posture } : cmd);
   if (o.kind === 'act' && str(o.instruction)) {
-    return { kind: 'act', preface: str(o.preface) || 'On it — working now.', instruction: str(o.instruction) };
+    return withPosture({ kind: 'act', preface: str(o.preface) || 'On it — working now.', instruction: str(o.instruction) });
   }
   if (o.kind === 'build' && str(o.prompt)) {
-    return { kind: 'build', preface: str(o.preface) || 'To the forge —', prompt: str(o.prompt) };
+    return withPosture({ kind: 'build', preface: str(o.preface) || 'To the forge —', prompt: str(o.prompt) });
   }
   if (o.kind === 'explore' && str(o.query)) {
-    return { kind: 'explore', preface: str(o.preface) || 'Down we go —', query: str(o.query) };
+    return withPosture({ kind: 'explore', preface: str(o.preface) || 'Down we go —', query: str(o.query) });
   }
   if (o.kind === 'open' && (o.surface === 'mailer' || o.surface === 'video')) {
-    return {
+    return withPosture({
       kind: 'open', surface: o.surface,
       preface: str(o.preface) || 'Opening the studio —',
       world: str(o.world) && str(o.world).toLowerCase() !== 'null' ? str(o.world) : null,
-    };
+    });
   }
   if (o.kind === 'mission' && str(o.objective)) {
-    return {
+    return withPosture({
       kind: 'mission',
       preface: str(o.preface) || 'On it.',
       objective: str(o.objective),
       subject: str(o.subject) || str(o.objective),
       app: str(o.app) && str(o.app).toLowerCase() !== 'null' ? str(o.app) : null,
-    };
+    });
   }
-  return { kind: 'reply', text: str(o.text) || raw.trim() || 'Done.' };
+  return withPosture({ kind: 'reply', text: str(o.text) || raw.trim() || 'Done.' });
 }
