@@ -4,6 +4,8 @@
 // opinions, quick lookups) or propose a MISSION (real work → the planner + workers handle it). The user
 // never picks a worker. Pure: prompt + tolerant parse; the model call + dispatch live in useCommander.
 
+import { BRAIN_WINDOW } from './thread';
+
 export type Command =
   | { kind: 'reply'; text: string }
   | { kind: 'mission'; preface: string; objective: string; subject: string; app: string | null }
@@ -115,7 +117,7 @@ export function buildCommanderUser(
   mindContext = '', // compiled record digest (useMind.mindContext); '' = record empty, inject nothing
 ): string {
   const hist = history.length
-    ? history.slice(-6).map((h) => `${h.role === 'user' ? 'FOUNDER' : 'GARVIS'}: ${h.text}`).join('\n')
+    ? history.slice(-BRAIN_WINDOW).map((h) => `${h.role === 'user' ? 'FOUNDER' : 'GARVIS'}: ${h.text}`).join('\n')
     : '(no prior turns)';
   return [
     ...(mindContext ? [mindContext, ''] : []),
