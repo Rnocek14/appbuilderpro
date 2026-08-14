@@ -65,6 +65,7 @@
     "verify:workweb": "tsx src/lib/garvis/workweb.verify.ts",
     "verify:workshops": "node --import tsx src/lib/garvis/workshops.verify.ts",
     "verify:workerparity": "tsx src/lib/garvis/workerParity.verify.ts",
+    "verify:arcparity": "tsx src/lib/garvis/arcParity.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",
