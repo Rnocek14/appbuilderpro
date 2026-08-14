@@ -21,6 +21,7 @@
     "verify:channelpulse": "tsx src/lib/garvis/channelPulse.verify.ts",
     "verify:automationcards": "tsx src/lib/garvis/automationCards.verify.ts",
     "verify:concierge": "tsx src/lib/garvis/concierge.verify.ts",
+    "verify:dockbrain": "tsx src/lib/garvis/dockBrain.verify.ts",
     "verify:objective": "tsx src/lib/garvis/objective.verify.ts",
     "verify:profiles": "tsx src/lib/garvis/profiles.verify.ts",
     "verify:liveness": "tsx src/lib/garvis/liveness.verify.ts",

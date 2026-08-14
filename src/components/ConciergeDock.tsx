@@ -18,6 +18,7 @@ import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, s
 import { composeBriefing, isBriefingAsk, type Briefing } from '../lib/garvis/briefing';
 import { applyFollowupAsk, parseFollowupAsk, type AskMemory } from '../lib/garvis/conversationMemory';
 import { matchPlanShape } from '../lib/garvis/masterPlan';
+import { STUDIO_AREA, matchWorldTitle, type DockAction } from '../lib/garvis/dockBrain';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
@@ -35,6 +36,9 @@ export const GENESIS_PREFILL_KEY = 'ff:genesis-intent';
  *  Read once and clear — a stale sentence must never prefill a later visit. */
 export const HANDOFF_KEY = 'ff:concierge-handoff';
 const MEM_KEY = 'ff:concierge-memory';
+/** The recent turns the deep brain sees. Session-scoped; six is plenty for "what about that?". */
+const TURNS_KEY = 'ff:concierge-turns';
+const TURN_WINDOW = 6;
 
 export interface ConciergeHandoff { taskId: string; sentence: string }
 
@@ -135,6 +139,17 @@ export function ConciergeDock() {
     const mem: AskMemory = { sentence, subject: matchPlanShape(sentence)?.subject ?? null };
     askMemRef.current = mem;
     try { sessionStorage.setItem(MEM_KEY, JSON.stringify(mem)); } catch { /* session-only */ }
+  };
+  // THE DEEP BRAIN'S SHORT MEMORY — the recent back-and-forth it gets to see, so "what about the
+  // other one?" means something. Session-persisted for the same reason as the ask memory: the
+  // dock remounts on every navigation. Only the AI tier writes here; the instant tiers cost
+  // nothing and need no thread.
+  const turnsRef = useRef<{ role: 'user' | 'garvis'; text: string }[]>(((): { role: 'user' | 'garvis'; text: string }[] => {
+    try { return JSON.parse(sessionStorage.getItem(TURNS_KEY) ?? '[]') as { role: 'user' | 'garvis'; text: string }[]; } catch { return []; }
+  })());
+  const rememberTurn = (role: 'user' | 'garvis', text: string) => {
+    turnsRef.current = [...turnsRef.current, { role, text }].slice(-TURN_WINDOW);
+    try { sessionStorage.setItem(TURNS_KEY, JSON.stringify(turnsRef.current)); } catch { /* session-only */ }
   };
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
@@ -389,6 +404,53 @@ export function ConciergeDock() {
     return weak ? weak.task.id.slice('proj:'.length) : null;
   };
 
+  /**
+   * Carry out what the deep brain decided, using the DOCK's own routing and the dock's own
+   * approval spine. Returns false when the dock can't honour it (an unknown business, a missing
+   * studio area) — the cheap router then gets its shot instead of the operator getting a guess.
+   */
+  const runDockAction = async (a: DockAction, sentence: string, worlds: ConciergeWorld[]): Promise<boolean> => {
+    if (a.kind === 'say') {
+      rememberTurn('garvis', a.text);
+      setNote(a.text);
+      speak(a.text);
+      return true;
+    }
+    // WORK — the model chose a verb, so the plan gets compiled and shown; the operator still
+    // presses Run. Nothing consequential fires from the corner on a model's say-so.
+    if (a.kind === 'compile') {
+      rememberTurn('garvis', a.note);
+      setNote(a.note);
+      await doIt(a.sentence || sentence);
+      return true;
+    }
+    if (a.kind === 'goto') {
+      rememberTurn('garvis', a.note);
+      rememberAsk(sentence);
+      setNote(a.note);
+      navigate(a.to);
+      return true;
+    }
+    // STUDIO — the commander named a business; the dock decides whether that business exists and
+    // whether it has that studio. Either answer is honest; neither is a guess.
+    const title = a.world
+      ? matchWorldTitle(a.world, worlds.map((w) => w.title))
+      : (worlds.length === 1 ? worlds[0].title : null);
+    const world = title ? worlds.find((w) => w.title === title) : null;
+    const slug = STUDIO_AREA[a.surface];
+    if (!world || !world.slugs.includes(slug)) return false;
+    rememberTurn('garvis', a.note);
+    rememberAsk(sentence);
+    setNote(a.note);
+    // The operator's words ride along, exactly as act() sends them, so the studio opens on topic.
+    try {
+      sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: `area:${world.id}:${slug}`, sentence }));
+      window.dispatchEvent(new Event('ff:concierge-handoff'));
+    } catch { /* fine */ }
+    navigate(`/garvis/webs/${world.id}?area=${encodeURIComponent(slug)}`);
+    return true;
+  };
+
   const askBrain = async (sentence: string, worlds: ConciergeWorld[]) => {
     setBusy(true);
     setSuggestions([]);
@@ -400,29 +462,61 @@ export function ConciergeDock() {
       // summary that auto-refreshes when the code changes. Fail-soft: no digest just means the
       // brain answers the way it always did.
       const projectId = projectInScope(sentence);
-      const digest = projectId
-        ? await import('../lib/garvis/projectDigestRun')
-          .then((m) => m.loadProjectDigest(projectId)).catch(() => null)
-        : null;
-      const { data, error } = await supabase.functions.invoke('concierge', {
-        body: {
+      rememberTurn('user', sentence);
+
+      // TIER 2a — THE ROUTER, unchanged. Picking a door is a routing decision, not a
+      // conversation: this tier knows every task in the dock by id, its pick is validated
+      // server-side against that list, and a hit teaches tier 0 the phrasing forever. It keeps
+      // first refusal so nothing that used to land somewhere stops landing there.
+      let routerAnswer: string | null = null;
+      try {
+        const digest = projectId
+          ? await import('../lib/garvis/projectDigestRun')
+            .then((m) => m.loadProjectDigest(projectId)).catch(() => null)
+          : null;
+        const { data, error } = await supabase.functions.invoke('concierge', {
+          body: {
+            sentence,
+            context: window.location.pathname,
+            tasks: tasksRef.current.map(({ id, label }) => ({ id, label })),
+            ...(digest ? { project: digest.context } : {}),
+          },
+        });
+        const d = (error ? null : data) as { available?: boolean; setup?: string[]; taskId?: string | null; answer?: string | null } | null;
+        if (d?.available === false) {
+          routerAnswer = d.setup?.[0] ?? null;
+        } else if (d) {
+          const picked = d.taskId ? tasksRef.current.find((t) => t.id === d.taskId) ?? null : null;
+          if (picked) {
+            rememberAlias(sentence, picked.id);   // tier 0 learns — next time this phrasing is instant
+            const { route, missingWorld } = routeFor(picked, worlds);
+            act(picked, route, missingWorld, sentence);
+            return;
+          }
+          routerAnswer = d.answer?.trim() ? d.answer : null;
+        }
+      } catch { /* the deep brain gets its turn below */ }
+
+      // TIER 2b — THE DEEP BRAIN. No door matched, so this is a question, an opinion, or real
+      // work — and that used to get 250 improvised tokens from a model shown three things: the
+      // sentence, the URL, and a list of labels. The good brain already existed one page away
+      // (the command page); this is that same brain, reading the mind record, the live
+      // situation, the operator's goals, their own retrieved knowledge and the project digest.
+      // It DECIDES what the sentence is; runDockAction decides what the dock does about it —
+      // so navigation stays the dock's and work still compiles to a plan the operator runs.
+      const deep = await import('../lib/garvis/dockBrainRun')
+        .then((m) => m.askCommander({
           sentence,
-          context: window.location.pathname,
-          tasks: tasksRef.current.map(({ id, label }) => ({ id, label })),
-          ...(digest ? { project: digest.context } : {}),
-        },
-      });
-      if (error || !data) { setNote(FALLBACK); return; }
-      const d = data as { available?: boolean; setup?: string[]; taskId?: string | null; answer?: string | null };
-      if (d.available === false) { setNote(d.setup?.[0] ?? FALLBACK); return; }
-      const picked = d.taskId ? tasksRef.current.find((t) => t.id === d.taskId) ?? null : null;
-      if (picked) {
-        rememberAlias(sentence, picked.id);   // tier 0 learns — next time this phrasing is instant
-        const { route, missingWorld } = routeFor(picked, worlds);
-        act(picked, route, missingWorld, sentence);
-        return;
-      }
-      const ans = d.answer?.trim() ? d.answer : FALLBACK;
+          history: turnsRef.current.slice(0, -1),
+          worlds: worlds.map((w) => ({ title: w.title })),
+          projectId,
+        }))
+        .catch(() => null);
+      if (deep && await runDockAction(deep, sentence, worlds)) return;
+
+      // Neither brain could be reached: say the honest thing, never a fabricated answer.
+      const ans = routerAnswer ?? FALLBACK;
+      rememberTurn('garvis', ans);
       setNote(ans);
       speak(ans);
     } catch {
