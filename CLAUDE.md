@@ -46,3 +46,5 @@ disclosure).
 `npx tsc --noEmit` · the affected `verify:*` suites (CI runs all of them) · `npm run build` ·
 the growth e2e spec if UI changed. Commits end with the Claude Code trailer; model IDs never
 appear in commits, PRs, or code.
+
+Reviews (in-session `/code-review`, PR bots, deep passes) follow the rules in `REVIEW.md`.
