@@ -457,8 +457,40 @@ export async function sendEdit(
   }
   // Both classic paths stream so the UI can render the edit landing file-by-file.
   // reviewMode (review-before-write) is direct-mode only for now; the edge path applies as before.
-  if (DIRECT) return directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, reviewMode, signal);
-  return edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, signal);
+  const classic = DIRECT
+    ? await directEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, reviewMode, signal)
+    : await edgeEditStream(projectId, message, previewError, onEvent, planFirst, image, threadId, signal);
+
+  // PROVIDER HONESTY (SW3.4): the classic path ships whole-file rewrites with no agent loop —
+  // it must not also skip the compiler and end in silence. Decision recorded in the plan: no
+  // second tool-loop for non-Anthropic providers (that would double-maintain the product's
+  // spine); instead the same compile gate runs after the fact, one static QA repair attempt is
+  // made, and the residual is NAMED in the chat. Verification is an upgrade, never a blocker.
+  if (classic.action === 'edit' && classic.changed.length) {
+    try {
+      let gate = await generationCompileGate(projectId);
+      if (gate.ran && gate.errors > 0) {
+        const qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
+        if (qaErrors.length) {
+          try { await qaFixPass(projectId, qaErrors); gate = await generationCompileGate(projectId); } catch { /* report below */ }
+        }
+      }
+      const v = verificationFromGate(gate);
+      if (v.level === 'compile_failed') {
+        const note = verificationNote(v);
+        onEvent?.({ type: 'activity', text: verificationLabel(v) });
+        const { data: auth } = await supabase.auth.getUser();
+        if (auth.user) {
+          await insertAiMessage({
+            project_id: projectId, user_id: auth.user.id, role: 'assistant',
+            content: note, thread_id: threadId,
+          });
+        }
+        classic.explanation = `${classic.explanation}\n\n${note}`;
+      }
+    } catch { /* the edit already landed; a broken verifier must not eat it */ }
+  }
+  return classic;
 }
 
 // Calls the streaming chat-edit edge function. supabase-js's functions.invoke buffers the

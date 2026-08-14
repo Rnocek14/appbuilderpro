@@ -74,6 +74,16 @@ export function ModelPicker({ open, onToggle }: { open: boolean; onToggle: (open
                 <option key={p.id} value={p.id}>{p.label}</option>
               ))}
             </select>
+            {/* Provider honesty (SW3.4): the agentic runtime (tool loop, surgical edits,
+                web research, stage-then-commit verification) is Anthropic-only by decision —
+                other providers use the classic whole-file path, compile-gated after the fact. */}
+            {provider !== 'anthropic' && (
+              <p className="mt-1 text-[10px] leading-snug text-forge-dim">
+                This provider uses the classic edit path: whole-file rewrites, verified by the
+                compiler after each edit. Agentic repair, surgical edits, and branch work need an
+                Anthropic model.
+              </p>
+            )}
 
             <label className="mb-1 mt-3 block text-[10px] uppercase tracking-wide text-forge-dim">Model</label>
             {/* Always-visible preset chips — a datalist here hid every option that didn't match the
