@@ -20,7 +20,11 @@ export type VideoAsk =
   | { kind: 'cut'; concept: 'proof_first' | 'story_first' | 'offer_first' }
   | { kind: 'aspect'; aspect: '9:16' | '1:1' | '16:9' }
   | { kind: 'play' }
-  | { kind: 'pause' };
+  | { kind: 'pause' }
+  /** "change the opening to X" — a LINE edit: the named slot's words become exactly X. */
+  | { kind: 'line'; slot: 'opening' | 'closing'; text: string }
+  /** "surprise me" — an honest shuffle: the NEXT cut of the same real material, never invention. */
+  | { kind: 'surprise' };
 
 const clean = (s: string): string => s.replace(/\s+/g, ' ').trim();
 const strip = (s: string): string => clean(s).replace(/[.!?]+$/, '');
@@ -49,10 +53,24 @@ const ASPECT_SHELL = /^(?:make (?:it|this|the video)|switch (?:it|this)? ?to|go|
 const PLAY_RE = /^(?:play (?:it|the video|this)( from the top)?|run the video|watch it)$/i;
 const PAUSE_RE = /^(?:pause( it| the video| this)?|stop (?:playing|the video))$/i;
 
+// "change the opening to X" / "make the ending say X" — the operator dictates a line; the slot
+// keeps their EXACT words. Opening|hook|first card ↔ closing|ending|offer|last card.
+const LINE_RE =
+  /^(?:change|make|set|rewrite|update)\s+the\s+(opening|hook|first (?:card|line|scene)|closing|ending|offer|last (?:card|line|scene)|cta)\s+(?:to say|to read|to|say|read)[:,]?\s+(.{2,120})$/i;
+const OPENING_SLOT = /^(opening|hook|first)/i;
+
+// "surprise me" — anchored tight; a sentence about surprises is not a command.
+const SURPRISE_RE = /^(?:surprise me|mix it up|try something (?:else|different|new)|shuffle it)$/i;
+
 /** The video studio's spoken vocabulary. Null = not ours; the sentence flows on. */
 export function parseVideoAsk(sentence: string): VideoAsk | null {
   const t = strip(sentence);
   if (!t) return null;
+  const line = LINE_RE.exec(t);
+  if (line) {
+    return { kind: 'line', slot: OPENING_SLOT.test(line[1]!) ? 'opening' : 'closing', text: clean(line[2]!) };
+  }
+  if (SURPRISE_RE.test(t)) return { kind: 'surprise' };
   const topic = VIDEO_TOPIC.exec(t)?.[1];
   if (topic) return { kind: 'title', title: clean(topic) };
   for (const [re, concept] of CUTS) if (re.test(t)) return { kind: 'cut', concept };
@@ -104,4 +122,31 @@ export function parseReelAsk(sentence: string): ReelAsk | null {
     }
   }
   return null;
+}
+
+// ── THE VOICE OF THE ROOM — deterministic variety for confirmations ──────────────────────────
+// A control that answers "Rolling." every single time reads like a machine; one that varies its
+// word reads like a colleague. Variety WITHOUT randomness: the pick is a hash of the operator's
+// own sentence, so the same ask always earns the same reply (testable), and different asks breathe.
+// House rules hold: no persona biography, no hype, no claims — just a short human word.
+
+const POOLS = {
+  play: ['Rolling.', 'Action.', 'Showtime.'],
+  pause: ['Paused.', 'Holding there.', 'Freeze frame.'],
+  made: ['Built it — take a look.', 'Done — it\u2019s on the board.', 'There it is.'],
+  recut: ['Recut.', 'New angle on the same truth.', 'Same photos, different story.'],
+  reshaped: ['Reshaped.', 'New frame.', 'Fits now.'],
+  line: ['Said. Your words, verbatim.', 'On the card, word for word.', 'Written in.'],
+  surprise: ['Try this one.', 'Something different \u2014 same real material.', 'A fresh cut of the same truth.'],
+  ideas: ['Fresh angles.', 'New directions up.', 'More ways in.'],
+} as const;
+
+export type ConfirmKind = keyof typeof POOLS;
+
+/** A short human confirmation, deterministically varied by the operator's own sentence. */
+export function confirmLine(kind: ConfirmKind, seed: string): string {
+  const pool = POOLS[kind];
+  let h = 0;
+  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return pool[h % pool.length]!;
 }

@@ -22,7 +22,7 @@ import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
 import { SoundKitFields } from './SoundKitFields';
 import { withDisclosure, type AiProvenance } from '../../lib/garvis/mediaProvenance';
 import { registerSurface } from '../../lib/garvis/surfaceBridge';
-import { parseVideoAsk } from '../../lib/garvis/studioVoice';
+import { confirmLine, parseVideoAsk } from '../../lib/garvis/studioVoice';
 import { PLATFORM_LABEL, type Platform } from '../../lib/garvis/social';
 import { queueSocialPost } from '../../lib/garvis/socialRun';
 import { cn } from '../../lib/utils';
@@ -76,6 +76,9 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   // words must not silently destroy an hour of typing.
   const voiceRef = useRef({ materials, dirty, playing, aspect, concept });
   voiceRef.current = { materials, dirty, playing, aspect, concept };
+  const sbRef = useRef<Storyboard | null>(sb);
+  sbRef.current = sb;
+  const editSceneRef = useRef<(i: number, patch: Partial<{ onScreen: string; voiceover: string }>) => void>(() => {});
   useEffect(() => registerSurface({
     id: 'studio:video',
     claims: (sentence) => (parseVideoAsk(sentence) ? { kind: 'instruct', text: sentence } : null),
@@ -90,22 +93,35 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
       const ask = parseVideoAsk(cmd.text);
       const v = voiceRef.current;
       if (!ask) return 'Say it again?';
-      if (ask.kind === 'play') { setPlaying(true); return 'Rolling.'; }
-      if (ask.kind === 'pause') { setPlaying(false); return 'Paused.'; }
-      if (ask.kind === 'aspect') { setAspect(ask.aspect); rebuild({ aspect: ask.aspect }); setScene(0); return `Now ${ask.aspect === '9:16' ? 'vertical' : ask.aspect === '1:1' ? 'square' : 'landscape'}.`; }
+      if (ask.kind === 'play') { setPlaying(true); return confirmLine('play', cmd.text); }
+      if (ask.kind === 'pause') { setPlaying(false); return confirmLine('pause', cmd.text); }
+      if (ask.kind === 'aspect') { setAspect(ask.aspect); rebuild({ aspect: ask.aspect }); setScene(0); return `${confirmLine('reshaped', cmd.text)} ${ask.aspect === '9:16' ? 'Vertical.' : ask.aspect === '1:1' ? 'Square.' : 'Landscape.'}`; }
+      // A LINE edit is exactly what the operator typed — it rides the same editScene path as a
+      // hand edit (marks dirty, guard-protected like any typing).
+      if (ask.kind === 'line') {
+        const cur = sbRef.current;
+        if (!cur || !cur.scenes.length) return 'Nothing on the timeline yet — say "make a video about \u2026" first.';
+        const i = ask.slot === 'opening' ? 0 : cur.scenes.length - 1;
+        editSceneRef.current(i, { onScreen: ask.text.slice(0, 60), voiceover: ask.text });
+        return `${confirmLine('line', cmd.text)}`;
+      }
       if (v.dirty) return "You have unsaved line edits — save or render first, then I'll rebuild the timeline.";
       if (!v.materials) return 'Still loading this business\u2019s photos — one moment.';
-      if (ask.kind === 'cut') {
-        setConcept(ask.concept);
-        setSb(defaultStoryboardFor(v.materials, title, v.aspect, ask.concept));
+      if (ask.kind === 'cut' || ask.kind === 'surprise') {
+        const order: VideoConcept[] = ['proof_first', 'story_first', 'offer_first'];
+        const c = ask.kind === 'cut' ? ask.concept : order[(order.indexOf(v.concept) + 1) % order.length]!;
+        setConcept(c);
+        setSb(defaultStoryboardFor(v.materials, title, v.aspect, c));
         setScene(0); setPlaying(false);
-        return `Recut — ${ask.concept === 'story_first' ? 'the story leads' : ask.concept === 'offer_first' ? 'the offer leads' : 'the proof leads'}.`;
+        return ask.kind === 'surprise'
+          ? `${confirmLine('surprise', cmd.text)} ${c === 'story_first' ? 'The story leads.' : c === 'offer_first' ? 'The offer leads.' : 'The proof leads.'}`
+          : `${confirmLine('recut', cmd.text)} ${c === 'story_first' ? 'The story leads.' : c === 'offer_first' ? 'The offer leads.' : 'The proof leads.'}`;
       }
       // retitle: the whole board rebuilds AROUND the spoken subject — opening card and words,
       // not just the artifact title.
       setSb(subjectStoryboardFor(v.materials, ask.title, v.aspect, v.concept));
       setScene(0); setPlaying(false);
-      return `Built around \u201c${ask.title}\u201d — the real photos are in; tune any line and press Render.`;
+      return `${confirmLine('made', cmd.text)} It\u2019s about \u201c${ask.title}\u201d — tune any line and press Render.`;
     },
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -148,6 +164,7 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
     const scenes = sb.scenes.map((s, j) => (j === i ? { ...s, ...patch } : s));
     rebuild({ scenes });
   };
+  editSceneRef.current = editScene;
 
   const downloadSrt = () => {
     if (!sb?.captionsSrt) { onToast('info', 'No captions yet — add voiceover lines to the scenes.'); return; }

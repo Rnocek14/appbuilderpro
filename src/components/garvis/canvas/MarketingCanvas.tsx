@@ -42,7 +42,7 @@ import { SocialBoard } from './SocialBoard';
 import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
 import { registerSurface } from '../../../lib/garvis/surfaceBridge';
-import { parseVideoAsk } from '../../../lib/garvis/studioVoice';
+import { confirmLine, parseVideoAsk } from '../../../lib/garvis/studioVoice';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { canvasNodeForArea } from '../../../lib/garvis/workweb';
 import type { MailerBrand } from '../../../lib/garvis/mailer';
@@ -566,6 +566,8 @@ function VideoSheet({ worldId, clusterId, title, onToast, onClose, onSpin }: {
   // once-registered handle always acts on the latest render.
   const voiceRef = useRef({ materials, aspect, concept });
   voiceRef.current = { materials, aspect, concept };
+  const sbRef = useRef<Storyboard | null>(sb);
+  sbRef.current = sb;
   const actRef = useRef({ pickCut, pickAspect });
   actRef.current = { pickCut, pickAspect };
   useEffect(() => registerSurface({
@@ -580,21 +582,33 @@ function VideoSheet({ worldId, clusterId, title, onToast, onClose, onSpin }: {
       const ask = parseVideoAsk(cmd.text);
       const v = voiceRef.current;
       if (!ask) return 'Say it again?';
-      if (ask.kind === 'play') { setPlaying(true); return 'Rolling.'; }
-      if (ask.kind === 'pause') { setPlaying(false); return 'Paused.'; }
+      if (ask.kind === 'play') { setPlaying(true); return confirmLine('play', cmd.text); }
+      if (ask.kind === 'pause') { setPlaying(false); return confirmLine('pause', cmd.text); }
       if (!v.materials) return 'Still loading the photos \u2014 one moment.';
       if (ask.kind === 'aspect') {
         actRef.current.pickAspect(ask.aspect);
-        return `Now ${ask.aspect === '9:16' ? 'vertical' : ask.aspect === '1:1' ? 'square' : 'landscape'}.`;
+        return `${confirmLine('reshaped', cmd.text)} ${ask.aspect === '9:16' ? 'Vertical.' : ask.aspect === '1:1' ? 'Square.' : 'Landscape.'}`;
       }
-      if (ask.kind === 'cut') {
-        actRef.current.pickCut(ask.concept);
-        return `Recut \u2014 ${ask.concept === 'story_first' ? 'the story leads' : ask.concept === 'offer_first' ? 'the offer leads' : 'the proof leads'}.`;
+      if (ask.kind === 'cut' || ask.kind === 'surprise') {
+        const order: VideoConcept[] = ['proof_first', 'story_first', 'offer_first'];
+        const c = ask.kind === 'cut' ? ask.concept : order[(order.indexOf(v.concept) + 1) % order.length]!;
+        actRef.current.pickCut(c);
+        const led = c === 'story_first' ? 'The story leads.' : c === 'offer_first' ? 'The offer leads.' : 'The proof leads.';
+        return `${confirmLine(ask.kind === 'surprise' ? 'surprise' : 'recut', cmd.text)} ${led}`;
+      }
+      // A LINE edit: the operator's EXACT words land on the named card.
+      if (ask.kind === 'line') {
+        const cur = sbRef.current;
+        if (!cur || !cur.scenes.length) return 'Nothing on the timeline yet \u2014 say \u201cmake a video about \u2026\u201d first.';
+        const i = ask.slot === 'opening' ? 0 : cur.scenes.length - 1;
+        setSb({ ...cur, scenes: cur.scenes.map((sc, j) => (j === i ? { ...sc, onScreen: ask.text.slice(0, 60), voiceover: ask.text } : sc)) });
+        setScene(i);
+        return confirmLine('line', cmd.text);
       }
       setSpokenTitle(ask.title);
       setSb(subjectStoryboardFor(v.materials, ask.title, v.aspect, v.concept));
       setScene(0); setPlaying(false);
-      return `Built around \u201c${ask.title}\u201d \u2014 the real photos are in; tune any line, then Render.`;
+      return `${confirmLine('made', cmd.text)} It\u2019s about \u201c${ask.title}\u201d \u2014 tune any line, then Render.`;
     },
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
