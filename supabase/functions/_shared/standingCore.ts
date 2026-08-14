@@ -44,6 +44,21 @@ export interface StandingOrder {
   nextRunAt: string;             // ISO
   lastRunAt: string | null;      // ISO
   lastResult: WatchResult | null;
+  /** Straight failures since the last success (app_0140). At ORDER_BREAKER_LIMIT the worker
+   *  pauses the order with the reason on the row — a dead-letter the operator can SEE and
+   *  resume, instead of a slot burned silently every tick. */
+  consecutiveFailures: number;
+  /** The last failure's honest line, kept while the streak is alive; null after a success. */
+  lastError: string | null;
+}
+
+/** Straight failures before a standing order pauses itself (mirrors the app_0113 trigger
+ *  breaker's limit — one notion of "too many" across both clocks). */
+export const ORDER_BREAKER_LIMIT = 5;
+
+/** Does this streak trip the breaker? Boundary is >=, so exactly LIMIT failures pause. */
+export function breakerTrips(consecutiveFailures: number): boolean {
+  return consecutiveFailures >= ORDER_BREAKER_LIMIT;
 }
 
 export interface WatchResult {

@@ -24,7 +24,7 @@ import { episodePerf, hookIntel, type EpisodeMetricRow } from '../../../src/lib/
 import { FACT_SCRIPT_SYSTEM, buildFactScriptUser } from '../_shared/factScriptCore.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
-import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, type WatchResult } from '../_shared/standingCore.ts';
+import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, breakerTrips, ORDER_BREAKER_LIMIT, type WatchResult } from '../_shared/standingCore.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
 import { sendBookingNotice } from '../_shared/bookingNotify.ts';
@@ -1516,6 +1516,49 @@ Deno.serve(async (req) => {
         next_run_at: nextRunAfter(order.cadence, order.anchor_at, nowIso),
         updated_at: nowIso,
       }).eq('id', order.id).then(() => {}, () => {});
+    }
+  }
+
+  // ---- ORDER BREAKER (app_0140): repeated failure becomes a fact the operator SEES ----------
+  // Mirrors the app_0113 trigger breaker, at ONE site by design: every branch above stamps
+  // last_result.checkedAt with THIS tick's nowIso, so what just happened is readable from the
+  // rows without threading streak state through eight catch paths. Unreachable this tick bumps
+  // the streak; any other outcome this tick clears it; at ORDER_BREAKER_LIMIT the order pauses
+  // itself with the reason on the row, a mind_event for the waking moment, and a webhook nudge.
+  // Resume (setOrderStatus → active) clears the streak — trying again is a fresh start.
+  if (rows?.length) {
+    const { data: fresh } = await admin.from('standing_orders')
+      .select('id, owner_id, label, status, consecutive_failures, last_result')
+      .in('id', rows.map((r: { id: string }) => r.id));
+    for (const o of (fresh ?? []) as { id: string; owner_id: string; label: string; status: string; consecutive_failures: number; last_result: { status?: string; line?: string; checkedAt?: string } | null }[]) {
+      const lr = o.last_result;
+      if (!lr || lr.checkedAt !== nowIso) continue;               // did not run this tick
+      if (lr.status !== 'unreachable') {
+        // A success closes the breaker: transient blips never accumulate into a false pause.
+        if (o.consecutive_failures > 0) {
+          await admin.from('standing_orders')
+            .update({ consecutive_failures: 0, last_error: null, last_error_at: null })
+            .eq('id', o.id).then(() => {}, () => {});
+        }
+        continue;
+      }
+      const streak = o.consecutive_failures + 1;
+      const tripped = breakerTrips(streak) && o.status === 'active';
+      await admin.from('standing_orders').update({
+        consecutive_failures: streak,
+        last_error: (lr.line ?? 'failed').slice(0, 500), last_error_at: nowIso,
+        ...(tripped ? { status: 'paused' } : {}),
+      }).eq('id', o.id).then(() => {}, () => {});
+      if (tripped) {
+        await admin.from('mind_events').insert({
+          owner_id: o.owner_id, event_type: 'note', source: 'execution',
+          subject: `🔴 Standing order "${o.label.slice(0, 100)}" paused itself after ${ORDER_BREAKER_LIMIT} straight failures: ${(lr.line ?? '').slice(0, 160)}`,
+          payload: { key: `order-breaker:${o.id}`, order_id: o.id, consecutive_failures: streak },
+        }).then(() => {}, () => {});
+        const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', o.owner_id).maybeSingle();
+        await notifyText((prof as { webhook_url?: string } | null)?.webhook_url,
+          `🔴 Standing order "${o.label.slice(0, 80)}" paused itself after ${ORDER_BREAKER_LIMIT} straight failures. Fix the cause, then Resume it from its panel.`).catch(() => {});
+      }
     }
   }
 
