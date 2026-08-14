@@ -6,7 +6,7 @@
 
 import { supabase } from '../supabase';
 import { getBrandKit } from './artifacts';
-import { buildStoryboard, conceptScenes, toShotstackEdit, type EditOpts, type Storyboard, type VideoConcept } from './storyboard';
+import { buildStoryboard, conceptScenes, subjectScenes, toShotstackEdit, type EditOpts, type Storyboard, type VideoConcept } from './storyboard';
 import type { AiProvenance } from './mediaProvenance';
 import type { BusinessContext } from './genesis';
 
@@ -48,6 +48,22 @@ export function defaultStoryboardFor(m: VideoMaterials, title: string, aspect: S
       offer: c?.offerings?.[0] ? `Ask about ${c.offerings[0]}` : null,
       photos: m.photos,
     }, concept),
+  });
+}
+
+/** "Make a video about X": the same real materials, with X as the video's actual SUBJECT —
+ *  in the opening card and the words, not just the artifact title. */
+export function subjectStoryboardFor(m: VideoMaterials, subject: string, aspect: Storyboard['aspect'] = '9:16', concept: VideoConcept = 'proof_first'): Storyboard {
+  const c = m.ctx;
+  return buildStoryboard({
+    title: subject, aspect, accent: m.accent,
+    scenes: subjectScenes({
+      businessName: c?.business_name ?? subject,
+      craft: c?.craft ?? null,
+      audience: c?.audience ?? null,
+      offer: c?.offerings?.[0] ? `Ask about ${c.offerings[0]}` : null,
+      photos: m.photos,
+    }, subject, concept),
   });
 }
 

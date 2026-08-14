@@ -1,5 +1,5 @@
 // Run: npx tsx src/lib/garvis/storyboard.verify.ts
-import { buildStoryboard, buildCaptionsSrt, buildTimedCaptionsSrt, chunkCaptionLine, toShotstackEdit, defaultScenes } from './storyboard';
+import { buildStoryboard, buildCaptionsSrt, buildTimedCaptionsSrt, chunkCaptionLine, toShotstackEdit, defaultScenes, subjectScenes } from './storyboard';
 
 let passed = 0; let failed = 0;
 const check = (n: string, c: boolean) => { if (c) { passed++; console.log(`  ok  - ${n}`); } else { failed++; console.error(`  FAIL - ${n}`); } };
@@ -199,6 +199,23 @@ console.log('storyboard.verify');
   check('all three cuts use the SAME real photos, no inventions', [proof, story, offer].every((c) => c.filter((s) => s.imageUrl).length === 2 && c.every((s) => !s.imageUrl || ['u1', 'u2'].includes(s.imageUrl))));
   check('cuts are genuinely different (opening lines differ)', new Set([proof[0].onScreen, story[0].onScreen, offer[0].onScreen]).size === 3);
   check('deterministic: same input → same cut', JSON.stringify(conceptScenes(input, 'story_first')) === JSON.stringify(story));
+}
+
+// ---- SUBJECT SCENES (talk-to-design) — "make a video about X" must be ABOUT X ----
+{
+  const input = {
+    businessName: "Mom's Real Estate Marketing", craft: 'lakefront homes', audience: 'sellers',
+    offer: 'Ask about a free valuation', photos: [{ url: 'https://x/p1.jpg', caption: 'the dock at dusk' }],
+  };
+  for (const concept of ['proof_first', 'story_first', 'offer_first'] as const) {
+    const sc = subjectScenes(input, 'the lakefront listing on snake road', concept);
+    const words = sc.map((x) => `${x.onScreen} ${x.voiceover}`).join(' ');
+    check(`[${concept}] the spoken subject is IN the video's words`, words.includes('the lakefront listing on snake road'));
+    check(`[${concept}] the real photos still ride`, sc.some((x) => x.imageUrl === 'https://x/p1.jpg'));
+    check(`[${concept}] no invented "started with one thing" story about a listing`, !/started with one thing/.test(words));
+  }
+  const bare = subjectScenes({ businessName: '', craft: null, audience: null, offer: null, photos: [] }, 'a topic', 'proof_first');
+  check('no context still produces an honest subject board', bare.length >= 2 && (bare[0]!.onScreen ?? '').includes('a topic'));
 }
 
 console.log(`\nstoryboard.verify: ${passed} passed, ${failed} failed`);

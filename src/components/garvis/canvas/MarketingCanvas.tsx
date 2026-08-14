@@ -24,7 +24,7 @@ import { buildImagePrompt, canGenerateImage } from '../../../lib/garvis/imagegen
 import { generateImageAsset } from '../../../lib/garvis/imagegenRun';
 import { VIDEO_CONCEPTS, type Aspect, type Storyboard, type VideoConcept } from '../../../lib/garvis/storyboard';
 import {
-  loadVideoMaterials, defaultStoryboardFor, startRender, pollRender, saveStoryboard, saveRenderedVideo,
+  loadVideoMaterials, defaultStoryboardFor, subjectStoryboardFor, startRender, pollRender, saveStoryboard, saveRenderedVideo,
   type VideoMaterials,
 } from '../../../lib/garvis/videoRun';
 import {
@@ -41,6 +41,8 @@ import { PostcardBoard } from './PostcardBoard';
 import { SocialBoard } from './SocialBoard';
 import { patchClusterWorkingState } from '../../../lib/garvis/clusterState';
 import { getBrandKit, uploadClusterFile } from '../../../lib/garvis/artifacts';
+import { registerSurface } from '../../../lib/garvis/surfaceBridge';
+import { parseVideoAsk } from '../../../lib/garvis/studioVoice';
 import { loadWeb } from '../../../lib/garvis/workwebRun';
 import { canvasNodeForArea } from '../../../lib/garvis/workweb';
 import type { MailerBrand } from '../../../lib/garvis/mailer';
@@ -529,6 +531,9 @@ function VideoSheet({ worldId, clusterId, title, onToast, onClose, onSpin }: {
   const [scene, setScene] = useState(0);
   const [busy, setBusy] = useState(false);
   const [renderMsg, setRenderMsg] = useState<string | null>(null);
+  // The SPOKEN subject: "make a video about X" rebuilds around X, and every later rebuild
+  // (cut/aspect switches) keeps X instead of reverting to the sheet's default title.
+  const [spokenTitle, setSpokenTitle] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -549,8 +554,49 @@ function VideoSheet({ worldId, clusterId, title, onToast, onClose, onSpin }: {
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [playing, scene, sb]);
 
-  const pickCut = (c: VideoConcept) => { if (!materials || c === concept) return; setConcept(c); setSb(defaultStoryboardFor(materials, title, aspect, c)); setScene(0); setPlaying(false); };
-  const pickAspect = (a: Aspect) => { if (!materials) return; setAspect(a); setSb(defaultStoryboardFor(materials, title, a, concept)); setScene(0); };
+  // A spoken subject sticks: once "make a video about X" landed, every rebuild stays about X.
+  const boardFor = (m: VideoMaterials, a: Aspect, c: VideoConcept) =>
+    (spokenTitle ? subjectStoryboardFor(m, spokenTitle, a, c) : defaultStoryboardFor(m, title, a, c));
+  const pickCut = (c: VideoConcept) => { if (!materials || c === concept) return; setConcept(c); setSb(boardFor(materials, aspect, c)); setScene(0); setPlaying(false); };
+  const pickAspect = (a: Aspect) => { if (!materials) return; setAspect(a); setSb(boardFor(materials, a, concept)); setScene(0); };
+
+  // TALK TO THE STUDIO — while this sheet is open, the concierge's sentences design HERE:
+  // "make a video about the lakefront listing", "story first", "make it vertical", "play it".
+  // Claims are the verified pure parser (studioVoice.ts). State and actions ride refs so the
+  // once-registered handle always acts on the latest render.
+  const voiceRef = useRef({ materials, aspect, concept });
+  voiceRef.current = { materials, aspect, concept };
+  const actRef = useRef({ pickCut, pickAspect });
+  actRef.current = { pickCut, pickAspect };
+  useEffect(() => registerSurface({
+    id: 'sheet:video',
+    claims: (sentence) => (parseVideoAsk(sentence) ? { kind: 'instruct', text: sentence } : null),
+    suggest: () => [
+      { label: 'Play it', cmd: { kind: 'instruct', text: 'play it' } },
+      { label: 'Story-first cut', cmd: { kind: 'instruct', text: 'story first' } },
+      { label: 'Make it landscape', cmd: { kind: 'instruct', text: 'make it landscape' } },
+    ],
+    handle: (cmd) => {
+      const ask = parseVideoAsk(cmd.text);
+      const v = voiceRef.current;
+      if (!ask) return 'Say it again?';
+      if (ask.kind === 'play') { setPlaying(true); return 'Rolling.'; }
+      if (ask.kind === 'pause') { setPlaying(false); return 'Paused.'; }
+      if (!v.materials) return 'Still loading the photos \u2014 one moment.';
+      if (ask.kind === 'aspect') {
+        actRef.current.pickAspect(ask.aspect);
+        return `Now ${ask.aspect === '9:16' ? 'vertical' : ask.aspect === '1:1' ? 'square' : 'landscape'}.`;
+      }
+      if (ask.kind === 'cut') {
+        actRef.current.pickCut(ask.concept);
+        return `Recut \u2014 ${ask.concept === 'story_first' ? 'the story leads' : ask.concept === 'offer_first' ? 'the offer leads' : 'the proof leads'}.`;
+      }
+      setSpokenTitle(ask.title);
+      setSb(subjectStoryboardFor(v.materials, ask.title, v.aspect, v.concept));
+      setScene(0); setPlaying(false);
+      return `Built around \u201c${ask.title}\u201d \u2014 the real photos are in; tune any line, then Render.`;
+    },
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doRender = async () => {
     if (!sb) return;
