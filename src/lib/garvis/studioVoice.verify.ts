@@ -2,7 +2,7 @@
 // Pins the video surfaces' spoken vocabulary — and, just as hard, what they must NOT claim.
 // The surface tier runs before the briefing, small talk, stats and every door: an over-eager
 // claim here silently steals a sentence from its real destination.
-import { parseReelAsk, parseVideoAsk } from './studioVoice';
+import { confirmLine, parseReelAsk, parseVideoAsk } from './studioVoice';
 
 let passed = 0;
 let failed = 0;
@@ -88,6 +88,40 @@ const check = (n: string, c: boolean) => {
     && JSON.stringify(parseReelAsk(s)) === JSON.stringify(parseReelAsk(s));
   check('same sentence, same parse, every time',
     ['make a video about x', 'story first', 'use the second one', 'zzz'].every(twice));
+}
+
+// LINE EDITS — the operator dictates a card, verbatim.
+{
+  const o = parseVideoAsk('change the opening to Just sold on Snake Road');
+  check('"change the opening to X" edits the opening', o?.kind === 'line' && o.slot === 'opening' && o.text === 'Just sold on Snake Road');
+  const c = parseVideoAsk('make the ending say Call Deb for a free valuation');
+  check('"make the ending say X" edits the closing', c?.kind === 'line' && c.slot === 'closing' && c.text === 'Call Deb for a free valuation');
+  const cta = parseVideoAsk('set the cta to Book a walkthrough');
+  check('"set the cta to X" is the closing slot', cta?.kind === 'line' && cta.slot === 'closing');
+  const hook = parseVideoAsk('rewrite the hook to read The lake decides the price');
+  check('"rewrite the hook to read X" is the opening', hook?.kind === 'line' && hook.slot === 'opening' && hook.text === 'The lake decides the price');
+  check('a sentence merely ABOUT changing openings is not claimed',
+    parseVideoAsk('i keep changing the opening every week') === null);
+}
+
+// SURPRISE — an honest shuffle of the same real material.
+{
+  check('"surprise me" is claimed', parseVideoAsk('surprise me')?.kind === 'surprise');
+  check('"mix it up" too', parseVideoAsk('mix it up')?.kind === 'surprise');
+  check('"try something different" too', parseVideoAsk('try something different')?.kind === 'surprise');
+  check('"that party was a surprise" is not', parseVideoAsk('that party was a surprise') === null);
+}
+
+// THE VOICE OF THE ROOM — variety without randomness.
+{
+  check('the same ask always earns the same reply', confirmLine('play', 'play it') === confirmLine('play', 'play it'));
+  const distinct = new Set(['play it', 'run the video', 'watch it', 'play the video'].map((s) => confirmLine('play', s)));
+  check('different asks can earn different words', distinct.size > 1);
+  const all = (['play', 'pause', 'made', 'recut', 'reshaped', 'line', 'surprise', 'ideas'] as const)
+    .flatMap((k) => ['a', 'bb', 'ccc'].map((seed) => confirmLine(k, seed)));
+  check('every reply is a short human line', all.every((t) => t.length > 2 && t.length < 60));
+  check('no persona biography, no hype, no claims',
+    all.every((t) => !/\bI\b|\bmy\b|amazing|incredible|hours? saved|saved you/i.test(t)));
 }
 
 console.log(`\nstudioVoice.verify: ${passed} passed, ${failed} failed`);

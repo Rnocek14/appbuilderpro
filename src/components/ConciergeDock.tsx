@@ -924,7 +924,7 @@ export function ConciergeDock() {
         onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); setOpen(true); } }}
         aria-label="Open the concierge — say what you want to do (drag to move it)"
         style={posStyle}
-        className="fixed bottom-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105">
+        className="fixed bottom-4 right-4 z-[80] flex h-11 w-11 items-center justify-center rounded-full border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105">
         <MessageCircle size={19} />
       </button>
     );
@@ -938,7 +938,9 @@ export function ConciergeDock() {
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={() => setDropping(false)}
       onDrop={(e) => { e.preventDefault(); setDropping(false); void handleFiles(e.dataTransfer.files); }}
-      className={cn('fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
+      // z-[80]: ABOVE the studio sheets (Overlay z=70), below toasts (z-100). The concierge is
+      // the control — a scrim must never dim it or eat its clicks while it is driving the sheet.
+      className={cn('fixed bottom-4 right-4 z-[80] w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
         dropping && 'border-forge-ember/70 ring-2 ring-forge-ember/40')}>
       <div className="flex items-center gap-2">
         <button onPointerDown={startDrag} onDoubleClick={redock}
@@ -947,7 +949,7 @@ export function ConciergeDock() {
           className="-ml-1 cursor-grab touch-none rounded p-0.5 text-forge-dim hover:text-forge-ink active:cursor-grabbing">
           <GripVertical size={13} />
         </button>
-        <Sparkles size={14} className="text-forge-ember" />
+        <Sparkles size={14} className={cn('text-forge-ember', busy && 'ff-breathe')} />
         <p className="text-xs font-semibold text-forge-ink">Say what you want to do</p>
         {/* Always shown: the ElevenLabs seam carries the voice; speechSynthesis is only the fallback. */}
         <button onClick={toggleVoice} aria-label={voiceOn ? 'Turn voice replies off' : 'Turn voice replies on'}
@@ -970,13 +972,13 @@ export function ConciergeDock() {
           screen and survive the walk to another page. Bounded height keeps the doctrine (work
           first, chrome collapsed) — the full record lives on the command page. */}
       {showsScrollback(scrollback.length, defer) && (
-        <div ref={scrollRef} className="mt-2 max-h-36 space-y-1.5 overflow-y-auto pr-0.5">
+        <div ref={scrollRef} className="mt-2 max-h-44 space-y-1.5 overflow-y-auto pr-0.5">
           {scrollback.map((t) => (
             <p key={t.id}
-              className={cn('whitespace-pre-line text-[11px] leading-snug',
+              className={cn('ff-turn whitespace-pre-line rounded-2xl px-2.5 py-1.5 text-[11px] leading-snug',
                 t.role === 'user'
-                  ? 'border-l-2 border-forge-ember/40 pl-2 text-forge-ink'
-                  : 'text-forge-dim')}>
+                  ? 'ml-auto w-fit max-w-[85%] rounded-br-sm bg-forge-ember/15 text-forge-ink'
+                  : 'mr-auto w-fit max-w-[92%] rounded-bl-sm border border-forge-border/60 bg-forge-bg/70 text-forge-ink/90')}>
               {t.text}
             </p>
           ))}
@@ -1008,7 +1010,7 @@ export function ConciergeDock() {
           className="rounded-lg border border-forge-ember/50 px-2.5 text-forge-ember hover:bg-forge-ember/10 disabled:opacity-50"><ArrowRight size={14} /></button>
       </div>
 
-      {note && <p className="mt-2 whitespace-pre-line text-[11px] text-forge-dim">{note}</p>}
+      {note && <p className={cn('ff-turn mt-2 whitespace-pre-line text-[11px] text-forge-dim', busy && 'ff-shimmer')}>{note}</p>}
 
       {/* THE BRIEFING — Garvis speaks first: the state of the operation on the first open of
           the day, or whenever asked ("good morning", "status report"). Real rows only. */}

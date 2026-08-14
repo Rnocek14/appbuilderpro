@@ -23,7 +23,7 @@ import {
 } from '../../lib/garvis/reelStudio';
 import type { StudioCtx } from '../../lib/garvis/studioKit';
 import { registerSurface } from '../../lib/garvis/surfaceBridge';
-import { parseReelAsk } from '../../lib/garvis/studioVoice';
+import { confirmLine, parseReelAsk } from '../../lib/garvis/studioVoice';
 import { createArtifact } from '../../lib/garvis/artifacts';
 import { loadWeb } from '../../lib/garvis/workwebRun';
 import { Button } from '../ui';
@@ -99,7 +99,7 @@ export function ReelStudio({ worldId, clusterId, onToast, onSaved, ctxOverride }
         return `Angles on \u201c${ask.topic}\u201d are up \u2014 pick one and I script it beat by beat.`;
       }
       if (!v.format) return 'Pick a format first \u2014 then I can pull angles.';
-      if (ask.kind === 'more') { setIdeaVariant(v.ideaVariant + 1); setStage('ideate'); return 'Fresh angles.'; }
+      if (ask.kind === 'more') { setIdeaVariant(v.ideaVariant + 1); setStage('ideate'); return confirmLine('ideas', cmd.text); }
       const list = reelIdeas(v.format.id, v.topic, v.ideaVariant);
       const chosen = list[ask.index];
       if (!chosen) return `Only ${list.length} idea${list.length === 1 ? ' is' : 's are'} up \u2014 pick one of those.`;
