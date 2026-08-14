@@ -18,7 +18,6 @@ const Garvis = lazy(() => import('./pages/Garvis'));
 const Marketing = lazy(() => import('./pages/Marketing'));
 const Missions = lazy(() => import('./pages/Missions'));
 const Command = lazy(() => import('./pages/Command'));
-const Mind = lazy(() => import('./pages/Mind'));
 const Memory = lazy(() => import('./pages/Memory'));
 const Opportunities = lazy(() => import('./pages/Opportunities'));
 const MissionControl = lazy(() => import('./pages/MissionControl'));
@@ -32,7 +31,6 @@ const Pricing = lazy(() => import('./pages/Pricing'));
 const Billing = lazy(() => import('./pages/Billing'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const ClusterSpike = lazy(() => import('./pages/spike/ClusterSpike'));
-const Brain = lazy(() => import('./pages/Brain'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const WinClients = lazy(() => import('./pages/WinClients'));
 const Automations = lazy(() => import('./pages/Automations'));
@@ -114,12 +112,14 @@ function AppRoutes() {
           <Route path="/garvis/command" element={<Protected><Command /></Protected>} />
           {/* ONE MEMORY (design review P2): the nav door; the old rooms stay routable below. */}
           <Route path="/garvis/memory" element={<Protected><Memory /></Protected>} />
-          <Route path="/garvis/mind" element={<Protected><Mind /></Protected>} />
+          {/* Knowledge doors closed honestly (SW2.7): Memory mounts both halves, so the old
+              standalone rooms become redirects — zero lost URLs, two fewer page shells. */}
+          <Route path="/garvis/mind" element={<Navigate to="/garvis/memory?tab=mind" replace />} />
           <Route path="/garvis/control" element={<Protected><MissionControl /></Protected>} />
           <Route path="/garvis/marketing" element={<Protected><Marketing /></Protected>} />
           <Route path="/garvis/missions" element={<Protected><Missions /></Protected>} />
           <Route path="/garvis/opportunities" element={<Protected><Opportunities /></Protected>} />
-          <Route path="/garvis/brain" element={<Protected><Brain /></Protected>} />
+          <Route path="/garvis/brain" element={<Navigate to="/garvis/memory" replace />} />
           {/* ONE QUEUE (design review P0): the three triage rooms merged. Old doors redirect —
               every deep link, toast, and waking move keeps working (merge and relocate). */}
           <Route path="/garvis/queue" element={<Protected><Queue /></Protected>} />

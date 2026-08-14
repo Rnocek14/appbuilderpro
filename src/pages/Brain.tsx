@@ -343,10 +343,5 @@ export function BrainContent() {
   );
 }
 
-export default function Brain() {
-  return (
-    <AppShell>
-      <BrainContent />
-    </AppShell>
-  );
-}
+// The standalone page shell is gone (SW2.7): /garvis/mind and /garvis/brain redirect into
+// Memory, which mounts this content as a tab. Merge and relocate, never amputate.
