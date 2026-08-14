@@ -61,6 +61,24 @@ export function modelForPlan(plan: string | null | undefined): { provider: AIPro
   return { provider: cfg.provider, model: Deno.env.get('AI_FREE_MODEL') ?? cheapest[cfg.provider] ?? cfg.model };
 }
 
+/** The BRAIN tier (best-in-class plan SW2.4): judgment-path calls — the deep concierge brain,
+ *  cluster synthesis — may run a stronger model than the bulk default, set via the
+ *  AI_BRAIN_MODEL secret. Unset = byte-identical to modelForPlan, so this seam costs nothing
+ *  until the operator opts in. Free plans keep the cheap tier regardless (the upgrade is paid
+ *  judgment, not free-tier burn), and every call stays behind checkCredits/spendCredits — the
+ *  app_0127 kill switch and dollar caps bound whatever model this resolves. */
+export function brainModelForPlan(plan: string | null | undefined): { provider: AIProvider; model: string } {
+  const base = modelForPlan(plan);
+  if (plan !== 'pro' && plan !== 'starter') return base;
+  const brain = Deno.env.get('AI_BRAIN_MODEL')?.trim();
+  if (!brain) return base;
+  // Same provider-compatibility guard the premium seam uses: a mismatched override is ignored
+  // loudly rather than sent to the wrong API.
+  const compatible = base.provider === 'anthropic' ? /^claude/i.test(brain) : !/^claude/i.test(brain);
+  if (!compatible) { console.warn(`AI_BRAIN_MODEL ${brain} incompatible with provider ${base.provider} — ignored`); return base; }
+  return { provider: base.provider, model: brain };
+}
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {

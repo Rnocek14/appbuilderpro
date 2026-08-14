@@ -15,7 +15,7 @@
 // The runtime assigns tool-call ids and records cost; we just return the shape + costUsd.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { complete, corsHeaders, parseJson, modelForPlan, type AIMessage } from '../_shared/ai.ts';
+import { complete, corsHeaders, parseJson, brainModelForPlan, type AIMessage } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 
 type Mode = 'observe' | 'plan' | 'act';
@@ -163,7 +163,8 @@ Deno.serve(async (req) => {
     if (e instanceof InsufficientCreditsError) return json({ error: e.message }, 402);
     throw e;
   }
-  const m = modelForPlan(await getUserPlan(admin, user.id));
+  // Judgment path: the brain tier (AI_BRAIN_MODEL) when configured, the plan default when not.
+  const m = brainModelForPlan(await getUserPlan(admin, user.id));
 
   let body: BrainRequest;
   try {
