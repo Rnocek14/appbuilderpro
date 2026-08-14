@@ -181,6 +181,16 @@ export const HEARTBEAT_CARDS: Record<(typeof EXPECTED_JOBS)[number], AutomationC
     sop: ['Fetch listings changed since the last sync', 'Update the local market data', 'Record the sync result'],
     killSwitch: 'System health → Master switch', doneBy: 'mls-sync',
   },
+  'garvis-embed-sweep': {
+    id: 'garvis-embed-sweep', name: 'Overnight connection sweep', when: 'Every night',
+    does: 'Indexes any knowledge that has no vector yet and files a note when two pieces of your material are genuinely related.',
+    replaces: 'Manually re-reading old material to spot what connects.',
+    rung: 'runs',
+    human: 'Connections land as suggestions on the shelf; linking them stays yours.',
+    never: 'Never sends or posts anything — similarity is measured or the connection is not filed.',
+    sop: ['Find material with no vector', 'Index it into the vector brain', 'Compare against what exists; file only strong matches'],
+    killSwitch: 'System health → Master switch', doneBy: 'embed-sweep',
+  },
 };
 
 // ---------------------------------------------------------------------------
