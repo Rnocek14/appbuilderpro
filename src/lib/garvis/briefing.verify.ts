@@ -84,5 +84,14 @@ const base: BriefingFacts = {
   check('no persona language, no hours-saved claims', !/\bi am\b|\bmy name\b|hours? saved|saved you/i.test(all));
 }
 
+// ---- MORE WAYS THE OPERATOR ASKS (full-stack gauntlet) — these were paying for a model call ----
+{
+  check('"hows everything looking" is a briefing ask', isBriefingAsk('hows everything looking'));
+  check('"hows things going" is a briefing ask', isBriefingAsk('hows things going'));
+  check('"whered we leave off" is a briefing ask', isBriefingAsk('whered we leave off'));
+  check('"where did we leave off" is a briefing ask', isBriefingAsk('where did we leave off'));
+  check('a real ask is NOT eaten by the door', !isBriefingAsk('hows the postcard looking'));
+}
+
 console.log(`\nbriefing.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} briefing check(s) failed`);

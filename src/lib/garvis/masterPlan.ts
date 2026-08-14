@@ -44,6 +44,9 @@ export function marketSubject(sentence: string): string | null {
 
 const presenceWorld = (s: string): string | null => {
   const world = (/\bkeep\s+(.+?)(?:'s|s')?\s+(?:socials?|social media|instagram|presence)\s+(?:active|alive|going|fresh|warm)/i.exec(s)?.[1]
+    // "keep money facts posting every week" — the same standing job said the way it is actually
+    // said, without the word 'socials' in it.
+    ?? /\bkeep\s+(.+?)(?:'s|s')?\s+(?:posting|publishing|putting out)\b/i.exec(s)?.[1]
     ?? /\b(?:weekly|regular)\s+(?:content|posts)\s+for\s+(.+?)(?=\s+(?:and|so|then)\b|[.,;!?]|$)/i.exec(s)?.[1])?.trim();
   return world && world.length >= 2 && world.length <= 40 ? world : null;
 };
@@ -53,7 +56,7 @@ const clientNiche = (s: string): string | null =>
     ?? /\b(?:find|get|land|win|book)\s+(?:me\s+)?(?:more\s+|some\s+|new\s+)?([a-z][\w\s-]{2,30}?)\s+clients\b/i.exec(s)?.[1])?.trim() ?? null;
 
 const huntFocus = (s: string): string | null => {
-  const focus = /\b(?:find|hunt(?:\s+for)?|look for)\s+(?:all\s+|me\s+|some\s+)?(.+?\b(?:jobs|gigs|commissions|rfps|grants|open calls)\b)/i.exec(s)?.[1]?.trim();
+  const focus = /\b(?:find|hunt(?:\s+for)?|look for)\s+(?:all\s+|me\s+|some\s+|every\s+|any\s+)?(.+?\b(?:jobs?|gigs?|commissions?|rfps?|grants?|open calls?)\b)/i.exec(s)?.[1]?.trim();
   return focus && focus.length >= 8 && focus.length <= 60 ? focus : null;
 };
 
