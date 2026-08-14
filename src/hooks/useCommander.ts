@@ -15,6 +15,8 @@ import { useMind } from './useMind';
 import { goalsDigest } from '../lib/garvis/goalsRun';
 import { retrieveForPrompt } from '../lib/garvis/ask';
 import { assembleSituation } from '../lib/garvis/situationRun';
+import { THREAD_WINDOW, unseenTurns } from '../lib/garvis/thread';
+import { THREAD_EVENT, appendThread, loadThread } from '../lib/garvis/threadRun';
 import { runGarvisAct } from '../lib/garvis';
 import { patchWorkingState, loadWorkingState, clearCanvasIfMatches } from '../lib/garvis/workingStateRun';
 
@@ -27,7 +29,6 @@ export interface ChatMessage {
   action?: { label: string; to: string };
 }
 
-const THREAD_WINDOW = 40; // recent turns loaded on mount; the full record stays in the DB
 
 /** SUMMONED CANVAS (UX redesign, architectural tier): what Garvis opened beside the thread —
  *  a studio pre-loaded with a venture's materials, or the exploration galaxy mid-dive. */
@@ -110,31 +111,31 @@ export function useCommander() {
   }, []);
   const navigate = useNavigate();
 
-  // The thread survives refresh: load the recent transcript once (fail-soft — an empty thread
-  // renders the same first-run experience as before).
+  // ONE CONVERSATION: this transcript and the corner concierge's are the same rows, read and
+  // written through the same module (threadRun). Loading once on mount is unchanged; the
+  // THREAD_EVENT listener is what makes a line said in the corner appear here without a refresh.
+  // The catch-up is strictly ADDITIVE — turns already on screen are never rewritten, so a
+  // message's mission link or tappable next step survives.
   useEffect(() => {
     let live = true;
-    void supabase.from('command_messages')
-      .select('id, role, text, mission_id, created_at')
-      .order('created_at', { ascending: false }).limit(THREAD_WINDOW)
-      .then(({ data }) => {
-        if (!live || !data?.length) return;
-        setMessages((prev) => prev.length ? prev : (data as { id: string; role: 'user' | 'garvis'; text: string; mission_id: string | null }[])
-          .reverse()
-          .map((m) => ({ id: m.id, role: m.role, text: m.text, missionId: m.mission_id ?? undefined })));
+    const catchUp = () => {
+      void loadThread(THREAD_WINDOW).then((turns) => {
+        if (!live || !turns.length) return;
+        setMessages((prev) => {
+          if (!prev.length) return turns.map((t) => ({ id: t.id, role: t.role, text: t.text }));
+          const fresh = unseenTurns(turns, prev.map((m) => ({ role: m.role, text: m.text })));
+          return fresh.length ? [...prev, ...fresh.map((t) => ({ id: t.id, role: t.role, text: t.text }))] : prev;
+        });
       });
-    return () => { live = false; };
+    };
+    catchUp();
+    window.addEventListener(THREAD_EVENT, catchUp);
+    return () => { live = false; window.removeEventListener(THREAD_EVENT, catchUp); };
   }, []);
 
   const persist = (m: Omit<ChatMessage, 'id'>) => {
     // Fire-and-forget: a lost row must never break the conversation.
-    void supabase.auth.getUser().then(({ data }) => {
-      const uid = data.user?.id;
-      if (!uid) return;
-      return supabase.from('command_messages').insert({
-        owner_id: uid, role: m.role, text: m.text, mission_id: m.missionId ?? null,
-      });
-    }).then(() => {}, () => {});
+    void appendThread(m.role, m.text, m.missionId ?? null);
   };
 
   const push = (m: Omit<ChatMessage, 'id'>) => {

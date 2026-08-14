@@ -19,6 +19,8 @@ import { composeBriefing, isBriefingAsk, type Briefing } from '../lib/garvis/bri
 import { applyFollowupAsk, parseFollowupAsk, type AskMemory } from '../lib/garvis/conversationMemory';
 import { matchPlanShape } from '../lib/garvis/masterPlan';
 import { STUDIO_AREA, matchWorldTitle, type DockAction } from '../lib/garvis/dockBrain';
+import { appendTurn, dockScrollback, mergeThread, recentForBrain, worthKeeping, type ThreadTurn } from '../lib/garvis/thread';
+import { THREAD_EVENT, appendThread, loadThread } from '../lib/garvis/threadRun';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
@@ -36,9 +38,6 @@ export const GENESIS_PREFILL_KEY = 'ff:genesis-intent';
  *  Read once and clear — a stale sentence must never prefill a later visit. */
 export const HANDOFF_KEY = 'ff:concierge-handoff';
 const MEM_KEY = 'ff:concierge-memory';
-/** The recent turns the deep brain sees. Session-scoped; six is plenty for "what about that?". */
-const TURNS_KEY = 'ff:concierge-turns';
-const TURN_WINDOW = 6;
 
 export interface ConciergeHandoff { taskId: string; sentence: string }
 
@@ -140,16 +139,31 @@ export function ConciergeDock() {
     askMemRef.current = mem;
     try { sessionStorage.setItem(MEM_KEY, JSON.stringify(mem)); } catch { /* session-only */ }
   };
-  // THE DEEP BRAIN'S SHORT MEMORY — the recent back-and-forth it gets to see, so "what about the
-  // other one?" means something. Session-persisted for the same reason as the ask memory: the
-  // dock remounts on every navigation. Only the AI tier writes here; the instant tiers cost
-  // nothing and need no thread.
-  const turnsRef = useRef<{ role: 'user' | 'garvis'; text: string }[]>(((): { role: 'user' | 'garvis'; text: string }[] => {
-    try { return JSON.parse(sessionStorage.getItem(TURNS_KEY) ?? '[]') as { role: 'user' | 'garvis'; text: string }[]; } catch { return []; }
-  })());
-  const rememberTurn = (role: 'user' | 'garvis', text: string) => {
-    turnsRef.current = [...turnsRef.current, { role, text }].slice(-TURN_WINDOW);
-    try { sessionStorage.setItem(TURNS_KEY, JSON.stringify(turnsRef.current)); } catch { /* session-only */ }
+  // ONE CONVERSATION — the corner and the command page are the same transcript now
+  // (command_messages, via threadRun). The dock renders its tail as scrollback, hands its recent
+  // turns to the deep brain as history, and appends what was actually said. Status lines
+  // ("Thinking…") stay live-only; worthKeeping decides.
+  const [thread, setThread] = useState<ThreadTurn[]>([]);
+  const threadRef = useRef<ThreadTurn[]>([]);
+  threadRef.current = thread;
+  /** Our own writes echo back as THREAD_EVENT; skip that many refreshes so we don't re-query. */
+  const selfWrites = useRef(0);
+  const recordTurn = (role: 'user' | 'garvis', text: string) => {
+    const t: ThreadTurn = { id: crypto.randomUUID(), role, text };
+    const next = appendTurn(threadRef.current, t);
+    if (next === threadRef.current) return;   // the same line twice running is one line
+    threadRef.current = next;
+    setThread(next);
+    selfWrites.current += 1;
+    void appendThread(role, text);
+  };
+  /**
+   * Say something to the operator. A real answer joins the conversation (and clears the status
+   * line, which the scrollback now carries); live status stays a status line and is forgotten.
+   */
+  const tell = (text: string | null) => {
+    if (text && worthKeeping(text)) { setNote(null); recordTurn('garvis', text); return; }
+    setNote(text);
   };
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) === '1');
@@ -243,6 +257,33 @@ export function ConciergeDock() {
   useEffect(() => {
     try { sessionStorage.setItem(TASK_KEY, JSON.stringify(guide)); } catch { /* session-only */ }
   }, [guide]);
+  // The conversation reads bottom-up like every chat: newest line in view, no scrolling to find it.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [thread]);
+
+  // THE CONVERSATION LOADS. Same rows the command page reads, so the corner opens knowing what
+  // was already said — including what was said on the other surface. THREAD_EVENT catches lines
+  // written elsewhere while the dock is up; our own writes are skipped (we already have them).
+  useEffect(() => {
+    if (!open) return;
+    let dead = false;
+    const pull = () => {
+      if (selfWrites.current > 0) { selfWrites.current -= 1; return; }
+      void loadThread().then((remote) => {
+        if (dead || !remote.length) return;
+        const merged = mergeThread(remote, threadRef.current);
+        threadRef.current = merged;
+        setThread(merged);
+      });
+    };
+    pull();
+    window.addEventListener(THREAD_EVENT, pull);
+    return () => { dead = true; window.removeEventListener(THREAD_EVENT, pull); };
+  }, [open]);
+
   // Zero-input value: the dock opens knowing the ONE number that matters — approvals waiting.
   // A failed count hides the line (honest silence), never a fake zero.
   useEffect(() => {
@@ -373,6 +414,9 @@ export function ConciergeDock() {
     if (sentence) { try { sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: task.id, sentence })); window.dispatchEvent(new Event('ff:concierge-handoff')); } catch { /* fine */ } }
     startGuide(task);
     const missing = missingWorld ? `That business doesn't exist yet — pick or create it here, then say it again.` : null;
+    // The record shows where the ask actually went. The note itself stays a note because it has
+    // to survive the navigation that follows (sessionStorage), which a thread line does not.
+    recordTurn('garvis', missing ?? `Opening ${task.label}.`);
     setNote(missing);
     if (missing) { try { sessionStorage.setItem('ff:concierge-note', missing); } catch { /* fine */ } }
     // The Explore bridge: "explore lakefront resort branding" FALLS INTO a galaxy of the topic
@@ -411,23 +455,20 @@ export function ConciergeDock() {
    */
   const runDockAction = async (a: DockAction, sentence: string, worlds: ConciergeWorld[]): Promise<boolean> => {
     if (a.kind === 'say') {
-      rememberTurn('garvis', a.text);
-      setNote(a.text);
+      tell(a.text);
       speak(a.text);
       return true;
     }
     // WORK — the model chose a verb, so the plan gets compiled and shown; the operator still
     // presses Run. Nothing consequential fires from the corner on a model's say-so.
     if (a.kind === 'compile') {
-      rememberTurn('garvis', a.note);
-      setNote(a.note);
+      tell(a.note);
       await doIt(a.sentence || sentence);
       return true;
     }
     if (a.kind === 'goto') {
-      rememberTurn('garvis', a.note);
       rememberAsk(sentence);
-      setNote(a.note);
+      tell(a.note);
       navigate(a.to);
       return true;
     }
@@ -439,9 +480,8 @@ export function ConciergeDock() {
     const world = title ? worlds.find((w) => w.title === title) : null;
     const slug = STUDIO_AREA[a.surface];
     if (!world || !world.slugs.includes(slug)) return false;
-    rememberTurn('garvis', a.note);
     rememberAsk(sentence);
-    setNote(a.note);
+    tell(a.note);
     // The operator's words ride along, exactly as act() sends them, so the studio opens on topic.
     try {
       sessionStorage.setItem(HANDOFF_KEY, JSON.stringify({ taskId: `area:${world.id}:${slug}`, sentence }));
@@ -462,7 +502,6 @@ export function ConciergeDock() {
       // summary that auto-refreshes when the code changes. Fail-soft: no digest just means the
       // brain answers the way it always did.
       const projectId = projectInScope(sentence);
-      rememberTurn('user', sentence);
 
       // TIER 2a — THE ROUTER, unchanged. Picking a door is a routing decision, not a
       // conversation: this tier knows every task in the dock by id, its pick is validated
@@ -507,7 +546,7 @@ export function ConciergeDock() {
       const deep = await import('../lib/garvis/dockBrainRun')
         .then((m) => m.askCommander({
           sentence,
-          history: turnsRef.current.slice(0, -1),
+          history: recentForBrain(threadRef.current),
           worlds: worlds.map((w) => ({ title: w.title })),
           projectId,
         }))
@@ -516,8 +555,7 @@ export function ConciergeDock() {
 
       // Neither brain could be reached: say the honest thing, never a fabricated answer.
       const ans = routerAnswer ?? FALLBACK;
-      rememberTurn('garvis', ans);
-      setNote(ans);
+      tell(ans);
       speak(ans);
     } catch {
       setNote(FALLBACK);
@@ -574,7 +612,7 @@ export function ConciergeDock() {
       const { compileIntent } = await import('../lib/garvis/orchestratorRun');
       const { plan, problems, warnings } = await compileIntent(sentence);
       if (!plan) {
-        setNote(problems[0] ?? "I couldn't compile that — Orchestrate has the full composer.");
+        tell(problems[0] ?? "I couldn't compile that — Orchestrate has the full composer.");
         return;
       }
       setNote(null);
@@ -582,7 +620,7 @@ export function ConciergeDock() {
       rememberAsk(sentence);
       speak(`Plan ready: ${plan.summary}`);
     } catch (e) {
-      setNote(e instanceof Error && /key|credit/i.test(e.message)
+      tell(e instanceof Error && /key|credit/i.test(e.message)
         ? e.message
         : "The compiler isn't reachable — is an AI key set? Orchestrate shows the same composer with setup notes.");
     } finally {
@@ -632,9 +670,12 @@ export function ConciergeDock() {
   };
   // The tier walk, separated from the input box so the mic's hands-free path can submit a
   // finished utterance directly (the box may already be cleared by then).
-  const submitText = async (raw: string) => {
+  const submitText = async (raw: string, opts: { echo?: boolean } = {}) => {
     if (!raw || busy) return;
     setPendingCreate(null);
+    // The operator's words join the conversation once — the follow-up path re-enters with the
+    // resolved sentence and passes echo:false, so "again" is recorded as said, not as two asks.
+    if (opts.echo !== false) recordTurn('user', raw);
     // A plan is on screen and the operator is correcting it → revise THAT plan, don't start over.
     if (doState && !doState.statuses && isRevision(raw)) {
       const prev = doState;
@@ -667,12 +708,12 @@ export function ConciergeDock() {
       const resolved = applyFollowupAsk(fu, askMemRef.current);
       if (resolved) {
         setNote(fu.kind === 'again' ? 'Running it again.' : `Same play — now for ${fu.target}.`);
-        await submitText(resolved);
+        await submitText(resolved, { echo: false });
         return;
       }
       setSuggestions([]);
       setCompound(false);
-      setNote(fu.kind === 'again'
+      tell(fu.kind === 'again'
         ? "Nothing to repeat yet — say the whole thing once and I'll remember it."
         : "I don't know what to swap yet — say the whole ask once and I'll remember its shape.");
       inputRef.current?.focus();
@@ -690,7 +731,7 @@ export function ConciergeDock() {
     if (surfaceNote) {
       setSuggestions([]);
       setCompound(false);
-      setNote(surfaceNote);
+      tell(surfaceNote);
       speak(surfaceNote);
       inputRef.current?.focus();
       return;
@@ -699,7 +740,7 @@ export function ConciergeDock() {
     if (isGoBack(text)) {
       setSuggestions([]);
       setCompound(false);
-      setNote('Back you go.');
+      tell('Back you go.');
       navigate(-1);
       return;
     }
@@ -719,7 +760,7 @@ export function ConciergeDock() {
         setNote(null);
         speak(b.headline);
       } catch {
-        setNote('Could not read the state right now — the Queue and Missions pages have the live view.');
+        tell('Could not read the state right now — the Queue and Missions pages have the live view.');
       } finally {
         setBusy(false);
         inputRef.current?.focus();
@@ -734,7 +775,7 @@ export function ConciergeDock() {
       // A halt points at the real levers — the Queue chip is one tap.
       const queueTask = chat.kind === 'halt' ? tasksRef.current.find((t) => t.id === 'approvals') : null;
       setSuggestions(queueTask ? [queueTask] : []);
-      setNote(chat.text);
+      tell(chat.text);
       speak(chat.text);
       inputRef.current?.focus();
       return;
@@ -747,7 +788,7 @@ export function ConciergeDock() {
       const a = await answerStat(stat);
       setBusy(false);
       setSuggestions([]);
-      setNote(a.text);
+      tell(a.text);
       // Raw-route match only — a world task's missing-world fallback must never steal the chip.
       if (a.link) { const t = ALL_CONCIERGE_TASKS.find((x) => x.route === a.link); if (t) setSuggestions([t]); }
       speak(a.text);
@@ -844,6 +885,7 @@ export function ConciergeDock() {
   }
 
   const moves = rankMoves(surfaceSuggestions(), tapsRef.current);
+  const scrollback = dockScrollback(thread);
 
   return (
     <div ref={(el) => { rootRef.current = el; }} style={posStyle}
@@ -875,6 +917,24 @@ export function ConciergeDock() {
           className="mt-1.5 w-full rounded-lg border border-forge-border bg-forge-bg/60 px-2.5 py-1 text-left text-[11px] text-forge-dim hover:border-forge-ember/40 hover:text-forge-ink">
           {pendingCount} approval{pendingCount === 1 ? '' : 's'} waiting on you — tap to review
         </button>
+      )}
+
+      {/* THE CONVERSATION — the same transcript the command page shows, tailed. The corner is a
+          chat box now, not a one-line ticker: what you asked and what Garvis answered stay on
+          screen and survive the walk to another page. Bounded height keeps the doctrine (work
+          first, chrome collapsed) — the full record lives on the command page. */}
+      {scrollback.length > 0 && (
+        <div ref={scrollRef} className="mt-2 max-h-36 space-y-1.5 overflow-y-auto pr-0.5">
+          {scrollback.map((t) => (
+            <p key={t.id}
+              className={cn('whitespace-pre-line text-[11px] leading-snug',
+                t.role === 'user'
+                  ? 'border-l-2 border-forge-ember/40 pl-2 text-forge-ink'
+                  : 'text-forge-dim')}>
+              {t.text}
+            </p>
+          ))}
+        </div>
       )}
 
       <div className="mt-2 flex gap-1.5">
