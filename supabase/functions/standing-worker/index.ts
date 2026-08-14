@@ -26,6 +26,7 @@ import { safeFetch } from '../_shared/safeFetch.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, breakerTrips, ORDER_BREAKER_LIMIT, type WatchResult } from '../_shared/standingCore.ts';
 import { expiresAtFor } from '../_shared/approvalTtl.ts';
+import { quarantineExternal, quarantineNote } from '../_shared/untrustedText.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
 import { sendBookingNotice } from '../_shared/bookingNotify.ts';
@@ -992,10 +993,15 @@ Deno.serve(async (req) => {
           }
 
           // 3. EXTRACT — one batched, credit-metered call bound to the fetched-URL allowlist.
+          let quarantineFlags: string[] = [];
           if (pages.length) {
             await checkCredits(admin, order.owner_id, 'discover');
             const m = modelForPlan(await getUserPlan(admin, order.owner_id));
-            const blocks = pages.map((p, i) => `PAGE ${i + 1} · ${p.url}\n${p.text}`).join('\n\n');
+            // INJECTION QUARANTINE (SW4.2): fetched pages are hostile-by-default — neutralize
+            // instruction-shaped lines and fence the lot; a flag surfaces on the result line.
+            const quarantined = pages.map((p) => ({ url: p.url, q: quarantineExternal(p.text) }));
+            quarantineFlags = [...new Set(quarantined.flatMap((x) => x.q.reasons))];
+            const blocks = quarantined.map((x, i) => `PAGE ${i + 1} · ${x.url}\n${x.q.text}`).join('\n\n');
             const result = await complete([
               { role: 'system', content: EXTRACT_SYSTEM },
               { role: 'user', content: `${blocks}\n\nExtract the real opportunities now (strict JSON array):` },
@@ -1019,6 +1025,9 @@ Deno.serve(async (req) => {
           }
           line = huntLine(focus, searched, pages.length, found, thin);
           if (rendered > 0) line += ` (${rendered} JS-rendered page${rendered === 1 ? '' : 's'} read via the rendered fetch)`;
+          // Never silent: a quarantine hit is stated on the order's own line (recall stays —
+          // flagged pages are still READ as data; only their instruction-shaped lines are gone).
+          if (quarantineFlags.length) line += ` ${quarantineNote({ text: '', flagged: true, reasons: quarantineFlags })}.`;
         }
 
         ran++;

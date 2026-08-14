@@ -21,6 +21,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, getProviderConfig } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { quarantineExternal } from '../_shared/untrustedText.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 
@@ -97,7 +98,9 @@ Deno.serve(async (req) => {
       const log = evs.map((e) => `[${e.event_type}/${e.source}] ${(e.subject ?? '').slice(0, 160)}`).join('\n');
       const res = await complete([
         { role: 'system', content: SYSTEM },
-        { role: 'user', content: `EVENT LOG (newest first, ${evs.length} events):\n${log}\n\nCandidate lessons (strict JSON array):` },
+        // The log's subjects include EXTERNAL text (inbound reply subjects, watched-page
+        // excerpts) — quarantined before it can steer the lesson-writer (SW4.2).
+        { role: 'user', content: `EVENT LOG (newest first, ${evs.length} events):\n${quarantineExternal(log, 16_000).text}\n\nCandidate lessons (strict JSON array):` },
       ], { maxTokens: 1200 });
       // audit 12 §1.2 (unmetered call sites): record the real cost right where usage is known —
       // fail-soft (spendCredits never throws), so a ledger hiccup never drops the proposals.

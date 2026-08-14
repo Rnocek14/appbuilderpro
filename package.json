@@ -72,6 +72,7 @@
     "verify:approvalttl": "tsx src/lib/garvis/approvalTtl.verify.ts",
     "verify:verification": "tsx src/lib/verification.verify.ts",
     "verify:renderprobe": "tsx src/lib/renderProbe.verify.ts",
+    "verify:untrustedtext": "tsx src/lib/garvis/untrustedText.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",
