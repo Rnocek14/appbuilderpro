@@ -20,8 +20,9 @@ import { applyFollowupAsk, parseFollowupAsk, type AskMemory } from '../lib/garvi
 import { matchPlanShape } from '../lib/garvis/masterPlan';
 import { STUDIO_AREA, matchWorldTitle, type DockAction } from '../lib/garvis/dockBrain';
 import { appendTurn, dockScrollback, mergeThread, recentForBrain, worthKeeping, type ThreadTurn } from '../lib/garvis/thread';
-import { THREAD_EVENT, appendThread, loadThread } from '../lib/garvis/threadRun';
+import { THREAD_EVENT, appendThread, broadcastTurn, loadThread } from '../lib/garvis/threadRun';
 import { lookDue, markLooked } from '../lib/garvis/proactiveRun';
+import { dockDeference, opensOnArrival, showsScrollback } from '../lib/garvis/dockPresence';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
@@ -108,7 +109,18 @@ interface DoState {
 
 export function ConciergeDock() {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(() => sessionStorage.getItem(OPEN_KEY) === '1');
+  // WHERE THE DOCK IS A GUEST. Two surfaces already have a conversation: the command page shows
+  // this very transcript, and a project workspace has the builder chat. The dock stays available
+  // on both and stops competing — no second copy of the same conversation, and no second chat box
+  // landing on top of the builder's controls. Computed per mount; AppShell remounts per page.
+  const defer = dockDeference(window.location.pathname);
+  const [open, setOpen] = useState(() => {
+    // A guide in flight means the dock ROUTED the operator here and is mid-walkthrough — it
+    // stays open to finish it, even on a page it would otherwise defer to.
+    let escorting = false;
+    try { escorting = !!sessionStorage.getItem(TASK_KEY) && sessionStorage.getItem(TASK_KEY) !== 'null'; } catch { /* fine */ }
+    return opensOnArrival(sessionStorage.getItem(OPEN_KEY) === '1', defer, escorting);
+  });
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   // A note written just before a navigation (the missing-world explanation) must survive the
@@ -156,7 +168,14 @@ export function ConciergeDock() {
     threadRef.current = next;
     setThread(next);
     selfWrites.current += 1;
-    void appendThread(role, text);
+    // A surface rendering this conversation on the dock's behalf (Home) shows the line NOW,
+    // rather than after the row lands — otherwise a corner ask looks like it went nowhere.
+    broadcastTurn(role, text);
+    // And where the dock shows no scrollback, that surface is the ONLY place the line appears —
+    // so if the record refuses it outright, say it here instead of losing it.
+    void appendThread(role, text).then((landed) => {
+      if (!landed && role === 'garvis' && !showsScrollback(1, defer)) setNote(text);
+    });
   };
   /**
    * Say something to the operator. A real answer joins the conversation (and clears the status
@@ -950,7 +969,7 @@ export function ConciergeDock() {
           chat box now, not a one-line ticker: what you asked and what Garvis answered stay on
           screen and survive the walk to another page. Bounded height keeps the doctrine (work
           first, chrome collapsed) — the full record lives on the command page. */}
-      {scrollback.length > 0 && (
+      {showsScrollback(scrollback.length, defer) && (
         <div ref={scrollRef} className="mt-2 max-h-36 space-y-1.5 overflow-y-auto pr-0.5">
           {scrollback.map((t) => (
             <p key={t.id}

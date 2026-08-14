@@ -11,8 +11,25 @@
 import { supabase } from '../supabase';
 import { THREAD_WINDOW, type ThreadTurn } from './thread';
 
-/** Fired after a turn is written, so a surface mounted alongside can pick it up immediately. */
+/** Fired after a turn is written, so a surface mounted alongside can re-read the record. */
 export const THREAD_EVENT = 'ff:thread';
+/**
+ * Fired the INSTANT a turn is said, carrying the turn itself. A surface that renders the
+ * conversation on behalf of another (the command page showing what was typed into the corner)
+ * must not wait for a database round-trip to show it — a line the operator just watched being
+ * sent should not blink out of existence while a row is written.
+ */
+export const THREAD_TURN_EVENT = 'ff:thread-turn';
+
+export interface SaidTurn { role: 'user' | 'garvis'; text: string }
+
+/** Tell any surface showing this conversation that a line was just said. */
+export function broadcastTurn(role: 'user' | 'garvis', text: string): void {
+  const body = text.trim();
+  if (!body) return;
+  try { window.dispatchEvent(new CustomEvent<SaidTurn>(THREAD_TURN_EVENT, { detail: { role, text: body } })); }
+  catch { /* non-browser */ }
+}
 
 interface Row { id: string; role: 'user' | 'garvis'; text: string; mission_id: string | null; created_at: string }
 
@@ -30,26 +47,34 @@ export async function loadThread(limit = THREAD_WINDOW): Promise<ThreadTurn[]> {
 }
 
 /**
- * Write one turn. Fire-and-forget by design: the surface has already shown the line, so a failed
- * insert costs the record, never the conversation. Signed-out callers write nothing (RLS owns
- * the row) rather than throwing at a UI that has no way to act on it.
+ * Write one turn. Never throws: a surface has already shown the line, so a failed insert costs
+ * the record, not the conversation. Signed-out callers write nothing (RLS owns the row) rather
+ * than throwing at a UI that has no way to act on it.
+ *
+ * Returns whether the row actually LANDED. A caller that isn't rendering its own copy of the
+ * conversation (the dock on a page that shows the transcript itself) needs to know, because for
+ * that caller the record is the only place the line would appear.
  */
 export async function appendThread(
   role: 'user' | 'garvis',
   text: string,
   missionId?: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const body = text.trim();
-  if (!body) return;
+  if (!body) return false;
+  let landed = false;
   try {
     const { data } = await supabase.auth.getUser();
     const uid = data.user?.id;
-    if (!uid) return;
-    await supabase.from('command_messages').insert({
-      owner_id: uid, role, text: body, mission_id: missionId ?? null,
-    });
-  } catch { /* the line was already said; the record can miss it */ }
+    if (uid) {
+      const { error } = await supabase.from('command_messages').insert({
+        owner_id: uid, role, text: body, mission_id: missionId ?? null,
+      });
+      landed = !error;
+    }
+  } catch { /* landed stays false */ }
   finally {
     try { window.dispatchEvent(new Event(THREAD_EVENT)); } catch { /* non-browser */ }
   }
+  return landed;
 }
