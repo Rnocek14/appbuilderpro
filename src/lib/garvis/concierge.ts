@@ -355,7 +355,15 @@ export const CONCIERGE_TASKS: ConciergeTask[] = [
   },
 ];
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').replace(/\s+/g, ' ').trim();
+// Apostrophes are DROPPED, not kept: a possessive must fold to its bare stem or the derivation
+// layer cannot see it. A world titled "Mom's Real Estate Marketing" used to derive the keywords
+// ["mom's", "mom'"] — the plural fold chopping the s off the possessive — so "videos for my mom"
+// matched nothing and the operator got a pick-list instead of her video studio. Handwritten tasks
+// papered over this by listing every form by hand; derived world/area tasks cannot. Stripping
+// here makes both sides agree: "Mom's" → "moms" → folds to "mom", and a spoken "mom", "moms" or
+// "mom's" all normalize to the same thing. Every regex tested against norm() already carries its
+// apostrophe-free branch ("isn't|isnt"), so nothing downstream loses a match.
+const norm = (s: string) => s.toLowerCase().replace(/'/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** Universal navigation verbs. They BOOST, never carry: a verb phrase adds its weight only to
  *  tasks the sentence already hits on a distinctive word — so "take me to the fleet" or "check

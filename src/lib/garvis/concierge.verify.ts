@@ -353,6 +353,30 @@ const ALL = ALL_CONCIERGE_TASKS;
     resolve('what does this app do', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'new-app');
 }
 
+// POSSESSIVE WORLD TITLES — a world called "Mom's X" derived the keywords ["mom's","mom'"] (the
+// plural fold chopping the s off a possessive), so a spoken "mom" matched NOTHING and the
+// operator got a pick-list instead of her studio. Reported live: "lets work on some creative
+// videos for my mom" → postcard / draft-episode / app-marketing.
+{
+  const W = [{ id: 'w-mom', title: "Mom's Real Estate Marketing", slugs: ['brand', 'direct-mail', 'video-studio', 'social'] }];
+  const T = deriveWorldTasks(ALL_CONCIERGE_TASKS, W);
+  const go = (s: string) => { const r = resolve(s, W, T); return r.kind === 'go' ? r.task?.id : `${r.kind}:${(r.suggestions ?? []).map((t) => t.id).join(',')}`; };
+  check('"lets work on some creative videos for my mom" → her VIDEO STUDIO (the reported miss)',
+    go('lets work on some creative videos for my mom') === 'area:w-mom:video-studio');
+  check('"lets work on video for my mom" → the same door', go('lets work on video for my mom') === 'area:w-mom:video-studio');
+  check('"lets do some videos for mom" → the same door', go('lets do some videos for mom') === 'area:w-mom:video-studio');
+  check('the possessive, bare and plural forms all normalize together',
+    go('videos for moms marketing') === 'area:w-mom:video-studio' && go("videos for mom's marketing") === 'area:w-mom:video-studio');
+  check('a different area of the SAME world still wins its own words',
+    go('lets work on moms social posts') === 'area:w-mom:social');
+  check('the postcard door keeps its sentence (no over-capture by the video area)',
+    resolve('lets work on moms postcard', W, T).task?.id === 'postcard');
+  // Handwritten keywords may carry apostrophes ("what's next") — they normalize at match time.
+  // DERIVED ones are generated, and used to come out mangled ("mom'").
+  check('a derived possessive title no longer emits the mangled "mom\'" keyword',
+    !T.filter((t) => /^(world|area):/.test(t.id)).some((t) => t.keywords.some((k) => k.includes("'"))));
+}
+
 // ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----
 {
   const MOMV: ConciergeWorld[] = [
