@@ -454,7 +454,12 @@ export function parseCommandPrefix(input: string): { sentence: string; execute: 
   const courtesy = /^(hey |ok |okay )?garvis[,:]?\s+/i;
   if (courtesy.test(s)) s = s.replace(courtesy, '');
   const doPrefix = /^(do|run|execute|just do)[,:]?\s+/i;
-  if (doPrefix.test(s)) return { sentence: s.replace(doPrefix, '').trim(), execute: true };
+  // …but "do I have too many businesses going" is a QUESTION, and reading it as an order sends
+  // it to the compiler — the operator asks something and gets a work plan. An execution order
+  // after "do" names work ("do the postcard", "do find me clients"); a subject pronoun means
+  // they are asking, not telling.
+  const asking = /^(do|does|did)\s+(i|you|we|they)\b/i;
+  if (doPrefix.test(s) && !asking.test(s)) return { sentence: s.replace(doPrefix, '').trim(), execute: true };
   return { sentence: s.trim(), execute: false };
 }
 
@@ -488,7 +493,7 @@ export interface SmallTalk { kind: 'greet' | 'thanks' | 'affirm' | 'closure' | '
 
 const GREET_RE = /^(hi|hello|hey|yo|sup|good (morning|afternoon|evening))( garvis)?[.!]*$/;
 const THANKS_RE = /^(thanks|thank you|thank u|ty|thx|appreciate (it|you))( garvis| man| dude| bro| buddy)?( so much| a lot)?[.!]*$/;
-const AFFIRM_RE = /^(ok|okay|k|yes|yep|yeah|cool|nice|great|perfect|awesome|good job|well done|love it|lol)[.!]*$/;
+const AFFIRM_RE = /^(ok|okay|k|yes|yep|yeah|cool|nice|great|perfect|awesome|good job|nice job|nice work|good work|well done|love it|lol)[.!]*$/;
 const CLOSURE_RE = /^(no|nope|nevermind|never mind|forget it|nothing|nah|na)[.!]*$/;
 const HALT_RE = /^(stop|cancel|halt|abort|pause)\b|^(dont|don't|do not)\b/;
 
@@ -593,6 +598,16 @@ const CONJUNCTION = /\b(and|then|also|plus|after that)\b/;
 // Negative "why" forms are TROUBLESHOOTING (answer them); analytical "why is revenue down"
 // stays routable — the page with the numbers is a fine answer to that one.
 const PROCEDURAL_QUESTION = /^(how do i|how to|can i|can you|why (isnt|isn't|wont|won't|doesnt|doesn't|didnt|didn't|cant|can't)|whats wrong|what's wrong|what happens)\b/;
+// TROUBLESHOOTING is definitionally unanswerable by a page: "whats wrong with the postcard"
+// opens the postcard board, which is not an answer, however strongly 'postcard' matches. These
+// forms bypass the strength escape that the softer "how do i / can i" forms keep (those are
+// often really requests — "can i see the queue" should open the queue).
+const TROUBLESHOOTING = /^(whats wrong|what's wrong|why (isnt|isn't|wont|won't|doesnt|doesn't|didnt|didn't|cant|can't))\b/;
+// OPINION — a judgment the operator wants, not a destination. "is direct mail even worth it
+// anymore" landing on the postcard studio answers a question they didn't ask; "am i spreading
+// myself too thin" landing anywhere at all is worse. Deliberately narrow: only forms that can't
+// be read as a request. ("should i …" is left out — it is usually a soft ask for the thing.)
+const OPINION_QUESTION = /^(am i|are we|do i (have|need)|does it (matter|make sense)|do you think|which of my|whats your (honest )?(read|take|opinion)|what's your (honest )?(read|take|opinion)|remind me why i)\b|\b(worth it|too many|too thin|fooling myself|even worth)\b/;
 // Destructive verbs never navigate on a weak match: "delete all my worlds" must get an honest
 // ANSWER (there is no spoken bulk-delete; the brain explains where deleting lives), never a
 // confident hop to whatever door shares a word.
@@ -615,7 +630,7 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   if (!matches.length) {
     // A procedural QUESTION never rides the weak tier either — "how do i connect my tiktok
     // account" wants an ANSWER, not two doors that share the word 'tiktok'.
-    if (PROCEDURAL_QUESTION.test(norm(input))) return { kind: 'none' };
+    if (PROCEDURAL_QUESTION.test(norm(input)) || OPINION_QUESTION.test(norm(input))) return { kind: 'none' };
     // Sub-threshold degradation: a single SHARED-word hit ("system health" → the Health page and
     // the health channel preset) is a real signal even though no task clears the bar — offer the
     // hits as suggestions instead of pretending the sentence meant nothing.
@@ -627,6 +642,10 @@ export function resolve(input: string, worlds: ConciergeWorld[], tasks: Concierg
   // A procedural QUESTION with only a weak match wants an ANSWER, not a page — hand it to the
   // AI tier ("how do i connect my tiktok account" should be explained, not routed on 'tiktok').
   if (PROCEDURAL_QUESTION.test(norm(input)) && top.score < 4) return { kind: 'none' };
+  // Troubleshooting and judgment questions want an ANSWER however strong the keyword match is —
+  // a page is not a diagnosis and it is not an opinion.
+  if (TROUBLESHOOTING.test(norm(input))) return { kind: 'none' };
+  if (OPINION_QUESTION.test(norm(input))) return { kind: 'none' };
   // Destructive asks on weak matches get an honest ANSWER, never a shared-word door.
   if (DESTRUCTIVE.test(norm(input)) && top.score < 4) return { kind: 'none' };
   // An EXACT world-title hit is decisive: "open money facts" NAMES the world verbatim — a page

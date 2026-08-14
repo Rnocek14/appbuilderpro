@@ -97,5 +97,5 @@ export function composeBriefing(f: BriefingFacts): Briefing {
  *  greeting with the state of the operation, not with chat. */
 export function isBriefingAsk(input: string): boolean {
   const t = input.trim().toLowerCase();
-  return /^(brief me|briefing|daily brief|morning brief(ing)?|good morning( garvis)?|morning( garvis)?|status report|sitrep|whats (happening|new|going on)|what's (happening|new|going on)|what happened|anything new\??|catch me up|what did i miss)[\s!.?]*$/.test(t);
+  return /^(brief me|briefing|daily brief|morning brief(ing)?|good morning( garvis)?|morning( garvis)?|status report|sitrep|whats (happening|new|going on)|what's (happening|new|going on)|what happened|anything new\??|catch me up|what did i miss|hows (everything|it all|things) (looking|going)|how's (everything|it all|things) (looking|going)|where(d| did) we leave off)[\s!.?]*$/.test(t);
 }

@@ -498,5 +498,50 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('no projects, no change', withProjectTasks(ALL_CONCIERGE_TASKS, []) === ALL_CONCIERGE_TASKS);
 }
 
+// ---- THE QUESTION GUARDS (full-stack gauntlet, Aug 2026) — a question must never be mistaken
+//      for an order, and a page is never an answer to a judgment call ----
+{
+  // The worst one found: "do i have too many businesses going" was read as an execution order,
+  // so asking a question silently compiled a work plan.
+  check('"do i have …" is a QUESTION, not an execution order',
+    parseCommandPrefix('do i have too many businesses going').execute === false);
+  check('"do you think …" likewise', parseCommandPrefix('do you think this is working').execute === false);
+  check('"do we need …" likewise', parseCommandPrefix('do we need another channel').execute === false);
+  check('…while "do the postcard" is still an order', parseCommandPrefix('do the postcard').execute === true);
+  check('…and "do find me web design clients" is still an order',
+    parseCommandPrefix('do find me web design clients').execute === true);
+  check('…and "do my postcard" is still an order (a pronoun that names work, not a subject)',
+    parseCommandPrefix('do my postcard').execute === true);
+
+  // TROUBLESHOOTING beats keyword strength: opening the postcard board is not a diagnosis.
+  check('"whats wrong with the postcard" gets an ANSWER, not the postcard board',
+    resolve('whats wrong with the postcard', WORLDS).kind === 'none');
+  check('"why isnt my video rendering" gets an ANSWER',
+    resolve('why isnt my video rendering', WORLDS).kind === 'none');
+
+  // OPINION questions want a judgment, not a destination.
+  for (const q of [
+    'am i spreading myself too thin',
+    'is direct mail even worth it anymore',
+    'which of my businesses is worth the most attention',
+    'do i have too many businesses going',
+    'remind me why i started the caregiver thing',
+    'is the caregiver channel actually working or am i fooling myself',
+  ]) {
+    check(`a judgment question is answered, never routed: "${q.slice(0, 38)}"`, resolve(q, WORLDS).kind === 'none');
+  }
+  // …and the guard is narrow enough that real requests still land.
+  check('"lets work on moms postcard" is still a confident door',
+    resolve('lets work on moms postcard', WORLDS).kind === 'go');
+  check('"whats waiting on me" is still a confident door',
+    resolve('whats waiting on me', WORLDS).kind === 'go');
+  check('"open money facts" is still a confident door', resolve('open money facts', WORLDS).kind === 'go');
+
+  // A compliment costs nothing — small talk owns it before any model call.
+  check('"nice work" is small talk, not a metered call', !!smallTalk('nice work'));
+  check('"nice job" too', !!smallTalk('nice job'));
+  check('"good work" too', !!smallTalk('good work'));
+}
+
 console.log(`\nconcierge.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} concierge check(s) failed`);
