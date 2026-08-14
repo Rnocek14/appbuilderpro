@@ -6,6 +6,7 @@
 
 import { diffLines } from 'diff';
 import { supabase } from '../supabase';
+import type { PendingEdit } from '../pendingEdit';
 import { resolveAI } from '../aiConfig';
 import { recordUsage, tagUsageSince, estimateCost } from '../usage';
 import { AGENT_BUILD_SYSTEM } from '../prompts';
@@ -278,6 +279,21 @@ export async function agenticEdit(
     turnChanges.set(path, { before: prev?.before ?? files.get(path) ?? '', after });
   };
 
+  // STAGE-THEN-COMMIT (SW3.2): on Main, writes accumulate here and land in ONE batch after the
+  // verification gate — a turn that ends failing leaves project_files untouched and comes back
+  // as a reviewable diff instead of broken code wearing a chat warning. Branch turns keep their
+  // copy-on-write semantics (their writes can't touch Main by construction). null = deletion.
+  const staged: Map<string, string | null> | null = branch ? null : new Map();
+  let lastVerify: { ok: boolean; summary: string } | null = null;
+  // The live runtime still sees every staged write, so "watch it build" is unchanged wherever a
+  // real dev server is running; the blob preview refreshes at commit (it reads the DB).
+  const syncLive = async () => {
+    try {
+      const wc = await import('../webcontainer');
+      await wc.syncFiles(projectId, [...files.entries()].map(([path, content]) => ({ path, content })) as unknown as ProjectFile[]);
+    } catch { /* best-effort — the commit refresh covers it */ }
+  };
+
   const ctx: AgentToolContext = {
     projectId,
     files,
@@ -295,15 +311,15 @@ export async function agenticEdit(
           await clearTombstone(projectId, branchId, path);
         }
       } else {
-        await supabase.from('project_files').upsert(
-          { project_id: projectId, path, content, updated_by_ai: true, deleted_at: null },
-          { onConflict: 'project_id,path' },
-        );
+        staged!.set(path, content);
+        void syncLive();
+        return;   // file-done fires at commit — the workspace refetches the DB on that event
       }
       onEvent?.({ type: 'file-done', path });
     },
     deleteFile: async (path) => {
       recordChange(path, '');
+      if (!branch) { staged!.set(path, null); return; }   // deletion event fires at commit
       if (branch && branchId) {
         const onMain = mainApp.has(path);
         const freeze = onMain && !branch.bases.has(path) ? mainApp.get(path)! : null;
@@ -317,7 +333,13 @@ export async function agenticEdit(
       }
       onEvent?.({ type: 'deletion', path });
     },
-    typecheck: () => verifyProject(projectId, files, false, !!branch),
+    typecheck: async () => {
+      // QA must read the live in-memory view: on Main the DB is stale while writes are staged
+      // (SW3.2), exactly as it always was on a branch. The summary is kept for the review card.
+      const r = await verifyProject(projectId, files, false, true);
+      lastVerify = r;
+      return r;
+    },
     onActivity: (label) => onEvent?.({ type: 'activity', text: label }),
   };
 
@@ -354,6 +376,56 @@ export async function agenticEdit(
     const touched = result.changed.length + result.deleted.length;
     if (touched === prevTouched) break; // stalled — no new files touched this round
     prevTouched = touched;
+  }
+
+  // THE GATE DECIDES WHAT LANDS (SW3.2). verified === false is the explicit fail; a turn the
+  // agent never type-checked (small copy tweaks, discuss-shaped turns) commits exactly as it
+  // always did — the gate blocks known-broken work, it does not invent new ceremony.
+  const stagedEntries = staged ? [...staged.entries()] : [];
+  const stagedFailed = stagedEntries.length > 0 && result.verified === false;
+  if (staged && stagedEntries.length && !stagedFailed) {
+    const upserts = stagedEntries.filter(([, c]) => c !== null)
+      .map(([path, c]) => ({ project_id: projectId, path, content: c as string, updated_by_ai: true, deleted_at: null }));
+    if (upserts.length) {
+      await supabase.from('project_files').upsert(upserts, { onConflict: 'project_id,path' });
+    }
+    const dels = stagedEntries.filter(([, c]) => c === null).map(([p]) => p);
+    if (dels.length) {
+      await supabase.from('project_files')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('project_id', projectId).in('path', dels);
+    }
+    for (const [path, c] of stagedEntries) onEvent?.(c === null ? { type: 'deletion', path } : { type: 'file-done', path });
+  }
+  if (stagedFailed) {
+    // Nothing landed. Package the overlay as the existing review flow's PendingEdit — the
+    // workspace renders the diff with the named failure, and Apply anyway stays one click.
+    // (cast: TS can't see the closure assignment from the tool executor's typecheck calls)
+    const lv = lastVerify as { ok: boolean; summary: string } | null;
+    const failure = (lv && !lv.ok ? lv.summary : 'verification did not pass')
+      .split('\n\nFix the root cause')[0];
+    const pending: PendingEdit = {
+      changes: [...turnChanges.entries()]
+        .filter(([path, c]) => c.before !== c.after && staged!.get(path) !== null)
+        .map(([path, c]) => ({ path, before: c.before, after: c.after, isNew: !mainApp.has(path) })),
+      deletions: stagedEntries.filter(([, c]) => c === null).map(([p]) => p),
+      explanation: (result.text || '').trim() || 'Applied the reviewed change set.',
+      blocked: [],
+    };
+    void supabase.from('usage_events').insert({
+      user_id: userId, project_id: projectId, event_type: 'edit',
+      provider: ai.provider, model: ai.model,
+      input_tokens: turnIn, output_tokens: turnOut,
+      cost_usd: Math.round(estimateCost(ai.provider, ai.model, turnIn, turnOut) * 1e5) / 1e5,
+    }).then(() => {}, () => {});
+    onEvent?.({ type: 'done' });
+    return {
+      action: 'review',
+      explanation: 'I made the change, but verification is still failing — so NOTHING has been applied yet:\n\n'
+        + failure
+        + '\n\nReview the diff: Apply anyway to take it as-is, or discard it and ask me to try another approach.',
+      changed: [], deleted: [], pending,
+    };
   }
 
   const changed = result.changed;
