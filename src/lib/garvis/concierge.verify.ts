@@ -1,5 +1,6 @@
 // Run: npx tsx src/lib/garvis/concierge.verify.ts
-import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, deriveWorldTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, isGoBack, parseCommandPrefix, reelTopic, resolve, routeFor, smallTalk, statsFor, withProjectTasks, type ConciergeWorld } from './concierge';
+import { CONCIERGE_TASKS, STAT_QUERIES, aliasLookup, aliasRemember, deriveTasks, deriveWorldTasks, exploreDive, isBrief, isRevision, matchTasks, parseBoardCommand, parseBuilderCommand, isGoBack, parseCommandPrefix, reelTopic, resolve, routeFor, smallTalk, statsFor, withProjectTasks, type ConciergeWorld , isAboutOpenThing }
+from './concierge';
 import { ALL_CONCIERGE_TASKS } from './conciergeTasks';
 import { NAV_SECTIONS } from '../navConfig';
 
@@ -334,6 +335,22 @@ const ALL = ALL_CONCIERGE_TASKS;
   check('"thank you so much" still lands', smallTalk('thank you so much')?.kind === 'thanks');
   check('"make me a plan to promote my clothing brand threadline" → the planner (top-2 guard)',
     (() => { const r = resolve('make me a plan to promote my clothing brand threadline', W2, T2); return r.kind === 'go' && r.task?.id === 'orchestrate'; })());
+}
+
+// QUESTIONS ABOUT THE THING ALREADY OPEN — the dock uses this to stop "what does this app do",
+// asked while standing on a project, from opening the CREATE-A-NEW-APP door (a live misroute).
+{
+  for (const s of [
+    'what does this app actually do', 'whats missing', "what's left to build", 'how does this work',
+    'explain this project', 'summarize this app', 'is this deployed', 'what is this',
+    'tell me about this site', 'why does this app need a login',
+  ]) check(`about the open thing: "${s}"`, isAboutOpenThing(s));
+  for (const s of [
+    'open the queue', 'add a contact form', 'make a reel about lake geneva',
+    'draft an episode about rates', 'start a clothing brand', 'go back', 'build me an app for tracking appointments',
+  ]) check(`NOT about the open thing: "${s}"`, !isAboutOpenThing(s));
+  check('"what does this app do" alone still matches the new-app door (the guard is the dock\'s job, not resolve\'s)',
+    resolve('what does this app do', WORLDS, ALL_CONCIERGE_TASKS).task?.id === 'new-app');
 }
 
 // ---- THE WORLD-KNOWLEDGE TIER — the operator's worlds × areas ARE the vocabulary ----

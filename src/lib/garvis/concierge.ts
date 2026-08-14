@@ -499,6 +499,16 @@ export function smallTalk(input: string): SmallTalk | null {
   return null;
 }
 
+/** A QUESTION about the thing already open, rather than an instruction to go somewhere. Used by
+ *  the dock while the operator stands on a project page: "what does this app do" is a question
+ *  about THAT app, and must never be answered by opening the create-a-new-app door. Narrow by
+ *  design — an interrogative opener, or an explicit "this app/project/site". */
+export function isAboutOpenThing(input: string): boolean {
+  const t = norm(input);
+  if (/\bthis (app|project|site|website|thing|one|codebase)\b/.test(t)) return true;
+  return /^(what|whats|what's|how|why|which|where|who|is|are|does|do|did|can|could|should|tell me|explain|describe|summar)/.test(t);
+}
+
 /** "go back" is a browser verb, not a destination. The dock steps back one page. */
 export function isGoBack(input: string): boolean {
   return /^(go back|take me back|back)[.!]*$/.test(input.trim().toLowerCase());

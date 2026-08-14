@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, GripVertical, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
-  aliasKey, aliasLookup, aliasRemember, deriveWorldTasks, exploreDive, isBrief, isGoBack, isRevision, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
+  aliasKey, aliasLookup, aliasRemember, deriveWorldTasks, exploreDive, isAboutOpenThing, isBrief, isGoBack, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
   type ConciergeAlias, type ConciergeTask, type ConciergeWorld,
 } from '../lib/garvis/concierge';
 import { applySuggestion, offerFileToSurface, offerToSurface, onSurfaceChange, surfaceAcceptsFiles, surfaceSuggestions } from '../lib/garvis/surfaceBridge';
@@ -378,17 +378,38 @@ export function ConciergeDock() {
   // server-side against the list — it can't invent destinations) or answers in two sentences.
   // Degraded (no AI key) or failing, the dock says so honestly and points at Garvis on Home.
   const FALLBACK = "I don't have a shortcut for that — Garvis on Home handles anything free-form.";
+  /** Which app the operator is asking ABOUT, if any. Standing on its page counts; so does a
+   *  sentence that names it but asks a question (a sentence that merely names it never reaches
+   *  the brain tier — resolve() would have opened the builder). Null means no project context is
+   *  attached, which is the case for most asks — the digest rides only when it is the subject. */
+  const projectInScope = (sentence: string): string | null => {
+    const onPage = /^\/project\/([\w-]+)/.exec(window.location.pathname)?.[1];
+    if (onPage) return onPage;
+    const weak = matchTasks(sentence, tasksRef.current, 1).find((m) => m.task.id.startsWith('proj:'));
+    return weak ? weak.task.id.slice('proj:'.length) : null;
+  };
+
   const askBrain = async (sentence: string, worlds: ConciergeWorld[]) => {
     setBusy(true);
     setSuggestions([]);
     setCompound(false);
     setNote('Thinking…');
     try {
+      // THE PROJECT DIGEST — the concierge knew the operator's apps by name only. When one is the
+      // subject, hand the brain its live file tree, the operator's own notes, and a generated
+      // summary that auto-refreshes when the code changes. Fail-soft: no digest just means the
+      // brain answers the way it always did.
+      const projectId = projectInScope(sentence);
+      const digest = projectId
+        ? await import('../lib/garvis/projectDigestRun')
+          .then((m) => m.loadProjectDigest(projectId)).catch(() => null)
+        : null;
       const { data, error } = await supabase.functions.invoke('concierge', {
         body: {
           sentence,
           context: window.location.pathname,
           tasks: tasksRef.current.map(({ id, label }) => ({ id, label })),
+          ...(digest ? { project: digest.context } : {}),
         },
       });
       if (error || !data) { setNote(FALLBACK); return; }
@@ -651,6 +672,18 @@ export function ConciergeDock() {
       return;
     }
     const r = resolve(text, worlds, tasksRef.current);
+    // STANDING ON A PROJECT, ASKING ABOUT IT: "what does this app do" is a question about the app
+    // on screen — answering it by opening the create-a-new-app door is the wrong end of the
+    // stick. Only creation doors are blocked, only for questions, only on a project page; every
+    // navigate door ("open the queue") still wins from here.
+    const makesSomethingNew = r.task
+      && (r.task.kind === 'create' || r.route === '/new' || !!r.task.genesisIntent);
+    if (r.kind === 'go' && makesSomethingNew
+      && /^\/project\/[\w-]+/.test(window.location.pathname) && isAboutOpenThing(text)) {
+      rememberAsk(text);
+      await askBrain(text, worlds);
+      return;
+    }
     if (r.kind === 'go' && r.task && r.route) { rememberAsk(text); act(r.task, r.route, r.missingWorld, text); return; }
     if (r.kind === 'compound' && r.suggestions?.length) {
       setCompound(true);
