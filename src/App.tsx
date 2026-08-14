@@ -11,7 +11,7 @@ import Auth from './pages/Auth';
 import OAuthCallback from './pages/OAuthCallback';
 
 // Every workspace behind auth (and the heavy public preview pages) is code-split, so the main bundle
-// no longer carries Monaco, Sandpack, three.js, pdf.js, Recharts, xterm, etc. up front — each route
+// no longer carries Monaco, three.js, pdf.js, Recharts, xterm, etc. up front — each route
 // pulls its own chunk on navigation. A per-route error boundary + Suspense wraps them all below.
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Garvis = lazy(() => import('./pages/Garvis'));

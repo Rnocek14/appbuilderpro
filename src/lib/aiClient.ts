@@ -2,7 +2,7 @@
 // Client-side AI service layer.
 //
 // PRODUCTION MODE (default): all model calls go through Supabase Edge Functions
-// (generate-app, chat-edit). Provider keys live in edge function secrets and never
+// (chat-edit, agent-turn). Provider keys live in edge function secrets and never
 // reach the browser. Usage, cost, and audit records are written server-side.
 //
 // DIRECT MODE (VITE_AI_DIRECT=true): for local hacking without deploying edge
@@ -144,10 +144,10 @@ export interface EditResult {
 export async function startGeneration(projectId: string, prompt: string, planContext?: string): Promise<GenerateResult> {
   // ONE pipeline, always: the chunked client orchestrator — shell first, then every page in
   // PARALLEL against frozen contracts, schema concurrent, compile-verify + agentic repair inline.
-  // The edge `generate-app` function used to serve "edge mode + browser key" with a single serial
+  // A `generate-app` edge function once served "edge mode + browser key" with a single serial
   // 32k-token stream and static-QA-only healing — a strictly weaker build whose quality silently
-  // depended on which path you hit. Retired: every environment now gets the good pipeline (cloud
-  // users' model calls already relay through agent-turn, so no browser key is required).
+  // depended on which path you hit. Retired and DELETED (Aug 2026): every environment gets the
+  // good pipeline (cloud users' model calls already relay through agent-turn, no browser key).
   return chunkedGenerate(projectId, prompt, planContext);
 }
 

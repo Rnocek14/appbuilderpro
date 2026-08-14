@@ -4,7 +4,7 @@
 //   node scripts/generated-app-probe.mjs --fixtures          (the two shipped proof fixtures)
 //
 // THE GAP THIS CLOSES
-// generate-app plans, writes files, validates and self-heals — and never once runs what it made.
+// the generator plans, writes files, validates and self-heals — and never once runs what it made.
 // validateProject reads source and infers; interactionIssues() (added to _shared/qa.ts) narrows
 // that to "will it respond?", but it is still only reading. This builds the project with Vite,
 // serves the output, and drives it in a real browser using the same generic prober that tests the
