@@ -16,7 +16,7 @@ import { goalsDigest } from '../lib/garvis/goalsRun';
 import { retrieveForPrompt } from '../lib/garvis/ask';
 import { assembleSituation } from '../lib/garvis/situationRun';
 import { THREAD_WINDOW, unseenTurns } from '../lib/garvis/thread';
-import { THREAD_EVENT, appendThread, loadThread } from '../lib/garvis/threadRun';
+import { THREAD_EVENT, THREAD_TURN_EVENT, appendThread, loadThread, type SaidTurn } from '../lib/garvis/threadRun';
 import { runGarvisAct } from '../lib/garvis';
 import { patchWorkingState, loadWorkingState, clearCanvasIfMatches } from '../lib/garvis/workingStateRun';
 
@@ -128,9 +128,24 @@ export function useCommander() {
         });
       });
     };
+    // A line said in the corner shows here immediately; the record catch-up then reconciles it
+    // (unseenTurns keys on role+text, so the row does not arrive as a second copy).
+    const said = (e: Event) => {
+      const t = (e as CustomEvent<SaidTurn>).detail;
+      if (!live || !t?.text) return;
+      setMessages((prev) => (unseenTurns([{ id: crypto.randomUUID(), role: t.role, text: t.text }],
+        prev.map((m) => ({ role: m.role, text: m.text }))).length
+        ? [...prev, { id: crypto.randomUUID(), role: t.role, text: t.text }]
+        : prev));
+    };
     catchUp();
     window.addEventListener(THREAD_EVENT, catchUp);
-    return () => { live = false; window.removeEventListener(THREAD_EVENT, catchUp); };
+    window.addEventListener(THREAD_TURN_EVENT, said);
+    return () => {
+      live = false;
+      window.removeEventListener(THREAD_EVENT, catchUp);
+      window.removeEventListener(THREAD_TURN_EVENT, said);
+    };
   }, []);
 
   const persist = (m: Omit<ChatMessage, 'id'>) => {

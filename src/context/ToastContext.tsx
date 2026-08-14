@@ -25,7 +25,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm" role="status" aria-live="polite">
+      {/* Top-right, not bottom-right: the concierge dock owns the bottom-right corner, and a
+          toast stack landing on its input meant an error hid the thing you were typing into. */}
+      <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 max-w-sm" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div
             key={t.id}
