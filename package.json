@@ -183,7 +183,8 @@
     "verify:verticalplan": "tsx src/lib/garvis/verticalPlan.verify.ts",
     "verify:masterplan": "tsx src/lib/garvis/masterPlan.verify.ts",
     "verify:briefing": "tsx src/lib/garvis/briefing.verify.ts",
-    "verify:conversationmemory": "tsx src/lib/garvis/conversationMemory.verify.ts"
+    "verify:conversationmemory": "tsx src/lib/garvis/conversationMemory.verify.ts",
+    "verify:projectdigest": "tsx src/lib/garvis/projectDigest.verify.ts"
   },
   "dependencies": {
     "@codesandbox/sandpack-react": "^2.19.10",

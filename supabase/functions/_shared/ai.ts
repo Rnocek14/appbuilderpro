@@ -97,7 +97,19 @@ export async function complete(
           'x-api-key': Deno.env.get('ANTHROPIC_API_KEY') ?? '',
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: rest }),
+        // PROMPT CACHING: the system prompt is the stable prefix on every one of these calls —
+        // routing instructions, compiler catalogs, summarizer rules — and it is exactly what the
+        // API caches. Sending it as a cached block makes repeat reads ~10% of input price, which
+        // is what lets callers put real context (a project digest, the action catalog) in front
+        // of the model without the per-ask cost being the reason not to. Cache misses are free;
+        // a prefix below the model's minimum simply doesn't cache. Volatile content stays in
+        // `messages`, AFTER the breakpoint, so the prefix keeps matching.
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          ...(system ? { system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] } : {}),
+          messages: rest,
+        }),
       });
       if (!res.ok) throw new Error(`anthropic ${res.status}: ${await res.text()}`);
       const data = await res.json();
@@ -105,9 +117,15 @@ export async function complete(
         .filter((b: { type: string }) => b.type === 'text')
         .map((b: { text: string }) => b.text)
         .join('\n');
-      const inTok = data.usage?.input_tokens ?? 0;
+      // Cached tokens are billed at their own rates (writes ~1.25x, reads ~0.1x) and are reported
+      // SEPARATELY from input_tokens — counting only input_tokens would under-report a cache
+      // write and over-report a read. Fold them in so spend stays honest.
+      const cacheWrite = data.usage?.cache_creation_input_tokens ?? 0;
+      const cacheRead = data.usage?.cache_read_input_tokens ?? 0;
+      const inTok = (data.usage?.input_tokens ?? 0) + cacheWrite + cacheRead;
       const outTok = data.usage?.output_tokens ?? 0;
-      return { text, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, inTok, outTok) };
+      const billedIn = (data.usage?.input_tokens ?? 0) + Math.round(cacheWrite * 1.25) + Math.round(cacheRead * 0.1);
+      return { text, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, billedIn, outTok) };
     }
 
     // OpenAI-compatible providers

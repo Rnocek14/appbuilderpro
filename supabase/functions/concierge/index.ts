@@ -33,6 +33,8 @@ const cors = {
 
 const MAX_TASKS = 120;
 const MAX_SENTENCE = 400;
+/** The project digest's ceiling (~3k tokens) — the whole point is that it stays cheap. */
+const MAX_PROJECT = 12_000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -53,10 +55,13 @@ Deno.serve(async (req) => {
     }
 
     const body = (await req.json().catch(() => ({}))) as {
-      sentence?: string; context?: string; tasks?: { id?: string; label?: string }[];
+      sentence?: string; context?: string; tasks?: { id?: string; label?: string }[]; project?: string;
     };
     const sentence = String(body.sentence ?? '').trim().slice(0, MAX_SENTENCE);
     const context = String(body.context ?? '').trim().slice(0, 200);
+    // The project digest — sent ONLY when the client decided a specific app is in scope, never on
+    // every ask. Bounded here too: a client cannot inflate the router's prompt past this cap.
+    const project = String(body.project ?? '').trim().slice(0, MAX_PROJECT);
     const tasks = (Array.isArray(body.tasks) ? body.tasks : [])
       .filter((t) => t?.id && t?.label).slice(0, MAX_TASKS) as { id: string; label: string }[];
     if (!sentence || tasks.length === 0) return json({ error: 'sentence and tasks are required.' }, 400);
@@ -71,10 +76,10 @@ Deno.serve(async (req) => {
     const result = await complete([
       {
         role: 'system',
-        content: 'You route an operator\'s sentence to ONE task from the list, by meaning. Reply with STRICT JSON only: {"taskId": "<id>"} when one task clearly fits, or {"taskId": null, "answer": "<at most three short sentences>"} when none does. If the sentence asks for MULTIPLE distinct things at once, pick the task whose id is "orchestrate" (it compiles multi-part plans) when it is in the list. Never invent task ids. The answer must be honest — if you do not know, say so; never claim the platform does something you cannot see in the task list.',
+        content: 'You route an operator\'s sentence to ONE task from the list, by meaning. Reply with STRICT JSON only: {"taskId": "<id>"} when one task clearly fits, or {"taskId": null, "answer": "<at most three short sentences>"} when none does. If the sentence asks for MULTIPLE distinct things at once, pick the task whose id is "orchestrate" (it compiles multi-part plans) when it is in the list. Never invent task ids. The answer must be honest — if you do not know, say so; never claim the platform does something you cannot see in the task list. When a PROJECT block is present, the operator is asking about that app: answer questions about it from that block ({"taskId": null, "answer": ...}) instead of routing, and describe only what the block actually shows — if it does not say, say you cannot see it.',
       },
-      { role: 'user', content: `TASKS:\n${list}\n${context ? `\nOPERATOR IS CURRENTLY ON: ${context}` : ''}\nSENTENCE: ${sentence}` },
-    ], { provider, model, maxTokens: 250 });
+      { role: 'user', content: `TASKS:\n${list}\n${context ? `\nOPERATOR IS CURRENTLY ON: ${context}` : ''}${project ? `\n\nPROJECT IN SCOPE:\n${project}\n` : ''}\nSENTENCE: ${sentence}` },
+    ], { provider, model, maxTokens: project ? 500 : 250 });
 
     await spendCredits(admin, user.id, {
       costUsd: result.costUsd, kind: 'garvis', provider, model,
