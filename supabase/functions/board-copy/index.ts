@@ -14,6 +14,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { complete, modelForPlan, getProviderConfig } from '../_shared/ai.ts';
+import { holdsBar } from '../_shared/qualityCore.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 // The rubric lives in ONE place now (_shared/copyJudge.ts) so the content-week producer holds the
 // same bar as the boards. Extracted verbatim — this function's behavior is unchanged.
@@ -106,7 +107,8 @@ Deno.serve(async (req) => {
     };
 
     let quality = await judge(parsed);
-    if (quality && quality.score < 8) {
+    const draftScore = quality?.score ?? null;
+    if (quality && !holdsBar(quality.score)) {
       try {
         const rev = await complete([
           { role: 'system', content: system },
@@ -123,6 +125,18 @@ Deno.serve(async (req) => {
       costUsd, kind: 'board_copy', provider: m.provider, model: m.model,
       inputTokens: inTok, outputTokens: outTok,
     });
+
+    // The bar's event trail (app_0139): every judged piece leaves a row — draft score, what
+    // shipped, whether revision ran, whether the bar held. Best-effort by construction: a
+    // ledger hiccup never blocks the copy the operator is waiting on.
+    if (quality) {
+      void admin.from('copy_quality_events').insert({
+        owner_id: user.id, channel, mode,
+        draft_score: draftScore, final_score: quality.score,
+        revised: draftScore !== null && quality.score !== draftScore,
+        held_bar: holdsBar(quality.score),
+      }).then(() => {}, () => {});
+    }
 
     return json({ ok: true, fields: parsed, quality });
   } catch (e) {
