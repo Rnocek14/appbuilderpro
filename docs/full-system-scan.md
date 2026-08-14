@@ -268,3 +268,17 @@ deploy, stale manual DB script) kill features outright — one focused fix pass 
 extends itself with rooms and new actions, earns autonomy per action class, tunes its own
 engines, perceives more than static HTML, and proves itself alive every night — plus the
 delivery pipeline that would let all of that ship safely.
+
+---
+
+> **SECOND ADDENDUM (Aug 14, 2026): the census above is historical.** Current tree:
+> **153 migration files (app_0001–app_0139 + timestamped) · 75 entries under
+> supabase/functions (generate-app DELETED this pass — it was unreachable dead code) ·
+> 175 `verify:*` suites in CI · 72 routes in src/App.tsx · 25 orchestrator actions**
+> (§4's "14 actions" is stale). Two more corrections: custom domains shipped
+> (`supabase/functions/connect-domain/`) — §4 #14's "deliberately missing" filing lost to
+> best-software-plan P3.4's argument; and the 11-job heartbeat grew to 13
+> (`systemControl.ts` EXPECTED_JOBS). The operative roadmap is now
+> `garvis-best-in-class-plan.md`; §4 items #10 (engine self-tuning) and #11 (inbox
+> ingestion / rendered-DOM fetch) remain genuinely unbuilt and are NOT in that plan's waves —
+> deliberately deferred, revisit after its SW10.
