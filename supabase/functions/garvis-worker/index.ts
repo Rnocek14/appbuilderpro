@@ -256,6 +256,13 @@ async function dispatch(name: string, input: Record<string, unknown>, ctx: Ctx):
         { role: 'system', content: 'You are a senior short-form video scriptwriter. Produce a SCRIPT ONLY. Output EXACTLY ONE JSON object: {"hook":str,"script":str,"caption":str,"cta":str,"visual_beats":[str],"confidence":num}. Ground in provided material; never imply a rendered video.' },
         { role: 'user', content: `TOPIC: ${s('topic')}\nAUDIENCE: ${s('audience')}\nGOAL: ${s('goal')}\nPLATFORM: ${s('platform') || 'short-form'}\nSOURCE: ${s('source_material')}` },
       ] as AIMessage[], { maxTokens: 1200, provider: ctx.provider, model: ctx.model });
+      // The step's checkCredits gate covered this call, but the spend caps only see what gets
+      // RECORDED — an unrecorded tool call is invisible to the daily/monthly dollar ceilings.
+      // Fail-soft like every spendCredits call: a ledger hiccup never loses the script.
+      await spendCredits(ctx.db, ctx.ownerId, {
+        costUsd: res.costUsd, kind: 'garvis', provider: ctx.provider, model: ctx.model,
+        inputTokens: res.inputTokens, outputTokens: res.outputTokens,
+      });
       const parsed: Record<string, unknown> = parseJson<Record<string, unknown>>(res.text) ?? { script: res.text };
       return { short: { ...parsed, fidelity: 'script_only', required_approval: true } };
     }
