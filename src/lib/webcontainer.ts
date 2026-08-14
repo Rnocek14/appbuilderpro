@@ -9,6 +9,7 @@
 import { WebContainer, type FileSystemTree, type WebContainerProcess } from '@webcontainer/api';
 import type { ProjectFile } from '../types';
 import { isMetaFile } from './projectBrain';
+import { registryPin } from './depRegistry';
 
 export type { WebContainerProcess };
 
@@ -186,7 +187,10 @@ function scanImports(files: ProjectFile[]): Set<string> {
   return names;
 }
 
-/** Ensure every imported package is in package.json dependencies (added as "latest"). */
+/** Ensure every imported package is in package.json dependencies — at the registry's pin when
+ *  the package is blessed, and only at "latest" (with a visible log line) when it never was.
+ *  An unpinned injection is the drift the dep registry exists to kill; the log keeps the
+ *  remaining hole honest instead of silent. */
 function reconcilePackageJson(files: ProjectFile[]): ProjectFile[] {
   const pkg = files.find((f) => f.path === '/package.json');
   if (!pkg) return files;
@@ -197,7 +201,9 @@ function reconcilePackageJson(files: ProjectFile[]): ProjectFile[] {
   let changed = false;
   for (const name of scanImports(files)) {
     if (deps[name] || dev[name]) continue;
-    deps[name] = 'latest';
+    const pin = registryPin(name);
+    if (!pin) console.warn(`[deps] "${name}" has no registry pin — installing "latest" (add it to _shared/depRegistry.ts to pin it)`);
+    deps[name] = pin ? `^${pin}` : 'latest';
     changed = true;
   }
   if (!changed) return files;

@@ -4,6 +4,7 @@ import type { ProjectFile } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture } from '../../lib/previewRuntime';
+import { REACT_VERSION, previewPins } from '../../lib/depRegistry';
 
 export type Device = 'desktop' | 'tablet' | 'mobile';
 const DEVICE_WIDTH: Record<Device, string> = { desktop: '100%', tablet: '768px', mobile: '390px' };
@@ -45,7 +46,7 @@ const BABEL_CDNS = [
 
 interface PreviewPayload { files: Record<string, string>; css: string; externals: string[]; aliases: Record<string, string>; env: Record<string, string> }
 
-const REACT_PIN = '18.3.1';
+const REACT_PIN = REACT_VERSION;
 const REACT_FAMILY = new Set(['react', 'react-dom', 'react-dom/client', 'react/jsx-runtime', 'react/jsx-dev-runtime']);
 // Build-time / Node-only specifiers that must never be fetched from esm.sh.
 const NON_BROWSER = new Set([
@@ -353,12 +354,10 @@ function loadScript(urls){
 // Copy a module namespace into a plain object with __esModule so Babel's commonjs interop
 // resolves default and named imports correctly.
 function nsToObj(ns){ const o={__esModule:true}; for(const k in ns) o[k]=ns[k]; if(ns&&ns.default!==undefined)o.default=ns.default; return o; }
-// Pin the curated deps to the versions in the scaffold's package.json so esm.sh doesn't
-// surprise us with a breaking "latest".
-const PINS={'react-router-dom':'6.26.2','recharts':'2.13.0','lucide-react':'0.453.0','@supabase/supabase-js':'2.45.4','date-fns':'4.1.0','clsx':'2.1.1',
-// Motion/3D stack — pinned to a known-compatible set so esm.sh never drifts a peer-dep and wedges
-// the preview (three<->fiber<->drei are the classic footgun). These power the advanced-motion kit.
-'framer-motion':'11.11.17','gsap':'3.12.5','lenis':'1.1.14','three':'0.169.0','@react-three/fiber':'8.17.10','@react-three/drei':'9.114.3'};
+// Pins come from the ONE dependency registry (interpolated at shell build time) so esm.sh
+// never surprises us with a breaking "latest" — and so the preview, the scaffold, and the QA
+// allowlist can never disagree about a version (verify:depregistry pins the agreement).
+const PINS=${JSON.stringify(previewPins())};
 function esmUrl(spec){
   const v=PINS[spec]?('@'+PINS[spec]):'';
   // @react-three/* MUST share the app's single pinned three instance (bundling their own copy

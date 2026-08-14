@@ -3,6 +3,8 @@
 // generated source: unresolved relative imports, Node built-ins (don't exist in the browser),
 // disallowed packages, and a missing entry file.
 
+import { generatedImportable } from './depRegistry.ts';
+
 export interface QAIssue {
   path: string;
   severity: 'error' | 'warning';
@@ -17,13 +19,9 @@ const NODE_BUILTINS = new Set([
 // demand from the CDN). Anything outside this set is a WARNING (not an error) — kept in sync with
 // PLATFORM_CONSTRAINTS / GENERATE_CORE in prompts.ts so the generation QA gate doesn't flag the
 // libraries we tell the model to use.
-const ALLOWED_TS = new Set([
-  'react', 'react-dom', 'react-router-dom', 'lucide-react', 'recharts',
-  '@supabase/supabase-js', 'date-fns', 'clsx',
-  'class-variance-authority', 'tailwind-merge', 'framer-motion', 'zustand',
-  '@tanstack/react-query', 'react-hook-form', 'zod',
-  'gsap', 'lenis', // bespoke scroll choreography (ScrollTrigger timelines, smooth scroll)
-]);
+// Derived from the one dependency truth — a package joins the allowlist by joining the
+// registry (scope 'generated'), never by being typed here.
+const ALLOWED_TS = new Set(generatedImportable());
 const ALLOWED_JS = new Set(['react']);
 
 const CODE_RE = /\.(t|j)sx?$/;
