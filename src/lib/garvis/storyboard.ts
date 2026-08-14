@@ -413,6 +413,42 @@ export function conceptScenes(input: DefaultScenesInput, concept: VideoConcept):
 /** A deterministic default storyboard from a business's real photos — the zero-AI floor. A hook
  *  card, one scene per photo (its caption becomes the voiceover), and a closing CTA card. This is
  *  what plays in the browser preview before any AI script runs. */
+/** The SPOKEN-SUBJECT scenes: "make a video about X" must make a video ABOUT X — the same real
+ *  photos, but the opening and closing words center the named subject, not the business
+ *  generally. No invented facts: the subject is the operator's own words, the name is real, and
+ *  everything else stays what it was. */
+export function subjectScenes(input: DefaultScenesInput, subject: string, concept: VideoConcept): SceneInput[] {
+  const name = input.businessName || 'this business';
+  const s = clip(subject, 60);
+  const photos = input.photos.slice(0, 5).map((p) => ({
+    imageUrl: p.url,
+    onScreen: p.caption ? clip(p.caption, 60) : '',
+    voiceover: p.caption ? clip(p.caption, 120) : '',
+    durationS: 3.5,
+  }));
+  const close = { onScreen: clip(input.offer || 'Get in touch', 60), voiceover: input.offer || `Reach out to ${name}.`, durationS: 3 };
+  if (concept === 'story_first') {
+    return [
+      { onScreen: s, voiceover: clip(`${subject} — here's the story, from ${name}.`, 120), durationS: 3 },
+      ...photos,
+      close,
+    ];
+  }
+  if (concept === 'offer_first') {
+    return [
+      { onScreen: clip(input.offer || s, 60), voiceover: clip(`${subject}. Here's a look.`, 120), durationS: 3 },
+      ...photos,
+      { onScreen: clip(`${name} · ${subject}`, 60), voiceover: clip(`That's ${subject}. Reach out — ${name}.`, 120), durationS: 3 },
+    ];
+  }
+  // proof_first
+  return [
+    { onScreen: s, voiceover: clip(`${name} — ${subject}.`, 120), durationS: 3 },
+    ...photos,
+    close,
+  ];
+}
+
 export function defaultScenes(input: DefaultScenesInput): SceneInput[] {
   const scenes: SceneInput[] = [];
   const name = input.businessName || 'this business';

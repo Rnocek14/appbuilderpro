@@ -15,13 +15,15 @@
 // SEED: rendering it to a real vertical video needs a connected video model — this never fakes footage.
 // All logic lives in the pure core (reelStudio.ts, verified). This file is the staged UI over it.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Sparkles, Copy, Save, Loader2, Lightbulb, FileText, Clapperboard, Play, Clock } from 'lucide-react';
 import {
   REEL_FORMATS, reelIdeas, reelScript, reelScenes, reelCaption, reelToText,
   type ReelFormat, type ReelIdea, type ReelScript, type ReelBeat,
 } from '../../lib/garvis/reelStudio';
 import type { StudioCtx } from '../../lib/garvis/studioKit';
+import { registerSurface } from '../../lib/garvis/surfaceBridge';
+import { parseReelAsk } from '../../lib/garvis/studioVoice';
 import { createArtifact } from '../../lib/garvis/artifacts';
 import { loadWeb } from '../../lib/garvis/workwebRun';
 import { Button } from '../ui';
@@ -67,6 +69,44 @@ export function ReelStudio({ worldId, clusterId, onToast, onSaved, ctxOverride }
   const scenes = useMemo(() => (format && script ? reelScenes(format, script) : []), [format, script]);
 
   const reset = () => { setStage('ideate'); setFormat(null); setIdea(null); setScript(null); setIdeaVariant(0); setCaptionVariant(0); };
+
+  // TALK TO THE STUDIO — "make a reel about home espresso" ideates right here; "more ideas",
+  // "use the second one", "start over". Claims are the verified pure parser (studioVoice.ts).
+  // State AND actions ride refs: the surface registers once, and a handle built on the first
+  // render must always act on the latest state (pickIdea closes over `format`).
+  const voiceRef = useRef({ format, topic, ideaVariant });
+  voiceRef.current = { format, topic, ideaVariant };
+  const actRef = useRef({ reset, pickIdea: (i: ReelIdea) => pickIdea(i) });
+  useEffect(() => registerSurface({
+    id: 'studio:reel',
+    claims: (s) => (parseReelAsk(s) ? { kind: 'instruct', text: s } : null),
+    suggest: () => (voiceRef.current.format
+      ? [
+        { label: 'More ideas', cmd: { kind: 'instruct', text: 'more ideas' } },
+        { label: 'Use the first one', cmd: { kind: 'instruct', text: 'use the first one' } },
+      ]
+      : []),
+    handle: (cmd) => {
+      const ask = parseReelAsk(cmd.text);
+      const v = voiceRef.current;
+      if (!ask) return 'Say it again?';
+      if (ask.kind === 'restart') { actRef.current.reset(); return 'Cleared — pick a format and we go again.'; }
+      if (ask.kind === 'topic') {
+        setTopic(ask.topic);
+        setTopicTouched(true);
+        if (!v.format) setFormat(REEL_FORMATS[0] ?? null);
+        setIdeaVariant(0); setIdea(null); setScript(null); setStage('ideate');
+        return `Angles on \u201c${ask.topic}\u201d are up \u2014 pick one and I script it beat by beat.`;
+      }
+      if (!v.format) return 'Pick a format first \u2014 then I can pull angles.';
+      if (ask.kind === 'more') { setIdeaVariant(v.ideaVariant + 1); setStage('ideate'); return 'Fresh angles.'; }
+      const list = reelIdeas(v.format.id, v.topic, v.ideaVariant);
+      const chosen = list[ask.index];
+      if (!chosen) return `Only ${list.length} idea${list.length === 1 ? ' is' : 's are'} up \u2014 pick one of those.`;
+      actRef.current.pickIdea(chosen);
+      return `\u201c${chosen.title}\u201d \u2014 scripted. Tune any beat, then storyboard it.`;
+    },
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
   const openFormat = (f: ReelFormat) => { setFormat(f); setIdeaVariant(0); setStage('ideate'); };
   const pickIdea = (i: ReelIdea) => {
     if (!format) return;
@@ -74,6 +114,8 @@ export function ReelStudio({ worldId, clusterId, onToast, onSaved, ctxOverride }
     if (!sc) return;
     setIdea(i); setScript({ ...sc, beats: sc.beats.map((b) => ({ ...b })) }); setStage('script');
   };
+
+  actRef.current = { reset, pickIdea: (i: ReelIdea) => pickIdea(i) };
 
   const editBeat = (i: number, patch: Partial<ReelBeat>) => setScript((s) => {
     if (!s) return s;

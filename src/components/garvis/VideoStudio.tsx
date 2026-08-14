@@ -12,7 +12,7 @@ import { Loader2, Play, Pause, Save, Film, Download, Clapperboard, Send, Mic } f
 import { buildStoryboard, buildTimedCaptionsSrt, VIDEO_CONCEPTS, type Aspect, type EditOpts, type Storyboard, type VideoConcept, type WordTiming } from '../../lib/garvis/storyboard';
 import { planEmphasis } from '../../lib/garvis/editPlan';
 import {
-  loadVideoMaterials, defaultStoryboardFor, saveStoryboard, startRender, pollRender, saveRenderedVideo,
+  loadVideoMaterials, defaultStoryboardFor, subjectStoryboardFor, saveStoryboard, startRender, pollRender, saveRenderedVideo,
   saveSrtAsset, generateVoiceover,
   type VideoMaterials,
 } from '../../lib/garvis/videoRun';
@@ -21,6 +21,8 @@ import { type SfxKit } from '../../lib/garvis/ugcEdit';
 import { loadSfxKit, sfxKitCount } from '../../lib/garvis/sfxStore';
 import { SoundKitFields } from './SoundKitFields';
 import { withDisclosure, type AiProvenance } from '../../lib/garvis/mediaProvenance';
+import { registerSurface } from '../../lib/garvis/surfaceBridge';
+import { parseVideoAsk } from '../../lib/garvis/studioVoice';
 import { PLATFORM_LABEL, type Platform } from '../../lib/garvis/social';
 import { queueSocialPost } from '../../lib/garvis/socialRun';
 import { cn } from '../../lib/utils';
@@ -66,6 +68,46 @@ export function VideoStudio({ worldId, clusterId, title, onToast }: {
   // browser with edits pending must ask first (design review).
   const [dirty, setDirty] = useState(false);
   useUnsavedGuard(dirty);
+
+  // TALK TO THE STUDIO — the concierge's sentences act HERE while this studio is open ("make a
+  // video about the lakefront listing", "story first", "make it vertical", "play it"). Claims
+  // are the verified pure parser (studioVoice.ts); state is read through a ref so the handle
+  // never goes stale across renders. A rebuild op refuses while hand edits are unsaved — spoken
+  // words must not silently destroy an hour of typing.
+  const voiceRef = useRef({ materials, dirty, playing, aspect, concept });
+  voiceRef.current = { materials, dirty, playing, aspect, concept };
+  useEffect(() => registerSurface({
+    id: 'studio:video',
+    claims: (sentence) => (parseVideoAsk(sentence) ? { kind: 'instruct', text: sentence } : null),
+    suggest: () => (voiceRef.current.playing
+      ? [{ label: 'Pause it', cmd: { kind: 'instruct', text: 'pause' } }]
+      : [
+        { label: 'Play it', cmd: { kind: 'instruct', text: 'play it' } },
+        { label: 'Story-first cut', cmd: { kind: 'instruct', text: 'story first' } },
+        { label: 'Make it vertical', cmd: { kind: 'instruct', text: 'make it vertical' } },
+      ]),
+    handle: (cmd) => {
+      const ask = parseVideoAsk(cmd.text);
+      const v = voiceRef.current;
+      if (!ask) return 'Say it again?';
+      if (ask.kind === 'play') { setPlaying(true); return 'Rolling.'; }
+      if (ask.kind === 'pause') { setPlaying(false); return 'Paused.'; }
+      if (ask.kind === 'aspect') { setAspect(ask.aspect); rebuild({ aspect: ask.aspect }); setScene(0); return `Now ${ask.aspect === '9:16' ? 'vertical' : ask.aspect === '1:1' ? 'square' : 'landscape'}.`; }
+      if (v.dirty) return "You have unsaved line edits — save or render first, then I'll rebuild the timeline.";
+      if (!v.materials) return 'Still loading this business\u2019s photos — one moment.';
+      if (ask.kind === 'cut') {
+        setConcept(ask.concept);
+        setSb(defaultStoryboardFor(v.materials, title, v.aspect, ask.concept));
+        setScene(0); setPlaying(false);
+        return `Recut — ${ask.concept === 'story_first' ? 'the story leads' : ask.concept === 'offer_first' ? 'the offer leads' : 'the proof leads'}.`;
+      }
+      // retitle: the whole board rebuilds AROUND the spoken subject — opening card and words,
+      // not just the artifact title.
+      setSb(subjectStoryboardFor(v.materials, ask.title, v.aspect, v.concept));
+      setScene(0); setPlaying(false);
+      return `Built around \u201c${ask.title}\u201d — the real photos are in; tune any line and press Render.`;
+    },
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let live = true;
