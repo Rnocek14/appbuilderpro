@@ -21,6 +21,7 @@ import { matchPlanShape } from '../lib/garvis/masterPlan';
 import { STUDIO_AREA, matchWorldTitle, type DockAction } from '../lib/garvis/dockBrain';
 import { appendTurn, dockScrollback, mergeThread, recentForBrain, worthKeeping, type ThreadTurn } from '../lib/garvis/thread';
 import { THREAD_EVENT, appendThread, loadThread } from '../lib/garvis/threadRun';
+import { lookDue, markLooked } from '../lib/garvis/proactiveRun';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
 import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
@@ -270,16 +271,42 @@ export function ConciergeDock() {
   useEffect(() => {
     if (!open) return;
     let dead = false;
+    const absorb = (remote: ThreadTurn[]) => {
+      if (dead || !remote.length) return;
+      const merged = mergeThread(remote, threadRef.current);
+      threadRef.current = merged;
+      setThread(merged);
+    };
     const pull = () => {
       if (selfWrites.current > 0) { selfWrites.current -= 1; return; }
-      void loadThread().then((remote) => {
-        if (dead || !remote.length) return;
-        const merged = mergeThread(remote, threadRef.current);
-        threadRef.current = merged;
-        setThread(merged);
-      });
+      void loadThread().then(absorb);
     };
-    pull();
+    // GARVIS SPEAKS UNPROMPTED. The standing machinery runs while the operator is elsewhere —
+    // an approval sits for days blocking everything behind it, an arc parks at a seam, a watch
+    // catches a competitor's page changing. Those become TURNS here, where they already look.
+    // The rules live in the pure core: real rows only, each thing said once ever, the most
+    // important few per waking, and silence when nothing qualifies. Never spoken aloud — an
+    // assistant that volunteers something shouldn't also talk over the room.
+    const listen = async () => {
+      if (!lookDue()) return;
+      const [{ gatherProactive, loadSpoken, saveSpoken }, { observe, pickToSay, rememberSpoken }] = await Promise.all([
+        import('../lib/garvis/proactiveRun'), import('../lib/garvis/proactive'),
+      ]);
+      const spoken = loadSpoken();
+      const say = pickToSay(observe(await gatherProactive()), spoken);
+      // The throttle is marked only by a pass that SURVIVED. Marking it up front would mean a
+      // torn-down mount (StrictMode does exactly this) silently eats the news for the whole
+      // window — a blocking approval would go unmentioned because of a remount.
+      if (dead) return;
+      markLooked();
+      if (!say.length) return;
+      saveSpoken(rememberSpoken(spoken, say.map((o) => o.key)));
+      for (const o of say) recordTurn('garvis', o.text);
+    };
+
+    // Load first, then listen — a volunteered line has to land at the END of the conversation,
+    // not race the load and get merged out of order.
+    void loadThread().then(absorb).then(listen).catch(() => {});
     window.addEventListener(THREAD_EVENT, pull);
     return () => { dead = true; window.removeEventListener(THREAD_EVENT, pull); };
   }, [open]);
