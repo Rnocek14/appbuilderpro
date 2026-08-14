@@ -28,7 +28,8 @@ import { resolveAI, providerInfo, DIRECT, type Provider } from './aiConfig';
 import { PREFERENCE_DISTILL_SYSTEM, DIRECTIONS_SYSTEM, directionPickPrompt, singleDirectionPrompt, filesPromptChunk } from './prompts';
 import { parseProtocol } from '../../supabase/functions/_shared/streamparse';
 import { recordUsage, tagUsageSince, estimateCost } from './usage';
-import { agenticEdit, agenticVerifyAndFix, generationCompileGate } from './agent/edit';
+import { agenticEdit, agenticVerifyAndFix, generationCompileGate, type CompileGateResult } from './agent/edit';
+import { verificationFromGate, verificationLabel, verificationNote } from './verification';
 import { agentAvailable } from './agent/loop';
 
 interface Usage { inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
@@ -1282,15 +1283,17 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
         } catch { /* best-effort */ }
       }
-      let tsErrors: number | null = null;
+      // Honest verification (SW3.1): the gate reports ran/errors/reason, and the state machine
+      // (src/lib/verification.ts) owns the wording — a compiler that never ran can no longer
+      // walk away wearing 'clean'.
+      let gate: CompileGateResult | null = null;
       if (!qaErrors.length) {
-        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+        try { gate = await generationCompileGate(projectId); } catch { gate = null; }
       }
+      let verification = verificationFromGate(gate);
       await mark('validate', 'done',
-        qaErrors.length ? `${qaErrors.length} issue(s) found`
-          : tsErrors ? `${tsErrors} type error(s) found`
-          : tsErrors === 0 ? 'verified — compiles clean' : 'clean');
-      if (qaErrors.length || tsErrors) {
+        qaErrors.length ? `${qaErrors.length} issue(s) found` : verificationLabel(verification));
+      if (qaErrors.length || verification.level === 'compile_failed') {
         await mark('fix', 'running');
         try {
           if (agentAvailable()) {
@@ -1303,16 +1306,17 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           }
         } catch { /* best-effort — report whatever remains below */ }
         qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
-        if (tsErrors && agentAvailable()) {
+        if (verification.level === 'compile_failed' && agentAvailable()) {
           // Recount after the agentic repair (the container is warm, so this is a quick tsc).
-          try { tsErrors = await generationCompileGate(projectId); } catch { /* keep the last count */ }
+          try { gate = await generationCompileGate(projectId); verification = verificationFromGate(gate); }
+          catch { /* keep the last state */ }
         }
-        const remaining = qaErrors.length + (tsErrors ?? 0);
-        await mark('fix', 'done', remaining ? `${remaining} unresolved` : 'fixed');
+        const remaining = qaErrors.length + (verification.level === 'compile_failed' ? verification.errors : 0);
+        await mark('fix', 'done', remaining ? `${remaining} unresolved` : verificationLabel(verification));
       } else {
         await mark('fix', 'done');
       }
-      const unresolved = qaErrors.length + (tsErrors ?? 0);
+      const unresolved = qaErrors.length + (verification.level === 'compile_failed' ? verification.errors : 0);
 
       await mark('summarize', 'running');
       const genAi = resolveAI();
@@ -1326,7 +1330,8 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           ` Open the preview to try it, then keep iterating in chat.` +
           (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
           (stillMissing.length ? `\n\n⚠️ ${stillMissing.length} page(s) could not be generated (${stillMissing.map((p) => p.split('/').pop()).join(', ')}) — ask me in chat to add them.` : '') +
-          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.` : ''),
+          (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.`
+            : `\n\n${verificationNote(verification)}`),
         files_changed: [...written.keys()],
         thread_id: MAIN_THREAD_ID,
       });
@@ -1485,12 +1490,13 @@ export async function resumeGeneration(projectId: string): Promise<{ generationI
           if (made.length) qaErrors = (await runQA(projectId)).filter((i) => i.severity === 'error');
         } catch { /* best-effort */ }
       }
-      let tsErrors: number | null = null;
+      let resumeGate: CompileGateResult | null = null;
       if (!qaErrors.length) {
-        try { tsErrors = await generationCompileGate(projectId); } catch { tsErrors = null; }
+        try { resumeGate = await generationCompileGate(projectId); } catch { resumeGate = null; }
       }
-      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s)` : tsErrors ? `${tsErrors} type error(s)` : 'clean');
-      if (qaErrors.length || tsErrors) {
+      const resumeVerification = verificationFromGate(resumeGate);
+      await mark('validate', 'done', qaErrors.length ? `${qaErrors.length} issue(s)` : verificationLabel(resumeVerification));
+      if (qaErrors.length || resumeVerification.level === 'compile_failed') {
         await mark('fix', 'running');
         try {
           if (agentAvailable()) await agenticVerifyAndFix(projectId, { onActivity: (l) => void mark('fix', 'running', l) });

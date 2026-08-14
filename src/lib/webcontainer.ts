@@ -422,9 +422,12 @@ export async function syncFiles(projectId: string, files: ProjectFile[]): Promis
 let deepActive = false;                                            // a deep verify owns the container
 let deepRun: Promise<{ ran: boolean; diags: TsDiag[] }> | null = null; // in-flight verify (startRunner awaits it)
 
-export async function deepTypecheck(projectId: string, files: ProjectFile[]): Promise<{ ran: boolean; diags: TsDiag[] }> {
+export async function deepTypecheck(projectId: string, files: ProjectFile[]): Promise<{ ran: boolean; diags: TsDiag[]; reason?: string }> {
   try {
-    if (!isolationReady() || !hasPackageJson(files)) return { ran: false, diags: [] };
+    // Each not-ran path NAMES its reason (SW3.1): "static only" without a why is the silent
+    // degrade the honest-verification work exists to kill.
+    if (!isolationReady()) return { ran: false, diags: [], reason: 'this tab lacks cross-origin isolation — open the Full-runtime preview to compile-verify' };
+    if (!hasPackageJson(files)) return { ran: false, diags: [], reason: 'not a runnable project (no package.json)' };
 
     // The live runner already serves this project — reuse it wholesale.
     if (state.projectId === projectId && state.status === 'ready') {
@@ -435,18 +438,18 @@ export async function deepTypecheck(projectId: string, files: ProjectFile[]): Pr
     if (deepRun) return deepRun;
     // The container is busy with ANOTHER project (or mid-boot) — never clobber a live session.
     if (state.projectId !== projectId && state.status !== 'idle' && state.status !== 'error') {
-      return { ran: false, diags: [] };
+      return { ran: false, diags: [], reason: 'the compiler is serving another project right now' };
     }
     // A REAL boot (dev server) is in flight for this project — never fight it; static-only.
     if (state.projectId === projectId && !deepActive
         && (state.status === 'booting' || state.status === 'mounting' || state.status === 'installing' || state.status === 'starting')) {
-      return { ran: false, diags: [] };
+      return { ran: false, diags: [], reason: 'the preview is still booting — verification will catch up' };
     }
 
     deepRun = runDeep(projectId, files);
     return await deepRun;
   } catch {
-    return { ran: false, diags: [] };
+    return { ran: false, diags: [], reason: 'the compiler crashed before it could check' };
   }
 }
 

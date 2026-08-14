@@ -95,11 +95,13 @@ async function verifyProject(projectId: string, files: Map<string, string>, deep
 
 /**
  * The generation COMPILE GATE: load the project's files and run the deep compiler check (headless
- * boot when the preview isn't open). Returns the number of type errors, or null when this
- * environment can't run the compiler (no cross-origin isolation) — callers fall back to
- * static-only verification and say so honestly.
+ * boot when the preview isn't open). Returns the full outcome — ran + error count + the NAMED
+ * reason when the compiler could not run (SW3.1) — so callers render an honest verification
+ * state instead of a silent "clean" that never saw a compiler.
  */
-export async function generationCompileGate(projectId: string): Promise<number | null> {
+export interface CompileGateResult { ran: boolean; errors: number; reason: string | null }
+
+export async function generationCompileGate(projectId: string): Promise<CompileGateResult> {
   const { data: fileRows } = await supabase
     .from('project_files').select('path, content')
     .eq('project_id', projectId).is('deleted_at', null);
@@ -107,9 +109,11 @@ export async function generationCompileGate(projectId: string): Promise<number |
   try {
     const wc = await import('../webcontainer');
     const res = await wc.deepTypecheck(projectId, arr as unknown as ProjectFile[]);
-    return res.ran ? res.diags.length : null;
+    return res.ran
+      ? { ran: true, errors: res.diags.length, reason: null }
+      : { ran: false, errors: 0, reason: res.reason ?? 'the compiler could not run here' };
   } catch {
-    return null;
+    return { ran: false, errors: 0, reason: 'the compiler crashed before it could check' };
   }
 }
 
