@@ -3,7 +3,7 @@ import { Wand2, MousePointerClick } from 'lucide-react';
 import type { ProjectFile } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
-import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture } from '../../lib/previewRuntime';
+import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture, registerPreviewNavigator } from '../../lib/previewRuntime';
 import { REACT_VERSION, previewPins } from '../../lib/depRegistry';
 
 export type Device = 'desktop' | 'tablet' | 'mobile';
@@ -620,6 +620,15 @@ window.addEventListener('message',function(e){
     update(d.files||{}, d.externals||[], d.aliases||{}, d.env||{});
   } else if(d.type==='screenshot'){
     captureScreenshot();
+  } else if(d.type==='navigate'){
+    // The render probe's steering wheel: hash-route apps get a hash hop, everything else a
+    // pushState + popstate so BrowserRouter re-matches. The DOM snapshot reports on its own
+    // (MutationObserver + route listeners) once the app repaints.
+    try{
+      var r=String(d.route||'/');
+      if((location.hash&&location.hash.indexOf('#/')===0)||r.indexOf('#')===0){ location.hash=(r.indexOf('#')===0?r:'#'+r); }
+      else{ history.pushState(null,'',r); window.dispatchEvent(new PopStateEvent('popstate')); }
+    }catch(err){}
   }
 });
 
@@ -769,6 +778,14 @@ function NativePreview({ files, device, showConsole, onFixError, busy, onSelectE
       win.postMessage({ __ff_cmd: true, type: 'screenshot' }, '*');
     }));
     return () => registerScreenshotCapture(null);
+  }, []);
+
+  // The probe's navigator (SW3.3): registered while this pane hosts the live iframe.
+  useEffect(() => {
+    registerPreviewNavigator((route) => {
+      iframeRef.current?.contentWindow?.postMessage({ __ff_cmd: true, type: 'navigate', route }, '*');
+    });
+    return () => registerPreviewNavigator(null);
   }, []);
 
   // PAGE SELECTOR: every concrete <Route path> in the app, jumpable from a dropdown. The blob

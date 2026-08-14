@@ -30,6 +30,8 @@ import { parseProtocol } from '../../supabase/functions/_shared/streamparse';
 import { recordUsage, tagUsageSince, estimateCost } from './usage';
 import { agenticEdit, agenticVerifyAndFix, generationCompileGate, type CompileGateResult } from './agent/edit';
 import { verificationFromGate, verificationLabel, verificationNote } from './verification';
+import { extractRoutePaths, probeFixRequest, probeSummary } from './renderProbe';
+import { probeRoutes } from './renderProbeRun';
 import { agentAvailable } from './agent/loop';
 
 interface Usage { inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
@@ -1350,6 +1352,38 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
       }
       const unresolved = qaErrors.length + (verification.level === 'compile_failed' ? verification.errors : 0);
 
+      // RENDER PROBE (SW3.3): the app is DRIVEN, not just compiled. Walk every static route in
+      // the live preview, judge what actually renders (uncaught error / blank screen), hand
+      // failures to the agentic fixer once, and report the honest count. Fail-soft throughout:
+      // no live preview or no routes is a named skip, never a fake pass.
+      let probeLine = '';
+      try {
+        const { data: appRow } = await supabase.from('project_files')
+          .select('content').eq('project_id', projectId).eq('path', '/src/App.tsx')
+          .is('deleted_at', null).maybeSingle();
+        const routes = extractRoutePaths(((appRow as { content?: string } | null)?.content) ?? '');
+        const probe = await probeRoutes(routes);
+        if (!probe.ran) {
+          probeLine = probe.reason ? `Routes unwalked — ${probe.reason}.` : '';
+        } else {
+          let judged = probe.results;
+          let bad = judged.filter((r) => !r.ok);
+          if (bad.length && agentAvailable()) {
+            await mark('fix', 'running', `repairing ${bad.length} broken route(s)`);
+            try {
+              await agenticVerifyAndFix(projectId, {
+                onActivity: (l) => void mark('fix', 'running', l),
+                focus: probeFixRequest(judged),
+              });
+              const again = await probeRoutes(routes);
+              if (again.ran) { judged = again.results; bad = judged.filter((r) => !r.ok); }
+            } catch { /* the honest count below reports whatever remains */ }
+            await mark('fix', 'done', bad.length ? `${bad.length} route(s) still broken` : 'routes repaired');
+          }
+          probeLine = probeSummary(judged);
+        }
+      } catch { /* the probe is an upgrade, never a blocker */ }
+
       await mark('summarize', 'running');
       const genAi = resolveAI();
       const summaryId = await insertAiMessage({
@@ -1363,7 +1397,8 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           (secretEnvs.length ? `\n\n🔑 This build wires up ${secretServices.join(', ') || 'external services'} via server-side edge functions (/supabase/functions). It needs ${secretEnvs.length} API key(s) — ${secretEnvs.join(', ')} — added in Secrets to go live; until then those features show a "connect to enable" state.` : '') +
           (stillMissing.length ? `\n\n⚠️ ${stillMissing.length} page(s) could not be generated (${stillMissing.map((p) => p.split('/').pop()).join(', ')}) — ask me in chat to add them.` : '') +
           (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.`
-            : `\n\n${verificationNote(verification)}`),
+            : `\n\n${verificationNote(verification)}`) +
+          (probeLine ? `\n${/broken|unwalked/i.test(probeLine) ? '⚠️ ' : ''}Route walk: ${probeLine}` : ''),
         files_changed: [...written.keys()],
         thread_id: MAIN_THREAD_ID,
       });

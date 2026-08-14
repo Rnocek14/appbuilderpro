@@ -6,7 +6,7 @@ import { Button } from '../ui';
 import {
   subscribeRunner, getRunnerState, startRunner, syncFiles, hasPackageJson, type RunnerStatus, type TsDiag,
 } from '../../lib/webcontainer';
-import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture } from '../../lib/previewRuntime';
+import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture, registerPreviewNavigator } from '../../lib/previewRuntime';
 
 interface Props {
   files: ProjectFile[];
@@ -148,6 +148,15 @@ export function WebContainerPane({ files, projectId, onFixError, onHealTypes, ai
     }));
     return () => registerScreenshotCapture(null);
   }, [url]);
+
+  // The probe's navigator (SW3.3): the same message the blob shell understands, posted into
+  // the WebContainer's cross-origin iframe (the shim installed at mount handles it).
+  useEffect(() => {
+    registerPreviewNavigator((route) => {
+      iframeRef.current?.contentWindow?.postMessage({ __ff_cmd: true, type: 'navigate', route }, '*');
+    });
+    return () => registerPreviewNavigator(null);
+  }, []);
 
   const restart = () => void startRunner(projectId, filesRef.current, { force: true });
   // Retry after a failure is a FORCED clean re-run (fresh mount + install) — a partial/broken

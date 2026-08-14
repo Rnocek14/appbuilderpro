@@ -116,6 +116,12 @@ const OBSERVABILITY_SHIM = `<script>
   ['popstate','hashchange'].forEach(function(ev){ try{ window.addEventListener(ev,schedule); }catch(_){ } });
   var H2C=['https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js','https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'];
   function loadH2C(){ if(window.html2canvas) return Promise.resolve(); return new Promise(function(res,rej){ var i=0; (function n(){ if(i>=H2C.length){rej(new Error('h2c'));return;} var s=document.createElement('script'); s.src=H2C[i++]; s.crossOrigin='anonymous'; s.onload=function(){res();}; s.onerror=n; document.head.appendChild(s); })(); }); }
+  window.addEventListener('message',function(e){ var d=e.data; if(!d||!d.__ff_cmd||d.type!=='navigate') return;
+    try{ var r=String(d.route||'/');
+      if((location.hash&&location.hash.indexOf('#/')===0)||r.indexOf('#')===0){ location.hash=(r.indexOf('#')===0?r:'#'+r); }
+      else{ history.pushState(null,'',r); window.dispatchEvent(new PopStateEvent('popstate')); }
+    }catch(err){}
+  });
   window.addEventListener('message',function(e){ var d=e.data; if(!d||!d.__ff_cmd||d.type!=='screenshot') return;
     loadH2C().then(function(){ return window.html2canvas(document.body,{useCORS:true,allowTaint:false,logging:false,backgroundColor:'#ffffff',scale:1,width:document.documentElement.clientWidth,height:document.documentElement.clientHeight,windowWidth:document.documentElement.clientWidth,windowHeight:document.documentElement.clientHeight}); })
     .then(function(c){ var cv=c; if(c.width>1024){ var r=1024/c.width,nc=document.createElement('canvas'); nc.width=1024; nc.height=Math.round(c.height*r); nc.getContext('2d').drawImage(c,0,0,nc.width,nc.height); cv=nc; } send({type:'screenshot',dataUrl:cv.toDataURL('image/jpeg',0.8)}); })

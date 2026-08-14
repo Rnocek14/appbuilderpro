@@ -59,6 +59,21 @@ export async function captureScreenshot(): Promise<string | null> {
   try { return await captureFn(); } catch { return null; }
 }
 
+// --- Navigation (the render probe's steering wheel, SW3.3) -------------------
+// Whichever pane hosts the live iframe registers a navigator (the screenshot pattern);
+// the probe drives routes through it. No pane registered = no live preview = the probe
+// reports an honest not-ran instead of inventing a walk.
+type NavigateFn = (route: string) => void;
+let navigateFn: NavigateFn | null = null;
+
+export function registerPreviewNavigator(fn: NavigateFn | null): void { navigateFn = fn; }
+
+/** Ask the live preview to navigate. False when no preview is mounted to drive. */
+export function navigatePreview(route: string): boolean {
+  if (!navigateFn) return false;
+  try { navigateFn(route); return true; } catch { return false; }
+}
+
 const MAX_LOG_LINES = 40;
 const MAX_DOM_CHARS = 4000;
 

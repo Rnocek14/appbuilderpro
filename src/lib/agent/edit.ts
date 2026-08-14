@@ -126,7 +126,7 @@ export async function generationCompileGate(projectId: string): Promise<CompileG
  * "verified". Best-effort: the caller swallows failures and reports the residual issue count.
  */
 export async function agenticVerifyAndFix(
-  projectId: string, opts?: { onActivity?: (label: string) => void; maxSteps?: number },
+  projectId: string, opts?: { onActivity?: (label: string) => void; maxSteps?: number; focus?: string },
 ): Promise<{ verified: boolean | null; changed: string[]; deleted: string[] }> {
   const { data: fileRows } = await supabase
     .from('project_files').select('path, content')
@@ -164,6 +164,7 @@ export async function agenticVerifyAndFix(
     '2. If it reports ANY error, read the offending file(s), fix the ROOT cause (use web_search if you are unsure of the correct approach), then call run_typecheck again.',
     '3. Repeat until run_typecheck is clean. Keep changes minimal — only what is needed for the app to be correct.',
     'When run_typecheck is clean, stop and reply with one short line confirming it.',
+    ...(opts?.focus ? ['', 'ADDITIONALLY — runtime findings from driving the app (fix these too):', opts.focus] : []),
     `\nPROJECT FILES (call read_file to see any):\n${tree}`,
   ].join('\n');
 
@@ -397,6 +398,20 @@ export async function agenticEdit(
     }
     for (const [path, c] of stagedEntries) onEvent?.(c === null ? { type: 'deletion', path } : { type: 'file-done', path });
   }
+  // Post-edit route judgment (SW3.3, the cheap half): if the live preview is showing a FRESH
+  // uncaught error right now — reported since this turn started — the turn says so instead of
+  // ending on a quiet "done" while the open route is broken. The workspace's capped auto-fix
+  // loop picks it up from here.
+  let liveNote = '';
+  if (staged && stagedEntries.length && !stagedFailed) {
+    try {
+      const { getPreviewSnapshot } = await import('../previewRuntime');
+      const snap = getPreviewSnapshot();
+      if (snap.error && snap.updatedAt >= startedAt) {
+        liveNote = `\n\n⚠️ The live preview is showing an error on the open route right now: ${snap.error.slice(0, 280)} — auto-fix will engage, or ask me to fix it.`;
+      }
+    } catch { /* best-effort */ }
+  }
   if (stagedFailed) {
     // Nothing landed. Package the overlay as the existing review flow's PendingEdit — the
     // workspace renders the diff with the named failure, and Apply anyway stays one click.
@@ -437,7 +452,7 @@ export async function agenticEdit(
   const verifyNote = didEdit && result.verified === false
     ? '\n\n⚠️ I used my full repair budget and some checks still fail. Say "continue fixing" and I\'ll pick up exactly where I left off.'
     : '';
-  const explanation = ((!rawText || looksInternal) ? (didEdit ? 'Done — changes applied and verified where possible.' : 'Here you go.') : rawText) + verifyNote;
+  const explanation = ((!rawText || looksInternal) ? (didEdit ? 'Done — changes applied and verified where possible.' : 'Here you go.') : rawText) + verifyNote + liveNote;
 
   // Persist this turn's per-file before/after + diffstat — the chat renders them as diff cards.
   const messageChanges: MessageFileChange[] = [...turnChanges.entries()]
