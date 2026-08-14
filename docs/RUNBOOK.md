@@ -52,6 +52,12 @@ Both lists are complete — every function referenced by the app is in one of th
 
 ## 3. Function secrets
 
+> **GitHub Actions (separate from Supabase secrets):** the AI review workflow
+> (`.github/workflows/ai-review.yml`) needs the repo Actions secret `ANTHROPIC_API_KEY`
+> (Settings → Secrets and variables → Actions). Optional Actions **variable** `REVIEW_MODEL`
+> overrides the review model — it lives in a variable on purpose; model IDs never go in code.
+> Without the secret, PRs simply get no AI review comment; nothing else is affected.
+
 Set in Supabase → Edge Functions → Secrets. Required for core:
 
 | Secret | Why |
