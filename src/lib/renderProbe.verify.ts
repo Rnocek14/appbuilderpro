@@ -53,5 +53,25 @@ check('no results, no verdict (never an invented count)', probeSummary([]) === '
 check('the fix request names each broken route', probeFixRequest(mixed).includes('/about') && probeFixRequest(mixed).includes('ROOT CAUSE'));
 check('a clean walk asks for no fixes', probeFixRequest([mixed[0]]) === '');
 
+// --- protocol parity: both preview runtimes must speak the same navigate command -----------
+// (the workerParity pattern: textual proof, so a shell edit that drops the handler is a CI
+// failure, not a probe that silently stops walking one runtime)
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const here = dirname(fileURLToPath(import.meta.url));
+const blobShell = readFileSync(join(here, '../components/editor/PreviewPane.tsx'), 'utf8');
+const wcShim = readFileSync(join(here, 'webcontainer.ts'), 'utf8');
+const runtime = readFileSync(join(here, 'previewRuntime.ts'), 'utf8');
+for (const [name, src] of [['blob shell', blobShell], ['webcontainer shim', wcShim]] as const) {
+  check(`${name} handles the navigate command`,
+    src.includes("d.type==='navigate'") || src.includes("d.type!=='navigate'"));
+  check(`${name} hops hash routers by hash`, src.includes("location.hash.indexOf('#/')===0"));
+  check(`${name} re-matches BrowserRouter via popstate`, src.includes("new PopStateEvent('popstate')"));
+}
+check('both panes register the navigator', blobShell.includes('registerPreviewNavigator((route)')
+  && readFileSync(join(here, '../components/editor/WebContainerPane.tsx'), 'utf8').includes('registerPreviewNavigator((route)'));
+check('the runtime exposes exactly one steering wheel', runtime.includes('export function navigatePreview'));
+
 console.log(`\nrenderProbe.verify: ${passed} passed, ${failed} failed`);
 if (failed) throw new Error(`${failed} render probe check(s) failed`);
