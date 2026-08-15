@@ -535,6 +535,105 @@ function ForwardInCard() {
   );
 }
 
+
+/** THE GARVIS LINE (SW4.3): bind the operator's own phone so Garvis can be texted (and, once
+ *  enabled, text first). A disclosure inside Settings — closed by default, no new page, no new
+ *  primary button. All writes go through the garvis-line function; this card only reads state
+ *  and presses the function's buttons. */
+function GarvisLineCard() {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<{ state: string; phone: string | null; proactive_enabled: boolean; attempts_left: number | null } | null>(null);
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const call = async (body: Record<string, unknown>) => {
+    const { data, error } = await supabase.functions.invoke('garvis-line', { body });
+    if (error) throw new Error((data as { error?: string } | null)?.error ?? error.message);
+    const res = data as { error?: string };
+    if (res?.error) throw new Error(res.error);
+    return data as Record<string, unknown>;
+  };
+  const refresh = async () => {
+    try { setState(await call({ action: 'status' }) as typeof state); } catch { /* card stays usable */ }
+  };
+  useEffect(() => { if (open) void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
+
+  const act = async (body: Record<string, unknown>, done?: string) => {
+    setBusy(true);
+    try { await call(body); if (done) toast('success', done); await refresh(); }
+    catch (e) { toast('error', e instanceof Error ? e.message : 'Something went wrong.'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Card className="mt-4 p-5">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className="flex w-full items-center justify-between text-left">
+        <div>
+          <h2 className="text-sm font-semibold text-forge-ink">Text Garvis</h2>
+          <p className="text-xs text-forge-dim">Bind your own phone so you can text Garvis a question — and let it text you first when something real needs you.</p>
+        </div>
+        <span className="text-xs text-forge-dim">{open ? 'Hide' : state?.state === 'verified' ? `Bound ${state.phone}` : 'Set up'}</span>
+      </button>
+      {open && (
+        <div className="mt-4 space-y-3 text-sm">
+          {state?.state === 'verified' ? (
+            <>
+              <p className="text-forge-dim">Verified: <span className="text-forge-ink">{state.phone}</span>. Texts from this number reach Garvis; nothing ever executes from a text — answers only.</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" disabled={busy}
+                  onClick={() => void act({ action: 'proactive', enabled: !state.proactive_enabled }, state.proactive_enabled ? 'Garvis will no longer text first.' : 'Garvis may now text first when something qualifies.')}
+                  className="rounded-lg border border-forge-border px-3 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50 disabled:opacity-50">
+                  {state.proactive_enabled ? 'Stop texting me first' : 'Let Garvis text first'}
+                </button>
+                <button type="button" disabled={busy}
+                  onClick={() => {
+                    void (async () => {
+                      const { data } = await supabase.auth.getUser();
+                      if (!data.user) return;
+                      const { error } = await supabase.from('garvis_line').delete().eq('owner_id', data.user.id);
+                      if (error) toast('error', error.message);
+                      else { toast('success', 'Number unbound.'); void refresh(); }
+                    })();
+                  }}
+                  className="rounded-lg border border-forge-border px-3 py-1.5 text-xs text-forge-warn hover:border-forge-warn/50 disabled:opacity-50">
+                  Unbind this number
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="block text-xs text-forge-dim">Your phone (international format)
+                <Input className="mt-1" placeholder="+1 555 010 1234" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </label>
+              <button type="button" disabled={busy || !phone.trim()}
+                onClick={() => void act({ action: 'start', phone }, 'Code sent — check your phone.')}
+                className="rounded-lg border border-forge-border px-3 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50 disabled:opacity-50">
+                Text me a code
+              </button>
+              {(state?.state === 'pending_code' || state?.state === 'code_expired' || state?.state === 'locked') && (
+                <div className="flex items-end gap-2">
+                  <label className="block text-xs text-forge-dim">6-digit code
+                    <Input className="mt-1 w-32" value={code} onChange={(e) => setCode(e.target.value)} />
+                  </label>
+                  <button type="button" disabled={busy || code.trim().length !== 6}
+                    onClick={() => void act({ action: 'confirm', code }, 'Number verified — you can text Garvis now.')}
+                    className="rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-3 py-1.5 text-xs text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">
+                    Confirm
+                  </button>
+                </div>
+              )}
+              {state?.state === 'locked' && <p className="text-xs text-forge-warn">Too many wrong guesses — request a fresh code.</p>}
+            </>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { profile, refreshProfile } = useAuth();
   const { toast } = useToast();
@@ -635,6 +734,7 @@ export default function Settings() {
         <OutreachCard />
 
         <ForwardInCard />
+        <GarvisLineCard />
 
         <Card className="mt-4 p-5">
           <h2 className="text-sm font-medium">Connections</h2>
