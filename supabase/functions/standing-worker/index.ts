@@ -82,6 +82,11 @@ import { templateById, flattenTemplate, type Charter } from '../../../src/lib/ga
 // SW6.2 — the producer trio server-side: same pure cores, same artifact shapes, same honesty
 // seams as the client producers (field-level parity pinned by arcParity.verify).
 import { produceResearchSrv, produceBusinessPlanSrv, produceCampaignSrv, persistProducedSrv } from '../_shared/producersSrv.ts';
+// SW6.3 — the genesis actions: drafts only, through the same pure parsers; approval (and
+// therefore instantiation of a genesis world) remains the operator's client-side ceremony.
+import { generateDraftSrv } from '../_shared/genesisSrv.ts';
+import { intakeFor, clientWorldIntent } from '../../../src/lib/garvis/clientEngagement.ts';
+import { VERTICAL_LIBRARY } from '../../../src/lib/garvis/verticalPlan.ts';
 // AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
@@ -2696,6 +2701,9 @@ const SERVER_ACTIONS = new Set([
   // SW6.2 — the producer trio. Grounded research, a red-teamed plan, campaign drafts: all
   // reviewable work product, credit-gated before the first model call.
   'research_market', 'business_plan', 'marketing_campaign',
+  // SW6.3 — the genesis composites. Every outcome is a reviewable draft; a genesis world is
+  // never instantiated server-side (approval is the client ceremony).
+  'found_company', 'onboard_client', 'launch_vertical',
 ]);
 
 /** Browser-required steps (the forge, the Paperwork studio) the worker can never run — but it can
@@ -2738,6 +2746,67 @@ async function resolveWorldSrv(admin: any, ownerId: string, title: string): Prom
   if (rows.length === 1) return rows[0];
   const exact = rows.filter((r) => r.title.toLowerCase() === title.toLowerCase());
   return exact.length === 1 ? exact[0] : null;
+}
+
+/** Instantiate a builtin template into a world (mirror of the client's instantiateWeb, minus
+ *  playbook seeding — the packs regenerate from any area's tools). Returns the world id and the
+ *  cluster ids by slug so composites (launch_vertical) can wire channels to their studio area. */
+// deno-lint-ignore no-explicit-any
+async function instantiateTemplateSrv(admin: any, ownerId: string, templateId: string, title: string): Promise<{ worldId: string; clusterIdBySlug: Map<string, string> }> {
+  const t = templateById(templateId);
+  if (!t) throw new Error(`The ${templateId} template is missing from the library.`);
+  const flat = flattenTemplate(t);
+  const { data: world, error: wErr } = await admin.from('knowledge_worlds').insert({
+    owner_id: ownerId, title, focus_slug: flat[0]?.slug ?? null,
+  }).select('id').single();
+  if (wErr || !world) throw new Error(wErr?.message ?? 'Could not create the world.');
+  const worldId = (world as { id: string }).id;
+  const clusterIdBySlug = new Map<string, string>(flat.map((n) => [n.slug, crypto.randomUUID()]));
+  const { error: clErr } = await admin.from('knowledge_clusters').insert(flat.map((n) => ({
+    id: clusterIdBySlug.get(n.slug), owner_id: ownerId, world_id: worldId,
+    parent_id: n.parentSlug ? clusterIdBySlug.get(n.parentSlug) : null,
+    slug: n.slug, title: n.title, summary: n.summary,
+    kind: n.charter.archetype === 'intel' ? 'question' : n.charter.archetype === 'studio' ? 'project' : 'topic',
+    maturity: 'spark', salience: n.depth === 0 ? 0.8 : 0.5, turn_refs: [],
+    charter: n.charter,
+  })));
+  if (clErr) throw new Error(clErr.message);
+  await admin.from('mind_events').insert({
+    owner_id: ownerId, event_type: 'note', source: 'workweb',
+    subject: `Created work web "${title}" from template ${t.id}`,
+    payload: { world_id: worldId, template: t.id },
+  }).then(() => {}, () => {});
+  return { worldId, clusterIdBySlug };
+}
+
+/** One cited episode draft for a channel — the shared inner path for the draft_episode arc step
+ *  and launch_vertical's episode one. Gates credits BEFORE the model call, records the real
+ *  spend after, and saves only a parseFactScript-validated script. */
+// deno-lint-ignore no-explicit-any
+async function draftEpisodeSrv(admin: any, ownerId: string, channel: { id: string; name: string; niche: string; persona: string; cluster_id: string | null }, topic?: string): Promise<{ title: string; warnings: string[] }> {
+  await checkCredits(admin, ownerId, 'short_script');
+  const { data: eps } = await admin.from('channel_episodes')
+    .select('title').eq('channel_id', channel.id).order('created_at', { ascending: false }).limit(20);
+  const m = modelForPlan(await getUserPlan(admin, ownerId));
+  const result = await complete([
+    { role: 'system', content: FACT_SCRIPT_SYSTEM },
+    { role: 'user', content: buildFactScriptUser({
+      niche: channel.niche || channel.name, topic: topic || undefined,
+      persona: channel.persona || undefined, targetSeconds: 75,
+      avoidTitles: ((eps ?? []) as { title: string }[]).map((e) => e.title).filter(Boolean),
+    }) },
+  ], { provider: m.provider, model: m.model, maxTokens: 3000 });
+  await spendCredits(admin, ownerId, { costUsd: result.costUsd, kind: 'short_script', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+  let rawScript: unknown = null;
+  try { rawScript = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* parseFactScript reports below */ }
+  const parsed = parseFactScript(rawScript);
+  if (!parsed.ok) throw new Error(parsed.reason);
+  const { error: epErr } = await admin.from('channel_episodes').insert({
+    owner_id: ownerId, channel_id: channel.id, cluster_id: channel.cluster_id ?? null,
+    title: parsed.script.title, topic: topic ?? '', script: parsed.script,
+  });
+  if (epErr) throw new Error(epErr.message);
+  return { title: parsed.script.title, warnings: parsed.warnings };
 }
 
 /** One mechanical step, server-side. Mirrors the client executors' outcomes; a missing world
@@ -2956,30 +3025,8 @@ async function execServerAction(admin: any, ownerId: string, action: string, p: 
     case 'start_app_marketing': {
       const app = (p.app ?? '').trim();
       if (!app) throw new Error('Which app? Name it exactly as it appears on Projects.');
-      const t = templateById('app-marketing');
-      if (!t) throw new Error('The app-marketing template is missing from the library.');
-      const flat = flattenTemplate(t);
       const title = `${app.slice(0, 50)} Marketing`;
-      const { data: world, error: wErr } = await admin.from('knowledge_worlds').insert({
-        owner_id: ownerId, title, focus_slug: flat[0]?.slug ?? null,
-      }).select('id').single();
-      if (wErr || !world) throw new Error(wErr?.message ?? 'Could not create the world.');
-      const worldId = (world as { id: string }).id;
-      const idBySlug = new Map<string, string>(flat.map((n) => [n.slug, crypto.randomUUID()]));
-      const { error: clErr } = await admin.from('knowledge_clusters').insert(flat.map((n) => ({
-        id: idBySlug.get(n.slug), owner_id: ownerId, world_id: worldId,
-        parent_id: n.parentSlug ? idBySlug.get(n.parentSlug) : null,
-        slug: n.slug, title: n.title, summary: n.summary,
-        kind: n.charter.archetype === 'intel' ? 'question' : n.charter.archetype === 'studio' ? 'project' : 'topic',
-        maturity: 'spark', salience: n.depth === 0 ? 0.8 : 0.5, turn_refs: [],
-        charter: n.charter,
-      })));
-      if (clErr) throw new Error(clErr.message);
-      await admin.from('mind_events').insert({
-        owner_id: ownerId, event_type: 'note', source: 'workweb',
-        subject: `Created work web "${title}" from template ${t.id}`,
-        payload: { world_id: worldId, template: t.id },
-      }).then(() => {}, () => {});
+      const { worldId } = await instantiateTemplateSrv(admin, ownerId, 'app-marketing', title);
       return { kind: 'done', note: `"${title}" stands — the canvas IS the plan: competitor intel, SEO articles, social, video ideas, results. Later steps (and you) fill the areas.`, link: `/garvis/webs/${worldId}` };
     }
     case 'draft_episode': {
@@ -2990,30 +3037,9 @@ async function execServerAction(admin: any, ownerId: string, action: string, p: 
       if (!channels.length) throw { waiting: 'No content channel exists yet — press "Start a channel" on Channels, then this continues on its own.' };
       const wanted = (p.channel ?? '').trim().toLowerCase();
       const channel = (wanted ? channels.find((c) => c.name.toLowerCase().includes(wanted)) : null) ?? channels[0];
-      await checkCredits(admin, ownerId, 'short_script');
-      const { data: eps } = await admin.from('channel_episodes')
-        .select('title').eq('channel_id', channel.id).order('created_at', { ascending: false }).limit(20);
-      const m = modelForPlan(await getUserPlan(admin, ownerId));
-      const result = await complete([
-        { role: 'system', content: FACT_SCRIPT_SYSTEM },
-        { role: 'user', content: buildFactScriptUser({
-          niche: channel.niche || channel.name, topic: (p.topic ?? '').trim() || undefined,
-          persona: channel.persona || undefined, targetSeconds: 75,
-          avoidTitles: ((eps ?? []) as { title: string }[]).map((e) => e.title).filter(Boolean),
-        }) },
-      ], { provider: m.provider, model: m.model, maxTokens: 3000 });
-      await spendCredits(admin, ownerId, { costUsd: result.costUsd, kind: 'short_script', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
-      let rawScript: unknown = null;
-      try { rawScript = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* parseFactScript reports below */ }
-      const parsed = parseFactScript(rawScript);
-      if (!parsed.ok) throw new Error(parsed.reason);
-      const { error: epErr } = await admin.from('channel_episodes').insert({
-        owner_id: ownerId, channel_id: channel.id, cluster_id: channel.cluster_id ?? null,
-        title: parsed.script.title, topic: (p.topic ?? '').trim(), script: parsed.script,
-      });
-      if (epErr) throw new Error(epErr.message);
-      const warn = parsed.warnings.length ? ` (${parsed.warnings[0]})` : '';
-      return { kind: 'needs_review', note: `Episode "${parsed.script.title}" drafted for ${channel.name} unattended${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
+      const ep = await draftEpisodeSrv(admin, ownerId, channel, (p.topic ?? '').trim() || undefined);
+      const warn = ep.warnings.length ? ` (${ep.warnings[0]})` : '';
+      return { kind: 'needs_review', note: `Episode "${ep.title}" drafted for ${channel.name} unattended${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
     }
 
     // ---- SW6.2: the producer trio — grounded research, the red-teamed plan, campaign drafts.
@@ -3062,6 +3088,85 @@ async function execServerAction(admin: any, ownerId: string, action: string, p: 
         note: `Campaign drafted${research ? ' (strategy grounded in the business\'s research)' : ' (ungrounded — no research on record for it)'} — ${res.summary ?? 'review the assets and approve what should ship'}.`,
         link: '/garvis/marketing',
       };
+    }
+
+    // ---- SW6.3: the genesis composites. Drafts and reviewable structures only — a genesis
+    // ---- world is NEVER instantiated server-side; approval stays the operator's ceremony.
+    case 'found_company': {
+      await checkCredits(admin, ownerId, 'plan');
+      const res = await generateDraftSrv(admin, ownerId, p.intent ?? '');
+      if (!res.id || !res.draft) throw new Error(res.problems[0] ?? 'Genesis could not draft this company.');
+      return {
+        kind: 'needs_review',
+        note: `Company draft "${res.draft.title}" is ready — review its areas, money verdict and open questions, then approve to instantiate.`,
+        link: '/garvis/webs',
+      };
+    }
+    case 'onboard_client': {
+      const clientName = (p.client_name ?? '').trim();
+      const business = (p.business ?? '').trim();
+      const scope = (p.scope ?? '').trim();
+      if (!clientName || !business || !scope) throw new Error('Client name, their business, and your scope are all required.');
+      const intake = intakeFor(scope);
+      // Engagement FIRST and unconditionally — a failed world draft never loses the client record.
+      const { data: eng, error: engErr } = await admin.from('client_engagements').insert({
+        owner_id: ownerId, client_name: clientName, client_email: (p.email ?? '').trim() || null,
+        business, scope, status: 'prospect', intake,
+      }).select('id').single();
+      if (engErr || !eng) throw new Error(`Could not open the engagement: ${engErr?.message ?? 'unknown'}`);
+      let draftProblem: string | null = null;
+      try {
+        await checkCredits(admin, ownerId, 'plan');
+        const res = await generateDraftSrv(admin, ownerId, clientWorldIntent(clientName, business, scope));
+        if (!res.id) draftProblem = res.problems[0] ?? 'The world draft could not be created.';
+      } catch (e) {
+        draftProblem = e instanceof Error ? e.message : 'The world draft could not be created.';
+      }
+      await admin.from('mind_events').insert({
+        owner_id: ownerId, event_type: 'note', source: 'client-book',
+        subject: `Opened client engagement: ${clientName} (${scope}) — ${intake.length} intake item(s)${draftProblem ? '; world draft failed' : '; world draft ready for review'}`,
+        payload: { engagement_id: (eng as { id: string }).id, scope },
+      }).then(() => {}, () => {});
+      return {
+        kind: 'needs_review',
+        note: `Engagement for ${clientName} opened — ${intake.length} intake item(s) to collect.${draftProblem ? ` Their world draft failed (${draftProblem}) — re-run it from Businesses.` : ' Their business draft is ready: approve it on Businesses, then link it in the Client book.'}`,
+        link: '/garvis/client-book',
+      };
+    }
+    case 'launch_vertical': {
+      const name = (p.name ?? '').trim();
+      const niche = (p.niche ?? '').trim();
+      if (!name || !niche) throw new Error('A vertical needs a channel name and a niche in plain words.');
+      const lib = VERTICAL_LIBRARY.find((v) => v.libId === (p.vertical ?? '').trim()) ?? null;
+      // One WORLD per vertical on the content-channel pattern — the channel lives where channels
+      // live, so every downstream surface (studio, pulse, learning loop) works unchanged.
+      const { worldId, clusterIdBySlug } = await instantiateTemplateSrv(admin, ownerId, 'content-channel', name);
+      const { data: ch, error: chErr } = await admin.from('growth_channels').insert({
+        owner_id: ownerId, world_id: worldId, cluster_id: clusterIdBySlug.get('growth-studio') ?? null,
+        name, niche, persona: lib?.persona ?? 'clear, cited, no hype',
+        platforms: ['tiktok', 'youtube', 'instagram'],
+        visual_style: lib?.visualStyle ?? 'clean caption cards', voice: lib?.voice ?? 'nova', music_mood: lib?.mood ?? 'minimal',
+      }).select('id, name, niche, persona, cluster_id').single();
+      if (chErr || !ch) throw new Error(`Could not create the channel: ${chErr?.message ?? 'unknown'}`);
+      const channel = ch as { id: string; name: string; niche: string; persona: string; cluster_id: string | null };
+      const url = (p.cta_url ?? '').trim();
+      if (/^https?:\/\//i.test(url)) {
+        await admin.from('growth_channels').update({ cta_url: url, cta_label: (p.cta_label ?? '').trim() || 'Learn more', updated_at: nowIso }).eq('id', channel.id);
+      }
+      // The daily clock — fail-soft, armable later from the studio (same as the client).
+      await admin.from('standing_orders').insert({
+        owner_id: ownerId, world_id: worldId, status: 'active', anchor_at: nowIso, next_run_at: nowIso,
+        kind: 'episode_draft', label: `${name} — daily episode draft`, cadence: 'daily', config: { channel_id: channel.id },
+      }).then(() => {}, () => {});
+      // Episode one: best-effort — with no AI key or credits the channel still STANDS and the
+      // daily clock drafts once it can. The note tells the truth either way.
+      try {
+        const ep = await draftEpisodeSrv(admin, ownerId, channel, (p.first_topic ?? '').trim() || undefined);
+        return { kind: 'needs_review', note: `"${name}" is live: world + channel + ${url ? 'CTA wired' : 'CTA open'} + daily clock. Episode one "${ep.title}" is drafted — review, produce, approve.`, link: `/garvis/webs/${worldId}` };
+      } catch (e) {
+        const why = e instanceof Error ? e.message : 'drafting is unavailable';
+        return { kind: 'done', note: `"${name}" is live: world + channel + ${url ? 'CTA wired' : 'CTA open'} + daily clock armed. Episode one waits (${why}) — the clock drafts as soon as the AI key is set.`, link: `/garvis/webs/${worldId}` };
+      }
     }
 
     default:

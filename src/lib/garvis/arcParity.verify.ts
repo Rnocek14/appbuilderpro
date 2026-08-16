@@ -22,11 +22,8 @@ function check(name: string, condition: boolean, detail = '') {
 // worker stages them as honest handoffs (kind 'handoff' + link) instead of executing them —
 // pinned below, never silent.
 const CLIENT_ONLY: Record<string, string> = {
-  found_company: 'genesis draft flow runs through client-side genesisRun',
-  onboard_client: 'engagement + intake checklist built by client-side clientEngagementRun',
   build_app: 'browser genuinely required (the forge) — the worker stages an honest handoff with the link',
   template_document: 'browser genuinely required (Paperwork studio) — the worker stages an honest handoff with the link',
-  launch_vertical: 'composite founding flow runs client-side',
 };
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -88,14 +85,17 @@ check('email_segment refuses unknown merge tokens and stages a send_batch approv
 check('every approval the ported block stages is hash-bound with a decision window',
   [...portedBlock.matchAll(/payload_hash: await hashPayload\(payload\)/g)].length === 2
   && [...portedBlock.matchAll(/expires_at: expiresAtFor\(/g)].length === 2);
-check('draft_episode gates credits BEFORE the model call and records the spend after',
-  portedBlock.indexOf("checkCredits(admin, ownerId, 'short_script')") > 0
-  && portedBlock.indexOf("checkCredits(admin, ownerId, 'short_script')") < portedBlock.indexOf('await complete([')
-  && portedBlock.includes('await spendCredits(admin, ownerId,'));
-check('draft_episode saves only a parseFactScript-validated script',
-  portedBlock.includes('parseFactScript(rawScript)') && portedBlock.includes('if (!parsed.ok) throw new Error(parsed.reason)'));
-check('start_app_marketing instantiates the real template, not an ad-hoc world',
-  portedBlock.includes("templateById('app-marketing')") && portedBlock.includes('flattenTemplate(t)'));
+// The shared episode path (draft_episode + launch_vertical's episode one) lives in one helper.
+const epHelper = worker.slice(worker.indexOf('async function draftEpisodeSrv'), worker.indexOf('/** One mechanical step, server-side.'));
+check('the episode path gates credits BEFORE the model call and records the spend after',
+  epHelper.indexOf("checkCredits(admin, ownerId, 'short_script')") > 0
+  && epHelper.indexOf("checkCredits(admin, ownerId, 'short_script')") < epHelper.indexOf('await complete([')
+  && epHelper.includes('await spendCredits(admin, ownerId,'));
+check('the episode path saves only a parseFactScript-validated script',
+  epHelper.includes('parseFactScript(rawScript)') && epHelper.includes('if (!parsed.ok) throw new Error(parsed.reason)'));
+check('template instantiation goes through the real library, not ad-hoc worlds',
+  worker.includes('async function instantiateTemplateSrv') && worker.includes('templateById(templateId)') && worker.includes('flattenTemplate(t)')
+  && portedBlock.includes("instantiateTemplateSrv(admin, ownerId, 'app-marketing'"));
 check('a missing channel PARKS the step waiting (a seam, not a failure)',
   [...portedBlock.matchAll(/throw \{ waiting: 'No content channel exists yet/g)].length === 2);
 check('the ported block never touches a send path — approvals are its only outward edge',
@@ -153,10 +153,47 @@ check('the client arc executors persist too — work lands, on both paths',
 // The worker credit-gates BEFORE each producer runs (the SW1.5 precondition for this port).
 for (const [gate, action] of [
   ["checkCredits(admin, ownerId, 'research')", 'research_market'],
-  ["checkCredits(admin, ownerId, 'plan')", 'business_plan + marketing_campaign'],
+  ["checkCredits(admin, ownerId, 'plan')", 'business_plan + marketing_campaign + genesis'],
 ] as const) {
   check(`the worker gates ${action} with ${gate.match(/'([a-z_]+)'/)![1]} credits`, worker.includes(gate));
 }
+
+// ---- SW6.3: the genesis composites — and the END STATE this whole sub-wave was driving at.
+check('END STATE: the client-only allowlist is exactly the two browser handoffs, forever',
+  Object.keys(CLIENT_ONLY).sort().join() === 'build_app,template_document');
+
+const genSrv = readFileSync(join(here, '../../../supabase/functions/_shared/genesisSrv.ts'), 'utf8');
+const genRun = readFileSync(join(here, 'genesisRun.ts'), 'utf8');
+const bothGen = (name: string, needle: string) => check(name, genSrv.includes(needle) && genRun.includes(needle));
+bothGen('both genesis paths run the same two-stage parse (DNA)', 'parseDNA(dnaText)');
+bothGen('…and the same web synthesis parse', 'parseGenesis(genText, dna)');
+bothGen('both persist ONLY a draft row', "status: 'draft'");
+bothGen("both mark the row 'generated'", "source: 'generated'");
+bothGen('both refuse a too-short intent with the same words', 'Say a little more about the business');
+check('the server genesis path NEVER touches worlds — approval stays the client ceremony',
+  !genSrv.includes("from('knowledge_worlds')"));
+
+check('found_company gates plan credits before drafting, and the outcome is review-only',
+  portedBlock.indexOf("case 'found_company'") > 0
+  && /case 'found_company': \{\s*\n\s*await checkCredits\(admin, ownerId, 'plan'\)/.test(portedBlock)
+  && portedBlock.includes('approve to instantiate'));
+// The client's onboard flow lives in clientEngagementRun; the channel clock in channelsRun.
+const engagementRun = readFileSync(join(here, 'clientEngagementRun.ts'), 'utf8');
+const channelsRun = readFileSync(join(here, 'channelsRun.ts'), 'utf8');
+const bothEng = (name: string, needle: string) => check(name, portedBlock.includes(needle) && engagementRun.includes(needle));
+bothEng('onboard_client derives the same intake checklist', 'intakeFor(');
+bothEng("…opens the engagement as 'prospect'", "status: 'prospect'");
+bothEng('…and keeps the draft best-effort (a failed draft never loses the client)', 'The world draft could not be created.');
+check('onboard_client opens the engagement BEFORE attempting the draft',
+  portedBlock.indexOf("from('client_engagements')") < portedBlock.indexOf('clientWorldIntent('));
+const bothReg = (name: string, needle: string) => check(name, portedBlock.includes(needle) && registry.includes(needle));
+bothReg('launch_vertical speaks with the same library persona default', "lib?.persona ?? 'clear, cited, no hype'");
+check('launch_vertical arms the daily episode clock (the same order kind the studio arms)',
+  portedBlock.includes("kind: 'episode_draft'") && channelsRun.includes("kind: 'episode_draft'"));
+bothReg('…and tells the truth when episode one cannot draft yet', 'Episode one waits (');
+check('launch_vertical instantiates the content-channel pattern with the studio wired',
+  portedBlock.includes("instantiateTemplateSrv(admin, ownerId, 'content-channel'")
+  && portedBlock.includes("clusterIdBySlug.get('growth-studio')"));
 
 console.log(`\narcParity.verify: ${passed} passed, ${failed} failed`
   + ` (server: ${serverActions.length}, client-only: ${Object.keys(CLIENT_ONLY).length}, catalog: ${catalogIds.length})`);
