@@ -61,6 +61,11 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
   },
   {
+    name: 'see_preview',
+    description: 'LOOK at the running app preview: the current route, its console errors, a DOM excerpt, and an approximate screenshot of what actually rendered. Use it after UI changes to self-critique the result against the blueprint\'s design intent — compiling is not the same as looking right. Degrades honestly when no preview is open.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
     name: 'run_typecheck',
     description: 'Compile the project (real TypeScript compiler + static checks) and return any errors. Run this after editing to verify your work, and fix every error it reports before finishing.',
     input_schema: { type: 'object', properties: {}, required: [] },
@@ -81,9 +86,35 @@ function shortPath(p: string): string {
 }
 
 /** Execute one tool call and return the string result fed back to the model as a tool_result. */
+/** A tool result that carries an image alongside its text (see_preview). Plain string results
+ *  stay plain — the loop converts either shape into Anthropic content blocks. */
+export interface AgentToolOutput { text: string; imageBase64?: string | null; imageMediaType?: string }
+
 export async function executeAgentTool(
   name: string, input: Record<string, unknown>, ctx: AgentToolContext,
-): Promise<string> {
+): Promise<string | AgentToolOutput> {
+  if (name === 'see_preview') {
+    ctx.onActivity?.('Looking at the preview');
+    const { getPreviewSnapshot, captureScreenshot } = await import('../previewRuntime');
+    const snap = getPreviewSnapshot();
+    if (!snap.updatedAt) {
+      // HONEST DEGRADE: a closed preview is a named state, never an invented view.
+      return 'The preview is not open — nothing to look at. Continue without it (run_typecheck stays your ground truth), or ask the operator to open the preview pane.';
+    }
+    const shot = await captureScreenshot();
+    const imageBase64 = shot?.startsWith('data:image/') ? shot.split(',')[1] ?? null : null;
+    const imageMediaType = shot?.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
+    const text = [
+      `Route: ${snap.route ?? '(unknown)'} · Title: ${snap.title ?? '(none)'}`,
+      snap.error ? `UNCAUGHT ERROR on this route: ${snap.error}` : 'No uncaught error on this route.',
+      snap.logs.length ? `Recent console: ${snap.logs.slice(-8).join(' | ').slice(0, 800)}` : 'Console quiet.',
+      snap.dom ? `DOM excerpt:\n${snap.dom.slice(0, 1500)}` : 'No DOM snapshot yet.',
+      imageBase64
+        ? 'Screenshot attached (APPROXIMATE — the preview shell rasterizes its own DOM; close, not pixel-exact).'
+        : 'No screenshot available (the shell did not answer) — judge from the DOM excerpt and console.',
+    ].join('\n');
+    return { text, imageBase64, imageMediaType };
+  }
   switch (name) {
     case 'list_files': {
       ctx.onActivity?.('Reading the project');
