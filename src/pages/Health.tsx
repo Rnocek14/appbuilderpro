@@ -13,6 +13,45 @@ import { supabase } from '../lib/supabase';
 import { ClockStatus } from '../components/garvis/ClockStatus';
 import { MasterSwitch } from '../components/garvis/MasterSwitch';
 import { HuntReadiness } from '../components/garvis/HuntReadiness';
+import { loadScorecard, type ScorecardFacts } from '../lib/garvis/forgeScoreRun';
+
+/** THE BUILDER/AUTONOMY SCORECARD (SW9.4): headline metrics from real rows with strict, stated
+ *  definitions. A fresh account shows honest zeroes ("no forges yet"), never a fake percent;
+ *  an execution row that traces to no approval is FLAGGED, not averaged away. */
+function ScorecardCard() {
+  const [facts, setFacts] = useState<ScorecardFacts | null>(null);
+  useEffect(() => { void loadScorecard().then(setFacts).catch(() => setFacts({ forge: null, ledger: null, unattendedLastDay: null })); }, []);
+  if (!facts) return null;
+  const f = facts.forge;
+  const l = facts.ledger;
+  const pct = (n: number | null) => (n === null ? null : `${Math.round(n * 100)}%`);
+  return (
+    <div className="mb-5 rounded-2xl border border-forge-border bg-forge-panel/40 p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-forge-dim">Builder &amp; autonomy record</h3>
+      <ul className="mt-2 space-y-1 text-sm">
+        <li className="text-forge-ink/80">
+          {f === null ? 'First-forge success: unavailable (probe failed).'
+            : f.forges === 0 ? 'First-forge success: no forges yet — the number starts with your first build.'
+            : `First-forge success: ${f.firstTry} of ${f.forges} (${pct(f.firstTryRate)}) compiled clean AND route-walked clean on the first try.`}
+        </li>
+        <li className="text-forge-ink/80">
+          {f === null ? null
+            : f.forges === 0 ? 'Verification coverage: n/a until a forge runs.'
+            : `Verification coverage: ${f.verified} of ${f.forges} (${pct(f.coverage)}) had the compile gate actually run.`}
+        </li>
+        <li className={l && l.orphans.length > 0 ? 'text-forge-warn' : 'text-forge-ink/80'}>
+          {l === null ? 'Execution ledger: unavailable (probe failed).'
+            : l.orphans.length > 0 ? `⚠ Execution ledger: ${l.orphans.length} external run(s) trace to NO approval — inspect ids ${l.orphans.slice(0, 3).join(', ')}${l.orphans.length > 3 ? '…' : ''}.`
+            : `Execution ledger: all ${l.external} recent external runs trace to an approval.`}
+        </li>
+        <li className="text-forge-ink/80">
+          {facts.unattendedLastDay === null ? 'Unattended actions: unavailable (probe failed).'
+            : `Unattended actions (earned autonomy, last 24h): ${facts.unattendedLastDay}.`}
+        </li>
+      </ul>
+    </div>
+  );
+}
 
 const PROBE_META: Record<Probe, { icon: typeof Check; cls: string; label: string }> = {
   deployed: { icon: Check, cls: 'text-forge-ok', label: 'deployed' },
@@ -93,6 +132,10 @@ export default function Health() {
         {/* Ready to hunt & send: the exact prerequisites for the scrape→demo→pitch→send pipeline,
             each with its fix — so "why did my hunt produce nothing?" is answered at a glance. */}
         <div className="mb-5"><HuntReadiness /></div>
+
+        {/* The builder/autonomy record: first-forge success, verification coverage, and the
+            execution-ledger identity — measured, never asserted. */}
+        <ScorecardCard />
 
         {!report && failed ? (
           <div className="rounded-xl border border-forge-warn/40 bg-forge-warn/10 p-4 text-sm text-forge-warn">
