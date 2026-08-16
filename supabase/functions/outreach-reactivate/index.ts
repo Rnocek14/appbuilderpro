@@ -130,7 +130,7 @@ Deno.serve(async (req) => {
         if (!msg) continue;
         // Earned autonomy (app_0097): a granted 'reactivation' class self-approves under its
         // daily cap and executes through the one send path. Otherwise: pending, as ever.
-        const auto = await autonomyAllowed(admin, uid, 'reactivation');
+        const auto = await autonomyAllowed(admin, uid, 'reactivation', { kind: 'send_email', recipientKnown: true });
         const apPayload: Record<string, unknown> = { message_id: msg.id, sweep: 'reactivation' };
         if (auto) apPayload.autonomy_class = 'reactivation';
         const { data: apRow } = await admin.from('approvals').insert({

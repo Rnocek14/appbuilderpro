@@ -30,6 +30,9 @@ export interface Approval {
   decided_at: string | null;
   /** The decision window's end (app_0141) — display-only until the SW5.1 sweep lands. */
   expires_at?: string | null;
+  /** The risk annotation (SW8.3) — deterministic score + named reasons, worker-written. */
+  risk_score?: number | null;
+  risk_reasons?: string[] | null;
 }
 
 export interface ExecutionRun {
@@ -79,7 +82,7 @@ export async function enqueueApproval(input: {
 export async function listApprovals(status: ApprovalStatus | 'all' = 'pending', limit = 50): Promise<Approval[]> {
   let q = supabase
     .from('approvals')
-    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at, world_id, expires_at')
+    .select('id, kind, title, preview, payload, requested_by, status, result, created_at, decided_at, world_id, expires_at, risk_score, risk_reasons')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (status !== 'all') q = q.eq('status', status);

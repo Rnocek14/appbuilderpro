@@ -196,7 +196,7 @@ Deno.serve(async (req) => {
     if (newMsg) {
       // Earned autonomy (app_0097): a granted 'followup' class self-approves under its daily
       // cap and executes through the one send path (every gate re-runs there). Otherwise: pending.
-      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup');
+      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup', { kind: 'send_email', recipientKnown: true });
       const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
       if (auto) apPayload.autonomy_class = 'followup';
       const { data: apRow } = await admin.from('approvals').insert({
@@ -272,7 +272,7 @@ Deno.serve(async (req) => {
     // Enqueue the approval (never auto-send). The signal is stated HERE, to the owner — never in
     // the email itself.
     if (newMsg) {
-      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup');
+      const auto = await autonomyAllowed(admin, camp.owner_id, 'followup', { kind: 'send_email', recipientKnown: true });
       const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: camp.id };
       if (auto) apPayload.autonomy_class = 'followup';
       const { data: apRow } = await admin.from('approvals').insert({

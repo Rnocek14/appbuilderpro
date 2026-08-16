@@ -7949,6 +7949,18 @@ drop trigger if exists trg_approvals_pin_payload on public.approvals;
 create trigger trg_approvals_pin_payload before update on public.approvals
   for each row execute function public.approvals_pin_payload();
 
+-- ======== supabase/migrations/app_0150_approval_risk.sql ========
+-- app_0150_approval_risk.sql — SW8.3: the approval risk annotation. The worker scores pending
+-- approvals from deterministic features (approvalRisk.ts) and stores the verdict here; the
+-- Queue renders the chip with its named reasons; autonomyGate treats a high (or absent) score
+-- as "manual". The classifier can only ADD review — these columns never grant anything.
+-- Additive + idempotent. Written by the service role; the owner's existing row policies make
+-- them owner-readable (an owner rewriting their own risk chip only lies to themself — the
+-- GATE recomputes from raw facts and never trusts these columns).
+
+alter table public.approvals add column if not exists risk_score int;
+alter table public.approvals add column if not exists risk_reasons jsonb;
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).

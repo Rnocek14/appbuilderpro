@@ -87,6 +87,8 @@ import { produceResearchSrv, produceBusinessPlanSrv, produceCampaignSrv, persist
 import { generateDraftSrv } from '../_shared/genesisSrv.ts';
 import { intakeFor, clientWorldIntent } from '../../../src/lib/garvis/clientEngagement.ts';
 import { VERTICAL_LIBRARY } from '../../../src/lib/garvis/verticalPlan.ts';
+// SW8.3 — the risk chip: deterministic scoring for pending approvals (display; the gate recomputes).
+import { riskFor } from '../../../src/lib/garvis/approvalRisk.ts';
 // AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
@@ -1606,6 +1608,35 @@ Deno.serve(async (req) => {
       }
     }
   }
+
+  // ---- THE RISK CHIP (SW8.3): annotate pending approvals from deterministic features -------
+  // Display-side only — the Queue renders the score with its named reasons. The GATE
+  // (autonomyGate) recomputes from raw facts and never trusts these columns.
+  try {
+    const { data: unscored } = await admin.from('approvals')
+      .select('id, owner_id, kind, payload, created_at')
+      .eq('status', 'pending').is('risk_score', null)
+      .order('created_at', { ascending: true }).limit(20);
+    for (const a of (unscored ?? []) as { id: string; owner_id: string; kind: string; payload: Record<string, unknown> | null; created_at: string }[]) {
+      const p = a.payload ?? {};
+      const amount = typeof p.amount_usd === 'number' ? p.amount_usd : typeof p.amount === 'number' ? p.amount : null;
+      // Recipient-known: only computable for message-backed sends — a to_address with zero
+      // previously-sent messages is a first contact. Null (not applicable) adds no risk.
+      let recipientKnown: boolean | null = null;
+      if (typeof p.message_id === 'string') {
+        const { data: msg } = await admin.from('outreach_messages').select('to_address').eq('id', p.message_id).maybeSingle();
+        const to = (msg as { to_address?: string | null } | null)?.to_address?.trim().toLowerCase();
+        if (to) {
+          const { count } = await admin.from('outreach_messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('owner_id', a.owner_id).eq('to_address', to).eq('status', 'sent');
+          recipientKnown = (count ?? 0) > 0;
+        }
+      }
+      const v = riskFor({ kind: a.kind, amountUsd: amount, recipientKnown, mintedHourLocal: new Date(a.created_at).getUTCHours(), payloadBytes: JSON.stringify(p).length, classMedianBytes: null });
+      await admin.from('approvals').update({ risk_score: v.score, risk_reasons: v.reasons }).eq('id', a.id).is('risk_score', null);
+    }
+  } catch { /* the chip is best-effort; the Queue renders without it */ }
 
   // ---- THE DECISION CLOCK, part 2 (SW5.1): nudge at half-life, expire past the window ------
   // Order matters: the NUDGE path went live in the same change as the sweep, so pending work

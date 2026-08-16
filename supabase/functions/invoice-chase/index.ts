@@ -96,7 +96,7 @@ Deno.serve(async (req) => {
       if (!msg) { skipped++; continue; }
       // Earned autonomy (app_0097): a granted 'invoice_chase' class self-approves under its
       // daily cap and executes through the one send path. Otherwise: pending, as ever.
-      const auto = await autonomyAllowed(admin, inv.owner_id, 'invoice_chase');
+      const auto = await autonomyAllowed(admin, inv.owner_id, 'invoice_chase', { kind: 'send_email', recipientKnown: true, amountUsd: Number(inv.amount_usd) });
       const apPayload: Record<string, unknown> = { message_id: msg.id, invoice_id: inv.id, chase_stage: stage };
       if (auto) apPayload.autonomy_class = 'invoice_chase';
       const { data: apRow } = await admin.from('approvals').insert({

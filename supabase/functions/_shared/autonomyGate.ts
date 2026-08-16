@@ -18,9 +18,15 @@ export async function executeSendNow(approvalId: string): Promise<void> {
   }).catch(() => {});
 }
 
+import { riskFor, riskBlocksAutonomy, type RiskFacts } from '../../../src/lib/garvis/approvalRisk.ts';
+
 // deno-lint-ignore no-explicit-any
-export async function autonomyAllowed(admin: any, ownerId: string, actionClass: string): Promise<boolean> {
+export async function autonomyAllowed(admin: any, ownerId: string, actionClass: string, risk?: RiskFacts | null): Promise<boolean> {
   try {
+    // SW8.3 — the risk classifier can only BLOCK earned autonomy, never grant it. Callers MUST
+    // supply the candidate's deterministic facts; absent facts (or a high score) fail closed to
+    // manual — the human reviews, exactly as if no grant existed.
+    if (riskBlocksAutonomy(risk ? riskFor(risk) : null)) return false;
     const { data: grant, error } = await admin.from('autonomy_grants')
       .select('mode, daily_cap').eq('owner_id', ownerId).eq('action_class', actionClass).maybeSingle();
     if (error || !grant || (grant as { mode: string }).mode !== 'auto') return false;

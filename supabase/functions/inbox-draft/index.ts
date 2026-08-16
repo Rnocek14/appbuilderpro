@@ -206,7 +206,7 @@ Deno.serve(async (req) => {
 
       // Earned autonomy (app_0097): a granted 'inbox_reply' class self-approves under its
       // daily cap and executes through the one send path. Otherwise: pending, as ever.
-      const auto = await autonomyAllowed(admin, r.owner_id, 'inbox_reply');
+      const auto = await autonomyAllowed(admin, r.owner_id, 'inbox_reply', { kind: 'send_email', recipientKnown: true });
       const apPayload: Record<string, unknown> = { message_id: (newMsg as { id: string }).id, campaign_id: r.campaign_id, reply_id: r.id };
       if (auto) apPayload.autonomy_class = 'inbox_reply';
       const { data: apRow } = await admin.from('approvals').insert({

@@ -27,6 +27,7 @@ import {
   type Approval, type ExecutionRun,
 } from '../lib/garvis/execution';
 import { expiryCountdown } from '../lib/garvis/approvalTtl';
+import { RISK_HIGH } from '../lib/garvis/approvalRisk';
 import {
   loadInbox, composeReply, markLeadAnswered, markReplyHandled, unmarkReplyHandled, reopenLead,
   markMailHandled, unmarkMailHandled, draftContext, type InboxItem,
@@ -391,6 +392,14 @@ export default function Queue() {
                     {(() => { const c = expiryCountdown(a.expires_at, new Date().toISOString()); return c
                       ? <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] ${c === 'past its window' ? 'bg-forge-warn/15 text-forge-warn' : 'border border-forge-border text-forge-dim'}`}>{c}</span>
                       : null; })()}
+                    {/* The risk chip (SW8.3): deterministic features, named reasons — it only ever
+                        ADDS review. No score, no chip; never an invented "low risk" reassurance. */}
+                    {typeof a.risk_score === 'number' && a.risk_score >= RISK_HIGH && (
+                      <span title={(a.risk_reasons ?? []).join(' · ')}
+                        className="shrink-0 rounded-full bg-forge-warn/15 px-1.5 py-0.5 text-[10px] text-forge-warn">
+                        review closely — {(a.risk_reasons ?? [])[0] ?? 'high risk'}
+                      </span>
+                    )}
                     <span className="text-[10px] text-forge-dim">{timeAgo(a.created_at)}</span>
                     <button onClick={() => void decide(a, true)} disabled={actingId === a.id}
                       className="flex items-center gap-1 rounded-lg border border-forge-ember/50 bg-forge-ember/10 px-2.5 py-1 text-[11px] font-medium text-forge-ember hover:bg-forge-ember/20 disabled:opacity-50">
