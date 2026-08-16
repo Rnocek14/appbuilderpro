@@ -52,16 +52,23 @@ const webhook = readFileSync(join(here, '../../../supabase/functions/stripe-webh
   check('mark-paid is a CAS on draft/sent — a void invoice is never resurrected',
     webhook.includes(".in('status', ['draft', 'sent'])"));
   check('…and stamps HOW it was paid', webhook.includes("paid_via: 'stripe'"));
-  check('a redelivered event for a settled invoice is a clean no-op',
-    webhook.includes("if (inv.status === 'paid') return true;"));
+  check('a FRESH payment on a settled invoice is surfaced, never swallowed (double-charge alarm)',
+    webhook.includes('another $') && webhook.includes('duplicate: true'));
+  check('…while a manual-mark crossover reconciles provenance without a false alarm',
+    webhook.includes('provenance reconciled') && webhook.includes("reconciled: true"));
+  check('a CAS miss RE-READS the status before any VOID alarm (a raced mark-paid is not a void)',
+    webhook.indexOf('const { data: recheck }') > 0
+    && webhook.indexOf('const { data: recheck }') < webhook.indexOf('VOIDED ${inv.number}'));
   check('a settled bill never gets a final notice — pending chase approvals auto-reject',
     webhook.includes("decided_via: 'auto'") && webhook.includes('.contains(\'payload\', { invoice_id: invoiceId })'));
   check('the PAID record lands in the mind (same shape the manual path writes)',
-    webhook.includes('`PAID: ${inv.number} — ${inv.title}'));
+    webhook.includes('PAID: ${inv.number} — ${inv.title}'));
   check('a payment against a VOIDED invoice is surfaced, never silently booked',
     webhook.includes('refund it or un-void the invoice'));
   check('a transient invoice lookup fault retries (throw → 500 → Stripe redelivers)',
     webhook.includes('invoice lookup failed'));
+  check('the webhook FAILS CLOSED with no signing secret (empty-key HMAC is forgeable)',
+    webhook.includes('refusing all events until it is') && !webhook.includes("STRIPE_WEBHOOK_SECRET') ?? ''"));
 }
 
 // ---- the link minter (invoice-payment-link) ----
@@ -73,6 +80,8 @@ const minter = readFileSync(join(here, '../../../supabase/functions/invoice-paym
   check('the invoice lookup is owner-scoped', minter.includes(".eq('owner_id', ownerId).maybeSingle()"));
   check('a second press returns the SAME link — one live payment surface per bill',
     minter.includes('existing: true'));
+  check('the link is single-use — it deactivates after one completed payment',
+    minter.includes('completed_sessions: { limit: 1 }'));
   check('only a draft or sent invoice mints a link', minter.includes("['draft', 'sent'].includes(inv.status"));
 }
 

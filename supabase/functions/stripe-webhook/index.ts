@@ -26,21 +26,45 @@ async function handleInvoicePaid(admin: any, session: Stripe.Checkout.Session): 
   const invoiceId = session.metadata?.invoice_id;
   if (!isUuid(invoiceId)) return false;
   const { data: inv, error: lookupErr } = await admin.from('invoices')
-    .select('id, owner_id, number, title, amount_usd, status').eq('id', invoiceId).maybeSingle();
+    .select('id, owner_id, number, title, amount_usd, status, paid_via').eq('id', invoiceId).maybeSingle();
   // A transient DB fault must retry (throw → 500 → Stripe redelivers); a clean no-row means the
   // invoice was deleted after the link was minted — nothing left to reconcile, fall through.
   if (lookupErr) throw new Error(`invoice lookup failed: ${lookupErr.message}`);
   if (!inv) return false;
-  if (inv.status === 'paid') return true;   // redelivery / already reconciled — settled is settled
+  const ownerId = inv.owner_id as string;
+  const amount = typeof session.amount_total === 'number' && session.amount_total > 0
+    ? session.amount_total / 100 : Number(inv.amount_usd);
+  const tell = async (subject: string, extra: Record<string, unknown> = {}) => {
+    await admin.from('mind_events').insert({
+      owner_id: ownerId, event_type: 'note', source: 'money',
+      subject, payload: { invoice_id: invoiceId, amount_usd: amount, paid_via: 'stripe', ...extra },
+    }).then(() => {}, () => {});
+    const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', ownerId).maybeSingle();
+    await notifyText((owner as { webhook_url?: string } | null)?.webhook_url, subject);
+  };
+
+  // A FRESH event on a settled invoice is never swallowed (deep review 2026-08 #8): the event-id
+  // marker upstream already absorbed true redeliveries, so landing here means either a SECOND
+  // real payment (the link was reused) or Stripe confirming a payment the operator recorded by
+  // hand — money moved either way, and the two cases read differently.
+  if (inv.status === 'paid') {
+    if (inv.paid_via === 'stripe') {
+      await tell(`⚠ Stripe took another $${amount.toFixed(2)} for already-paid ${inv.number} — check for a double payment and refund if so.`, { duplicate: true });
+    } else {
+      // The operator marked it paid by hand; the webhook payment is almost certainly the same
+      // money arriving on record. Upgrade the provenance, note it, no alarm.
+      await admin.from('invoices').update({ paid_via: 'stripe', updated_at: new Date().toISOString() })
+        .eq('id', invoiceId).eq('status', 'paid').then(() => {}, () => {});
+      await tell(`Stripe confirmed payment for ${inv.number} — you had already marked it paid; provenance reconciled.`, { reconciled: true });
+    }
+    return true;
+  }
+
   const { data: flipped, error: flipErr } = await admin.from('invoices')
     .update({ status: 'paid', paid_at: new Date().toISOString(), paid_via: 'stripe', updated_at: new Date().toISOString() })
     .eq('id', invoiceId).in('status', ['draft', 'sent']).select('id').maybeSingle();
   if (flipErr) throw new Error(`invoice flip failed: ${flipErr.message}`);
-  // Void stays void — the payment is real (Stripe took it), but resurrecting a written-off bill
-  // is the operator's call; the ledger note below still lands so it can't go unnoticed.
-  const ownerId = inv.owner_id as string;
-  const amount = typeof session.amount_total === 'number' && session.amount_total > 0
-    ? session.amount_total / 100 : Number(inv.amount_usd);
+
   if (flipped) {
     // A paid invoice must not keep getting chased — reject its pending send/chase approvals.
     await admin.from('approvals')
@@ -48,21 +72,24 @@ async function handleInvoicePaid(admin: any, session: Stripe.Checkout.Session): 
       .eq('owner_id', ownerId).eq('status', 'pending').eq('kind', 'send_email')
       .contains('payload', { invoice_id: invoiceId })
       .then(() => {}, () => {});
+    await tell(`PAID: ${inv.number} — ${inv.title} ($${amount.toFixed(2)})`);
+    return true;
   }
-  await admin.from('mind_events').insert({
-    owner_id: ownerId, event_type: 'note', source: 'money',
-    subject: flipped
-      ? `PAID: ${inv.number} — ${inv.title} ($${amount.toFixed(2)})`
-      : `Stripe took a payment for VOIDED ${inv.number} ($${amount.toFixed(2)}) — refund it or un-void the invoice.`,
-    payload: { invoice_id: invoiceId, amount_usd: amount, paid_via: 'stripe' },
-  }).then(() => {}, () => {});
-  const { data: owner } = await admin.from('profiles').select('webhook_url').eq('id', ownerId).maybeSingle();
-  await notifyText(
-    (owner as { webhook_url?: string } | null)?.webhook_url,
-    flipped
-      ? `💰 PAID — ${inv.number} ${inv.title} ($${amount.toFixed(2)}) via its payment link. Reminders canceled.`
-      : `⚠ Stripe took $${amount.toFixed(2)} for VOIDED ${inv.number} — refund it or un-void the invoice.`,
-  );
+
+  // CAS miss: the status left draft/sent between the read and the update. RE-READ before
+  // alarming (deep review 2026-08 #9) — a concurrent manual mark-paid is NOT a void, and
+  // telling the operator to refund correctly-earned revenue is a loud, actionable lie.
+  const { data: recheck } = await admin.from('invoices').select('status').eq('id', invoiceId).maybeSingle();
+  const nowStatus = (recheck as { status?: string } | null)?.status;
+  if (nowStatus === 'paid') {
+    await admin.from('invoices').update({ paid_via: 'stripe', updated_at: new Date().toISOString() })
+      .eq('id', invoiceId).eq('status', 'paid').then(() => {}, () => {});
+    await tell(`Stripe confirmed payment for ${inv.number} — it was marked paid moments earlier; provenance reconciled.`, { reconciled: true });
+    return true;
+  }
+  // Genuinely void — the payment is real (Stripe took it), but resurrecting a written-off bill
+  // is the operator's call; the alarm makes sure it cannot go unnoticed.
+  await tell(`⚠ Stripe took $${amount.toFixed(2)} for VOIDED ${inv.number} — refund it or un-void the invoice.`);
   return true;
 }
 
@@ -220,10 +247,16 @@ Deno.serve(async (req) => {
   const sig = req.headers.get('stripe-signature') ?? '';
   const stripe = stripeClient();
 
+  // FAIL CLOSED when the signing secret is unset (deep review 2026-08 #11): HMAC with an empty
+  // key is computable by anyone, and this endpoint is public — an unset secret must mean "accept
+  // nothing", never "accept everything".
+  const whSecret = Deno.env.get('STRIPE_WEBHOOK_SECRET');
+  if (!whSecret) return new Response('STRIPE_WEBHOOK_SECRET is not set — refusing all events until it is.', { status: 500 });
+
   let event: Stripe.Event;
   try {
     event = await stripe.webhooks.constructEventAsync(
-      body, sig, Deno.env.get('STRIPE_WEBHOOK_SECRET') ?? '', undefined, cryptoProvider,
+      body, sig, whSecret, undefined, cryptoProvider,
     );
   } catch (e) {
     return new Response(`Bad signature: ${e instanceof Error ? e.message : e}`, { status: 401 });

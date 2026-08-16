@@ -59,6 +59,9 @@ Deno.serve(async (req) => {
     });
     const link = await stripe.paymentLinks.create({
       line_items: [{ price: price.id, quantity: 1 }],
+      // ONE bill, ONE payment: the link deactivates itself after a single completed session —
+      // a reusable link invites silent double-charges (deep review 2026-08 #8).
+      restrictions: { completed_sessions: { limit: 1 } },
       // THE RECONCILIATION KEY: Payment Link metadata is copied onto every Checkout Session it
       // spawns — stripe-webhook routes on metadata.invoice_id (stripeRouteCore) and marks THIS
       // invoice paid server-side.
