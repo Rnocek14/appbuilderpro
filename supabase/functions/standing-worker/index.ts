@@ -72,7 +72,13 @@ import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 // draft never auto-queues) + the pure week machinery from standingCore.
 import { honestySystemPrompt, judgeSystemPrompt, judgeUserPrompt, parseJudgeVerdict } from '../_shared/copyJudge.ts';
 import { parseContentWeekConfig, weekSlots, contentWeekLine } from '../_shared/standingCore.ts';
-import { composeBatchRecipients } from '../_shared/batchCore.ts';
+import { composeBatchRecipients, unknownTokens } from '../_shared/batchCore.ts';
+// SW6.1 — the worker takes the creative load: the same shared cores the client executors use,
+// so an approved arc's social/segment/CTA/episode steps advance overnight to PENDING APPROVALS
+// (never to sends — porting moves work server-side, never approval).
+import { checkDraft, PLATFORM_LABEL } from '../_shared/socialCore.ts';
+import { parseFactScript } from '../../../src/lib/garvis/factChannel.ts';
+import { templateById, flattenTemplate } from '../../../src/lib/garvis/workweb.ts';
 // AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
@@ -2681,7 +2687,26 @@ const SERVER_ACTIONS = new Set([
   'hunt_opportunities', 'watch_page', 'cadence_digest', 'record_thesis', 'check_master_switch',
   'add_reminder', 'add_contact', 'create_invoice', 'start_idea_stream', 'start_client_hunt',
   'start_content_week', 'mount_room',
+  // SW6.1 — the mechanical creative actions, ported. Every outcome is a draft or a pending
+  // approval; the send/publish machinery stays behind the Queue exactly as before.
+  'queue_social_post', 'email_segment', 'point_channel_cta', 'start_app_marketing', 'draft_episode',
 ]);
+
+/** Browser-required steps (the forge, the Paperwork studio) the worker can never run — but it can
+ *  say so HONESTLY: the step becomes a handoff carrying its link (the same outcome the client
+ *  executor returns), never a silent blocked-on-creative stall the operator has to discover. */
+const HANDOFF_ACTIONS: Record<string, (p: Record<string, string>) => StepStatus> = {
+  build_app: (p) => ({
+    kind: 'handoff',
+    note: 'The builder is ready with this idea — waiting for your visit: generation runs in the browser workspace with the compile-verified pipeline.',
+    link: `/new?idea=${encodeURIComponent(p.idea ?? '')}`,
+  }),
+  template_document: (p) => ({
+    kind: 'handoff',
+    note: `The Paperwork studio is ready${p.world ? ` in ${p.world}'s business` : ''} — waiting for your visit: paste the sample document, extract the template, review, and Save.${p.note ? ` (${p.note.slice(0, 120)})` : ''}`,
+    link: '/garvis/webs',
+  }),
+};
 
 // deno-lint-ignore no-explicit-any
 async function resolveWorldSrv(admin: any, ownerId: string, title: string): Promise<{ id: string; title: string } | null> {
@@ -2819,6 +2844,156 @@ async function execServerAction(admin: any, ownerId: string, action: string, p: 
         ? { kind: 'done', note: `The clock is alive — last tick ${age} min ago.`, link: '/garvis/health' }
         : { kind: 'needs_review', note: 'The heartbeat looks stale from here — check the Health page.', link: '/garvis/health' };
     }
+
+    // ---- SW6.1: the mechanical creative actions, server-side. Same shared cores, same rows,
+    // ---- same outcomes as the client executors — and NOTHING sends: every outward result is a
+    // ---- pending approval the Queue owns.
+    case 'queue_social_post': {
+      const platforms = (p.platforms ?? 'twitter').split(',').map((s) => s.trim()).filter(Boolean);
+      const text = (p.text ?? '').trim();
+      const chk = checkDraft({ text, platforms, mediaUrls: [], scheduleAt: null }, nowIso);
+      if (!chk.ok) throw new Error(chk.reason ?? 'Not sendable.');
+      const { data: post, error: postErr } = await admin.from('social_posts').insert({
+        owner_id: ownerId, world_id: null, body: text, platforms,
+        media_urls: [], scheduled_for: null, status: 'queued',
+      }).select('id').single();
+      if (postErr || !post) throw new Error(`Could not queue the post: ${postErr?.message ?? 'unknown'}`);
+      const names = platforms.map((pl) => (PLATFORM_LABEL as Record<string, string>)[pl] ?? pl).join(', ');
+      const payload = { post_row_id: (post as { id: string }).id };
+      const { data: ap, error: apErr } = await admin.from('approvals').insert({
+        owner_id: ownerId, kind: 'publish_post',
+        title: `Post to ${names}`,
+        preview: `${text.slice(0, 400)}${text.length > 400 ? '…' : ''}`,
+        payload, payload_hash: await hashPayload(payload), requested_by: 'garvis-arc',
+        expires_at: expiresAtFor('publish_post', nowIso),
+      }).select('id').single();
+      if (apErr || !ap) throw new Error(apErr?.message ?? 'Could not enqueue the approval.');
+      await admin.from('social_posts').update({ approval_id: (ap as { id: string }).id }).eq('id', (post as { id: string }).id);
+      return {
+        kind: 'needs_review',
+        note: `Post queued for ${names} unattended — approve it in the Queue and it goes out.${chk.warnings.length ? ` (${chk.warnings.join('; ')})` : ''}`,
+        link: '/garvis/queue',
+      };
+    }
+    case 'email_segment': {
+      const seg = ['all', 'new', 'contacted', 'qualified', 'customer'].includes(p.segment) ? p.segment : null;
+      if (!seg) throw new Error(`Segment must be one of all/new/contacted/qualified/customer — got "${p.segment}".`);
+      const subject = (p.subject ?? '').trim();
+      const bodyText = (p.body ?? '').trim();
+      if (!subject) throw new Error('The batch needs a subject.');
+      if (!bodyText) throw new Error('The batch needs a body.');
+      const badTokens = unknownTokens(`${subject}\n${bodyText}`);
+      if (badTokens.length > 0) {
+        throw new Error(`Unsupported merge tokens: ${badTokens.map((t) => `{{${t}}}`).join(', ')}. Only {{name}} and {{first_name}} merge — anything else would send literally.`);
+      }
+      let cq = admin.from('contacts').select('id, email, full_name, email_status').eq('owner_id', ownerId).limit(2000);
+      if (seg !== 'all') cq = cq.eq('stage', seg);
+      const { data: contacts, error: cErr } = await cq;
+      if (cErr) throw new Error(cErr.message);
+      const { recipients, excluded } = composeBatchRecipients((contacts ?? []) as { id: string; email: string | null; full_name: string | null; email_status: string | null }[]);
+      if (recipients.length === 0) {
+        throw new Error(excluded.length > 0
+          ? `Nothing sendable in that segment — all ${excluded.length} excluded (${excluded[0].reason}${excluded.length > 1 ? ', …' : ''}).`
+          : 'That segment has no contacts.');
+      }
+      const { data: batch, error: bErr } = await admin.from('outreach_batches').insert({
+        owner_id: ownerId, world_id: null, subject, body_text: bodyText, recipients, status: 'queued',
+      }).select('id').single();
+      if (bErr || !batch) throw new Error(`Could not create the batch: ${bErr?.message ?? 'unknown error'}`);
+      const payload = { batch_id: (batch as { id: string }).id, recipient_count: recipients.length };
+      const { data: ap, error: apErr } = await admin.from('approvals').insert({
+        owner_id: ownerId, kind: 'send_batch',
+        title: `Send "${subject}" to ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
+        preview: `${bodyText.slice(0, 280)}${bodyText.length > 280 ? '…' : ''}\n\nThe clock drains this under your daily cap; every recipient re-checks suppression at send time.`,
+        payload, payload_hash: await hashPayload(payload), requested_by: 'garvis-arc',
+        expires_at: expiresAtFor('send_batch', nowIso),
+      }).select('id').single();
+      if (apErr || !ap) throw new Error(apErr?.message ?? 'Could not enqueue the approval.');
+      await admin.from('outreach_batches').update({ approval_id: (ap as { id: string }).id }).eq('id', (batch as { id: string }).id);
+      return {
+        kind: 'needs_review',
+        note: `Batch staged unattended to the "${seg}" segment — ${recipients.length} recipient(s)${excluded.length ? `, ${excluded.length} excluded (suppression/bounces)` : ''}. ONE approval in the Queue releases it; nothing sends until you approve.`,
+        link: '/garvis/queue',
+      };
+    }
+    case 'point_channel_cta': {
+      const url = (p.url ?? '').trim();
+      if (!/^https?:\/\//i.test(url)) throw new Error(`"${url || '(empty)'}" is not a usable link — the CTA needs a full https:// URL.`);
+      const { data: chRows } = await admin.from('growth_channels')
+        .select('id, name').eq('owner_id', ownerId).order('created_at', { ascending: true }).limit(50);
+      const channels = (chRows ?? []) as { id: string; name: string }[];
+      if (!channels.length) throw { waiting: 'No content channel exists yet — press "Start a channel" on Channels, then this continues on its own.' };
+      const wanted = (p.channel ?? '').trim().toLowerCase();
+      const channel = (wanted ? channels.find((c) => c.name.toLowerCase().includes(wanted)) : null) ?? channels[0];
+      const label = (p.label ?? '').trim() || 'Learn more';
+      const { error } = await admin.from('growth_channels')
+        .update({ cta_url: url, cta_label: label, updated_at: nowIso }).eq('id', channel.id);
+      if (error) throw new Error(error.message);
+      return { kind: 'done', note: `"${channel.name}" now routes its audience to ${url} ("${label}") unattended — every future episode carries it.`, link: '/garvis/channels' };
+    }
+    case 'start_app_marketing': {
+      const app = (p.app ?? '').trim();
+      if (!app) throw new Error('Which app? Name it exactly as it appears on Projects.');
+      const t = templateById('app-marketing');
+      if (!t) throw new Error('The app-marketing template is missing from the library.');
+      const flat = flattenTemplate(t);
+      const title = `${app.slice(0, 50)} Marketing`;
+      const { data: world, error: wErr } = await admin.from('knowledge_worlds').insert({
+        owner_id: ownerId, title, focus_slug: flat[0]?.slug ?? null,
+      }).select('id').single();
+      if (wErr || !world) throw new Error(wErr?.message ?? 'Could not create the world.');
+      const worldId = (world as { id: string }).id;
+      const idBySlug = new Map<string, string>(flat.map((n) => [n.slug, crypto.randomUUID()]));
+      const { error: clErr } = await admin.from('knowledge_clusters').insert(flat.map((n) => ({
+        id: idBySlug.get(n.slug), owner_id: ownerId, world_id: worldId,
+        parent_id: n.parentSlug ? idBySlug.get(n.parentSlug) : null,
+        slug: n.slug, title: n.title, summary: n.summary,
+        kind: n.charter.archetype === 'intel' ? 'question' : n.charter.archetype === 'studio' ? 'project' : 'topic',
+        maturity: 'spark', salience: n.depth === 0 ? 0.8 : 0.5, turn_refs: [],
+        charter: n.charter,
+      })));
+      if (clErr) throw new Error(clErr.message);
+      await admin.from('mind_events').insert({
+        owner_id: ownerId, event_type: 'note', source: 'workweb',
+        subject: `Created work web "${title}" from template ${t.id}`,
+        payload: { world_id: worldId, template: t.id },
+      }).then(() => {}, () => {});
+      return { kind: 'done', note: `"${title}" stands — the canvas IS the plan: competitor intel, SEO articles, social, video ideas, results. Later steps (and you) fill the areas.`, link: `/garvis/webs/${worldId}` };
+    }
+    case 'draft_episode': {
+      const { data: chRows } = await admin.from('growth_channels')
+        .select('id, name, niche, persona, cluster_id').eq('owner_id', ownerId)
+        .order('created_at', { ascending: true }).limit(50);
+      const channels = (chRows ?? []) as { id: string; name: string; niche: string; persona: string; cluster_id: string | null }[];
+      if (!channels.length) throw { waiting: 'No content channel exists yet — press "Start a channel" on Channels, then this continues on its own.' };
+      const wanted = (p.channel ?? '').trim().toLowerCase();
+      const channel = (wanted ? channels.find((c) => c.name.toLowerCase().includes(wanted)) : null) ?? channels[0];
+      await checkCredits(admin, ownerId, 'short_script');
+      const { data: eps } = await admin.from('channel_episodes')
+        .select('title').eq('channel_id', channel.id).order('created_at', { ascending: false }).limit(20);
+      const m = modelForPlan(await getUserPlan(admin, ownerId));
+      const result = await complete([
+        { role: 'system', content: FACT_SCRIPT_SYSTEM },
+        { role: 'user', content: buildFactScriptUser({
+          niche: channel.niche || channel.name, topic: (p.topic ?? '').trim() || undefined,
+          persona: channel.persona || undefined, targetSeconds: 75,
+          avoidTitles: ((eps ?? []) as { title: string }[]).map((e) => e.title).filter(Boolean),
+        }) },
+      ], { provider: m.provider, model: m.model, maxTokens: 3000 });
+      await spendCredits(admin, ownerId, { costUsd: result.costUsd, kind: 'short_script', provider: m.provider, model: m.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      let rawScript: unknown = null;
+      try { rawScript = JSON.parse(result.text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')); } catch { /* parseFactScript reports below */ }
+      const parsed = parseFactScript(rawScript);
+      if (!parsed.ok) throw new Error(parsed.reason);
+      const { error: epErr } = await admin.from('channel_episodes').insert({
+        owner_id: ownerId, channel_id: channel.id, cluster_id: channel.cluster_id ?? null,
+        title: parsed.script.title, topic: (p.topic ?? '').trim(), script: parsed.script,
+      });
+      if (epErr) throw new Error(epErr.message);
+      const warn = parsed.warnings.length ? ` (${parsed.warnings[0]})` : '';
+      return { kind: 'needs_review', note: `Episode "${parsed.script.title}" drafted for ${channel.name} unattended${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
+    }
+
     default:
       throw new Error(`"${action}" is not a server-executable action.`);
   }
@@ -2839,6 +3014,7 @@ async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: str
   const steps = arc.steps;
   const statuses: StepStatus[] = steps.map((_, i) => arc.statuses?.[i] ?? { kind: 'pending', note: '' });
   let advanced = 0;
+  let handoffs = 0;
   let blockedOnCreative = false;
   const { order: topo } = orderSteps(steps);
   for (const i of topo) {
@@ -2849,15 +3025,24 @@ async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: str
       continue;
     }
     if (deps.some((a) => !stepSucceeded(statuses[a].kind))) { continue; }
+    // Browser-required steps become HONEST handoffs carrying their link (the same status the
+    // client executor returns) — the operator learns what's ready, never discovers a silent stall.
+    const handoff = HANDOFF_ACTIONS[steps[i].action];
+    if (handoff) { statuses[i] = handoff(steps[i].params); handoffs++; continue; }
     if (!SERVER_ACTIONS.has(steps[i].action)) { blockedOnCreative = true; continue; }
     try {
       statuses[i] = await execServerAction(admin, arc.owner_id, steps[i].action, steps[i].params, nowIso);
       advanced++;
     } catch (e) {
       const waiting = (e as { waiting?: string })?.waiting;
+      // A spend wall (402: kill switch, daily/monthly cap, empty balance) PARKS the step — the
+      // operator can clear it and the wake sweep resumes; burying it as failure would end the arc.
+      const spendWall = (e as { status?: number })?.status === 402;
       statuses[i] = waiting
         ? { kind: 'waiting', note: waiting }
-        : { kind: 'failed', note: e instanceof Error ? e.message : 'The step failed server-side.' };
+        : spendWall
+          ? { kind: 'waiting', note: e instanceof Error ? e.message : 'Out of credits — this step resumes when credits do.' }
+          : { kind: 'failed', note: e instanceof Error ? e.message : 'The step failed server-side.' };
     }
   }
 
@@ -2871,11 +3056,17 @@ async function advanceArcServerSide(admin: any, arc: { id: string; owner_id: str
     last_activity_at: nowIso, updated_at: nowIso, claimed_until: null,
   }).eq('id', arc.id);
 
-  if (advanced > 0) {
+  if (advanced > 0 || handoffs > 0) {
+    // Honest verbs: executed steps are "executed"; a handoff only STAGED a link — never claim
+    // the worker did browser work it cannot do.
+    const didParts = [
+      advanced > 0 ? `${advanced} step(s) executed unattended` : '',
+      handoffs > 0 ? `${handoffs} browser step(s) staged as handoffs with links` : '',
+    ].filter(Boolean).join(', ');
     await admin.from('mind_events').insert({
       owner_id: arc.owner_id, event_type: 'note', source: 'orchestrator',
-      subject: `⚙ Arc "${String(arc.title).slice(0, 100)}": ${advanced} step(s) executed unattended${status === 'done' ? ' — the arc is DONE' : blockedOnCreative ? ' — creative steps wait for your next visit' : ''}.`,
-      payload: { key: `arc-advance:${arc.id}:${nowIso.slice(0, 13)}`, plan_id: arc.id, advanced },
+      subject: `⚙ Arc "${String(arc.title).slice(0, 100)}": ${didParts}${status === 'done' ? ' — the arc is DONE' : blockedOnCreative ? ' — creative steps wait for your next visit' : ''}.`,
+      payload: { key: `arc-advance:${arc.id}:${nowIso.slice(0, 13)}`, plan_id: arc.id, advanced, handoffs },
     }).then(() => {}, () => {});
   }
 }
