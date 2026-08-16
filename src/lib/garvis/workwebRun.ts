@@ -26,7 +26,7 @@ import {
 import { playById, PLAYS, DEFAULT_LAKE_GENEVA_CONTEXT, type Play, type PlayContext, type PlayArtifact } from './plays';
 import { mergeTokens, type PlayData, type BusinessContext, type PlayEmail, type WorldDNA } from './genesis';
 import { seedPackFor, detectVertical, type Vertical } from './expertise';
-import { producerFor } from './producers';
+import { producerFor, type ProduceResult } from './producers';
 
 // The charter travels in the cluster's summary is NOT viable (summary is prose). Charters live in a
 // separate table column (knowledge_clusters.charter). universe.ts's ClusterGraph has no charter
@@ -486,6 +486,17 @@ async function versionCreativeSlugs(clusterId: string, artifacts: PlayArtifact[]
     } catch { out.push(a); } // fail-soft: worst case is the old refresh behavior
   }
   return out;
+}
+
+/** Persist a producer's finished work onto an area — the ARC path's seam (SW6.2): grounded work
+ *  versions its slug and lands as earned 'garvis' activity; a framework floor refreshes as seed.
+ *  Same semantics as the studio path below, exported so the arc executors stop dropping work. */
+export async function persistProduced(clusterId: string, r: ProduceResult): Promise<number> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) return 0;
+  const arts = r.grounded ? await versionCreativeSlugs(clusterId, r.artifacts) : r.artifacts;
+  return writeArtifacts(uid, clusterId, arts, r.grounded ? 'garvis' : SEED_SOURCE);
 }
 
 export async function runTool(

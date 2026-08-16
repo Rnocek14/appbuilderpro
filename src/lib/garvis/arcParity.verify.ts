@@ -24,9 +24,6 @@ function check(name: string, condition: boolean, detail = '') {
 const CLIENT_ONLY: Record<string, string> = {
   found_company: 'genesis draft flow runs through client-side genesisRun',
   onboard_client: 'engagement + intake checklist built by client-side clientEngagementRun',
-  research_market: 'producer pipeline (grounded research) runs client-side',
-  business_plan: 'producer pipeline (draft → red-team → refine) runs client-side',
-  marketing_campaign: 'three-stage campaign compiler runs client-side',
   build_app: 'browser genuinely required (the forge) — the worker stages an honest handoff with the link',
   template_document: 'browser genuinely required (Paperwork studio) — the worker stages an honest handoff with the link',
   launch_vertical: 'composite founding flow runs client-side',
@@ -108,6 +105,58 @@ check('the ported block never touches a send path — approvals are its only out
 // waiting for the operator, and the wake sweep resumes it.
 check('a 402 spend wall parks the arc step as waiting',
   worker.includes(".status === 402") && /spendWall\s*\?\s*\{ kind: 'waiting'/.test(worker.replace(/\n\s*/g, ' ')));
+
+// ---- SW6.2 field-level parity: the server producer trio vs the client path. Not spot-checks —
+// ---- the exact artifact identities, grounding markers, honesty seams, and persistence rules
+// ---- must appear in BOTH implementations, or the port has drifted.
+const srv = readFileSync(join(here, '../../../supabase/functions/_shared/producersSrv.ts'), 'utf8');
+const producers = readFileSync(join(here, 'producers.ts'), 'utf8');
+const marketingRun = readFileSync(join(here, 'marketingRun.ts'), 'utf8');
+const registry = readFileSync(join(here, 'actionRegistry.ts'), 'utf8');
+const both = (name: string, needle: string | RegExp) => {
+  const has = (s: string) => typeof needle === 'string' ? s.includes(needle) : needle.test(s);
+  check(name, has(srv) && has(producers));
+};
+
+// Research: same artifact identity, same citation marker, same sources block, same degrade.
+both('research artifact identity matches (slug + kind)', "slug: 'market-research-brief', kind: 'research'");
+both('both gate the grounded label on real [n] citations', '/\\[\\d+\\]/.test(brief)');
+both('both attach the numbered sources block', 'appendSources(brief, sources.slice(0, 10))');
+both('both name the SERPER_API_KEY setup step when search is missing', 'Add SERPER_API_KEY for live research');
+both('both fall to the expertise floor, never a stub', 'expertiseFloor(charter, m)');
+
+// Plan: same identity, same anti-thin gate, same red-team → refine loop, same unknowable rule.
+both('plan artifact identity matches (slug + kind)', "slug: 'business-plan', kind: 'doc'");
+both("plan title matches (operator's 90-day edition)", "operator's 90-day edition");
+both('both reject thin plans BY NAME', 'was too thin in');
+both('both red-team then refine only when the critique demands it', 'needsRefine(critique)');
+both('both ship the refined text only if it re-passes the gate', 'parsePlan(revised).ok');
+both('both keep unknowables as [YOU FILL], never invented', '[YOU FILL');
+
+// Campaign: same staged compiler, same verified draft assets, same honest status flips.
+const bothMkt = (name: string, needle: string) => check(name, srv.includes(needle) && marketingRun.includes(needle));
+bothMkt('campaign assets carry the verify stamp', 'verify: verifyAsset(');
+bothMkt("campaign assets land as drafts, never live", "status: 'draft'");
+bothMkt('the strategy stage grounds in research capped the same way', 'research.slice(0, 5000)');
+bothMkt("a finished campaign flips to 'review' (a human decides)", "status: 'review'");
+bothMkt("a failed campaign says 'failed', never half-done", "status: 'failed'");
+for (const kind of ['strategy', 'calendar', 'social_post', 'email', 'landing_page']) {
+  bothMkt(`both write the ${kind} asset`, `insertAsset('${kind}'`);
+}
+
+// Both paths PERSIST the produced work with the same rules (the arc path used to drop it).
+check('the worker persists through the shared seam (grounded versions, floors as seed)',
+  srv.includes("r.grounded ? 'garvis' : SEED_SOURCE") && srv.includes('versionCreativeSlugsSrv'));
+check('the client arc executors persist too — work lands, on both paths',
+  [...registry.matchAll(/persistProduced\(area\.clusterId, res\)/g)].length === 2);
+
+// The worker credit-gates BEFORE each producer runs (the SW1.5 precondition for this port).
+for (const [gate, action] of [
+  ["checkCredits(admin, ownerId, 'research')", 'research_market'],
+  ["checkCredits(admin, ownerId, 'plan')", 'business_plan + marketing_campaign'],
+] as const) {
+  check(`the worker gates ${action} with ${gate.match(/'([a-z_]+)'/)![1]} credits`, worker.includes(gate));
+}
 
 console.log(`\narcParity.verify: ${passed} passed, ${failed} failed`
   + ` (server: ${serverActions.length}, client-only: ${Object.keys(CLIENT_ONLY).length}, catalog: ${catalogIds.length})`);

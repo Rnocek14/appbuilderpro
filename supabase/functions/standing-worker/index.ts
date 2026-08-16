@@ -78,7 +78,10 @@ import { composeBatchRecipients, unknownTokens } from '../_shared/batchCore.ts';
 // (never to sends — porting moves work server-side, never approval).
 import { checkDraft, PLATFORM_LABEL } from '../_shared/socialCore.ts';
 import { parseFactScript } from '../../../src/lib/garvis/factChannel.ts';
-import { templateById, flattenTemplate } from '../../../src/lib/garvis/workweb.ts';
+import { templateById, flattenTemplate, type Charter } from '../../../src/lib/garvis/workweb.ts';
+// SW6.2 — the producer trio server-side: same pure cores, same artifact shapes, same honesty
+// seams as the client producers (field-level parity pinned by arcParity.verify).
+import { produceResearchSrv, produceBusinessPlanSrv, produceCampaignSrv, persistProducedSrv } from '../_shared/producersSrv.ts';
 // AUTOMATION TRIGGERS (app_0076): the pure scheduling core is verified in src (window guard, once-
 // only ledger) — this worker adds the missing server half so rules fire on the clock, not only when
 // the owner happens to click "Run due now" in a browser tab.
@@ -2690,6 +2693,9 @@ const SERVER_ACTIONS = new Set([
   // SW6.1 — the mechanical creative actions, ported. Every outcome is a draft or a pending
   // approval; the send/publish machinery stays behind the Queue exactly as before.
   'queue_social_post', 'email_segment', 'point_channel_cta', 'start_app_marketing', 'draft_episode',
+  // SW6.2 — the producer trio. Grounded research, a red-teamed plan, campaign drafts: all
+  // reviewable work product, credit-gated before the first model call.
+  'research_market', 'business_plan', 'marketing_campaign',
 ]);
 
 /** Browser-required steps (the forge, the Paperwork studio) the worker can never run — but it can
@@ -2707,6 +2713,22 @@ const HANDOFF_ACTIONS: Record<string, (p: Record<string, string>) => StepStatus>
     link: '/garvis/webs',
   }),
 };
+
+/** The world's best-matching chartered area for a producer (mirror of the client's resolveArea):
+ *  preferred archetypes first, else the first chartered area; none at all is a SEAM — the wake
+ *  sweep resumes the arc once the operator approves the draft that creates the areas. */
+// deno-lint-ignore no-explicit-any
+async function resolveAreaSrv(admin: any, worldId: string, preferred: string[]): Promise<{ clusterId: string; charter: Charter }> {
+  const { data } = await admin.from('knowledge_clusters')
+    .select('id, slug, charter').eq('world_id', worldId).limit(32);
+  const rows = ((data ?? []) as { id: string; charter: Charter | null }[]).filter((r) => r.charter);
+  if (!rows.length) throw { waiting: 'That business has no chartered areas yet — approve its draft on Businesses, then this continues on its own.' };
+  for (const pref of preferred) {
+    const hit = rows.find((r) => r.charter!.archetype === pref);
+    if (hit) return { clusterId: hit.id, charter: hit.charter! };
+  }
+  return { clusterId: rows[0].id, charter: rows[0].charter! };
+}
 
 // deno-lint-ignore no-explicit-any
 async function resolveWorldSrv(admin: any, ownerId: string, title: string): Promise<{ id: string; title: string } | null> {
@@ -2992,6 +3014,54 @@ async function execServerAction(admin: any, ownerId: string, action: string, p: 
       if (epErr) throw new Error(epErr.message);
       const warn = parsed.warnings.length ? ` (${parsed.warnings[0]})` : '';
       return { kind: 'needs_review', note: `Episode "${parsed.script.title}" drafted for ${channel.name} unattended${warn} — review in the studio, then produce it or film the shot list.`, link: '/garvis/channels' };
+    }
+
+    // ---- SW6.2: the producer trio — grounded research, the red-teamed plan, campaign drafts.
+    // ---- Credit-gated BEFORE the first model call; the finished work LANDS on the area (the
+    // ---- same persistence seam the studio uses), and every outcome is reviewable, never sent.
+    case 'research_market': {
+      const w = await needWorld(p.world);
+      const area = await resolveAreaSrv(admin, w.id, ['intel']);
+      await checkCredits(admin, ownerId, 'research');
+      const res = await produceResearchSrv(admin, ownerId, w.id, area.charter);
+      await persistProducedSrv(admin, ownerId, area.clusterId, res);
+      return {
+        kind: 'done',
+        note: `${res.message}${res.grounded ? '' : ' (not grounded — set SERPER_API_KEY for cited research)'}`,
+        link: `/garvis/home/${w.id}`,
+      };
+    }
+    case 'business_plan': {
+      const w = await needWorld(p.world);
+      const area = await resolveAreaSrv(admin, w.id, ['intel', 'studio']);
+      await checkCredits(admin, ownerId, 'plan');
+      const res = await produceBusinessPlanSrv(admin, ownerId, w.id, area.charter);
+      await persistProducedSrv(admin, ownerId, area.clusterId, res);
+      return { kind: 'done', note: res.message, link: `/garvis/home/${w.id}` };
+    }
+    case 'marketing_campaign': {
+      await checkCredits(admin, ownerId, 'plan');
+      // Named business → its newest EARNED research grounds the strategy stage (mirror of the
+      // client executor; seeds never count as grounding).
+      let research: string | null = null;
+      if (p.world) {
+        const w = await needWorld(p.world);
+        const { data: clusterRows } = await admin.from('knowledge_clusters').select('id').eq('world_id', w.id);
+        const ids = ((clusterRows ?? []) as { id: string }[]).map((c) => c.id);
+        if (ids.length) {
+          const { data: r } = await admin.from('knowledge_artifacts')
+            .select('title, detail').in('cluster_id', ids).eq('kind', 'research')
+            .neq('source', 'garvis-seed').order('created_at', { ascending: false }).limit(1);
+          const row = (r ?? [])[0] as { title: string; detail: string | null } | undefined;
+          if (row?.detail) research = `${row.title}\n${row.detail}`;
+        }
+      }
+      const res = await produceCampaignSrv(admin, ownerId, { subject: p.subject, brief: p.brief ?? null, research });
+      return {
+        kind: 'needs_review',
+        note: `Campaign drafted${research ? ' (strategy grounded in the business\'s research)' : ' (ungrounded — no research on record for it)'} — ${res.summary ?? 'review the assets and approve what should ship'}.`,
+        link: '/garvis/marketing',
+      };
     }
 
     default:

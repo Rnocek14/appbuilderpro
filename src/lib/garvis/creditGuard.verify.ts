@@ -65,6 +65,10 @@ for (const gate of [
   "checkCredits(admin, order.owner_id, 'board_copy')",
   "checkCredits(admin, order.owner_id, 'short_script')",
   "checkCredits(admin, order.owner_id, 'image')",
+  // SW6 arc-action gates (ownerId scope): the ported creative actions each gate before spending.
+  "checkCredits(admin, ownerId, 'short_script')",
+  "checkCredits(admin, ownerId, 'research')",
+  "checkCredits(admin, ownerId, 'plan')",
 ]) {
   check(`standing-worker gate present: ${gate.match(/'([a-z_]+)'/)![1]}`, standing.includes(gate));
 }
