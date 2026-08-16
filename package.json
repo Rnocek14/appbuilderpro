@@ -78,6 +78,7 @@
     "verify:reviewgate": "tsx scripts/reviewGate.verify.ts",
     "verify:striperoute": "tsx src/lib/garvis/stripeRoute.verify.ts",
     "verify:prediction": "tsx src/lib/garvis/prediction.verify.ts",
+    "verify:evidencematch": "tsx src/lib/garvis/evidenceMatch.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",

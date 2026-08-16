@@ -23,6 +23,12 @@ import { complete, getProviderConfig } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 import { quarantineExternal } from '../_shared/untrustedText.ts';
 import { closeSendPredictions } from '../_shared/predictionSrv.ts';
+// SW7.3 — auto evidence linking: the model NOMINATES which active beliefs the events bear on;
+// the pure matcher keeps only verbatim-verifiable citations, and attachEvidence (the same pure
+// reducer the Memory page uses) files them. Unverifiable citations are dropped, never guessed.
+import { verifyNominations, type EvidenceNomination } from '../_shared/evidenceMatch.ts';
+import { attachEvidence } from '../../../src/lib/garvis/mind.ts';
+import type { MindBelief } from '../../../src/types/index.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 
@@ -36,6 +42,10 @@ Given recent events (type, source, subject), propose AT MOST ${MAX_PROPOSALS} ca
 genuinely RECUR across multiple events and would change future decisions if remembered.
 Return STRICT JSON only: an array of {"kind":"lesson"|"outcome","title":"<≤80 chars>","body":"<1-3 sentences,
 grounded ONLY in the events>","evidence":["<verbatim event subject>", ...]}.
+When a block of ACTIVE BELIEFS is provided, the array may ALSO include evidence items:
+{"kind":"evidence","belief":"<one belief statement VERBATIM>","stance":"supports"|"contradicts",
+"events":["<verbatim event subject>", ...]} — only where specific events genuinely bear on a belief.
+Cite verbatim or not at all: a strict matcher discards any belief or event you paraphrase.
 Rules: every lesson MUST cite 2+ verbatim event subjects as evidence. Never invent numbers, causes, or events.
 If nothing actually recurs or teaches anything, return []. No preamble, no markdown fences.`;
 
@@ -77,11 +87,11 @@ Deno.serve(async (req) => {
         ?? new Date(Date.now() - 14 * 24 * 3_600_000).toISOString();
 
       const { data: events } = await admin.from('mind_events')
-        .select('event_type, source, subject, created_at')
+        .select('id, event_type, source, subject, created_at')
         .eq('owner_id', ownerId).neq('source', 'consolidation')
         .gte('created_at', since)
         .order('created_at', { ascending: false }).limit(MAX_EVENTS);
-      const evs = (events ?? []) as { event_type: string; source: string; subject: string | null }[];
+      const evs = (events ?? []) as { id: string; event_type: string; source: string; subject: string | null }[];
       if (evs.length < MIN_EVENTS) { skippedThin++; continue; }
 
       // audit 12 §1.2 (unmetered call sites): consolidation is one paid model call per owner — gate
@@ -100,13 +110,23 @@ Deno.serve(async (req) => {
         .select('title').eq('owner_id', ownerId).limit(400);
       const seenTitles = new Set(((existing ?? []) as { title: string }[]).map((k) => k.title.trim().toLowerCase()));
 
+      // The owner's active beliefs (SW7.3) — the model may nominate which ones the events bear
+      // on; only verbatim-verifiable nominations survive the matcher below.
+      const { data: beliefRows } = await admin.from('mind_beliefs')
+        .select('id, statement').eq('owner_id', ownerId).eq('status', 'active')
+        .order('updated_at', { ascending: false }).limit(40);
+      const beliefs = (beliefRows ?? []) as { id: string; statement: string }[];
+      const beliefsBlock = beliefs.length
+        ? `\n\nACTIVE BELIEFS (nominate evidence only for these, statements VERBATIM):\n${beliefs.map((b) => `- ${b.statement.replace(/\s+/g, ' ').slice(0, 200)}`).join('\n')}`
+        : '';
+
       const log = evs.map((e) => `[${e.event_type}/${e.source}] ${(e.subject ?? '').slice(0, 160)}`).join('\n');
       const res = await complete([
         { role: 'system', content: SYSTEM },
         // The log's subjects include EXTERNAL text (inbound reply subjects, watched-page
         // excerpts) — quarantined before it can steer the lesson-writer (SW4.2).
-        { role: 'user', content: `EVENT LOG (newest first, ${evs.length} events):\n${quarantineExternal(log, 16_000).text}\n\nCandidate lessons (strict JSON array):` },
-      ], { maxTokens: 1200 });
+        { role: 'user', content: `EVENT LOG (newest first, ${evs.length} events):\n${quarantineExternal(log, 16_000).text}${beliefsBlock}\n\nCandidate lessons (strict JSON array):` },
+      ], { maxTokens: 1600 });
       // audit 12 §1.2 (unmetered call sites): record the real cost right where usage is known —
       // fail-soft (spendCredits never throws), so a ledger hiccup never drops the proposals.
       const cfg = getProviderConfig();
@@ -122,8 +142,28 @@ Deno.serve(async (req) => {
         if (Array.isArray(parsed)) candidates = parsed;
       } catch { /* unparseable → propose nothing; never guess */ }
 
+      // Split the two item shapes: lessons go through the grounding gate below; evidence
+      // nominations go through the STRICT matcher — the model's word is never enough.
+      const nominations = candidates.filter((c) => (c as { kind?: string }).kind === 'evidence') as EvidenceNomination[];
+      const lessonCandidates = candidates.filter((c) => (c as { kind?: string }).kind !== 'evidence');
+
+      let linked = 0;
+      const verified = verifyNominations(nominations, beliefs, evs.map((e) => ({ id: e.id, subject: e.subject })));
+      for (const link of verified) {
+        const { data: b } = await admin.from('mind_beliefs')
+          .select('id, supporting_event_ids, contradicting_event_ids')
+          .eq('id', link.beliefId).maybeSingle();
+        if (!b) continue;
+        let next = b as unknown as MindBelief;
+        for (const eid of link.eventIds) next = attachEvidence(next, eid, link.stance);
+        const { error: linkErr } = await admin.from('mind_beliefs')
+          .update({ supporting_event_ids: next.supporting_event_ids, contradicting_event_ids: next.contradicting_event_ids })
+          .eq('id', link.beliefId);
+        if (!linkErr) linked += link.eventIds.length;
+      }
+
       let inserted = 0;
-      for (const c of candidates.slice(0, MAX_PROPOSALS)) {
+      for (const c of lessonCandidates.slice(0, MAX_PROPOSALS)) {
         const title = (c.title ?? '').trim();
         const body = (c.body ?? '').trim();
         const evidence = Array.isArray(c.evidence) ? c.evidence.filter((x) => typeof x === 'string') : [];
@@ -139,13 +179,16 @@ Deno.serve(async (req) => {
       }
 
       // The marker event — both the audit trail and next run's `since` anchor. Written even when
-      // nothing was proposed, so a noisy-but-lessonless fortnight isn't re-read forever.
+      // nothing was proposed, so a noisy-but-lessonless night isn't re-read forever.
       await admin.from('mind_events').insert({
         owner_id: ownerId, event_type: 'note', source: 'consolidation',
-        subject: inserted > 0
-          ? `Consolidation: proposed ${inserted} candidate lesson${inserted === 1 ? '' : 's'} from ${evs.length} events — review in Knowledge`
+        subject: inserted > 0 || linked > 0
+          ? `Consolidation: ${[
+            inserted > 0 ? `proposed ${inserted} candidate lesson${inserted === 1 ? '' : 's'}` : '',
+            linked > 0 ? `linked ${linked} event${linked === 1 ? '' : 's'} as belief evidence` : '',
+          ].filter(Boolean).join(', ')} from ${evs.length} events — review in Knowledge`
           : `Consolidation: read ${evs.length} events — nothing recurred enough to propose`,
-        payload: { events: evs.length, proposed: inserted, since },
+        payload: { events: evs.length, proposed: inserted, linked, since },
       }).then(() => {}, () => {});
       proposed += inserted;
     } catch { /* one owner's failure never blocks the rest */ }
