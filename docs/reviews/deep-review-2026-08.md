@@ -62,3 +62,20 @@ order: the credit wall (#4-7, #12), the webhook posture (#8, #9, #11), the appro
 (#1, #2, #10), the nets (#3, #17). Normals and advisories are queued behind them and re-checked
 at the 2026-09 review. Next review: first week of September, same five targets + rotating focus
 (SSRF surface).
+
+## Fixes landed (2026-08-16, same day)
+
+- **fix A** — credit wall: #4 #5 #6 #7 #12 (generate-video metered; app_0148 pins
+  `spend_guard_state`, bounds client-logged usage, restores grant ledgering; guard errors fail
+  closed; creditGuard.verify pins raw-fetch seams by name).
+- **fix B** — webhook posture: #8 #9 #11 (single-use payment links; settled-invoice events
+  surfaced with double-charge vs crossover told apart; CAS-miss re-reads before the VOID alarm;
+  webhook fails closed with no signing secret).
+- **fix C** — approval spine + net: #1 #2 #10 #3 (batch drain binds batch_id + payload hash +
+  content hash and consumes the approval; app_0149 makes decided payloads immutable; all four
+  senders get expiring claims + catch-release; rls.verify widened to app_01XX — and passes).
+
+Still queued for 2026-09: #13 (stripe_events processing-status), #14 (guarded revertToPending),
+#15 (partial-publish honesty), #16 (invokeFailure on the three senders), #17 (isolation tests
+for the three new tables), #18 (provenance-column write posture), #21 (constant-time compares).
+Accepted as recorded: #19, #20.
