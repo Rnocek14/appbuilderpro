@@ -79,7 +79,7 @@ const CAMP = '3f2b6a1e-9c4d-4e8f-a1b2-c3d4e5f60789';
 {
   const base: BriefingFacts = {
     hour: 8, sinceHours: 14, episodes: [], opportunities: 0,
-    arcsFinished: [], arcsWaiting: [], approvals: 0, clocks: 0, channels: 0, predictions: null,
+    arcsFinished: [], arcsWaiting: [], approvals: 0, clocks: 0, channels: 0, predictions: null, read: null,
   };
   check('the constant is the documented one', MIN_CLOSED_FOR_LINE === 5);
   check('at ≥5 closed the record shows',

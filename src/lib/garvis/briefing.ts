@@ -35,6 +35,9 @@ export interface BriefingFacts {
   channels: number | null;
   /** The decision journal's CLOSED prediction record (SW7.2). Null = probe failed. */
   predictions: { closed: number; hits: number } | null;
+  /** The overnight read (SW8.2) — the pulse's accepted 2-3 sentence synthesis, or null.
+   *  Additive and optional: the deterministic lines below are the spine either way. */
+  read: string | null;
 }
 
 export interface Briefing {
@@ -53,6 +56,9 @@ const sinceLabel = (h: number): string => (h <= 18 ? 'since your last look' : h 
 export function composeBriefing(f: BriefingFacts): Briefing {
   const lines: string[] = [];
   const since = sinceLabel(f.sinceHours);
+
+  // The overnight read leads WHEN IT EXISTS — it connects the facts below, never replaces them.
+  if (f.read) lines.push(`» ${f.read}`);
 
   if (f.episodes && f.episodes.length > 0) {
     const shown = f.episodes.slice(0, 3).map((e) => `“${e.title}” (${e.channel})`).join(', ');

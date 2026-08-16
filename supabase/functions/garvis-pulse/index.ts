@@ -21,6 +21,12 @@ import { notifyText } from '../_shared/notify.ts';
 import { observe, pickToSay, type ProactiveFacts } from '../../../src/lib/garvis/proactive.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
 import { parseIcsEvents, calendarLine } from '../_shared/icsCore.ts';
+// SW8.2 — the overnight read: one metered call connecting the brief's facts, additive and
+// optional (pure core + acceptance gate verified by overnightRead.verify.ts).
+import { READ_SYSTEM, READ_MIN_FACTS, buildReadUser, acceptOvernightRead } from '../../../src/lib/garvis/overnightRead.ts';
+import { complete, modelForPlan } from '../_shared/ai.ts';
+import { checkCredits, spendCredits, getUserPlan } from '../_shared/credits.ts';
+import { quarantineExternal } from '../_shared/untrustedText.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 
@@ -163,6 +169,42 @@ Deno.serve(async (req) => {
         ...calendar.map((c) => c.line),
         `Open Garvis → Command to act on all of it.`,
       ].filter(Boolean) as string[];
+
+      // THE OVERNIGHT READ (SW8.2): one metered call connecting the facts above — additive and
+      // optional by construction. The quiet-night gate already passed (real activity exists);
+      // the deterministic lines are the spine either way. Failure of ANY kind (no credits, model
+      // down, rejected read) degrades to the brief as-is — never a blocked morning.
+      let readLine: string | null = null;
+      const factLines = lines.slice(1, -1);            // the real facts, minus header/footer
+      if (factLines.length >= READ_MIN_FACTS) {
+        try {
+          await checkCredits(admin, p.id, 'garvis');
+          const [{ data: blf }, { data: wi }] = await Promise.all([
+            admin.from('mind_beliefs').select('statement').eq('owner_id', p.id).eq('status', 'active').limit(5),
+            admin.from('world_intelligence').select('open_questions').eq('owner_id', p.id).limit(3),
+          ]);
+          const beliefs = ((blf ?? []) as { statement: string }[]).map((b) => b.statement.slice(0, 160));
+          const openQs = ((wi ?? []) as { open_questions?: string[] | null }[])
+            .flatMap((w) => w.open_questions ?? []).slice(0, 5).map((q) => String(q).slice(0, 160));
+          const m = modelForPlan(await getUserPlan(admin, p.id));
+          // Fact lines can carry EXTERNAL text (reply subjects, arc reasons) — quarantined.
+          const res = await complete([
+            { role: 'system', content: READ_SYSTEM },
+            { role: 'user', content: quarantineExternal(buildReadUser(factLines, beliefs, openQs), 6_000).text },
+          ], { provider: m.provider, model: m.model, maxTokens: 300 });
+          await spendCredits(admin, p.id, { costUsd: res.costUsd, kind: 'garvis', provider: m.provider, model: m.model, inputTokens: res.inputTokens, outputTokens: res.outputTokens });
+          const verdict = acceptOvernightRead(res.text, factLines);
+          if (verdict.ok) {
+            readLine = verdict.read;
+            await admin.from('mind_events').insert({
+              owner_id: p.id, event_type: 'note', source: 'overnight-read',
+              subject: readLine.slice(0, 300),
+              payload: { key: `overnight-read:${today}`, date: today },
+            }).then(() => {}, () => {});
+          }
+        } catch { /* out of credits / model down → the deterministic brief stands alone */ }
+      }
+      if (readLine) lines.splice(1, 0, `» ${readLine}`);
 
       await notifyText(p.webhook_url, lines.join('\n'));
       await admin.from('mind_events').insert({

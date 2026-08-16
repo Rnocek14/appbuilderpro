@@ -88,7 +88,18 @@ export async function gatherBriefing(): Promise<BriefingFacts> {
     return { closed: r.closed, hits: r.hits };
   })().catch(() => null);
 
-  const [eps, opps, arcRes, appr, clk, chan, preds] = await Promise.all([episodes, opportunities, arcs, approvals, clocks, channels, predictions]);
+  // The overnight read (SW8.2): today's accepted synthesis from the pulse, if one exists.
+  const read = (async (): Promise<BriefingFacts['read']> => {
+    const t = new Date();
+    const dayStart = new Date(t.getFullYear(), t.getMonth(), t.getDate()).toISOString();
+    const { data, error } = await supabase.from('mind_events').select('subject')
+      .eq('source', 'overnight-read').gte('created_at', dayStart)
+      .order('created_at', { ascending: false }).limit(1);
+    if (error) return null;
+    return ((data ?? [])[0] as { subject?: string | null } | undefined)?.subject ?? null;
+  })().catch(() => null);
+
+  const [eps, opps, arcRes, appr, clk, chan, preds, rd] = await Promise.all([episodes, opportunities, arcs, approvals, clocks, channels, predictions, read]);
   return {
     hour: new Date().getHours(),
     sinceHours,
@@ -100,5 +111,6 @@ export async function gatherBriefing(): Promise<BriefingFacts> {
     clocks: clk,
     channels: chan,
     predictions: preds,
+    read: rd,
   };
 }

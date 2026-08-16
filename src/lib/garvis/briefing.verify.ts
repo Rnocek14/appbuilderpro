@@ -12,7 +12,7 @@ const check = (n: string, c: boolean) => {
 
 const base: BriefingFacts = {
   hour: 8, sinceHours: 14, episodes: [], opportunities: 0,
-  arcsFinished: [], arcsWaiting: [], approvals: 0, clocks: 0, channels: 0, predictions: null,
+  arcsFinished: [], arcsWaiting: [], approvals: 0, clocks: 0, channels: 0, predictions: null, read: null,
 };
 
 // The full morning: production + waits, priorities right.
