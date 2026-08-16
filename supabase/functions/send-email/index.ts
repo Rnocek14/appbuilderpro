@@ -16,6 +16,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
+import { openSendPrediction } from '../_shared/predictionSrv.ts';
 import { senderDomainBlockReason, type DomainStatus } from '../../../src/lib/garvis/email/senderDomain.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -328,6 +329,12 @@ Deno.serve(async (req) => {
       subject: `Sent "${(msg.subject ?? '').slice(0, 120)}" to ${to}`,
       payload: { message_id: messageId, resend_id: resendId, campaign_id: msg.campaign_id },
     }).then(() => {}, () => {});
+
+    // THE PREDICTION PRODUCER (SW7.2) — fire-and-forget AFTER the send is recorded: it opens a
+    // falsifiable decision in the journal (closed later by garvis-consolidate against the real
+    // reply record). A throwing producer must never change a send outcome — the house
+    // .then(()=>{},()=>{}) pattern, pinned by verify:prediction.
+    openSendPrediction(admin, uid, { subject: msg.subject ?? '', to, campaignId: msg.campaign_id ?? null }).then(() => {}, () => {});
 
     return json({ ok: true, resend_id: resendId, sent_at: sentAt });
   } catch (e) {

@@ -22,6 +22,7 @@ import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, getProviderConfig } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
 import { quarantineExternal } from '../_shared/untrustedText.ts';
+import { closeSendPredictions } from '../_shared/predictionSrv.ts';
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'content-type, x-worker-secret' };
 
@@ -59,10 +60,14 @@ Deno.serve(async (req) => {
   if (error) return json({ error: error.message }, 500);
   const owners = [...new Set(((recentOwners ?? []) as { owner_id: string }[]).map((r) => r.owner_id))];
 
-  let checked = 0, proposed = 0, skippedThin = 0, skippedCredits = 0;
+  let checked = 0, proposed = 0, skippedThin = 0, skippedCredits = 0, predictionsClosed = 0;
   for (const ownerId of owners) {
     if (Date.now() - started > TIME_BUDGET_MS) break; // honest partial progress; next week continues
     checked++;
+    // THE PREDICTION CLOSER (SW7.2): every elapsed open send-prediction is judged against the
+    // real reply record — no model, no spend, so it runs BEFORE the thin-skip (a quiet owner's
+    // predictions still close on time). Best-effort per owner.
+    predictionsClosed += await closeSendPredictions(admin, ownerId).catch(() => 0);
     try {
       // Since the LAST consolidation (its own mind_event is the marker) — or 14 days back.
       const { data: lastRun } = await admin.from('mind_events')
@@ -146,5 +151,5 @@ Deno.serve(async (req) => {
     } catch { /* one owner's failure never blocks the rest */ }
   }
 
-  return json({ ok: true, checked, proposed, skippedThin, skippedCredits });
+  return json({ ok: true, checked, proposed, skippedThin, skippedCredits, predictionsClosed });
 });

@@ -77,7 +77,18 @@ export async function gatherBriefing(): Promise<BriefingFacts> {
   const channels = countOf(supabase.from('growth_channels')
     .select('id', { count: 'exact', head: true }));
 
-  const [eps, opps, arcRes, appr, clk, chan] = await Promise.all([episodes, opportunities, arcs, approvals, clocks, channels]);
+  // The prediction record (SW7.2): CLOSED decisions with a recorded verdict, straight through
+  // the verified decisionHitRate reducer. Fail-soft like every probe.
+  const predictions = (async (): Promise<BriefingFacts['predictions']> => {
+    const { data, error } = await supabase.from('mind_decisions')
+      .select('outcome, outcome_hit').not('outcome', 'is', null).limit(500);
+    if (error) return null;
+    const { decisionHitRate } = await import('./mind');
+    const r = decisionHitRate((data ?? []) as { outcome: string | null; outcome_hit: boolean | null }[]);
+    return { closed: r.closed, hits: r.hits };
+  })().catch(() => null);
+
+  const [eps, opps, arcRes, appr, clk, chan, preds] = await Promise.all([episodes, opportunities, arcs, approvals, clocks, channels, predictions]);
   return {
     hour: new Date().getHours(),
     sinceHours,
@@ -88,5 +99,6 @@ export async function gatherBriefing(): Promise<BriefingFacts> {
     approvals: appr,
     clocks: clk,
     channels: chan,
+    predictions: preds,
   };
 }
