@@ -8,7 +8,7 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectFreshDeploys, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectFreshDeploys, collectAdoptedStrategies, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn, type TrailRowIn,
 } from './nextMove';
 import { listWorlds, isWorldUuid } from './universe';
@@ -265,6 +265,12 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     created_at: d.created_at as string,
   }));
 
+  // Adopted strategies (SW9.2): the operator's declared way forward — fail-soft like every probe.
+  const adoptedStrategies = await supabase.from('strategies')
+    .select('id, title, world_id, created_at').eq('status', 'adopted')
+    .order('updated_at', { ascending: false }).limit(4)
+    .then(({ data }) => (data ?? []) as { id: string; title: string; world_id: string | null; created_at: string }[], () => []);
+
   const ranked = rankMoves([
     ...collectReminders(((remindersQ.data ?? []) as { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }[]), now),
     ...collectLeads(((leadsQ.data ?? []) as { id: string; world_id: string; name: string | null; email: string; message: string | null; source: string; created_at: string }[])),
@@ -282,6 +288,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     ...collectFloor(floors),
     ...collectNaturalNext(naturals),
     ...collectFreshDeploys(events as { subject: string; occurred_at: string; payload: Record<string, unknown> | null }[], now.toISOString()),
+    ...collectAdoptedStrategies(adoptedStrategies),
     ...collectTrails(trailRows, now),
   ], now, mergedDismissals());
 

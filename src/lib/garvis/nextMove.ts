@@ -320,6 +320,22 @@ export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
 /** SHIP→MARKET (SW5.3): a site deployed in the last 3 days is the natural next move's rawest
  *  form — the thing exists, and existence earns nothing until a channel points at it. Reads the
  *  deploy mind_events the executor writes; one move per site, newest deploy wins. */
+/** ADOPTED STRATEGIES surface at the waking moment (SW9.2) — the operator said "this is the
+ *  way", so the door back to it stays open. Adopt/retire is the ONLY thing that moves these;
+ *  proposed and retired rows never speak here. */
+export function collectAdoptedStrategies(rows: { id: string; title: string; world_id: string | null; created_at: string }[]): NextMove[] {
+  return rows.slice(0, 2).map((r) => ({
+    key: `strategy:${r.id}`,
+    kind: 'natural_next' as const,
+    title: `Adopted strategy: ${r.title.slice(0, 70)}`,
+    why: 'You adopted this as the way forward — its business is one click away.',
+    action: { label: 'Work the strategy', route: r.world_id ? `/garvis/webs/${r.world_id}` : '/garvis/webs' },
+    score: 0,
+    bornAt: r.created_at,
+    expected: { text: 'Keeps the adopted path in front of you until you retire it.', basis: 'structural' as const },
+  }));
+}
+
 export function collectFreshDeploys(events: { subject: string; occurred_at: string; payload: Record<string, unknown> | null }[], nowIso: string): NextMove[] {
   const seen = new Set<string>();
   const out: NextMove[] = [];
