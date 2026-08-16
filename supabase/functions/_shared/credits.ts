@@ -79,6 +79,16 @@ export async function getUserPlan(admin: { from: (table: string) => any }, userI
  *  only when the guard rpc itself is missing (pre-migration), never on an over-cap answer. */
 export async function checkCredits(admin: Admin, userId: string, kind: CreditKind): Promise<number> {
   const guard = await admin.rpc('spend_guard_state', { p_user: userId });
+  if (guard.error) {
+    // Fail OPEN for exactly one case — the guard RPC not migrated yet (pre-app_0127 DB). Every
+    // OTHER error (timeout under load, permission drift, schema breakage) fails CLOSED: an
+    // uncheckable kill switch must be treated as an ON one (deep review 2026-08 #12).
+    const gerr = guard.error as { code?: string; message?: string };
+    const sig = `${gerr.code ?? ''} ${gerr.message ?? ''}`;
+    if (!/PGRST202|does not exist|could not find the function/i.test(sig)) {
+      throw new SpendCapError('The spending guard could not be checked — refusing to spend until it can. Retry shortly.');
+    }
+  }
   if (!guard.error && guard.data && typeof guard.data === 'object') {
     const g = guard.data as { kill?: boolean; daily_cap?: number; monthly_cap?: number; spent_today?: number; spent_month?: number };
     if (g.kill) throw new SpendCapError('The AI kill switch is ON — nothing spends until you flip it off in Settings → Spending guard.');
