@@ -445,7 +445,13 @@ scope on the money spine is unbounded by definition and does not fit inside this
 
 ## SW8 — The brain takes the front door (~8 sessions)
 
-**8.1 Model-first routing inversion at the dock** (2s — TIME-GATED, see global rule 3). Invert
+**8.1 Model-first routing inversion at the dock** (2s — TIME-GATED, see global rule 3).
+> **PARKED 2026-08-16 (SW8 execution):** the rule-3 gate is unmet — SW2's feed-the-brain items
+> are merged but not deployed, so zero production `usage_events` exist and none of the
+> pre-registered numbers (cache-read share ≥40%, p50 ≤3.5s, spend headroom ≥30%) can be cited.
+> Builds only after ≥1 week of real usage post-deploy. Wave position alone never triggers this.
+
+Invert
 the tier walk: only exact/verbatim deterministic claims keep their pre-brain position (command
 prefix, learned aliases, brief capture, follow-up memory, go-back, small-talk halts, briefing
 greetings, exact stat matches); fuzzy resolve() tiers demote to AFTER `askCommander`; the regex
