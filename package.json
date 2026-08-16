@@ -75,6 +75,7 @@
     "verify:untrustedtext": "tsx src/lib/garvis/untrustedText.verify.ts",
     "verify:garvisline": "tsx src/lib/garvis/garvisLine.verify.ts",
     "verify:smsconcierge": "tsx src/lib/garvis/smsConcierge.verify.ts",
+    "verify:reviewgate": "tsx scripts/reviewGate.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",
