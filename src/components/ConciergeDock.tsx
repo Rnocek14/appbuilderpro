@@ -25,7 +25,7 @@ import { lookDue, markLooked } from '../lib/garvis/proactiveRun';
 import { dockDeference, opensOnArrival, showsScrollback } from '../lib/garvis/dockPresence';
 import { rankMoves } from '../lib/garvis/suggestionDeck';
 import { answerStat } from '../lib/garvis/conciergeStats';
-import { speakEleven, stopSpeaking } from '../lib/garvis/speakRun';
+import { speakChunked, bargeIn, stopSpeaking } from '../lib/garvis/speakRun';
 import { ALL_CONCIERGE_TASKS } from '../lib/garvis/conciergeTasks';
 import type { CompiledPlan, StepStatus } from '../lib/garvis/orchestrator';
 import { actionById } from '../lib/garvis/actionRegistry';
@@ -387,9 +387,10 @@ export function ConciergeDock() {
       window.speechSynthesis.speak(u);
     } catch { /* voice is best-effort */ }
   };
+  // SW8.4: chunked — sentence 1 starts at one sentence's latency, the rest prefetch and queue.
   const speak = (text: string) => {
     if (!voiceOn || !text) return;
-    void speakEleven(text).then((ok) => { if (!ok) browserSpeak(text); });
+    void speakChunked(text).then((ok) => { if (!ok) browserSpeak(text); });
   };
   const toggleVoice = () => {
     const next = !voiceOn;
@@ -911,6 +912,7 @@ export function ConciergeDock() {
     rec.onerror = () => setListening(false);
     recRef.current = rec;
     setListening(true);
+    bargeIn();   // mic activation takes the floor too (SW8.4)
     rec.start();
   };
 
@@ -984,7 +986,12 @@ export function ConciergeDock() {
       )}
 
       <div className="mt-2 flex gap-1.5">
-        <input ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)}
+        <input ref={inputRef} value={input} onChange={(e) => {
+          // BARGE-IN (SW8.4): the first keystroke takes the floor — speech stops instantly.
+          bargeIn();
+          try { window.speechSynthesis?.cancel(); } catch { /* fine */ }
+          setInput(e.target.value);
+        }}
           onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
           onPaste={(e) => {
             // A pasted IMAGE (screenshot, copied photo) lands on the work like a drop does.

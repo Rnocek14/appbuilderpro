@@ -81,6 +81,7 @@
     "verify:evidencematch": "tsx src/lib/garvis/evidenceMatch.verify.ts",
     "verify:overnightread": "tsx src/lib/garvis/overnightRead.verify.ts",
     "verify:approvalrisk": "tsx src/lib/garvis/approvalRisk.verify.ts",
+    "verify:speech": "tsx src/lib/garvis/speech.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",
