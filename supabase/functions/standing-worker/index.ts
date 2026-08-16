@@ -23,9 +23,9 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { episodePerf, hookIntel, type EpisodeMetricRow } from '../../../src/lib/garvis/growthLoop.ts';
 import { FACT_SCRIPT_SYSTEM, buildFactScriptUser } from '../_shared/factScriptCore.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
-import { notifyText } from '../_shared/notify.ts';
+import { notifyText, notifyOwner } from '../_shared/notify.ts';
 import { decideWatch, nextRunAfter, normalizeContent, changeExcerpt, isDue, breakerTrips, ORDER_BREAKER_LIMIT, type WatchResult } from '../_shared/standingCore.ts';
-import { expiresAtFor } from '../_shared/approvalTtl.ts';
+import { expiresAtFor, reminderDue } from '../_shared/approvalTtl.ts';
 import { quarantineExternal, quarantineNote } from '../_shared/untrustedText.ts';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
 import { complete, completeVision, modelForPlan } from '../_shared/ai.ts';
@@ -1566,12 +1566,50 @@ Deno.serve(async (req) => {
           subject: `🔴 Standing order "${o.label.slice(0, 100)}" paused itself after ${ORDER_BREAKER_LIMIT} straight failures: ${(lr.line ?? '').slice(0, 160)}`,
           payload: { key: `order-breaker:${o.id}`, order_id: o.id, consecutive_failures: streak },
         }).then(() => {}, () => {});
-        const { data: prof } = await admin.from('profiles').select('webhook_url').eq('id', o.owner_id).maybeSingle();
-        await notifyText((prof as { webhook_url?: string } | null)?.webhook_url,
+        await notifyOwner(admin, o.owner_id,
           `🔴 Standing order "${o.label.slice(0, 80)}" paused itself after ${ORDER_BREAKER_LIMIT} straight failures. Fix the cause, then Resume it from its panel.`).catch(() => {});
       }
     }
   }
+
+  // ---- THE DECISION CLOCK, part 2 (SW5.1): nudge at half-life, expire past the window ------
+  // Order matters: the NUDGE path went live in the same change as the sweep, so pending work
+  // cannot silently lapse for an operator with no channel — notifyOwner falls back to their own
+  // email, and Health names the no-channel gap. Dedupe is the server ledger (app_0145): one
+  // observation, notified once per channel, ever.
+  try {
+    const { data: pend } = await admin.from('approvals')
+      .select('id, owner_id, title, created_at, expires_at, reminded_at')
+      .eq('status', 'pending').not('expires_at', 'is', null)
+      .order('created_at', { ascending: true }).limit(50);
+    const pending = (pend ?? []) as { id: string; owner_id: string; title: string; created_at: string; expires_at: string; reminded_at: string | null }[];
+
+    // Half-life nudges — at most a handful per tick, each recorded before it rings.
+    for (const a of pending.filter((x) => reminderDue(x.created_at, x.expires_at, x.reminded_at, nowIso)).slice(0, 5)) {
+      const { data: claimed } = await admin.from('proactive_spoken')
+        .upsert({ owner_id: a.owner_id, key: `approval-nudge:${a.id}`, channel: 'owner' },
+          { onConflict: 'owner_id,key,channel', ignoreDuplicates: true })
+        .select('id');
+      if (!(claimed ?? []).length) continue;             // another tick already rang this one
+      await admin.from('approvals').update({ reminded_at: nowIso }).eq('id', a.id).then(() => {}, () => {});
+      await notifyOwner(admin, a.owner_id,
+        `⏳ Waiting on you: "${a.title.slice(0, 120)}" is halfway through its decision window. Nothing goes out until you decide — open the Queue.`);
+    }
+
+    // The expiry sweep: CAS on status so an in-flight human decision always wins the race.
+    const overdue = pending.filter((x) => Date.parse(x.expires_at) <= Date.parse(nowIso)).slice(0, 20);
+    for (const a of overdue) {
+      const { data: flipped } = await admin.from('approvals')
+        .update({ status: 'expired', decided_at: nowIso, decided_via: 'expiry' })
+        .eq('id', a.id).eq('status', 'pending').select('id').maybeSingle();
+      if (!flipped) continue;
+      await admin.from('mind_events').insert({
+        owner_id: a.owner_id, event_type: 'note', source: 'execution',
+        subject: `An approval lapsed unanswered: "${a.title.slice(0, 120)}" expired after its decision window.`,
+        payload: { key: `approval-expired:${a.id}`, approval_id: a.id },
+      }).then(() => {}, () => {});
+    }
+  } catch { /* the clock's bookkeeping must never fail the tick */ }
 
   return json({ ok: true, ran, changed, failed });
 });

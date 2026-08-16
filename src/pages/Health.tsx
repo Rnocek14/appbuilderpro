@@ -9,6 +9,7 @@ import { Loader2, Activity, Check, X, HelpCircle } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { cn } from '../lib/utils';
 import { loadHealth, type HealthReport, type Probe } from '../lib/garvis/healthRun';
+import { supabase } from '../lib/supabase';
 import { ClockStatus } from '../components/garvis/ClockStatus';
 import { MasterSwitch } from '../components/garvis/MasterSwitch';
 import { HuntReadiness } from '../components/garvis/HuntReadiness';
@@ -19,6 +20,36 @@ const PROBE_META: Record<Probe, { icon: typeof Check; cls: string; label: string
   error: { icon: X, cls: 'text-forge-warn', label: 'unreachable' },
   unknown: { icon: HelpCircle, cls: 'text-forge-dim', label: 'unknown' },
 };
+
+/** THE ALARM CHANNEL (SW5.1): where "something broke / something needs you" actually rings.
+ *  notifyOwner falls back webhook → owner's own email (via their verified sender); with neither,
+ *  the failure mode is silence — which this card refuses to leave unnamed. */
+function AlarmChannelCard() {
+  const [state, setState] = useState<'loading' | 'webhook' | 'email' | 'none'>('loading');
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        if (!auth.user) { setState('none'); return; }
+        const [{ data: prof }, { data: os }] = await Promise.all([
+          supabase.from('profiles').select('webhook_url').eq('id', auth.user.id).maybeSingle(),
+          supabase.from('outreach_settings').select('from_email').eq('owner_id', auth.user.id).maybeSingle(),
+        ]);
+        if ((prof as { webhook_url?: string | null } | null)?.webhook_url) setState('webhook');
+        else if ((os as { from_email?: string | null } | null)?.from_email) setState('email');
+        else setState('none');
+      } catch { setState('none'); }
+    })();
+  }, []);
+  if (state === 'loading') return null;
+  return (
+    <div className={`mb-5 rounded-xl border p-4 text-sm ${state === 'none' ? 'border-forge-warn/40 bg-forge-warn/10 text-forge-warn' : 'border-forge-border text-forge-dim'}`}>
+      {state === 'webhook' && <>Alarms (breaker trips, canary failures, approval nudges) ring your webhook.</>}
+      {state === 'email' && <>No webhook set — alarms fall back to an email to your own address, sent from your verified sender.</>}
+      {state === 'none' && <>No alarm channel: set a webhook in Settings, or verify a sender identity, so breaker trips and waiting approvals can reach you. Until then, those alarms are silent.</>}
+    </div>
+  );
+}
 
 export default function Health() {
   const [report, setReport] = useState<HealthReport | null>(null);
@@ -51,6 +82,9 @@ export default function Health() {
 
         {/* The clock: deployment says functions EXIST; this says the heartbeat actually TICKS. */}
         <div className="mb-5"><ClockStatus /></div>
+
+        {/* Where the machine's alarms actually reach the operator — silence named, never assumed. */}
+        <AlarmChannelCard />
 
         {/* The master switch: which secrets are set, which cron jobs are scheduled, and the
             guarded arm — the line between "built" and "running" made visible. */}

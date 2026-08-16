@@ -304,7 +304,7 @@ export default function Queue() {
               <ul className="space-y-1.5">
                 {decided.map((a) => (
                   <li key={a.id} className="flex items-center gap-3 rounded-lg border border-forge-border px-3 py-2 text-xs">
-                    <Badge tone={a.status === 'approved' ? 'ok' : 'err'}>{a.status}</Badge>
+                    <Badge tone={a.status === 'approved' ? 'ok' : a.status === 'expired' ? 'warn' : 'err'}>{a.status}</Badge>
                     {a.world_id && worldTitles[a.world_id] && (
                       <span className="max-w-[8rem] truncate rounded border border-forge-border px-1.5 py-0.5 text-[10px] text-forge-dim" title={worldTitles[a.world_id]}>
                         {worldTitles[a.world_id]}

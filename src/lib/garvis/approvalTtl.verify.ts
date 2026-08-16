@@ -1,7 +1,7 @@
 // The decision clock's contract: per-kind TTLs, a default for the unlisted, exact stamp math,
 // and a countdown that never invents a clock or claims an expiry nothing enforces yet.
 
-import { DEFAULT_TTL_DAYS, TTL_DAYS, ttlDaysFor, expiresAtFor, expiryCountdown } from './approvalTtl';
+import { DEFAULT_TTL_DAYS, TTL_DAYS, ttlDaysFor, expiresAtFor, expiryCountdown, reminderDue } from './approvalTtl';
 
 let passed = 0; let failed = 0;
 function check(name: string, condition: boolean, detail = '') {
@@ -26,6 +26,15 @@ check('overdue says past-its-window, never "expired" (nothing expires it yet)',
 check('under 48h counts hours', expiryCountdown('2026-08-15T12:00:00.000Z', now) === 'decide within 24h');
 check('beyond 48h counts days', expiryCountdown('2026-08-21T12:00:00.000Z', now) === 'decide within 7d');
 check('garbage rows render no clock', expiryCountdown('garbage', now) === null);
+
+// --- the half-life nudge (SW5.1) ---
+check('due exactly at the midpoint, not before', (() => {
+  const c = '2026-08-14T12:00:00.000Z', e = '2026-08-14T12:10:00.000Z';
+  return !reminderDue(c, e, null, '2026-08-14T12:04:59.000Z') && reminderDue(c, e, null, '2026-08-14T12:05:00.000Z');
+})());
+check('one nudge ever — a reminded row never nags again', !reminderDue('2026-08-14T12:00:00.000Z', '2026-08-14T12:10:00.000Z', '2026-08-14T12:05:00.000Z', '2026-08-14T12:09:00.000Z'));
+check('rows without a window never nag', !reminderDue('2026-08-14T12:00:00.000Z', null, null, now));
+check('garbage timestamps never nag', !reminderDue('garbage', '2026-08-14T12:10:00.000Z', null, now));
 
 console.log(`\napprovalTtl.verify: ${passed} passed, ${failed} failed`);
 if (failed) throw new Error(`${failed} approval TTL check(s) failed`);

@@ -5,11 +5,9 @@
 // waited forever with no visible clock. Every PENDING-capable mint site now stamps a per-kind
 // TTL at enqueue, and the Queue card renders the honest countdown.
 //
-// NOTE: nothing SWEEPS overdue rows to 'expired' yet — deliberately. The sweep lands together
-// with the off-app nudge (best-in-class plan SW5.1), because expiring work while the operator
-// has no channel that would tell them is a regression for exactly the away-from-the-app case.
-// Until then the stamp is honest display: an overdue card says "past its window", and still
-// waits for the human.
+// The SWEEP is live (SW5.1, standing-worker tick): overdue pending rows flip to 'expired'
+// with a mind_event, and a half-life nudge (reminderDue below) reaches the owner off-app
+// first — webhook or their own email — so work never lapses in silence.
 
 /** Kinds not listed below wait this many days. */
 export const DEFAULT_TTL_DAYS = 7;
@@ -32,8 +30,19 @@ export function expiresAtFor(kind: string, nowIso: string): string {
   return new Date(t + ttlDaysFor(kind) * 86_400_000).toISOString();
 }
 
+/** Is this pending approval due its ONE half-life nudge (SW5.1)? True past the midpoint of its
+ *  decision window, when it has never been nudged. Rows without a stamped window never nag. */
+export function reminderDue(createdAt: string, expiresAt: string | null | undefined, remindedAt: string | null | undefined, nowIso: string): boolean {
+  if (remindedAt) return false;
+  const c = Date.parse(createdAt);
+  const e = Date.parse(expiresAt ?? '');
+  const now = Date.parse(nowIso);
+  if (Number.isNaN(c) || Number.isNaN(e) || Number.isNaN(now)) return false;
+  return now >= c + (e - c) / 2;
+}
+
 /** The Queue card's honest countdown. Null when the row predates stamping (no invented clock);
- *  "past its window" once overdue — it does NOT claim expiry, because nothing expires it yet. */
+ *  "past its window" once overdue — the sweep flips it to expired on the next worker tick. */
 export function expiryCountdown(expiresAt: string | null | undefined, nowIso: string): string | null {
   if (!expiresAt) return null;
   const t = Date.parse(expiresAt);
