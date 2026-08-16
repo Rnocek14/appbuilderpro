@@ -7771,6 +7771,14 @@ drop policy if exists "proactive_spoken owner read" on public.proactive_spoken;
 create policy "proactive_spoken owner read" on public.proactive_spoken
   for select using (owner_id = auth.uid());
 
+-- ======== supabase/migrations/app_0146_invoice_stripe.sql ========
+-- app_0146: invoices learn HOW they were paid (SW7.1 — Stripe auto-reconciliation).
+-- paid_via: 'stripe' when the webhook reconciled the payment from a Payment Link;
+-- null/'manual' when the operator confirmed it by hand (the existing markInvoicePaid path).
+-- Additive + idempotent, like every migration in this tree.
+
+alter table public.invoices add column if not exists paid_via text;
+
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop
 -- is closed" upgrade the client runtime documented as its follow-up).
