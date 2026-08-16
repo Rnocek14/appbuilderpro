@@ -317,6 +317,33 @@ export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
     }));
 }
 
+/** SHIP→MARKET (SW5.3): a site deployed in the last 3 days is the natural next move's rawest
+ *  form — the thing exists, and existence earns nothing until a channel points at it. Reads the
+ *  deploy mind_events the executor writes; one move per site, newest deploy wins. */
+export function collectFreshDeploys(events: { subject: string; occurred_at: string; payload: Record<string, unknown> | null }[], nowIso: string): NextMove[] {
+  const seen = new Set<string>();
+  const out: NextMove[] = [];
+  for (const e of events) {
+    const p = e.payload;
+    if (!p || p['kind'] !== 'site_deployed') continue;
+    const ageMs = Date.parse(nowIso) - Date.parse(e.occurred_at);
+    if (Number.isNaN(ageMs) || ageMs > 72 * 3_600_000) continue;
+    const siteKey = String(p['site_id'] ?? p['url'] ?? '');
+    if (!siteKey || seen.has(siteKey)) continue;
+    seen.add(siteKey);
+    out.push({
+      key: `shipped:${siteKey}`,
+      kind: 'natural_next',
+      title: `A site just went live — nothing points at it yet`,
+      why: `${String(p['url'] ?? 'The site')} is deployed. A live site with no channel pointed at it earns exactly nothing.`,
+      action: { label: 'Point a channel at it', route: '/garvis/webs' },
+      score: 0,
+      bornAt: e.occurred_at,
+    });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Ranking — deterministic. value(kind) + urgency(age) − dismissal penalty − staleness decay.
 // ---------------------------------------------------------------------------

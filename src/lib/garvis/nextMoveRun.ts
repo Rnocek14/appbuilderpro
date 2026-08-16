@@ -8,7 +8,7 @@
 import { supabase } from '../supabase';
 import {
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
-  collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
+  collectNaturalNext, collectFreshDeploys, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals, type AwayLine, type FloorIn, type WorldIntelIn, type TrailRowIn,
 } from './nextMove';
 import { listWorlds, isWorldUuid } from './universe';
@@ -281,6 +281,7 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     ...collectInsights(insights.map((i) => ({ id: i.id as string, title: i.title as string, body: i.body as string, score: Number(i.score), created_at: i.created_at as string }))),
     ...collectFloor(floors),
     ...collectNaturalNext(naturals),
+    ...collectFreshDeploys(events as { subject: string; occurred_at: string; payload: Record<string, unknown> | null }[], now.toISOString()),
     ...collectTrails(trailRows, now),
   ], now, mergedDismissals());
 

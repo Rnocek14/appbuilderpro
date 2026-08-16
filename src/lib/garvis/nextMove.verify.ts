@@ -5,6 +5,7 @@
 // digest composition (since-filter, dedupe, cap, unknown-type passthrough).
 
 import {
+  collectFreshDeploys,
   collectReplies, collectApprovals, collectStagedFollowups, collectInsights, collectFloor,
   collectNaturalNext, collectWorldIntel, collectDrafts, collectLeads, collectReminders, collectTrails, rankMoves, scoreMove, greetingFor, awayLines, COLD_SKY_LINE,
   type NextMove, type Dismissals,
@@ -217,6 +218,25 @@ const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOStr
   const mk3 = (kind: NextMove['kind'], key: string): NextMove => ({ key, kind, title: key, why: 'w', action: { label: 'l', route: '/' }, score: 0, bornAt: hoursAgo(48) });
   const order = rankMoves([...collectTrails([trail('w1', 9, 48)], NOW), mk3('reply_unanswered', 'rep'), mk3('insight_connection', 'ins'), mk3('intel_stale', 'int')], NOW);
   check('ranking: reply > insight > trail > stale-intel', order.map((m) => m.kind).join(',') === 'reply_unanswered,insight_connection,trail_open,intel_stale', order.map((m) => m.kind).join(','));
+}
+
+// ---- ship→market (SW5.3): a fresh deploy is the rawest natural next ----
+{
+  const NOW = '2026-08-15T12:00:00.000Z';
+  const ev = (over: Record<string, unknown> = {}) => ({
+    subject: 'Site deployed: https://x.netlify.app',
+    occurred_at: '2026-08-15T10:00:00.000Z',
+    payload: { kind: 'site_deployed', url: 'https://x.netlify.app', site_id: 'site-1' } as Record<string, unknown>,
+    ...over,
+  });
+  check('a fresh deploy becomes one move with the URL in its why', (() => {
+    const m = collectFreshDeploys([ev()], NOW);
+    return m.length === 1 && m[0].key === 'shipped:site-1' && m[0].why.includes('https://x.netlify.app');
+  })());
+  check('two deploys of one site collapse to the newest', collectFreshDeploys([ev(), ev({ occurred_at: '2026-08-15T09:00:00.000Z' })], NOW).length === 1);
+  check('a deploy older than 3 days is not news', collectFreshDeploys([ev({ occurred_at: '2026-08-11T10:00:00.000Z' })], NOW).length === 0);
+  check('unrelated events are ignored', collectFreshDeploys([ev({ payload: { kind: 'email_sent' } })], NOW).length === 0);
+  check('a payload with no site identity is skipped, never keyed empty', collectFreshDeploys([ev({ payload: { kind: 'site_deployed' } })], NOW).length === 0);
 }
 
 console.log(`\nnextMove.verify: ${passed} passed, ${failed} failed`);
