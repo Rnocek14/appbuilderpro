@@ -46,6 +46,9 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
+  // Deep review 2026-08 #10: an unexpected throw after claiming must RELEASE the claim — set
+  // once the claim lands, cleared after the durable success stamp, drained in the catch.
+  let releaseOnThrow: (() => PromiseLike<unknown>) | null = null;
   try {
     const { approval_id } = (await req.json().catch(() => ({}))) as { approval_id?: string };
     if (!approval_id) return json({ error: 'approval_id is required.' }, 400);
@@ -115,13 +118,20 @@ Deno.serve(async (req) => {
     // still unclaimed — the WHERE is evaluated atomically per row, so two concurrent calls with
     // the same approval cannot both pass; the loser matches zero rows and stops here. block()
     // and the failure path release the claim so a legitimate retry stays possible.
+    // A claim older than an hour is a dead invocation, not an in-flight send — it may be
+    // re-claimed, so a crashed executor never strands the approval forever (deep review #10;
+    // the deploy executors' pattern). Post-success replays stay blocked by the message-level
+    // sent_at check above, which runs before this claim.
+    const staleBefore = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { data: claimRows, error: claimErr } = await admin.from('approvals')
       .update({ result: { ...priorResult, send_claimed_at: new Date().toISOString() } })
-      .eq('id', approval_id).eq('status', 'approved').is('result->>send_claimed_at', null)
+      .eq('id', approval_id).eq('status', 'approved')
+      .or(`result->>send_claimed_at.is.null,result->>send_claimed_at.lt.${staleBefore}`)
       .select('id');
     if (claimErr || !claimRows?.length) return json({ error: 'This send is already in flight (or was already claimed).' }, 409);
     const releaseClaim = (extra: Record<string, unknown> = {}) =>
       admin.from('approvals').update({ result: { ...priorResult, ...extra, send_claimed_at: null } }).eq('id', approval_id);
+    releaseOnThrow = () => releaseClaim({ failed: 'executor threw unexpectedly — claim released for retry' });
 
     const ledger = (row: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'resend', action: 'send_email', ...row });
@@ -324,6 +334,7 @@ Deno.serve(async (req) => {
     await ledger({ status: 'ok', request: { to, subject: msg.subject }, response: { resend_id: resendId } });
     // status is already 'approved' (checked at entry) — only the outcome lands in result.
     await admin.from('approvals').update({ result: { ...priorResult, send_claimed_at: sentAt, resend_id: resendId, sent_at: sentAt } }).eq('id', approval_id);
+    releaseOnThrow = null; // the send is durable — a later throw must not release an executed claim
     await admin.from('mind_events').insert({
       owner_id: uid, source: 'execution', event_type: 'email_sent',
       subject: `Sent "${(msg.subject ?? '').slice(0, 120)}" to ${to}`,
@@ -338,6 +349,7 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, resend_id: resendId, sent_at: sentAt });
   } catch (e) {
+    if (releaseOnThrow) await releaseOnThrow().then(() => {}, () => {});
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });

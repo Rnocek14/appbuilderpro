@@ -7,6 +7,7 @@
 
 import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
+import { hashPayload } from './payloadHash';
 import { composeBatchRecipients, unknownTokens, batchProgress, type BatchRecipient, computeBatchStats, type BatchEventCounts } from './outreachBatch';
 
 export type BatchSegment = 'all' | 'new' | 'contacted' | 'qualified' | 'customer';
@@ -88,12 +89,20 @@ export async function createBatch(input: {
   }).select('id').single();
   if (insErr || !batch) throw new Error(`Could not create the batch: ${insErr?.message ?? 'unknown error'}`);
 
+  // THE CONTENT BINDING (deep review 2026-08 #1): hash exactly what the human is approving —
+  // subject, body, and the audience's stable identity (email+name; drain-state fields would
+  // churn the hash). The worker re-derives this every tick and cancels the batch on mismatch,
+  // so post-approval edits to content or audience can never ride an old decision.
+  const content_hash = await hashPayload({
+    subject, body_text: body,
+    recipients: recipients.map((r) => ({ email: r.email, name: r.name })),
+  });
   const approvalId = await enqueueApproval({
     worldId: input.worldId ?? null,
     kind: 'send_batch',
     title: `Send "${subject}" to ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
     preview: `${body.slice(0, 280)}${body.length > 280 ? '…' : ''}\n\nThe clock drains this under your daily cap; every recipient re-checks suppression at send time.`,
-    payload: { batch_id: batch.id, recipient_count: recipients.length },
+    payload: { batch_id: batch.id, recipient_count: recipients.length, content_hash },
   });
   await supabase.from('outreach_batches').update({ approval_id: approvalId }).eq('id', batch.id);
 

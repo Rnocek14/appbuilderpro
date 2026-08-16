@@ -293,10 +293,25 @@ Deno.serve(async (req) => {
           continue;
         }
         const { data: ap } = await admin.from('approvals')
-          .select('id, owner_id, kind, status').eq('id', b.approval_id).single();
+          .select('id, owner_id, kind, status, payload, payload_hash, result').eq('id', b.approval_id).single();
         if (!ap || ap.kind !== 'send_batch' || ap.owner_id !== b.owner_id) { await cancel('approval record invalid'); continue; }
         if (ap.status === 'rejected' || ap.status === 'expired') { await cancel(`approval ${ap.status}`); continue; }
         if (ap.status !== 'approved') continue; // still awaiting the human — not our call to make
+        // THE BINDING (deep review 2026-08 #1): the approval must cover THIS batch — its payload
+        // names the batch id, the payload hash proves the payload is the one that was approved,
+        // and the content hash proves the subject/body/audience are what the human actually saw.
+        // A finished batch CONSUMES its approval, so one decision is never a reusable send grant.
+        const apPayload = (ap.payload ?? {}) as { batch_id?: string; content_hash?: string };
+        if (apPayload.batch_id !== b.id) { await cancel('approval does not cover this batch'); continue; }
+        if (!(await payloadMatches(ap.payload, ap.payload_hash as string | null))) { await cancel('approval payload changed since it was approved'); continue; }
+        if ((ap.result as { consumed_at?: string } | null)?.consumed_at) { await cancel('approval already fully used'); continue; }
+        if (apPayload.content_hash) {
+          const liveHash = await hashPayload({
+            subject: b.subject, body_text: b.body_text,
+            recipients: (b.recipients ?? []).map((r) => ({ email: r.email, name: r.name })),
+          });
+          if (liveHash !== apPayload.content_hash) { await cancel('batch content changed after approval'); continue; }
+        }
 
         const recips: BatchRecipient[] = Array.isArray(b.recipients) ? b.recipients : [];
         // Persist each recipient's outcome IMMEDIATELY, not after the whole slice.
@@ -323,6 +338,9 @@ Deno.serve(async (req) => {
           // swept) before finishing — never mark a batch done while a send is unconfirmed.
           if (prog.sending > 0) continue;
           await admin.from('outreach_batches').update({ status: 'done', finished_at: nowIso }).eq('id', b.id);
+          // Consume the approval: this decision authorized THIS batch once, and it is spent.
+          await admin.from('approvals').update({ result: { consumed_at: nowIso, batch_id: b.id } })
+            .eq('id', b.approval_id).then(() => {}, () => {});
           await admin.from('mind_events').insert({
             owner_id: b.owner_id, event_type: 'note', source: 'execution',
             subject: `Batch "${b.subject.slice(0, 100)}" done — ${prog.sent} sent${prog.skipped > 0 ? `, ${prog.skipped} skipped` : ''}`,
@@ -392,6 +410,9 @@ Deno.serve(async (req) => {
           ...(finished ? { status: 'done', finished_at: nowIso } : {}),
         }).eq('id', b.id).in('status', ['queued', 'draining']);
         if (finished) {
+          // Consume the approval: this decision authorized THIS batch once, and it is spent.
+          await admin.from('approvals').update({ result: { consumed_at: nowIso, batch_id: b.id } })
+            .eq('id', b.approval_id).then(() => {}, () => {});
           await admin.from('mind_events').insert({
             owner_id: b.owner_id, event_type: 'note', source: 'execution',
             subject: `Batch "${b.subject.slice(0, 100)}" done — ${prog.sent} sent${prog.skipped > 0 ? `, ${prog.skipped} skipped` : ''}`,

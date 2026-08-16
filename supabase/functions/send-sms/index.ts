@@ -21,6 +21,8 @@ Deno.serve(async (req) => {
     new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, 'content-type': 'application/json' } });
   if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
 
+  // Deep review 2026-08 #10: an unexpected throw after claiming must RELEASE the claim.
+  let releaseOnThrow: (() => PromiseLike<unknown>) | null = null;
   try {
     const { approval_id } = (await req.json().catch(() => ({}))) as { approval_id?: string };
     if (!approval_id) return json({ error: 'approval_id is required.' }, 400);
@@ -78,10 +80,12 @@ Deno.serve(async (req) => {
     // Atomic double-send claim (same pattern as send-email).
     const { data: claimRows, error: claimErr } = await admin.from('approvals')
       .update({ result: { ...priorResult, send_claimed_at: new Date().toISOString() } })
-      .eq('id', approval_id).eq('status', 'approved').is('result->>send_claimed_at', null).select('id');
+      .eq('id', approval_id).eq('status', 'approved')
+      .or(`result->>send_claimed_at.is.null,result->>send_claimed_at.lt.${new Date(Date.now() - 60 * 60 * 1000).toISOString()}`).select('id');
     if (claimErr || !claimRows?.length) return json({ error: 'This send is already in flight.' }, 409);
     const releaseClaim = (extra: Record<string, unknown> = {}) =>
       admin.from('approvals').update({ result: { ...priorResult, ...extra, send_claimed_at: null } }).eq('id', approval_id);
+    releaseOnThrow = () => releaseClaim({ failed: 'executor threw unexpectedly — claim released for retry' });
     const ledger = (row: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'twilio', action: 'send_sms', ...row });
     const block = async (reason: string): Promise<Response> => {
@@ -130,10 +134,12 @@ Deno.serve(async (req) => {
     }
 
     await admin.from('outreach_messages').update({ status: 'sent', sent_at: new Date().toISOString(), provider_message_id: data.sid }).eq('id', messageId);
+    releaseOnThrow = null; // durable success — a later throw must not release an executed claim
     await ledger({ status: 'ok', request: { message_id: messageId }, result: { sid: data.sid } });
     await releaseClaim({ sent_sid: data.sid, sent_at: new Date().toISOString() });
     return json({ ok: true, sid: data.sid });
   } catch (e) {
+    if (releaseOnThrow) await releaseOnThrow().then(() => {}, () => {});
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
