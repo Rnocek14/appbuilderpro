@@ -94,13 +94,14 @@ interface RecipientDbRow {
   full_name: string; situs_address1: string; situs_city: string; situs_state: string; situs_zip: string;
   mail_address1: string | null; mail_city: string | null; mail_state: string | null; mail_zip: string | null;
   is_absentee: boolean; household_key: string; attrs: Record<string, string> | null;
+  verify_status?: 'unverified' | 'verified' | 'undeliverable';
 }
 
 export const RECIPIENT_LOAD_CAP = 2000;
 
 export async function listRecipients(territoryId: string): Promise<FarmRecipient[]> {
   const { data, error } = await supabase.from('mail_recipients')
-    .select('full_name, situs_address1, situs_city, situs_state, situs_zip, mail_address1, mail_city, mail_state, mail_zip, is_absentee, household_key, attrs')
+    .select('full_name, situs_address1, situs_city, situs_state, situs_zip, mail_address1, mail_city, mail_state, mail_zip, is_absentee, household_key, attrs, verify_status')
     .eq('territory_id', territoryId).order('created_at', { ascending: true }).limit(RECIPIENT_LOAD_CAP);
   if (error) throw new Error(error.message);
   return ((data ?? []) as RecipientDbRow[]).map((r) => ({
@@ -112,7 +113,36 @@ export async function listRecipients(territoryId: string): Promise<FarmRecipient
     isAbsentee: r.is_absentee,
     householdKey: r.household_key,
     attrs: r.attrs ?? {},
+    verifyStatus: r.verify_status ?? 'unverified',
   }));
+}
+
+export interface VerifyStats { verified: number; undeliverable: number; unverified: number }
+
+/** Exact verification counts for a territory (head-count queries — never capped by the load cap). */
+export async function verifyStats(territoryId: string): Promise<VerifyStats> {
+  const count = async (status: string) => {
+    const { count: n, error } = await supabase.from('mail_recipients')
+      .select('id', { count: 'exact', head: true })
+      .eq('territory_id', territoryId).eq('verify_status', status);
+    if (error) throw new Error(error.message);
+    return n ?? 0;
+  };
+  const [verified, undeliverable, unverified] = await Promise.all([count('verified'), count('undeliverable'), count('unverified')]);
+  return { verified, undeliverable, unverified };
+}
+
+/** Run one capped, throttled verification pass over a territory's unverified addresses.
+ *  The edge function enforces the cap and the kill switch; errors come back named. */
+export async function runVerification(territoryId: string): Promise<{ verified: number; undeliverable: number; errors: number; remaining: number }> {
+  const { data, error } = await supabase.functions.invoke('lob-verify', { body: { territory_id: territoryId } });
+  if (error) {
+    const { invokeFailure } = await import('./videoRun');
+    throw new Error((await invokeFailure(error, 'The address verifier (lob-verify)')).message);
+  }
+  const res = data as { ok?: boolean; error?: string; verified?: number; undeliverable?: number; errors?: number; remaining?: number };
+  if (!res?.ok) throw new Error(res?.error ?? 'Verification failed.');
+  return { verified: res.verified ?? 0, undeliverable: res.undeliverable ?? 0, errors: res.errors ?? 0, remaining: res.remaining ?? 0 };
 }
 
 export async function listDoNotMail(): Promise<DoNotMailRow[]> {
