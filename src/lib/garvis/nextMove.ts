@@ -323,6 +323,25 @@ export function collectNaturalNext(rows: MissionDoneIn[]): NextMove[] {
 /** ADOPTED STRATEGIES surface at the waking moment (SW9.2) — the operator said "this is the
  *  way", so the door back to it stays open. Adopt/retire is the ONLY thing that moves these;
  *  proposed and retired rows never speak here. */
+/** SW10.11: the cross-venture transfer — AT MOST ONE, and only when both worlds' rows earn it
+ *  (the pure engine already enforced sample discipline; this only dresses the move). */
+export function collectCrossVenture(
+  move: { channel: string; toWorldId: string; toWorldTitle: string; fromWorldTitle: string; text: string; evidence: string } | null,
+  nowIso: string,
+): NextMove[] {
+  if (!move) return [];
+  return [{
+    key: `transfer:${move.channel}:${move.toWorldId}`,
+    kind: 'measured_recommendation' as const,
+    title: `Transfer the play: ${move.channel} → ${move.toWorldTitle}`,
+    why: move.evidence,
+    action: { label: 'Run it there', route: `/garvis/webs/${move.toWorldId}` },
+    score: 0,
+    bornAt: nowIso,
+    expected: { text: `${move.fromWorldTitle}'s own rows proved this channel; the transfer inherits that evidence, not a hunch.`, basis: 'measured' as const },
+  }];
+}
+
 export function collectAdoptedStrategies(rows: { id: string; title: string; world_id: string | null; created_at: string }[]): NextMove[] {
   return rows.slice(0, 2).map((r) => ({
     key: `strategy:${r.id}`,

@@ -15,6 +15,9 @@ export interface ChannelResults {
     leads: number; leads7d: number;
     bySource: { source: string; visits: number; leads: number }[];
   } | null;                                                   // null = no site channel (not instrumented)
+  /** SW10.11: social joins the measured world. posts = really-posted rows; engagements = the
+   *  summed synced metrics; synced=false means metrics never arrived — the channel ran blind. */
+  social: { posts: number; engagements: number; synced: boolean } | null; // null = nothing posted
   leadsList: LeadRow[];
 }
 
@@ -30,13 +33,15 @@ export async function worldResults(worldId: string): Promise<ChannelResults> {
   const now = Date.now();
   const within7 = (iso: string) => now - new Date(iso).getTime() < 7 * DAY;
 
-  const [campsQ, batchesQ, channelQ, eventsQ, leadsQ] = await Promise.all([
+  const [campsQ, batchesQ, channelQ, eventsQ, leadsQ, postsQ, metricsQ] = await Promise.all([
     supabase.from('outreach_campaigns').select('id').eq('world_id', worldId),
     supabase.from('mail_batches').select('piece_count, status').eq('world_id', worldId).eq('status', 'mailed'),
     supabase.from('site_channels').select('id').eq('world_id', worldId).is('revoked_at', null).limit(1),
     supabase.from('site_events').select('kind, source, created_at').eq('world_id', worldId).order('created_at', { ascending: false }).limit(1000),
     supabase.from('leads').select('id, name, email, phone, message, source, status, contact_id, created_at')
       .eq('world_id', worldId).neq('status', 'spam').order('created_at', { ascending: false }).limit(50),
+    supabase.from('social_posts').select('id').eq('world_id', worldId).eq('status', 'posted').limit(1000),
+    supabase.from('social_post_metrics').select('likes, comments, shares, engagement').eq('world_id', worldId).limit(1000),
   ]);
 
   // Email — only when campaigns exist for this world.
@@ -88,7 +93,18 @@ export async function worldResults(worldId: string): Promise<ChannelResults> {
     };
   }
 
-  return { email, mail, site, leadsList: ((leadsQ.data ?? []) as LeadRow[]) };
+  // Social — only when posts really went out. Engagement is the SYNCED read (social_post_metrics,
+  // written only by social-sync from the provider); prefer the provider's own engagement total,
+  // else sum the parts. Absent metrics stay absent — synced:false says the channel ran blind.
+  let social: ChannelResults['social'] = null;
+  const postCount = ((postsQ.data ?? []) as { id: string }[]).length;
+  if (postCount > 0) {
+    const metricRows = ((metricsQ.data ?? []) as { likes: number | null; comments: number | null; shares: number | null; engagement: number | null }[]);
+    const engagements = metricRows.reduce((n, m) => n + (m.engagement ?? ((m.likes ?? 0) + (m.comments ?? 0) + (m.shares ?? 0))), 0);
+    social = { posts: postCount, engagements, synced: metricRows.length > 0 };
+  }
+
+  return { email, mail, site, social, leadsList: ((leadsQ.data ?? []) as LeadRow[]) };
 }
 
 /** Move a lead through its honest lifecycle. 'contacted' is the operator's report that they
