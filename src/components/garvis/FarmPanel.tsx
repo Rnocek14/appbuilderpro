@@ -177,6 +177,26 @@ export function FarmPanel({ worldId, onToast }: { worldId: string; onToast: Toas
     finally { setBusy(false); }
   };
 
+  // Stage an API mail drop through the approval spine (SW10.3): partition + snapshot + ONE
+  // approval carrying the cost ceiling and suppression breakdown. Refusals come back named
+  // (unfinished design, empty partition) — nothing stages on a guess.
+  const doQueueLobDrop = async () => {
+    const design = designs[designIx];
+    const terr = territories?.find((t) => t.id === sel);
+    if (!terr || !design) return;
+    try {
+      setBusy(true);
+      const { requestMailDrop } = await import('../../lib/garvis/lobRun');
+      const r = await requestMailDrop({
+        worldId, territoryId: terr.id, territoryName: terr.name,
+        spec: design.spec, absenteeOnly: absOnly,
+      });
+      const held = Object.values(r.suppressed).reduce((a, b) => a + b, 0);
+      onToast('success', `Drop staged: ${r.pieces} postcards ≈ $${r.estTotalUsd.toFixed(2)}${held ? ` (${held} held back)` : ''} — decide it in the Queue. Nothing mails without your approval.`);
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not stage the drop.'); }
+    finally { setBusy(false); }
+  };
+
   const doLogBatch = async () => {
     if (!merge || !territory) return;
     try {
@@ -337,6 +357,11 @@ export function FarmPanel({ worldId, onToast }: { worldId: string; onToast: Toas
                   <Button variant='primary' size='sm' onClick={() => void doMerge()} disabled={busy}>
                     <Printer size={13} /> Merge &amp; print
                   </Button>
+                  <button onClick={() => void doQueueLobDrop()} disabled={busy}
+                    title="Stages the addressed drop and puts ONE approval in the Queue with the cost ceiling and suppression breakdown. Nothing mails without your approval."
+                    className="rounded border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:text-forge-ink disabled:opacity-50">
+                    ✉ Queue API drop (through Approvals)
+                  </button>
                 </div>
                 {merge && (
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-forge-dim">

@@ -13,7 +13,7 @@ import { expiresAtFor } from './approvalTtl';
 export type ApprovalKind =
   | 'send_email' | 'send_sms' | 'publish_post' | 'deploy_site' | 'deploy_backend'
   | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature'
-  | 'content_week' | 'ship_repo';
+  | 'content_week' | 'ship_repo' | 'send_mail';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface Approval {
@@ -195,6 +195,26 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     const res = await executeBackendDeploy(a);
     if (!res.ok) await revertToPending(a.id);
     return res;
+  }
+
+  // send_mail (SW10.3): the DECISION is recorded and the staged drop advances staged → approved —
+  // but nothing mails: the Lob submit executor lands in SW10.4, and pretending otherwise here
+  // would be a fake send. The honest state is visible in the ledger and on the card.
+  if (a.kind === 'send_mail') {
+    const dropId = a.payload?.drop_id as string | undefined;
+    if (dropId) {
+      await supabase.from('mail_drops').update({ status: 'approved' })
+        .eq('id', dropId).eq('status', 'staged').then(() => {}, () => {});
+    }
+    const { data: sess2 } = await supabase.auth.getUser();
+    if (sess2.user?.id) {
+      await supabase.from('execution_runs').insert({
+        owner_id: sess2.user.id, approval_id: a.id, connector: 'garvis', action: 'send_mail',
+        status: 'skipped', request: { approval_id: a.id, drop_id: dropId ?? null },
+        error: 'decision recorded — the Lob submit path is not wired yet; nothing has mailed',
+      }).then(() => {}, () => {});
+    }
+    return { ok: true, result: { approved: true, executed: false, staged: true } };
   }
 
   // ship_repo (SW10.1): a REAL executor. The source snapshot was captured into deploy_bundles at
@@ -396,6 +416,12 @@ export async function rejectApproval(id: string): Promise<void> {
   if (invoiceId) {
     await supabase.from('invoices').update({ status: 'draft', sent_at: null, updated_at: new Date().toISOString() })
       .eq('id', invoiceId).eq('status', 'sent').then(() => {}, () => {});
+  }
+
+  // Rejecting a mail drop cancels the staged drop — the snapshot must not linger looking sendable.
+  if (inv.kind === 'send_mail' && inv.payload?.drop_id) {
+    await supabase.from('mail_drops').update({ status: 'canceled' })
+      .eq('id', inv.payload.drop_id as string).in('status', ['staged', 'approved']).then(() => {}, () => {});
   }
 
   // Rejecting a content week REVOKES autonomy (safe regression: streak to 0, auto-mode off) and

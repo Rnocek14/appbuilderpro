@@ -19,4 +19,5 @@ export const KIND_META: Record<ApprovalKind, { icon: typeof Mail; label: string 
   send_for_signature: { icon: FileSignature, label: 'Send for signature' },
   content_week: { icon: CalendarDays, label: 'Content week' },
   ship_repo: { icon: Github, label: 'Ship code to GitHub' },
+  send_mail: { icon: Mail, label: 'Mail drop (postcards)' },
 };

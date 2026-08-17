@@ -8032,13 +8032,16 @@ create index if not exists idx_mail_recipients_verify on public.mail_recipients(
 -- ---------- the mail kill switch (fail-closed, off by default) ----------
 alter table public.outreach_settings add column if not exists mail_enabled boolean not null default false;
 
--- ---------- mail_batches: one staged drop = one row = ONE approval ----------
-create table if not exists public.mail_batches (
+-- ---------- mail_drops: one staged Lob drop = one row = ONE approval ----------
+-- (NOT mail_batches — that table has existed since app_0035 as the operator's MANUAL mail log
+--  with its own planned/printed/mailed lifecycle. The API-submitted drop is a different thing
+--  with a different lifecycle, so it gets its own table instead of overloading that one.)
+create table if not exists public.mail_drops (
   id             uuid primary key default gen_random_uuid(),
   owner_id       uuid not null references public.profiles(id) on delete cascade,
   world_id       uuid references public.knowledge_worlds(id) on delete set null,
   territory_id   uuid references public.farm_territories(id) on delete set null,
-  mailer_id      uuid,                          -- the mailer-studio design this drop prints
+  spec           jsonb,                         -- the EXACT postcard design snapshot this drop prints
   status         text not null default 'staged'
                  check (status in ('staged', 'approved', 'submitted', 'partial', 'done', 'failed', 'canceled')),
   pieces         int not null default 0,
@@ -8050,20 +8053,20 @@ create table if not exists public.mail_batches (
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
-alter table public.mail_batches enable row level security;
-drop policy if exists "mail_batches owner all" on public.mail_batches;
-create policy "mail_batches owner all" on public.mail_batches
+alter table public.mail_drops enable row level security;
+drop policy if exists "mail_drops owner all" on public.mail_drops;
+create policy "mail_drops owner all" on public.mail_drops
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
-create index if not exists idx_mail_batches_owner on public.mail_batches(owner_id, created_at desc);
-drop trigger if exists trg_mail_batches_touch on public.mail_batches;
-create trigger trg_mail_batches_touch before update on public.mail_batches
+create index if not exists idx_mail_drops_owner on public.mail_drops(owner_id, created_at desc);
+drop trigger if exists trg_mail_drops_touch on public.mail_drops;
+create trigger trg_mail_drops_touch before update on public.mail_drops
   for each row execute function public.touch_updated_at();
 
 -- ---------- mail_pieces: the addressed snapshot, one row per household ----------
 create table if not exists public.mail_pieces (
   id             uuid primary key default gen_random_uuid(),
   owner_id       uuid not null references public.profiles(id) on delete cascade,
-  batch_id       uuid not null references public.mail_batches(id) on delete cascade,
+  drop_id        uuid not null references public.mail_drops(id) on delete cascade,
   household_key  text not null,
   full_name      text not null default '',
   address1       text not null,
@@ -8085,10 +8088,17 @@ drop policy if exists "mail_pieces owner all" on public.mail_pieces;
 create policy "mail_pieces owner all" on public.mail_pieces
   for all using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 create unique index if not exists idx_mail_pieces_qr on public.mail_pieces(qr_token);
-create index if not exists idx_mail_pieces_batch on public.mail_pieces(batch_id, status);
+create index if not exists idx_mail_pieces_drop on public.mail_pieces(drop_id, status);
 drop trigger if exists trg_mail_pieces_touch on public.mail_pieces;
 create trigger trg_mail_pieces_touch before update on public.mail_pieces
   for each row execute function public.touch_updated_at();
+
+-- ======== supabase/migrations/app_0154_send_mail_enum.sql ========
+-- app_0154_send_mail_enum.sql — the send_mail approval kind (SW10.3): a Lob postcard drop is an
+-- outward action on the spine. Enum ALTER alone in its file (the app_0064/app_0152 discipline).
+-- Additive + idempotent.
+
+alter type public.approval_kind add value if not exists 'send_mail';
 
 -- ======== supabase/migrations/20260708120000_garvis_worker.sql ========
 -- GARVIS WORKER — the unattended, server-side runner for agent_runs (the "runs while your laptop

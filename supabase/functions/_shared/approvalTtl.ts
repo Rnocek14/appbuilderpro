@@ -14,7 +14,7 @@ export const DEFAULT_TTL_DAYS = 7;
 
 export const TTL_DAYS: Record<string, number> = {
   spend: 3,                                   // money intent goes stale fastest
-  send_email: 7, send_sms: 7, publish_post: 7, send_batch: 7, content_week: 7, crm_action: 7,
+  send_email: 7, send_sms: 7, publish_post: 7, send_batch: 7, content_week: 7, crm_action: 7, send_mail: 7,
   send_for_signature: 14, deploy_site: 14, deploy_backend: 14, apply_migration: 14, ship_repo: 14,
 };
 
