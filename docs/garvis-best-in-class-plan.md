@@ -617,6 +617,10 @@ two-destination claim is not checkable without it. One primary element (the Line
 surface (retiring one existing home to a redirect) OR delete the flag. Recorded either way in
 the docs ledger. The flag cannot outlive this decision.
 
+> **DATED 2026-08-17 (SW10 execution):** 10.9 landed today, so this checkpoint is due
+> **2026-09-14**. Decide from four weeks of real use of the door chip: promote or delete —
+> the chip cannot outlive the decision.
+
 **10.11 Cross-venture transfer engine (+ social joins the measured world)** (2s). Pure
 `crossVenture.ts`: a channel measured working at honest sample in world A while world B runs
 it silent/absent → one "transfer the play" recommendation carrying BOTH worlds' evidence,
@@ -640,6 +644,11 @@ until every meaningful survivor dies, real before/after counts in the PR body.
 pre-registered criteria: reviewGate becomes a required check for protected-path PRs only;
 override label honored and auto-logged; branch-protection commands in RUNBOOK. Everything else
 stays advisory forever.
+
+> **PARKED 2026-08-17 (SW10 execution):** the ledger criteria (≥4 weeks of runs, ≥60%
+> precision — docs/reviews/ai-review-ledger.md) are unmet because no PRs have flowed yet; the
+> clock starts when the branch deploys and PRs begin. Everything else in SW10 is built; this
+> flip is the wave's only remaining line, and it flips on evidence, not on schedule.
 
 **Optional spike (cuttable, 0.5s): wake word.** Continuous-listen toggle in the dock's voice
 disclosure, on-device match, default off, persistent mic indicator, one commit to remove.
