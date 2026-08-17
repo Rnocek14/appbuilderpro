@@ -94,6 +94,7 @@
     "verify:serverresume": "tsx src/lib/serverResume.verify.ts",
     "verify:watchdog": "tsx src/lib/stalledWatchdog.verify.ts",
     "verify:emailflows": "tsx src/lib/garvis/emailFlows.verify.ts",
+    "verify:field": "tsx src/lib/garvis/field.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",

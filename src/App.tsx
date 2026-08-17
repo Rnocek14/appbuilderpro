@@ -46,6 +46,7 @@ const Money = lazy(() => import('./pages/Money'));
 const Health = lazy(() => import('./pages/Health'));
 const FleetView = lazy(() => import('./pages/FleetView'));
 const Working = lazy(() => import('./pages/Working'));
+const Field = lazy(() => import('./pages/Field'));
 const ClientReadiness = lazy(() => import('./pages/ClientReadiness'));
 const Workshops = lazy(() => import('./pages/Workshops'));
 const WorkWebs = lazy(() => import('./pages/WorkWebs'));
@@ -142,6 +143,7 @@ function AppRoutes() {
           <Route path="/garvis/studies/:id" element={<Protected><Studies /></Protected>} />
           <Route path="/garvis/fleet" element={<Protected><FleetView /></Protected>} />
           <Route path="/garvis/working" element={<Protected><Working /></Protected>} />
+          <Route path="/garvis/field" element={<Protected><Field /></Protected>} />
           <Route path="/garvis/setup" element={<Protected><ClientReadiness /></Protected>} />
           <Route path="/garvis/approvals" element={<Navigate to="/garvis/queue" replace />} />
           <Route path="/garvis/workshops" element={<Protected><Workshops /></Protected>} />
