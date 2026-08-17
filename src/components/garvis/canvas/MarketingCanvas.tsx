@@ -37,6 +37,7 @@ import { marketStats, type MlsRow } from '../../../lib/garvis/mlsStats';
 import { listingChoices, listingFill, choiceLabel } from '../../../lib/garvis/mlsToCampaign';
 import { supabase } from '../../../lib/supabase';
 import { EmailBoard } from './EmailBoard';
+import { EmailFlowsPanel } from '../EmailFlowsPanel';
 import { BrandBoard } from './BrandBoard';
 import { MerchBoard } from './MerchBoard';
 import { PostcardBoard } from './PostcardBoard';
@@ -49,7 +50,7 @@ import type { MailerBrand } from '../../../lib/garvis/mailer';
 import { cn } from '../../../lib/utils';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
-type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding' | 'merch';
+type NodeKey = 'center' | 'postcard' | 'social' | 'email' | 'people' | 'video' | 'analysis' | 'branding' | 'merch' | 'flows';
 
 // The brand ember, as a concrete value for the JS-side rendering paths (postcard designer, video
 // storyboard, image prompts) that can't read the --gv-ember CSS token. Kept in lockstep with it.
@@ -117,6 +118,7 @@ export function MarketingCanvas({ worldId, realEstate = false, initialArea = nul
     { key: 'social', emoji: '📱', label: 'Social posts', sub: 'post ideas', dim: false },
     { key: 'email', emoji: '✉️', label: 'Email', sub: 'ideas + examples', dim: false },
     { key: 'people', emoji: '📍', label: 'People nearby', sub: 'build a mail list', accent: 'violet' },
+    { key: 'flows', emoji: '🔁', label: 'Email flows', sub: 'follow-ups on autopilot' },
     { key: 'video', emoji: '🎬', label: 'Video', sub: 'a 30s reel' },
     { key: 'analysis', emoji: '📊', label: 'Market analysis', sub: realEstate ? "what's selling" : 'your numbers' },
     { key: 'branding', emoji: '🎨', label: 'Branding', sub: 'logo concepts' },
@@ -182,6 +184,11 @@ export function MarketingCanvas({ worldId, realEstate = false, initialArea = nul
       )}
       {open === 'people' && (
         <PeopleSheet realEstate={realEstate} worldId={worldId} onToast={onToast} onClose={() => setOpen(null)} />
+      )}
+      {open === 'flows' && (
+        <Sheet emoji="🔁" title="Email flows" lead="Behavioral follow-ups from your real email events — every step lands in your Queue as one approval; a reply ends that contact's drip." onClose={() => setOpen(null)}>
+          <EmailFlowsPanel worldId={worldId} onToast={onToast} />
+        </Sheet>
       )}
       {open === 'video' && (
         <VideoSheet worldId={worldId} clusterId={targetCluster}

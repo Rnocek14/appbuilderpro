@@ -73,6 +73,7 @@ import { hashPayload, payloadMatches } from '../_shared/payloadHash.ts';
 import { honestySystemPrompt, judgeSystemPrompt, judgeUserPrompt, parseJudgeVerdict } from '../_shared/copyJudge.ts';
 import { parseContentWeekConfig, weekSlots, contentWeekLine } from '../_shared/standingCore.ts';
 import { composeBatchRecipients, unknownTokens } from '../_shared/batchCore.ts';
+import { computeSegment, nextDripStep, type SentStep, type DripStep, type BehavioralRule } from '../_shared/emailFlowsCore.ts';
 // SW6.1 — the worker takes the creative load: the same shared cores the client executors use,
 // so an approved arc's social/segment/CTA/episode steps advance overnight to PENDING APPROVALS
 // (never to sends — porting moves work server-side, never approval).
@@ -297,6 +298,114 @@ Deno.serve(async (req) => {
         }).catch(() => {});
       }
     } catch { /* the watchdog must never wedge the order tick */ }
+
+    // ---- EMAIL FLOW SWEEP (SW10.7) -----------------------------------------------------------
+    // Behavioral segments + drips, clock-executed on the EXISTING rails. Membership derives from
+    // REAL outreach_events; a later drip step fires only on the REAL absence of a reply; and every
+    // due cohort becomes one outreach_batch + one send_batch approval — the drain re-checks
+    // suppression, caps, and the kill switch per recipient at send time. A staged-but-unapproved
+    // step holds everything behind it: approval-gating composes through the whole flow.
+    try {
+      const { data: activeFlows } = await admin.from('email_flows')
+        .select('id, owner_id, world_id, name, segment_rule, steps').eq('status', 'active').limit(3);
+      for (const flow of (activeFlows ?? []) as { id: string; owner_id: string; world_id: string | null; name: string; segment_rule: BehavioralRule; steps: DripStep[] }[]) {
+        const rule = flow.segment_rule;
+        const steps = flow.steps ?? [];
+        if (!steps.length) continue;
+
+        // 1) ENROLL from real events in the rule's window (once per contact, ever — re-qualifying
+        //    never restarts a finished drip; the unique index makes the upsert a no-op).
+        const sinceIso = new Date(Date.now() - Math.max(1, rule.sinceDays ?? 7) * 86_400_000).toISOString();
+        const { data: evRows } = await admin.from('outreach_events')
+          .select('contact_id, kind, created_at')
+          .eq('owner_id', flow.owner_id).gte('created_at', sinceIso).limit(5000);
+        const seg = computeSegment(evRows ?? [], rule, nowIso);
+        if (seg.contactIds.length) {
+          await admin.from('email_flow_members').upsert(
+            seg.contactIds.slice(0, 500).map((cid) => ({ owner_id: flow.owner_id, flow_id: flow.id, contact_id: cid })),
+            { onConflict: 'flow_id,contact_id', ignoreDuplicates: true },
+          ).then(() => {}, () => {});
+        }
+
+        // 2) Load live members; end drips for anyone who REALLY replied since enrolling.
+        const { data: memberRows } = await admin.from('email_flow_members')
+          .select('id, contact_id, enrolled_at, replied_at, steps_sent')
+          .eq('flow_id', flow.id).is('replied_at', null).limit(500);
+        const members = (memberRows ?? []) as { id: string; contact_id: string; enrolled_at: string; replied_at: string | null; steps_sent: SentStep[] }[];
+        if (!members.length) continue;
+        const { data: freshReplies } = await admin.from('outreach_events')
+          .select('contact_id, created_at').eq('owner_id', flow.owner_id).eq('kind', 'replied')
+          .in('contact_id', members.map((m) => m.contact_id));
+        const repliedAtBy = new Map<string, string>();
+        for (const r of (freshReplies ?? []) as { contact_id: string | null; created_at: string }[]) {
+          if (r.contact_id && !repliedAtBy.has(r.contact_id)) repliedAtBy.set(r.contact_id, r.created_at);
+        }
+
+        // 3) Backfill drained_at: a step's delay clock starts when its batch REALLY sent ('done').
+        const pendingBatchIds = [...new Set(members.flatMap((m) => (m.steps_sent ?? []).filter((s) => !s.drained_at).map((s) => s.batch_id)))];
+        const drainedBy = new Map<string, string>();
+        if (pendingBatchIds.length) {
+          const { data: batches } = await admin.from('outreach_batches')
+            .select('id, status, finished_at').in('id', pendingBatchIds);
+          for (const b of (batches ?? []) as { id: string; status: string; finished_at: string | null }[]) {
+            if (b.status === 'done') drainedBy.set(b.id, b.finished_at ?? nowIso);
+          }
+        }
+
+        // 4) Decide each member through the pure gate; group due members into per-step cohorts.
+        const cohorts = new Map<number, typeof members>();
+        for (const m of members) {
+          const replied = repliedAtBy.get(m.contact_id) && Date.parse(repliedAtBy.get(m.contact_id)!) >= Date.parse(m.enrolled_at)
+            ? repliedAtBy.get(m.contact_id)! : null;
+          let sent = (m.steps_sent ?? []) as SentStep[];
+          const backfilled = sent.map((s) => (!s.drained_at && drainedBy.has(s.batch_id) ? { ...s, drained_at: drainedBy.get(s.batch_id)! } : s));
+          if (replied || JSON.stringify(backfilled) !== JSON.stringify(sent)) {
+            await admin.from('email_flow_members')
+              .update({ ...(replied ? { replied_at: replied } : {}), steps_sent: backfilled })
+              .eq('id', m.id).then(() => {}, () => {});
+            if (replied) continue;                       // the drip ends on a REAL reply
+            sent = backfilled; m.steps_sent = backfilled;
+          }
+          const due = nextDripStep(steps, sent, replied, m.enrolled_at, nowIso);
+          if (!due) continue;
+          const list = cohorts.get(due.stepIndex) ?? [];
+          list.push(m); cohorts.set(due.stepIndex, list);
+        }
+
+        // 5) One batch + ONE approval per due cohort, on the existing spine.
+        for (const [stepIndex, cohort] of cohorts) {
+          const step = steps[stepIndex];
+          if (!step || unknownTokens(`${step.subject}\n${step.body}`).length) continue; // creation validates; never send literal tokens
+          const { data: contacts } = await admin.from('contacts')
+            .select('id, email, full_name, email_status')
+            .eq('owner_id', flow.owner_id).in('id', cohort.map((m) => m.contact_id));
+          const { recipients } = composeBatchRecipients((contacts ?? []) as { id: string; email: string | null; full_name: string | null; email_status: string | null }[]);
+          if (!recipients.length) continue;
+          const { data: batch } = await admin.from('outreach_batches').insert({
+            owner_id: flow.owner_id, world_id: flow.world_id, subject: step.subject, body_text: step.body,
+            recipients, status: 'queued',
+          }).select('id').single();
+          if (!batch) continue;
+          const batchId = (batch as { id: string }).id;
+          const apPayload = { batch_id: batchId, recipient_count: recipients.length };
+          const { data: ap } = await admin.from('approvals').insert({
+            owner_id: flow.owner_id, kind: 'send_batch',
+            title: `Flow "${flow.name}" step ${stepIndex + 1} → ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
+            preview: `${step.body.slice(0, 240)}${step.body.length > 240 ? '…' : ''}\n\nBehavioral drip step ${stepIndex + 1}/${steps.length} — recipients ${stepIndex > 0 ? 'have NOT replied to the previous step' : `matched "${rule.kind}" on real events`}. The clock drains this under your daily cap after you approve.`,
+            payload: apPayload, payload_hash: await hashPayload(apPayload), requested_by: 'garvis-flow',
+            world_id: flow.world_id, expires_at: expiresAtFor('send_batch', nowIso),
+          }).select('id').single();
+          if (!ap) { await admin.from('outreach_batches').update({ status: 'canceled', finished_at: nowIso }).eq('id', batchId); continue; }
+          await admin.from('outreach_batches').update({ approval_id: (ap as { id: string }).id }).eq('id', batchId);
+          // Stamp the cohort as staged (ordering) — drained_at arrives only when the batch sends.
+          for (const m of cohort) {
+            await admin.from('email_flow_members').update({
+              steps_sent: [...(m.steps_sent ?? []), { stepIndex, batch_id: batchId, staged_at: nowIso, drained_at: null }],
+            }).eq('id', m.id).then(() => {}, () => {});
+          }
+        }
+      }
+    } catch { /* the flow sweep must never wedge the order tick */ }
 
     // ---- ARC ADVANCE (server-side execution of mechanical steps) -----------------------------
     // A 'ready' arc advances RIGHT HERE for every step whose action is purely mechanical
