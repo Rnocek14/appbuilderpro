@@ -30,6 +30,12 @@ check('hash is 64 hex chars (SHA-256)', /^[0-9a-f]{64}$/.test(a));
 const c = await hashPayload({ message_id: 'm2', batch_id: 'b1' }); // different message
 check('a changed field → a different hash', a !== c);
 check('empty vs {} hash identically', (await hashPayload(undefined)) === (await hashPayload({})));
+// GOLDEN VECTOR (mutation looking-glass, SW10.12): hashes are PERSISTED — payload_hash rows
+// written today are re-derived at execution time, possibly by a future build. Any change to the
+// canonical form or the digest encoding (the surviving mutant was toString(16)→17) silently
+// invalidates every stored approval, so the exact output is pinned, not just its shape.
+check('the digest encoding is pinned — a persisted hash must re-derive forever',
+  (await hashPayload({ b: 2, a: 1 })) === '43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777');
 
 // --- payloadMatches: grandfathers a missing hash, catches tampering ----------------------------
 check('missing stored hash → matches (grandfathered, never blocks legacy/worker approvals)',
