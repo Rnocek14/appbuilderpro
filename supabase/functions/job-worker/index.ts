@@ -10,6 +10,11 @@ import { complete, parseJson, corsHeaders, modelForPlan } from '../_shared/ai.ts
 import { checkCredits, spendCredits, InsufficientCreditsError, getUserPlan } from '../_shared/credits.ts';
 import { contextPayload } from '../_shared/context.ts';
 import { notify } from '../_shared/notify.ts';
+import { pagesFromAppTsx } from '../_shared/generateDriver.ts';
+import { GENERATE_FILES_STREAM, filesPromptChunk } from '../_shared/prompts.ts';
+import { parseProtocol } from '../_shared/streamparse.ts';
+import { SCAFFOLD_PATHS } from '../_shared/scaffold.ts';
+import { validateProject, looksTruncated, issuesToFixRequest } from '../_shared/qa.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -49,6 +54,7 @@ type Job = {
   id: string; owner_id: string; project_id: string; title: string; brief: string;
   status: string; phase: string; milestone_index: number; fix_attempts: number;
   budget_usd: number; spent_usd: number; max_fix_attempts: number; retry_count: number;
+  kind?: string; payload?: Record<string, unknown> | null;
 };
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY);
@@ -116,8 +122,182 @@ async function insertQuestions(
   return hasBlocking;
 }
 
+// ---------------------------------------------------------------------------
+// GENERATION RESUME (SW10.5): a second job kind riding the SAME worker spine (claim/lease/
+// backoff/credit gate) and the SAME shared driver rules the browser uses. STATELESS by design:
+// every step re-derives the missing-page list from the saved App.tsx (pagesFromAppTsx — the ONE
+// manifest rule), generates a bounded slice, and self-chains until nothing is missing; then one
+// static-QA heal pass, then an HONEST finish — the server cannot run the compiler, so the
+// generation record says 'static checks only' and the deep gate upgrades the badge when the
+// operator next opens the project (that client mitigation stays).
+
+const RESUME_PAGES_PER_STEP = 2;
+
+/** Same write rules as a fresh build: never the scaffold/UI kit, and — resume being a RECOVERY —
+ *  never overwrite a file that already survived; only the target page and genuinely-new
+ *  companions land. */
+function resumeWritable(path: string, content: string, target: string, existing: Map<string, string>): boolean {
+  const reserved = new Set([...SCAFFOLD_PATHS, '/src/lib/supabaseClient.ts', '/supabase/migrations/0001_init.sql', '/.env.example']);
+  if (!path || !content.trim() || reserved.has(path) || path.startsWith('/src/components/ui/')) return false;
+  if (path !== target && existing.get(path)?.trim()) return false;
+  return true;
+}
+
+async function resumeStep(job: Job): Promise<boolean> {
+  const payload = (job.payload ?? {}) as { generation_id?: string };
+
+  // CREDIT GATE — the resume self-chains like any job; pause instead of burning unpaid spend.
+  try {
+    await checkCredits(admin, job.owner_id, 'agent');
+  } catch (e) {
+    if (e instanceof InsufficientCreditsError) {
+      await admin.from('jobs').update({ status: 'paused', pause_reason: "You're out of credits — top up to resume this build.", lease_until: null }).eq('id', job.id);
+      return false;
+    }
+    throw e;
+  }
+  if (overBudget(job)) {
+    await admin.from('jobs').update({ status: 'paused', pause_reason: `Budget cap of $${Number(job.budget_usd).toFixed(2)} reached.`, lease_until: null }).eq('id', job.id);
+    return false;
+  }
+  const m = modelForPlan(await getUserPlan(admin, job.owner_id));
+
+  const { data: fileRows } = await admin.from('project_files')
+    .select('path, content').eq('project_id', job.project_id).is('deleted_at', null).limit(1200);
+  const files = new Map(((fileRows ?? []) as { path: string; content: string }[]).map((f) => [f.path, f.content]));
+  const appTsx = files.get('/src/App.tsx') ?? '';
+  if (!appTsx.trim()) {
+    // Not transient and not recoverable — without a shell there is no manifest to resume from.
+    throw new Error('resume: the build died before the app shell existed — start it again from the same prompt (no App.tsx to derive pages from)');
+  }
+
+  // Continue the EXISTING generation record when the enqueuer named one (the stalled build the
+  // watchdog saw); otherwise open a fresh record so the workspace shows the resume's stages.
+  let genId = payload.generation_id ?? null;
+  if (!genId) {
+    const { data: gen } = await admin.from('project_generations')
+      .insert({ project_id: job.project_id, user_id: job.owner_id, prompt: 'Server resume', kind: 'create', status: 'running' })
+      .select('id').single();
+    genId = (gen as { id: string } | null)?.id ?? null;
+    if (genId) await admin.from('jobs').update({ payload: { ...payload, generation_id: genId } }).eq('id', job.id);
+  }
+  const mark = async (stage: string, status: 'running' | 'done', note?: string) => {
+    if (!genId) return;
+    const { data: g } = await admin.from('project_generations').select('stages').eq('id', genId).maybeSingle();
+    const stages = ((g?.stages ?? []) as { stage: string; status: string; started_at: string; finished_at?: string; note?: string }[]);
+    const now = new Date().toISOString();
+    const found = stages.find((s) => s.stage === stage);
+    if (found) { found.status = status; if (status === 'done') found.finished_at = now; if (note) found.note = note; }
+    else stages.push({ stage, status, started_at: now, ...(note ? { note } : {}) });
+    await admin.from('project_generations').update({ stages, current_stage: stage, status: 'running' }).eq('id', genId);
+  };
+
+  // THE ONE MANIFEST RULE — re-derived fresh every step, never checkpointed.
+  const missing = pagesFromAppTsx(appTsx).filter((p) => !files.get(p)?.trim());
+
+  if (missing.length) {
+    await mark('file_tree', 'running', `server resume — ${missing.length} page(s) missing`);
+    const bpJson = await (async () => {
+      const { data: bpRow } = await admin.from('app_blueprints')
+        .select('*').eq('project_id', job.project_id).order('version', { ascending: false }).limit(1).maybeSingle();
+      if (bpRow) {
+        const { id: _i, project_id: _p, created_at: _c, version: _v, ...saved } = bpRow as Record<string, unknown>;
+        return JSON.stringify(saved);
+      }
+      const { data: proj } = await admin.from('projects').select('name, description').eq('id', job.project_id).maybeSingle();
+      return JSON.stringify({
+        app_name: (proj as { name?: string } | null)?.name ?? 'The app',
+        description: 'Resume of an interrupted build — the existing files are the authoritative contracts.',
+      });
+    })();
+    const contracts = [...files.entries()]
+      .filter(([p]) => p.startsWith('/src/'))
+      .map(([p, c]) => `--- ${p} ---\n${c}`)
+      .join('\n\n').slice(0, 60000);
+
+    for (const pagePath of missing.slice(0, RESUME_PAGES_PER_STEP)) {
+      const res = await complete([
+        { role: 'system', content: GENERATE_FILES_STREAM },
+        { role: 'user', content: filesPromptChunk(bpJson, pagePath, contracts, false, false) },
+      ], { maxTokens: 9000, provider: m.provider, model: m.model });
+      await spend(job, res.costUsd, res, 'resume_page');
+      let changes = parseProtocol(res.text).changes;
+      if (res.stopReason === 'max_tokens' && changes.length && looksTruncated(changes[changes.length - 1].content)) {
+        changes = changes.slice(0, -1);
+      }
+      if (!changes.some((c) => c.path === pagePath && c.content.trim())) {
+        throw new Error(`resume: page ${pagePath} was not emitted — network or model trouble (retryable)`);
+      }
+      for (const ch of changes) {
+        if (!resumeWritable(ch.path, ch.content, pagePath, files)) continue;
+        await admin.from('project_files').upsert(
+          { project_id: job.project_id, path: ch.path, content: ch.content, updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+        files.set(ch.path, ch.content);
+      }
+      await mark('file_tree', 'running', pagePath.split('/').pop());
+    }
+    return true; // self-chain re-derives what is still missing
+  }
+
+  // Nothing missing — one static-QA heal pass (phase 'resume' → 'resume_finish'), then finish.
+  if (job.phase === 'resume') {
+    const allFiles = [...files.entries()].map(([path, content]) => ({ path, content }));
+    const errors = validateProject(allFiles).filter((i) => i.severity === 'error');
+    await mark('validate', 'running', errors.length ? `${errors.length} static issue(s) — healing` : 'static checks');
+    if (errors.length) {
+      const res = await complete([
+        { role: 'system', content: FIX_SYSTEM },
+        { role: 'user', content: `${issuesToFixRequest(errors)}\n\nFiles:\n${contextPayload(allFiles, errors.map((e) => e.message).join(' '))}` },
+      ], { maxTokens: 16000, provider: m.provider, model: m.model });
+      await spend(job, res.costUsd, res, 'resume_heal');
+      const patch = parseJson<{ changes: { path: string; content: string }[] }>(res.text);
+      for (const ch of patch?.changes ?? []) {
+        // The heal may touch any non-reserved file it named — but still never the scaffold/kit.
+        if (!resumeWritable(ch.path, ch.content, ch.path, new Map())) continue;
+        await admin.from('project_files').upsert(
+          { project_id: job.project_id, path: ch.path, content: ch.content, updated_by_ai: true },
+          { onConflict: 'project_id,path' },
+        );
+      }
+    }
+    await admin.from('jobs').update({ phase: 'resume_finish' }).eq('id', job.id);
+    return true;
+  }
+
+  // Finish — HONESTLY: the compiler cannot run here, so the record says static-only and the
+  // workspace's deep gate upgrades (or convicts) the badge on next open.
+  const allFiles = [...files.entries()].map(([path, content]) => ({ path, content }));
+  const remaining = validateProject(allFiles).filter((i) => i.severity === 'error').length;
+  await mark('validate', 'done', remaining
+    ? `static checks only (server) — ${remaining} issue(s) remain; open the project to run the compiler`
+    : 'static checks only (server) — open the project to run the compiler');
+  if (genId) {
+    await admin.from('project_generations').update({ status: 'succeeded', finished_at: new Date().toISOString() }).eq('id', genId);
+  }
+  await admin.from('projects').update({ status: 'ready' }).eq('id', job.project_id);
+  await admin.from('jobs').update({ status: 'completed', completed_at: new Date().toISOString(), lease_until: null }).eq('id', job.id);
+  const recovered = pagesFromAppTsx(appTsx).length;
+  await admin.from('ai_messages').insert({
+    project_id: job.project_id, role: 'assistant',
+    content: `Resumed this build server-side — all ${recovered} routed page(s) now exist. ` +
+      `Verification so far is static checks only (the server cannot run the compiler); opening the preview runs the full gate and updates the badge.` +
+      (remaining ? ` ${remaining} static issue(s) remain — use "Fix with AI" if something looks off.` : ''),
+  }).then(() => {}, () => {});
+  // THE BUILD ANNOUNCES ITSELF at COMPLETION (never at enqueue — no fake progress): the operator's
+  // waking moment says the resume happened and what state it left things in.
+  await admin.from('mind_events').insert({
+    owner_id: job.owner_id, event_type: 'note', source: 'builder',
+    subject: `Resumed your build — ${recovered} routed page(s) exist; verification pending your next open`,
+    payload: { project_id: job.project_id, job_id: job.id, static_issues: remaining },
+  }).then(() => {}, () => {});
+  return false;
+}
+
 /** Executes exactly one phase step. Returns true if the job still has work. */
 async function step(job: Job): Promise<boolean> {
+  if (job.kind === 'generation_resume') return await resumeStep(job);
   const ctx = await loadProjectContext(job);
   const { data: profile } = await admin.from('profiles').select('webhook_url').eq('id', job.owner_id).single();
   const webhook = profile?.webhook_url;
@@ -341,6 +521,15 @@ Deno.serve(async (req) => {
     }
     // Terminal: a non-transient error, or retries exhausted.
     await admin.from('jobs').update({ status: 'failed', retry_count: attempts, pause_reason: msg.slice(0, 500), lease_until: null }).eq('id', job.id);
+    // A failed RESUME reaches the waking moment honestly — what was tried, and why it failed
+    // (written at completion of the attempt, never at enqueue — no fake progress).
+    if (job.kind === 'generation_resume') {
+      await admin.from('mind_events').insert({
+        owner_id: job.owner_id, event_type: 'note', source: 'builder',
+        subject: `Tried to resume your build; it failed: ${msg.slice(0, 140)}`,
+        payload: { project_id: job.project_id, job_id: job.id },
+      }).then(() => {}, () => {});
+    }
     await admin.from('error_logs').insert({
       project_id: job.project_id, user_id: job.owner_id, source: 'job-worker', message: msg.slice(0, 1000),
     });

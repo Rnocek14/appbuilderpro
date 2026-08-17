@@ -23,6 +23,10 @@ export interface AIResult {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /** Why generation stopped, normalized: 'max_tokens' = the output was CUT — callers persisting
+   *  files must drop a truncated tail rather than half-persist it. Optional: only complete()
+   *  populates it today. */
+  stopReason?: string | null;
 }
 
 // $ per 1M tokens — adjust in one place
@@ -143,7 +147,7 @@ export async function complete(
       const inTok = (data.usage?.input_tokens ?? 0) + cacheWrite + cacheRead;
       const outTok = data.usage?.output_tokens ?? 0;
       const billedIn = (data.usage?.input_tokens ?? 0) + Math.round(cacheWrite * 1.25) + Math.round(cacheRead * 0.1);
-      return { text, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, billedIn, outTok) };
+      return { text, inputTokens: inTok, outputTokens: outTok, costUsd: estimateCost(model, billedIn, outTok), stopReason: data.stop_reason ?? null };
     }
 
     // OpenAI-compatible providers
@@ -170,6 +174,8 @@ export async function complete(
       inputTokens: inTok,
       outputTokens: outTok,
       costUsd: estimateCost(model, inTok, outTok),
+      // OpenAI's 'length' is the cut-output signal — normalized to the anthropic name.
+      stopReason: data.choices?.[0]?.finish_reason === 'length' ? 'max_tokens' : (data.choices?.[0]?.finish_reason ?? null),
     };
   });
 }
