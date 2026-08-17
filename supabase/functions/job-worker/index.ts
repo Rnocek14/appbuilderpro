@@ -230,10 +230,27 @@ async function resumeStep(job: Job): Promise<boolean> {
       }
       for (const ch of changes) {
         if (!resumeWritable(ch.path, ch.content, pagePath, files)) continue;
-        await admin.from('project_files').upsert(
-          { project_id: job.project_id, path: ch.path, content: ch.content, updated_by_ai: true },
-          { onConflict: 'project_id,path' },
-        );
+        if (ch.path === pagePath) {
+          // The target was missing at derivation — but a LIVE browser build the watchdog mistook
+          // for dead may have written it since (deep review). Re-check at the database RIGHT
+          // before the write: if it now exists non-empty, the browser won; the next step's fresh
+          // derivation drops it from `missing`.
+          const { data: cur } = await admin.from('project_files').select('content')
+            .eq('project_id', job.project_id).eq('path', ch.path).is('deleted_at', null).maybeSingle();
+          const live = (cur as { content?: string } | null)?.content;
+          if (live?.trim()) { files.set(ch.path, live); continue; }
+          await admin.from('project_files').upsert(
+            { project_id: job.project_id, path: ch.path, content: ch.content, updated_by_ai: true },
+            { onConflict: 'project_id,path' },
+          );
+        } else {
+          // Companions: INSERT-ONLY — a row that exists (even one written after our snapshot)
+          // is never overwritten by a recovery.
+          await admin.from('project_files').upsert(
+            { project_id: job.project_id, path: ch.path, content: ch.content, updated_by_ai: true },
+            { onConflict: 'project_id,path', ignoreDuplicates: true },
+          );
+        }
         files.set(ch.path, ch.content);
       }
       await mark('file_tree', 'running', pagePath.split('/').pop());
@@ -253,8 +270,11 @@ async function resumeStep(job: Job): Promise<boolean> {
       ], { maxTokens: 16000, provider: m.provider, model: m.model });
       await spend(job, res.costUsd, res, 'resume_heal');
       const patch = parseJson<{ changes: { path: string; content: string }[] }>(res.text);
+      // The heal may REPLACE files — but only files the static QA actually convicted (deep
+      // review: an unbounded heal voided the surviving-file protection for every path it named).
+      const convicted = new Set(errors.map((e) => e.path));
       for (const ch of patch?.changes ?? []) {
-        // The heal may touch any non-reserved file it named — but still never the scaffold/kit.
+        if (!convicted.has(ch.path)) continue;
         if (!resumeWritable(ch.path, ch.content, ch.path, new Map())) continue;
         await admin.from('project_files').upsert(
           { project_id: job.project_id, path: ch.path, content: ch.content, updated_by_ai: true },
@@ -489,6 +509,23 @@ Deno.serve(async (req) => {
   }
 
   const MAX_RETRIES = 4;
+
+  // KILL-LOOP CEILING (deep review): a step killed by the wall clock never throws, so the catch
+  // below never counts it — but claim_next_job (app_0158) bumps retry_count on every re-claim of
+  // an expired-lease 'running' job, and a completed step resets it to 0. A job whose claims keep
+  // dying without progress is terminal-failed HERE, before it can bill another model call.
+  if ((job.retry_count ?? 0) > MAX_RETRIES) {
+    const reason = 'the step died repeatedly without completing (wall-clock kill or crash loop) — stopped before more spend';
+    await admin.from('jobs').update({ status: 'failed', pause_reason: reason, lease_until: null }).eq('id', job.id);
+    if (job.kind === 'generation_resume') {
+      await admin.from('mind_events').insert({
+        owner_id: job.owner_id, event_type: 'note', source: 'builder',
+        subject: `Tried to resume your build; it failed: ${reason.slice(0, 140)}`,
+        payload: { project_id: job.project_id, job_id: job.id },
+      }).then(() => {}, () => {});
+    }
+    return new Response(JSON.stringify({ jobId: job.id, killed: 'retry ceiling' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
   // A transient AI/network blip should not kill a whole build (deep scan). These substrings mark
   // errors worth retrying; anything else (a real logic/validation failure) fails terminally.
   const isTransient = (m: string) => /\b(429|50[0-9]|52[0-9]|timeout|timed ?out|overloaded|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network|fetch failed|temporarily|rate.?limit(ed)?|service unavailable)\b/i.test(m);

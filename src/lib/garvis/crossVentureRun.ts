@@ -17,12 +17,13 @@ export async function loadCrossVentureMove(): Promise<TransferMove | null> {
   const worlds = (worldRows ?? []) as { id: string; title: string }[];
   if (worlds.length < 2) return null; // a single-world portfolio has no other venture to learn from
 
-  const ventures: VentureIn[] = [];
-  for (const w of worlds) {
+  // PARALLEL per world (deep review: a serial 6-world × ~9-query walk sat on the waking-moment
+  // critical path). Fail-soft per world — a broken world contributes nothing.
+  const assembled = await Promise.all(worlds.map(async (w) => {
     try {
       const { channels } = await assembleChannels(w.id);
-      ventures.push({ worldId: w.id, worldTitle: w.title, channels });
-    } catch { /* a broken world contributes nothing */ }
-  }
-  return crossVentureMove(ventures);
+      return { worldId: w.id, worldTitle: w.title, channels } as VentureIn;
+    } catch { return null; }
+  }));
+  return crossVentureMove(assembled.filter((v): v is VentureIn => v !== null));
 }

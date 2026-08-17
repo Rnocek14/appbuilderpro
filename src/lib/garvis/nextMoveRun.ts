@@ -265,15 +265,19 @@ export async function loadRankedMoves(now = new Date()): Promise<RankedMoves> {
     created_at: d.created_at as string,
   }));
 
+  // Cross-venture transfer (SW10.11): at most ONE measured move across the portfolio — started
+  // FIRST (it fans out per world, now in parallel) and awaited last, so it rides alongside the
+  // other probes instead of extending the waking moment's critical path.
+  const transferPromise = import('./crossVentureRun')
+    .then((m) => m.loadCrossVentureMove()).catch(() => null);
+
   // Adopted strategies (SW9.2): the operator's declared way forward — fail-soft like every probe.
   const adoptedStrategies = await supabase.from('strategies')
     .select('id, title, world_id, created_at').eq('status', 'adopted')
     .order('updated_at', { ascending: false }).limit(4)
     .then(({ data }) => (data ?? []) as { id: string; title: string; world_id: string | null; created_at: string }[], () => []);
 
-  // Cross-venture transfer (SW10.11): at most ONE measured move across the portfolio — fail-soft.
-  const transferMove = await import('./crossVentureRun')
-    .then((m) => m.loadCrossVentureMove()).catch(() => null);
+  const transferMove = await transferPromise;
 
   const ranked = rankMoves([
     ...collectReminders(((remindersQ.data ?? []) as { id: string; title: string; world_id: string | null; due_at: string | null; created_at: string }[]), now),

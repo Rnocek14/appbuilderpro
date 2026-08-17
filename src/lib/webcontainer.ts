@@ -122,6 +122,7 @@ const OBSERVABILITY_SHIM = `<script>
     try{ var r=String(d.route||'/');
       if((location.hash&&location.hash.indexOf('#/')===0)||r.indexOf('#')===0){ location.hash=(r.indexOf('#')===0?r:'#'+r); }
       else{ history.pushState(null,'',r); window.dispatchEvent(new PopStateEvent('popstate')); }
+      schedule(); // same-route hops fire no hashchange — snapshot unconditionally for the probe
     }catch(err){}
   });
   window.addEventListener('message',function(e){ var d=e.data; if(!d||!d.__ff_cmd||d.type!=='screenshot') return;

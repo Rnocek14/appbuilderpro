@@ -48,7 +48,15 @@ const brief = readFileSync(join(here, 'websiteBrief.ts'), 'utf8');
 {
   check('executor verifies kind, status, owner, and the payload hash (tamper → 409)',
     send.includes("approval.kind !== 'send_mail'") && send.includes("approval.status !== 'approved'")
-    && send.includes('approval.owner_id !== uid') && send.includes('payloadMatches(approval.payload'));
+    && send.includes('approval.owner_id !== user.id') && send.includes('payloadMatches(approval.payload'));
+  check('the pieces read is paginated and ordered — big drops re-derive whole, never truncated-409',
+    send.includes(".order('household_key', { ascending: true })") && send.includes('.range(from, from + 999)'));
+  check('the ceiling unit comes from the HASH-BOUND payload, never the mutable drop row',
+    send.includes('Number(payload.est_piece_usd ?? 0)') && !send.includes('drop.est_piece_usd ?? payload.est_piece_usd'));
+  check("Lob's REAL billed prices accumulate against the ceiling across the whole drain",
+    send.includes('spentUsd + unit > ceiling') && send.includes('spent_usd: Math.round(spentUsd * 100) / 100'));
+  check('the do-not-mail re-check runs INSIDE the claim (only the claim holder cancels)',
+    send.indexOf('send_claimed_at: new Date().toISOString()') < send.indexOf("'do-not-mail at send time'"));
   check('the mail kill switch is re-checked at send time, fail-closed',
     send.includes('!settings?.mail_enabled') && send.includes('kill switch'));
   check('the design hash is re-derived from the drop snapshot (tamper → 409)',
@@ -65,8 +73,9 @@ const brief = readFileSync(join(here, 'websiteBrief.ts'), 'utf8');
     send.includes('send_claimed_at') && send.includes("or(`result->>send_claimed_at.is.null,result->>send_claimed_at.lt."));
   check('per-piece CAS + Idempotency-Key make double-submission impossible',
     send.includes("'Idempotency-Key': p.id") && send.includes(".eq('id', p.id).eq('status', 'staged')"));
-  check('big drops drain in slices and re-invoke with the caller\'s own authorization',
-    send.includes('functions/v1/lob-send') && send.includes('Authorization: authHeader'));
+  check('big drops drain in slices and the chain SURVIVES: waitUntil + the worker secret (never a dying JWT)',
+    send.includes('functions/v1/lob-send') && send.includes('EdgeRuntime.waitUntil(next)')
+    && send.includes("'x-worker-secret': workerSecret ?? ''"));
   check('every outcome lands in the one ledger under the lob connector',
     send.includes("connector: 'lob', action: 'send_mail'"));
   check('replays return the durable result, never a second drop',

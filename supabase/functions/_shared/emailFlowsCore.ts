@@ -65,9 +65,12 @@ export interface DripStep {
 
 export interface SentStep {
   stepIndex: number;
-  batch_id: string;
+  /** null while the claim placeholder awaits its batch (crash-safe staging, deep review) and on
+   *  steps closed WITHOUT a send (excluded recipients — `skipped` names why). */
+  batch_id: string | null;
   staged_at: string;
   drained_at?: string | null;        // stamped when the batch actually sent — the next step's clock
+  skipped?: string;                  // set when the step closed without a send (excluded at compose)
 }
 
 /**

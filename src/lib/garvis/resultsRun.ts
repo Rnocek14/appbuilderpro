@@ -99,9 +99,13 @@ export async function worldResults(worldId: string): Promise<ChannelResults> {
   let social: ChannelResults['social'] = null;
   const postCount = ((postsQ.data ?? []) as { id: string }[]).length;
   if (postCount > 0) {
+    // A row whose every metric is NULL is an UNMEASURED row (the sync's own contract: absent
+    // stays NULL, never fake 0) — it must not become a measured "0 engagements" nor count as
+    // instrumentation (deep review: all-NULL rows fabricated a measured-silent transfer target).
     const metricRows = ((metricsQ.data ?? []) as { likes: number | null; comments: number | null; shares: number | null; engagement: number | null }[]);
-    const engagements = metricRows.reduce((n, m) => n + (m.engagement ?? ((m.likes ?? 0) + (m.comments ?? 0) + (m.shares ?? 0))), 0);
-    social = { posts: postCount, engagements, synced: metricRows.length > 0 };
+    const measured = metricRows.filter((m) => m.engagement != null || m.likes != null || m.comments != null || m.shares != null);
+    const engagements = measured.reduce((n, m) => n + (m.engagement ?? ((m.likes ?? 0) + (m.comments ?? 0) + (m.shares ?? 0))), 0);
+    social = { posts: postCount, engagements, synced: measured.length > 0 };
   }
 
   return { email, mail, site, social, leadsList: ((leadsQ.data ?? []) as LeadRow[]) };

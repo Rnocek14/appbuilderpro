@@ -90,7 +90,19 @@ const migration = readFileSync(join(root, 'supabase/migrations/app_0157_email_fl
 {
   check('the sweep exists on the standing tick and reads REAL events', sweep.includes("from('outreach_events')"));
   check('the sweep decides through the PURE gate, not a private copy',
-    sweep.includes('computeSegment(evRows') && sweep.includes('nextDripStep(steps, sent, replied'));
+    sweep.includes('computeSegment(evRows') && sweep.includes('nextDripStep(steps, m.steps_sent ?? [], replied'));
+  check('members are CLAIMED (CAS placeholder) BEFORE any batch exists — no crash/overlap double-stage',
+    sweep.indexOf(".filter('steps_sent', 'eq', JSON.stringify(m.steps_sent ?? []))") < sweep.indexOf("from('outreach_batches').insert"));
+  check('flow batches carry the SAME content-hash binding as client batches',
+    sweep.includes('content_hash: contentHash'));
+  check('the reply read is chunked, ordered latest-first, and a failure skips the flow (never a blind gate)',
+    sweep.includes('replyReadFailed') && sweep.includes(".order('created_at', { ascending: false })"));
+  check('a reply prunes the contact from still-QUEUED flow batches (the staging→approval window)',
+    sweep.includes("state: 'skipped', reason: 'replied before send'"));
+  check('excluded recipients close their step WITHOUT a send — never a false advance, never a spin',
+    sweep.includes('excluded at compose'));
+  check('a truncated event window skips enrollment rather than enrolling an arbitrary subset',
+    sweep.includes('(evRows ?? []).length < 5000'));
   check('every due cohort becomes ONE batch + ONE send_batch approval',
     sweep.includes("kind: 'send_batch'") && sweep.includes('payload_hash: await hashPayload(apPayload)'));
   check('the drain re-check line is on the card', sweep.includes('drains this under your daily cap after you approve'));

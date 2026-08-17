@@ -26,7 +26,8 @@ export interface RiskFacts {
 export interface RiskVerdict { score: number; reasons: string[] }
 
 const SEND_KINDS = new Set(['send_email', 'send_sms', 'send_batch', 'publish_post', 'send_for_signature']);
-const HEAVY_KINDS = new Set(['spend', 'deploy_backend', 'apply_migration']);
+// send_mail: real dollars AND physical mail to households; ship_repo: pushes code infrastructure.
+const HEAVY_KINDS = new Set(['spend', 'deploy_backend', 'apply_migration', 'send_mail', 'ship_repo']);
 
 export function riskFor(f: RiskFacts): RiskVerdict {
   let score = 0;

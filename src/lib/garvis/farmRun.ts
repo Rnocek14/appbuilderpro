@@ -160,7 +160,7 @@ export async function loadDoNotMailKeys(): Promise<Set<string>> {
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase.from('do_not_mail')
-      .select('household_key').range(from, from + PAGE - 1);
+      .select('household_key').order('household_key', { ascending: true }).range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     for (const r of (data ?? []) as { household_key: string }[]) keys.add(r.household_key);
     if (!data || data.length < PAGE) break;

@@ -65,7 +65,8 @@ Deno.serve(async (req) => {
     const repo = payload.repo;
     const bundleId = payload.bundle_id;
     if (!projectId || !bundleId) return json({ error: 'This approval has no captured source snapshot — export again from the workspace.' }, 400);
-    if (!repo || !/^[A-Za-z0-9._-]{1,100}$/.test(repo)) return json({ error: 'The approved repo name is invalid.' }, 400);
+    // (?!\.{1,2}$): '.'/'..' survive the charset but URL-normalize into DIFFERENT API routes.
+    if (!repo || !/^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/.test(repo)) return json({ error: 'The approved repo name is invalid.' }, 400);
 
     const { data: project } = await admin.from('projects').select('id, owner_id').eq('id', projectId).single();
     if (!project || project.owner_id !== user.id) return json({ error: 'Project not found' }, 404);
@@ -80,9 +81,17 @@ Deno.serve(async (req) => {
       return json({ error: 'The approved snapshot contains an invalid file entry.' }, 400);
     }
     // Secrets never ride to GitHub (scan B14). The client filters these before capture; re-refuse
-    // here so a hand-built bundle cannot smuggle them either.
-    if (files.some((f) => /(^|\/)\.env$|(^|\/)\.fableforge\//.test(f.path))) {
-      return json({ error: 'The snapshot contains secret-bearing paths (.env / .fableforge) — these never ship to GitHub.' }, 400);
+    // here so a hand-built bundle cannot smuggle them either. The rule matches the platform's own
+    // isEnvSecretFile: any .env / .env.* basename EXCEPT the secretless templates (deep review:
+    // the old `\.env$` regex waved /.env.local and /.env.production straight through).
+    const isSecretPath = (p: string) => {
+      if (/(^|\/)\.fableforge\//.test(p)) return true;
+      const base = p.split('/').pop() ?? '';
+      if (base !== '.env' && !base.startsWith('.env.')) return false;
+      return !/^\.env\.(example|sample|template)$/.test(base);
+    };
+    if (files.some((f) => isSecretPath(f.path))) {
+      return json({ error: 'The snapshot contains secret-bearing paths (.env / .env.* / .fableforge) — these never ship to GitHub.' }, 400);
     }
     // TAMPER-EVIDENCE: the payload pinned a hash of the exact files reviewed; the bundle row must
     // still hash to it at execution time.
@@ -178,10 +187,14 @@ Deno.serve(async (req) => {
 
     const url = (repoInfo.body as { html_url: string }).html_url;
     await ledger('ok', null, { url, branch });
-    // Durable result (drops the claim key by construction) + one-shot bundle consumption.
-    await admin.from('approvals').update({
-      result: { executed: true, url, owner, repo, branch, files: files.length, shipped_at: new Date().toISOString() },
-    }).eq('id', approval_id);
+    // Durable result — KEEPS the claim key and is GUARDED on it (the deploy-site pattern; deep
+    // review: a stamp that dropped ship_claimed_at re-opened the claim for a stalled concurrent
+    // invocation to double-push). A failed stamp is a failure: the bundle is NOT consumed, so the
+    // durable record can never be lost while retries still work.
+    const { error: stampErr } = await admin.from('approvals').update({
+      result: { executed: true, url, owner, repo, branch, files: files.length, shipped_at: new Date().toISOString(), ship_claimed_at: claimAt },
+    }).eq('id', approval_id).eq('result->>ship_claimed_at', claimAt);
+    if (stampErr) return await fail(`The push landed at ${url} but the record could not be stamped (${stampErr.message}) — retry to reconcile.`, 500);
     releaseExecutionClaim = null;
     await admin.from('deploy_bundles').delete().eq('id', bundleId).then(() => {}, () => {});
 

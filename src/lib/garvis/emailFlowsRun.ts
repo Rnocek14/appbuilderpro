@@ -69,6 +69,7 @@ export async function flowStats(flowId: string): Promise<FlowStats> {
   return {
     members: rows.length,
     replied: rows.filter((r) => r.replied_at).length,
-    staged: rows.reduce((n, r) => n + (r.steps_sent?.length ?? 0), 0),
+    // Only entries with a REAL batch count as staged — placeholders and excluded-skips are not sends.
+    staged: rows.reduce((n, r) => n + (r.steps_sent ?? []).filter((s) => s.batch_id).length, 0),
   };
 }

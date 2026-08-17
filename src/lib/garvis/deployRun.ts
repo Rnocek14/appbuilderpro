@@ -83,10 +83,17 @@ export async function requestRepoShip(input: {
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
   if (!input.files.length) throw new Error('No files to export.');
-  if (!/^[A-Za-z0-9._-]{1,100}$/.test(input.repo)) throw new Error('That repo name is invalid.');
-  // Secrets never ride to GitHub — refuse at capture, not just server-side.
-  if (input.files.some((f) => /(^|\/)\.env$|(^|\/)\.fableforge\//.test(f.path))) {
-    throw new Error('The snapshot contains secret-bearing paths (.env / .fableforge) — these never ship to GitHub.');
+  if (!/^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/.test(input.repo)) throw new Error('That repo name is invalid.');
+  // Secrets never ride to GitHub — refuse at capture, not just server-side. The rule matches the
+  // platform's isEnvSecretFile: .env and every .env.* except the secretless templates.
+  const secretPath = (p: string) => {
+    if (/(^|\/)\.fableforge\//.test(p)) return true;
+    const base = p.split('/').pop() ?? '';
+    if (base !== '.env' && !base.startsWith('.env.')) return false;
+    return !/^\.env\.(example|sample|template)$/.test(base);
+  };
+  if (input.files.some((f) => secretPath(f.path))) {
+    throw new Error('The snapshot contains secret-bearing paths (.env / .env.* / .fableforge) — these never ship to GitHub.');
   }
   const filesHash = await hashPayload(input.files);
 

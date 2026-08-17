@@ -1091,11 +1091,13 @@ export default function ProjectWorkspace() {
   // github-export executor re-verifies everything server-side (token resolved there too).
   const exportGitHub = async () => {
     if (!id) return;
-    const repo = ((project?.name ?? 'fableforge-app').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)) || 'fableforge-app';
+    const rawRepo = ((project?.name ?? 'fableforge-app').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80));
+    const repo = (!rawRepo || rawRepo === '.' || rawRepo === '..') ? 'fableforge-app' : rawRepo;
+    const isEnvName = (p: string) => { const b = p.split('/').pop() ?? ''; return (b === '.env' || b.startsWith('.env.')) && !/^\.env\.(example|sample|template)$/.test(b); };
     const payload = files
-      // /.env holds the provisioned anon key (and whatever secrets land there later) — it must
-      // never ride along into a GitHub repo (scan B14). /.fableforge/ is internal state.
-      .filter((f) => !f.path.includes('/.fableforge/') && f.path !== '/.env' && !f.path.endsWith('/.env') && !!f.content.trim())
+      // .env AND every .env.* variant hold real secrets — they must never ride along into a
+      // GitHub repo (scan B14 + deep review). /.fableforge/ is internal state.
+      .filter((f) => !f.path.includes('/.fableforge/') && !isEnvName(f.path) && !!f.content.trim())
       .map((f) => ({ path: f.path.replace(/^\/+/, ''), content: f.content }));
     if (!payload.length) { toast('error', 'Nothing to export yet.'); return; }
     setDeploying(true);

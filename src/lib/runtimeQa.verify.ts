@@ -154,7 +154,10 @@ const aiClient = read('src/lib/aiClient.ts');
     runtime.includes('qaHtml: string | null') && !runtime.includes('s.qaHtml'));
   check('the probe clears the previous route\'s capture before each hop (no stale conviction)',
     probeRun.includes('error: null, qaHtml: null'));
-  check('the probe hands per-route HTML to the pipeline', probeRun.includes('htmlByRoute[route] = s.qaHtml'));
+  check('the probe accepts a capture ONLY when the shim stamped it with the requested route',
+    probeRun.includes('reported === route ? s.qaHtml : null'));
+  check('both shims snapshot unconditionally after a navigate (same-route hops fire no events)',
+    /navigate[\s\S]{0,900}scheduleSnapshot\(\);/.test(blobShell) && /navigate[\s\S]{0,900}schedule\(\); \/\/ same-route/.test(wcShim));
   check('the build pipeline scans, repairs on errors, and re-scans after repair',
     aiClient.includes('runtimeQa(probe.htmlByRoute)') && aiClient.includes('qa = runtimeQa(again.htmlByRoute)')
     && aiClient.includes('runtimeQaFixRequest'));

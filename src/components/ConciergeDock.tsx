@@ -551,6 +551,7 @@ export function ConciergeDock() {
 
   const askBrain = async (sentence: string, worlds: ConciergeWorld[]) => {
     setBusy(true);
+    setPosture(null); // a fresh utterance clears the old verb's tint until the brain answers
     setSuggestions([]);
     setCompound(false);
     setNote('Thinking…');
@@ -971,7 +972,7 @@ export function ConciergeDock() {
         posture ? postureTint[posture] : undefined,
         dropping && 'border-forge-ember/70 ring-2 ring-forge-ember/40')}>
       <div className="flex items-center gap-2">
-        <button onPointerDown={startDrag} onDoubleClick={redock}
+        <button onPointerDown={lineMode ? undefined : startDrag} onDoubleClick={lineMode ? undefined : redock}
           aria-label="Move the concierge — drag it anywhere; double-click to send it back to the corner"
           title="Drag to move · double-click to re-dock"
           className="-ml-1 cursor-grab touch-none rounded p-0.5 text-forge-dim hover:text-forge-ink active:cursor-grabbing">

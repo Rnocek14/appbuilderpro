@@ -96,8 +96,19 @@ const nextMoveRun = readFileSync(join(here, 'nextMoveRun.ts'), 'utf8');
     adaptiveRun.includes("name: 'social'") && adaptiveRun.includes("outLabel: 'posts'"));
   check('social is instrumented ONLY when metrics really synced',
     adaptiveRun.includes('instrumented: results.social?.synced ?? false'));
-  check('social results count posted rows and SYNCED engagement, never a fake zero',
-    resultsRun.includes("eq('status', 'posted')") && resultsRun.includes('synced: metricRows.length > 0'));
+  check('social results count posted rows and MEASURED engagement — an all-NULL metric row is unmeasured, never a fake zero',
+    resultsRun.includes("eq('status', 'posted')") && resultsRun.includes('synced: measured.length > 0')
+    && resultsRun.includes('m.engagement != null || m.likes != null'));
+  check('derived remainder channels are never transferable plays',
+    (() => {
+      const move = crossVentureMove([
+        venture('a', 'A', [{ ...ch('website (organic/direct)', 40, 5), outLabel: 'visits' }]),
+        venture('b', 'B', []),
+      ]);
+      return move === null;
+    })());
+  check('the per-world assembly runs in PARALLEL off the waking-moment critical path',
+    cvRun.includes('Promise.all(worlds.map') && nextMoveRun.includes('const transferMove = await transferPromise'));
   check('the transfer engine reads the SAME channel substrate as the adaptive read',
     cvRun.includes('assembleChannels(w.id)') && adaptiveRun.includes('export async function assembleChannels'));
   check('a single-world portfolio short-circuits before any assembly',

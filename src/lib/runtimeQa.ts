@@ -101,11 +101,26 @@ export function runtimeQa(htmlByRoute: Record<string, string | null>): RuntimeQa
   for (const [route, html] of Object.entries(htmlByRoute)) {
     if (!html || !html.trim()) { unscanned.push(route); continue; }
     scanned++;
+    // A capture that hit the shim's cap was CUT mid-document: cross-reference checks (label
+    // pairing, id targets) can false-positive on the missing half, and error-severity false
+    // positives would feed the repair loop. Truncated routes report ADVISORIES only, and say so.
+    const truncated = html.length >= QA_HTML_CAP;
     for (const row of scanOne(html)) {
+      const severity = truncated ? 'advisory' as const : row.severity;
       const key = `${row.code}\n${row.message}`;
       const prior = byKey.get(key);
       if (prior) { if (!prior.routes.includes(route)) prior.routes.push(route); }
-      else byKey.set(key, { ...row, routes: [route] });
+      else byKey.set(key, { ...row, severity, routes: [route] });
+    }
+    if (truncated) {
+      const key = 'qa.capture_truncated\n';
+      const prior = byKey.get(key);
+      if (prior) { if (!prior.routes.includes(route)) prior.routes.push(route); }
+      else byKey.set(key, {
+        code: 'qa.capture_truncated', severity: 'advisory',
+        message: `the capture hit the ${Math.round(QA_HTML_CAP / 1000)}k cap — content past the cut is unscanned, and this route's findings are advisories only`,
+        routes: [route],
+      });
     }
   }
   const all = [...byKey.values()];

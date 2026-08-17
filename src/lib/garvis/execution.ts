@@ -210,9 +210,12 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     }
     const { data, error } = await supabase.functions.invoke('lob-send', { body: { approval_id: a.id } });
     if (error) {
-      await revertToPending(a.id);
+      // A 409 means the drain is ALREADY running (healthy concurrency) — reverting to pending
+      // would decapitate a live drain (deep review). Only genuine failures revert.
+      const status = (error as { context?: { status?: number } }).context?.status;
+      if (status !== 409) await revertToPending(a.id);
       const { invokeFailure } = await import('./videoRun');
-      return { ok: false, error: (await invokeFailure(error, 'The mail executor (lob-send)')).message };
+      return { ok: status === 409, error: (await invokeFailure(error, 'The mail executor (lob-send)')).message };
     }
     const res = data as { ok?: boolean; error?: string; submitted?: number; draining?: boolean };
     if (!res?.ok && !res?.draining) await revertToPending(a.id);
@@ -225,7 +228,13 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
   // ledger row itself. We send only the approval id.
   if (a.kind === 'ship_repo') {
     const { data, error } = await supabase.functions.invoke('github-export', { body: { approval_id: a.id } });
-    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    if (error) {
+      await revertToPending(a.id);
+      // Surface the executor's own named refusal (snapshot changed, in flight…), never the
+      // generic non-2xx line (the honesty-spine rule the sibling branches already follow).
+      const { invokeFailure } = await import('./videoRun');
+      return { ok: false, error: (await invokeFailure(error, 'The repo exporter (github-export)')).message };
+    }
     const res = data as { ok?: boolean; error?: string; url?: string };
     if (!res?.ok) await revertToPending(a.id);
     return { ok: !!res?.ok, error: res?.error, result: res };

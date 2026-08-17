@@ -67,8 +67,12 @@ const command = readFileSync(join(root, 'src/pages/Command.tsx'), 'utf8');
 {
   check('the loader composes through the pure core, not a private copy',
     run.includes('composeField(worlds, working, approvalsByWorld, newsByWorld)'));
-  check('the whisper includes decisions with NO world attribution (the queue\'s whole truth)',
-    run.includes('totalPending = rows.length'));
+  check('the whisper carries the queue\'s TRUE total via count:exact, never a row-cap masquerading as it',
+    run.includes("{ count: 'exact' }") && run.includes('totalPending = count ?? rows.length'));
+  check('only renderable worlds become orbs (a cluster-less world dead-ends on tap)',
+    run.includes('renderable.has(w.id)'));
+  check('working means actively RUNNING, not merely enabled',
+    run.includes(".eq('status', 'running')") && !run.includes("from('standing_orders')"));
   check('signals are independent and fail-soft (a broken source never fakes a state)',
     (run.match(/catch \{ \/\* no /g) ?? []).length >= 3);
   check('the route exists', app.includes('path="/garvis/field"'));

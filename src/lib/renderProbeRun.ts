@@ -49,7 +49,12 @@ export async function probeRoutes(paths: string[]): Promise<ProbeOutcome> {
     await sleep(ROUTE_SETTLE_MS);
     const s = getPreviewSnapshot();
     results.push(judgeSnapshot(route, { error: s.error, dom: s.dom }));
-    htmlByRoute[route] = s.qaHtml;
+    // Accept the capture ONLY when the shim says it serialized THIS route (deep review: a
+    // late-debounced snapshot from the previous route — or a slow route's pre-navigation DOM —
+    // must be an honest "not captured", never scanned under the wrong route's name).
+    // Normalize both runtimes' spellings: blob-shell hash '#/x', WebContainer '/#/x', plain '/x'.
+    const reported = (s.route ?? '').replace(/^\/?#/, '') || null;
+    htmlByRoute[route] = reported === route ? s.qaHtml : null;
   }
 
   if (original) { updatePreviewSnapshot({ error: null }); navigatePreview(original); }

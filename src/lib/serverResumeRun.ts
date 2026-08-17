@@ -15,10 +15,12 @@ export async function enqueueServerResume(input: {
   const uid = sess.user?.id;
   if (!uid) throw new Error('Not signed in.');
 
-  // One live resume per project — a second enqueue while one is queued/running would double-generate.
+  // One live resume per project — a second enqueue while one is live would double-generate.
+  // Paused counts as live (a credit pause is a wait, not an end). The app_0158 partial unique
+  // index is the real guarantee; this check just makes the common path quiet.
   const { data: existing } = await supabase.from('jobs')
     .select('id').eq('project_id', input.projectId).eq('kind', 'generation_resume')
-    .in('status', ['queued', 'running']).limit(1);
+    .in('status', ['queued', 'running', 'paused', 'waiting_approval']).limit(1);
   if (existing?.length) return (existing[0] as { id: string }).id;
 
   const { data, error } = await supabase.from('jobs').insert({
@@ -28,7 +30,17 @@ export async function enqueueServerResume(input: {
     brief: 'Server-side resume: derive missing pages from the saved App.tsx and recover them.',
     payload: input.generationId ? { generation_id: input.generationId } : {},
   }).select('id').single();
-  if (error || !data) throw new Error(`Could not queue the resume: ${error?.message ?? 'unknown error'}`);
+  if (error) {
+    // The unique index turned a concurrent enqueue into a conflict — return the winner.
+    if (/duplicate key|unique/i.test(error.message)) {
+      const { data: winner } = await supabase.from('jobs')
+        .select('id').eq('project_id', input.projectId).eq('kind', 'generation_resume')
+        .in('status', ['queued', 'running', 'paused', 'waiting_approval']).limit(1);
+      if (winner?.length) return (winner[0] as { id: string }).id;
+    }
+    throw new Error(`Could not queue the resume: ${error.message}`);
+  }
+  if (!data) throw new Error('Could not queue the resume: no row returned.');
 
   // Nudge the worker now; the cron tick is the guarantee.
   void supabase.functions.invoke('job-worker', { body: {} }).catch(() => {});

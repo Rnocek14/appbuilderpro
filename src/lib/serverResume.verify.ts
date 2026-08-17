@@ -61,8 +61,15 @@ check('the mind event is written at completion, never at enqueue (no fake progre
   !run.includes('mind_events'));
 
 // --- the enqueue seam ---
-check('one live resume per project — enqueue is idempotent',
-  run.includes("in('status', ['queued', 'running'])"));
+check('one live resume per project — paused counts as live, and the unique index backstops the race',
+  run.includes("in('status', ['queued', 'running', 'paused', 'waiting_approval'])")
+  && run.includes('duplicate key|unique'));
+check('the resume never clobbers a live browser build: target re-checked at the DB, companions insert-only',
+  worker.includes('Re-check at the database RIGHT') && worker.includes('ignoreDuplicates: true'));
+check('the heal only replaces files the static QA actually convicted',
+  worker.includes('convicted.has(ch.path)'));
+check('claim-die loops hit a ceiling before more spend (the wall-clock kill is counted)',
+  worker.includes('KILL-LOOP CEILING') && worker.includes("killed: 'retry ceiling'"));
 check('the worker is nudged but the cron tick is the guarantee',
   run.includes("functions.invoke('job-worker'") && run.includes('fire-and-forget'));
 check('the migration constrains kind and defaults autopilot',

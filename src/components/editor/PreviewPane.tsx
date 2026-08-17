@@ -632,6 +632,9 @@ window.addEventListener('message',function(e){
       var r=String(d.route||'/');
       if((location.hash&&location.hash.indexOf('#/')===0)||r.indexOf('#')===0){ location.hash=(r.indexOf('#')===0?r:'#'+r); }
       else{ history.pushState(null,'',r); window.dispatchEvent(new PopStateEvent('popstate')); }
+      // Same-route hops fire no hashchange/mutation — snapshot unconditionally so the probe
+      // always gets a capture stamped with the route it asked for (deep review).
+      scheduleSnapshot();
     }catch(err){}
   }
 });

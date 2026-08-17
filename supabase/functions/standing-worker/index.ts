@@ -273,9 +273,11 @@ Deno.serve(async (req) => {
           continue;
         }
         // One live resume per project — idempotent against the enqueue seam and prior ticks.
+        // 'paused' and 'waiting_approval' count as LIVE (deep review): a credit-paused resume
+        // must not burn a second attempt and later flip the build "failed" over an empty balance.
         const { data: existingJob } = await admin.from('jobs')
           .select('id').eq('project_id', g.project_id).eq('kind', 'generation_resume')
-          .in('status', ['queued', 'running']).limit(1);
+          .in('status', ['queued', 'running', 'paused', 'waiting_approval']).limit(1);
         if (existingJob?.length) continue;
         // Bump the attempt BEFORE inserting the job (CAS on the exact prior count) — a crash
         // between the two costs one unused attempt, never an uncounted spend loop.
@@ -299,95 +301,183 @@ Deno.serve(async (req) => {
       }
     } catch { /* the watchdog must never wedge the order tick */ }
 
-    // ---- EMAIL FLOW SWEEP (SW10.7) -----------------------------------------------------------
+    // ---- EMAIL FLOW SWEEP (SW10.7, hardened by the SW10 deep review) -------------------------
     // Behavioral segments + drips, clock-executed on the EXISTING rails. Membership derives from
     // REAL outreach_events; a later drip step fires only on the REAL absence of a reply; and every
-    // due cohort becomes one outreach_batch + one send_batch approval — the drain re-checks
-    // suppression, caps, and the kill switch per recipient at send time. A staged-but-unapproved
-    // step holds everything behind it: approval-gating composes through the whole flow.
+    // due cohort becomes one outreach_batch + one send_batch approval — content-hash bound, like
+    // every client-minted batch — that the drain executes with suppression/caps/kill-switch
+    // re-checked per recipient. Deep-review hardening: members are CLAIMED (CAS placeholder) BEFORE
+    // a batch exists, so a crash or an overlapping tick can never double-stage a cohort; the reply
+    // query is chunked/ordered/bounded; excluded recipients never falsely advance; canceled and
+    // stale stagings self-heal; flows rotate (touch → oldest-first) so no tenant starves.
     try {
+      const chunk = <T,>(a: T[], n: number): T[][] => { const out: T[][] = []; for (let i = 0; i < a.length; i += n) out.push(a.slice(i, i + n)); return out; };
       const { data: activeFlows } = await admin.from('email_flows')
-        .select('id, owner_id, world_id, name, segment_rule, steps').eq('status', 'active').limit(3);
+        .select('id, owner_id, world_id, name, segment_rule, steps')
+        .eq('status', 'active').order('updated_at', { ascending: true }).limit(3);
       for (const flow of (activeFlows ?? []) as { id: string; owner_id: string; world_id: string | null; name: string; segment_rule: BehavioralRule; steps: DripStep[] }[]) {
         const rule = flow.segment_rule;
         const steps = flow.steps ?? [];
         if (!steps.length) continue;
+        // Rotate: touch the flow so oldest-updated-first round-robins past the 3-per-tick cap.
+        await admin.from('email_flows').update({ status: 'active' }).eq('id', flow.id).eq('status', 'active').then(() => {}, () => {});
 
-        // 1) ENROLL from real events in the rule's window (once per contact, ever — re-qualifying
-        //    never restarts a finished drip; the unique index makes the upsert a no-op).
+        // 1) ENROLL from real events in the rule's window (once per contact, ever). Ordered newest
+        //    first; a FULL read means the window was truncated — skip enrollment rather than
+        //    enroll from an arbitrary subset (enrollment is permanent, so one bad tick would be too).
         const sinceIso = new Date(Date.now() - Math.max(1, rule.sinceDays ?? 7) * 86_400_000).toISOString();
-        const { data: evRows } = await admin.from('outreach_events')
+        const { data: evRows, error: evErr } = await admin.from('outreach_events')
           .select('contact_id, kind, created_at')
-          .eq('owner_id', flow.owner_id).gte('created_at', sinceIso).limit(5000);
-        const seg = computeSegment(evRows ?? [], rule, nowIso);
-        if (seg.contactIds.length) {
-          await admin.from('email_flow_members').upsert(
-            seg.contactIds.slice(0, 500).map((cid) => ({ owner_id: flow.owner_id, flow_id: flow.id, contact_id: cid })),
-            { onConflict: 'flow_id,contact_id', ignoreDuplicates: true },
-          ).then(() => {}, () => {});
+          .eq('owner_id', flow.owner_id).gte('created_at', sinceIso)
+          .order('created_at', { ascending: false }).limit(5000);
+        if (!evErr && (evRows ?? []).length < 5000) {
+          const seg = computeSegment(evRows ?? [], rule, nowIso);
+          if (seg.contactIds.length) {
+            await admin.from('email_flow_members').upsert(
+              seg.contactIds.slice(0, 500).map((cid) => ({ owner_id: flow.owner_id, flow_id: flow.id, contact_id: cid })),
+              { onConflict: 'flow_id,contact_id', ignoreDuplicates: true },
+            ).then(() => {}, () => {});
+          }
         }
 
-        // 2) Load live members; end drips for anyone who REALLY replied since enrolling.
+        // 2) Load live members (stable order); find each member's LATEST reply. Chunked (URL
+        //    limits), ordered, bounded from the earliest enrollment — an error skips the flow
+        //    this tick rather than running with the reply gate silently off.
         const { data: memberRows } = await admin.from('email_flow_members')
           .select('id, contact_id, enrolled_at, replied_at, steps_sent')
-          .eq('flow_id', flow.id).is('replied_at', null).limit(500);
+          .eq('flow_id', flow.id).is('replied_at', null)
+          .order('enrolled_at', { ascending: true }).limit(500);
         const members = (memberRows ?? []) as { id: string; contact_id: string; enrolled_at: string; replied_at: string | null; steps_sent: SentStep[] }[];
         if (!members.length) continue;
-        const { data: freshReplies } = await admin.from('outreach_events')
-          .select('contact_id, created_at').eq('owner_id', flow.owner_id).eq('kind', 'replied')
-          .in('contact_id', members.map((m) => m.contact_id));
-        const repliedAtBy = new Map<string, string>();
-        for (const r of (freshReplies ?? []) as { contact_id: string | null; created_at: string }[]) {
-          if (r.contact_id && !repliedAtBy.has(r.contact_id)) repliedAtBy.set(r.contact_id, r.created_at);
-        }
-
-        // 3) Backfill drained_at: a step's delay clock starts when its batch REALLY sent ('done').
-        const pendingBatchIds = [...new Set(members.flatMap((m) => (m.steps_sent ?? []).filter((s) => !s.drained_at).map((s) => s.batch_id)))];
-        const drainedBy = new Map<string, string>();
-        if (pendingBatchIds.length) {
-          const { data: batches } = await admin.from('outreach_batches')
-            .select('id, status, finished_at').in('id', pendingBatchIds);
-          for (const b of (batches ?? []) as { id: string; status: string; finished_at: string | null }[]) {
-            if (b.status === 'done') drainedBy.set(b.id, b.finished_at ?? nowIso);
+        const minEnrolled = members.reduce((a, m) => (m.enrolled_at < a ? m.enrolled_at : a), members[0].enrolled_at);
+        const latestReplyBy = new Map<string, string>();
+        let replyReadFailed = false;
+        for (const ids of chunk(members.map((m) => m.contact_id), 100)) {
+          const { data: reps, error: rErr } = await admin.from('outreach_events')
+            .select('contact_id, created_at').eq('owner_id', flow.owner_id).eq('kind', 'replied')
+            .gte('created_at', minEnrolled).in('contact_id', ids)
+            .order('created_at', { ascending: false }).limit(1000);
+          if (rErr) { replyReadFailed = true; break; }
+          for (const r of (reps ?? []) as { contact_id: string | null; created_at: string }[]) {
+            if (r.contact_id && !latestReplyBy.has(r.contact_id)) latestReplyBy.set(r.contact_id, r.created_at); // desc order → first = latest
           }
         }
+        if (replyReadFailed) continue; // never stage with the reply gate blind
 
-        // 4) Decide each member through the pure gate; group due members into per-step cohorts.
+        // 3) Backfill from batch reality: 'done' stamps drained_at (the delay clock);
+        //    'canceled' with nothing sent strips the entry so the step can re-stage under a fresh
+        //    approval; a placeholder (batch_id null) older than an hour is a crashed staging — strip.
+        const pendingBatchIds = [...new Set(members.flatMap((m) => (m.steps_sent ?? []).filter((s) => s.batch_id && !s.drained_at).map((s) => s.batch_id)))];
+        const drainedBy = new Map<string, string>();
+        const canceledDead = new Set<string>();   // canceled, zero sent → safe to re-stage
+        const canceledPartial = new Map<string, string>(); // canceled after partial sends → never re-stage
+        for (const ids of chunk(pendingBatchIds, 100)) {
+          const { data: batches } = await admin.from('outreach_batches')
+            .select('id, status, finished_at, recipients').in('id', ids);
+          for (const b of (batches ?? []) as { id: string; status: string; finished_at: string | null; recipients: unknown }[]) {
+            if (b.status === 'done') drainedBy.set(b.id, b.finished_at ?? nowIso);
+            else if (b.status === 'canceled') {
+              const anySent = Array.isArray(b.recipients) && (b.recipients as { state?: string }[]).some((r) => r.state === 'sent');
+              if (anySent) canceledPartial.set(b.id, b.finished_at ?? nowIso); else canceledDead.add(b.id);
+            }
+          }
+        }
+        const staleBefore = Date.now() - 60 * 60 * 1000;
+
+        // 4) Decide each member through the pure gate; collect due members per step.
         const cohorts = new Map<number, typeof members>();
         for (const m of members) {
-          const replied = repliedAtBy.get(m.contact_id) && Date.parse(repliedAtBy.get(m.contact_id)!) >= Date.parse(m.enrolled_at)
-            ? repliedAtBy.get(m.contact_id)! : null;
-          let sent = (m.steps_sent ?? []) as SentStep[];
-          const backfilled = sent.map((s) => (!s.drained_at && drainedBy.has(s.batch_id) ? { ...s, drained_at: drainedBy.get(s.batch_id)! } : s));
-          if (replied || JSON.stringify(backfilled) !== JSON.stringify(sent)) {
+          const latest = latestReplyBy.get(m.contact_id);
+          const replied = latest && Date.parse(latest) >= Date.parse(m.enrolled_at) ? latest : null;
+          const sent = (m.steps_sent ?? []) as SentStep[];
+          const repaired = sent
+            .filter((s) => !(s.batch_id && canceledDead.has(s.batch_id)))                                     // canceled-unsent → re-stage
+            .filter((s) => !(!s.batch_id && !s.drained_at && Date.parse(s.staged_at) < staleBefore))          // crashed placeholder → re-stage
+            .map((s) => {
+              if (s.drained_at) return s;
+              if (s.batch_id && drainedBy.has(s.batch_id)) return { ...s, drained_at: drainedBy.get(s.batch_id)! };
+              if (s.batch_id && canceledPartial.has(s.batch_id)) return { ...s, drained_at: canceledPartial.get(s.batch_id)! }; // partial: never re-send
+              return s;
+            });
+          if (replied || JSON.stringify(repaired) !== JSON.stringify(sent)) {
             await admin.from('email_flow_members')
-              .update({ ...(replied ? { replied_at: replied } : {}), steps_sent: backfilled })
+              .update({ ...(replied ? { replied_at: replied } : {}), steps_sent: repaired })
               .eq('id', m.id).then(() => {}, () => {});
-            if (replied) continue;                       // the drip ends on a REAL reply
-            sent = backfilled; m.steps_sent = backfilled;
+            if (replied) {
+              // A reply also PRUNES the contact from any still-QUEUED flow batch (deep review:
+              // the staging→approval→drain window is unbounded, and "has NOT replied" must stay
+              // true at send time). CAS on 'queued' — a draining batch is the drain's to manage.
+              for (const s of repaired) {
+                if (!s.batch_id || s.drained_at) continue;
+                const { data: qb } = await admin.from('outreach_batches')
+                  .select('id, status, recipients').eq('id', s.batch_id).eq('status', 'queued').maybeSingle();
+                if (!qb) continue;
+                const recips = (qb.recipients as { contactId?: string; state?: string; reason?: string }[] | null) ?? [];
+                const pruned = recips.map((r) => (r.contactId === m.contact_id && r.state === 'pending'
+                  ? { ...r, state: 'skipped', reason: 'replied before send' } : r));
+                await admin.from('outreach_batches').update({ recipients: pruned })
+                  .eq('id', s.batch_id).eq('status', 'queued').then(() => {}, () => {});
+              }
+              continue; // the drip ends on a REAL reply
+            }
+            m.steps_sent = repaired;
           }
-          const due = nextDripStep(steps, sent, replied, m.enrolled_at, nowIso);
+          const due = nextDripStep(steps, m.steps_sent ?? [], replied, m.enrolled_at, nowIso);
           if (!due) continue;
           const list = cohorts.get(due.stepIndex) ?? [];
           list.push(m); cohorts.set(due.stepIndex, list);
         }
 
-        // 5) One batch + ONE approval per due cohort, on the existing spine.
+        // 5) CLAIM members first (CAS placeholder), THEN one batch + ONE approval per cohort.
+        //    The CAS makes exactly one invocation win each member — a crash after claiming leaves
+        //    a placeholder the next tick strips (step 3), never a double batch.
         for (const [stepIndex, cohort] of cohorts) {
           const step = steps[stepIndex];
-          if (!step || unknownTokens(`${step.subject}\n${step.body}`).length) continue; // creation validates; never send literal tokens
-          const { data: contacts } = await admin.from('contacts')
-            .select('id, email, full_name, email_status')
-            .eq('owner_id', flow.owner_id).in('id', cohort.map((m) => m.contact_id));
-          const { recipients } = composeBatchRecipients((contacts ?? []) as { id: string; email: string | null; full_name: string | null; email_status: string | null }[]);
+          if (!step || unknownTokens(`${step.subject}\n${step.body}`).length) continue; // never send literal tokens
+          const claimed: typeof members = [];
+          for (const m of cohort.slice(0, 200)) {   // bounded per tick — the rest stage next tick
+            const placeholder = { stepIndex, batch_id: null, staged_at: nowIso, drained_at: null };
+            const { data: won } = await admin.from('email_flow_members')
+              .update({ steps_sent: [...(m.steps_sent ?? []), placeholder] })
+              .eq('id', m.id)
+              .filter('steps_sent', 'eq', JSON.stringify(m.steps_sent ?? []))
+              .select('id');
+            if (won?.length) { m.steps_sent = [...(m.steps_sent ?? []), placeholder as unknown as SentStep]; claimed.push(m); }
+          }
+          if (!claimed.length) continue;
+
+          const contactRows: { id: string; email: string | null; full_name: string | null; email_status: string | null }[] = [];
+          for (const ids of chunk(claimed.map((m) => m.contact_id), 100)) {
+            const { data: cs } = await admin.from('contacts')
+              .select('id, email, full_name, email_status').eq('owner_id', flow.owner_id).in('id', ids);
+            contactRows.push(...((cs ?? []) as typeof contactRows));
+          }
+          const { recipients } = composeBatchRecipients(contactRows);
+          const inBatch = new Set(recipients.map((r) => r.contactId));
+          // Members excluded for good (suppressed/bad/no email) close this step WITHOUT a send —
+          // batch_id stays null, skipped names why, drained_at set so they neither spin nor look sent.
+          for (const m of claimed.filter((x) => !inBatch.has(x.contact_id))) {
+            const sentArr = [...(m.steps_sent ?? [])];
+            const ph = sentArr[sentArr.length - 1] as unknown as { skipped?: string; drained_at: string | null };
+            ph.skipped = 'excluded at compose (suppressed, bad status, or no email)';
+            ph.drained_at = nowIso;
+            await admin.from('email_flow_members').update({ steps_sent: sentArr }).eq('id', m.id).then(() => {}, () => {});
+          }
           if (!recipients.length) continue;
+
           const { data: batch } = await admin.from('outreach_batches').insert({
             owner_id: flow.owner_id, world_id: flow.world_id, subject: step.subject, body_text: step.body,
             recipients, status: 'queued',
           }).select('id').single();
-          if (!batch) continue;
+          if (!batch) continue; // claimed placeholders strip after an hour and re-stage
           const batchId = (batch as { id: string }).id;
-          const apPayload = { batch_id: batchId, recipient_count: recipients.length };
+          // The SAME content-hash binding every client-minted batch carries (deep review: the
+          // drain's strongest tamper check must not be skipped for machine-minted batches).
+          const contentHash = await hashPayload({
+            subject: step.subject, body_text: step.body,
+            recipients: recipients.map((r) => ({ email: r.email, name: r.name })),
+          });
+          const apPayload = { batch_id: batchId, recipient_count: recipients.length, content_hash: contentHash };
           const { data: ap } = await admin.from('approvals').insert({
             owner_id: flow.owner_id, kind: 'send_batch',
             title: `Flow "${flow.name}" step ${stepIndex + 1} → ${recipients.length} contact${recipients.length === 1 ? '' : 's'}`,
@@ -397,11 +487,11 @@ Deno.serve(async (req) => {
           }).select('id').single();
           if (!ap) { await admin.from('outreach_batches').update({ status: 'canceled', finished_at: nowIso }).eq('id', batchId); continue; }
           await admin.from('outreach_batches').update({ approval_id: (ap as { id: string }).id }).eq('id', batchId);
-          // Stamp the cohort as staged (ordering) — drained_at arrives only when the batch sends.
-          for (const m of cohort) {
-            await admin.from('email_flow_members').update({
-              steps_sent: [...(m.steps_sent ?? []), { stepIndex, batch_id: batchId, staged_at: nowIso, drained_at: null }],
-            }).eq('id', m.id).then(() => {}, () => {});
+          // Fill the claimed placeholders with the real batch id (only IN-BATCH members).
+          for (const m of claimed.filter((x) => inBatch.has(x.contact_id))) {
+            const sentArr = [...(m.steps_sent ?? [])];
+            (sentArr[sentArr.length - 1] as unknown as { batch_id: string | null }).batch_id = batchId;
+            await admin.from('email_flow_members').update({ steps_sent: sentArr }).eq('id', m.id).then(() => {}, () => {});
           }
         }
       }
@@ -1806,10 +1896,10 @@ Deno.serve(async (req) => {
   // observation, notified once per channel, ever.
   try {
     const { data: pend } = await admin.from('approvals')
-      .select('id, owner_id, title, created_at, expires_at, reminded_at')
+      .select('id, owner_id, kind, title, payload, created_at, expires_at, reminded_at')
       .eq('status', 'pending').not('expires_at', 'is', null)
       .order('created_at', { ascending: true }).limit(50);
-    const pending = (pend ?? []) as { id: string; owner_id: string; title: string; created_at: string; expires_at: string; reminded_at: string | null }[];
+    const pending = (pend ?? []) as { id: string; owner_id: string; kind: string; title: string; payload: Record<string, unknown> | null; created_at: string; expires_at: string; reminded_at: string | null }[];
 
     // Half-life nudges — at most a handful per tick, each recorded before it rings.
     for (const a of pending.filter((x) => reminderDue(x.created_at, x.expires_at, x.reminded_at, nowIso)).slice(0, 5)) {
@@ -1830,6 +1920,12 @@ Deno.serve(async (req) => {
         .update({ status: 'expired', decided_at: nowIso, decided_via: 'expiry' })
         .eq('id', a.id).eq('status', 'pending').select('id').maybeSingle();
       if (!flipped) continue;
+      // Per-kind cleanup (deep review): an expired mail drop's snapshot must not linger looking
+      // sendable — the same cancel the explicit reject path runs.
+      if (a.kind === 'send_mail' && a.payload?.drop_id) {
+        await admin.from('mail_drops').update({ status: 'canceled' })
+          .eq('id', a.payload.drop_id as string).in('status', ['staged', 'approved']).then(() => {}, () => {});
+      }
       await admin.from('mind_events').insert({
         owner_id: a.owner_id, event_type: 'note', source: 'execution',
         subject: `An approval lapsed unanswered: "${a.title.slice(0, 120)}" expired after its decision window.`,

@@ -27,8 +27,8 @@ check('THE CAP: two attempts, then a NAMED failed state — no infinite spend lo
   wd.includes('>= 2') && wd.includes('stalled — automatic resume failed twice; needs your attention'));
 check('the cap flip is CAS-guarded and tells the owner once',
   wd.includes(".eq('id', g.id).eq('status', 'running')") && wd.includes('two automatic resumes did not fix it'));
-check('one live resume per project (idempotent against prior ticks)',
-  wd.includes("in('status', ['queued', 'running'])"));
+check('one live resume per project — and a credit-paused resume still counts as live',
+  wd.includes("in('status', ['queued', 'running', 'paused', 'waiting_approval'])"));
 check('the attempt is counted BEFORE the job exists (a crash costs an attempt, never a loop)',
   wd.indexOf('resume_attempts: (g.resume_attempts ?? 0) + 1') < wd.indexOf("from('jobs').insert"));
 check('the enqueued job continues the EXACT stalled generation',

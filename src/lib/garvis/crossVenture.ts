@@ -31,9 +31,14 @@ export interface TransferMove {
 
 const pct = (a: number, b: number) => `${((a / b) * 100).toFixed(1)}%`;
 
+/** Channels that are PLAYS someone can run. 'website (organic/direct)' is a derived remainder —
+ *  nobody can "run organic traffic" for world B, and "never ran it" would misdescribe a world
+ *  that simply has no site channel (deep review). */
+export const NON_TRANSFERABLE = new Set(['website (organic/direct)']);
+
 /** Working at an honest, act-grade sample: enough volume for a rate, enough responses to act. */
 function provenWorking(c: ChannelIn): boolean {
-  return c.instrumented && c.out >= MIN_SAMPLE && c.responses >= ACT_RESPONSES;
+  return !NON_TRANSFERABLE.has(c.name) && c.instrumented && c.out >= MIN_SAMPLE && c.responses >= ACT_RESPONSES;
 }
 
 /** Silent at real volume (instrumented, at sample, zero back) — or genuinely never run. */
