@@ -86,6 +86,7 @@
     "verify:forgescore": "tsx src/lib/garvis/forgeScore.verify.ts",
     "verify:generatedriver": "tsx src/lib/generateDriver.verify.ts",
     "verify:seepreview": "tsx src/lib/seePreview.verify.ts",
+    "verify:runtimeqa": "tsx src/lib/runtimeQa.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",

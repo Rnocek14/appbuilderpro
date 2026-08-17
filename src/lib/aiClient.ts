@@ -33,6 +33,7 @@ import { agenticEdit, agenticVerifyAndFix, generationCompileGate, type CompileGa
 import { verificationFromGate, verificationLabel, verificationNote } from './verification';
 import { extractRoutePaths, probeFixRequest, probeSummary } from './renderProbe';
 import { probeRoutes } from './renderProbeRun';
+import { runtimeQa, runtimeQaFixRequest, runtimeQaLine, runtimeQaDisclosure } from './runtimeQa';
 import { agentAvailable } from './agent/loop';
 
 interface Usage { inputTokens: number; outputTokens: number; cacheCreation?: number; cacheRead?: number; stopReason?: string }
@@ -1282,6 +1283,8 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
       // failures to the agentic fixer once, and report the honest count. Fail-soft throughout:
       // no live preview or no routes is a named skip, never a fake pass.
       let probeLine = '';
+      let qaLine = '';
+      let qaDisclosure = '';
       try {
         const { data: appRow } = await supabase.from('project_files')
           .select('content').eq('project_id', projectId).eq('path', '/src/App.tsx')
@@ -1292,20 +1295,34 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           probeLine = probe.reason ? `Routes unwalked — ${probe.reason}.` : '';
         } else {
           let judged = probe.results;
+          // RUNTIME QA (SW9.7): the same static scanners the platform points at prospects' sites,
+          // run over the serialized HTML each route actually rendered. Error-severity findings
+          // join the repair pass; the rest fold into a collapsed disclosure in the summary.
+          let qa = runtimeQa(probe.htmlByRoute);
           let bad = judged.filter((r) => !r.ok);
-          if (bad.length && agentAvailable()) {
-            await mark('fix', 'running', `repairing ${bad.length} broken route(s)`);
+          let qaFix = runtimeQaFixRequest(qa);
+          if ((bad.length || qaFix) && agentAvailable()) {
+            const qaErrs = qa.findings.filter((f) => f.severity === 'error').length;
+            await mark('fix', 'running',
+              [bad.length ? `repairing ${bad.length} broken route(s)` : '', qaErrs ? `${qaErrs} runtime QA finding(s)` : '']
+                .filter(Boolean).join(', '));
             try {
               await agenticVerifyAndFix(projectId, {
                 onActivity: (l) => void mark('fix', 'running', l),
-                focus: probeFixRequest(judged),
+                focus: [probeFixRequest(judged), qaFix].filter(Boolean).join('\n\n'),
               });
               const again = await probeRoutes(routes);
-              if (again.ran) { judged = again.results; bad = judged.filter((r) => !r.ok); }
+              if (again.ran) {
+                judged = again.results; bad = judged.filter((r) => !r.ok);
+                qa = runtimeQa(again.htmlByRoute); qaFix = runtimeQaFixRequest(qa);
+              }
             } catch { /* the honest count below reports whatever remains */ }
-            await mark('fix', 'done', bad.length ? `${bad.length} route(s) still broken` : 'routes repaired');
+            await mark('fix', 'done',
+              bad.length ? `${bad.length} route(s) still broken` : qaFix ? 'runtime QA findings remain' : 'routes repaired');
           }
           probeLine = probeSummary(judged);
+          qaLine = runtimeQaLine(qa);
+          qaDisclosure = runtimeQaDisclosure(qa);
         }
       } catch { /* the probe is an upgrade, never a blocker */ }
 
@@ -1323,7 +1340,9 @@ async function chunkedGenerate(projectId: string, prompt: string, planContext?: 
           (stillMissing.length ? `\n\n⚠️ ${stillMissing.length} page(s) could not be generated (${stillMissing.map((p) => p.split('/').pop()).join(', ')}) — ask me in chat to add them.` : '') +
           (unresolved ? `\n\n⚠️ ${unresolved} issue(s) couldn't be auto-resolved — open the preview and use "Fix with AI" if something looks off.`
             : `\n\n${verificationNote(verification)}`) +
-          (probeLine ? `\n${/broken|unwalked/i.test(probeLine) ? '⚠️ ' : ''}Route walk: ${probeLine}` : ''),
+          (probeLine ? `\n${/broken|unwalked/i.test(probeLine) ? '⚠️ ' : ''}Route walk: ${probeLine}` : '') +
+          (qaLine ? `\n${/to fix/.test(qaLine) ? '⚠️ ' : ''}${qaLine}` : '') +
+          (qaDisclosure ? `\n\n${qaDisclosure}` : ''),
         files_changed: [...written.keys()],
         thread_id: MAIN_THREAD_ID,
       });

@@ -4,6 +4,7 @@ import type { ProjectFile } from '../../types';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
 import { updatePreviewSnapshot, pushPreviewLog, resetPreviewSnapshot, registerScreenshotCapture, registerPreviewNavigator } from '../../lib/previewRuntime';
+import { QA_HTML_CAP } from '../../lib/runtimeQa';
 import { REACT_VERSION, previewPins } from '../../lib/depRegistry';
 
 export type Device = 'desktop' | 'tablet' | 'mobile';
@@ -298,8 +299,11 @@ function visibleText(){
   }catch(_){ return ''; }
 }
 function curRoute(){ try{ return location.hash||location.pathname||'/'; }catch(_){ return null; } }
+// Serialized document (capped) so the parent can run its static QA scanners over what actually
+// rendered — the whole document, because app styles live in shell-injected <style> blocks.
+function qaHtml(){ try{ return document.documentElement.outerHTML.slice(0,${QA_HTML_CAP}); }catch(_){ return null; } }
 function postSnapshot(){
-  try{ parent.postMessage({__ff:true,type:'dom',dom:visibleText(),title:document.title,route:curRoute()},'*'); }catch(_){ }
+  try{ parent.postMessage({__ff:true,type:'dom',dom:visibleText(),title:document.title,route:curRoute(),qaHtml:qaHtml()},'*'); }catch(_){ }
 }
 var __snapT=null;
 function scheduleSnapshot(){ if(__snapT)clearTimeout(__snapT); __snapT=setTimeout(postSnapshot,500); }
@@ -753,7 +757,7 @@ function NativePreview({ files, device, showConsole, onFixError, busy, onSelectE
         setLogs((l) => [...l.slice(-99), { level: d.level, text }]);
         pushPreviewLog({ level: d.level, text });
       } else if (d.type === 'dom') {
-        updatePreviewSnapshot({ dom: d.dom ?? null, title: d.title ?? null, route: d.route ?? null });
+        updatePreviewSnapshot({ dom: d.dom ?? null, title: d.title ?? null, route: d.route ?? null, qaHtml: typeof d.qaHtml === 'string' ? d.qaHtml : null });
       } else if (d.type === 'selected') {
         setEditMode(false);
         onSelectRef.current?.({ loc: d.loc ?? '', tag: d.tag ?? '', text: d.text ?? '', className: d.className ?? '', count: d.count ?? 1 });

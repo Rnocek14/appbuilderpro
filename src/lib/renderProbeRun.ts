@@ -25,27 +25,33 @@ export interface ProbeOutcome {
   ran: boolean;
   reason?: string;
   results: RouteJudgement[];
+  /** Per-route serialized HTML (capped by the shim) for the runtime QA adapter (SW9.7).
+   *  null = the runtime never reported a capture for that route — unscanned, never "clean". */
+  htmlByRoute: Record<string, string | null>;
 }
 
 export async function probeRoutes(paths: string[]): Promise<ProbeOutcome> {
-  if (!paths.length) return { ran: false, reason: 'no static routes found in App.tsx', results: [] };
+  if (!paths.length) return { ran: false, reason: 'no static routes found in App.tsx', results: [], htmlByRoute: {} };
   const original = getPreviewSnapshot().route;
   const results: RouteJudgement[] = [];
+  const htmlByRoute: Record<string, string | null> = {};
 
   for (const route of paths) {
     // Clear the store's error BEFORE the hop: a stale error from the previous route must never
-    // convict this one (the pure judge's stated precondition).
-    updatePreviewSnapshot({ error: null });
+    // convict this one (the pure judge's stated precondition). qaHtml is cleared for the same
+    // reason — the previous route's serialized DOM must never be scanned as this route's.
+    updatePreviewSnapshot({ error: null, qaHtml: null });
     const baseline = getPreviewSnapshot().updatedAt;
     if (!navigatePreview(route)) {
-      return { ran: false, reason: 'no live preview to drive — open the preview and ask me to check the routes', results };
+      return { ran: false, reason: 'no live preview to drive — open the preview and ask me to check the routes', results, htmlByRoute };
     }
     await waitForUpdate(baseline, ROUTE_TIMEOUT_MS);
     await sleep(ROUTE_SETTLE_MS);
     const s = getPreviewSnapshot();
     results.push(judgeSnapshot(route, { error: s.error, dom: s.dom }));
+    htmlByRoute[route] = s.qaHtml;
   }
 
   if (original) { updatePreviewSnapshot({ error: null }); navigatePreview(original); }
-  return { ran: true, results };
+  return { ran: true, results, htmlByRoute };
 }

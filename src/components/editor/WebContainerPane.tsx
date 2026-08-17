@@ -123,7 +123,7 @@ export function WebContainerPane({ files, projectId, onFixError, onHealTypes, ai
       if (d.type === 'error') updatePreviewSnapshot({ error: d.message });
       else if (d.type === 'ready') updatePreviewSnapshot({ error: null });
       else if (d.type === 'log') pushPreviewLog({ level: d.level, text: (d.args ?? []).join(' ') });
-      else if (d.type === 'dom') updatePreviewSnapshot({ dom: d.dom ?? null, title: d.title ?? null, route: d.route ?? null });
+      else if (d.type === 'dom') updatePreviewSnapshot({ dom: d.dom ?? null, title: d.title ?? null, route: d.route ?? null, qaHtml: typeof d.qaHtml === 'string' ? d.qaHtml : null });
       else if (d.type === 'screenshot' || d.type === 'screenshot-error') {
         const p = pendingShot.current;
         if (p) { clearTimeout(p.timer); pendingShot.current = null; p.resolve(d.type === 'screenshot' ? (d.dataUrl ?? null) : null); }

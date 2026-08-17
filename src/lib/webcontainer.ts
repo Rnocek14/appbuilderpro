@@ -10,6 +10,7 @@ import { WebContainer, type FileSystemTree, type WebContainerProcess } from '@we
 import type { ProjectFile } from '../types';
 import { isMetaFile } from './projectBrain';
 import { registryPin } from './depRegistry';
+import { QA_HTML_CAP } from './runtimeQa';
 
 export type { WebContainerProcess };
 
@@ -109,7 +110,8 @@ const OBSERVABILITY_SHIM = `<script>
   window.addEventListener('error',function(e){ send({type:'error',message:String((e.error&&e.error.stack)||e.message)}); });
   window.addEventListener('unhandledrejection',function(e){ send({type:'error',message:'Unhandled rejection: '+String((e.reason&&(e.reason.stack||e.reason.message))||e.reason)}); });
   function visibleText(){ try{ var t=((document.body&&document.body.innerText)||'').replace(/[ \\t]+\\n/g,'\\n').replace(/\\n{3,}/g,'\\n\\n').trim(); return t.slice(0,4000);}catch(_){ return ''; } }
-  function snap(){ send({type:'dom',dom:visibleText(),title:document.title,route:(location.pathname+location.search+location.hash)||'/'}); }
+  function qaHtml(){ try{ return document.documentElement.outerHTML.slice(0,${QA_HTML_CAP}); }catch(_){ return null; } }
+  function snap(){ send({type:'dom',dom:visibleText(),title:document.title,route:(location.pathname+location.search+location.hash)||'/',qaHtml:qaHtml()}); }
   var t=null; function schedule(){ if(t)clearTimeout(t); t=setTimeout(snap,500); }
   window.addEventListener('load',function(){ send({type:'ready'}); schedule(); try{ new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true,characterData:true}); }catch(_){ } });
   ['click','input','change','keyup'].forEach(function(ev){ try{ document.addEventListener(ev,schedule,true); }catch(_){ } });
