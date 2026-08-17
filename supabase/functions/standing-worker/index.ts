@@ -246,6 +246,58 @@ Deno.serve(async (req) => {
       }
     } catch { /* the wake sweep must never wedge the order tick */ }
 
+    // ---- STALLED-BUILD WATCHDOG (SW10.6) -----------------------------------------------------
+    // A generation whose stage marks stopped moving for 10+ minutes is a dead build, not a slow
+    // one. Enqueue ONE server resume (SW10.5) per stall, at most twice per generation — after the
+    // second attempt the row flips to a NAMED failed state, so a permanently-broken build stops
+    // consuming credits. The mind_event for a resume is written at job COMPLETION (job-worker),
+    // never here at enqueue — no fake progress; only the cap-exceeded flip speaks from this sweep.
+    try {
+      const staleIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const { data: stalledGens } = await admin.from('project_generations')
+        .select('id, project_id, user_id, resume_attempts')
+        .eq('status', 'running').lt('updated_at', staleIso).limit(10);
+      for (const g of (stalledGens ?? []) as { id: string; project_id: string; user_id: string; resume_attempts: number }[]) {
+        if ((g.resume_attempts ?? 0) >= 2) {
+          const { data: cas } = await admin.from('project_generations')
+            .update({ status: 'failed', error: 'stalled — automatic resume failed twice; needs your attention', finished_at: nowIso })
+            .eq('id', g.id).eq('status', 'running').select('id');
+          if (cas?.length) {
+            await admin.from('mind_events').insert({
+              owner_id: g.user_id, event_type: 'note', source: 'builder',
+              subject: 'A build stalled and two automatic resumes did not fix it — open the project to see what remains',
+              payload: { key: `gen-stalled:${g.id}`, project_id: g.project_id, generation_id: g.id },
+            }).then(() => {}, () => {});
+          }
+          continue;
+        }
+        // One live resume per project — idempotent against the enqueue seam and prior ticks.
+        const { data: existingJob } = await admin.from('jobs')
+          .select('id').eq('project_id', g.project_id).eq('kind', 'generation_resume')
+          .in('status', ['queued', 'running']).limit(1);
+        if (existingJob?.length) continue;
+        // Bump the attempt BEFORE inserting the job (CAS on the exact prior count) — a crash
+        // between the two costs one unused attempt, never an uncounted spend loop.
+        const { data: bumped } = await admin.from('project_generations')
+          .update({ resume_attempts: (g.resume_attempts ?? 0) + 1 })
+          .eq('id', g.id).eq('status', 'running').eq('resume_attempts', g.resume_attempts ?? 0).select('id');
+        if (!bumped?.length) continue;
+        await admin.from('jobs').insert({
+          owner_id: g.user_id, project_id: g.project_id,
+          kind: 'generation_resume', phase: 'resume',
+          title: 'Resume interrupted build',
+          brief: 'Watchdog: the generation stopped marking stages — derive missing pages from the saved App.tsx and recover them.',
+          payload: { generation_id: g.id },
+        }).then(() => {}, () => {});
+        // Nudge the job worker now; its cron tick is the guarantee.
+        fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/job-worker`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-worker-secret': workerSecret ?? '', Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({}),
+        }).catch(() => {});
+      }
+    } catch { /* the watchdog must never wedge the order tick */ }
+
     // ---- ARC ADVANCE (server-side execution of mechanical steps) -----------------------------
     // A 'ready' arc advances RIGHT HERE for every step whose action is purely mechanical
     // (standing orders, records, reminders, invoices — no model, no browser). Creative steps
