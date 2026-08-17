@@ -10,7 +10,7 @@
 //   text can read state and nothing else. (Any future "APPROVE by text" needs per-approval
 //   one-time codes and its own adversarial review — see the plan's SW4 risks.)
 
-import type { Command } from './commander';
+import type { Command } from './commander.ts';
 
 /** Replies per number per hour — a loop with another bot must throttle itself, not the operator. */
 export const MAX_REPLIES_PER_HOUR = 12;

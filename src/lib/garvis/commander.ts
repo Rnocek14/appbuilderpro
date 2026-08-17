@@ -4,7 +4,7 @@
 // opinions, quick lookups) or propose a MISSION (real work → the planner + workers handle it). The user
 // never picks a worker. Pure: prompt + tolerant parse; the model call + dispatch live in useCommander.
 
-import { BRAIN_WINDOW } from './thread';
+import { BRAIN_WINDOW } from './thread.ts';
 
 /** The Intention Router's second axis (SW4.1, docs/garvis-first-principles.md §5): every
  *  utterance is an intent AND a mode. Postures are VERBS, not places — think (weighing,

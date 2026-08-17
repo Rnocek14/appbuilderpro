@@ -3,7 +3,7 @@
 // a set of cities into an ordered, capped, deduped list of per-city search queries, and provides the
 // national dedupe (one business shouldn't be pitched twice because it ranked in two nearby cities).
 
-import type { UsCity } from './usCities';
+import type { UsCity } from './usCities.ts';
 
 export interface SweepQuery { niche: string; city: string; state: string; area: string }
 

@@ -8,8 +8,8 @@
 // capability that we can actually deliver matches it; a matched need we can't yet deliver becomes a
 // roadmap GAP, not a promise. Pure + deterministic (verified by detect.verify.ts) — no model call.
 
-import type { Vertical } from '../verticals';
-import type { ProspectAuditRow, TechFingerprint } from '../clientHuntRun';
+import type { Vertical } from '../verticals.ts';
+import type { ProspectAuditRow, TechFingerprint } from '../clientHuntRun.ts';
 // .ts extension: this module is also imported by the standing-worker EDGE function (Deno strict
 // resolver). Type-only imports above it are erased and need none.
 import { CAPABILITIES, isDeliverable, type SignalKind } from './registry.ts';

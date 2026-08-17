@@ -6,7 +6,7 @@
 // and at least one survives; anything less is RELABELED 'heuristic' with the fake citations
 // dropped. Hostile input of any shape returns [] — never a throw, never an off-list value.
 
-import { normalizeCitation } from './evidenceMatch';
+import { normalizeCitation } from './evidenceMatch.ts';
 
 export type StrategyBasis = 'measured' | 'heuristic';
 export type StrategyStatus = 'proposed' | 'adopted' | 'retired';

@@ -8,7 +8,7 @@
 // Growing this catalog IS growing Garvis's agency. The rule stands: if a human can click it, the
 // brain can propose it — and nothing else.
 
-import type { ActionSpec } from './orchestrator';
+import type { ActionSpec } from './orchestrator.ts';
 
 export const ACTION_SPECS: ActionSpec[] = [
   {

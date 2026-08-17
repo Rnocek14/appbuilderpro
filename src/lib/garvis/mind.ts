@@ -13,7 +13,7 @@
 //  4. OUTCOMES CLOSE DECISIONS — a decision without an outcome is open; hit-rate only counts closed
 //     ones (decisionHitRate), so the journal can't flatter itself with unresolved predictions.
 
-import type { MindBelief, MindDecision, MindEvent, MindIdentityDoc } from '../../types';
+import type { MindBelief, MindDecision, MindEvent, MindIdentityDoc } from '../../types/index.ts';
 
 // ---- 1. the typed event contract ----
 

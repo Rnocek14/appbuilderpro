@@ -108,7 +108,9 @@ Deno.serve(async (req) => {
       // Re-host the prospect's scraped photos onto our storage BEFORE stashing, so both the live site
       // and any later webhook re-publish serve durable, self-owned images (not fragile hotlinks).
       const durable = await rehostImages(admin, html, ownerId, previewSiteId);
-      bytes = new TextEncoder().encode(durable);
+      // encode() types as Uint8Array<ArrayBufferLike> under newer TS libs; at runtime it is always
+      // a fresh ArrayBuffer-backed array, so the assertion narrows to what BodyInit requires.
+      bytes = new TextEncoder().encode(durable) as Uint8Array<ArrayBuffer>;
       // Only the operator path reaches here with html; stash it (upsert) for later webhook re-publish.
       // FAIL-SOFT: the stash is only needed for a LATER webhook re-publish, so a transient storage error
       // must not abort this live publish (the Netlify deploy below can still succeed).

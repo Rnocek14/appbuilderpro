@@ -26,8 +26,8 @@
 import {
   validateTemplate, ARCHETYPES, FLAVORS,
   type WebTemplate, type TemplateNode, type Archetype, type Flavor,
-} from './workweb';
-import { slugify } from './clustering';
+} from './workweb.ts';
+import { slugify } from './clustering.ts';
 
 // ---------------------------------------------------------------------------
 // World DNA — the business, synthesized

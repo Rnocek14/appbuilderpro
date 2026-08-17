@@ -9,7 +9,7 @@
 // setup), and (2) render-video, which sends toShotstackEdit(sb) to a cloud render provider to
 // produce an actual mp4 when a render key exists.
 
-import { sfxCueClips, type SfxKit } from './ugcEdit';
+import { sfxCueClips, type SfxKit } from './ugcEdit.ts';
 
 export type Aspect = '9:16' | '1:1' | '16:9';
 

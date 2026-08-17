@@ -11,14 +11,14 @@
 
 // .ts extensions on the VALUE imports: this module is also imported by the standing-worker EDGE
 // function (Deno), whose strict resolver requires explicit extensions. The type-only import from
-// '../preview/spec' is erased, so it needs none. Every leaf here imports only types (Deno-safe).
+// '../preview/spec.ts' is erased, so it needs none. Every leaf here imports only types (Deno-safe).
 import { parseSerperOrganic } from './marketIntel.ts';
 import { domainOf } from './nationalSweepCore.ts';
 import { auditIssues, type SiteAudit } from './siteAudit.ts';
 import { buildProfile, type ExtractedFields, type ScrapeContext } from '../preview/scrapeProfileCore.ts';
 import { restraintFor } from '../../../supabase/functions/_shared/previewSpec.ts';
 import { pitchSentence, claimsAreSafe, scanProvenance, type PitchFinding } from './prospects/pitchFindings.ts';
-import type { BusinessProfile } from '../preview/spec';
+import type { BusinessProfile } from '../preview/spec.ts';
 
 // Big aggregators/directories aren't prospects — we want a business's OWN (beatable) site.
 const DIRECTORY = /(yelp\.|facebook\.|instagram\.|linkedin\.|yellowpages\.|bbb\.org|mapquest\.|tripadvisor\.|angi\.com|thumbtack\.|google\.[a-z.]+\/maps|houzz\.|nextdoor\.|wikipedia\.|amazon\.|reddit\.)/i;

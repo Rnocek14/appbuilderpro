@@ -9,7 +9,7 @@
 // social posts reference REAL vault photos (by caption) or say "shoot this", never a stock image;
 // every parser degrades gracefully — a malformed model reply yields fewer items, never a throw.
 
-import type { WorldDNA, BusinessContext } from './genesis';
+import type { WorldDNA, BusinessContext } from './genesis.ts';
 
 export interface FinishedPost { caption: string; visual: string; tags: string[] }
 export interface ResearchSource { title: string; url: string; snippet: string }

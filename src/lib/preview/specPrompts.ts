@@ -9,7 +9,7 @@ import {
   pickRecipe, usablePhotos, usableReviews, SECTION_TYPES, FONT_LIBRARY,
 } from '../../../supabase/functions/_shared/previewSpec.ts';
 import type { BusinessProfile, SiteSpec } from '../../../supabase/functions/_shared/previewSpec.ts';
-import type { WebsiteStrategy, OwnerCritique } from './strategy';
+import type { WebsiteStrategy, OwnerCritique } from './strategy.ts';
 
 /** The one JSON-out parser every chain stage shares. Throws on prose-only responses. */
 export function extractJson<T>(raw: string): T {

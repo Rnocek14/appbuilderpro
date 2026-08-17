@@ -7,7 +7,7 @@
 // Honesty spine: the notes say exactly what implement DOES and what it deliberately does NOT
 // (render/publish stay behind keys, the studio's Produce press, and the Queue).
 
-import type { CompiledPlan } from './orchestrator';
+import type { CompiledPlan } from './orchestrator.ts';
 
 export interface VerticalSpec {
   libId: string;

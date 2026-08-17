@@ -9,7 +9,7 @@
 //
 // The first play is real work, not a demo: Mom's Lake Geneva lakefront seller campaign.
 
-import type { ArtifactKind } from './clustering';
+import type { ArtifactKind } from './clustering.ts';
 
 // ---------------------------------------------------------------------------
 // Types

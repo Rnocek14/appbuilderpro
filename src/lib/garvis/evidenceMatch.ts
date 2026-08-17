@@ -5,4 +5,4 @@
 export {
   normalizeCitation, verifyNominations,
   type EvidenceNomination, type BeliefRef, type EventRef, type VerifiedLink,
-} from '../../../supabase/functions/_shared/evidenceMatch';
+} from '../../../supabase/functions/_shared/evidenceMatch.ts';

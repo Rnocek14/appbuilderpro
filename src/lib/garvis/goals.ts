@@ -12,7 +12,7 @@
 // owner typed the number (and it says so); a goal with no metric is "directional — not measured",
 // never a fake meter.
 
-import type { NextMove } from './nextMove';
+import type { NextMove } from './nextMove.ts';
 
 // ---------------------------------------------------------------------------
 // Types
