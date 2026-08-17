@@ -58,6 +58,60 @@ export async function deployBackendThroughSpine(input: {
   return { ok: res.ok, results: r?.results, error: res.error };
 }
 
+export interface RepoFile { path: string; content: string }
+
+/** Ship source to GitHub THROUGH the spine (SW10.1): capture the snapshot + create the approval,
+ *  then execute it (the operator clicking Export is their approval — the publishThroughSpine
+ *  pattern). github-export re-verifies everything server-side and resolves the token there. */
+export async function shipRepoThroughSpine(input: {
+  projectId: string; repo: string; files: RepoFile[];
+}): Promise<{ url: string | null }> {
+  const approvalId = await requestRepoShip(input);
+  const { data } = await supabase.from('approvals').select(APPROVAL_COLS).eq('id', approvalId).single();
+  const res = await approveAndExecute(data as unknown as Approval);
+  if (!res.ok) throw new Error(res.error ?? 'Export failed.');
+  return { url: (res.result as { url?: string } | undefined)?.url ?? null };
+}
+
+/** Capture a source snapshot + enqueue a ship_repo approval bound to its hash. Returns the
+ *  approval id. The payload pins {project_id, repo, files_hash}; the executor re-derives the
+ *  hash from the captured bundle and refuses on any drift (tamper → 409). */
+export async function requestRepoShip(input: {
+  projectId: string; repo: string; files: RepoFile[];
+}): Promise<string> {
+  const { data: sess } = await supabase.auth.getUser();
+  const uid = sess.user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  if (!input.files.length) throw new Error('No files to export.');
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(input.repo)) throw new Error('That repo name is invalid.');
+  // Secrets never ride to GitHub — refuse at capture, not just server-side.
+  if (input.files.some((f) => /(^|\/)\.env$|(^|\/)\.fableforge\//.test(f.path))) {
+    throw new Error('The snapshot contains secret-bearing paths (.env / .fableforge) — these never ship to GitHub.');
+  }
+  const filesHash = await hashPayload(input.files);
+
+  const { data: bundle, error: bErr } = await supabase.from('deploy_bundles').insert({
+    owner_id: uid, project_id: input.projectId, site_id: null,
+    files: input.files, file_count: input.files.length,
+  }).select('id').single();
+  if (bErr || !bundle) throw new Error(`Could not stage the export: ${bErr?.message ?? 'unknown error'}`);
+
+  const bundleId = (bundle as { id: string }).id;
+  try {
+    return await enqueueApproval({
+      kind: 'ship_repo',
+      title: `Ship code to GitHub (${input.repo})`,
+      preview: `Push ${input.files.length} source file${input.files.length === 1 ? '' : 's'} to the private repo "${input.repo}" on your connected GitHub account. The token stays server-side.`,
+      payload: { project_id: input.projectId, repo: input.repo, bundle_id: bundleId, files_hash: filesHash },
+      requestedBy: 'user',
+    });
+  } catch (e) {
+    // The bundle only exists to serve its approval — do not strand snapshots on enqueue failure.
+    await supabase.from('deploy_bundles').delete().eq('id', bundleId);
+    throw e;
+  }
+}
+
 /** Capture a built bundle + enqueue a deploy_site approval for it. Returns the approval id. The
  *  optional netlifyToken is passed through the approval payload (self-serve hosting) — it's the
  *  user's own token, kept only in their owner-scoped approval row, never shipped to others. */

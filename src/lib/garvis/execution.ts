@@ -13,7 +13,7 @@ import { expiresAtFor } from './approvalTtl';
 export type ApprovalKind =
   | 'send_email' | 'send_sms' | 'publish_post' | 'deploy_site' | 'deploy_backend'
   | 'spend' | 'apply_migration' | 'crm_action' | 'send_batch' | 'send_for_signature'
-  | 'content_week';
+  | 'content_week' | 'ship_repo';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
 
 export interface Approval {
@@ -195,6 +195,18 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     const res = await executeBackendDeploy(a);
     if (!res.ok) await revertToPending(a.id);
     return res;
+  }
+
+  // ship_repo (SW10.1): a REAL executor. The source snapshot was captured into deploy_bundles at
+  // authorization time (requestRepoShip); github-export re-verifies the approval, the payload
+  // hash, and the snapshot hash server-side, resolves the token server-side, and writes the
+  // ledger row itself. We send only the approval id.
+  if (a.kind === 'ship_repo') {
+    const { data, error } = await supabase.functions.invoke('github-export', { body: { approval_id: a.id } });
+    if (error) { await revertToPending(a.id); return { ok: false, error: error.message }; }
+    const res = data as { ok?: boolean; error?: string; url?: string };
+    if (!res?.ok) await revertToPending(a.id);
+    return { ok: !!res?.ok, error: res?.error, result: res };
   }
 
   if (a.kind === 'publish_post') {

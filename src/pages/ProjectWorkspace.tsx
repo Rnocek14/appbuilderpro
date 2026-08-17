@@ -160,7 +160,6 @@ export default function ProjectWorkspace() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
-  const [githubToken, setGithubToken] = useState(() => { try { return localStorage.getItem('ff:gh-token') ?? ''; } catch { return ''; } });
   const [netlifyToken, setNetlifyToken] = useState(() => { try { return localStorage.getItem('ff:netlify-token') ?? ''; } catch { return ''; } });
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [deploying, setDeploying] = useState(false);
@@ -1087,7 +1086,9 @@ export default function ProjectWorkspace() {
     const ref = projectRef();
     window.open(ref ? `https://supabase.com/dashboard/project/${ref}/sql/new` : 'https://supabase.com/dashboard', '_blank');
   };
-  // Export the project's source to a real GitHub repo (create-or-update) via the github-export edge fn.
+  // Export the project's source to a real GitHub repo — THROUGH the approval spine (SW10.1):
+  // the snapshot is captured + hashed at request time, your click is the approval, and the
+  // github-export executor re-verifies everything server-side (token resolved there too).
   const exportGitHub = async () => {
     if (!id) return;
     const repo = ((project?.name ?? 'fableforge-app').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)) || 'fableforge-app';
@@ -1099,11 +1100,9 @@ export default function ProjectWorkspace() {
     if (!payload.length) { toast('error', 'Nothing to export yet.'); return; }
     setDeploying(true);
     try {
-      const { data, error } = await supabase.functions.invoke<{ ok?: boolean; error?: string; url?: string }>(
-        'github-export', { body: { projectId: id, repo, files: payload, githubToken: githubToken.trim() || undefined } });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      if (data?.url) { toast('success', `Exported to ${data.url}`); window.open(data.url, '_blank'); }
+      const { shipRepoThroughSpine } = await import('../lib/garvis/deployRun');
+      const res = await shipRepoThroughSpine({ projectId: id, repo, files: payload });
+      if (res.url) { toast('success', `Exported to ${res.url}`); window.open(res.url, '_blank'); }
       else toast('success', 'Exported to GitHub.');
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Export failed.';
@@ -1812,12 +1811,9 @@ export default function ProjectWorkspace() {
             value={netlifyToken}
             onChange={(e) => { setNetlifyToken(e.target.value); try { localStorage.setItem('ff:netlify-token', e.target.value.trim()); } catch { /* ignore */ } }} />
         </label>
-        <label className="mt-2 block text-[11px] text-forge-dim">
-          <span className="inline-flex items-center gap-1"><Github size={11} /> GitHub token (repo scope) — connect your own account</span>
-          <Input className="mt-1" type="password" placeholder="ghp_… (stored locally; create one at github.com/settings/tokens)"
-            value={githubToken}
-            onChange={(e) => { setGithubToken(e.target.value); try { localStorage.setItem('ff:gh-token', e.target.value.trim()); } catch { /* ignore */ } }} />
-        </label>
+        <p className="mt-2 text-[11px] text-forge-dim">
+          <span className="inline-flex items-center gap-1"><Github size={11} /> GitHub export uses your connected account (Settings → Connections) — the token stays server-side.</span>
+        </p>
         <p className="mt-4 text-[11px] text-forge-dim">Or just record a deployment to track elsewhere:</p>
         <div className="mt-1.5 grid grid-cols-3 gap-2">
           {(['vercel', 'netlify', 'supabase'] as const).map((t) => (
