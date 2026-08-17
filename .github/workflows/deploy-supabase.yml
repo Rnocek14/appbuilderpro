@@ -261,13 +261,16 @@ jobs:
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER }}
+          LOB_API_KEY: ${{ secrets.LOB_API_KEY }}
+          LOB_WEBHOOK_SECRET: ${{ secrets.LOB_WEBHOOK_SECRET }}
         run: |
           set -e
           synced=""
           for name in ANTHROPIC_API_KEY OPENAI_API_KEY WORKER_SECRET CRON_SECRET \
                       GOOGLE_PLACES_API_KEY APP_ORIGIN RESEND_API_KEY RESEND_WEBHOOK_SECRET \
                       INBOUND_SECRET AI_PROVIDER AI_MODEL EMBEDDINGS_API_KEY \
-                      SCREENSHOT_API_KEY TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_NUMBER; do
+                      SCREENSHOT_API_KEY TWILIO_ACCOUNT_SID TWILIO_AUTH_TOKEN TWILIO_FROM_NUMBER \
+                      LOB_API_KEY LOB_WEBHOOK_SECRET; do
             val="${!name}"
             if [ -n "$val" ]; then
               supabase secrets set "$name=$val" --project-ref "$PROJECT_REF" >/dev/null
