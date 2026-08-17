@@ -83,5 +83,27 @@ const command = readFileSync(join(root, 'src/pages/Command.tsx'), 'utf8');
   check('the whisper links the one place decisions happen', page.includes("navigate('/garvis/queue')"));
 }
 
+// ---- part 2 (SW10.9): the Line, the postures, the morph ----
+const dock = readFileSync(join(root, 'src/components/ConciergeDock.tsx'), 'utf8');
+const dockBrain = readFileSync(join(here, 'dockBrain.ts'), 'utf8');
+const shell = readFileSync(join(root, 'src/components/layout/AppShell.tsx'), 'utf8');
+{
+  check('every commander decision carries its posture into the dock (total: postureOf)',
+    dockBrain.includes('const posture = postureOf(cmd);') && dockBrain.includes('posture?: Posture'));
+  check('the Line IS the dock in field dress — same component, keyed off the field route',
+    dock.includes("pathname === '/garvis/field'") && dock.includes('lineMode'));
+  check('the Line centers as the Field\'s one primary element',
+    dock.includes('-translate-x-1/2'));
+  check('postures drive the dressing — all four verbs tint the frame',
+    dock.includes('data-posture') && dock.includes('think:') && dock.includes('create:')
+    && dock.includes('execute:') && dock.includes('observe:')
+    && dock.includes('if (a.posture) setPosture(a.posture)'));
+  check('utterances land in the ONE command_messages thread (threadRun seam)',
+    dock.includes("from '../lib/garvis/threadRun'") && dock.includes('appendThread'));
+  check('THE MORPH IS PROVABLE: the shell mounts the dock, the Field never mounts a second one',
+    shell.includes('<ConciergeDock />') && !page.includes('ConciergeDock'));
+  check('the orbs never hide behind the Line', page.includes('pb-32'));
+}
+
 console.log(`\nfield.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} field check(s) failed`);

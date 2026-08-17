@@ -8,7 +8,7 @@
 // State survives navigation via sessionStorage because AppShell remounts per page.
 
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, GripVertical, Loader2, MessageCircle, Mic, Play, Sparkles, TriangleAlert, Volume2, VolumeX, X } from 'lucide-react';
 import {
   aliasKey, aliasLookup, aliasRemember, deriveWorldTasks, exploreDive, isAboutOpenThing, isBrief, isGoBack, isRevision, matchTasks, parseCommandPrefix, resolve, routeFor, smallTalk, statsFor, withProjectTasks,
@@ -109,6 +109,16 @@ interface DoState {
 
 export function ConciergeDock() {
   const navigate = useNavigate();
+  // THE LINE (SW10.9): on the Field, this same dock — same brain, same command_messages thread —
+  // dresses as the centered Line instead of the corner bubble. It is the SAME component either
+  // way, so touching an orb morphs to that world's surface with the Line persisting as the
+  // corner dock: two dressings, one conversation (the thread + open-state survive the
+  // transition via command_messages and sessionStorage), nothing forked.
+  const { pathname } = useLocation();
+  const lineMode = pathname === '/garvis/field';
+  // The commander's posture (SW4.1) dresses the Line: think/create/execute/observe each tint the
+  // frame, so the operator can SEE what mode the last utterance put Garvis in.
+  const [posture, setPosture] = useState<'think' | 'create' | 'execute' | 'observe' | null>(null);
   // WHERE THE DOCK IS A GUEST. Two surfaces already have a conversation: the command page shows
   // this very transcript, and a project workspace has the builder chat. The dock stays available
   // on both and stops competing — no second copy of the same conversation, and no second chat box
@@ -501,6 +511,7 @@ export function ConciergeDock() {
    * studio area) — the cheap router then gets its shot instead of the operator getting a guess.
    */
   const runDockAction = async (a: DockAction, sentence: string, worlds: ConciergeWorld[]): Promise<boolean> => {
+    if (a.posture) setPosture(a.posture);
     if (a.kind === 'say') {
       tell(a.text);
       speak(a.text);
@@ -921,13 +932,19 @@ export function ConciergeDock() {
 
   if (!open) {
     return (
-      <button ref={(el) => { rootRef.current = el; }} onPointerDown={startDrag}
+      <button ref={(el) => { rootRef.current = el; }} onPointerDown={lineMode ? undefined : startDrag}
         onClick={() => { if (justDragged.current) return; setOpen(true); }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); setOpen(true); } }}
         aria-label="Open the concierge — say what you want to do (drag to move it)"
-        style={posStyle}
-        className="fixed bottom-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105">
-        <MessageCircle size={19} />
+        style={lineMode ? undefined : posStyle}
+        className={cn(
+          'fixed z-50 border border-forge-ember/50 bg-forge-panel text-forge-ember shadow-lg transition-transform hover:scale-105',
+          lineMode
+            // The Line, at rest: the Field's ONE primary element, centered under the orbs.
+            ? 'bottom-6 left-1/2 flex h-11 w-[min(92vw,480px)] -translate-x-1/2 items-center justify-center gap-2 rounded-full text-sm'
+            : 'bottom-4 right-4 flex h-11 w-11 items-center justify-center rounded-full',
+        )}>
+        <MessageCircle size={19} />{lineMode ? <span>Say what you want to do</span> : null}
       </button>
     );
   }
@@ -935,12 +952,23 @@ export function ConciergeDock() {
   const moves = rankMoves(surfaceSuggestions(), tapsRef.current);
   const scrollback = dockScrollback(thread);
 
+  // The posture tint (SW10.9): the frame quietly says which VERB the last utterance resolved to.
+  const postureTint: Record<string, string> = {
+    think: 'border-sky-500/50', create: 'border-forge-ember/60',
+    execute: 'border-emerald-500/50', observe: 'border-violet-500/50',
+  };
+
   return (
-    <div ref={(el) => { rootRef.current = el; }} style={posStyle}
+    <div ref={(el) => { rootRef.current = el; }} style={lineMode ? undefined : posStyle}
+      data-posture={posture ?? undefined}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true); } }}
       onDragLeave={() => setDropping(false)}
       onDrop={(e) => { e.preventDefault(); setDropping(false); void handleFiles(e.dataTransfer.files); }}
-      className={cn('fixed bottom-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
+      className={cn('fixed z-50 rounded-2xl border border-forge-border bg-forge-panel p-3 shadow-2xl',
+        lineMode
+          ? 'bottom-6 left-1/2 w-[min(92vw,560px)] -translate-x-1/2'
+          : 'bottom-4 right-4 w-[340px] max-w-[calc(100vw-2rem)]',
+        posture ? postureTint[posture] : undefined,
         dropping && 'border-forge-ember/70 ring-2 ring-forge-ember/40')}>
       <div className="flex items-center gap-2">
         <button onPointerDown={startDrag} onDoubleClick={redock}

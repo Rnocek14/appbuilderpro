@@ -18,9 +18,9 @@
 //     Do-engine, where it compiles to a reviewable plan the operator presses Run on — nothing
 //     consequential happens because a model chose a verb.
 
-import type { Command } from './commander';
+import { postureOf, type Command, type Posture } from './commander';
 
-export type DockAction =
+export type DockAction = (
   /** Just say it — the deep, grounded answer. */
   | { kind: 'say'; text: string }
   /** Work: hand to the dock's Do-engine, which compiles a REVIEWABLE plan (approval spine intact). */
@@ -28,7 +28,12 @@ export type DockAction =
   /** A destination the dock resolves and navigates to itself. */
   | { kind: 'goto'; to: string; note: string }
   /** A world-scoped studio: the dock matches the world by its own rules, then deep-links. */
-  | { kind: 'studio'; surface: 'mailer' | 'video'; world: string | null; note: string };
+  | { kind: 'studio'; surface: 'mailer' | 'video'; world: string | null; note: string }
+) & {
+  /** The commander's posture (SW4.1) — a VERB, not a place. The Line's dressing reads it (SW10.9);
+   *  absent only on actions that never came from the commander (local router answers). */
+  posture?: Posture;
+};
 
 const clean = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
@@ -40,9 +45,12 @@ const note = (preface: string, fallback: string): string => clean(preface) || fa
  * has an action, and an empty/garbled reply still produces something honest to show.
  */
 export function dockActionFor(cmd: Command): DockAction {
+  // Every action carries the commander's resolved posture — the Line's dressing (SW10.9) reads
+  // it, and postureOf is total, so no Command leaves here undressed.
+  const posture = postureOf(cmd);
   switch (cmd.kind) {
     case 'reply':
-      return { kind: 'say', text: clean(cmd.text) || "I don't have an answer for that one." };
+      return { kind: 'say', text: clean(cmd.text) || "I don't have an answer for that one.", posture };
 
     // WORK — never fired from the corner on a model's say-so. The Do-engine compiles it into a
     // plan with steps, risks, holes and questions, and the operator presses Run.
@@ -51,12 +59,14 @@ export function dockActionFor(cmd: Command): DockAction {
         kind: 'compile',
         sentence: clean(cmd.objective) || clean(cmd.subject),
         note: note(cmd.preface, "Here's the plan — press Run when it reads right."),
+        posture,
       };
     case 'act':
       return {
         kind: 'compile',
         sentence: clean(cmd.instruction),
         note: note(cmd.preface, "Here's the plan — press Run when it reads right."),
+        posture,
       };
 
     // DESTINATIONS — returned as intentions; the dock owns the actual navigation.
@@ -65,12 +75,14 @@ export function dockActionFor(cmd: Command): DockAction {
         kind: 'goto',
         to: `/new?idea=${encodeURIComponent(clean(cmd.prompt).slice(0, 1900))}`,
         note: note(cmd.preface, 'The brief is pre-filled at the forge — press Generate when it reads right.'),
+        posture,
       };
     case 'explore':
       return {
         kind: 'goto',
         to: `/garvis/universe?dive=${encodeURIComponent(clean(cmd.query).slice(0, 300))}`,
         note: note(cmd.preface, 'Opening the rabbit hole.'),
+        posture,
       };
     case 'open':
       return {
@@ -78,6 +90,7 @@ export function dockActionFor(cmd: Command): DockAction {
         surface: cmd.surface,
         world: clean(cmd.world ?? '') || null,
         note: note(cmd.preface, cmd.surface === 'mailer' ? 'Opening the postcard studio.' : 'Opening the video studio.'),
+        posture,
       };
   }
 }

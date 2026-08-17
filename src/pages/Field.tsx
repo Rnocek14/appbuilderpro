@@ -31,7 +31,9 @@ export default function Field() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-3xl px-4 py-8">
+      {/* pb-32: the centered Line (the dock in field dress, SW10.9) floats at the bottom — the
+          orbs must never hide behind the page's one primary element. */}
+      <div className="mx-auto max-w-3xl px-4 py-8 pb-32">
         <h1 className="text-lg font-medium text-forge-ink">The Field</h1>
         <p className="mt-0.5 text-xs text-forge-dim">Every business at a glance — touch one to step in.</p>
 
