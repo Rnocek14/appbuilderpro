@@ -90,6 +90,7 @@
     "verify:shiprepo": "tsx src/lib/garvis/shipRepo.verify.ts",
     "verify:lobverify": "tsx src/lib/garvis/lobVerify.verify.ts",
     "verify:lobdrop": "tsx src/lib/garvis/lobDrop.verify.ts",
+    "verify:lobsend": "tsx src/lib/garvis/lobSend.verify.ts",
     "verify:productlifecycle": "tsx src/lib/garvis/productLifecycle.verify.ts",
     "verify:mindcontextrun": "tsx src/lib/garvis/mindContextRun.verify.ts",
     "verify:agentruncontrol": "tsx src/lib/garvis/agentRunControl.verify.ts",

@@ -117,6 +117,45 @@ export function compileLobHtml(spec: LobPostcardSpec): { front: string; back: st
   return { front, back };
 }
 
+// ---------------------------------------------------------------------------
+// The tracking side (SW10.4): Lob webhook events map onto the piece lifecycle
+// MONOTONICALLY — a piece only ever advances, so replays and out-of-order
+// deliveries can never regress 'delivered' back to 'in_transit'.
+
+/** Lifecycle rank. Advancement is strictly upward; 'returned' is terminal-by-exception. */
+export const PIECE_RANK: Record<string, number> = { staged: 0, submitted: 1, in_transit: 2, delivered: 3 };
+
+/** How many pieces one lob-send invocation submits before it re-invokes itself to drain the rest. */
+export const PIECES_PER_RUN = 25;
+
+/**
+ * Map a Lob event type to the piece status it implies. Unknown events map to null (ignored —
+ * never a guess). 'processed_for_delivery' is USPS's FINAL scan for postcards (there is no
+ * per-mailbox scan), so it is our 'delivered'; the raw event name is preserved in last_event.
+ */
+export function mapLobEvent(eventTypeId: unknown): 'in_transit' | 'delivered' | 'returned' | null {
+  if (typeof eventTypeId !== 'string') return null;
+  const e = eventTypeId.toLowerCase();
+  if (e === 'postcard.returned_to_sender') return 'returned';
+  if (e === 'postcard.processed_for_delivery') return 'delivered';
+  if (e === 'postcard.in_transit' || e === 'postcard.in_local_area' || e === 'postcard.re-routed') return 'in_transit';
+  return null;
+}
+
+/**
+ * The monotonic advance: returns the status to write, or null when the event must be ignored
+ * (replay, out-of-order, or unknown current state). 'returned' applies from any non-returned
+ * state — a came-back piece is a fact regardless of what we believed its progress was.
+ */
+export function advancePiece(current: string, target: 'in_transit' | 'delivered' | 'returned'): string | null {
+  if (current === 'returned') return null;                       // terminal — nothing follows a return
+  if (target === 'returned') return 'returned';
+  const cur = PIECE_RANK[current];
+  const tgt = PIECE_RANK[target];
+  if (cur === undefined || tgt === undefined) return null;       // canceled/failed/unknown never advance
+  return tgt > cur ? target : null;
+}
+
 export interface VerifyMapping {
   status: 'verified' | 'undeliverable' | 'unverified';
   detail: string | null;

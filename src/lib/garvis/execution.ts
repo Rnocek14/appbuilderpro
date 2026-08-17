@@ -197,24 +197,26 @@ export async function approveAndExecute(a: Approval): Promise<{ ok: boolean; err
     return res;
   }
 
-  // send_mail (SW10.3): the DECISION is recorded and the staged drop advances staged → approved —
-  // but nothing mails: the Lob submit executor lands in SW10.4, and pretending otherwise here
-  // would be a fake send. The honest state is visible in the ledger and on the card.
+  // send_mail (SW10.3/10.4): a REAL executor. The drop + pieces + design were snapshotted and
+  // hash-bound at staging; lob-send re-verifies everything server-side (kill switch, hashes,
+  // EDIT holes, cost ceiling, do-not-mail at send time) and drains the pieces through Lob with
+  // per-piece CAS + idempotency. A soft failure returns the row to pending — retryable, never
+  // stranded (the send-email semantics, exactly).
   if (a.kind === 'send_mail') {
     const dropId = a.payload?.drop_id as string | undefined;
     if (dropId) {
       await supabase.from('mail_drops').update({ status: 'approved' })
         .eq('id', dropId).eq('status', 'staged').then(() => {}, () => {});
     }
-    const { data: sess2 } = await supabase.auth.getUser();
-    if (sess2.user?.id) {
-      await supabase.from('execution_runs').insert({
-        owner_id: sess2.user.id, approval_id: a.id, connector: 'garvis', action: 'send_mail',
-        status: 'skipped', request: { approval_id: a.id, drop_id: dropId ?? null },
-        error: 'decision recorded — the Lob submit path is not wired yet; nothing has mailed',
-      }).then(() => {}, () => {});
+    const { data, error } = await supabase.functions.invoke('lob-send', { body: { approval_id: a.id } });
+    if (error) {
+      await revertToPending(a.id);
+      const { invokeFailure } = await import('./videoRun');
+      return { ok: false, error: (await invokeFailure(error, 'The mail executor (lob-send)')).message };
     }
-    return { ok: true, result: { approved: true, executed: false, staged: true } };
+    const res = data as { ok?: boolean; error?: string; submitted?: number; draining?: boolean };
+    if (!res?.ok && !res?.draining) await revertToPending(a.id);
+    return { ok: !!(res?.ok || res?.draining), error: res?.error, result: res };
   }
 
   // ship_repo (SW10.1): a REAL executor. The source snapshot was captured into deploy_bundles at

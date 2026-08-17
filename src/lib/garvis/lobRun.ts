@@ -4,7 +4,7 @@
 // staging (do-not-mail, undeliverable, incomplete addresses all held back and counted), the
 // pieces are snapshotted with per-household qr_tokens, and ONE send_mail approval binds the
 // piece count, the design, and est_total_usd — the executor's hard ceiling — under the payload
-// hash. Nothing mails at approval time until the Lob executor (SW10.4) is wired; the card says so.
+// hash. On approval, lob-send (SW10.4) re-verifies every gate server-side and drains the pieces.
 
 import { supabase } from '../supabase';
 import { enqueueApproval } from './execution';
@@ -104,11 +104,15 @@ export async function requestMailDrop(input: {
     }
 
     // The payload binds the drop, the exact design, and the exact addressed list — the executor
-    // re-derives both hashes from the rows and refuses on drift.
-    const piecesHash = await hashPayload(pieceRows.map((p) => ({
-      household_key: p.household_key, full_name: p.full_name,
-      address1: p.address1, city: p.city, state: p.state, zip5: p.zip5,
-    })));
+    // re-derives both hashes from the rows and refuses on drift. Sorted by household_key so the
+    // server can reconstruct the exact hash input regardless of row-return order.
+    const piecesHash = await hashPayload(pieceRows
+      .map((p) => ({
+        household_key: p.household_key, full_name: p.full_name,
+        address1: p.address1, city: p.city, state: p.state, zip5: p.zip5,
+      }))
+      // Plain codepoint order — localeCompare could disagree between the browser and Deno.
+      .sort((a, b) => (a.household_key < b.household_key ? -1 : a.household_key > b.household_key ? 1 : 0)));
     const specHash = await hashPayload(input.spec as unknown as Record<string, unknown>);
     const approvalId = await enqueueApproval({
       kind: 'send_mail',
@@ -116,7 +120,7 @@ export async function requestMailDrop(input: {
       preview:
         `${part.mailable.length.toLocaleString()} pieces × $${pieceUsd.toFixed(2)} ≈ $${estTotalUsd.toFixed(2)} (the hard ceiling)` +
         `${part.suppressed.length ? ` · ${part.suppressed.length} held back (${bd(breakdown)})` : ''}` +
-        ` · Nothing mails yet — the Lob submit path is not wired; approving records the decision.`,
+        ` · Approving submits through Lob (the one mail path) — every gate re-checked at send time.`,
       payload: {
         drop_id: dropId, territory_id: input.territoryId, world_id: input.worldId,
         pieces: part.mailable.length, est_piece_usd: pieceUsd, est_total_usd: estTotalUsd,

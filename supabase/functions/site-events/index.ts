@@ -38,6 +38,7 @@ Deno.serve(async (req) => {
   try {
     const body = (await req.json().catch(() => ({}))) as {
       token?: string; kind?: string; path?: string; source?: string;
+      pt?: string; // the postcard piece token (SW10.4) — attributes this visit/lead to a household
       lead?: { name?: string; email?: string; phone?: string; message?: string };
     };
     const token = cap(body.token, 64);
@@ -70,11 +71,30 @@ Deno.serve(async (req) => {
     const path = cap(body.path, 300);
     const source = cap(body.source, 60);
 
+    // POSTCARD ATTRIBUTION (SW10.4): a valid piece token ties this visit/lead to the exact
+    // household the card went to. The piece must belong to the SAME owner as the channel — a
+    // token from someone else's drop attributes nothing. Invalid tokens are ignored, never fatal:
+    // the visit is still real.
+    let piece: { id: string; household_key: string; address1: string } | null = null;
+    const pt = cap(body.pt, 64);
+    if (pt && /^[0-9a-f-]{36}$/i.test(pt)) {
+      const { data: p } = await admin.from('mail_pieces')
+        .select('id, owner_id, household_key, address1').eq('qr_token', pt).maybeSingle();
+      if (p && p.owner_id === ownerId) {
+        piece = p as { id: string; household_key: string; address1: string };
+        await admin.from('mail_pieces').update({ last_event: `qr scanned (${kind})` })
+          .eq('id', piece.id).then(() => {}, () => {});
+      }
+    }
+
     // The raw event row — the honest fact that something happened.
     const { error: evErr } = await admin.from('site_events').insert({
       channel_id: channel.id, owner_id: ownerId, world_id: worldId,
       kind, path, source,
-      payload: body.lead ? { has_lead: true } : {},
+      payload: {
+        ...(body.lead ? { has_lead: true } : {}),
+        ...(piece ? { piece_id: piece.id, household_key: piece.household_key } : {}),
+      },
     });
     if (evErr) return json({ error: 'Could not record the event.' }, 500);
 
@@ -94,7 +114,8 @@ Deno.serve(async (req) => {
         ownerId, worldId, channelId: channel.id, previewSiteId: null,
         name, email, phone, message,
         source: source === 'postcard' ? 'postcard-qr' : (source ?? 'website'),
-        mindSubject: `Lead from the website: ${name || email}${source ? ` (via ${source})` : ''}`,
+        mindSubject: `Lead from the website: ${name || email}${source ? ` (via ${source})` : ''}` +
+          (piece ? ` — the postcard household at ${piece.address1}` : ''),
       });
       if (!leadId) return json({ error: 'Could not record the lead.' }, 500);
 

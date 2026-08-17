@@ -105,14 +105,16 @@ export function compileWebsiteBrief(input: WebsiteBriefInput, budget = 9000): We
       '  then show a warm confirmation. The form must NOT send email or contact anyone directly.',
       `- Endpoint: ${input.ingest.endpoint}`,
       '- Submit body: {"token":"' + input.ingest.token + '","kind":"lead","path":location.pathname,',
-      '  "source":srcParam(),"lead":{"name":...,"email":...,"phone":...,"message":...}}',
+      '  "source":srcParam(),"pt":ptParam(),"lead":{"name":...,"email":...,"phone":...,"message":...}}',
       '- ALSO, once per page load, POST a visit ping: {"token":"' + input.ingest.token + '","kind":"visit",',
-      '  "path":location.pathname,"source":srcParam()}',
+      '  "path":location.pathname,"source":srcParam(),"pt":ptParam()}',
       '  (fire-and-forget; never block rendering; swallow errors silently).',
       '- srcParam() = new URLSearchParams(location.search); return p.get("src")||p.get("utm_source")||undefined —',
       '  campaign attribution: postcard QR carries ?src=postcard, ads carry ?src=meta-ads / ?src=google-ads',
       '  or standard UTMs. Persist it in sessionStorage on first load so a lead submitted from another',
       '  page still carries its source.',
+      '- ptParam() = same pattern for p.get("pt") (the postcard piece token — attributes the visit to the',
+      '  exact household the card went to). Persist alongside src in sessionStorage; omit when absent.',
     ].join('\n'));
   } else {
     sections.push([

@@ -86,13 +86,16 @@ const ttl = readFileSync(join(root, 'supabase/functions/_shared/approvalTtl.ts')
     && run.includes('spec_hash: specHash') && run.includes('est_total_usd: estTotalUsd'));
   check('the card prices the drop and names the ceiling and the suppression breakdown',
     run.includes('the hard ceiling') && run.includes('held back'));
-  check('the card says nothing mails yet — no fake send at approval time',
-    run.includes('Nothing mails yet'));
+  check('the card says approval executes through the one mail path with gates re-checked',
+    run.includes('every gate re-checked at send time'));
   check('every piece carries a fresh per-household attribution token', run.includes('qr_token: crypto.randomUUID()'));
   check('a failed stage cleans up after itself (pieces cascade with the drop)',
     /catch \(e\) \{\s*await cleanup\(\)/.test(run));
-  check('approving advances the drop staged → approved and ledgers the honest skip',
-    client.includes("eq('status', 'staged')") && client.includes('nothing has mailed'));
+  check('approving advances the drop staged → approved and executes through lob-send',
+    client.includes("eq('status', 'staged')")
+    && /send_mail'\)\s*\{[\s\S]{0,900}functions\.invoke\('lob-send', \{ body: \{ approval_id: a\.id \} \}\)/.test(client));
+  check('a soft failure returns the row to pending — retryable, never stranded',
+    /send_mail'\)\s*\{[\s\S]{0,1600}revertToPending\(a\.id\)/.test(client));
   check('rejecting cancels the staged drop', /send_mail' && inv\.payload\?\.drop_id[\s\S]{0,200}status: 'canceled'/.test(client));
   check('the farm panel stages through the spine', panel.includes('requestMailDrop({'));
   check('the staging tables avoid the app_0035 mail_batches clash',
