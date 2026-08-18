@@ -11,7 +11,11 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { getConnection, upsertConnection, probeProvider } from '../_shared/connections.ts';
 
-const PROVIDERS = new Set(['supabase', 'github', 'netlify', 'vercel', 'docusign', 'ayrshare']);
+const PROVIDERS = new Set([
+  'supabase', 'github', 'netlify', 'vercel', 'docusign', 'ayrshare',
+  // Service keys (the API manager): per-user keys with the platform env key as fallback.
+  'resend', 'lob', 'google_places', 'twilio',
+]);
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -27,9 +31,24 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: 'Unauthorized' }, 401);
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { action, provider, token, accountLabel } = (await req.json().catch(() => ({}))) as {
+    const { action, provider, token, accountLabel, meta } = (await req.json().catch(() => ({}))) as {
       action?: string; provider?: string; token?: string; accountLabel?: string;
+      meta?: { from_number?: string };
     };
+
+    // Which service keys the PLATFORM has configured — booleans only, values never leave the server.
+    // The hub uses this to say "running on the platform key" honestly instead of guessing.
+    if (action === 'status') {
+      const has = (n: string) => !!Deno.env.get(n)?.trim();
+      return json({ platform: {
+        resend: has('RESEND_API_KEY'),
+        lob: has('LOB_API_KEY'),
+        google_places: has('GOOGLE_PLACES_API_KEY'),
+        twilio: has('TWILIO_ACCOUNT_SID') && has('TWILIO_AUTH_TOKEN') && has('TWILIO_FROM_NUMBER'),
+        anthropic: has('ANTHROPIC_API_KEY'),
+        stripe: has('STRIPE_SECRET_KEY'),
+      } });
+    }
 
     if (action === 'list') {
       const { data } = await admin.from('provider_connections')
@@ -55,7 +74,18 @@ Deno.serve(async (req) => {
       if (!token || !token.trim()) return json({ error: 'A token is required to connect.' }, 400);
       const probe = await probeProvider(provider, token.trim());
       if (!probe.ok) return json({ error: `Could not verify ${provider} token: ${probe.error ?? 'rejected'}` }, 400);
-      await upsertConnection(admin, user.id, provider, { access_token: token.trim(), account_label: accountLabel ?? probe.label ?? null });
+      // Twilio carries one extra fact — the sending number. Only that key is accepted, validated
+      // to phone shape, and it lands in metadata (send-sms/garvis-line read it per-user).
+      let metadata: Record<string, unknown> | undefined;
+      if (provider === 'twilio' && meta?.from_number) {
+        const from = meta.from_number.trim();
+        if (!/^\+?[0-9][0-9 ().-]{6,18}$/.test(from)) return json({ error: 'The from number must be a phone number (E.164 like +15551234567 works best).' }, 400);
+        metadata = { from_number: from };
+      }
+      await upsertConnection(admin, user.id, provider, {
+        access_token: token.trim(), account_label: accountLabel ?? probe.label ?? null,
+        ...(metadata ? { metadata } : {}),
+      });
       return json({ ok: true, label: probe.label });
     }
 
