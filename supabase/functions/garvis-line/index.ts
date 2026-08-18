@@ -16,6 +16,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { timingSafeEqual } from '../_shared/cronGate.ts';
+import { twilioCreds } from '../_shared/connections.ts';
 import { toE164 } from '../../../src/lib/garvis/sms.ts';
 import {
   MAX_CODE_ATTEMPTS, bindingState, codeExpiryFrom, codeFormatOk, hashCode, maskPhone,
@@ -61,12 +62,12 @@ Deno.serve(async (req) => {
       if (row && !startAllowed(row.last_start_at, row.starts_in_hour, nowIso)) {
         return json({ error: 'Too many code requests this hour — wait a bit and try again.' }, 429);
       }
-      const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
-      const token = Deno.env.get('TWILIO_AUTH_TOKEN');
-      const from = Deno.env.get('TWILIO_FROM_NUMBER');
-      if (!sid || !token || !from) {
-        return json({ error: 'Texting is not set up yet — add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER to function secrets first.' }, 503);
+      // Connection-first (API manager): the caller's own Twilio rail, platform fallback.
+      const creds = await twilioCreds(admin, user.id);
+      if (!creds?.from) {
+        return json({ error: 'Texting is not set up yet — connect Twilio in Settings → Connections first.' }, 503);
       }
+      const { sid, token, from } = creds;
 
       // The code is born, texted, hashed, and forgotten — it exists in plaintext only inside
       // the SMS body below.

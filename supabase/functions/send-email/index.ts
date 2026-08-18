@@ -18,6 +18,7 @@ import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
 import { openSendPrediction } from '../_shared/predictionSrv.ts';
 import { findShortenedLinks } from '../_shared/emailPlacementCore.ts';
+import { serviceKey } from '../_shared/connections.ts';
 import { senderDomainBlockReason, type DomainStatus } from '../../../src/lib/garvis/email/senderDomain.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -95,8 +96,10 @@ Deno.serve(async (req) => {
     const messageId = (approval.payload as { message_id?: string })?.message_id;
     if (!messageId) return json({ error: 'Approval payload is missing message_id.' }, 400);
 
-    const resendKey = Deno.env.get('RESEND_API_KEY');
-    if (!resendKey) return json({ error: 'Email is not configured (RESEND_API_KEY missing).' }, 400);
+    // Connection-first (API manager): the owner's own Resend key carries their sends; the
+    // platform key is the fallback. uid is already the OWNER on both caller paths.
+    const { key: resendKey } = await serviceKey(admin, uid, 'resend', 'RESEND_API_KEY');
+    if (!resendKey) return json({ error: 'Email is not configured — connect Resend in Settings → Connections.' }, 400);
 
     const { data: msg } = await admin.from('outreach_messages')
       .select('id, owner_id, campaign_id, contact_id, batch_id, preview_site_id, subject, body_text, body_html, to_address, status, sent_at')

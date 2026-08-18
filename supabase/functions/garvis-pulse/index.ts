@@ -17,6 +17,7 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { stampHeartbeat } from '../_shared/heartbeat.ts';
+import { twilioCreds } from '../_shared/connections.ts';
 import { notifyText } from '../_shared/notify.ts';
 import { observe, pickToSay, type ProactiveFacts } from '../../../src/lib/garvis/proactive.ts';
 import { safeFetch } from '../_shared/safeFetch.ts';
@@ -225,10 +226,9 @@ Deno.serve(async (req) => {
   // opt-out (unbind). Nothing here acts outward — a text SAYS; the app still does.
   let texted = 0;
   try {
-    const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
-    const token = Deno.env.get('TWILIO_AUTH_TOKEN');
-    const fromNum = Deno.env.get('TWILIO_FROM_NUMBER');
-    if (sid && token && fromNum) {
+    // Connection-first (API manager): each owner texts on THEIR OWN Twilio rail when connected,
+    // the platform rail as fallback — resolved per owner inside the loop, after the cheap gates.
+    {
       const { data: linesData } = await admin.from('garvis_line')
         .select('owner_id, phone_e164').eq('proactive_enabled', true).not('verified_at', 'is', null).limit(500);
       for (const line of (linesData ?? []) as { owner_id: string; phone_e164: string }[]) {
@@ -238,6 +238,9 @@ Deno.serve(async (req) => {
           const tz2 = (os2 as { timezone?: string } | null)?.timezone ?? 'America/Chicago';
           const { hour: localHour } = localParts(now, tz2);
           if (localHour < 8 || localHour >= 21) continue;                    // waking hours only
+
+          const creds = await twilioCreds(admin, owner);
+          if (!creds?.from) continue;                                        // no texting rail for this owner
 
           const probe = async <T,>(run: () => PromiseLike<{ data: unknown; error: unknown }>): Promise<T | null> => {
             try { const { data, error } = await run(); return error ? null : ((data ?? []) as T); } catch { return null; }
@@ -266,10 +269,10 @@ Deno.serve(async (req) => {
               { onConflict: 'owner_id,key,channel', ignoreDuplicates: true }).select('id');
           if (!(claimed ?? []).length) continue;                            // another tick beat us to it
 
-          const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+          const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${creds.sid}/Messages.json`, {
             method: 'POST',
-            headers: { Authorization: `Basic ${btoa(`${sid}:${token}`)}`, 'content-type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ To: line.phone_e164, From: fromNum, Body: say.text.slice(0, 1000) }),
+            headers: { Authorization: `Basic ${btoa(`${creds.sid}:${creds.token}`)}`, 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ To: line.phone_e164, From: creds.from, Body: say.text.slice(0, 1000) }),
             signal: AbortSignal.timeout(15_000),
           });
           if (!res.ok) continue;                                            // ledger row stands; no retry storm

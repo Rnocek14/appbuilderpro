@@ -24,6 +24,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches, hashPayload } from '../_shared/payloadHash.ts';
 import { compileLobHtml, PIECES_PER_RUN, type LobPostcardSpec } from '../_shared/lobCore.ts';
+import { serviceKey } from '../_shared/connections.ts';
 
 interface PieceRow {
   id: string; household_key: string; full_name: string;
@@ -93,8 +94,10 @@ Deno.serve(async (req) => {
       return json({ error: `The drop is ${drop.status} — only an approved drop mails.` }, 409);
     }
 
-    const apiKey = Deno.env.get('LOB_API_KEY');
-    if (!apiKey) return json({ error: 'Lob is not connected — set the LOB_API_KEY secret.' }, 400);
+    // Connection-first (API manager): the drop prints and bills on the owner's own Lob key when
+    // connected; the platform key is the fallback. uid is the OWNER on both caller paths.
+    const { key: apiKey } = await serviceKey(admin, uid, 'lob', 'LOB_API_KEY');
+    if (!apiKey) return json({ error: 'Lob is not connected — connect it in Settings → Connections.' }, 400);
 
     const ledger = (row: Record<string, unknown>) =>
       admin.from('execution_runs').insert({ owner_id: uid, approval_id, connector: 'lob', action: 'send_mail', ...row });

@@ -75,6 +75,8 @@ import { parseContentWeekConfig, weekSlots, contentWeekLine } from '../_shared/s
 import { composeBatchRecipients, unknownTokens } from '../_shared/batchCore.ts';
 import { computeSegment, nextDripStep, type SentStep, type DripStep, type BehavioralRule } from '../_shared/emailFlowsCore.ts';
 import { sunsetContacts } from '../_shared/emailPlacementCore.ts';
+// Aliased: HuntEnv's own `serviceKey` field is the service-role key — a different thing entirely.
+import { serviceKey as connectionKey } from '../_shared/connections.ts';
 // SW6.1 — the worker takes the creative load: the same shared cores the client executors use,
 // so an approved arc's social/segment/CTA/episode steps advance overnight to PENDING APPROVALS
 // (never to sends — porting moves work server-side, never approval).
@@ -152,12 +154,14 @@ Deno.serve(async (req) => {
       .update({ status: 'building', updated_at: new Date().toISOString() })
       .eq('id', body.pitch_lead_id).eq('owner_id', ownerScope).neq('status', 'building').select('id');
     if (!claimRows?.length) return json({ error: 'This prospect is already being built — give it a moment.' }, 409);
+    // Connection-first (API manager): the pitch build hunts on the owner's own Places key.
+    const { key: pitchPlacesKey } = await connectionKey(admin, ownerScope, 'google_places', 'GOOGLE_PLACES_API_KEY');
     const env: HuntEnv = {
       supabaseUrl: Deno.env.get('SUPABASE_URL')!,
       workerSecret: workerSecret ?? '',
       serviceKey,
       appOrigin,
-      placesKey: Deno.env.get('GOOGLE_PLACES_API_KEY') ?? '',
+      placesKey: pitchPlacesKey ?? '',
       nowYear: new Date(nowIso).getUTCFullYear(),
       runRatings: new Map(),
     };
@@ -2099,8 +2103,9 @@ async function runAreaStudy(admin: any, order: OrderRow, nowIso: string):
   if (!niche || towns.length === 0 || !areaLabel) {
     return { line: `${order.label}: config is missing niche/towns/area — nothing to study.`, done: true, audited: 0, failed: 0 };
   }
-  const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
-  if (!placesKey) return { line: `${order.label}: GOOGLE_PLACES_API_KEY missing — study cannot search.`, done: false, audited: 0, failed: 0 };
+  // Connection-first (API manager): the study searches on the order owner's own Places key.
+  const { key: placesKey } = await connectionKey(admin, order.owner_id, 'google_places', 'GOOGLE_PLACES_API_KEY');
+  if (!placesKey) return { line: `${order.label}: Google Places isn’t connected — study cannot search. Connect it in Settings → Connections.`, done: false, audited: 0, failed: 0 };
 
   const env: HuntEnv = {
     supabaseUrl: Deno.env.get('SUPABASE_URL')!,
@@ -2205,8 +2210,9 @@ async function runClientHunt(admin: any, order: OrderRow, nowIso: string):
   Promise<{ discovered: number; built: number; queued: number; line: string }> {
   const cfg = parseHuntConfig(order.config);
   if (!cfg) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: no config — nothing to hunt. Set it up on Win Clients.` };
-  const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
-  if (!placesKey) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: Google Places isn’t configured on the server (GOOGLE_PLACES_API_KEY missing) — nothing was hunted.` };
+  // Connection-first (API manager): the hunt discovers on the order owner's own Places key.
+  const { key: placesKey } = await connectionKey(admin, order.owner_id, 'google_places', 'GOOGLE_PLACES_API_KEY');
+  if (!placesKey) return { discovered: 0, built: 0, queued: 0, line: `${order.label}: Google Places isn’t connected — nothing was hunted. Connect it in Settings → Connections.` };
 
   const env: HuntEnv = {
     supabaseUrl: Deno.env.get('SUPABASE_URL')!,

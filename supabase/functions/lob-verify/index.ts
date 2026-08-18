@@ -15,6 +15,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { mapDeliverability, VERIFY_RUN_CAP, VERIFY_THROTTLE_MS } from '../_shared/lobCore.ts';
+import { serviceKey } from '../_shared/connections.ts';
 
 interface RecipientRow {
   id: string;
@@ -48,8 +49,10 @@ Deno.serve(async (req) => {
     if (!settings?.mail_enabled) {
       return json({ error: 'Direct mail is disabled — turn on Mail in Settings → Outreach before verifying addresses.' }, 422);
     }
-    const apiKey = Deno.env.get('LOB_API_KEY');
-    if (!apiKey) return json({ error: 'Lob is not connected — set the LOB_API_KEY secret to verify addresses.' }, 422);
+    // Connection-first (API manager): verification spend rides the owner's own Lob key when
+    // connected; the platform key is the fallback.
+    const { key: apiKey } = await serviceKey(admin, user.id, 'lob', 'LOB_API_KEY');
+    if (!apiKey) return json({ error: 'Lob is not connected — connect it in Settings → Connections to verify addresses.' }, 422);
 
     // Territory ownership, then the unverified slice — HARD-CAPPED per run.
     const { data: terr } = await admin.from('farm_territories')

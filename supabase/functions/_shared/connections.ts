@@ -74,10 +74,16 @@ export async function probeProvider(provider: string, token: string): Promise<{ 
       return { ok: true, label: token.startsWith('live_') ? 'Lob (live)' : 'Lob (test)' };
     }
     if (provider === 'google_places') {
-      const r = await fetch(`https://maps.googleapis.com/maps/api/place/findplacefromtext/json?input=coffee&inputtype=textquery&key=${encodeURIComponent(token)}`);
-      const d = await r.json() as { status?: string; error_message?: string };
-      if (d.status === 'REQUEST_DENIED' || d.status === 'INVALID_REQUEST') {
-        return { ok: false, error: d.error_message ?? `Places said ${d.status} — check the key and that Places API is enabled` };
+      // Places API (New) — the same backend every hunt path calls, so a key that passes here
+      // is a key that actually works in production (system-control's probe_places pattern).
+      const r = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': token, 'X-Goog-FieldMask': 'places.id' },
+        body: JSON.stringify({ textQuery: 'coffee shop', maxResultCount: 1, regionCode: 'US' }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({})) as { error?: { message?: string } };
+        return { ok: false, error: d.error?.message ?? `Places ${r.status} — check the key and that "Places API (New)" is enabled` };
       }
       return { ok: true, label: 'Places API' };
     }
@@ -95,6 +101,42 @@ export async function probeProvider(provider: string, token: string): Promise<{ 
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+// ---- CONNECTION-FIRST KEY CONSUMPTION (API manager part 2) --------------------------------------
+// Executors resolve service keys through here: the owner's OWN connection first, the platform env
+// key as fallback. `source` says which is carrying the call — surfaces and ledgers can stay honest.
+// Deliberately NOT routed through here: inbound webhook signature checks (sms-inbound/voice-inbound
+// validate against the PLATFORM number's auth token — per-user keys don't apply to inbound routing)
+// and platform notifications to the operator (_shared/notify).
+
+export interface ServiceKeyResult { key: string | null; source: 'connection' | 'platform' | null }
+
+/** The owner's connected key for a provider, else the platform env key, else an honest null. */
+export async function serviceKey(
+  admin: SupabaseClient, ownerId: string, provider: string, envName: string,
+): Promise<ServiceKeyResult> {
+  const conn = await getConnection(admin, ownerId, provider).catch(() => null);
+  const own = conn?.access_token?.trim();
+  if (own) return { key: own, source: 'connection' };
+  const fallback = Deno.env.get(envName)?.trim();
+  return fallback ? { key: fallback, source: 'platform' } : { key: null, source: null };
+}
+
+export interface TwilioCreds { sid: string; token: string; from: string | null; source: 'connection' | 'platform' }
+
+/** Twilio's credential pair + sending number, connection-first. Null = neither side is configured. */
+export async function twilioCreds(admin: SupabaseClient, ownerId: string): Promise<TwilioCreds | null> {
+  const conn = await getConnection(admin, ownerId, 'twilio').catch(() => null);
+  const split = conn?.access_token ? splitTwilioToken(conn.access_token) : null;
+  if (split) {
+    const metaFrom = typeof conn?.metadata?.from_number === 'string' ? conn.metadata.from_number.trim() : '';
+    return { sid: split.sid, token: split.secret, from: metaFrom || Deno.env.get('TWILIO_FROM_NUMBER') || null, source: 'connection' };
+  }
+  const sid = Deno.env.get('TWILIO_ACCOUNT_SID');
+  const token = Deno.env.get('TWILIO_AUTH_TOKEN');
+  if (!sid || !token) return null;
+  return { sid, token, from: Deno.env.get('TWILIO_FROM_NUMBER') ?? null, source: 'platform' };
 }
 
 /** Twilio is a credential PAIR — stored as one token "ACCOUNT_SID:AUTH_TOKEN". Null = malformed. */

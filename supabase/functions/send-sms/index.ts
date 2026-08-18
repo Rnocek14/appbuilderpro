@@ -13,6 +13,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
+import { twilioCreds } from '../_shared/connections.ts';
 import { toE164, validSmsBody, smsConsentOk, resolveSmsFrom, type SmsConsent } from '../../../src/lib/garvis/sms.ts';
 
 Deno.serve(async (req) => {
@@ -59,14 +60,17 @@ Deno.serve(async (req) => {
     if (!messageId) return json({ error: 'Approval payload is missing message_id.' }, 400);
     const smsKind = payload.sms_kind === 'transactional' ? 'transactional' : 'marketing';   // default to the stricter gate
 
-    const accountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-    const authToken = Deno.env.get('TWILIO_AUTH_TOKEN');
+    // Connection-first (API manager): the owner's own Twilio account carries their texts; the
+    // platform account is the fallback.
+    const creds = await twilioCreds(admin, uid);
+    const accountSid = creds?.sid;
+    const authToken = creds?.token;
     // PER-CLIENT ROUTING: the enqueuer stamps payload.from_number with the client's own number when
     // they've connected one, so the text comes from THEIR line (recognizable to their customer). We
-    // still fall back to the operator's shared TWILIO_FROM_NUMBER. Both sit on the one Twilio account,
-    // so accountSid/authToken stay global. Refuse only when neither sender is usable.
-    const fromNumber = resolveSmsFrom(payload.from_number, Deno.env.get('TWILIO_FROM_NUMBER'));
-    if (!accountSid || !authToken) return json({ error: 'SMS is not configured (Twilio secrets missing).' }, 400);
+    // still fall back to the owner's connected number, then the platform TWILIO_FROM_NUMBER.
+    // Refuse only when neither sender is usable.
+    const fromNumber = resolveSmsFrom(payload.from_number, creds?.from ?? undefined);
+    if (!accountSid || !authToken) return json({ error: 'SMS is not configured — connect Twilio in Settings → Connections.' }, 400);
     if (!fromNumber) return json({ error: 'No SMS sender number configured (client or default).' }, 400);
 
     const { data: msg } = await admin.from('outreach_messages')

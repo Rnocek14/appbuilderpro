@@ -74,5 +74,38 @@ const hook = read('src/hooks/useConnections.ts');
     hook.includes("action: 'status'") && hook.includes('platformHas'));
 }
 
+// ---- part 2: connection-first consumption (the owner's key carries their calls) ----
+{
+  check('serviceKey resolves the CONNECTION first, platform env second',
+    /serviceKey[\s\S]{0,500}getConnection[\s\S]{0,300}source: 'connection'[\s\S]{0,200}Deno\.env\.get\(envName\)/.test(shared));
+  check('a connections-table hiccup degrades to the platform key, never a crash',
+    /getConnection\(admin, ownerId, provider\)\.catch\(\(\) => null\)/.test(shared));
+  check('twilioCreds prefers the connected pair + its from number, platform as fallback',
+    shared.includes('splitTwilioToken(conn.access_token)') && /twilioCreds[\s\S]{0,900}source: 'platform'/.test(shared));
+  const consumers: [string, string][] = [
+    ['send-email', 'serviceKey(admin, uid, \'resend\''],
+    ['sender-domain', 'serviceKey(admin, uid, \'resend\''],
+    ['lob-verify', 'serviceKey(admin, user.id, \'lob\''],
+    ['lob-send', 'serviceKey(admin, uid, \'lob\''],
+    ['discover-run', 'serviceKey(admin, ownerId, \'google_places\''],
+    ['discover-media', 'serviceKey(admin, user.id, \'google_places\''],
+    ['lead-ingest', 'serviceKey(admin, ownerId, \'google_places\''],
+    ['system-control', 'serviceKey(admin, user.id, \'google_places\''],
+    ['garvis-pulse', 'twilioCreds(admin, owner)'],
+    ['garvis-line', 'twilioCreds(admin, user.id)'],
+    ['send-sms', 'twilioCreds(admin, uid)'],
+  ];
+  for (const [fnName, needle] of consumers) {
+    check(`${fnName} consumes connection-first`, read(`supabase/functions/${fnName}/index.ts`).includes(needle));
+  }
+  const worker = read('supabase/functions/standing-worker/index.ts');
+  check('all three standing-worker hunt paths consume connection-first',
+    (worker.match(/connectionKey\(admin, /g) ?? []).length === 3);
+  check('inbound webhooks stay on the PLATFORM auth token — per-user keys never gate inbound routing',
+    !read('supabase/functions/sms-inbound/index.ts').includes('twilioCreds')
+    && !read('supabase/functions/voice-inbound/index.ts').includes('twilioCreds')
+    && shared.includes('inbound routing'));
+}
+
 console.log(`\nconnectorCatalog.verify: ${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} connector check(s) failed`);

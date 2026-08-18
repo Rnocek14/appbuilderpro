@@ -19,6 +19,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { completeWithWebSearch } from '../_shared/ai.ts';
 import { checkCredits, spendCredits, InsufficientCreditsError } from '../_shared/credits.ts';
+import { serviceKey } from '../_shared/connections.ts';
 import { LOCAL_NICHES } from '../../../src/lib/garvis/clientHuntSchedule.ts';
 import { bigMetroCities } from '../../../src/lib/garvis/bigCities.ts';
 import { parsePlace, buildDiscoveryQueries, exhaustionUpdate, placesQueryText, PLACES_FIELD_MASK, type PlaceRaw } from '../../../src/lib/garvis/placesDiscovery.ts';
@@ -146,17 +147,18 @@ Deno.serve(async (req) => {
     // grounding rules, same pool inserts (the lead pool grows either way), same per-call metering.
     const targeted = typeof rawKeyword === 'string' && rawKeyword.trim().length > 0;
 
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
     // Each engine needs its own key. Claude web-search only needs the Anthropic key the app already
-    // uses — no Google Cloud setup.
-    const placesKey = Deno.env.get('GOOGLE_PLACES_API_KEY');
-    if (source === 'places' && !placesKey) return json({ error: 'GOOGLE_PLACES_API_KEY is not set — add it in Supabase secrets.' }, 400);
+    // uses — no Google Cloud setup. Places is connection-first (API manager): the owner's own key
+    // when connected, the platform key as fallback.
+    const { key: placesKey } = await serviceKey(admin, ownerId, 'google_places', 'GOOGLE_PLACES_API_KEY');
+    if (source === 'places' && !placesKey) return json({ error: 'Google Places is not connected — connect it in Settings → Connections.' }, 400);
     if (source === 'claude' && !Deno.env.get('ANTHROPIC_API_KEY')) return json({ error: 'ANTHROPIC_API_KEY is not set — add it in Supabase secrets.' }, 400);
 
     // Claude calls are metered per combo, so batches stay small; Places is a cheap firehose.
     const maxBatch = source === 'claude' ? 3 : 10;
     const batch = Math.max(1, Math.min(Math.floor(rawBatch ?? (source === 'claude' ? 2 : 4)), maxBatch));
-
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
     if (targeted) {
       // Targeted runs are always the Claude scout — a targeted Places search already exists
