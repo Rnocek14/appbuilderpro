@@ -1,0 +1,47 @@
+# Live routing eval — grades the REAL compiler model on the full ROUTING_CASES table (the
+# deterministic contract half runs in ci.yml as verify:orchestratorcases on every push).
+# Needs: secret ANTHROPIC_API_KEY, repo variable HEADLESS_MODEL. Skips with a notice when the key
+# is absent — never a red X for missing setup.
+
+name: Routing Eval
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays 09:00 UTC — a weekly answer to "does the router still read us right?"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      HEADLESS_MODEL: ${{ vars.HEADLESS_MODEL }}
+    steps:
+      - name: Check setup
+        id: setup
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::notice::ANTHROPIC_API_KEY is not set as a repo secret — skipping the live eval (the contract suite still runs in CI)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$HEADLESS_MODEL" ]; then
+            echo "::notice::HEADLESS_MODEL repo variable is not set — the model id is configuration; skipping."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.setup.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.setup.outputs.ready == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+        if: steps.setup.outputs.ready == 'true'
+
+      - name: Run the live routing eval
+        if: steps.setup.outputs.ready == 'true'
+        run: npx tsx scripts/routingEvalRun.ts
