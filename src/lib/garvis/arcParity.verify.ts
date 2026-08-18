@@ -165,8 +165,9 @@ check('END STATE: the client-only allowlist is exactly the two browser handoffs,
 const genSrv = readFileSync(join(here, '../../../supabase/functions/_shared/genesisSrv.ts'), 'utf8');
 const genRun = readFileSync(join(here, 'genesisRun.ts'), 'utf8');
 const bothGen = (name: string, needle: string) => check(name, genSrv.includes(needle) && genRun.includes(needle));
-bothGen('both genesis paths run the same two-stage parse (DNA)', 'parseDNA(dnaText)');
-bothGen('…and the same web synthesis parse', 'parseGenesis(genText, dna)');
+bothGen('both genesis paths run the same two-stage parse (DNA), one bounded retry each', 'if (!dna) dna = parseDNA(await reason(');
+bothGen('…and the same web synthesis parse with the same retry seam', 'if (second.draft) parsed = second;');
+bothGen('…with the identical JSON-only reminder on both sides', 'Return ONLY the complete JSON object');
 bothGen('both persist ONLY a draft row', "status: 'draft'");
 bothGen("both mark the row 'generated'", "source: 'generated'");
 bothGen('both refuse a too-short intent with the same words', 'Say a little more about the business');
