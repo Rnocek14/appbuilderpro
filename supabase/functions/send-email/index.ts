@@ -17,6 +17,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/ai.ts';
 import { payloadMatches } from '../_shared/payloadHash.ts';
 import { openSendPrediction } from '../_shared/predictionSrv.ts';
+import { findShortenedLinks } from '../_shared/emailPlacementCore.ts';
 import { senderDomainBlockReason, type DomainStatus } from '../../../src/lib/garvis/email/senderDomain.ts';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -110,6 +111,15 @@ Deno.serve(async (req) => {
     const composed = `${msg.subject ?? ''}\n${msg.body_text ?? ''}\n${msg.body_html ?? ''}`;
     if (/\[(?:YOU FILL|EDIT)\b/i.test(composed)) {
       return json({ error: 'Message still has an unfilled [YOU FILL]/[EDIT] placeholder — refusing to send.' }, 422);
+    }
+
+    // SHORTENER GATE (fail-closed, same posture as the placeholder gate): filters treat shortened
+    // links as cloaked destinations and junk the mail — and one junked send taxes the domain's
+    // reputation for every future send. There is no legitimate shortener in our mail, so this is
+    // the one placement finding that refuses rather than advises.
+    const shortened = findShortenedLinks(composed);
+    if (shortened.length) {
+      return json({ error: `Message links through a URL shortener (${shortened[0]}) — shortened links get email junked. Use the full URL.` }, 422);
     }
 
     const priorResult = (approval.result as Record<string, unknown> | null) ?? {};

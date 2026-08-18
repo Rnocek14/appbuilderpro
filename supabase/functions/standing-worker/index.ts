@@ -74,6 +74,7 @@ import { honestySystemPrompt, judgeSystemPrompt, judgeUserPrompt, parseJudgeVerd
 import { parseContentWeekConfig, weekSlots, contentWeekLine } from '../_shared/standingCore.ts';
 import { composeBatchRecipients, unknownTokens } from '../_shared/batchCore.ts';
 import { computeSegment, nextDripStep, type SentStep, type DripStep, type BehavioralRule } from '../_shared/emailFlowsCore.ts';
+import { sunsetContacts } from '../_shared/emailPlacementCore.ts';
 // SW6.1 — the worker takes the creative load: the same shared cores the client executors use,
 // so an approved arc's social/segment/CTA/episode steps advance overnight to PENDING APPROVALS
 // (never to sends — porting moves work server-side, never approval).
@@ -332,9 +333,16 @@ Deno.serve(async (req) => {
           .order('created_at', { ascending: false }).limit(5000);
         if (!evErr && (evRows ?? []).length < 5000) {
           const seg = computeSegment(evRows ?? [], rule, nowIso);
-          if (seg.contactIds.length) {
+          // THE SUNSET RULE (emailPlacementCore): a contact delivered 5+ emails in this window who
+          // never opened/clicked/replied is asleep — enrolling them again is the spam signal
+          // providers punish hardest. Matters most to 'no_open' flows, deliberately: one
+          // re-engagement attempt is a play; the sixth is a reputation tax. A single real
+          // engagement inside the window wakes them right back up.
+          const asleep = sunsetContacts(evRows ?? []);
+          const enrollIds = seg.contactIds.filter((cid) => !asleep.has(cid));
+          if (enrollIds.length) {
             await admin.from('email_flow_members').upsert(
-              seg.contactIds.slice(0, 500).map((cid) => ({ owner_id: flow.owner_id, flow_id: flow.id, contact_id: cid })),
+              enrollIds.slice(0, 500).map((cid) => ({ owner_id: flow.owner_id, flow_id: flow.id, contact_id: cid })),
               { onConflict: 'flow_id,contact_id', ignoreDuplicates: true },
             ).then(() => {}, () => {});
           }

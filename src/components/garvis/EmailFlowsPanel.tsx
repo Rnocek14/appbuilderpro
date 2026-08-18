@@ -11,6 +11,7 @@ import {
   type FlowRow, type FlowStats,
 } from '../../lib/garvis/emailFlowsRun';
 import { MAX_DRIP_STEPS, type BehavioralRule, type DripStep } from '../../lib/garvis/emailFlows';
+import { placementLint, placementLine } from '../../lib/garvis/email/placement';
 import { Button } from '../ui';
 
 type Toast = (k: 'success' | 'error' | 'info', m: string) => void;
@@ -135,6 +136,18 @@ export function EmailFlowsPanel({ worldId, onToast }: { worldId: string; onToast
               <textarea className={`${field} mt-1`} rows={3} placeholder="Body — {{first_name}} fills per recipient"
                 value={s.body}
                 onChange={(e) => setSteps((all) => all.map((x, j) => (j === i ? { ...x, body: e.target.value } : x)))} />
+              {(() => {
+                // Live inbox-placement findings — the same lint send-email's gate uses. Advice
+                // while writing, never a block: the operator's words are the operator's call.
+                const found = placementLint(s.subject, s.body);
+                if (!found.length) return null;
+                return (
+                  <div className="mt-1 text-[11px] text-amber-500/90">
+                    <span>{placementLine(found)}</span>
+                    <span className="text-forge-dim"> — {found[0].detail}</span>
+                  </div>
+                );
+              })()}
             </div>
           ))}
           <div className="flex flex-wrap items-center gap-2">
