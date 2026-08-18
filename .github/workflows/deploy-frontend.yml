@@ -1,0 +1,63 @@
+# Deploy the FableForge/Garvis console (the Vite app) to Netlify — the operator's live URL.
+#
+# One-time setup (repo Settings → Secrets and variables → Actions):
+#   Secrets:   NETLIFY_AUTH_TOKEN   — personal access token (User settings → Applications) —
+#                                     the same account client preview sites publish through.
+#              NETLIFY_APP_SITE_ID  — the site's API ID (Netlify: Site configuration → Site
+#                                     details). Create the site once, empty, any name.
+#   Variables: VITE_SUPABASE_URL      — https://<project-ref>.supabase.co
+#              VITE_SUPABASE_ANON_KEY — the anon/public key (Supabase: Settings → API). These are
+#                                       Variables, not Secrets: both ship in every client bundle
+#                                       by design; RLS is the security boundary.
+#
+# Then: Actions → Deploy Frontend → Run workflow. Re-run any time; each run replaces the site.
+
+name: Deploy Frontend
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_APP_SITE_ID: ${{ secrets.NETLIFY_APP_SITE_ID }}
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+    steps:
+      - name: Check required configuration
+        run: |
+          missing=""
+          [ -n "$NETLIFY_AUTH_TOKEN" ] || missing="$missing NETLIFY_AUTH_TOKEN(secret)"
+          [ -n "$NETLIFY_APP_SITE_ID" ] || missing="$missing NETLIFY_APP_SITE_ID(secret)"
+          [ -n "$VITE_SUPABASE_URL" ] || missing="$missing VITE_SUPABASE_URL(variable)"
+          [ -n "$VITE_SUPABASE_ANON_KEY" ] || missing="$missing VITE_SUPABASE_ANON_KEY(variable)"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing:$missing — see the comment at the top of deploy-frontend.yml for where each one comes from."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build (production Supabase baked in)
+        run: npm run build
+
+      - name: Deploy to Netlify
+        run: npx --yes netlify-cli@17 deploy --prod --dir dist --site "$NETLIFY_APP_SITE_ID" --message "deploy-frontend ${{ github.sha }}"
+
+      - name: Where it lives
+        run: |
+          echo "Deployed. The site URL is on the Netlify dashboard for site $NETLIFY_APP_SITE_ID"
+          echo "(Site configuration → Domain management to attach a real domain)."
