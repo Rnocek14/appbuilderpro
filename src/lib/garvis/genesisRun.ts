@@ -61,18 +61,21 @@ export async function generateDraft(intent: string): Promise<GenerateDraftResult
     return { id: null, draft: null, problems: ['Say a little more about the business — a sentence is enough.'], warnings: [] };
   }
 
-  // Stage 1 — business synthesis. Everything downstream derives from this record.
-  const dnaText = await reason(DNA_SYSTEM, '', cleanIntent);
-  const dna = parseDNA(dnaText);
+  // Stage 1 — business synthesis. Everything downstream derives from this record. A parse miss
+  // gets ONE retry with a JSON-only reminder (genesisSrv's contract): truncation and stray prose
+  // are transient shapes, not verdicts on the intent.
+  const JSON_ONLY = 'Return ONLY the complete JSON object — no prose, no code fences, nothing after the closing brace.';
+  let dna = parseDNA(await reason(DNA_SYSTEM, '', cleanIntent));
+  if (!dna) dna = parseDNA(await reason(DNA_SYSTEM, '', `${cleanIntent}\n\n${JSON_ONLY}`));
   if (!dna) return { id: null, draft: null, problems: ['Could not synthesize the business DNA — try describing the business in one or two more sentences.'], warnings: [] };
 
-  // Stage 2 — web synthesis, grounded in the DNA it just wrote.
-  const genText = await reason(
-    GENESIS_SYSTEM,
-    `WORLD DNA:\n${JSON.stringify({ title: dna.title, objective: dna.objective, dna: dna.dna, businessContext: dna.businessContext }, null, 1)}`,
-    'Design the work web for this business now. JSON only.',
-  );
-  const parsed = parseGenesis(genText, dna);
+  // Stage 2 — web synthesis, grounded in the DNA it just wrote. Same one-retry contract.
+  const genContext = `WORLD DNA:\n${JSON.stringify({ title: dna.title, objective: dna.objective, dna: dna.dna, businessContext: dna.businessContext }, null, 1)}`;
+  let parsed = parseGenesis(await reason(GENESIS_SYSTEM, genContext, 'Design the work web for this business now. JSON only.'), dna);
+  if (!parsed.draft) {
+    const second = parseGenesis(await reason(GENESIS_SYSTEM, genContext, `Design the work web for this business now. ${JSON_ONLY}`), dna);
+    if (second.draft) parsed = second;
+  }
   if (!parsed.draft) return { id: null, draft: null, problems: parsed.problems, warnings: parsed.warnings };
 
   const d = parsed.draft;

@@ -22,15 +22,20 @@ export interface GenerateDraftResultSrv {
   warnings: string[];
 }
 
-async function reason(admin: Admin, ownerId: string, system: string, user: string): Promise<string> {
+async function reason(admin: Admin, ownerId: string, system: string, user: string, maxTokens = 2600): Promise<string> {
   const m = modelForPlan(await getUserPlan(admin, ownerId));
   const r = await complete(
     [{ role: 'system', content: system }, { role: 'user', content: user }],
-    { provider: m.provider, model: m.model, maxTokens: 2600 },
+    { provider: m.provider, model: m.model, maxTokens },
   );
   await spendCredits(admin, ownerId, { costUsd: r.costUsd, kind: 'plan', provider: m.provider, model: m.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens });
   return r.text.trim();
 }
+
+// A full work-web JSON routinely outruns the default budget — a truncated object is exactly the
+// "did not return valid JSON" failure the operator saw live (2026-08-18). Give stage 2 room.
+const GENESIS_MAX_TOKENS = 5000;
+const JSON_ONLY_REMINDER = '\n\nReturn ONLY the complete JSON object — no prose, no code fences, nothing after the closing brace.';
 
 /** Intent → DNA → draft web. Two model calls, one draft row, zero worlds created. */
 export async function generateDraftSrv(admin: Admin, ownerId: string, intent: string): Promise<GenerateDraftResultSrv> {
@@ -39,17 +44,20 @@ export async function generateDraftSrv(admin: Admin, ownerId: string, intent: st
     return { id: null, draft: null, problems: ['Say a little more about the business — a sentence is enough.'], warnings: [] };
   }
 
-  // Stage 1 — business synthesis. Everything downstream derives from this record.
-  const dnaText = await reason(admin, ownerId, DNA_SYSTEM, cleanIntent);
-  const dna = parseDNA(dnaText);
+  // Stage 1 — business synthesis. Everything downstream derives from this record. A parse miss
+  // gets ONE retry with the JSON-only reminder: truncation and stray prose are transient shapes,
+  // not verdicts on the intent.
+  let dna = parseDNA(await reason(admin, ownerId, DNA_SYSTEM, cleanIntent));
+  if (!dna) dna = parseDNA(await reason(admin, ownerId, DNA_SYSTEM, cleanIntent + JSON_ONLY_REMINDER));
   if (!dna) return { id: null, draft: null, problems: ['Could not synthesize the business DNA — try describing the business in one or two more sentences.'], warnings: [] };
 
-  // Stage 2 — web synthesis, grounded in the DNA it just wrote.
-  const genText = await reason(
-    admin, ownerId, GENESIS_SYSTEM,
-    `WORLD DNA:\n${JSON.stringify({ title: dna.title, objective: dna.objective, dna: dna.dna, businessContext: dna.businessContext }, null, 1)}\n\nDesign the work web for this business now. JSON only.`,
-  );
-  const parsed = parseGenesis(genText, dna);
+  // Stage 2 — web synthesis, grounded in the DNA it just wrote. Same one-retry contract.
+  const genPrompt = `WORLD DNA:\n${JSON.stringify({ title: dna.title, objective: dna.objective, dna: dna.dna, businessContext: dna.businessContext }, null, 1)}\n\nDesign the work web for this business now. JSON only.`;
+  let parsed = parseGenesis(await reason(admin, ownerId, GENESIS_SYSTEM, genPrompt, GENESIS_MAX_TOKENS), dna);
+  if (!parsed.draft) {
+    const second = parseGenesis(await reason(admin, ownerId, GENESIS_SYSTEM, genPrompt + JSON_ONLY_REMINDER, GENESIS_MAX_TOKENS), dna);
+    if (second.draft) parsed = second;
+  }
   if (!parsed.draft) return { id: null, draft: null, problems: parsed.problems, warnings: parsed.warnings };
 
   const d = parsed.draft;

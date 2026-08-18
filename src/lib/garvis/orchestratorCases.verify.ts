@@ -1,5 +1,5 @@
 // src/lib/garvis/orchestratorCases.verify.ts
-// INTENT COVERAGE SUITE (run: `npm run verify:orchestratorcases`). 32 realistic operator intents —
+// INTENT COVERAGE SUITE (run: `npm run verify:orchestratorcases`). 48 realistic operator intents —
 // ventures, tools, hunts, one-offs, out-of-domain, underspecified, and over-reaching asks — each
 // with the CORRECT compile the model contract demands, run through the REAL parse gauntlet against
 // the REAL catalog. This pins the intended intent→plan mapping as executable checks:
@@ -331,6 +331,21 @@ const CASES: Case[] = [
     intent: 'Find me web design clients — go after landscapers',
     compile: plan([step('start_client_hunt', { niche: 'landscapers' }, W('automatic discovery, audits, demos, and pitch drafts are the hunt machine'))]),
     actions: ['start_client_hunt'],
+  },
+  {
+    // The live miss of 2026-08-18: this exact operator phrasing compiled to found_company +
+    // hunt_opportunities (bidding on posted RFPs) and died there. "Find websites we could build
+    // new ones for" means WE pitch — the client hunt, whole and alone. No company founding, no
+    // RFP feed, no invented niche; breadth is a question, never a guess.
+    name: 'find-websites-to-rebuild is the client hunt — never the RFP hunt, never a new company',
+    intent: 'lets find some websites we could build new ones and automations',
+    compile: plan(
+      [step('start_client_hunt', {}, W('finding businesses with weak sites and pitching new sites + automations IS the client-hunt machine'))],
+      [],
+      ['Should the hunt focus on a niche or geography, or stay broad?'],
+    ),
+    actions: ['start_client_hunt'],
+    minQuestions: 1,
   },
   {
     name: 'mount a deployed tool as an in-business room (the wardrobe room comes home)',

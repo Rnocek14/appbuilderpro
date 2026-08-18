@@ -95,7 +95,7 @@ export const ACTION_SPECS: ActionSpec[] = [
     title: 'Hunt for opportunities',
     category: 'automation',
     risk: 'safe',
-    description: 'Standing hunt for real work: jobs, RFPs, grants, commissions, open calls matching a focus (e.g. "mural commissions and public art projects"). Runs scheduled web-search sweeps, reads the results, extracts ONLY opportunities the pages actually describe, and files them deduped in the Opportunity feed for triage. Use when the intent is about FINDING work/opportunities, not customers to pitch.',
+    description: 'Standing hunt for real work: jobs, RFPs, grants, commissions, open calls matching a focus (e.g. "mural commissions and public art projects"). Runs scheduled web-search sweeps, reads the results, extracts ONLY opportunities the pages actually describe, and files them deduped in the Opportunity feed for triage. Use ONLY when someone else has POSTED the work and the operator wants to find and bid on it. If the ask is to find businesses or websites WE would pitch, rebuild, or automate ("find websites we could build new ones for"), that is start_client_hunt, not this.',
     params: [
       { name: 'focus', required: true, hint: 'what to hunt, in the operator\'s words ("mural and custom art jobs")' },
       { name: 'region', required: false, hint: 'geography to prefer ("Wisconsin", "Chicago area")' },
@@ -265,7 +265,7 @@ export const ACTION_SPECS: ActionSpec[] = [
     title: 'Start the daily client hunt',
     category: 'automation',
     risk: 'spend',
-    description: 'The fully-automatic client acquisition machine: every day it discovers real local businesses (Google Places), audits their sites, builds demo previews, and stages pitch emails as PENDING approvals — nothing sends itself. Use for "find me clients", "get me web-design leads". Niche comes from the intent when stated.',
+    description: 'The fully-automatic client acquisition machine: every day it discovers real local businesses (Google Places), audits their sites, builds demo previews, and stages pitch emails as PENDING approvals — nothing sends itself. Use for "find me clients", "get me web-design leads", "find websites we could rebuild / build new ones for", "find businesses with bad or missing sites" (with or without automations attached). This is the answer whenever WE are the ones pitching. Niche comes from the intent when stated.',
     params: [
       { name: 'niche', required: false, hint: 'business type to hunt ("realtors", "landscapers") — omit to hunt every local type' },
       { name: 'searches_per_day', required: false, hint: 'daily search budget (default 6)' },
