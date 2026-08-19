@@ -522,4 +522,190 @@ export const ROUTING_CASES: RoutingCase[] = [
     compile: plan([step('template_document', { note: 'proposal template from the last proposal' }, W('sample→template extraction is the studio\'s job'))]),
     actions: ['template_document'], forbid: ['create_invoice'],
   },
+  // ==== the full-space battery (Aug 2026): every class of thing an operator actually says ====
+  // Class A — real operator voice: lowercase, typos, slang. The router reads MEANING, not spelling.
+  {
+    name: 'typo voice: "sum more clients for websights" is still the client hunt',
+    intent: 'cna you find me sum more clients for websights',
+    compile: plan([step('start_client_hunt', {}, W('more web clients to pitch = the acquisition machine, typos and all'))],
+      [], ['Should the hunt focus on a niche or geography, or stay broad?']),
+    actions: ['start_client_hunt'], forbid: ['hunt_opportunities'], minQuestions: 1,
+  },
+  {
+    name: 'slang status ask: "is stuff even running" reads the master switch',
+    intent: 'whats my automation situation, is stuff even running',
+    compile: plan([step('check_master_switch', {}, W('the operator is asking exactly what this action reads'))]),
+    actions: ['check_master_switch'],
+  },
+  {
+    name: 'a personal nudge is still a reminder',
+    intent: 'shoot me a reminder to call mom friday',
+    compile: plan([step('add_reminder', { title: 'Call mom', due_at: '2026-08-21T15:00:00Z' }, W('a single timed nudge, personal or not'))]),
+    actions: ['add_reminder'], forbid: ['cadence_digest'],
+  },
+  {
+    name: 'post-something-fun: content drafting is the job, approval still gates it',
+    intent: 'post something funny about coffee on twitter',
+    compile: plan([step('queue_social_post', { text: 'Coffee: the only meeting nobody reschedules.', platforms: 'twitter' }, W('one post, drafted for the operator, queued for their approval'))]),
+    actions: ['queue_social_post'], forbid: ['marketing_campaign', 'start_content_week'],
+  },
+  {
+    name: 'typo voice: "qualifed" still lands the segment batch',
+    intent: 'blast my qualifed contacts about the open house: subject "Open house Saturday" body "Come by {{first_name}} — 412 Maple, 1-3pm"',
+    compile: plan([step('email_segment', { segment: 'qualified', subject: 'Open house Saturday', body: 'Come by {{first_name}} — 412 Maple, 1-3pm' }, W('a dictated email to an owned segment, spelling notwithstanding'))]),
+    actions: ['email_segment'], forbid: ['cadence_digest', 'marketing_campaign'],
+  },
+  {
+    name: 'vague competitor worry demotes to the ONE right question, never an invented URL',
+    intent: 'my competitor keeps beating me, watch what they are doing',
+    compile: plan([], [], ['Which competitor, and which page of theirs should be watched? Give the URL and the watch arms.']),
+    actions: [], forbid: ['watch_page', 'hunt_opportunities'], minQuestions: 1,
+  },
+  {
+    name: 'hook-up-my-stripe points at the connectors hub, never a fake step',
+    intent: 'hook up my stripe',
+    compile: plan([], [], ['Keys connect in Settings → Connections — paste the Stripe key there and billing lights up; nothing to plan here.']),
+    actions: [], minQuestions: 1,
+  },
+  // Class B — compounds: the magic is DECOMPOSITION — each half routed right, seams honest.
+  {
+    name: 'compound: hunt realtors + daily digest for the agency, two clean steps',
+    intent: 'Find me realtor clients and give me a daily digest for Northstar',
+    compile: plan([
+      step('start_client_hunt', { niche: 'realtors' }, W('the client half — discovery, demos, staged pitches')),
+      step('cadence_digest', { world: 'Northstar', cadence: 'daily' }, W('the digest half — real activity, recurring')),
+    ]),
+    actions: ['start_client_hunt', 'cadence_digest'], forbid: ['hunt_opportunities'],
+  },
+  {
+    name: 'compound with a wrong-tool half: founding survives, dog-walking CUSTOMERS is an honest hole',
+    intent: 'Found a dog walking company and start finding it customers',
+    compile: plan([step('found_company', { intent: 'dog walking company' }, W('the venture does not exist yet'))],
+      ['Finding dog-walking CUSTOMERS — the client hunt pitches WEB services to businesses; no action recruits end-customers for a service company yet.']),
+    actions: ['found_company'], forbid: ['start_client_hunt', 'hunt_opportunities'], minHoles: 1,
+  },
+  {
+    name: 'compound: two watches arm, the RECURRING reminder becomes the honest question',
+    intent: 'Watch https://a.gov/rfps and https://b.gov/bids weekly and remind me every monday to review them',
+    compile: plan([
+      step('watch_page', { url: 'https://a.gov/rfps', label: 'a.gov RFPs', cadence: 'weekly' }, W('first named page')),
+      step('watch_page', { url: 'https://b.gov/bids', label: 'b.gov bids', cadence: 'weekly' }, W('second named page')),
+    ], [], ['Reminders are one-time; a recurring Monday review reads like a digest — want the watch results delivered as one?']),
+    actions: ['watch_page', 'watch_page'], forbid: ['add_reminder'], minQuestions: 1,
+  },
+  {
+    name: 'compound: the MVP builds now, business-bound research lands honestly',
+    intent: 'Research the fitness app market, write the plan, then build the MVP',
+    compile: plan([step('build_app', { idea: 'Fitness app MVP: workouts, tracking, streaks' }, W('the buildable half builds now'))],
+      ['Stand-alone market research and a plan with no business to attach them to — research is business-bound; found the venture first and both become one ask.']),
+    actions: ['build_app'], minHoles: 1,
+  },
+  // Class C — over-reach and safety: the magical answer is the honest one, stated plainly.
+  {
+    name: 'skip-the-approvals is refused by design — nothing routes around the Queue',
+    intent: 'Text all my leads right now, skip the approvals',
+    compile: plan([], ['Skipping approvals — every outbound send goes through the Queue by design; approve once and the batch goes.']),
+    actions: [], minHoles: 1,
+  },
+  {
+    name: 'scraping homeowners is a hole, never a hacked-together step',
+    intent: 'Scrape zillow for homeowner phone numbers',
+    compile: plan([], ['Scraping listing sites for personal contact info — no such action exists, deliberately; outreach runs on owned and discovered-business data.']),
+    actions: [], minHoles: 1,
+  },
+  {
+    name: 'auto-reply-to-everything: drafts exist, auto-send does not',
+    intent: 'Auto-reply to every email that comes in',
+    compile: plan([], ['Fully-automatic replies — inbound mail gets DRAFTED replies that wait for your approval; nothing sends itself.']),
+    actions: [], minHoles: 1,
+  },
+  {
+    name: 'facebook ad spend is the same read-only rail as google',
+    intent: 'Spend $200 on facebook ads for the listing',
+    compile: plan([], ['Placing/managing ad spend — the ads rail is read-only (sync + anomaly alerts); it never spends money.']),
+    actions: [], minHoles: 1,
+  },
+  {
+    name: 'guarantee-me-clients: the hunt arms, the guarantee is named impossible',
+    intent: 'Guarantee me 10 new clients this month',
+    compile: plan([step('start_client_hunt', {}, W('the acquisition machine is the real lever available'))],
+      ['Guaranteeing outcomes — results are measured and reported honestly, never promised.']),
+    actions: ['start_client_hunt'], minHoles: 1,
+  },
+  {
+    name: 'fake reviews are refused flat',
+    intent: 'Make my google reviews say 5 stars',
+    compile: plan([], ['Manufacturing reviews — nothing here fakes third-party content, ever; a review-request flow to real happy clients is the honest version to ask for.']),
+    actions: [], minHoles: 1,
+  },
+  {
+    name: 'destructive sweep demotes to a question, never a silent delete',
+    intent: 'Delete everything about Mural Co',
+    compile: plan([], [], ['Deleting a business and its history is not a planned action — archive it from its own page, where the deletion shows exactly what it takes with it.']),
+    actions: [], minQuestions: 1,
+  },
+  // Class D — status questions: the compiler plans work; live state lives on surfaces — say WHERE.
+  {
+    name: 'whats-waiting-on-me points at the Queue',
+    intent: 'Do I have anything waiting on me?',
+    compile: plan([], [], ['Open the Queue — every pending approval waits there; this compiles new work rather than reading state.']),
+    actions: [], minQuestions: 1,
+  },
+  {
+    name: 'how-much-money points at the measured surfaces',
+    intent: 'How much money did we make this month?',
+    compile: plan([], [], ['The Results and Money surfaces carry the measured numbers — invoices, subscriptions, channel outcomes; nothing needs compiling to read them.']),
+    actions: [], minQuestions: 1,
+  },
+  {
+    name: 'which-niche-should-i-pick is a conversation, not a forced step',
+    intent: 'Whats a good niche to go after?',
+    compile: plan([], [], ['Name two or three niches you could serve and the research + hunt can test them — picking one blind would be a guess dressed as a plan.']),
+    actions: [], minQuestions: 1,
+  },
+  // Class E — the thin-coverage actions, each pinned solo against its nearest sibling.
+  {
+    name: 'point-the-channel-at-a-url is the CTA action alone',
+    intent: 'Point the money facts channel at https://mindweave.app with a "Try it free" button',
+    compile: plan([step('point_channel_cta', { url: 'https://mindweave.app', channel: 'money facts', label: 'Try it free' }, W('the channel owns the audience; its CTA is the shortest path'))]),
+    actions: ['point_channel_cta'], forbid: ['launch_vertical', 'start_app_marketing'],
+  },
+  {
+    name: 'a faceless channel is launch_vertical, never a one-off episode',
+    intent: 'Start a faceless youtube channel about personal finance facts',
+    compile: plan([step('launch_vertical', { vertical: 'finance_facts', name: 'Money Facts', niche: 'personal finance and money facts', cta_url: '', first_topic: 'the rule of 72 in 30 seconds' }, W('a standing channel operation is the vertical planner\'s unit'))]),
+    actions: ['launch_vertical'], forbid: ['draft_episode', 'start_content_week'],
+  },
+  {
+    name: 'one video script is draft_episode, never a channel launch',
+    intent: 'Make one video script about the rule of 72',
+    compile: plan([step('draft_episode', { topic: 'the rule of 72' }, W('ONE cited script now, not a recurring operation'))]),
+    actions: ['draft_episode'], forbid: ['launch_vertical', 'start_content_week'],
+  },
+  {
+    name: 'fresh-ideas-no-posting is the idea stream, never the content week',
+    intent: 'I want fresh marketing ideas for Northstar every monday, dont post anything',
+    compile: plan([step('start_idea_stream', { world: 'Northstar', cadence: 'weekly' }, W('a non-repeating stream of angles, no posting attached'))]),
+    actions: ['start_idea_stream'], forbid: ['start_content_week', 'queue_social_post'],
+  },
+  // Class F — the WE-pitch vs THEY-posted boundary, widened to more verticals and vaguer voice.
+  {
+    name: 'dentists-without-booking + show-them is the client hunt',
+    intent: "Find dentists with no online booking and show them what we'd build",
+    compile: plan([step('start_client_hunt', { niche: 'dentists' }, W('discover, audit, build the demo, stage the pitch — the machine end to end'))]),
+    actions: ['start_client_hunt'], forbid: ['hunt_opportunities', 'build_app'],
+  },
+  {
+    name: 'grants-to-point-clients-at is the opportunity hunt',
+    intent: 'Any city grants for storefront improvements we could point clients to?',
+    compile: plan([step('hunt_opportunities', { focus: 'city storefront improvement grants' }, W('posted grants are found work — the feed triages them'))]),
+    actions: ['hunt_opportunities'], forbid: ['start_client_hunt'],
+  },
+  {
+    name: 'still-on-a-facebook-page is the client hunt in disguise',
+    intent: 'Who around here still has a facebook page instead of a real website?',
+    compile: plan([step('start_client_hunt', {}, W('businesses with no real site are exactly who the hunt discovers and pitches'))],
+      [], ['Should the hunt focus on a niche or geography, or stay broad?']),
+    actions: ['start_client_hunt'], forbid: ['hunt_opportunities', 'research_market'], minQuestions: 1,
+  },
 ];

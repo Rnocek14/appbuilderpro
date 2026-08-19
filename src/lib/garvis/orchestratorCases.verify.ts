@@ -1,7 +1,8 @@
 // src/lib/garvis/orchestratorCases.verify.ts
 // INTENT COVERAGE SUITE (run: `npm run verify:orchestratorcases`). The shared ROUTING_CASES table
-// (routingCases.ts — 72 realistic operator intents: ventures, tools, hunts, one-offs, out-of-domain,
-// underspecified, over-reaching, and the boundary battery of confusable pairs) run through the REAL
+// (routingCases.ts — 100+ realistic operator intents: ventures, tools, hunts, one-offs, out-of-domain,
+// underspecified, over-reaching, sloppy real voice, compounds, status questions, safety refusals,
+// and the boundary battery of confusable pairs from both sides) run through the REAL
 // parse gauntlet against the REAL catalog. This pins the intended intent→plan mapping:
 //   - the right actions survive, in order — and no FORBIDDEN sibling ever appears;
 //   - what the system can't do lands in holes (never a faked step);
@@ -42,6 +43,13 @@ const used = new Set(ROUTING_CASES.flatMap((c) => c.actions));
 for (const spec of ACTION_SPECS) {
   check(`catalog coverage: ${spec.id} is exercised`, used.has(spec.id));
 }
+
+// The table only grows (routingCases.ts policy): a shrink below the full-space battery is a
+// regression, and duplicate names would silently mask lost cases.
+check('the table holds the full-space battery (≥100 intents)', ROUTING_CASES.length >= 100);
+check('every case name is unique', new Set(ROUTING_CASES.map((c) => c.name)).size === ROUTING_CASES.length);
+check('every boundary class carries forbids (≥30 cases pin a confusable sibling)',
+  ROUTING_CASES.filter((c) => (c.forbid ?? []).length > 0).length >= 30);
 
 // The live eval grades with THIS grader — pin its verdicts here so the two consumers can't drift.
 {
