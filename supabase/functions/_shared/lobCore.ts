@@ -47,6 +47,66 @@ export interface LobPostcardSpec {
   };
   accent: string;
   meta: { sizeIn: [number, number]; bleedIn: number; safeIn: number; addressZoneIn: [number, number] };
+  /** The client's brand riding the card (stamped from their brand kit at staging; hash-bound
+   *  with the rest of the spec). Absent = the neutral house design, unchanged. */
+  brand?: LobBrand | null;
+}
+
+// ---- BRAND ON MAIL (one brand, many channels): a client's postcards look like THEIR business --
+
+export interface LobBrand {
+  businessName?: string | null;
+  /** Hex. The authoritative accent when present — brand consistency is the product's promise;
+   *  a one-off card color belongs in the kit, not around it. */
+  primary?: string | null;
+  ink?: string | null;      // hex; must be DARK or it falls back (print legibility)
+  paper?: string | null;    // hex; must be LIGHT or it falls back (print + address scannability)
+  font?: 'grotesk' | 'humanist' | 'serif' | null;
+  logoUrl?: string | null;  // https only
+}
+
+/** Print-safe stacks only — a postcard renderer is not a browser with your webfonts. */
+export const LOB_FONT_STACKS: Record<'grotesk' | 'humanist' | 'serif', string> = {
+  grotesk: "'Helvetica Neue',Helvetica,Arial,sans-serif",
+  humanist: "'Trebuchet MS',Verdana,sans-serif",
+  serif: "Georgia,'Times New Roman',serif",
+};
+
+const HEX_RE = /^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$/;
+
+/** Relative luminance 0..1 of a #rgb/#rrggbb hex (print-contrast gate). */
+export function hexLuminance(hex: string): number {
+  const h = hex.slice(1);
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+const validHex = (v: unknown): string | null => (typeof v === 'string' && HEX_RE.test(v) ? v : null);
+const darkHex = (v: unknown): string | null => { const h = validHex(v); return h && hexLuminance(h) <= 0.45 ? h : null; };
+const lightHex = (v: unknown): string | null => { const h = validHex(v); return h && hexLuminance(h) >= 0.85 ? h : null; };
+
+/** Derive a card brand from a stored brand kit. Junk never survives: colors must be real hex
+ *  (ink dark, paper light), the logo https, the font mapped to a print-safe stack. Returns null
+ *  when the kit contributes nothing — the neutral house design is the honest fallback. */
+export function lobBrandFromKit(kit: {
+  name?: string | null; palette?: unknown; fonts?: unknown; logo_url?: string | null;
+}): LobBrand | null {
+  const hexes = (Array.isArray(kit.palette) ? kit.palette : []).map(validHex).filter((h): h is string => !!h);
+  const primary = hexes[0] ?? null;
+  // Ink is the first dark hex that ISN'T the primary — headline (primary) and body (ink) must
+  // keep their hierarchy; a palette whose only dark IS the primary falls back to neutral ink.
+  const ink = hexes.filter((h) => h !== primary).map(darkHex).find((h) => !!h) ?? null;
+  const paper = hexes.map(lightHex).find((h) => !!h) ?? null;
+  const firstFont = (Array.isArray(kit.fonts) ? kit.fonts : []).find((f) => typeof f === 'string' && f.trim()) as string | undefined;
+  const font = !firstFont ? null
+    : /serif|georgia|times|playfair|merriweather|garamond|lora|freight/i.test(firstFont) && !/sans/i.test(firstFont) ? 'serif' as const
+    : /verdana|trebuchet|tahoma|segoe|open sans|source sans|lato/i.test(firstFont) ? 'humanist' as const
+    : 'grotesk' as const;
+  const logoUrl = typeof kit.logo_url === 'string' && /^https:\/\//.test(kit.logo_url) ? kit.logo_url : null;
+  const businessName = kit.name?.trim() || null;
+  if (!primary && !ink && !paper && !font && !logoUrl) return null;
+  return { businessName, primary, ink, paper, font, logoUrl };
 }
 
 /** Every [EDIT: …] hole still in the spec, verbatim. A card with holes must never print. */
@@ -83,12 +143,23 @@ export function compileLobHtml(spec: LobPostcardSpec): { front: string; back: st
   const pageW = (w + 2 * bleed).toFixed(3);
   const pageH = (h + 2 * bleed).toFixed(3);
   const pad = (bleed + safe).toFixed(3);
-  const accent = /^#[0-9a-fA-F]{3,8}$/.test(spec.accent) ? spec.accent : '#1a1a1a';
+  // Brand-on-mail: the client's kit colors the card; every invalid or missing value falls back
+  // to the neutral house design. The brand's primary is authoritative over the per-card accent —
+  // brand consistency is the promise; a one-off color belongs in the kit, not around it.
+  const b = spec.brand ?? {};
+  const brandPrimary = typeof b.primary === 'string' && HEX_RE.test(b.primary) ? b.primary : null;
+  const accent = brandPrimary ?? (/^#[0-9a-fA-F]{3,8}$/.test(spec.accent) ? spec.accent : '#1a1a1a');
+  const ink = darkHex(b.ink) ?? '#1a1a1a';
+  const paper = lightHex(b.paper) ?? '#ffffff';
+  const fontStack = b.font && LOB_FONT_STACKS[b.font] ? LOB_FONT_STACKS[b.font] : 'Helvetica,Arial,sans-serif';
+  const logo = typeof b.logoUrl === 'string' && /^https:\/\//.test(b.logoUrl)
+    ? `<img src="${escapeHtml(b.logoUrl)}" alt="${escapeHtml(b.businessName ?? 'logo')}" style="height:0.32in;display:block;margin-bottom:0.1in">`
+    : '';
 
   const page = (body: string) =>
     `<html><head><meta charset="utf-8"><style>` +
     `*{margin:0;padding:0;box-sizing:border-box}` +
-    `body{width:${pageW}in;height:${pageH}in;font-family:Helvetica,Arial,sans-serif;color:#1a1a1a;background:#ffffff;position:relative;overflow:hidden}` +
+    `body{width:${pageW}in;height:${pageH}in;font-family:${fontStack};color:${ink};background:${paper};position:relative;overflow:hidden}` +
     `</style></head><body>${body}</body></html>`;
 
   const front = page(
@@ -103,6 +174,7 @@ export function compileLobHtml(spec: LobPostcardSpec): { front: string; back: st
 
   const back = page(
     `<div style="position:absolute;top:0;left:0;bottom:0;width:${(Number(pageW) - azW - safe).toFixed(3)}in;padding:${pad}in">` +
+    logo +
     `<div style="font-size:16pt;font-weight:700;color:${accent}">${escapeHtml(spec.back.headline)}</div>` +
     `<div style="font-size:11pt;line-height:1.5;margin-top:0.12in;white-space:pre-line">${escapeHtml(spec.back.body)}</div>` +
     `<div style="font-size:12pt;font-weight:700;margin-top:0.14in">${escapeHtml(spec.back.offer)}</div>` +

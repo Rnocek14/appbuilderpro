@@ -11,7 +11,7 @@ import { enqueueApproval } from './execution';
 import { hashPayload } from './payloadHash';
 import { partitionMailable, farmMath, type FarmRecipient, type MergePartition } from './farm';
 import { listRecipients, loadDoNotMailKeys } from './farmRun';
-import { specHoles, LOB_POSTCARD_UNIT_USD } from './lobCore';
+import { specHoles, LOB_POSTCARD_UNIT_USD, lobBrandFromKit } from './lobCore';
 import type { MailerSpec } from './mailer';
 
 export interface MailDropRequest {
@@ -61,6 +61,13 @@ export async function requestMailDrop(input: {
     throw new Error(`The design still has ${holes.length} unfinished edit${holes.length === 1 ? '' : 's'} (${holes.slice(0, 3).join(', ')}${holes.length > 3 ? '…' : ''}) — finish it before staging a drop.`);
   }
 
+  // BRAND ON MAIL: stamp the world's brand kit onto the spec HERE, before anything snapshots or
+  // hashes — the approved card and the printed card carry the same brand by construction. A
+  // missing/empty kit leaves the neutral house design; a kit-load hiccup never blocks a drop.
+  const kitRow = await supabase.from('brand_kits').select('name, palette, fonts, logo_url')
+    .eq('world_id', input.worldId).maybeSingle().then((r) => r.data, () => null);
+  const spec: MailerSpec = { ...input.spec, brand: (kitRow ? lobBrandFromKit(kitRow) : null) ?? input.spec.brand ?? null };
+
   const all = await listRecipients(input.territoryId);
   const pool = input.absenteeOnly ? all.filter((r) => r.isAbsentee) : all;
   const part = partitionMailable(pool, await loadDoNotMailKeys());
@@ -78,7 +85,7 @@ export async function requestMailDrop(input: {
 
   const { data: drop, error: dErr } = await supabase.from('mail_drops').insert({
     owner_id: uid, world_id: input.worldId, territory_id: input.territoryId,
-    spec: input.spec, status: 'staged', pieces: part.mailable.length,
+    spec, status: 'staged', pieces: part.mailable.length,
     est_piece_usd: pieceUsd, est_total_usd: estTotalUsd,
     suppressed_count: part.suppressed.length, suppressed_reasons: breakdown,
   }).select('id').single();
@@ -113,7 +120,7 @@ export async function requestMailDrop(input: {
       }))
       // Plain codepoint order — localeCompare could disagree between the browser and Deno.
       .sort((a, b) => (a.household_key < b.household_key ? -1 : a.household_key > b.household_key ? 1 : 0)));
-    const specHash = await hashPayload(input.spec as unknown as Record<string, unknown>);
+    const specHash = await hashPayload(spec as unknown as Record<string, unknown>);
     const approvalId = await enqueueApproval({
       kind: 'send_mail',
       title: `Mail drop: ${part.mailable.length} postcard${part.mailable.length === 1 ? '' : 's'} — ${input.territoryName}`,

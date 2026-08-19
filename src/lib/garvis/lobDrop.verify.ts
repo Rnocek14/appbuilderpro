@@ -7,7 +7,9 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { specHoles, compileLobHtml, LOB_POSTCARD_UNIT_USD, type LobPostcardSpec } from './lobCore';
+import {
+  specHoles, compileLobHtml, LOB_POSTCARD_UNIT_USD, lobBrandFromKit, hexLuminance, type LobPostcardSpec,
+} from './lobCore';
 import { suppressionBreakdown } from './lobRun';
 import { farmMath } from './farm';
 
@@ -103,6 +105,49 @@ const ttl = readFileSync(join(root, 'supabase/functions/_shared/approvalTtl.ts')
   check('the enum migration is additive, idempotent, and ALONE in its file',
     mig154.includes("add value if not exists 'send_mail'") && !/create\s+table|update\s|insert\s/i.test(mig154));
   check('send_mail has the send-family TTL', /send_mail:\s*7/.test(ttl));
+}
+
+// ---- BRAND ON MAIL: a client's card looks like THEIR business — safely ----
+{
+  const kit = { name: 'Maple Grove Realty', palette: ['#7A1F2B', '#2B1A1A', '#FBF7F2', 'salmon'], fonts: ['Georgia'], logo_url: 'https://cdn.example.com/mg.png' };
+  const brand = lobBrandFromKit(kit)!;
+  check('the kit derives a full brand: primary, dark ink, light paper, serif, https logo',
+    brand.primary === '#7A1F2B' && brand.ink === '#2B1A1A' && brand.paper === '#FBF7F2'
+    && brand.font === 'serif' && brand.logoUrl === 'https://cdn.example.com/mg.png'
+    && brand.businessName === 'Maple Grove Realty');
+  check('junk never survives: non-hex colors and non-https logos are dropped',
+    (() => { const b = lobBrandFromKit({ palette: ['salmon', 'rgb(1,2,3)'], logo_url: 'http://x.com/l.png' }); return b === null; })());
+  check('a contributing-nothing kit is null — the neutral house design is the fallback',
+    lobBrandFromKit({ name: '' }) === null);
+  check('luminance gates hold: a dark-only palette becomes the primary, never paper or ink',
+    (() => { const b = lobBrandFromKit({ palette: ['#111111'] })!; return b.paper === null && b.ink === null && b.primary === '#111111'; })());
+  check('hexLuminance reads white light and black dark',
+    hexLuminance('#ffffff') > 0.99 && hexLuminance('#000000') < 0.01);
+
+  const branded = { ...spec(), brand };
+  const { front, back } = compileLobHtml(branded);
+  check('the branded card carries the kit: serif stack, brand ink, brand paper',
+    back.includes("Georgia,'Times New Roman',serif") && back.includes('color:#2B1A1A') && back.includes('background:#FBF7F2'));
+  check('the brand primary is authoritative over the per-card accent (consistency is the promise)',
+    back.includes('color:#7A1F2B') && !back.includes('color:#B3402E'));
+  check('the logo prints on the back, sized for print, named for the business',
+    back.includes('https://cdn.example.com/mg.png') && back.includes('height:0.32in') && back.includes('alt="Maple Grove Realty"'));
+  check('the USPS address zone stays white REGARDLESS of brand paper',
+    back.includes('background:#ffffff'));
+  check('the front headline band still reads on any brand (its own overlay, unbranded)',
+    front.includes('rgba(0,0,0,0.65)'));
+
+  const plain = compileLobHtml(spec());
+  check('no brand = the neutral house design, exactly as before',
+    plain.back.includes('Helvetica,Arial,sans-serif') && plain.back.includes('color:#1a1a1a')
+    && plain.back.includes('background:#ffffff') && plain.back.includes('color:#B3402E'));
+}
+{
+  const run = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'lobRun.ts'), 'utf8');
+  check('staging stamps the brand BEFORE the spec is snapshotted and hashed (approved = printed)',
+    run.indexOf('lobBrandFromKit(kitRow)') < run.indexOf("from('mail_drops').insert")
+    && run.indexOf('lobBrandFromKit(kitRow)') < run.indexOf('hashPayload(spec'));
+  check('a kit-load hiccup never blocks a drop', run.includes('.then((r) => r.data, () => null)'));
 }
 
 console.log(`\nlobDrop.verify: ${passed} passed, ${failed} failed`);
