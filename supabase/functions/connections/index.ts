@@ -15,6 +15,9 @@ const PROVIDERS = new Set([
   'supabase', 'github', 'netlify', 'vercel', 'docusign', 'ayrshare',
   // Service keys (the API manager): per-user keys with the platform env key as fallback.
   'resend', 'lob', 'google_places', 'twilio',
+  // The AI brain: pasted here, sealed, then pulled into function secrets by the deploy run —
+  // the app is the source of truth; CI bridges it. Credits meter usage the same either way.
+  'anthropic',
 ]);
 
 Deno.serve(async (req) => {

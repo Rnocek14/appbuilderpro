@@ -24,6 +24,9 @@ export interface ConnectorSpec {
   tokenPlaceholder?: string;
   /** Twilio only: the connect form also asks for the sending number. */
   needsFromNumber?: boolean;
+  /** Platform rows only: paste-able here — sealed, then pulled into function secrets by the
+   *  deploy run (the app is the source of truth; CI bridges it). */
+  pasteable?: boolean;
 }
 
 export const CONNECTOR_CATALOG: ConnectorSpec[] = [
@@ -52,9 +55,9 @@ export const CONNECTOR_CATALOG: ConnectorSpec[] = [
     powers: 'the SMS/voice concierge',
     hint: 'Paste ACCOUNT_SID:AUTH_TOKEN (both on the console home page) plus your Twilio number' },
   // ---- platform ----
-  { id: 'anthropic', name: 'Anthropic', kind: 'platform', url: '',
+  { id: 'anthropic', name: 'Anthropic', kind: 'platform', pasteable: true, url: 'https://console.anthropic.com/settings/keys', tokenPlaceholder: 'sk-ant-…',
     powers: 'the AI brain — building, drafting, thinking',
-    hint: 'Platform key (AI usage is metered by credits)' },
+    hint: 'Paste once — sealed here, then synced to the function fleet on each deploy run. Credits meter AI usage either way.' },
   { id: 'stripe', name: 'Stripe', kind: 'platform', url: '',
     powers: 'getting paid — subscriptions + reconciliation',
     hint: 'Platform key (your own payment rail)' },
@@ -68,9 +71,9 @@ export function connectorStatusLine(
   s: { connected: boolean; label: string | null; platformConfigured: boolean },
 ): string {
   if (spec.kind === 'platform') {
-    return s.platformConfigured
-      ? 'configured (platform)'
-      : `not configured — ${spec.powers} won't run`;
+    if (s.platformConfigured) return 'configured (platform)';
+    if (s.connected) return 'key saved — reaches the fleet on the next deploy run';
+    return `not configured — ${spec.powers} won't run`;
   }
   if (s.connected) return `connected${s.label ? ` · ${s.label}` : ''}`;
   if (spec.kind === 'service') {

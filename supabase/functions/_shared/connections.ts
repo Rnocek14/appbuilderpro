@@ -61,6 +61,13 @@ export async function probeProvider(provider: string, token: string): Promise<{ 
       const n = (u.displayNames ?? []).length;
       return { ok: true, label: u.title || u.email || `${n} account${n === 1 ? '' : 's'} linked` };
     }
+    if (provider === 'anthropic') {
+      const r = await fetch('https://api.anthropic.com/v1/models', {
+        headers: { 'x-api-key': token, 'anthropic-version': '2023-06-01' },
+      });
+      if (!r.ok) return { ok: false, error: `Anthropic ${r.status} — check the API key` };
+      return { ok: true, label: 'Anthropic' };
+    }
     if (provider === 'resend') {
       const r = await fetch('https://api.resend.com/domains', { headers: { Authorization: `Bearer ${token}` } });
       if (!r.ok) return { ok: false, error: `Resend ${r.status} — check the API key` };

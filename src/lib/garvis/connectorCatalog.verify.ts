@@ -26,8 +26,12 @@ const check = (n: string, c: boolean) => {
     CONNECTOR_CATALOG.every((c) => c.powers.length > 10 && !/api|env|token/i.test(c.powers)));
   check('every non-OAuth connectable row says where the key comes from',
     CONNECTOR_CATALOG.filter((c) => !c.oauth && c.kind !== 'platform').every((c) => c.url.startsWith('https://')));
-  check('platform rows are report-only (Anthropic billing stays platform-side by design)',
+  check('the platform rows are anthropic and stripe',
     CONNECTOR_CATALOG.filter((c) => c.kind === 'platform').map((c) => c.id).sort().join() === 'anthropic,stripe');
+  const anthropic = CONNECTOR_CATALOG.find((c) => c.id === 'anthropic')!;
+  check('anthropic is paste-able in-app and says the sync contract out loud',
+    anthropic.pasteable === true && anthropic.hint.includes('deploy run'));
+  check('stripe stays report-only', CONNECTOR_CATALOG.find((c) => c.id === 'stripe')!.pasteable !== true);
 }
 
 // ---- honest status copy ----
@@ -42,6 +46,8 @@ const check = (n: string, c: boolean) => {
   const anthropic = CONNECTOR_CATALOG.find((c) => c.id === 'anthropic')!;
   check('a missing platform key is missing, not hedged',
     connectorStatusLine(anthropic, { connected: false, label: null, platformConfigured: false }).includes("won't run"));
+  check('a pasted-but-unsynced platform key says exactly where it stands',
+    connectorStatusLine(anthropic, { connected: true, label: 'Anthropic', platformConfigured: false }).includes('next deploy run'));
 }
 
 // ---- wiring pins (textual proof against the real sources) ----
@@ -56,9 +62,20 @@ const hook = read('src/hooks/useConnections.ts');
   for (const id of CONNECTOR_CATALOG.filter((c) => c.kind !== 'platform').map((c) => c.id)) {
     check(`backend accepts provider: ${id}`, fn.includes(`'${id}'`));
   }
-  for (const id of SERVICE_PROVIDER_IDS) {
+  for (const id of [...SERVICE_PROVIDER_IDS, 'anthropic']) {
     check(`live probe exists for: ${id}`, shared.includes(`provider === '${id}'`));
   }
+  // The CI bridge: keys pasted in the app reach the rails that run outside it.
+  const deployWf = read('.github/workflows/deploy-supabase.yml');
+  const frontendWf = read('.github/workflows/deploy-frontend.yml');
+  const evalWf = read('.github/workflows/routing-eval.yml');
+  check('the deploy pulls the app-pasted Anthropic key into function secrets (repo secret wins)',
+    deployWf.includes('Sync keys pasted in the app') && deployWf.includes("provider = '\\''anthropic'\\''")
+    && deployWf.includes('the repo wins'));
+  check('the frontend deploy pulls the app-connected Netlify token (masked, secret overrides)',
+    frontendWf.includes("provider = '\\''netlify'\\''") && frontendWf.includes('::add-mask::'));
+  check('the live eval reaches the app-pasted key the same way',
+    evalWf.includes("provider = '\\''anthropic'\\''") && evalWf.includes('::add-mask::'));
   check('a token only saves after its probe PASSES',
     fn.indexOf('probeProvider(provider, token.trim())') < fn.indexOf('upsertConnection(admin, user.id, provider'));
   check('list returns sanitized status — access_token is never selected for the browser',

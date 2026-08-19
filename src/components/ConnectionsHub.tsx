@@ -23,7 +23,7 @@ const ICONS: Record<string, typeof Github> = {
 const GROUPS: { kind: ConnectorSpec['kind']; title: string; sub: string }[] = [
   { kind: 'account', title: 'Your accounts', sub: 'Connect once — every project and client reuses them.' },
   { kind: 'service', title: 'Service keys', sub: 'Paste a key to run on your own accounts; without one, the platform key carries it where configured.' },
-  { kind: 'platform', title: 'Platform', sub: 'Managed with the deployment — shown here so nothing is a mystery.' },
+  { kind: 'platform', title: 'Platform', sub: 'Platform-wide keys. The Anthropic key pastes here and reaches the fleet on each deploy run; Stripe is managed with the deployment.' },
 ];
 
 export function ConnectionsHub() {
@@ -68,7 +68,7 @@ export function ConnectionsHub() {
           </div>
           <div className="space-y-2">
             {CONNECTOR_CATALOG.filter((p) => p.kind === g.kind).map((p) => {
-              const connected = p.kind !== 'platform' && isConnected(p.id);
+              const connected = (p.kind !== 'platform' || p.pasteable === true) && isConnected(p.id);
               const status = connectorStatusLine(p, {
                 connected, label: labelFor(p.id), platformConfigured: platformHas(p.id),
               });
@@ -93,8 +93,8 @@ export function ConnectionsHub() {
                       <button onClick={() => void disconnect(p.id)} className="ml-auto inline-flex items-center gap-1 text-[11px] text-forge-dim hover:text-forge-err"><X size={11} /> disconnect</button>
                     )}
                   </div>
-                  {!connected && p.kind !== 'platform' && <p className="mt-1 text-[11px] text-forge-dim">{p.hint}</p>}
-                  {!connected && !p.oauth && p.kind !== 'platform' && (
+                  {!connected && (p.kind !== 'platform' || p.pasteable === true) && <p className="mt-1 text-[11px] text-forge-dim">{p.hint}</p>}
+                  {!connected && !p.oauth && (p.kind !== 'platform' || p.pasteable === true) && (
                     <div className="mt-2 flex flex-wrap gap-2">
                       <Input type="password" placeholder={p.tokenPlaceholder ? `Paste ${p.tokenPlaceholder}` : `Paste your ${p.name} token`}
                         value={drafts[p.id] ?? ''} onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))} />

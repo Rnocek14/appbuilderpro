@@ -285,6 +285,30 @@ jobs:
           done
           echo "Synced:${synced:- (none provided as repo secrets)}"
 
+      # The app is a source of truth too: a key pasted in Settings → Connections (sealed in
+      # provider_connections) reaches the fleet here. Names only in logs, values masked.
+      # Single-operator read, deliberately — the platform key belongs to the platform owner.
+      - name: Sync keys pasted in the app
+        env:
+          ANTHROPIC_FROM_REPO: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -e
+          if [ -n "$ANTHROPIC_FROM_REPO" ]; then
+            echo "ANTHROPIC_API_KEY already synced from repo secrets — the repo wins."
+            exit 0
+          fi
+          body=$(jq -n '{query: "select access_token from provider_connections where provider = '\''anthropic'\'' limit 1"}')
+          key=$(curl -sf -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json" \
+            -d "$body" | jq -r '.[0].access_token // empty')
+          if [ -z "$key" ]; then
+            echo "No Anthropic key pasted in the app yet — paste it in Settings → Connections and re-run."
+            exit 0
+          fi
+          echo "::add-mask::$key"
+          supabase secrets set "ANTHROPIC_API_KEY=$key" --project-ref "$PROJECT_REF" >/dev/null
+          echo "Synced from the app: ANTHROPIC_API_KEY"
+
       # The step everything "while you sleep" depends on: schedules the pg_cron jobs that POST
       # the workers. Uses the management API so no direct DB connection is needed from the runner.
       - name: Arm heartbeat
