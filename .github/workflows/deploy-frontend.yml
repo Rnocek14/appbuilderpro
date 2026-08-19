@@ -16,6 +16,11 @@ name: Deploy Frontend
 
 on:
   workflow_dispatch:
+  # workflow_dispatch only registers once this file reaches the default branch — until then,
+  # touching .github/triggers/deploy-frontend and pushing fires a deploy from this branch.
+  push:
+    branches: [claude/garvis-system-app-manager-0rcrae]
+    paths: ['.github/triggers/deploy-frontend']
 
 concurrency:
   group: deploy-frontend

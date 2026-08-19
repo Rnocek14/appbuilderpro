@@ -7,6 +7,11 @@ name: Routing Eval
 
 on:
   workflow_dispatch:
+  # workflow_dispatch/schedule only register once this file reaches the default branch — until
+  # then, touching .github/triggers/routing-eval and pushing fires a run from this branch.
+  push:
+    branches: [claude/garvis-system-app-manager-0rcrae]
+    paths: ['.github/triggers/routing-eval']
   schedule:
     - cron: '0 9 * * 1'   # Mondays 09:00 UTC — a weekly answer to "does the router still read us right?"
 
