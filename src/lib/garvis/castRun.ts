@@ -6,8 +6,10 @@
 // (the autoCut precedent — the client decodes media free; the server judges).
 
 import { supabase } from '../supabase';
-import { invokeFailure } from './videoRun';
-import { characterRefPrompts, locationRefPrompts, sixShotScene, type TestShot } from './castLab';
+import { invokeFailure, startRenderEdit, pollRender, saveRenderedVideo } from './videoRun';
+import { characterRefPrompts, locationRefPrompts, sixShotScene, sceneTakes, type TestShot } from './castLab';
+import { buildUgcEdit } from './ugcEdit';
+import { aiProvenance } from './mediaProvenance';
 import type { QaVerdict } from './videoQa';
 
 // ---- rows -------------------------------------------------------------------------------------
@@ -142,6 +144,37 @@ export async function qaClip(candidateId: string, frames: string[]) {
 export async function acceptClip(candidateId: string, continuityOut?: Record<string, unknown>) {
   return invokeClip<{ continuityOut: Record<string, unknown> }>(
     { action: 'accept', candidateId, continuityOut }, 'The clip engine (generate-clip)');
+}
+
+// ---- scene assembly ---------------------------------------------------------------------------
+
+/** Cut the accepted clips into ONE produced scene through the shared edit grammar — hard cuts,
+ *  alternating punch-ins, word-karaoke captions from the clips' own (generated) dialogue audio,
+ *  sound cues on the known cut times. This is the layer the shipping AI-drama operations skip, and
+ *  it's where six generations start reading as one scene. Fully AI footage → the provenance stamp
+ *  rides the finalized file (the disclosure gate enforces the label at publish, as everywhere). */
+export async function renderScene(
+  clips: Array<{ url: string; durationS: number }>, clusterId: string, title: string,
+  onStatus?: (s: string) => void,
+): Promise<string> {
+  const takes = sceneTakes(clips);
+  if (!takes.length) throw new Error('No accepted clips to assemble.');
+  const provenance = aiProvenance('video', 'cast-scene', Date.now());
+  const edit = buildUgcEdit(takes, { lane: 'calm', captions: true });
+  const start = await startRenderEdit(edit);
+  if (start.available === false) throw new Error("Rendering isn't configured — add SHOTSTACK_API_KEY (System health).");
+  if (!start.ok || !start.id) throw new Error(start.error ?? 'The scene render could not start.');
+  for (let i = 0; i < 45; i++) {
+    await new Promise((r) => setTimeout(r, 4000));
+    const st = await pollRender(start.id, { clusterId, aiProvenance: provenance });
+    onStatus?.(st.status ?? 'working');
+    if (st.status === 'done' && st.url) {
+      await saveRenderedVideo(clusterId, title, st.url, start.id);
+      return st.url;
+    }
+    if (st.status === 'failed') throw new Error('The scene render failed on the provider.');
+  }
+  throw new Error('Still rendering — try again in a minute to resume checking.');
 }
 
 // ---- browser frame sampling -------------------------------------------------------------------

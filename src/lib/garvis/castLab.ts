@@ -84,6 +84,18 @@ export function testCostEstimateUsd(): number {
   return Math.round(usd * 100) / 100;
 }
 
+// ---- scene assembly ---------------------------------------------------------------------------
+
+/** Accepted clips → the edit builder's take list. Explicit lengths matter: known cut times are
+ *  what unlock precise sound cues and the punch alternation that makes six generations read as one
+ *  produced scene instead of six clips — the exact gap viewers feel in shipping AI drama. The
+ *  research finding, encoded: the cut grammar, not the renderer, is where AI content wins or loses. */
+export function sceneTakes(clips: Array<{ url: string; durationS: number }>): Array<{ url: string; lengthS: number }> {
+  return clips
+    .filter((c) => !!c.url)
+    .map((c) => ({ url: c.url, lengthS: Math.max(1, Math.min(15, Math.round(c.durationS * 10) / 10)) }));
+}
+
 // ---- honest readiness -------------------------------------------------------------------------
 
 export interface CastSubjectState {

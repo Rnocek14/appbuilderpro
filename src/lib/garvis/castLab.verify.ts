@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/castLab.verify.ts
 import {
   CHARACTER_STYLE_BLOCK, characterRefPrompts, locationRefPrompts,
-  sixShotScene, testCostEstimateUsd, testReadiness,
+  sixShotScene, testCostEstimateUsd, testReadiness, sceneTakes,
 } from './castLab';
 
 let passed = 0; let failed = 0;
@@ -48,6 +48,15 @@ console.log('castLab.verify');
     [{ id: 'a', name: 'Sarah', approvedKinds: ['face_front', 'full_body'] }, { id: 'b', name: 'Jake', approvedKinds: [] }],
     [{ id: 'l', name: 'the apartment', approvedKinds: [] }]);
   check('unapproved references do not count as ready', !unapproved.ready && unapproved.missing.some((m) => m.includes('Jake')) && unapproved.missing.some((m) => m.includes('the apartment')));
+}
+
+{ // scene assembly
+  const takes = sceneTakes([
+    { url: 'https://x/1.mp4', durationS: 5 }, { url: '', durationS: 4 }, { url: 'https://x/3.mp4', durationS: 22 },
+  ]);
+  check('scene takes carry EXPLICIT lengths (known cut times unlock sound cues)', takes.every((t) => typeof t.lengthS === 'number'));
+  check('a clip without a url never enters the timeline', takes.length === 2);
+  check('lengths clamp into the renderer band (1-15s)', takes[1].lengthS === 15);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

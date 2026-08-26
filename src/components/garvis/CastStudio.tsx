@@ -10,10 +10,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Users, Plus, Sparkles, Check, Clapperboard, X } from 'lucide-react';
 import {
   loadCast, createCharacter, createLocation, setAssetApproved, generateReferenceSheet,
-  createTestScene, setClipContinuityIn, startClip, pollClip, qaClip, acceptClip, sampleFrames,
+  createTestScene, setClipContinuityIn, startClip, pollClip, qaClip, acceptClip, sampleFrames, renderScene,
   type CastCharacter, type CastLocation, type CastAsset, type TestClip,
 } from '../../lib/garvis/castRun';
-import { testReadiness, testCostEstimateUsd, type CastSubjectState } from '../../lib/garvis/castLab';
+import { testReadiness, testCostEstimateUsd, sixShotScene, type CastSubjectState } from '../../lib/garvis/castLab';
 import type { QaVerdict } from '../../lib/garvis/videoQa';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui';
@@ -32,6 +32,8 @@ export function CastStudio({ worldId, clusterId, onToast }: {
   const [desc, setDesc] = useState('');
   const [shots, setShots] = useState<ShotState[]>([]);
   const [running, setRunning] = useState(false);
+  const [sceneUrl, setSceneUrl] = useState<string | null>(null);
+  const [cutting, setCutting] = useState(false);
 
   const reload = async () => {
     try {
@@ -133,6 +135,19 @@ export function CastStudio({ worldId, clusterId, onToast }: {
     finally { setRunning(false); }
   };
 
+  // THE CUT — accepted clips through the shared edit grammar (the layer shipping AI drama skips).
+  const doCutScene = async () => {
+    const durations = sixShotScene({ id: 'a', name: 'A' }, { id: 'b', name: 'B' }).map((s) => s.durationS);
+    const clips = shots.map((s, i) => ({ url: s.videoUrl ?? '', durationS: durations[i] ?? 5 }));
+    setCutting(true); setSceneUrl(null);
+    try {
+      const url = await renderScene(clips, clusterId, 'Six-shot continuity test — the cut');
+      setSceneUrl(url);
+      onToast('success', 'Scene cut — watch it as ONE piece. This is the real Test A verdict.');
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'The scene cut failed.'); }
+    finally { setCutting(false); }
+  };
+
   const subjects: Array<{ kind: 'character' | 'location'; row: CastCharacter | CastLocation }> = [
     ...characters.map((c) => ({ kind: 'character' as const, row: c })),
     ...locations.map((l) => ({ kind: 'location' as const, row: l })),
@@ -219,6 +234,19 @@ export function CastStudio({ worldId, clusterId, onToast }: {
         </div>
         {!readiness.ready && (
           <p className="mt-2 text-[11px] text-forge-dim">Waiting on: {readiness.missing.join(' · ')}.</p>
+        )}
+        {shots.length === 6 && shots.every((s) => s.status.startsWith('accepted')) && !running && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button onClick={() => void doCutScene()} disabled={cutting}
+              className="flex items-center gap-1 rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-ink hover:border-forge-ember/50 disabled:opacity-60">
+              {cutting ? <Loader2 size={12} className="animate-spin" /> : <Clapperboard size={12} />} Cut the scene — hard cuts, captions, sound cues
+            </button>
+            <span className="text-[11px] text-forge-dim">the edit layer is where six generations become one scene</span>
+            {sceneUrl && <a href={sceneUrl} target="_blank" rel="noreferrer" className="text-[11px] text-forge-ember hover:underline">watch the cut mp4</a>}
+          </div>
+        )}
+        {sceneUrl && (
+          <video src={sceneUrl} controls className="mt-2 w-full max-w-[300px] rounded-lg border border-forge-border" />
         )}
         {shots.length > 0 && (
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
