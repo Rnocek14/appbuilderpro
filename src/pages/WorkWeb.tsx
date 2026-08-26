@@ -58,6 +58,7 @@ const IdeaStudio = lazy(() => import('../components/garvis/IdeaStudio').then((m)
 const ReelStudio = lazy(() => import('../components/garvis/ReelStudio').then((m) => ({ default: m.ReelStudio })));
 const FactChannelStudio = lazy(() => import('../components/garvis/FactChannelStudio').then((m) => ({ default: m.FactChannelStudio })));
 const UgcStudio = lazy(() => import('../components/garvis/UgcStudio').then((m) => ({ default: m.UgcStudio })));
+const CastStudio = lazy(() => import('../components/garvis/CastStudio').then((m) => ({ default: m.CastStudio })));
 const VideoStudio = lazy(() => import('../components/garvis/VideoStudio').then((m) => ({ default: m.VideoStudio })));
 const AnsweringDesk = lazy(() => import('../components/garvis/AnsweringDesk').then((m) => ({ default: m.AnsweringDesk })));
 const DeliverableStudio = lazy(() => import('../components/garvis/DeliverableStudio').then((m) => ({ default: m.DeliverableStudio })));
@@ -971,6 +972,12 @@ function Workspace({ cluster, worldId, webTitle, results, busyTool, onTool, onCh
 
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
         <PanelBoundary name="ugc studio"><UgcStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
+      )}
+
+      {/* THE CAST — persistent AI people/places (approved reference images pin identity) and the
+          six-shot continuity test: the gate everything bigger waits behind. */}
+      {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (
+        <PanelBoundary name="cast studio"><CastStudio worldId={worldId} clusterId={cluster.id} onToast={(k, m) => toast(k, m)} /></PanelBoundary>
       )}
 
       {cluster.charter?.archetype === 'studio' && cluster.charter.flavor === 'content_growth' && (

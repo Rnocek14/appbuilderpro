@@ -62,6 +62,7 @@
     "verify:videoscenes": "tsx src/lib/garvis/videoScenes.verify.ts",
     "verify:mediacast": "tsx src/lib/garvis/mediaCast.verify.ts",
     "verify:videoqa": "tsx src/lib/garvis/videoQa.verify.ts",
+    "verify:castlab": "tsx src/lib/garvis/castLab.verify.ts",
     "verify:sms": "tsx src/lib/garvis/sms.verify.ts",
     "verify:clientsale": "tsx src/lib/garvis/billing/clientSale.verify.ts",
     "verify:mind": "tsx src/lib/garvis/mind.verify.ts",
