@@ -91,11 +91,18 @@ Deno.serve(async (req) => {
       const subjectIds = [...characterIds, ...(locationId ? [locationId] : [])];
       if (subjectIds.length) {
         const [{ data: chars }, { data: locs }, { data: rows }] = await Promise.all([
-          admin.from('media_characters').select('id, name').in('id', characterIds.length ? characterIds : ['00000000-0000-0000-0000-000000000000']),
+          admin.from('media_characters').select('id, name, likeness, consented_at').in('id', characterIds.length ? characterIds : ['00000000-0000-0000-0000-000000000000']),
           locationId ? admin.from('media_locations').select('id, name').eq('id', locationId) : Promise.resolve({ data: [] }),
           admin.from('media_ref_assets').select('id, subject_kind, subject_id, kind, label, file_url, approved')
             .eq('owner_id', ownerId).in('subject_id', subjectIds).eq('approved', true),
         ]);
+        // THE LIKENESS GATE — server-side, fail-closed (the disclosure-gate pattern): a real
+        // person's face never reaches a renderer without recorded consent on the character row.
+        const noConsent = ((chars ?? []) as Array<{ name: string; likeness?: string; consented_at?: string | null }>)
+          .filter((c) => c.likeness === 'real' && !c.consented_at);
+        if (noConsent.length) {
+          throw new Error(`${noConsent.map((c) => c.name).join(', ')} ${noConsent.length === 1 ? 'is' : 'are'} a real person without recorded consent — record their consent on the character before generating.`);
+        }
         for (const c of (chars ?? []) as Array<{ id: string; name: string }>) cast.characters[c.id] = { name: c.name };
         for (const l of (locs ?? []) as Array<{ id: string; name: string }>) cast.locations[l.id] = { name: l.name };
         assets = ((rows ?? []) as Array<Record<string, unknown>>).map((a) => ({

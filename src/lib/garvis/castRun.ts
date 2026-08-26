@@ -14,7 +14,10 @@ import type { QaVerdict } from './videoQa';
 
 // ---- rows -------------------------------------------------------------------------------------
 
-export interface CastCharacter { id: string; name: string; description: string; status: string }
+export interface CastCharacter {
+  id: string; name: string; description: string; status: string;
+  likeness: 'synthetic' | 'real'; consented_at: string | null;
+}
 export interface CastLocation { id: string; name: string; description: string; status: string }
 export interface CastAsset {
   id: string; subject_kind: 'character' | 'location'; subject_id: string;
@@ -23,7 +26,7 @@ export interface CastAsset {
 
 export async function loadCast(): Promise<{ characters: CastCharacter[]; locations: CastLocation[]; assets: CastAsset[] }> {
   const [{ data: characters }, { data: locations }, { data: assets }] = await Promise.all([
-    supabase.from('media_characters').select('id, name, description, status').eq('status', 'active').order('created_at'),
+    supabase.from('media_characters').select('id, name, description, status, likeness, consented_at').eq('status', 'active').order('created_at'),
     supabase.from('media_locations').select('id, name, description, status').eq('status', 'active').order('created_at'),
     supabase.from('media_ref_assets').select('id, subject_kind, subject_id, kind, label, file_url, approved').order('created_at'),
   ]);
@@ -34,10 +37,50 @@ export async function loadCast(): Promise<{ characters: CastCharacter[]; locatio
   };
 }
 
-export async function createCharacter(name: string, description: string): Promise<void> {
+/** Create a character. A REAL person (a friend, a willing spokesperson) requires a consent note —
+ *  who said yes and how — recorded at creation; without it the row is created consent-less and the
+ *  server-side likeness gate refuses to generate them. */
+export async function createCharacter(
+  name: string, description: string,
+  real?: { consentNote: string },
+): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
-  const { error } = await supabase.from('media_characters').insert({ owner_id: user?.id, name, description });
+  const { error } = await supabase.from('media_characters').insert({
+    owner_id: user?.id, name, description,
+    likeness: real ? 'real' : 'synthetic',
+    consent_note: real?.consentNote.trim() || null,
+    consented_at: real?.consentNote.trim() ? new Date().toISOString() : null,
+  });
   if (error) throw new Error(error.message);
+}
+
+/** Upload real photos as a character's canonical references (the licensed-likeness path). Files
+ *  map to reference kinds in order: front portrait, 3/4 portrait, full body; extras land as
+ *  'expression'. Uploaded UNAPPROVED like every reference — the operator still blesses each. Real
+ *  photos carry no AI provenance (they aren't AI); the videos generated FROM them are stamped and
+ *  disclosed like all AI media. */
+export async function uploadReferencePhotos(characterId: string, clusterId: string, files: File[]): Promise<number> {
+  const { data: { user } } = await supabase.auth.getUser();
+  const uid = user?.id;
+  if (!uid) throw new Error('Not signed in.');
+  const kinds = ['face_front', 'face_34', 'full_body'];
+  let made = 0;
+  for (const [i, f] of files.entries()) {
+    if (!f.type.startsWith('image/')) continue;
+    const clean = f.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+    const path = `${uid}/studio/${clusterId}/cast-${characterId}-${Date.now()}-${clean}`;
+    const { error: upErr } = await supabase.storage.from('project-assets').upload(path, f, { contentType: f.type || 'image/jpeg' });
+    if (upErr) throw new Error(`Could not upload ${f.name}: ${upErr.message}`);
+    const url = supabase.storage.from('project-assets').getPublicUrl(path).data.publicUrl;
+    const { error: insErr } = await supabase.from('media_ref_assets').insert({
+      owner_id: uid, subject_kind: 'character', subject_id: characterId,
+      kind: kinds[i] ?? 'expression', file_url: url, approved: false,
+    });
+    if (insErr) throw new Error(insErr.message);
+    made++;
+  }
+  if (!made) throw new Error('No image files to upload.');
+  return made;
 }
 
 export async function createLocation(name: string, description: string): Promise<void> {

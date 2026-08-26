@@ -7,9 +7,9 @@
 // reports the verdicts it got, never a rosier summary).
 
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2, Users, Plus, Sparkles, Check, Clapperboard, X } from 'lucide-react';
+import { Loader2, Users, Plus, Sparkles, Check, Clapperboard, X, Upload } from 'lucide-react';
 import {
-  loadCast, createCharacter, createLocation, setAssetApproved, generateReferenceSheet,
+  loadCast, createCharacter, createLocation, setAssetApproved, generateReferenceSheet, uploadReferencePhotos,
   createTestScene, setClipContinuityIn, startClip, pollClip, qaClip, acceptClip, sampleFrames, renderScene,
   type CastCharacter, type CastLocation, type CastAsset, type TestClip,
 } from '../../lib/garvis/castRun';
@@ -30,6 +30,8 @@ export function CastStudio({ worldId, clusterId, onToast }: {
   const [addOpen, setAddOpen] = useState<'character' | 'location' | null>(null);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
+  const [realPerson, setRealPerson] = useState(false);
+  const [consentNote, setConsentNote] = useState('');
   const [shots, setShots] = useState<ShotState[]>([]);
   const [running, setRunning] = useState(false);
   const [sceneUrl, setSceneUrl] = useState<string | null>(null);
@@ -53,12 +55,25 @@ export function CastStudio({ worldId, clusterId, onToast }: {
     if (!addOpen || !name.trim() || !desc.trim()) return;
     setBusy('Saving…');
     try {
-      if (addOpen === 'character') await createCharacter(name.trim(), desc.trim());
-      else await createLocation(name.trim(), desc.trim());
-      setName(''); setDesc(''); setAddOpen(null);
+      if (addOpen === 'character') {
+        if (realPerson && !consentNote.trim()) { onToast('error', 'A real person needs a consent note — who said yes, and how.'); return; }
+        await createCharacter(name.trim(), desc.trim(), realPerson ? { consentNote: consentNote.trim() } : undefined);
+      } else await createLocation(name.trim(), desc.trim());
+      setName(''); setDesc(''); setConsentNote(''); setRealPerson(false); setAddOpen(null);
       await reload();
-      onToast('success', 'Added — now generate its reference sheet.');
+      onToast('success', realPerson ? 'Added — upload their photos as the reference sheet.' : 'Added — now generate its reference sheet.');
     } catch (e) { onToast('error', e instanceof Error ? e.message : 'Could not save.'); }
+    finally { setBusy(null); }
+  };
+
+  const doUploadPhotos = async (characterId: string, subjectName: string, files: FileList | null) => {
+    if (!files?.length) return;
+    setBusy(`Uploading ${subjectName}'s photos…`);
+    try {
+      const n = await uploadReferencePhotos(characterId, clusterId, Array.from(files));
+      await reload();
+      onToast('success', `${n} photo${n === 1 ? '' : 's'} uploaded — approve the ones that look right.`);
+    } catch (e) { onToast('error', e instanceof Error ? e.message : 'Photo upload failed.'); }
     finally { setBusy(null); }
   };
 
@@ -174,11 +189,21 @@ export function CastStudio({ worldId, clusterId, onToast }: {
               <div key={row.id} className="rounded-xl border border-forge-border p-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-xs font-semibold text-forge-ink">{row.name}</p>
-                  <span className="text-[11px] text-forge-dim">{kind}{own.length ? ` · ${own.filter((a) => a.approved).length}/${own.length} approved` : ''}</span>
-                  <button onClick={() => void doSheet(kind, row.id, row.description, row.name)} disabled={!!busy || running}
-                    className="ml-auto flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">
-                    <Sparkles size={11} /> {own.length ? 'Regenerate sheet' : 'Generate reference sheet'}
-                  </button>
+                  <span className="text-[11px] text-forge-dim">
+                    {kind === 'character' && (row as CastCharacter).likeness === 'real' ? 'real person · consented' : kind}
+                    {own.length ? ` · ${own.filter((a) => a.approved).length}/${own.length} approved` : ''}
+                  </span>
+                  {kind === 'character' && (row as CastCharacter).likeness === 'real' ? (
+                    <label className={cn('ml-auto flex cursor-pointer items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40', (!!busy || running) && 'pointer-events-none opacity-60')}>
+                      <Upload size={11} /> Upload photos (front, angled, full body)
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => void doUploadPhotos(row.id, row.name, e.target.files)} />
+                    </label>
+                  ) : (
+                    <button onClick={() => void doSheet(kind, row.id, row.description, row.name)} disabled={!!busy || running}
+                      className="ml-auto flex items-center gap-1 rounded-lg border border-forge-border px-2 py-1 text-[11px] text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">
+                      <Sparkles size={11} /> {own.length ? 'Regenerate sheet' : 'Generate reference sheet'}
+                    </button>
+                  )}
                 </div>
                 {own.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2">
@@ -209,14 +234,29 @@ export function CastStudio({ worldId, clusterId, onToast }: {
         ))}
       </div>
       {addOpen && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder={addOpen === 'character' ? 'name (e.g. Sarah)' : 'name (e.g. the lake house kitchen)'}
-            className="min-w-[160px] rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
-          <input value={desc} onChange={(e) => setDesc(e.target.value)}
-            placeholder={addOpen === 'character' ? 'appearance: age, build, hair, distinguishing features' : 'the space: layout, furniture, windows, light'}
-            className="min-w-[280px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
-          <button onClick={() => void doAdd()} disabled={!!busy || !name.trim() || !desc.trim()}
-            className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">Save</button>
+        <div className="mt-2 space-y-2">
+          <div className="flex flex-wrap gap-2">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={addOpen === 'character' ? 'name (e.g. Sarah)' : 'name (e.g. the lake house kitchen)'}
+              className="min-w-[160px] rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+            <input value={desc} onChange={(e) => setDesc(e.target.value)}
+              placeholder={addOpen === 'character' ? 'appearance: age, build, hair, distinguishing features' : 'the space: layout, furniture, windows, light'}
+              className="min-w-[280px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-xs text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+            <button onClick={() => void doAdd()} disabled={!!busy || !name.trim() || !desc.trim() || (realPerson && !consentNote.trim())}
+              className="rounded-lg border border-forge-border px-2.5 py-1.5 text-xs text-forge-dim hover:border-forge-ember/40 disabled:opacity-60">Save</button>
+          </div>
+          {addOpen === 'character' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={() => setRealPerson(!realPerson)}
+                className={cn('rounded-lg border px-2 py-1 text-[11px]', realPerson ? 'border-forge-ember/60 text-forge-ember' : 'border-forge-border text-forge-dim hover:border-forge-ember/40')}>
+                Real person (a friend — their photos become the references)
+              </button>
+              {realPerson && (
+                <input value={consentNote} onChange={(e) => setConsentNote(e.target.value)}
+                  placeholder="consent: who said yes, and how (required — generation refuses without it)"
+                  className="min-w-[300px] flex-1 rounded-lg border border-forge-border bg-forge-bg px-2.5 py-1.5 text-[11px] text-forge-ink focus:border-forge-ember/60 focus:outline-none" />
+              )}
+            </div>
+          )}
         </div>
       )}
 

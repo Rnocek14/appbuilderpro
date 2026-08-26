@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/castLab.verify.ts
 import {
   CHARACTER_STYLE_BLOCK, characterRefPrompts, locationRefPrompts,
-  sixShotScene, testCostEstimateUsd, testReadiness, sceneTakes,
+  sixShotScene, testCostEstimateUsd, testReadiness, sceneTakes, likenessGate,
 } from './castLab';
 
 let passed = 0; let failed = 0;
@@ -57,6 +57,19 @@ console.log('castLab.verify');
   check('scene takes carry EXPLICIT lengths (known cut times unlock sound cues)', takes.every((t) => typeof t.lengthS === 'number'));
   check('a clip without a url never enters the timeline', takes.length === 2);
   check('lengths clamp into the renderer band (1-15s)', takes[1].lengthS === 15);
+}
+
+{ // the likeness gate
+  check('synthetic characters pass unconditionally',
+    likenessGate([{ name: 'Sarah', likeness: 'synthetic', consentedAt: null }]).ok);
+  const blocked = likenessGate([
+    { name: 'Sarah', likeness: 'synthetic', consentedAt: null },
+    { name: 'Jake (real)', likeness: 'real', consentedAt: null },
+  ]);
+  check('a real person without recorded consent blocks generation, by name',
+    !blocked.ok && !!blocked.reason && blocked.reason.includes('Jake (real)') && blocked.reason.includes('consent'));
+  check('recorded consent opens the gate',
+    likenessGate([{ name: 'Jake (real)', likeness: 'real', consentedAt: '2026-08-26T00:00:00Z' }]).ok);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

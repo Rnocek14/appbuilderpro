@@ -84,6 +84,20 @@ export function testCostEstimateUsd(): number {
   return Math.round(usd * 100) / 100;
 }
 
+// ---- the likeness gate ------------------------------------------------------------------------
+
+export interface LikenessState { name: string; likeness: 'synthetic' | 'real'; consentedAt: string | null }
+
+/** A real person's face never reaches a renderer without recorded consent. Same shape as every
+ *  honest gate in the platform: fail-closed, and the refusal NAMES what's missing. Synthetic
+ *  characters pass unconditionally. */
+export function likenessGate(chars: LikenessState[]): { ok: boolean; reason: string | null } {
+  const blocked = chars.filter((c) => c.likeness === 'real' && !c.consentedAt);
+  if (!blocked.length) return { ok: true, reason: null };
+  const names = blocked.map((c) => c.name || 'a character').join(', ');
+  return { ok: false, reason: `${names} ${blocked.length === 1 ? 'is' : 'are'} a real person without recorded consent — record their consent on the character before generating.` };
+}
+
 // ---- scene assembly ---------------------------------------------------------------------------
 
 /** Accepted clips → the edit builder's take list. Explicit lengths matter: known cut times are
