@@ -71,6 +71,29 @@ export function sixShotScene(a: { id: string; name: string }, b: { id: string; n
   ];
 }
 
+/** ANY script → shots: the generalization of the fixed test scene into the production line. One
+ *  beat per line. A line like "Sarah: How did you get in?" is a dialogue shot for that cast member
+ *  (name match, case-insensitive); any other line is an action shot whose visible characters are
+ *  the cast members NAMED in it (falling back to the first cast member so a shot never renders
+ *  empty). Duration from the spoken-word budget (~2.3 words/sec), clamped to the renderer band.
+ *  Deterministic: same script + same cast → same shots. */
+export function scriptShots(lines: string[], cast: Array<{ id: string; name: string }>, _locationId?: string): TestShot[] {
+  const clean = lines.map((l) => l.trim()).filter(Boolean);
+  return clean.map((line, i) => {
+    const m = line.match(/^([^:]{1,40}):\s*(.+)$/);
+    const speaker = m ? cast.find((c) => c.name.toLowerCase() === m[1].trim().toLowerCase()) : undefined;
+    if (speaker && m) {
+      const dialogue = m[2].trim();
+      const durationS = Math.max(4, Math.min(10, Math.round(dialogue.split(/\s+/).length / 2.3) + 2));
+      return { sceneIndex: i, action: `${speaker.name} speaks to camera, natural and engaged.`, dialogue, characterIds: [speaker.id], durationS };
+    }
+    const mentioned = cast.filter((c) => new RegExp(`\\b${c.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(line));
+    const ids = (mentioned.length ? mentioned : cast.slice(0, 1)).map((c) => c.id);
+    const durationS = Math.max(4, Math.min(10, Math.round(line.split(/\s+/).length / 3) + 3));
+    return { sceneIndex: i, action: line, dialogue: '', characterIds: ids, durationS };
+  });
+}
+
 /** What the whole test costs at one candidate per shot: shot 1 at the full fast rate, shots 2-6 on
  *  the chained video-reference discount. The number the button shows before spending. */
 export function testCostEstimateUsd(): number {

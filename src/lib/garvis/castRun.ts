@@ -9,7 +9,7 @@ import { supabase } from '../supabase';
 import { invokeFailure, startRenderEdit, pollRender, saveRenderedVideo } from './videoRun';
 import { characterRefPrompts, locationRefPrompts, sixShotScene, sceneTakes, type TestShot } from './castLab';
 import { buildUgcEdit } from './ugcEdit';
-import { aiProvenance } from './mediaProvenance';
+import { aiProvenance, type AiProvenance } from './mediaProvenance';
 import type { QaVerdict } from './videoQa';
 
 // ---- rows -------------------------------------------------------------------------------------
@@ -126,19 +126,18 @@ export async function generateReferenceSheet(
 
 export interface TestClip { id: string; scene_index: number; prompt: string; vo: string; status: string; output_url: string | null }
 
-/** Create the Test A production: one reel_jobs row + six wired reel_clips. Returns the clips in
- *  scene order. */
-export async function createTestScene(
-  worldId: string, clusterId: string,
-  a: { id: string; name: string }, b: { id: string; name: string }, locationId: string,
+/** ANY production: one reel_jobs row + wired reel_clips from a shot list. The six-shot test and
+ *  every real episode go through this same door. Returns the clips in scene order. */
+export async function createProduction(
+  worldId: string, clusterId: string, title: string, shots: TestShot[], locationId: string | null,
 ): Promise<TestClip[]> {
   const { data: { user } } = await supabase.auth.getUser();
-  const shots = sixShotScene(a, b);
+  if (!shots.length) throw new Error('The script produced no shots.');
   const { data: job, error: jobErr } = await supabase.from('reel_jobs').insert({
     owner_id: user?.id, world_id: worldId, cluster_id: clusterId,
-    title: 'Six-shot continuity test', hook: '', storyboard: { test: 'six-shot-continuity' }, status: 'generating',
+    title, hook: '', storyboard: { shots: shots.length }, status: 'generating',
   }).select('id').single();
-  if (jobErr || !job) throw new Error(jobErr?.message ?? 'Could not create the test production.');
+  if (jobErr || !job) throw new Error(jobErr?.message ?? 'Could not create the production.');
 
   const rows = shots.map((s: TestShot) => ({
     owner_id: user?.id, reel_id: job.id, scene_index: s.sceneIndex,
@@ -149,6 +148,14 @@ export async function createTestScene(
     .select('id, scene_index, prompt, vo, status, output_url').order('scene_index');
   if (clipErr || !clips) throw new Error(clipErr?.message ?? 'Could not create the shots.');
   return clips as TestClip[];
+}
+
+/** The Test A production, unchanged: the fixed six-shot scene through the same door. */
+export async function createTestScene(
+  worldId: string, clusterId: string,
+  a: { id: string; name: string }, b: { id: string; name: string }, locationId: string,
+): Promise<TestClip[]> {
+  return createProduction(worldId, clusterId, 'Six-shot continuity test', sixShotScene(a, b), locationId);
 }
 
 /** Hand the previous accepted shot's state to the next shot before it starts. */
@@ -196,10 +203,12 @@ export async function acceptClip(candidateId: string, continuityOut?: Record<str
  *  sound cues on the known cut times. This is the layer the shipping AI-drama operations skip, and
  *  it's where six generations start reading as one scene. Fully AI footage → the provenance stamp
  *  rides the finalized file (the disclosure gate enforces the label at publish, as everywhere). */
+export interface RenderedScene { url: string; provenance: AiProvenance; durable: boolean }
+
 export async function renderScene(
   clips: Array<{ url: string; durationS: number }>, clusterId: string, title: string,
   onStatus?: (s: string) => void,
-): Promise<string> {
+): Promise<RenderedScene> {
   const takes = sceneTakes(clips);
   if (!takes.length) throw new Error('No accepted clips to assemble.');
   const provenance = aiProvenance('video', 'cast-scene', Date.now());
@@ -213,7 +222,9 @@ export async function renderScene(
     onStatus?.(st.status ?? 'working');
     if (st.status === 'done' && st.url) {
       await saveRenderedVideo(clusterId, title, st.url, start.id);
-      return st.url;
+      // A publisher must only ever see the DURABLE copy — the provider url rots in 24h. When the
+      // durable save failed, say so honestly rather than queueing a post that will 404 tomorrow.
+      return { url: st.url, provenance, durable: st.durable !== false };
     }
     if (st.status === 'failed') throw new Error('The scene render failed on the provider.');
   }

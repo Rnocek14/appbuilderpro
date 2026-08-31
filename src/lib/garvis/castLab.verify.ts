@@ -1,7 +1,7 @@
 // Run: npx tsx src/lib/garvis/castLab.verify.ts
 import {
   CHARACTER_STYLE_BLOCK, characterRefPrompts, locationRefPrompts,
-  sixShotScene, testCostEstimateUsd, testReadiness, sceneTakes, likenessGate,
+  sixShotScene, testCostEstimateUsd, testReadiness, sceneTakes, likenessGate, scriptShots,
 } from './castLab';
 
 let passed = 0; let failed = 0;
@@ -70,6 +70,31 @@ console.log('castLab.verify');
     !blocked.ok && !!blocked.reason && blocked.reason.includes('Jake (real)') && blocked.reason.includes('consent'));
   check('recorded consent opens the gate',
     likenessGate([{ name: 'Jake (real)', likeness: 'real', consentedAt: '2026-08-26T00:00:00Z' }]).ok);
+}
+
+{ // script → shots (the production line)
+  const cast = [{ id: 's1', name: 'Sarah' }, { id: 'j1', name: 'Jake' }];
+  const shots = scriptShots([
+    'Sarah: A stranger texted her three words. Nice blue car.',
+    'Sarah looks out the window at the street below.',
+    '  ',
+    'jake: Where else would I be?',
+    'A phone buzzes on the counter.',
+  ], cast);
+  check('blank lines drop; indices stay sequential', shots.length === 4 && shots.every((s, i) => s.sceneIndex === i));
+  check('a "Name:" line is a dialogue shot for that cast member (case-insensitive)',
+    shots[0].dialogue.startsWith('A stranger texted') && shots[0].characterIds.join() === 's1'
+    && shots[2].dialogue === 'Where else would I be?' && shots[2].characterIds.join() === 'j1');
+  check('an action line casts the characters NAMED in it', shots[1].dialogue === '' && shots[1].characterIds.join() === 's1');
+  check('a line naming nobody falls back to the first cast member — never an empty shot', shots[3].characterIds.join() === 's1');
+  check('durations sit in the renderer band', shots.every((s) => s.durationS >= 4 && s.durationS <= 10));
+  check('deterministic: same script, same shots', JSON.stringify(shots) === JSON.stringify(scriptShots([
+    'Sarah: A stranger texted her three words. Nice blue car.',
+    'Sarah looks out the window at the street below.',
+    '  ',
+    'jake: Where else would I be?',
+    'A phone buzzes on the counter.',
+  ], cast)));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
