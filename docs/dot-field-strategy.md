@@ -198,5 +198,45 @@ plus near-zero CAC through the engine compounds into a Cal-AI-shaped consumer pa
 the full search/social vision on zero validation. The wrap ships in days; the feel test comes
 first.
 
+## 6. Capitalization — how the value actually gets captured
+
+The gesture will leak the moment it works (Brichter's law). Value pools in five assets the
+gesture merely advertises, sequenced cheapest-first:
+
+1. **Priority, first (~$100–300, this month, before any public demo blitz).** File a
+   provisional patent on the *method* — trajectory-as-recommendation-signal: micro-verdict
+   harvesting from continuous scrub, steer-away as explicit negative feedback, dwell-weighted
+   territory materialization. Methods are patentable where looks are not; a provisional is a
+   dated stake, not a lawsuit — its job is to make the invention *acquirable instead of
+   copyable-for-free*. File before the public write-up (US grace exists; foreign rights die on
+   disclosure). Then publish the naming write-up + demo video: whoever names a gesture owns it
+   in the discourse forever — pick ONE name (the drift) and use it in every clip, every post.
+   Canonical-origin status is a real asset: it prices talks, press, and acquihire gravity.
+2. **Internal yield, immediately.** Scout's first customer is the operator's own content
+   business: better daily trend-scouting → better videos across 50 accounts. This monetizes at
+   zero external sales and funds patience.
+3. **The tool's cash flow (the 90% case).** $10–30/mo per creator seat, sold to the operator's
+   own audience per niche, App Store after TestFlight proves ritual. Honest ceiling stated in
+   §5 — but it's profitable at solo scale from month one of charging.
+4. **The consumer swing (the 10% case).** Free app + Pro tier (extra niches/worlds, trail
+   export), near-zero CAC through the engine — the Cal AI shape. Monetization laws hold: never
+   sell positions; sponsored *regions* only, labeled, later; affiliate on opens where the
+   corpus is shoppable.
+5. **The data asset (the deep, defensible one).** Once real users scrub real corpora, the
+   micro-verdict logs become the only dataset of its kind: per-niche, per-day, high-frequency
+   attention maps with explicit negatives. That is a trend-intelligence product (reports/API
+   for brands and agencies — "what creators steered toward this week") and the training corpus
+   for the psychic-fast ranker. Nobody can replicate it without shipping the interface first.
+   One law attached: this telemetry is intimate (thumb-dwell ≈ gaze); capitalize consent-first
+   or the trust that powers routes 3–4 dies.
+6. **The exit that the history predicts.** If the pattern proves, the likely ending is a
+   distributor carrying it (per the inventor-never-wins law) — so build to be *bought, not
+   beaten*: retention proof + the dataset + the provisional + canonical-origin status are
+   exactly an acquisition package, and they are the same artifacts the plan already produces.
+   SDK licensing stays shelved until one surface hits.
+
+Order of operations this quarter: provisional → wrap feel test → dogfood → naming write-up +
+engine blitz → paid TestFlight. Every step produces a capture asset even when the step fails.
+
 *Panel details preserved in the session record; the drift's feel spec and invariants that any
 native build must honor are in `dot-field-drift.md` §3–5.*
