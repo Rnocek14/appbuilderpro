@@ -26,6 +26,7 @@
     "verify:proactive": "tsx src/lib/garvis/proactive.verify.ts",
     "verify:dockpresence": "tsx src/lib/garvis/dockPresence.verify.ts",
     "verify:studiovoice": "tsx src/lib/garvis/studioVoice.verify.ts",
+    "verify:claimscreen": "tsx src/lib/garvis/claimScreen.verify.ts",
     "verify:objective": "tsx src/lib/garvis/objective.verify.ts",
     "verify:profiles": "tsx src/lib/garvis/profiles.verify.ts",
     "verify:liveness": "tsx src/lib/garvis/liveness.verify.ts",
