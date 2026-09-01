@@ -74,6 +74,35 @@ Pinterest, BeReal):
    sermon — "I don't scroll" as virtue is BeReal's grave; "my feed has an end and I reached it"
    is a feeling scroll structurally cannot offer.
 
+## 3½. The velocity thesis (the operator's reframe, adopted)
+
+The operator, after real use: *"it's like scrolling but so much quicker — people can't hold
+attention; it's like scrubbing. That's why it would be viral if we got the algorithm and
+content right."* This corrects the skeptic's throughput verdict, which conflated two speeds:
+
+- **Reading speed:** scroll wins (4–6 items in parallel at full fidelity). Unchanged.
+- **Rejection speed:** the field wins by an order of magnitude. A scroll rejection costs a
+  flick + transition (~500ms) and TikTok makes you start watching before you may skip; a
+  scrub rejection costs ~40ms. *Scroll makes you watch to skip; scrub lets you skip without
+  watching.* For the attention-collapsed audience, rejection speed is the product — the scrub
+  is not the anti-feed, it is the feed's logical endpoint.
+- **Signal bandwidth — the buried moat:** TikTok's real innovation was the fastest
+  preference-feedback loop ever built (~one signal per item-view). Scrubbing emits 10–25
+  micro-verdicts per second (crossings, graded dwells, direction, steer-away — the last
+  unmeasurable by any feed). The algorithm doesn't need to be smarter than TikTok's; with
+  20–50× the feedback per minute it can be dumber and still feel psychic. One minute of
+  scrubbing ≈ one hour of scroll telemetry. When the pipeline is built, per-crossing
+  micro-signals are the core data asset, not a footnote.
+- **The demo this unlocks:** make the learning visible — 60 seconds of scrubbing while the
+  territory reshapes on camera and the label names your taste; side-by-side counter vs a
+  scroll feed ("them: 9/min · you: 150/min"). Speed is the hook, the psychic-fast algorithm
+  is the session-one aha, closure + the trail remain the ritual. The three layers stack.
+- **Caveat kept:** comb-speed gives texture, not comprehension — content must stay
+  scent-first (sub-400ms thumbnails/hooks, which short-form already is), and raw velocity
+  decays like all novelty; visible learning and the finishable day carry week three.
+
+Pitch, upgraded: *"Faster than scrolling — and it learns you in a minute."*
+
 ## 4. The ruling
 
 **Build "Scout" (working name): a native iOS app that turns one niche's last 24 hours of
