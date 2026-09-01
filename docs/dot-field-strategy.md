@@ -87,7 +87,9 @@ The trail card is the receipt and the ad.**
   plugin, staged data, on the operator's phone. One question: does the feel survive the wrap?
   No backend, no accounts. This is the cheapest kill in the whole plan. (Known risk: WebView
   touch latency may blur the detent — if so, the fallback is a minimal SwiftUI/Metal spike of
-  just the scrub-detent loop, not abandonment.)
+  just the scrub-detent loop, not abandonment.) **Scaffolded: `scout/` — `npm install &&
+  npx cap add ios && npx cap open ios` on a Mac, then Run; the build steps and the feel-test
+  checklist are in `scout/README.md`.**
 - **Days 15–90:** daily batch assembly for ONE niche — the one the operator scouts hardest
   personally (batch-once-daily caps API cost at cents and sidesteps the projection-stability
   problem; small daily sets, frozen layouts). Two weeks of dogfooding every morning. Then

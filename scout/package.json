@@ -1,0 +1,18 @@
+{
+  "name": "scout",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scout v0 — the drift's native feel test. Capacitor wrap of prototypes/the-drift.html with real Taptic detents.",
+  "scripts": {
+    "sync:web": "node scripts/sync-from-prototype.mjs",
+    "ios": "npm run sync:web && npx cap sync ios && npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.5.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.1"
+  }
+}

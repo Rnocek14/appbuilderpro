@@ -421,8 +421,12 @@ function spring(k, c){ return {value:0, v:0, target:0, k, c}; }
 function step(s, dt, kMul){
   if (reduceMotion){ s.value = s.target; s.v = 0; return; }
   const k = s.k * (kMul||1);
-  const a = -k*(s.value - s.target) - s.c*s.v;
-  s.v += a*dt; s.value += s.v*dt;
+  // substep: explicit Euler at k≈2700 diverges past dt≈8ms, and a dropped frame hands us 32ms
+  const n = Math.max(1, Math.ceil(dt/0.008)), h = dt/n;
+  for (let i = 0; i < n; i++){
+    const a = -k*(s.value - s.target) - s.c*s.v;
+    s.v += a*h; s.value += s.v*h;
+  }
 }
 const hx = spring(900, 60), hy = spring(900, 60);   // halo position — critically damped
 const swell = spring(550, 30);                      // selected-dot scale — one micro-overshoot
