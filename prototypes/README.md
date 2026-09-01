@@ -41,6 +41,16 @@ suites and a route — and no way to see what any of it feels like. These are th
 | P11 | `the-request.html` | A client's email becomes an object whose shape refuses to bend | `change_requests` (app_0117) — same 11 states, same append-only history | You cannot skip a step; a *deployed* change can never be declined; refusals are recorded too |
 | P12 | `the-report.html` | The month compiled, with its holes left in | `clientReport.ts` | An absent source becomes a named unknown, an empty one a measured zero, and one observation refuses to become a percentage |
 
+## Concept probes — paradigms, not product claims
+
+Waves 1–3 prototype *this product's* moments. A concept probe tests an interaction
+paradigm on staged content, before any product commitment. Same contract (`DESIGN.md`),
+same harnesses; what it must prove is a feel, not a schema.
+
+| # | File | The question | Grounded in | Inevitable when |
+|---|---|---|---|---|
+| P13 | `the-field.html` | Can navigation be *felt*? A day's feed as a bounded dot field: scrub with hysteresis, one detent per crossing, preview above the hand, lift to open, fade on read | `docs/dot-field-navigation.md` (the six-lens interrogation and the feel spec it implements) | A thumb parked between two dots never flickers; a half-second edge-to-edge scrub is an even ratchet; after a minute you reach for a dot you *remember* |
+
 ## Testing them
 
 Two harnesses, deliberately separate, because they answer different questions:
