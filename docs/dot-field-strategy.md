@@ -139,6 +139,55 @@ The trail card is the receipt and the ad.**
   feed; an SDK; Android; a Swift/Metal rewrite before Capacitor invalidates itself; accounts
   or payments before TestFlight proves ritual.
 
+## 4½. The verdict — "did we find something?" (historian · prosecutor · advocate · referee)
+
+Asked directly by the operator and put to a fourth adversarial panel. The ruling:
+
+**Yes — two things were found, and neither is the app yet.** (a) **A new composite interaction
+primitive**: bubble-cursor selection + hysteresis + haptic detents + scrub-preview +
+commit-on-lift, assembled into corpus navigation for the first time (closest relative: Dasher,
+2000 — for text entry, never content). Publishable-grade, with a driven test suite. (b) **A
+novel sensor design**: the high-frequency micro-verdict channel — above all *steer-away as an
+explicit, cheap negative signal*, attacking the implicit-negative-feedback problem recommender
+literature mostly abandons. Even the prosecutor ranked this the most real, most stealable
+asset. Tier: **absorbable-pattern candidate on demo-tier evidence** — the argument sits at
+pull-to-refresh rung; the evidence is still one nervous system deep.
+
+**"The next evolution of scrolling" — no, and the framing is the trap.** The succession laws,
+from the actual record: winners remove *decisions*, not motion (infinite scroll, TikTok);
+"consumption gets more passive" is false as stated — pull-to-refresh *added* effort and won
+because the gesture was pleasurable, Tinder made choosing the content, TikTok added a flick
+per item and won on **loop-tightness** (watch-time as a per-item verdict). The dot field
+satisfies the deepest law emphatically — the largest single feedback-loop tightening in the
+lineage — and sits on an unexploited feel-substrate (Taptic 2016 / Core Haptics 2019, the
+capacitive-touch of this cycle). It violates the sustained-hold and self-teaching laws. Best
+analog: **Tinder** — verdict-dense input that wins where judging IS the content, and never
+generalized. Realistic best outcome: **pull-to-refresh-shaped** — absorbed into everything,
+invented here, captured by distributors (the inventor almost never wins: Prada/iPhone,
+Raskin/Facebook, Snapchat/Instagram, Brichter/everyone). Failure mode: 3D Touch / Cover Flow —
+mitigated only because glowing dots are a *visible* affordance.
+
+**Three claims flagged as echo-chamber risks, with their external tests:**
+1. *40ms rejection beats 500ms scroll* — the real competitor is the eye (saccades ≈30ms,
+   parallel). Test: same corpus, list vs field, strangers, rejections/min and
+   time-to-accepted-item.
+2. *The recommender can be dumber and feel psychic* — zero micro-verdicts have ever been fed
+   to a model; transit may swamp signal. Test: train a simple ranker on logged steer-away,
+   measure lift vs a dwell-only baseline.
+3. *The feel is validated* — by the thumb that built it, under the IKEA-effect premium. Test:
+   one uncoached stranger, native haptics, five minutes, unprompted day-2 return.
+
+**The upgrade ladder, on the clock:** demo → niche instrument (Q1 2027: wrap feel survives on
+device + one stranger's day-2 return); niche → confirmed pattern (mid-2027: TestFlight-100
+day-7 cohort + measured steer-away lift); pattern → paradigm conversation (2028: layout
+stability on a real corpus + a measured triage win over a list). Also on the table now, per
+the inventor-never-wins law: a write-up/provisional-patent posture for the sensor channel —
+the defensible residue if a distributor carries the gesture.
+
+*Bottom line, verbatim from the referee: "you found a sensor and a primitive with a real
+thesis attached. You did not find the next scrolling — and the only evidence that could ever
+say otherwise is a stranger's second session."*
+
 ## 5. Honest odds, stated to the operator
 
 ~90%: a gorgeous niche tool with a few hundred devoted users that never escapes its vertical —
