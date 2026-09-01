@@ -50,6 +50,7 @@ same harnesses; what it must prove is a feel, not a schema.
 | # | File | The question | Grounded in | Inevitable when |
 |---|---|---|---|---|
 | P13 | `the-field.html` | Can navigation be *felt*? A day's feed as a bounded dot field: scrub with hysteresis, one detent per crossing, preview above the hand, lift to open, fade on read | `docs/dot-field-navigation.md` (the six-lens interrogation and the feel spec it implements) | A thumb parked between two dots never flickers; a half-second edge-to-edge scrub is an even ratchet; after a minute you reach for a dot you *remember* |
+| P14 | `the-drift.html` | Can you *steer* an algorithm with your thumb? The field becomes a bounded territory: push into an edge with intent and the world flows under the thumb; dwell tilts what unseen ground materializes ahead; the walked world never rewrites; the journey is an object | `docs/dot-field-drift.md` (the four-lens referee spec it implements) | A fast skim through the edge band never moves the world; release stops it dead in a beat; back-scrubbing meets the exact same dots; the "drifting toward" label names what you actually wanted |
 
 ## Testing them
 

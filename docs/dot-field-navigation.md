@@ -230,3 +230,10 @@ card, dwell-marks-read, doneness moment, first-class List tab, arrow-key + Enter
 reduced-motion support, desktop hover-scrub. Every number above is implemented, not
 aspirational. What it must prove is in its "?" card; the two-line version: **park a
 thumb between two dots and feel nothing; scrub the whole field and feel everything.**
+
+## 9. Where it went next
+
+The operator's follow-up — recentering so a liked direction can continue, the field as a
+steerable feed — became its own interrogation and prototype: **the Drift**
+(`docs/dot-field-drift.md`, `prototypes/the-drift.html`), where the bounded field grows into
+a territory and the thumb's trajectory becomes the recommendation signal.
