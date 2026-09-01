@@ -94,24 +94,27 @@ and trail-link → install %.
 **3.2 THE MONTH-6 FORK (pre-decide your temperament now — decision #3 below):**
 - **Velocity path:** ≥100K installs and still accelerating → open buyer conversations within
   30 days. The Mailbox/tbh window is 8–16 weeks from inflection and does not reopen.
-- **Retention path:** D30 ≥20–25%, verdicts/session holding → don't sell yet; start **Sample
-  Drift** (Phase 3.3) and talk at months 9–12 from strength.
+- **Retention path:** D30 ≥20–25%, verdicts/session holding → don't sell yet; start the
+  **creator-asset drift** (Phase 3.3) and talk at months 9–12 from strength.
 - **Fallback (applications research, 2026-09-01):** if Scout misses the D30 gate, the platform
   effort pivots to **Shopify "Drift Browse"** ($29/$99/$299 for visual catalogs, steer-away
   heatmaps the free incumbent can't show) — merchants pay for conversion lift; exit 3–4× profit.
 - **Neither:** Halide posture (run it profitably, keep the patent) or execute the kill.
 
-**3.3 Sample Drift — world #2, the exit surface (retention path only).** Loops and one-shots
-for music producers: every dot plays its sample on crossing — the truest sub-400ms verdict there
-is, and the ritual producers already perform by clicking through Splice's lists. Corpus: Freesound
-(714K sounds, 72% CC0, ~129 new/day — legally free, free API) plus label-permissioned packs.
-Money: Splice affiliate ($11.20/paid sub + recurring), Loopcloud 15% recurring. Buyers: Splice
-(bought Spitfire ~$50M, Apr 2025), Loopcloud, Native Instruments, Output. Build **THE CHART**: a
-ranker trained on steer-away/dwell logs beating a dwell-only baseline — "3 drift sessions predict
-what a producer keeps better than N sessions of clicks." That chart is the acquisition memo.
-*(Podcasts, the previous world #2, are in the drawer: speech needs ~30s to judge, 71K
-episodes/day is a firehose, no payer, and Spotify shipped Clips May 2026 — see
-`dot-field-applications.md`.)*
+**3.3 Creator-asset drift — world #2, the founder-fit version (retention path only).** The
+sounds, sound effects, music beds, b-roll clips, fonts and templates a short-form maker hunts
+for every day — which is exactly what your own 50-account video pipeline hunts for every day,
+so you are user #1 again. Every dot plays or shows its asset on crossing: audio and image scent
+are the truest sub-400ms verdicts there are. Corpus, legally free: Freesound (714K sounds, 72%
+CC0 — mostly SFX), Pexels/Pixabay video, Mixkit, Google Fonts. Payers via affiliate: Adobe Stock
+($43 per subscription referral — verified), Epidemic Sound, Artlist, Envato Elements (programs
+exist; rates to verify). Buyers in the world you already operate in: Canva, Adobe, CapCut,
+Envato, Epidemic Sound. Build **THE CHART**: a ranker trained on steer-away/dwell logs beating a
+dwell-only baseline — "3 drift sessions predict what a creator keeps better than N sessions of
+clicks." *(The producer sample-library variant — Splice, Loopcloud — keeps every technical
+virtue but fails founder fit: you don't live there, can't dogfood it, and your accounts don't
+reach producers. It is a later adjacency if the mechanic proves, not an entry point. Podcasts
+remain in the drawer — see `dot-field-applications.md`.)*
 
 ## PHASE 4 — The exit machinery (months 7–12 · only if a Phase-3 trigger fired)
 
@@ -120,10 +123,11 @@ episodes/day is a firehose, no payer, and Spotify shipped Clips May 2026 — see
   non-provisional ~$8–15K with attorney, **plus a professional claim chart of Google's
   US 10,365,719 — detent-on-crossing haptics, the one identified FTO risk — before any
   commercial ship of the detent mechanic**), AI-provenance page, press/naming trail.
-- **The rooms:** Splice / Loopcloud / Native Instruments / Output (wound: sample browse is a
-  list with play buttons; comp: Splice→Spitfire ~$50M) + **Match Group always as the second
-  room** (they litigated the swipe — they believe gestures have cash value) + Pinterest/Snap
-  warm. Apple is press strategy, not a meeting.
+- **The rooms:** Canva / Adobe / CapCut / Envato / Epidemic Sound (wound: every creator-asset
+  library is a search box over a grid — nobody owns *browse* for assets; comp: Splice→Spitfire
+  ~$50M for a judging-dense audio catalog) + **Match Group always as the second room** (they
+  litigated the swipe — they believe gestures have cash value) + Pinterest/Snap warm. Apple is
+  press strategy, not a meeting.
 - **LOI discipline:** never one bidder, never name a number first, no exclusivity >30 days,
   **no earnouts tied to their roadmap**, M&A lawyer at first LOI (no banker under ~$50M).
 
@@ -135,6 +139,10 @@ episodes/day is a firehose, no payer, and Spotify shipped Clips May 2026 — see
 3. The walked world never rewrites; the list sibling always ships; no wellbeing sermons in
    marketing — sell the full stop ("my feed has an end"), never the virtue.
 4. Gates decide. Not enthusiasm — yours or the AI's.
+5. Founder fit. Never enter a vertical you don't use daily — every world must have you as
+   user #1, reachable by your own accounts, dogfoodable every morning. A corpus that scores
+   perfectly on the mechanic but fails this test (the producer sample-library variant) is an
+   adjacency for later or an acquirer's expansion slide, never an entry point.
 
 ## THE THREE DECISIONS ONLY YOU CAN MAKE (decide before month 6)
 
@@ -158,7 +166,7 @@ every step services) · ~4% the fear-scale outcome (recognize it; never need it)
 strangers, the three decisions, every conversation with a human buyer.
 **Me, on your word:** the Scout pipeline + daily world assembler, the metrics dashboard, the
 trail-card generator + public trail pages, the naming write-up draft, the ranker experiment,
-the IP-assignment/provenance one-pagers, Sample Drift world, the free small-web Stumble field
-demo, and any spike a gate demands.
+the IP-assignment/provenance one-pagers, the creator-asset world, the free small-web Stumble
+field demo, and any spike a gate demands.
 
 **Next physical action: the provisional and the wrap. Both fit in one week. Gate A is waiting.**

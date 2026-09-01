@@ -120,3 +120,22 @@ for visual Shopify catalogs, $29/$99/$299, with a steer-away heatmap the free ap
   audio for producer-niche accounts; get it onto 20 producers' phones. Kill metric, set now:
   **D7 ≥40% among those 20**, or Sample Drift joins podcasts in the drawer and the Shopify
   wedge moves up.
+
+## 6. Founder-fit correction (same day)
+
+The operator's objection, verbatim: "It seems a bit ridiculous to get into music industry
+randomly." Correct, and it exposes a flaw in §2–3: the ranking scored *corpus fit* (scent,
+payers, free data, buyers) and ignored *founder fit*. Entering a vertical the founder doesn't
+live in is a classic solo-founder death — no dogfooding, no taste, no buyer relationships, and
+the 50-account engine doesn't reach producers.
+
+The sweep's real lesson is the **pattern**, not the vertical: the drift monetizes best on
+creator-tool subscriptions reached by affiliate, over bounded, judgeable, legally-free corpora
+**the founder uses daily**. Applied to the founder's own world — a pipeline producing short-form
+video at volume — the corpus is the **creator asset hunt**: sound effects, music beds, b-roll,
+fonts, templates. Same scent virtues (Freesound's 72% CC0 corpus is mostly SFX; Pexels/Pixabay
+video; Google Fonts), same affiliate class (Adobe Stock $43/sub verified; Epidemic Sound,
+Artlist, Envato Elements programs exist — rates to verify), and buyers in the founder's own
+operating world: Canva, Adobe, CapCut, Envato, Epidemic Sound. The producer sample-library
+variant becomes a later adjacency if the mechanic proves. New standing rule in the plan:
+**never enter a vertical you don't use daily — every world must have you as user #1.**

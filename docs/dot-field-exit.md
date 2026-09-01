@@ -74,13 +74,19 @@ micro-verdict dataset an acquirer must rename and ship.**
 - **The trigger:** Scout passes its retention gate (~M6) → Audio Drift world begins. What
   carries over: the spine, the recommender, the cross-domain dataset, the patent claims.
 
-**Amendment (applications research, 2026-09-01 — see `dot-field-applications.md`):** world #2
-changes from podcasts to **Sample Drift** (loops/one-shots for producers). The audio thesis
-strengthens rather than weakens — a musical transient is judged in <400ms where speech needs a
-~30s clip — and the corpus is legally free (Freesound, 72% CC0) where podcasts carried licensing
-posture. Buyer slate reorders accordingly: Splice (bought Spitfire ~$50M, Apr 2025), Loopcloud,
-Native Instruments, Output first; Match stays the second room. Honest bands shrink to $1–5M
-for the exit case but with four named, recently active buyers instead of one.
+**Amendment (applications research + founder-fit correction, 2026-09-01 — see
+`dot-field-applications.md` §6):** world #2 changes from podcasts to the **creator-asset
+drift** — the sound effects, music beds, b-roll, fonts and templates a short-form maker hunts
+for daily. The audio/visual-scent thesis strengthens rather than weakens (an SFX or a clip is
+judged in <400ms where speech needs a ~30s hook), the corpus is legally free (Freesound 72%
+CC0, Pexels/Pixabay, Mixkit, Google Fonts) where podcasts carried licensing posture, and — the
+deciding factor — the founder is user #1: the 50-account video pipeline hunts these assets
+every day and reaches the exact cohort. The research's first pick, a producer sample-library
+world (Splice/Loopcloud), kept every technical virtue but failed founder fit and is demoted to
+a later adjacency. Buyer slate reorders accordingly: Canva, Adobe, CapCut, Envato, Epidemic
+Sound first (the Splice→Spitfire ~$50M comp still anchors what a judging-dense audio catalog
+is worth); Match stays the second room. Honest bands stay in the $1–5M exit case with five
+named, active buyers instead of one.
 
 ## 3. The buyer slate
 
