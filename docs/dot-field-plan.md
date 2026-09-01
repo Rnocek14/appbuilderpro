@@ -18,8 +18,9 @@ legal name and address; delete the cover note; export to PDF. Optional but recom
 hour of a patent attorney's review (~$300–500). File at USPTO Patent Center as a provisional
 (cover sheet SB/16; micro-entity fee ~$65 / small ~$130 — verify current). Save the receipt
 and application number. **Iron rule: this happens before ANY public post, video, or App Store
-listing about the mechanism.** The 12-month conversion clock starts at filing — put the
-conversion date in your calendar now.
+listing about the mechanism** — the US gives inventors a 12-month grace period but the EPO's
+absolute-novelty rule has none: a public demo before filing kills European rights
+permanently. The 12-month conversion clock starts at filing — calendar it now.
 
 **0.2 Entity hygiene (same week, ~1 hour + state fee).** The drift IP + apps live in one
 entity; the 50-account content engine stays in another (or stays personal). Never bundle them
@@ -33,6 +34,9 @@ standard 2026 diligence; I can draft both pages).
 set Signing team (free Apple ID works; 7-day dev builds) → plug in iPhone → Run.
 Then walk it every morning. The feel checklist is in `scout/README.md`; the one question that
 matters: **does the detent land ON the crossing, or trail it?**
+(Audit note, 2026-09-01: Apple patched the programmatic switch-haptic trick in iOS 26.5 — the
+mobile web can no longer produce the detent at all. The native wrap is the *only* path to the
+feel on iPhone; web demos are visual + audio only, permanently.)
 
 **⛔ GATE A (end of week 2):** feel survives the wrap → continue. Detents trail the crossing →
 one decision: a 1–2 week SwiftUI/Metal spike of *just the scrub-detent loop*, or kill to the
@@ -96,7 +100,11 @@ and trail-link → install %.
 
 **3.3 Audio Drift — world #2, the exit surface (retention path only).** Podcast corpus via
 open RSS; hooks cut server-side (`scout/scripts/hook-cutter.mjs` — already proven against a
-live feed). The paradigm's scent weakness vanishes here: a 1.5s audio hook is judged before a
+live feed). **Licensing posture required (audit finding):** technically open ≠ licensed —
+there is no "short clip = fair use" rule; excerpting is a case-by-case defense, and Podz's
+real defense was driving discovery until it sold to the license-holder. Ship with a
+podcaster opt-in/opt-out program and takedown path from day one, and treat hooks as
+discovery that links to the source. The paradigm's scent weakness vanishes here: a 1.5s audio hook is judged before a
 title could be read. Build **THE CHART**: a simple ranker trained on steer-away/dwell logs vs
 a dwell-only baseline — "3 drift sessions predict subscribes better than N sessions of taps."
 That chart is the acquisition memo.
@@ -105,7 +113,9 @@ That chart is the acquisition memo.
 
 - **Data room:** retention dashboard (live, not slides), rejection-latency distribution,
   verdicts-per-session chart, the consent-clean dataset, IP chain (provisional → budget the
-  non-provisional ~$8–15K with attorney), AI-provenance page, press/naming trail.
+  non-provisional ~$8–15K with attorney, **plus a professional claim chart of Google's
+  US 10,365,719 — detent-on-crossing haptics, the one identified FTO risk — before any
+  commercial ship of the detent mechanic**), AI-provenance page, press/naming trail.
 - **The rooms:** Spotify (wound: podcast discovery is broken; comp: Podz ~$50M) + **Match
   Group always as the second room** (they litigated the swipe — they believe gestures have
   cash value) + Snap warm. Pinterest if the moodboard demand moment was manufactured. Apple is

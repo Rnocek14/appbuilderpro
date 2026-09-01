@@ -9,8 +9,9 @@
 > ~$65, small entity ~$130 as of recent schedules — verify current fees). You have **12 months**
 > from filing to convert to a non-provisional or PCT application or the priority lapses.
 > **File BEFORE any public disclosure** of the mechanism (the write-up, demo videos, App Store):
-> the U.S. has a 12-month grace period for the inventor's own disclosures, but most foreign
-> rights die on first public disclosure. The published artifacts to date are private links; the
+> the U.S. has a 12-month grace period for the inventor's own disclosures (AIA §102(b)(1)),
+> but the EPO applies absolute novelty (Art. 54 EPC) with no general grace period — a public
+> demo before filing kills European rights while leaving U.S. rights intact. The published artifacts to date are private links; the
 > repository is private; treat both as non-disclosing but do not test that assumption.
 > Strongly recommended: 1–2 hours of a patent attorney's review before filing, and a real
 > attorney for the non-provisional conversion (that is where claims get drafted for value —
@@ -56,6 +57,33 @@ reshuffle, defeating spatial memory. Separately, haptic actuators capable of cri
 transients (e.g., linear resonant actuators with programmable transient interfaces) have been
 ubiquitous in mobile devices since approximately 2016 but are not used as the primary feedback
 spine of any mainstream content-navigation interface.
+
+Known prior art, acknowledged and distinguished (from a live prior-art sweep, 2026-09-01):
+area-cursor selection with the nearest-target property (Grossman & Balakrishnan, "The Bubble
+Cursor," CHI 2005) lacks hysteresis for continuous scrubbing, haptic confirmation, and any
+signal channel. Shipped dot-map browsers (Radio Garden's drag-to-reticle station globe; the
+Every Noise at Once family; Nomic Atlas embedding maps) present content spatially with tap or
+reticle auto-play but emit no haptic detents, apply no hysteresis, and harvest no gesture
+signal from static geography. One-dimensional haptic-detent scrubbers are shipped (platform
+page-dot scrubbing; alphabet-rail scrubbers) without two-dimensional fields, preview
+coupling, or signal extraction. Gaze-driven adaptive image retrieval (Kozma, Klami & Kaski,
+"GaZIR," ICMI-MLMI 2009; "PinView," arXiv 2014) closes an implicit-signal-to-presentation
+loop using gaze, without touch input, haptics, hysteresis selection, kinematic event
+taxonomy, or negative signals from motion-away. Desktop cursor-movement relevance research
+(Huang, White & Dumais, CHI 2011, and successors) infers relevance from passive mouse
+telemetry on conventional layouts; cognitive mouse-tracking research reads trajectory
+curvature as a psychological measurement; neither defines real-time weighted negative
+feedback events from heading kinematics within a designed selection gesture, nor supplies
+them to a recommender at the rates disclosed herein. In the patent literature, haptic effects
+on item-boundary crossings during continuous scrolling are claimed (e.g., US 10,365,719;
+US 8,264,465), and coarse swipe-gesture attributes mapped to signed preference are claimed
+(e.g., US 10,891,049); cursor direction-change relevance was disclosed in abandoned
+US 2013/0246383. The present invention is distinguished by the combination of
+hysteresis-governed nearest-target selection over a two-dimensional content field,
+per-selection-interval kinematic classification into weighted preference events including a
+heading-kinematics negative ("steer-away"), preference-conditioned materialization of
+unvisited territory with immutability of visited territory, and the locomotion and trail
+mechanisms disclosed herein.
 
 ## SUMMARY
 
@@ -229,6 +257,18 @@ controller/rotary crown (detents mapped to rumble/crown haptics). An accessibili
 presents the identical corpus as a first-class list. The signal-acquisition method of §5 is
 independent of the specific rendering and may be embodied in any continuous-selection
 interface with discrete targets.
+
+## CLAIM-DRAFTING NOTES FOR THE NON-PROVISIONAL (attorney guidance, not filed text)
+
+Per the 2026-09-01 prior-art sweep: do NOT pursue broad claims on (a) haptic detents on item
+crossings during continuous input (US 10,365,719, assigned to Google, appears alive to ~2037 —
+obtain a professional claim chart before any commercial ship of the detent mechanic), or
+(b) generic swipe-kinematics-to-preference mapping (US 10,891,049). The defensible center of
+gravity is: per-selection-interval kinematic classification *under hysteresis-governed
+nearest-target selection*; the steer-away heading-kinematics negative event as a real-time
+weighted recommender input; preference-conditioned territory materialization with
+visited-region immutability; and the combined system. Cite GaZIR, US 2013/0246383, and
+US 10,891,049 proactively in the non-provisional rather than letting the examiner find them.
 
 ## INFORMAL EXAMPLE CLAIMS (scaffolding for non-provisional drafting)
 
