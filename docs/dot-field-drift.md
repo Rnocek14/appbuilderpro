@@ -41,6 +41,19 @@ set, and stops the frame you stop.**
 | Detents | fire on nearest-cell *change*, whether thumb crossed the comb or the comb slid under the thumb; skip-never-queue; none during any system glide | the ribbed feel was never proprioceptive — a crown proves detents-come-to-you feels *more* mechanical |
 | Vestibular | one rigid plane, no parallax; 6% vignette above half speed; reduce-motion → half-viewport step-pages on 350ms dwell | self-caused flow plus a cockpit frame is the VR-tested mitigation |
 
+**The drift ring — the operator-tested revision.** The referee originally rejected a
+joystick as "abandoning direct manipulation" and ordered the ergonomics *measured, not
+assumed*. The measurement happened: the operator's own thumb found edge-holding "kinda fun
+but kinda annoying" — the skeptic's reach attack, confirmed in the wild. The revision: a
+spring-loaded **ring docked in the thumb's natural home** (bottom-center, 44px radius).
+Displacement from center is the velocity vector — same smoothstep envelope, same caps, same
+release-stops-dead law — and while steering, **selection hands off to a reticle near screen
+center** that the world streams past: the radio-tuner inversion (fixed needle, spinning dial).
+Release never opens anything; easing off the stick while something crosses the needle is
+itself a dwell signal. Direct scrubbing stays untouched everywhere else on the glass, and the
+edge conveyor remains as the secondary grip. Ruling amended: direct manipulation for
+*choosing*, the ring for *traveling* — two verbs, two grips, one grammar.
+
 **Recenter-on-lift — the one orchestrated move.** Lift without opening, selection beyond 62%
 of half-extent → the camera glides it to center (280–450ms by √distance, ease-out); below the
 threshold, nothing moves. 180ms grace; touch-down mid-glide freezes the camera that frame.

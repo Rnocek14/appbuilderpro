@@ -4,7 +4,10 @@
      before; push into an edge with intent and the world flows under your thumb (you push, it
      never pushes: attack 180ms, release zero, the thumb always has right of way); what you dwell
      on tilts what unseen territory materializes ahead; the walked world is immutable forever; a
-     trail line is drawn on the land and the journey is an object you can re-walk.
+     trail line is drawn on the land and the journey is an object you can re-walk. Travel has
+     two grips, both operator-tested: the edge conveyor, and the drift ring — a spring-loaded
+     puck in the thumb's home whose displacement is the velocity vector, with selection handed
+     to a reticle near center that the world streams past (the radio-tuner inversion).
      Rendered as a luminous canvas: topic currents glow as nebulas under the dots, selection is
      an ignition, every detent throws sparks, the halo trails a comet, conveyor speed streaks the
      field. Inevitable when: brushing an edge mid-scrub never yanks the world; holding the east
@@ -51,7 +54,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   overflow:hidden; text-overflow:ellipsis}
 .driftlabel b{color:var(--dim); font-weight:400}
 .hapchip{position:fixed; left:50%; transform:translateX(-50%);
-  bottom:calc(env(safe-area-inset-bottom,0px) + 106px); z-index:41;
+  bottom:calc(env(safe-area-inset-bottom,0px) + 162px); z-index:41;
   font:11px var(--mono); color:var(--dim); background:rgba(19,24,34,.8); border:1px solid var(--line);
   border-radius:999px; padding:4px 12px; transition:opacity 600ms; white-space:nowrap; max-width:94vw;
   overflow:hidden; text-overflow:ellipsis}
@@ -63,7 +66,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 #field:focus{outline:none}
 #field:focus-visible{outline:none; box-shadow:inset 0 0 0 2px var(--ember-soft)}
 #fieldcv{position:absolute; inset:0; width:100%; height:100%}
-#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 80px); transform:translateX(-50%);
+#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 136px); transform:translateX(-50%);
   font:italic 14px var(--serif); color:var(--faint); z-index:20; pointer-events:none;
   transition:opacity 400ms; white-space:nowrap}
 #vig{position:fixed; inset:0; pointer-events:none; z-index:17; opacity:0; transition:opacity 300ms;
@@ -211,8 +214,8 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 <div class="card" id="feelcard">
   <h4>What to feel for</h4>
   <ul>
-    <li>Scrub as before. Then push into an edge <em>with intent</em> and hold — the world flows under your thumb, ticking as it streams. Release: it stops dead. You push, it never pushes.</li>
-    <li>Brush an edge casually mid-scrub: the world must not move. The conveyor arms only on deliberate outward pressure.</li>
+    <li>Scrub as before. To travel, rest your thumb in the <em>ring</em> at the bottom and push — any direction, any amount. The world flows, ticking past the needle near center. Release: it stops dead. You push, it never pushes.</li>
+    <li>The edges still work too: push into one <em>with intent</em> and hold. Brush one casually mid-scrub and the world must not move.</li>
     <li>Dwell on what you like, then keep drifting that way — unseen territory ahead materializes thicker with it, and the label top-left names the pull.</li>
     <li>The glowing weather under the dots is real information: each nebula is a topic current. Read the land before you touch it.</li>
     <li>Back-scrub your own path: the exact same dots, same positions, your fades intact. The walked world never rewrites.</li>
@@ -447,6 +450,13 @@ let cardBelow = false, cardHiddenAt = 0, flipOff = null;
    in-band dwell) · v=880·smoothstep(p) · attack 180ms · release ZERO · cap 1100 combined */
 const EDGE = 72, V_MAX = 880, CAP = 1100;
 let armT = 0, bandT = 0;
+/* the drift ring — the user-tested fix for edge reach: a spring-loaded puck in the thumb's
+   home. Displacement = velocity vector, same envelope, same release-stops-dead law. While
+   steering, selection becomes the reticle near screen center that the world streams past. */
+const PUCK = { r: 44, knob: 14, dead: 7, max: 40 };
+let puckMode = false, puckCX = 0, puckCY = 0;
+function sizePuck(){ puckCX = innerWidth/2; puckCY = innerHeight - 92; }
+function reticle(){ return [innerWidth/2, innerHeight*0.42]; }
 
 let lastMoveAt = 0;
 function vel(now, x, y){
@@ -468,6 +478,12 @@ field.addEventListener('pointerdown', e => {
   if (canVibe) navigator.vibrate(5);              // activation primer — the first tap of the session
   px = e.clientX; py = e.clientY;
   const now = performance.now();
+  if (Math.hypot(px - puckCX, py - puckCY) < PUCK.r + 10){
+    puckMode = true;                              // the thumb is home; the world does the walking
+    cardEl.classList.add('docked');
+    if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; fadeHapchipSoon(); }
+    return;
+  }
   vel(now, px, py);
   const [wx, wy] = screenToWorld(px, py);
   if (!reduceMotion) ripples.push({ x: wx, y: wy, t0: now });
@@ -479,6 +495,7 @@ field.addEventListener('pointerdown', e => {
 field.addEventListener('pointermove', e => {
   if (postOn || trailOn) return;
   const now = performance.now();
+  if (puckMode){ px = e.clientX; py = e.clientY; return; }
   if (touching){
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     for (const ev of evs){
@@ -497,6 +514,12 @@ field.addEventListener('pointermove', e => {
 });
 function endTouch(e, open){
   if (!touching) return;
+  if (puckMode){                                   // stick release: the world stops, nothing opens
+    puckMode = false; touching = false;
+    setEdgeGlow(0, 0, false);
+    cardEl.classList.add('docked');
+    return;
+  }
   touching = false; armT = bandT = 0; setEdgeGlow(0, 0, false);
   const now = performance.now();
   settleDwell(now);
@@ -695,6 +718,49 @@ function draw(now){
     ctx.globalAlpha = (1-t)*0.5; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(p.x-camX, p.y-camY, 12 + t*70, 0, 7); ctx.stroke();
   }
+
+  // the drift ring — screen-space, the thumb's home
+  const puckActive = puckMode && touching;
+  ctx.globalAlpha = puckActive ? 0.95 : 0.5;
+  ctx.strokeStyle = puckActive ? 'rgba(232,131,58,.55)' : 'rgba(86,92,110,.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(puckCX, puckCY, PUCK.r, 0, 7); ctx.stroke();
+  ctx.strokeStyle = puckActive ? 'rgba(232,131,58,.35)' : 'rgba(86,92,110,.35)';
+  for (let a = 0; a < 4; a++){
+    const ang = a*Math.PI/2;
+    ctx.beginPath();
+    ctx.moveTo(puckCX + Math.cos(ang)*(PUCK.r-6), puckCY + Math.sin(ang)*(PUCK.r-6));
+    ctx.lineTo(puckCX + Math.cos(ang)*(PUCK.r-1), puckCY + Math.sin(ang)*(PUCK.r-1));
+    ctx.stroke();
+  }
+  let kx = 0, ky = 0;
+  if (puckActive){
+    const dx = px - puckCX, dy = py - puckCY, mag = Math.hypot(dx, dy);
+    const cl = Math.min(mag, PUCK.max);
+    if (mag > 0){ kx = dx/mag*cl; ky = dy/mag*cl; }
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.8;
+    ctx.drawImage(bloomSprite, puckCX + kx - 22, puckCY + ky - 22, 44, 44);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  ctx.globalAlpha = puckActive ? 1 : 0.55;
+  ctx.fillStyle = puckActive ? '#E8833A' : '#565C6E';
+  ctx.beginPath(); ctx.arc(puckCX + kx, puckCY + ky, PUCK.knob, 0, 7); ctx.fill();
+
+  // the needle the world streams past
+  if (puckActive){
+    const [rx, ry] = reticle();
+    ctx.globalAlpha = 0.4; ctx.strokeStyle = '#E8833A'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(rx, ry, 24, 0, 7); ctx.stroke();
+    ctx.globalAlpha = 0.6;
+    for (let a = 0; a < 4; a++){
+      const ang = a*Math.PI/2 + Math.PI/4;
+      ctx.beginPath();
+      ctx.moveTo(rx + Math.cos(ang)*24, ry + Math.sin(ang)*24);
+      ctx.lineTo(rx + Math.cos(ang)*30, ry + Math.sin(ang)*30);
+      ctx.stroke();
+    }
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -707,7 +773,15 @@ function frame(t){
 
   if (t - lastMoveAt > 80){ const f = Math.max(0, 1 - dt*8); velX *= f; velY *= f; speed *= f; }
   let wantX = 0, wantY = 0, armed = false;
-  if (touching || hovering){
+  if (puckMode && touching){
+    const dx = px - puckCX, dy = py - puckCY, mag = Math.hypot(dx, dy);
+    const m = Math.max(0, Math.min(1, (mag - PUCK.dead) / (PUCK.max - PUCK.dead)));
+    if (m > 0){
+      armed = true;
+      const s = smoothstep(m) * V_MAX;
+      wantX = dx/mag*s; wantY = dy/mag*s;
+    }
+  } else if (touching || hovering){
     const [ox, oy] = bandVector();
     const inBand = ox !== 0 || oy !== 0;
     if (inBand){
@@ -729,9 +803,9 @@ function frame(t){
     camVX = camVY = 0;
     if (armed && t - lastPage > 350){
       lastPage = t;
-      const [ox, oy] = bandVector();
-      camX += Math.sign(ox)*innerWidth/2; camY += Math.sign(oy)*innerHeight/2;
+      camX += Math.sign(Math.round(wantX))*innerWidth/2; camY += Math.sign(Math.round(wantY))*innerHeight/2;
       clampCam(); detent(performance.now());
+      if (puckMode){ const [rx, ry] = reticle(); trySelect(rx + camX, ry + camY, performance.now()); }
     }
   } else {
     camVX += (wantX - camVX) * Math.min(1, dt*11);
@@ -740,7 +814,10 @@ function frame(t){
     if (!armed) camVY = Math.abs(camVY) < 40 ? 0 : camVY * Math.max(0, 1 - dt*22);
     if (camVX || camVY){
       camX += camVX*dt; camY += camVY*dt; clampCam();
-      if (touching || hovering){
+      if (puckMode){
+        const [rx, ry] = reticle();
+        trySelect(rx + camX, ry + camY, performance.now());   // the needle: dots stream past it
+      } else if (touching || hovering){
         const now = performance.now();
         const [wx, wy] = screenToWorld(px, py);
         trySelect(wx, wy, now);
@@ -801,7 +878,7 @@ function frame(t){
   }
 
   draw(t);
-  positionCard(touching || hovering);
+  positionCard((touching || hovering) && !puckMode);
 }
 requestAnimationFrame(frame);
 
@@ -1092,16 +1169,16 @@ document.getElementById('snd').addEventListener('click', e => {
 });
 document.getElementById('feel').addEventListener('click', () =>
   document.getElementById('feelcard').classList.toggle('on'));
-addEventListener('resize', () => { sizeCanvas(); clampCam(); });
+addEventListener('resize', () => { sizeCanvas(); sizePuck(); clampCam(); });
 
 function boot(){
-  sizeCanvas();
+  sizeCanvas(); sizePuck();
   homeX = (WORLD_W - innerWidth)/2; homeY = (WORLD_H - innerHeight)/2;
   camX = homeX; camY = homeY; clampCam();
   const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55);
   const c = nearestCell(wx, wy);
   if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; }
-  hintEl.textContent = 'Scrub. Then push into an edge and hold — the world comes to you.';
+  hintEl.textContent = 'Scrub the dots — or rest a thumb in the ring and push.';
   updatePulse(); updateDriftLabel(); updateHome();
 }
 boot();
