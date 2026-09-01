@@ -94,20 +94,24 @@ and trail-link → install %.
 **3.2 THE MONTH-6 FORK (pre-decide your temperament now — decision #3 below):**
 - **Velocity path:** ≥100K installs and still accelerating → open buyer conversations within
   30 days. The Mailbox/tbh window is 8–16 weeks from inflection and does not reopen.
-- **Retention path:** D30 ≥20–25%, verdicts/session holding → don't sell yet; start **Audio
+- **Retention path:** D30 ≥20–25%, verdicts/session holding → don't sell yet; start **Sample
   Drift** (Phase 3.3) and talk at months 9–12 from strength.
+- **Fallback (applications research, 2026-09-01):** if Scout misses the D30 gate, the platform
+  effort pivots to **Shopify "Drift Browse"** ($29/$99/$299 for visual catalogs, steer-away
+  heatmaps the free incumbent can't show) — merchants pay for conversion lift; exit 3–4× profit.
 - **Neither:** Halide posture (run it profitably, keep the patent) or execute the kill.
 
-**3.3 Audio Drift — world #2, the exit surface (retention path only).** Podcast corpus via
-open RSS; hooks cut server-side (`scout/scripts/hook-cutter.mjs` — already proven against a
-live feed). **Licensing posture required (audit finding):** technically open ≠ licensed —
-there is no "short clip = fair use" rule; excerpting is a case-by-case defense, and Podz's
-real defense was driving discovery until it sold to the license-holder. Ship with a
-podcaster opt-in/opt-out program and takedown path from day one, and treat hooks as
-discovery that links to the source. The paradigm's scent weakness vanishes here: a 1.5s audio hook is judged before a
-title could be read. Build **THE CHART**: a simple ranker trained on steer-away/dwell logs vs
-a dwell-only baseline — "3 drift sessions predict subscribes better than N sessions of taps."
-That chart is the acquisition memo.
+**3.3 Sample Drift — world #2, the exit surface (retention path only).** Loops and one-shots
+for music producers: every dot plays its sample on crossing — the truest sub-400ms verdict there
+is, and the ritual producers already perform by clicking through Splice's lists. Corpus: Freesound
+(714K sounds, 72% CC0, ~129 new/day — legally free, free API) plus label-permissioned packs.
+Money: Splice affiliate ($11.20/paid sub + recurring), Loopcloud 15% recurring. Buyers: Splice
+(bought Spitfire ~$50M, Apr 2025), Loopcloud, Native Instruments, Output. Build **THE CHART**: a
+ranker trained on steer-away/dwell logs beating a dwell-only baseline — "3 drift sessions predict
+what a producer keeps better than N sessions of clicks." That chart is the acquisition memo.
+*(Podcasts, the previous world #2, are in the drawer: speech needs ~30s to judge, 71K
+episodes/day is a firehose, no payer, and Spotify shipped Clips May 2026 — see
+`dot-field-applications.md`.)*
 
 ## PHASE 4 — The exit machinery (months 7–12 · only if a Phase-3 trigger fired)
 
@@ -116,10 +120,10 @@ That chart is the acquisition memo.
   non-provisional ~$8–15K with attorney, **plus a professional claim chart of Google's
   US 10,365,719 — detent-on-crossing haptics, the one identified FTO risk — before any
   commercial ship of the detent mechanic**), AI-provenance page, press/naming trail.
-- **The rooms:** Spotify (wound: podcast discovery is broken; comp: Podz ~$50M) + **Match
-  Group always as the second room** (they litigated the swipe — they believe gestures have
-  cash value) + Snap warm. Pinterest if the moodboard demand moment was manufactured. Apple is
-  press strategy, not a meeting.
+- **The rooms:** Splice / Loopcloud / Native Instruments / Output (wound: sample browse is a
+  list with play buttons; comp: Splice→Spitfire ~$50M) + **Match Group always as the second
+  room** (they litigated the swipe — they believe gestures have cash value) + Pinterest/Snap
+  warm. Apple is press strategy, not a meeting.
 - **LOI discipline:** never one bidder, never name a number first, no exclusivity >30 days,
   **no earnouts tied to their roadmap**, M&A lawyer at first LOI (no banker under ~$50M).
 
@@ -154,6 +158,7 @@ every step services) · ~4% the fear-scale outcome (recognize it; never need it)
 strangers, the three decisions, every conversation with a human buyer.
 **Me, on your word:** the Scout pipeline + daily world assembler, the metrics dashboard, the
 trail-card generator + public trail pages, the naming write-up draft, the ranker experiment,
-the IP-assignment/provenance one-pagers, Audio Drift world, and any spike a gate demands.
+the IP-assignment/provenance one-pagers, Sample Drift world, the free small-web Stumble field
+demo, and any spike a gate demands.
 
 **Next physical action: the provisional and the wrap. Both fit in one week. Gate A is waiting.**

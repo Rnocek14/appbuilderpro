@@ -74,6 +74,14 @@ micro-verdict dataset an acquirer must rename and ship.**
 - **The trigger:** Scout passes its retention gate (~M6) → Audio Drift world begins. What
   carries over: the spine, the recommender, the cross-domain dataset, the patent claims.
 
+**Amendment (applications research, 2026-09-01 — see `dot-field-applications.md`):** world #2
+changes from podcasts to **Sample Drift** (loops/one-shots for producers). The audio thesis
+strengthens rather than weakens — a musical transient is judged in <400ms where speech needs a
+~30s clip — and the corpus is legally free (Freesound, 72% CC0) where podcasts carried licensing
+posture. Buyer slate reorders accordingly: Splice (bought Spitfire ~$50M, Apr 2025), Loopcloud,
+Native Instruments, Output first; Match stays the second room. Honest bands shrink to $1–5M
+for the exit case but with four named, recently active buyers instead of one.
+
 ## 3. The buyer slate
 
 1. **Spotify.** Wound: discovery is the moat narrative; podcast discovery is broken; Podz gave
