@@ -5,10 +5,12 @@
      never pushes: attack 180ms, release zero, the thumb always has right of way); what you dwell
      on tilts what unseen territory materializes ahead; the walked world is immutable forever; a
      trail line is drawn on the land and the journey is an object you can re-walk.
-     Inevitable when: brushing an edge mid-scrub never yanks the world; holding the east edge
-     feels like wading a current and releasing stops it dead in a beat; back-scrubbing meets the
-     exact same dots with your fades intact; and after two minutes the "drifting toward" label
-     names what you actually wanted. Staged world, simulated steering — no model, and it says so. -->
+     Rendered as a luminous canvas: topic currents glow as nebulas under the dots, selection is
+     an ignition, every detent throws sparks, the halo trails a comet, conveyor speed streaks the
+     field. Inevitable when: brushing an edge mid-scrub never yanks the world; holding the east
+     edge feels like wading a current and releasing stops it dead; back-scrubbing meets the exact
+     same dots; and the first screenshot makes someone ask what app that is.
+     Staged world, simulated steering — no model, and it says so. -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -28,7 +30,8 @@
 }
 *{box-sizing:border-box; margin:0; padding:0}
 html,body{height:100%; overscroll-behavior:none}
-body{background:var(--ground); color:var(--ink); font:14px var(--chrome); overflow:hidden;
+body{background:radial-gradient(120% 90% at 50% 35%, #101522 0%, #0B0E14 55%, #07090E 100%) fixed, var(--ground);
+  color:var(--ink); font:14px var(--chrome); overflow:hidden;
   -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent}
 button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
 button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); outline-offset:2px; border-radius:6px}
@@ -37,29 +40,30 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 /* ---------- fixed chrome ---------- */
 .tabs{position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:50%; transform:translateX(-50%);
   display:flex; gap:6px; z-index:40}
-.tab{font-size:13px; color:var(--dim); border:1px solid transparent; border-radius:999px; padding:4px 14px}
-.tab.on{color:var(--ink); background:var(--surface); border-color:var(--line)}
+.tab{font-size:13px; color:var(--dim); border:1px solid transparent; border-radius:999px; padding:4px 14px;
+  backdrop-filter:blur(6px)}
+.tab.on{color:var(--ink); background:rgba(19,24,34,.7); border-color:var(--line)}
 .tab:hover{color:var(--ink)}
 .pulse{position:fixed; top:calc(env(safe-area-inset-top,0px) + 16px); right:20px;
   font:12px var(--mono); font-variant-numeric:tabular-nums; color:var(--dim); z-index:40}
-.driftlabel{position:fixed; top:calc(env(safe-area-inset-top,0px) + 46px); left:50%; transform:translateX(-50%);
+.driftlabel{position:fixed; top:calc(env(safe-area-inset-top,0px) + 50px); left:50%; transform:translateX(-50%);
   font:12px var(--mono); color:var(--faint); z-index:40; max-width:92vw; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis}
 .driftlabel b{color:var(--dim); font-weight:400}
+.hapchip{position:fixed; left:50%; transform:translateX(-50%);
+  bottom:calc(env(safe-area-inset-bottom,0px) + 106px); z-index:41;
+  font:11px var(--mono); color:var(--dim); background:rgba(19,24,34,.8); border:1px solid var(--line);
+  border-radius:999px; padding:4px 12px; transition:opacity 600ms; white-space:nowrap; max-width:94vw;
+  overflow:hidden; text-overflow:ellipsis}
+.hapchip:empty{display:none}
+.hapchip a{color:var(--ember); text-decoration:none}
 
 /* ---------- the drift viewport ---------- */
 #field{position:fixed; inset:0; touch-action:none; cursor:crosshair; z-index:10; overflow:hidden}
 #field:focus{outline:none}
 #field:focus-visible{outline:none; box-shadow:inset 0 0 0 2px var(--ember-soft)}
-#trailcv{position:absolute; inset:0; pointer-events:none}
-#world{position:absolute; left:0; top:0; will-change:transform}
-.dot{position:absolute; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%;
-  pointer-events:none}
-.dot.read{opacity:.26}
-#halo{position:absolute; width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%;
-  border:1.5px solid var(--ember); box-shadow:0 0 18px 2px var(--ember-soft), inset 0 0 8px rgba(232,131,58,.18);
-  pointer-events:none; z-index:12}
-#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 52px); transform:translateX(-50%);
+#fieldcv{position:absolute; inset:0; width:100%; height:100%}
+#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 80px); transform:translateX(-50%);
   font:italic 14px var(--serif); color:var(--faint); z-index:20; pointer-events:none;
   transition:opacity 400ms; white-space:nowrap}
 #vig{position:fixed; inset:0; pointer-events:none; z-index:17; opacity:0; transition:opacity 300ms;
@@ -69,22 +73,23 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 /* edge glow — lit only while the conveyor flows that way */
 .egde{position:fixed; z-index:18; pointer-events:none; opacity:0; transition:opacity 160ms}
 .egde.on{opacity:1}
-#egN{top:0; left:0; right:0; height:56px; background:linear-gradient(rgba(232,131,58,.10), transparent)}
-#egS{bottom:0; left:0; right:0; height:56px; background:linear-gradient(transparent, rgba(232,131,58,.10))}
-#egW{top:0; bottom:0; left:0; width:56px; background:linear-gradient(90deg, rgba(232,131,58,.10), transparent)}
-#egE{top:0; bottom:0; right:0; width:56px; background:linear-gradient(-90deg, rgba(232,131,58,.10), transparent)}
+#egN{top:0; left:0; right:0; height:64px; background:linear-gradient(rgba(232,131,58,.16), transparent)}
+#egS{bottom:0; left:0; right:0; height:64px; background:linear-gradient(transparent, rgba(232,131,58,.16))}
+#egW{top:0; bottom:0; left:0; width:64px; background:linear-gradient(90deg, rgba(232,131,58,.16), transparent)}
+#egE{top:0; bottom:0; right:0; width:64px; background:linear-gradient(-90deg, rgba(232,131,58,.16), transparent)}
 
 /* ---------- preview card ---------- */
 #card{position:fixed; left:0; top:0; width:min(88vw,330px); z-index:25; pointer-events:none;
-  background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden;
-  box-shadow:0 10px 40px rgba(0,0,0,.5); transition:opacity 120ms linear}
+  background:rgba(19,24,34,.88); backdrop-filter:blur(10px); border:1px solid var(--line); border-radius:14px;
+  overflow:hidden; box-shadow:0 12px 44px rgba(0,0,0,.55), 0 0 0 1px rgba(232,131,58,.05);
+  transition:opacity 120ms linear}
 #card.docked{left:50%; transform:translateX(-50%)}
 #card.docked .media{display:none}
 #card.hidden{opacity:0}
 #card .media{display:block; width:100%; height:150px; background:var(--surface-2)}
 #card .body{padding:10px 12px 11px}
 #card .who{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--dim)}
-#card .who .tdot{width:8px; height:8px; border-radius:50%; flex:none}
+#card .who .tdot{width:8px; height:8px; border-radius:50%; flex:none; box-shadow:0 0 8px currentColor}
 #card .who b{color:var(--ink); font-weight:500}
 #card .who .age{margin-left:auto; font:11px var(--mono); color:var(--faint)}
 #card .cap{margin-top:6px; font:15px/1.45 var(--serif); color:var(--ink);
@@ -97,7 +102,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 #post{position:fixed; inset:0; background:var(--ground); z-index:50; display:none; flex-direction:column}
 #post.on{display:flex}
 #post .top{display:flex; align-items:center; gap:8px; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 10px}
-#post .top .tdot{width:9px; height:9px; border-radius:50%}
+#post .top .tdot{width:9px; height:9px; border-radius:50%; box-shadow:0 0 8px currentColor}
 #post .top b{font-weight:500}
 #post .top .age{font:11px var(--mono); color:var(--faint)}
 #post .top button{margin-left:auto; width:32px; height:32px; border:1px solid var(--line); border-radius:8px; color:var(--dim)}
@@ -113,7 +118,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 #trail .lead{max-width:560px; margin:0 auto 10px; font:italic 14px/1.5 var(--serif); color:var(--dim)}
 #trail .row{display:flex; align-items:center; gap:10px; width:100%; max-width:560px; margin:0 auto;
   text-align:left; padding:10px 10px; border-bottom:1px solid var(--line); border-radius:0}
-#trail .row .tdot{width:9px; height:9px; border-radius:50%; flex:none}
+#trail .row .tdot{width:9px; height:9px; border-radius:50%; flex:none; box-shadow:0 0 8px currentColor}
 #trail .row .txt{min-width:0}
 #trail .row .txt .l1{font-size:13px; color:var(--dim)} #trail .row .txt .l1 b{color:var(--ink); font-weight:500}
 #trail .row .txt .l2{font:14px/1.4 var(--serif); color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -124,7 +129,8 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 
 /* ---------- instruments ---------- */
 #homebtn{position:fixed; right:16px; bottom:calc(env(safe-area-inset-bottom,0px) + 40px); z-index:45;
-  font:11px var(--mono); color:var(--faint); border:1px solid var(--line); border-radius:6px; padding:3px 8px}
+  font:11px var(--mono); color:var(--faint); border:1px solid var(--line); border-radius:6px; padding:3px 8px;
+  background:rgba(19,24,34,.6); backdrop-filter:blur(6px)}
 #homebtn:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
 
 /* ---------- HUD ---------- */
@@ -140,6 +146,9 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 .card h4{font:500 13px var(--chrome); margin-bottom:8px}
 .card ul{margin-left:16px; display:grid; gap:6px; font-size:12.5px; color:var(--dim); line-height:1.45}
 .card .note{margin-top:10px; font-size:11px; color:var(--faint); line-height:1.4}
+.card .haprow{margin-top:10px; display:flex; align-items:center; gap:8px; font:11px var(--mono); color:var(--faint)}
+.card .haprow button{border:1px solid var(--line); border-radius:6px; padding:2px 8px; color:var(--dim)}
+.card .haprow button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
 
 .keys{position:fixed; right:20px; bottom:calc(env(safe-area-inset-bottom,0px) + 68px); font:11px var(--chrome);
   color:var(--faint); z-index:45; text-align:right}
@@ -161,8 +170,11 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 </div>
 <div class="driftlabel" id="driftlabel"></div>
 <div class="pulse" id="pulse"></div>
+<div class="hapchip" id="hapchip"></div>
 
-<div id="field" tabindex="0" role="application" aria-label="The drift — arrow keys move, Enter opens, H for home"></div>
+<div id="field" tabindex="0" role="application" aria-label="The drift — arrow keys move, Enter opens, H for home">
+  <canvas id="fieldcv"></canvas>
+</div>
 <div id="vig"></div>
 <div class="egde" id="egN"></div><div class="egde" id="egS"></div>
 <div class="egde" id="egW"></div><div class="egde" id="egE"></div>
@@ -202,10 +214,11 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
     <li>Scrub as before. Then push into an edge <em>with intent</em> and hold — the world flows under your thumb, ticking as it streams. Release: it stops dead. You push, it never pushes.</li>
     <li>Brush an edge casually mid-scrub: the world must not move. The conveyor arms only on deliberate outward pressure.</li>
     <li>Dwell on what you like, then keep drifting that way — unseen territory ahead materializes thicker with it, and the label top-left names the pull.</li>
+    <li>The glowing weather under the dots is real information: each nebula is a topic current. Read the land before you touch it.</li>
     <li>Back-scrub your own path: the exact same dots, same positions, your fades intact. The walked world never rewrites.</li>
     <li>Your route is drawn on the land. The Trail tab is the journey as an object — tap any stop to glide back to it.</li>
-    <li>The odometer top-right: this territory is bounded, and your coverage of it is a fact, not a feeling.</li>
   </ul>
+  <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
   <div class="note">Honest label: the "algorithm" is a seeded simulation — 2,420 cells, twelve
   staged currents, a dwell-weighted sampler for territory you haven't walked yet. What's real is
   the steering loop, the trail, and the feel. A real engine would put embeddings under the same
@@ -256,8 +269,6 @@ const KINDS = ['photo','photo','photo','photo','photo','photo','reel','reel','re
 function hash2(c, r){ let h = (c*73856093) ^ (r*19349663) ^ SEED; h = (h ^ (h>>>13)) >>> 0; return h; }
 function rng(seed){ let s = seed>>>0; return () => (s = (s*1664525 + 1013904223)>>>0, s/4294967296); }
 
-/* macro-grid of current anchors: every 12×12-cell region hosts one current, so coherent ~500px
-   topic neighbourhoods tile the territory and most currents recur somewhere else in it */
 const MACRO = 12;
 function macroAnchor(mc, mr){
   const r = rng(hash2(mc*7 + 3, mr*7 + 11));
@@ -275,8 +286,6 @@ function currentWeights(c, r){
   return w;
 }
 
-/* steering state — dwell thickens unseen territory, speed-past thins it, opens weigh most.
-   Session half-life 90s; the weights are the signal lens's shipping table. */
 const affinity = new Array(CURRENTS.length).fill(0);
 function affinityBoost(i, amt){ affinity[i] = Math.max(0, Math.min(8, affinity[i] + amt)); }
 setInterval(() => { for (let i = 0; i < affinity.length; i++) affinity[i] *= 0.9622; }, 5000);
@@ -285,7 +294,6 @@ function topCurrents(n){
     .map(x => CURRENTS[x[1]].key);
 }
 
-/* cell → item, generated once at first sight, cached forever (the walked world never rewrites) */
 const cells = new Map();
 function cellKey(c, r){ return c + ',' + r; }
 function getCell(c, r){
@@ -296,9 +304,6 @@ function getCell(c, r){
   const rd = rng(hash2(c, r));
   const w = currentWeights(c, r);
   let best = 0; for (let i = 1; i < w.length; i++) if (w[i] > w[best]) best = i;
-  // steering, honestly bounded: affinity tilts the sampler toward liked currents plausible
-  // HERE; 15% of cells stay pure serendipity; density thins where taste is cold, floored so
-  // no direction ever becomes a wall
   let cur = best;
   if (rd() < 0.15){ cur = Math.floor(rd()*CURRENTS.length); }
   else {
@@ -318,20 +323,17 @@ function getCell(c, r){
     dur: 18 + Math.floor(rd()*78), frames: 2 + Math.floor(rd()*5),
     mins: 5 + Math.floor(rd()*800), art: hash2(c*3+1, r*3+2),
     x: c*PITCH + PITCH/2 + (rd()*2-1)*JITTER, y: r*PITCH + PITCH/2 + (rd()*2-1)*JITTER,
-    read: false, el: null,
+    read: false,
   };
   cells.set(k, cell);
   return cell;
 }
-function curColor(i){ const C = CURRENTS[i]; return `hsl(${C.hue} ${C.sat+10}% 58%)`; }
+function curColor(i){ const C = CURRENTS[i]; return `hsl(${C.hue} ${C.sat+22}% 62%)`; }
 
-/* ===================== camera + rendering ================================================== */
+/* ===================== camera ============================================================== */
 const field = document.getElementById('field');
-const trailcv = document.createElement('canvas'); trailcv.id = 'trailcv'; field.appendChild(trailcv);
-const world = document.createElement('div'); world.id = 'world'; field.appendChild(world);
 let camX = 0, camY = 0, camVX = 0, camVY = 0;
 let glide = null, glideTimer = 0;
-const visible = new Map();
 
 function clampCam(){
   const mX = WORLD_W - innerWidth, mY = WORLD_H - innerHeight;
@@ -340,29 +342,6 @@ function clampCam(){
 }
 function screenToWorld(sx, sy){ return [sx + camX, sy + camY]; }
 
-function renderVisible(){
-  const pad = PITCH*3;
-  const c0 = Math.max(0, Math.floor((camX - pad)/PITCH)), c1 = Math.min(WCOLS-1, Math.ceil((camX + innerWidth + pad)/PITCH));
-  const r0 = Math.max(0, Math.floor((camY - pad)/PITCH)), r1 = Math.min(WROWS-1, Math.ceil((camY + innerHeight + pad)/PITCH));
-  for (const [k, cell] of visible){
-    if (cell.c < c0 || cell.c > c1 || cell.r < r0 || cell.r > r1){
-      if (cell.el){ cell.el.remove(); cell.el = null; }
-      visible.delete(k);
-    }
-  }
-  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
-    const cell = getCell(c, r);
-    if (!cell || cell.empty || visible.has(cell.key)) continue;
-    const el = document.createElement('div');
-    el.className = 'dot' + (cell.read ? ' read' : '');
-    el.style.left = cell.x + 'px'; el.style.top = cell.y + 'px';
-    el.style.background = curColor(cell.cur);
-    cell.el = el; world.appendChild(el);
-    visible.set(cell.key, cell);
-  }
-}
-
-/* nearest non-empty cell to a WORLD point, 5×5 neighbourhood, static centres only */
 function nearestCell(wx, wy){
   const cc = Math.round(wx/PITCH - 0.5), cr = Math.round(wy/PITCH - 0.5);
   let best = null, bd = Infinity;
@@ -403,9 +382,8 @@ function settleDwell(now){
 function setSelection(cell, now, tick){
   if (sel && sel.key === cell.key) return;
   const prev = sel; sel = cell;
-  if (tick) detent(now);
+  if (tick){ detent(now); spawnSparks(cell); }
   swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;
-  if (prev) relaxSet.add(prev.key);
   cardContent(cell);
   dwellStart = now;
   announce(cell);
@@ -415,18 +393,19 @@ function setSelection(cell, now, tick){
 let sndOn = true, audioCtx = null, tickBuf = null;
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canVibe = 'vibrate' in navigator;
 const swEl = document.getElementById('swhaptic');
 function detent(now){
   if (glide) return;
   const gap = speed > 1200 || conveyorOn ? 40 : 30;
   if (now - lastTickAt < gap) return;
   lastTickAt = now;
-  if (navigator.vibrate) navigator.vibrate(10);
+  if (canVibe) navigator.vibrate(12);
   else if (isIOS) { try { swEl.click(); } catch(e){} }
   if (sndOn && audioCtx && tickBuf){
     const s = audioCtx.createBufferSource(); s.buffer = tickBuf;
     s.playbackRate.value = 0.97 + Math.random()*0.06;
-    const g = audioCtx.createGain(); g.gain.value = 0.12;
+    const g = audioCtx.createGain(); g.gain.value = 0.13 + Math.random()*0.03;
     s.connect(g); g.connect(audioCtx.destination); s.start();
   }
 }
@@ -434,11 +413,12 @@ function initAudio(){
   if (audioCtx) return;
   try{
     audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    const sr = audioCtx.sampleRate, n = Math.floor(sr*0.006), b = audioCtx.createBuffer(1, n, sr);
+    const sr = audioCtx.sampleRate, n = Math.floor(sr*0.008), b = audioCtx.createBuffer(1, n, sr);
     const ch = b.getChannelData(0);
     for (let i = 0; i < n; i++){
       const t = i/sr;
-      ch[i] = (Math.sin(2*Math.PI*1900*t)*0.7 + (Math.random()*2-1)*0.3) * Math.exp(-t*900);
+      ch[i] = (Math.sin(2*Math.PI*1900*t)*0.6 + Math.sin(2*Math.PI*150*t)*0.35 + (Math.random()*2-1)*0.25)
+            * Math.exp(-t*820);
     }
     tickBuf = b;
   }catch(e){ audioCtx = null; }
@@ -456,16 +436,15 @@ function step(s, dt, kMul){
 const hx = spring(900, 60), hy = spring(900, 60);
 const swell = spring(550, 30);
 swell.value = 1; swell.target = 1;
-const relaxSet = new Set();
-const dispNow = new Map();
+let dispNow = new Map();
 
 /* ===================== pointer + conveyor ================================================== */
 let touching = false, hovering = false, px = 0, py = 0, speed = 0, velX = 0, velY = 0;
 let samples = [], firstTouch = true, conveyorOn = false;
 const cardEl = document.getElementById('card'), hintEl = document.getElementById('hint');
 let cardBelow = false, cardHiddenAt = 0, flipOff = null;
-/* conveyor ship numbers: band 72px · intent gate 60px/s outward × 80ms (or 150ms in-band dwell)
-   · v=880·smoothstep(p) · attack 180ms · release ZERO · combined cap 1100, thumb right of way */
+/* conveyor ship numbers: band 72px · intent gate 60–600px/s outward × 80ms (or 150ms slow
+   in-band dwell) · v=880·smoothstep(p) · attack 180ms · release ZERO · cap 1100 combined */
 const EDGE = 72, V_MAX = 880, CAP = 1100;
 let armT = 0, bandT = 0;
 
@@ -479,20 +458,23 @@ function vel(now, x, y){
   else { velX = velY = speed = 0; }
 }
 
+const ripples = [];
 field.addEventListener('pointerdown', e => {
   if (trailOn || postOn) return;
   e.preventDefault();
   field.setPointerCapture(e.pointerId);
   touching = true; hovering = false; samples = []; glide = null; clearTimeout(glideTimer);
   initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (canVibe) navigator.vibrate(5);              // activation primer — the first tap of the session
   px = e.clientX; py = e.clientY;
   const now = performance.now();
   vel(now, px, py);
   const [wx, wy] = screenToWorld(px, py);
+  if (!reduceMotion) ripples.push({ x: wx, y: wy, t0: now });
   trySelect(wx, wy, now);
   if (!sel){ const c = nearestCell(wx, wy); if (c) setSelection(c, now, true); }
   cardEl.classList.remove('docked');
-  if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; }
+  if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; fadeHapchipSoon(); }
 });
 field.addEventListener('pointermove', e => {
   if (postOn || trailOn) return;
@@ -557,7 +539,6 @@ function setEdgeGlow(tx, ty, on){
   eg.N.classList.toggle('on', on && ty < -10); eg.S.classList.toggle('on', on && ty > 10);
 }
 function smoothstep(p){ return p*p*(3 - 2*p); }
-/* outward direction + penetration for the current thumb position; 0 when not in any band */
 function bandVector(){
   const t = 64, b = innerHeight - 40;
   let ox = 0, oy = 0;
@@ -571,36 +552,172 @@ function startGlide(toX, toY, dur){
   const mX = WORLD_W - innerWidth, mY = WORLD_H - innerHeight;
   toX = mX > 0 ? Math.max(0, Math.min(mX, toX)) : mX/2;
   toY = mY > 0 ? Math.max(0, Math.min(mY, toY)) : mY/2;
-  if (reduceMotion){ camX = toX; camY = toY; renderVisible(); return; }
+  if (reduceMotion){ camX = toX; camY = toY; return; }
   glide = { fromX: camX, fromY: camY, toX, toY, t0: performance.now(), dur };
 }
 function forge(t){ return 1 - Math.pow(1 - t, 3); }
 
+/* ===================== canvas renderer — the luminous field ================================ */
+const cv = document.getElementById('fieldcv'), ctx = cv.getContext('2d');
+let DPR = 1;
+function sizeCanvas(){
+  DPR = Math.min(2, devicePixelRatio || 1);
+  cv.width = Math.round(innerWidth*DPR); cv.height = Math.round(innerHeight*DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+function makeSprite(size, stops){
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d').createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+  for (const [o, col] of stops) g.addColorStop(o, col);
+  const x = c.getContext('2d'); x.fillStyle = g; x.fillRect(0, 0, size, size);
+  return c;
+}
+const glowSprites = CURRENTS.map(C =>
+  makeSprite(64, [[0, `hsla(${C.hue} ${C.sat+42}% 64% / .85)`], [0.35, `hsla(${C.hue} ${C.sat+38}% 56% / .28)`], [1, 'hsla(0 0% 0% / 0)']]));
+const nebulaSprites = CURRENTS.map(C =>
+  makeSprite(256, [[0, `hsla(${C.hue} ${C.sat+28}% 48% / .21)`], [0.55, `hsla(${C.hue} ${C.sat+20}% 38% / .08)`], [1, 'hsla(0 0% 0% / 0)']]));
+const bloomSprite = makeSprite(128, [[0, 'rgba(255,244,230,.95)'], [0.18, 'rgba(232,131,58,.55)'], [0.5, 'rgba(232,131,58,.16)'], [1, 'rgba(0,0,0,0)']]);
+const sparkSprite = makeSprite(24, [[0, 'rgba(255,236,214,.95)'], [0.5, 'rgba(232,131,58,.4)'], [1, 'rgba(0,0,0,0)']]);
+
+const sparks = [];
+function spawnSparks(cell){
+  if (reduceMotion) return;
+  const n = 6;
+  for (let i = 0; i < n; i++){
+    if (sparks.length > 70) sparks.shift();
+    const a = Math.random()*Math.PI*2, sp = 50 + Math.random()*110;
+    sparks.push({ x: cell.x, y: cell.y, vx: Math.cos(a)*sp, vy: Math.sin(a)*sp,
+                  t0: performance.now(), life: 300 + Math.random()*160, cur: cell.cur });
+  }
+}
+const comet = [];
+
+function draw(now){
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  const pad = PITCH;
+  const c0 = Math.max(0, Math.floor((camX - pad)/PITCH)), c1 = Math.min(WCOLS-1, Math.ceil((camX + innerWidth + pad)/PITCH));
+  const r0 = Math.max(0, Math.floor((camY - pad)/PITCH)), r1 = Math.min(WROWS-1, Math.ceil((camY + innerHeight + pad)/PITCH));
+
+  ctx.globalCompositeOperation = 'lighter';
+  // the weather layer: topic currents as nebulas — legible before a single touch
+  const m0c = Math.floor(c0/MACRO)-1, m1c = Math.floor(c1/MACRO)+1;
+  const m0r = Math.floor(r0/MACRO)-1, m1r = Math.floor(r1/MACRO)+1;
+  for (let mr = m0r; mr <= m1r; mr++) for (let mc = m0c; mc <= m1c; mc++){
+    const a = macroAnchor(mc, mr);
+    const x = a.x*PITCH - camX, y = a.y*PITCH - camY;
+    if (x < -300 || y < -300 || x > innerWidth+300 || y > innerHeight+300) continue;
+    ctx.drawImage(nebulaSprites[a.cur], x-230, y-230, 460, 460);
+  }
+
+  // the trail, drawn on the land: a worn glowing route
+  if (trailPath.length > 1){
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const n = trailPath.length;
+    for (let i = 1; i < n; i++){
+      const A = trailPath[i-1], B = trailPath[i], f = i/n;
+      ctx.strokeStyle = `rgba(232,131,58,${0.03 + 0.10*f})`; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(A[0]-camX, A[1]-camY); ctx.lineTo(B[0]-camX, B[1]-camY); ctx.stroke();
+      ctx.strokeStyle = `rgba(200,190,175,${0.05 + 0.22*f})`; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(A[0]-camX, A[1]-camY); ctx.lineTo(B[0]-camX, B[1]-camY); ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'lighter';
+  }
+
+  // glow pass, then core pass — read dots are cooled embers, unread are lit
+  const camSpd = Math.hypot(camVX, camVY);
+  const streak = !reduceMotion && camSpd > 350;
+  const sx = streak ? -camVX*0.02 : 0, sy = streak ? -camVY*0.02 : 0;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+    const cell = getCell(c, r);
+    if (!cell || cell.empty || cell === sel) continue;
+    const d = dispNow.get(cell.key);
+    const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
+    const g = glowSprites[cell.cur];
+    if (cell.read){ ctx.globalAlpha = 0.10; ctx.drawImage(g, x-13, y-13, 26, 26); }
+    else {
+      ctx.globalAlpha = 0.55; ctx.drawImage(g, x-20, y-20, 40, 40);
+      if (streak){ ctx.globalAlpha = 0.22; ctx.drawImage(g, x-20+sx, y-20+sy, 40, 40); }
+    }
+  }
+  // sparks fly on every crossing
+  for (let i = sparks.length-1; i >= 0; i--){
+    const p = sparks[i], t = (now - p.t0)/p.life;
+    if (t >= 1){ sparks.splice(i, 1); continue; }
+    const x = p.x + p.vx*t*(p.life/1000) - camX, y = p.y + p.vy*t*(p.life/1000) - camY;
+    ctx.globalAlpha = (1-t)*0.8;
+    ctx.drawImage(sparkSprite, x-6, y-6, 12, 12);
+  }
+  // the halo's comet tail
+  if (!reduceMotion){
+    for (let i = 0; i < comet.length; i++){
+      const p = comet[i], f = (i+1)/comet.length;
+      ctx.globalAlpha = f*0.25;
+      ctx.drawImage(bloomSprite, p[0]-camX-10, p[1]-camY-10, 20, 20);
+    }
+  }
+  // selection: ignition
+  if (sel){
+    const bs = 76*(0.85 + 0.25*swell.value);
+    ctx.globalAlpha = 0.9;
+    ctx.drawImage(bloomSprite, hx.value-camX-bs/2, hy.value-camY-bs/2, bs, bs);
+    ctx.globalAlpha = 0.8;
+    ctx.drawImage(glowSprites[sel.cur], sel.x-camX-26, sel.y-camY-26, 52, 52);
+  }
+
+  // core pass
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+    const cell = getCell(c, r);
+    if (!cell || cell.empty) continue;
+    const d = dispNow.get(cell.key);
+    const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
+    const isSel = cell === sel;
+    const rad = isSel ? 5.5*(1 + 0.55*swell.value) : 5;
+    ctx.globalAlpha = cell.read && !isSel ? 0.30 : 1;
+    ctx.fillStyle = isSel ? '#F5EDE0' : curColor(cell.cur);
+    ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+  }
+  // halo ring
+  if (sel){
+    const active = touching || hovering;
+    const R = 17*(0.9 + 0.2*swell.value);
+    ctx.globalAlpha = active ? 0.95 : 0.6;
+    ctx.strokeStyle = '#E8833A'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(hx.value-camX, hy.value-camY, R, 0, 7); ctx.stroke();
+  }
+  // touch ripples
+  ctx.strokeStyle = 'rgba(232,131,58,.5)';
+  for (let i = ripples.length-1; i >= 0; i--){
+    const p = ripples[i], t = (now - p.t0)/450;
+    if (t >= 1){ ripples.splice(i, 1); continue; }
+    ctx.globalAlpha = (1-t)*0.5; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(p.x-camX, p.y-camY, 12 + t*70, 0, 7); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 /* ===================== the one rAF loop ==================================================== */
-let lastT = 0, haloEl = null, lastRender = 0, lastPathAt = 0, lastPage = 0;
+let lastT = 0, lastUi = 0, lastPathAt = 0, lastPage = 0;
 const trailPath = [];
 function frame(t){
   requestAnimationFrame(frame);
   const dt = Math.min(0.032, (t - lastT)/1000 || 0.016); lastT = t;
 
-  /* conveyor: intent-gated, asymmetric envelope — attack ~180ms, release zero */
-  if (t - lastMoveAt > 80){                               // a still thumb has no stale velocity
-    const f = Math.max(0, 1 - dt*8);
-    velX *= f; velY *= f; speed *= f;
-  }
+  if (t - lastMoveAt > 80){ const f = Math.max(0, 1 - dt*8); velX *= f; velY *= f; speed *= f; }
   let wantX = 0, wantY = 0, armed = false;
   if (touching || hovering){
     const [ox, oy] = bandVector();
     const inBand = ox !== 0 || oy !== 0;
     if (inBand){
-      bandT = speed < 200 ? bandT + dt : 0;               // dwell arms; a stroke along the edge never does
+      bandT = speed < 200 ? bandT + dt : 0;
       const outward = velX*Math.sign(ox) + velY*Math.sign(oy);
-      armT = (outward > 60 && outward < 600) ? armT + dt  // a controlled push arms; a fly-through skim never does
-           : Math.max(0, armT - dt*2);
+      armT = (outward > 60 && outward < 600) ? armT + dt : Math.max(0, armT - dt*2);
       armed = armT >= 0.08 || bandT >= 0.15;
       if (armed){
         wantX = ox*V_MAX; wantY = oy*V_MAX;
-        const allowed = Math.max(0, CAP - speed);          // thumb has right of way
+        const allowed = Math.max(0, CAP - speed);
         const mag = Math.hypot(wantX, wantY);
         if (mag > allowed && mag > 0){ wantX *= allowed/mag; wantY *= allowed/mag; }
       }
@@ -610,11 +727,11 @@ function frame(t){
 
   if (reduceMotion){
     camVX = camVY = 0;
-    if (armed && t - lastPage > 350){                       // step-paging, one soft detent
+    if (armed && t - lastPage > 350){
       lastPage = t;
       const [ox, oy] = bandVector();
       camX += Math.sign(ox)*innerWidth/2; camY += Math.sign(oy)*innerHeight/2;
-      clampCam(); renderVisible(); detent(performance.now());
+      clampCam(); detent(performance.now());
     }
   } else {
     camVX += (wantX - camVX) * Math.min(1, dt*11);
@@ -626,7 +743,7 @@ function frame(t){
       if (touching || hovering){
         const now = performance.now();
         const [wx, wy] = screenToWorld(px, py);
-        trySelect(wx, wy, now);                             // the world moves; crossings still tick
+        trySelect(wx, wy, now);
       }
     }
   }
@@ -638,8 +755,10 @@ function frame(t){
     camY = glide.fromY + (glide.toY - glide.fromY)*k;
     if (gt >= 1) glide = null;
   }
-  world.style.transform = `translate(${-camX}px, ${-camY}px)`;
-  if (t - lastRender > 100){ lastRender = t; renderVisible(); updateHome(); updatePulse(); }
+  if (t - lastUi > 250){
+    lastUi = t; updateHome(); updatePulse();
+    field.dataset.cam = Math.round(camX) + ',' + Math.round(camY);   // for the probe/walkthrough tier
+  }
   if (t - lastPathAt > 300){
     lastPathAt = t;
     const cx = camX + innerWidth/2, cy = camY + innerHeight/2;
@@ -647,41 +766,42 @@ function frame(t){
     if (!last || Math.hypot(cx-last[0], cy-last[1]) > 24) trailPath.push([cx, cy]);
     if (trailPath.length > 500) trailPath.shift();
   }
-  drawTrail();
 
-  if (!sel) return;
-  hx.target = sel.x; hy.target = sel.y;
-  const sep = Math.hypot(hx.value - sel.x, hy.value - sel.y);
-  const kMul = Math.min(3, Math.max(1, sep/35));
-  step(hx, dt, kMul); step(hy, dt, kMul);
-  step(swell, dt);
-  if (!haloEl){ haloEl = document.createElement('div'); haloEl.id = 'halo'; world.appendChild(haloEl); }
-  const active = touching || hovering;
-  haloEl.style.transform = `translate(${hx.value}px, ${hy.value}px) scale(${0.9 + 0.2*swell.value})`;
-  haloEl.style.opacity = active ? 1 : 0.65;
+  if (sel){
+    hx.target = sel.x; hy.target = sel.y;
+    const sep = Math.hypot(hx.value - sel.x, hy.value - sel.y);
+    const kMul = Math.min(3, Math.max(1, sep/35));
+    step(hx, dt, kMul); step(hy, dt, kMul);
+    step(swell, dt);
+    if (!reduceMotion && (touching || hovering)){
+      const last = comet[comet.length-1];
+      if (!last || Math.hypot(hx.value-last[0], hy.value-last[1]) > 4) comet.push([hx.value, hy.value]);
+      if (comet.length > 9) comet.shift();
+    } else comet.length = 0;
 
-  if (sel.el) sel.el.style.transform = `scale(${1 + 0.6*swell.value})`;
-  const R = PITCH*2.05;
-  for (const [k, cell] of visible){
-    if (cell === sel) continue;
-    const dx = cell.x - sel.x, dy = cell.y - sel.y, d = Math.hypot(dx, dy);
-    if (d > R || d === 0) continue;
-    const g = Math.exp(-(d*d)/(2*PITCH*PITCH)) * 6 * (reduceMotion ? 0 : swell.value);
-    dispNow.set(k, {cell, dx: dx/d*g, dy: dy/d*g});
-    relaxSet.add(k);
+    // the magnet sheet, canvas edition: neighbours lean away from the committed selection
+    const R = PITCH*2.05;
+    const next = new Map();
+    const cc = Math.round(sel.x/PITCH - 0.5), cr = Math.round(sel.y/PITCH - 0.5);
+    for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++){
+      const cell = getCell(cc+dc, cr+dr);
+      if (!cell || cell.empty || cell === sel) continue;
+      const dx = cell.x - sel.x, dy = cell.y - sel.y, d = Math.hypot(dx, dy);
+      if (d > R || d === 0) continue;
+      const g = Math.exp(-(d*d)/(2*PITCH*PITCH)) * 6 * (reduceMotion ? 0 : swell.value);
+      const old = dispNow.get(cell.key) || {dx:0, dy:0};
+      next.set(cell.key, { dx: old.dx + (dx/d*g - old.dx)*0.4, dy: old.dy + (dy/d*g - old.dy)*0.4 });
+    }
+    for (const [k, rec] of dispNow){
+      if (next.has(k)) continue;
+      rec.dx *= 0.6; rec.dy *= 0.6;
+      if (Math.abs(rec.dx) + Math.abs(rec.dy) > 0.15) next.set(k, rec);
+    }
+    dispNow = next;
   }
-  for (const k of relaxSet){
-    const rec = dispNow.get(k);
-    if (!rec || !rec.cell.el){ relaxSet.delete(k); dispNow.delete(k); continue; }
-    const isN = Math.hypot(rec.cell.x - sel.x, rec.cell.y - sel.y) <= R && rec.cell !== sel;
-    const nx = isN ? rec.dx : rec.dx*0.65, ny = isN ? rec.dy : rec.dy*0.65;
-    rec.cell.el.style.transform = `translate(${nx}px, ${ny}px)`;
-    if (!isN){
-      if (Math.abs(nx) < 0.1 && Math.abs(ny) < 0.1){ rec.cell.el.style.transform = ''; relaxSet.delete(k); dispNow.delete(k); }
-      else { rec.dx = nx; rec.dy = ny; }
-    } else { rec.dx = nx; rec.dy = ny; }
-  }
-  positionCard(active);
+
+  draw(t);
+  positionCard(touching || hovering);
 }
 requestAnimationFrame(frame);
 
@@ -712,61 +832,44 @@ function positionCard(active){
   cardEl.classList.toggle('deep', now - dwellStart > 1200);
 }
 
-/* the trail, drawn on the land: your route in world coordinates, age-faded */
-const tctx = trailcv.getContext('2d');
-function sizeTrail(){ trailcv.width = innerWidth; trailcv.height = innerHeight; }
-function drawTrail(){
-  tctx.clearRect(0, 0, trailcv.width, trailcv.height);
-  if (trailPath.length < 2) return;
-  const n = trailPath.length;
-  tctx.lineWidth = 2; tctx.lineCap = 'round';
-  for (let i = 1; i < n; i++){
-    const a = trailPath[i-1], b = trailPath[i];
-    tctx.strokeStyle = `rgba(138,143,163,${0.06 + 0.30*(i/n)})`;
-    tctx.beginPath();
-    tctx.moveTo(a[0]-camX, a[1]-camY); tctx.lineTo(b[0]-camX, b[1]-camY);
-    tctx.stroke();
-  }
-}
-
 /* ===================== preview content ===================================================== */
 const mediaCache = new Map();
 function art(cell, w, h){
   const key = cell.key + 'x' + w;
   if (mediaCache.has(key)) return mediaCache.get(key);
-  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-  const ctx = cv.getContext('2d'), r = rng(cell.art);
+  const cvv = document.createElement('canvas'); cvv.width = w; cvv.height = h;
+  const x2 = cvv.getContext('2d'), r = rng(cell.art);
   const C = CURRENTS[cell.cur];
   const h1 = C.hue + r()*24 - 12;
-  const g = ctx.createLinearGradient(0, 0, 0, h);
+  const g = x2.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, `hsl(${h1} ${C.sat+16}% ${16 + r()*10}%)`);
   g.addColorStop(1, `hsl(${h1 + 30} ${C.sat}% ${7 + r()*6}%)`);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  x2.fillStyle = g; x2.fillRect(0, 0, w, h);
   if (r() > 0.45){
-    ctx.beginPath();
-    ctx.arc(w*(0.2 + r()*0.6), h*(0.18 + r()*0.3), 8 + r()*h*0.09, 0, 7);
-    ctx.fillStyle = `hsla(${h1+10} 60% 78% / ${0.25 + r()*0.4})`; ctx.fill();
+    x2.beginPath();
+    x2.arc(w*(0.2 + r()*0.6), h*(0.18 + r()*0.3), 8 + r()*h*0.09, 0, 7);
+    x2.fillStyle = `hsla(${h1+10} 60% 78% / ${0.25 + r()*0.4})`; x2.fill();
   }
   for (let l = 0; l < 3; l++){
-    ctx.beginPath();
-    let y = h*(0.45 + l*0.16 + r()*0.06); ctx.moveTo(-4, y);
-    for (let x = 0; x <= w; x += w/14){ y += (r()*2-1)*h*0.07; y = Math.min(h-4, Math.max(h*0.3, y)); ctx.lineTo(x, y); }
-    ctx.lineTo(w+4, h+4); ctx.lineTo(-4, h+4); ctx.closePath();
-    ctx.fillStyle = `hsla(${h1 + 24 + l*10} ${C.sat+6}% ${10 - l*2}% / ${0.75})`;
-    ctx.fill();
+    x2.beginPath();
+    let y = h*(0.45 + l*0.16 + r()*0.06); x2.moveTo(-4, y);
+    for (let xx = 0; xx <= w; xx += w/14){ y += (r()*2-1)*h*0.07; y = Math.min(h-4, Math.max(h*0.3, y)); x2.lineTo(xx, y); }
+    x2.lineTo(w+4, h+4); x2.lineTo(-4, h+4); x2.closePath();
+    x2.fillStyle = `hsla(${h1 + 24 + l*10} ${C.sat+6}% ${10 - l*2}% / ${0.75})`;
+    x2.fill();
   }
   if (cell.kind === 'reel'){
-    ctx.fillStyle = 'rgba(232,228,218,.85)';
-    ctx.beginPath(); const cx = w-26, cy = 22;
-    ctx.moveTo(cx-5, cy-7); ctx.lineTo(cx+7, cy); ctx.lineTo(cx-5, cy+7); ctx.closePath(); ctx.fill();
+    x2.fillStyle = 'rgba(232,228,218,.85)';
+    x2.beginPath(); const cx = w-26, cy = 22;
+    x2.moveTo(cx-5, cy-7); x2.lineTo(cx+7, cy); x2.lineTo(cx-5, cy+7); x2.closePath(); x2.fill();
   }
   if (cell.kind === 'carousel'){
-    ctx.strokeStyle = 'rgba(232,228,218,.7)'; ctx.lineWidth = 1.5;
-    ctx.strokeRect(w-34, 12, 16, 12); ctx.strokeRect(w-30, 16, 16, 12);
+    x2.strokeStyle = 'rgba(232,228,218,.7)'; x2.lineWidth = 1.5;
+    x2.strokeRect(w-34, 12, 16, 12); x2.strokeRect(w-30, 16, 16, 12);
   }
   if (mediaCache.size > 400) mediaCache.clear();
-  mediaCache.set(key, cv);
-  return cv;
+  mediaCache.set(key, cvv);
+  return cvv;
 }
 const cm = document.getElementById('cmedia'), cmx = cm.getContext('2d');
 function ageStr(m){ return m < 60 ? m + 'm' : Math.round(m/60) + 'h'; }
@@ -777,7 +880,9 @@ function kindStr(p){
 function handleOf(name){ return '@' + name.toLowerCase().replace(/[^a-z]+/g, ''); }
 function cardContent(cell){
   cmx.drawImage(art(cell, 330, 150), 0, 0);
-  document.getElementById('ctdot').style.background = curColor(cell.cur);
+  const col = curColor(cell.cur);
+  const td = document.getElementById('ctdot');
+  td.style.background = col; td.style.color = col;
   document.getElementById('cauthor').textContent = cell.author;
   document.getElementById('chandle').textContent = handleOf(cell.author);
   document.getElementById('cage').textContent = ageStr(cell.mins);
@@ -803,7 +908,9 @@ function openPost(cell){
   pm.height = Math.round(Math.min(innerHeight*0.55, innerWidth*0.78));
   pm.width = innerWidth;
   pm.getContext('2d').drawImage(art(cell, innerWidth, pm.height), 0, 0);
-  document.getElementById('ptdot').style.background = curColor(cell.cur);
+  const col = curColor(cell.cur);
+  const td = document.getElementById('ptdot');
+  td.style.background = col; td.style.color = col;
   document.getElementById('pauthor').textContent = cell.author + '  ' + handleOf(cell.author);
   document.getElementById('page').textContent = ageStr(cell.mins);
   document.getElementById('pcap').textContent = cell.cap;
@@ -823,7 +930,6 @@ document.getElementById('pclose').addEventListener('click', closePost);
 function markRead(cell, opened){
   if (!cell.read){
     cell.read = true;
-    if (cell.el) cell.el.classList.add('read');
     journey.push({ cell, opened: !!opened });
   } else if (opened){
     const j = journey.find(j => j.cell === cell);
@@ -837,7 +943,6 @@ setInterval(() => {
   if ((touching || hovering) && sel && performance.now() - dwellStart > 1200) markRead(sel, false);
 }, 300);
 
-/* the trail tab: the journey as an object — tap a stop to glide back to it */
 let trailOn = false;
 const trailEl = document.getElementById('trail');
 function buildTrail(){
@@ -856,7 +961,8 @@ function buildTrail(){
     b.innerHTML = `<span class="tdot"></span>
       <span class="txt"><span class="l1"><b></b> <span class="cur"></span></span><span class="l2"></span></span>
       <span class="mark"></span>`;
-    b.querySelector('.tdot').style.background = curColor(j.cell.cur);
+    const col = curColor(j.cell.cur);
+    const td = b.querySelector('.tdot'); td.style.background = col; td.style.color = col;
     b.querySelector('b').textContent = j.cell.author;
     b.querySelector('.cur').textContent = '· ' + CURRENTS[j.cell.cur].key;
     b.querySelector('.l2').textContent = j.cell.cap;
@@ -914,6 +1020,33 @@ homeBtn.addEventListener('click', () => {
   } else startGlide(homeX, homeY, Math.min(900, 400 + d/4));
 });
 
+/* haptics honesty: say what THIS device/context can do, and how to unlock more */
+const hapchip = document.getElementById('hapchip');
+const embedded = (() => { try { return window.self !== window.top; } catch(e){ return true; } })();
+function setupHapchip(){
+  if (canVibe && embedded){
+    hapchip.textContent = 'ticks are muted in embedded previews — ';
+    const a = document.createElement('a');
+    a.href = location.href; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = 'open full screen for haptics ↗';
+    hapchip.appendChild(a);
+  } else if (!canVibe && isIOS){
+    hapchip.textContent = 'iPhone Safari has no web vibration — sound on, the ticks carry it';
+  } else hapchip.textContent = '';
+}
+function fadeHapchipSoon(){ setTimeout(() => { hapchip.style.opacity = '0'; }, 6000); }
+setupHapchip();
+document.getElementById('haptest').addEventListener('click', () => {
+  const out = document.getElementById('hapresult');
+  if (canVibe){
+    const ok = navigator.vibrate(120);
+    out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen';
+  } else if (isIOS){
+    try { swEl.click(); } catch(e){}
+    out.textContent = 'no vibration API on iOS Safari — tried the switch tick';
+  } else out.textContent = 'no vibration API in this browser';
+});
+
 /* ===================== keyboard ============================================================ */
 field.addEventListener('keydown', e => {
   if (postOn) return;
@@ -949,8 +1082,8 @@ document.addEventListener('keydown', e => {
 /* ===================== HUD + boot ========================================================== */
 document.getElementById('restart').addEventListener('click', () => {
   cells.clear(); mediaCache.clear(); affinity.fill(0); journey.length = 0; trailPath.length = 0;
-  for (const [, cell] of visible) if (cell.el) cell.el.remove();
-  visible.clear(); sel = null; relaxSet.clear(); dispNow.clear();
+  sparks.length = 0; ripples.length = 0; comet.length = 0;
+  sel = null; dispNow.clear();
   camVX = camVY = 0; glide = null; clearTimeout(glideTimer);
   boot(); updateDriftLabel();
 });
@@ -959,13 +1092,12 @@ document.getElementById('snd').addEventListener('click', e => {
 });
 document.getElementById('feel').addEventListener('click', () =>
   document.getElementById('feelcard').classList.toggle('on'));
-addEventListener('resize', () => { sizeTrail(); clampCam(); renderVisible(); });
+addEventListener('resize', () => { sizeCanvas(); clampCam(); });
 
 function boot(){
-  sizeTrail();
+  sizeCanvas();
   homeX = (WORLD_W - innerWidth)/2; homeY = (WORLD_H - innerHeight)/2;
   camX = homeX; camY = homeY; clampCam();
-  renderVisible();
   const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55);
   const c = nearestCell(wx, wy);
   if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; }

@@ -130,6 +130,17 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   color:var(--faint); z-index:45}
 @media (hover:none){.keys{display:none}}
 
+.hapchip{position:fixed; left:50%; transform:translateX(-50%);
+  bottom:calc(env(safe-area-inset-bottom,0px) + 82px); z-index:41;
+  font:11px var(--mono); color:var(--dim); background:rgba(19,24,34,.8); border:1px solid var(--line);
+  border-radius:999px; padding:4px 12px; transition:opacity 600ms; white-space:nowrap; max-width:94vw;
+  overflow:hidden; text-overflow:ellipsis}
+.hapchip:empty{display:none}
+.hapchip a{color:var(--ember); text-decoration:none}
+.card .haprow{margin-top:10px; display:flex; align-items:center; gap:8px; font:11px var(--mono); color:var(--faint)}
+.card .haprow button{border:1px solid var(--line); border-radius:6px; padding:2px 8px; color:var(--dim); width:auto; height:auto}
+.card .haprow button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+
 .sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
 #swhaptic{position:absolute; left:-9999px; top:0; pointer-events:none}
 
@@ -192,7 +203,9 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
     <span><i style="background:var(--tier-follow)"></i>following</span>
     <span><i style="background:var(--tier-new)"></i>new to you</span>
   </div>
+  <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
 </div>
+<div class="hapchip" id="hapchip"></div>
 
 <input type="checkbox" switch id="swhaptic" tabindex="-1" aria-hidden="true">
 <div class="sr" aria-live="polite" id="live"></div>
@@ -373,12 +386,13 @@ function setSelection(i, now, tick){
 let sndOn = true, audioCtx = null, tickBuf = null;
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canVibe = 'vibrate' in navigator;
 const swEl = document.getElementById('swhaptic');
 function detent(now){
   const gap = speed > 1200 ? 40 : 30;
   if (now - lastTickAt < gap) return;
   lastTickAt = now;
-  if (navigator.vibrate) navigator.vibrate(10);
+  if (canVibe) navigator.vibrate(12);
   else if (isIOS) { try { swEl.click(); } catch(e){} }   // Safari switch haptic — free if it works, silent if not
   if (sndOn && audioCtx && tickBuf){
     const s = audioCtx.createBufferSource(); s.buffer = tickBuf;
@@ -436,13 +450,14 @@ field.addEventListener('pointerdown', e => {
   field.setPointerCapture(e.pointerId);
   touching = true; hovering = false; samples = []; inCancel = false;
   initAudio(); if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (canVibe) navigator.vibrate(5);              // activation primer — the first tap of the session
   px = e.clientX; py = e.clientY;
   const now = performance.now();
   vel(now, px, py);
   trySelect(px, py, now);
   if (sel === -1){ const [i] = nearest(px, py); if (i !== -1) setSelection(i, now, true); }
   cardEl.classList.remove('docked');
-  if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; }
+  if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; fadeHapchipSoon(); }
 });
 field.addEventListener('pointermove', e => {
   if (postOn || listOn) return;
@@ -736,6 +751,32 @@ document.getElementById('snd').addEventListener('click', e => {
 });
 document.getElementById('feel').addEventListener('click', () =>
   document.getElementById('feelcard').classList.toggle('on'));
+
+/* haptics honesty: say what THIS device/context can do, and how to unlock more */
+const hapchip = document.getElementById('hapchip');
+const embedded = (() => { try { return window.self !== window.top; } catch(e){ return true; } })();
+(function setupHapchip(){
+  if (canVibe && embedded){
+    hapchip.textContent = 'ticks are muted in embedded previews — ';
+    const a = document.createElement('a');
+    a.href = location.href; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = 'open full screen for haptics ↗';
+    hapchip.appendChild(a);
+  } else if (!canVibe && isIOS){
+    hapchip.textContent = 'iPhone Safari has no web vibration — sound on, the ticks carry it';
+  } else hapchip.textContent = '';
+})();
+function fadeHapchipSoon(){ setTimeout(() => { hapchip.style.opacity = '0'; }, 6000); }
+document.getElementById('haptest').addEventListener('click', () => {
+  const out = document.getElementById('hapresult');
+  if (canVibe){
+    const ok = navigator.vibrate(120);
+    out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen';
+  } else if (isIOS){
+    try { swEl.click(); } catch(e){}
+    out.textContent = 'no vibration API on iOS Safari — tried the switch tick';
+  } else out.textContent = 'no vibration API in this browser';
+});
 
 /* ===================== boot ================================================================ */
 let resizeT = 0;
