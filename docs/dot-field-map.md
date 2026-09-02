@@ -1,340 +1,356 @@
-# The map — steering by named axes (drift rev. 4)
+# The map — the wheel (drift rev. 5)
 
-*Ruling of the seven-agent panel (five lenses, a skeptic, a referee, a critic), 2026-09-02, applied
-to `prototypes/the-drift.html` rev. 4 and `src/lib/driftPalette.ts`. Every number is marked
-SOURCED (a citation or a measurement of the file) or ESTIMATE (a design guess to be tested).*
+*Ruling of the seven-agent panel (five lenses, a skeptic, a referee, a critic), 2026-09-02, applied to
+`prototypes/the-drift.html` and `src/lib/driftPalette.ts` — then **reversed on one point by the
+founder's own clarification the same day** (§0b). Every number is marked SOURCED (a citation or a
+measurement of the file) or ESTIMATE (a design guess to be tested).*
 
-> **PRIVATE until the provisional is filed.** Steering by named semantic axes is a claimable
-> dependent variant of the signal method (§9). The shared Drift artifact stays at rev. 3; no clip,
-> no post, no republish of rev. 4 until the USPTO receipt exists (plan Phase 0.1).
+> **PRIVATE until the provisional is filed.** Steering by named coordinates is a claimable dependent
+> variant of the signal method (§9). The shared Drift artifact stays at rev. 3; no clip, no post, no
+> republish of rev. 4 or 5 until the USPTO receipt exists (plan Phase 0.1).
 
 ## 0. The sentence, and what survived it
 
-The founder's words: *"you hop in the drift and you can control your algorithm … if you go so far
-right you are in extreme sports and from there the deeper you go the more extreme, the more you
-pull back the goofier … or you switch drift to another category and same thing. It's almost like a
-remote of what you want to see … the colors and everything should mean something."*
+The founder's first sentence: *"if you go so far right you are in extreme sports and from there the
+deeper you go the more extreme, the more you pull back the goofier … or you switch drift to another
+category and same thing. It's almost like a remote of what you want to see … the colors and everything
+should mean something."*
 
-What survives every lens: a fixed **Cartesian compass** — west CALM, east WILD, north SERIOUS,
-south GOOFY — over named, hand-placed, colour-coded regions whose coordinates never move. Position
-carries both axes; **hue names the region; lightness is read state; ember is interaction only.**
-Switching worlds keeps your coordinates: east-goofy in sports lands you in punk/skate territory in
-music, which is literally "switch drift to another category and same thing."
+What survived every lens, and still stands: **direction means the same thing in every world**;
+named, hand-placed, colour-coded regions whose coordinates never move; **hue names the kind, lightness
+is read state, ember is interaction only**; switching worlds keeps your coordinates; steering is an
+explicit, logged preference; positions are a placement lookup, not a projection, so the geography is
+stable by construction. What it costs also still stands: the recommender loses the power to reshape the
+land and keeps only the power to choose which item fills an unvisited cell and how brightly a region
+glows. "The territory reshapes as it learns you" became "the glow and the fill change."
 
-What the map buys: geography that is **stable by construction** — a placement lookup instead of an
-embedding projection — which retires the old §7 "projection stability" risk *for placement only*.
-What it costs: the recommender loses the power to reshape the land and keeps only the power to
-choose which item fills an unvisited cell. The demo's "territory reshapes as it learns you" weakens
-to "the glow and the fill change." That is the honest trade, and this document is the record of it.
+### 0b. The reversal — plane to wheel (same day)
 
-Three readings of the sentence were rejected, with reasons:
+The panel ruled **Cartesian**: calm↔wild on x, serious↔goofy on y. Its reasons for rejecting the polar
+reading were two: (a) on a polar plane "push right" means *more* intense east of centre and *less* west
+of it, and (b) polar duplicates the tone axis on both semicircles. The critic accepted both.
 
-- **Polar** (angle = topic, radius = intensity — the skeptic's dial). On a polar plane "push right"
-  means *more* intense east of centre and *less* west of it, breaking the founder's own requirement
-  that a direction mean the same thing everywhere; the two shipped intensity-in-polar conventions
-  already contradict each other (Geneva Emotion Wheel outward vs Plutchik inward — SOURCED); and
-  polar duplicates the tone axis on both semicircles. The skeptic's real point — that the founder
-  may hold a 1-D model — is kept as a **measurement**: if intensity and tone correlate |ρ| > 0.7
-  (ESTIMATE) on the first real corpus, the plane collapses to one stakes diagonal.
-- **"Pull back" as a gesture.** On the ring, pulling the stick back toward centre is STOP under the
-  settled release law. So *goofier is a push south* (down the glass, toward the body), and a westward
-  push says CALMER, never goofier. The instrument corrects the intuition live — the lit word says
-  CALMER — not a tutorial. **This needs the founder's confirmation (§10).**
-- **A fifth word (BACK / HOME).** Rejected under the simplicity doctrine: the home glyph already
-  shows bearing and distance. The compass is four words.
+The founder then wrote: *"deeper or shallower drift determines intensity and then direction determines
+category … stay in that genre and play around with similar content or more intense, less intense,
+similar sport."* That is a wheel, and it changes the argument:
 
-"Deeper" = distance travelled east (the camera's position — the dial's setting), not stick
-deflection: the ring is a rate controller, release stops dead, and you stay where you set it. That
-is why the remote metaphor holds.
+- **The angle is category, not tone.** Reason (b) assumed tone on the angle. With *kinds* on the angle
+  there is nothing to duplicate, and "similar sport" becomes a small rotation — something the plane
+  could never offer, where chess sat beside golf because both were calm and serious, not because
+  they were alike. Category is a kind; intensity is an amount. Kinds around a ring and amounts along
+  the radius match how each behaves.
+- **"Pull back" is settled.** It means *shallower*, toward the hub — not goofier. The panel's y axis
+  was an over-reading of one word. Register survives as a **tag on the card** (serious / goofy),
+  never as geometry and never on a dot.
+- **Reason (a) is a cost, not a flaw.** In a vehicle, what a push does depends on where you are; that
+  is what piloting is. The ring pays the cost by always drawing **HOME at the bearing to the hub** and
+  **DEEPER opposite**. The rule a stranger can hold: pull toward HOME for shallower, push away for
+  deeper, push sideways for the neighbouring kind.
 
-## 1. The axes
+Costs the wheel introduces, stated honestly: serious↔goofy is no longer a place you can steer to;
+near the hub small moves swing the bearing, so a hub disc (radius < 0.15, ESTIMATE) is "the
+mainstream" with no kind; the sector order around the wheel is an editorial choice about similarity
+(which kinds are neighbours) that no measurement backs yet; and the eight-sector budget means a
+world with more than eight kinds must merge some. The panel's measurement still stands: if intensity
+and tone correlate |ρ| > 0.7 (ESTIMATE) on the first real corpus, the founder's one-dimensional model
+was right all along and the wheel is exactly that model.
 
-| | x | y |
-|---|---|---|
-| words | CALM (W) ↔ WILD (E) | SERIOUS (N) ↔ GOOFY (S) |
-| comparatives (ring, while pushing) | CALMER · WILDER | MORE SERIOUS · GOOFIER |
-| sign | x ∈ [−1, 1], east positive | y = −1 top row (serious), +1 bottom row (goofy) — rows increase downward, as on the screen |
-| lineage | Russell's arousal; Musicovery's calm ↔ energetic (SOURCED) | RATIONAL IS UP / highbrow–lowbrow (Lakoff & Johnson, SOURCED); *not* an Osgood factor |
-| per-item scoreability | intensity: usable, runs low vs humans (Nature 2025, SOURCED) | sarcasm/tone agreement α ≈ 0.25 for humans and LLMs (SOURCED) — **unproven** |
-| v1 status | region-level coordinate; within-region offset by score is v2 | **editorial, region-level only**; items scatter inside their region by stable hash, never by a tone score |
+## 1. The wheel
 
-Rules that follow:
+| | rule |
+|---|---|
+| **bearing** | the kind. Eight sectors 45° apart, sector *i* at bearing *i*·45°, 0 = east, counter-clockwise. Each world names its sectors in an editorial wheel order (neighbours are similar kinds — ESTIMATE, argued by nobody yet) |
+| **radius** | intensity, in the world's own words: sports *casual → extreme*, music *mellow → intense*, kitchen *comfort → extreme*, creators *familiar → new*, movies *mainstream → deep cut*. 0 is the hub, 1 is the rim |
+| **hub** | radius < 0.15: the mainstream. The kind is undefined; the label says the world's shallow word; the ring shows it in HOME's place |
+| **rim** | radius = 1: as deep as this world goes. The camera is clamped to it; beyond is dark land; contact is a thud and a logged, clamped wish |
+| **home** | the hub. The home glyph, the ring's HOME word and the you-are-here bead all point at it |
+| **register** | a tag on a region (serious / goofy / none), shown on the card as a word — never geometry, never on a dot |
+| **ring words** | universal: HOME · DEEPER at rest; SHALLOWER · DEEPER lit while pushing; the kind ahead lights at the screen edge |
 
-- **y is never a label on a creator's post.** "Goofy" is a compass word and a region coordinate,
-  never a verdict; no value words, no quality tint, equal density floors north and south.
-- **"Wild" is several dimensions wearing one word** (Cohen, Baluch & Duffy 2018 — SOURCED). Each
-  world ships a one-paragraph rubric for what wild means there (sports: injury-risk × speed ×
-  contact; kitchen: heat × time × skill) and its region coordinates are argued once, then frozen.
-- **One named exception: the creators world's x is measured, not judged** — 24 h engagement velocity
-  vs the niche baseline, frozen at the daily drop — and its compass reads **FAMILIAR ↔ NEW**
-  (comparatives MORE FAMILIAR · NEWER; the referee's "KNOWN ↔ BREAKING" lost "MORE KNOWN" to the
-  critic — not English). The prototype states this on its face: the switch hint reads *"Same compass,
-  new places — here right means newer: breaking now."*
-- **Mirror x under `dir=rtl`** (SNARC reverses in RTL readers — SOURCED). Not built; noted.
+Lineage, unchanged: intensity is Russell's arousal / Musicovery's calm↔energetic (SOURCED); the
+wheel itself is the Geneva Emotion Wheel's geometry with the sign convention "outward = more" and
+kinds, not emotions, on the angle (GEW and Plutchik disagree on the sign — SOURCED — so the sign is
+stated once here and never varies). Mirror the bearing under `dir=rtl`? Not needed: a wheel has no
+left-to-right reading order. Kept as a question.
 
 ## 2. Geometry
 
-Cells ↔ plane via `placeRegions()`: `col = 1.5 + (x+1)/2·(WCOLS−3)`, `row = 1.5 + (y+1)/2·(WROWS−3)`;
-`planePos()` inverts it for the camera (viewport centre). **Origin = home = the world's mainstream
-centre of mass** (basketball in sports, pop in music, street food in kitchen, hooks & cuts in
-creators) — "centre = mainstream" survives without polar rules. The plane is fixed per edition; when
-the production world is bounded to its populated hull (§5) the camera clamps to the hull and the
-plane does *not* rescale — otherwise x = 0.8 would mean something different tomorrow.
+A square world of 47 × 47 cells at 44 px pitch with the wheel inscribed: hub at the centre cell, rim
+radius 22 cells. A region at (sector *s*, radius *r*) sits at cell `(HUB_C + r·RIM·cos θ, HUB_R −
+r·RIM·sin θ)` with θ = *s*·45° (screen y grows downward). `polarPos()` inverts it for the viewport
+centre. Cells beyond the rim are empty by construction (driver-checked: zero populated cells with
+depth > 1; 1,517 cells inside the rim). Region spread grows with depth (3.6 + 2.6·r cells, ESTIMATE):
+the inner ring is tight and blends toward the hub; the deep end sprawls.
+
+`switchWorld` carries (bearing, radius) across: deep in *horror* in movies is deep in *air & mountain*
+in sports — the same bearing, the same colour, a different kind.
 
 ## 3. The worlds — edition 0 (draft)
 
-Generated by `npx tsx scripts/drift-edition-tables.ts` from the prototype's `WORLDS` literal through the core's
-`assignFamilies()` — **the code is the single source of truth**; the referee's hand-written tables
-did not reproduce from its own rule (critic, VERIFIED) and are superseded by these. Table order =
-index order = collision-rule order. All coordinates ESTIMATE: argued by no one yet. They freeze as
-**edition 1** only after one argue-once session (founder + one literate stranger per world), with
-the signatory recorded; every later coordinate change is a new edition, announced at the drop,
-never silent, never backfilled (spatial memory — Scarr/Cockburn, SOURCED).
+Generated by `npx tsx scripts/drift-edition-tables.ts` from the prototype's `WORLDS` literal through
+the core's `placeRegions()` — **the code is the single source of truth**. Table order = index order.
+All coordinates ESTIMATE: argued by no one yet. They freeze as **edition 1** only after one argue-once
+session (founder + one literate stranger per world), with the signatory recorded; every later
+coordinate change is a new edition, announced at the drop, never silent, never backfilled (spatial
+memory — Scarr/Cockburn, SOURCED).
 
 Rules the tables obey (all asserted by `verify:driftpalette`):
 
-- region keys ≤ 15 characters (the 390 px label — critic, VERIFIED overflow at 61 chars);
-- every region ≥ 2 staged authors and ≥ 3 captions; no key containing "rage" or "bait" — a
-  moderation verdict is not geography ("rage-bait" → "hot takes");
-- ≤ 8 hues per world; same-family pairs ≥ 0.5 plane-units apart;
-- `edition: 0` on every world until argued;
-- density = supply, by the hash alone: 0.85 populated, 0.65 where |x|+|y| ≥ 1.1 (ESTIMATE; the
-  critic's "four corner regions" had no definition — this rule is the definition).
+- exactly 8 sectors per world (null for an unused one), sector names ≤ 15 characters;
+- region keys ≤ 15 characters; every region ≥ 2 staged authors and ≥ 3 captions; no key containing
+  "rage" or "bait";
+- radius in [0.20, 0.98] — nothing inside the hub, nothing beyond the rim;
+- two regions in one sector ≥ 0.3 apart in radius (told apart by depth and name);
+- hue = the sector's hue, exactly, so ≤ 8 hues per world and the same bearing is the same colour in
+  every world; register tags ∈ {serious, goofy, absent};
+- `edition: 0` on every world; the movie world exists with ≥ 12 regions;
+- density = supply, by the hash alone: 0.85 populated, 0.65 at radius ≥ 0.75 (ESTIMATE).
 
-Deleted from rev. 3/4a and listed here so nothing vanishes silently: **surf** and **stunts**
-(sports), **rage-bait** (creators, renamed), the per-region `hue:` fields (dead — `placeRegions()`
-overrides them), `REGION_SHARPNESS` and the affinity mixture in `getCell()`.
+Deleted or replaced, listed so nothing vanishes silently: the plane coordinates `x`, `y` and the
+`AXES` compass; the deterministic hue **collision rule** (unnecessary once hue is the sector's);
+`xWords`/`xLit` (replaced by per-world `depth` words); `TOTAL_CELLS`-based odometer (now cells inside
+the rim); the rectangular camera clamp (now the rim).
 
-### sports — edition 0
+### sports — edition 0 (depth: casual → extreme)
 
-| # | region | x | y | family | hue | moved by collision | shares hue with | density | nebula sat |
-|---|---|---|---|---|---|---|---|---|---|
-| 0 | chess | -0.92 | -0.35 | 3 | 169 |  | bat & ball (0.60) | 0.65 | 19% |
-| 1 | golf | -0.72 | -0.1 | 2 | 130 | yes (3 → 2) | soccer (0.65) | 0.85 | 22% |
-| 2 | pub games | -0.66 | 0.55 | 4 | 208 |  |  | 0.65 | 22% |
-| 3 | bat & ball | -0.35 | -0.15 | 3 | 169 |  | chess (0.60) | 0.85 | 26% |
-| 4 | soccer | -0.1 | -0.3 | 2 | 130 |  | golf (0.65) | 0.85 | 30% |
-| 5 | basketball | 0.05 | 0.05 | 7 | 325 |  | moto (0.74) | 0.85 | 32% |
-| 6 | football | 0.22 | -0.45 | 1 | 91 |  | base & freeride (0.76) | 0.85 | 34% |
-| 7 | trick shots | 0.2 | 0.8 | 6 | 286 |  |  | 0.85 | 34% |
-| 8 | skate & bmx | 0.45 | 0.5 | 5 | 247 | yes (6 → 5) |  | 0.85 | 37% |
-| 9 | mma & boxing | 0.7 | -0.4 | 0 | 52 |  |  | 0.65 | 40% |
-| 10 | moto | 0.76 | 0.25 | 7 | 325 |  | basketball (0.74) | 0.85 | 41% |
-| 11 | base & freeride | 0.92 | -0.15 | 1 | 91 | yes (0 → 1) | football (0.76) | 0.85 | 43% |
+| # | region | sector | bearing | radius | hue | register | density | nebula sat |
+|---|---|---|---|---|---|---|---|---|
+| 0 | soccer | ball | 0° | 0.3 | 52 |  | 0.85 | 26% |
+| 1 | football | ball | 0° | 0.6 | 52 | serious | 0.85 | 34% |
+| 2 | basketball | court | 45° | 0.3 | 91 |  | 0.85 | 26% |
+| 3 | mma & boxing | combat | 90° | 0.8 | 130 | serious | 0.65 | 39% |
+| 4 | moto | motor | 135° | 0.7 | 169 |  | 0.85 | 36% |
+| 5 | base & freeride | air & mountain | 180° | 0.95 | 208 | serious | 0.65 | 43% |
+| 6 | trick shots | wheels | 225° | 0.3 | 247 | goofy | 0.85 | 26% |
+| 7 | skate & bmx | wheels | 225° | 0.65 | 247 |  | 0.85 | 35% |
+| 8 | pub games | mind & pub | 270° | 0.25 | 286 | goofy | 0.85 | 25% |
+| 9 | chess | mind & pub | 270° | 0.65 | 286 | serious | 0.85 | 35% |
+| 10 | golf | club & field | 315° | 0.2 | 325 |  | 0.85 | 23% |
+| 11 | bat & ball | club & field | 315° | 0.5 | 325 |  | 0.85 | 31% |
 
-### music — edition 0
+### music — edition 0 (depth: mellow → intense)
 
-| # | region | x | y | family | hue | moved by collision | shares hue with | density | nebula sat |
-|---|---|---|---|---|---|---|---|---|---|
-| 0 | classical | -0.9 | -0.4 | 3 | 169 |  |  | 0.65 | 19% |
-| 1 | folk | -0.6 | -0.1 | 2 | 130 | yes (3 → 2) |  | 0.85 | 23% |
-| 2 | jazz | -0.48 | -0.5 | 1 | 91 | yes (2 → 1) | electronic (0.96) | 0.85 | 25% |
-| 3 | musicals | -0.3 | 0.4 | 5 | 247 |  | novelty (0.50) | 0.85 | 27% |
-| 4 | pop | 0 | 0.1 | 6 | 286 |  |  | 0.85 | 31% |
-| 5 | hip-hop | 0.2 | -0.1 | 0 | 52 |  | metal (0.71) | 0.85 | 34% |
-| 6 | electronic | 0.45 | -0.25 | 1 | 91 | yes (0 → 1) | jazz (0.96) | 0.85 | 37% |
-| 7 | novelty | -0.15 | 0.88 | 5 | 247 |  | musicals (0.50) | 0.85 | 29% |
-| 8 | punk | 0.62 | 0.35 | 7 | 325 |  |  | 0.85 | 39% |
-| 9 | metal | 0.88 | -0.3 | 0 | 52 |  | hip-hop (0.71) | 0.65 | 42% |
+| # | region | sector | bearing | radius | hue | register | density | nebula sat |
+|---|---|---|---|---|---|---|---|---|
+| 0 | pop | pop | 0° | 0.2 | 52 |  | 0.85 | 23% |
+| 1 | hip-hop | hip-hop | 45° | 0.4 | 91 |  | 0.85 | 28% |
+| 2 | electronic | electronic | 90° | 0.55 | 130 |  | 0.85 | 32% |
+| 3 | punk | rock | 135° | 0.6 | 169 | goofy | 0.85 | 34% |
+| 4 | metal | rock | 135° | 0.92 | 169 | serious | 0.65 | 42% |
+| 5 | folk | roots | 180° | 0.25 | 208 |  | 0.85 | 25% |
+| 6 | classical | roots | 180° | 0.6 | 208 | serious | 0.85 | 34% |
+| 7 | jazz | jazz | 225° | 0.45 | 247 |  | 0.85 | 30% |
+| 8 | musicals | stage | 270° | 0.35 | 286 | goofy | 0.85 | 27% |
+| 9 | novelty | novelty | 315° | 0.3 | 325 | goofy | 0.85 | 26% |
 
-### kitchen — edition 0
+### kitchen — edition 0 (depth: comfort → extreme)
 
-| # | region | x | y | family | hue | moved by collision | shares hue with | density | nebula sat |
-|---|---|---|---|---|---|---|---|---|---|
-| 0 | tea & bread | -0.9 | -0.2 | 3 | 169 |  |  | 0.65 | 19% |
-| 1 | meal prep | -0.55 | -0.5 | 2 | 130 | yes (3 → 2) |  | 0.85 | 24% |
-| 2 | home baking | -0.4 | 0.3 | 4 | 208 |  |  | 0.85 | 26% |
-| 3 | fermentation | -0.25 | -0.7 | 1 | 91 | yes (2 → 1) | molecular (0.75), hot chili (1.19) | 0.85 | 28% |
-| 4 | street food | 0.1 | 0.2 | 6 | 286 |  | kitchen fails (0.66) | 0.85 | 32% |
-| 5 | grilling | 0.35 | -0.1 | 0 | 52 |  |  | 0.85 | 36% |
-| 6 | molecular | 0.5 | -0.7 | 1 | 91 |  | fermentation (0.75), hot chili (0.63) | 0.65 | 38% |
-| 7 | hot chili | 0.8 | -0.15 | 1 | 91 | yes (0 → 1) | fermentation (1.19), molecular (0.63) | 0.85 | 41% |
-| 8 | kitchen fails | 0.2 | 0.85 | 6 | 286 |  | street food (0.66) | 0.85 | 34% |
-| 9 | eating contest | 0.88 | 0.55 | 7 | 325 |  |  | 0.65 | 42% |
+| # | region | sector | bearing | radius | hue | register | density | nebula sat |
+|---|---|---|---|---|---|---|---|---|
+| 0 | tea & bread | baking | 0° | 0.2 | 52 |  | 0.85 | 23% |
+| 1 | home baking | baking | 0° | 0.5 | 52 |  | 0.85 | 31% |
+| 2 | meal prep | prep | 45° | 0.3 | 91 | serious | 0.85 | 26% |
+| 3 | fermentation | ferment | 90° | 0.6 | 130 | serious | 0.85 | 34% |
+| 4 | molecular | lab | 135° | 0.85 | 169 | serious | 0.65 | 40% |
+| 5 | grilling | heat | 180° | 0.45 | 208 |  | 0.85 | 30% |
+| 6 | hot chili | heat | 180° | 0.85 | 208 |  | 0.65 | 40% |
+| 7 | street food | street | 225° | 0.3 | 247 |  | 0.85 | 26% |
+| 8 | eating contest | contest | 270° | 0.9 | 286 | goofy | 0.65 | 41% |
+| 9 | kitchen fails | fails | 315° | 0.5 | 325 | goofy | 0.85 | 31% |
 
-### creators — edition 0 (x = familiar ↔ new)
+### creators — edition 0 (depth: familiar → new)
 
-| # | region | x | y | family | hue | moved by collision | shares hue with | density | nebula sat |
-|---|---|---|---|---|---|---|---|---|---|
-| 0 | essays | -0.82 | -0.5 | 3 | 169 |  |  | 0.65 | 20% |
-| 1 | tutorials | -0.55 | -0.7 | 2 | 130 |  |  | 0.65 | 24% |
-| 2 | storytime | -0.4 | 0.2 | 4 | 208 |  |  | 0.85 | 26% |
-| 3 | daily vlogs | -0.25 | 0.45 | 5 | 247 |  | memes (0.71) | 0.85 | 28% |
-| 4 | hooks & cuts | 0.05 | -0.15 | 1 | 91 |  |  | 0.85 | 32% |
-| 5 | breakouts | 0.5 | -0.45 | 0 | 52 |  | hot takes (0.63) | 0.85 | 38% |
-| 6 | reaction | 0.45 | 0.6 | 6 | 286 |  |  | 0.85 | 37% |
-| 7 | trends & sounds | 0.72 | 0.5 | 7 | 325 |  |  | 0.65 | 40% |
-| 8 | memes | 0.3 | 0.9 | 5 | 247 | yes (6 → 5) | daily vlogs (0.71) | 0.65 | 35% |
-| 9 | hot takes | 0.88 | 0.05 | 0 | 52 | yes (7 → 0) | breakouts (0.63) | 0.85 | 42% |
+| # | region | sector | bearing | radius | hue | register | density | nebula sat |
+|---|---|---|---|---|---|---|---|---|
+| 0 | essays | long-form | 0° | 0.25 | 52 | serious | 0.85 | 25% |
+| 1 | tutorials | how-to | 45° | 0.3 | 91 |  | 0.85 | 26% |
+| 2 | storytime | story | 90° | 0.3 | 130 |  | 0.85 | 26% |
+| 3 | daily vlogs | story | 90° | 0.6 | 130 |  | 0.85 | 34% |
+| 4 | hooks & cuts | craft | 135° | 0.5 | 169 |  | 0.85 | 31% |
+| 5 | breakouts | growth | 180° | 0.75 | 208 |  | 0.65 | 38% |
+| 6 | reaction | reaction | 225° | 0.55 | 247 |  | 0.85 | 32% |
+| 7 | memes | trends | 270° | 0.55 | 286 | goofy | 0.85 | 32% |
+| 8 | trends & sounds | trends | 270° | 0.88 | 286 |  | 0.65 | 41% |
+| 9 | hot takes | takes | 315° | 0.9 | 325 |  | 0.65 | 41% |
 
-### dot colours per family (solved, against #0B0E14)
+### movies — edition 0 (depth: mainstream → deep cut)
 
-| family | hue | unread | read |
-|---|---|---|---|
-| 0 | 52 | hsl(52 52% 47.6%) | hsl(52 30% 33.9%) |
-| 1 | 91 | hsl(91 52% 47.5%) | hsl(91 30% 34%) |
-| 2 | 130 | hsl(130 52% 49.1%) | hsl(130 30% 35%) |
-| 3 | 169 | hsl(169 52% 47.9%) | hsl(169 30% 34.4%) |
-| 4 | 208 | hsl(208 52% 66.2%) | hsl(208 30% 41.5%) |
-| 5 | 247 | hsl(247 52% 75.3%) | hsl(247 30% 51.8%) |
-| 6 | 286 | hsl(286 52% 71.9%) | hsl(286 30% 46.7%) |
-| 7 | 325 | hsl(325 52% 71.1%) | hsl(325 30% 45.7%) |
+| # | region | sector | bearing | radius | hue | register | density | nebula sat |
+|---|---|---|---|---|---|---|---|---|
+| 0 | crowd comedy | comedy | 0° | 0.3 | 52 | goofy | 0.85 | 26% |
+| 1 | cult comedy | comedy | 0° | 0.8 | 52 | goofy | 0.65 | 39% |
+| 2 | rom-coms | romance | 45° | 0.3 | 91 |  | 0.85 | 26% |
+| 3 | slow romance | romance | 45° | 0.75 | 91 |  | 0.65 | 38% |
+| 4 | prestige drama | drama | 90° | 0.35 | 130 | serious | 0.85 | 27% |
+| 5 | arthouse | drama | 90° | 0.85 | 130 | serious | 0.65 | 40% |
+| 6 | big thrillers | thriller | 135° | 0.3 | 169 |  | 0.85 | 26% |
+| 7 | slow-burn noir | thriller | 135° | 0.8 | 169 |  | 0.65 | 39% |
+| 8 | popcorn horror | horror | 180° | 0.35 | 208 |  | 0.85 | 27% |
+| 9 | extreme horror | horror | 180° | 0.9 | 208 |  | 0.65 | 41% |
+| 10 | tentpoles | action | 225° | 0.3 | 247 |  | 0.85 | 26% |
+| 11 | martial arts | action | 225° | 0.7 | 247 |  | 0.85 | 36% |
+| 12 | space opera | sci-fi | 270° | 0.3 | 286 |  | 0.85 | 26% |
+| 13 | hard sci-fi | sci-fi | 270° | 0.8 | 286 | serious | 0.65 | 39% |
+| 14 | family animated | animation | 315° | 0.25 | 325 |  | 0.85 | 25% |
+| 15 | anime & indie | animation | 315° | 0.7 | 325 |  | 0.85 | 36% |
 
-The collision rule, stated once (the code carries the same comment): in index order, a region that
-shares a bearing family with an earlier region less than 0.5 plane-units away moves to the nearest
-family — cyclic family distance, so family 7 (325) and family 0 (52) are neighbours across the ember
-gap — in which every member is ≥ 0.5 away; ties go to the lower family. **Consequence, stated
-honestly:** 9 of 42 regions wear a hue that is not their bearing's, so "same bearing → same hue
-across worlds" holds only approximately and "colour approximates location" is a tendency, not a
-law. The founder's call (§10): accept this, or hand-assign hues per world and drop the bearing rule.
+### sectors and their hues (every world)
+
+| sector | bearing | hue | unread dot | read dot |
+|---|---|---|---|---|
+| 0 | 0° | 52 | hsl(52 52% 47.6%) | hsl(52 30% 33.9%) |
+| 1 | 45° | 91 | hsl(91 52% 47.5%) | hsl(91 30% 34%) |
+| 2 | 90° | 130 | hsl(130 52% 49.1%) | hsl(130 30% 35%) |
+| 3 | 135° | 169 | hsl(169 52% 47.9%) | hsl(169 30% 34.4%) |
+| 4 | 180° | 208 | hsl(208 52% 66.2%) | hsl(208 30% 41.5%) |
+| 5 | 225° | 247 | hsl(247 52% 75.3%) | hsl(247 30% 51.8%) |
+| 6 | 270° | 286 | hsl(286 52% 71.9%) | hsl(286 30% 46.7%) |
+| 7 | 315° | 325 | hsl(325 52% 71.1%) | hsl(325 30% 45.7%) |
+
+**The movie world.** Sixteen regions, two per sector: the crowd-pleaser at radius ≈ 0.3 and the deep
+cut at ≈ 0.8. Staged from a hand-written list of real titles and years (facts) with studios or
+directors as authors; no catalogue API, no posters, no images. It is the one world where the map is
+literally a map — a fixed catalogue means positions are frozen for real and "stable by construction"
+is trivially true — and where the remote is literally a remote (the phone drifts, the TV would play).
+Caveats, unverified: Netflix has no public catalogue; a v1 would sit on TMDB metadata with deep links
+to wherever a title streams, and TMDB's commercial terms have not been checked. The genre wheel
+order (comedy · romance · drama · thriller · horror · action · sci-fi · animation) is editorial.
+Mood-based movie discovery has shipped before (Jinni, among others); the map is never claimed.
 
 ## 4. The colour grammar — one meaning per channel
 
 | channel | meaning | rule in the file |
 |---|---|---|
-| **hue** | region identity, nothing else (Bertin: selective, not ordered — SOURCED) | 8 families 39° apart from HSL 52: 52 · 91 · 130 · 169 · 208 · 247 · 286 · 325; the band 5–51 around ember (#E8833A ≈ HSL 26) is never used |
+| **hue** | the kind — sector identity, nothing else (Bertin: selective, not ordered — SOURCED) | 8 families 39° apart from HSL 52: 52 · 91 · 130 · 169 · 208 · 247 · 286 · 325 = sectors 0–7; the band 5–51 around ember (#E8833A ≈ HSL 26) is never used |
 | **lightness** | read state, nothing else | **solved per hue**: every unread dot lands at 8:1 and every read dot at 3.5:1 against `--ground #0B0E14` (`lightnessFor()` in both files; WCAG 1.4.11 floors 4.5 / 3) |
-| **chroma** | the one ordered ramp — *nebula layer only* | nebula saturation 18 % → 44 % west → east (ESTIMATE); dots carry a fixed 52 % unread / 30 % read |
+| **chroma** | the one ordered ramp — *nebula layer only* | nebula saturation 18 % → 44 % hub → rim (ESTIMATE); dots carry a fixed 52 % unread / 30 % read |
 | **glow (nebula alpha)** | the engine's current belief — the remote's "signal strength" | 0.18 at rest → 0.30 with affinity (ESTIMATE), sampled on the label's 2 s clock, never while touching, floored so no region vanishes |
 | **size, motion** | interface only | swell, bloom, halo, sparks, ≤ 3 "live now" — nothing in the data drives them |
-| **ember** | interaction only | halo, knob, needle, reticle, trail, edge glow, lit compass word — never data |
-| **shape** | unassigned | the "wry" ambiguity glyph is undecided (§10) |
+| **ember** | interaction only | halo, knob, needle, reticle, trail, edge glow, lit ring word — never data |
+| **register** | a word on the card | never a colour, never a shape, never on a dot |
 
 Why lightness is *solved* rather than fixed: the critic measured the referee's fixed-L palette and
-found the cool half failing — read hsl(247 30% 40%) was 2.37:1, hsl(325 …) 2.87:1 against the
-ground (VERIFIED). HSL lightness is not perceptual, so a fixed L lets hue leak into brightness and a
-read blue looks *more* unread than a read yellow. The solver (bisection on L to a target contrast)
-makes brightness mean exactly one thing. The resulting palette:
+found the cool half failing — read hsl(247 30% 40%) was 2.37:1 and hsl(325 …) 2.87:1 against the
+ground (VERIFIED). HSL lightness is not perceptual, so a fixed L lets hue leak into brightness. The
+solver (bisection on L to a target contrast) makes brightness mean exactly one thing. The palette is
+the last table in §3.
 
-| family | hue | unread | read |
-|---|---|---|---|
-| 0 | 52 | hsl(52 52% 47.6%) | hsl(52 30% 33.9%) |
-| 1 | 91 | hsl(91 52% 47.5%) | hsl(91 30% 34%) |
-| 2 | 130 | hsl(130 52% 49.1%) | hsl(130 30% 35%) |
-| 3 | 169 | hsl(169 52% 47.9%) | hsl(169 30% 34.4%) |
-| 4 | 208 | hsl(208 52% 66.2%) | hsl(208 30% 41.5%) |
-| 5 | 247 | hsl(247 52% 75.3%) | hsl(247 30% 51.8%) |
-| 6 | 286 | hsl(286 52% 71.9%) | hsl(286 30% 46.7%) |
-| 7 | 325 | hsl(325 52% 71.1%) | hsl(325 30% 45.7%) |
+Why the chroma ramp came off the dots: chroma and lightness are not perceptually separable (Smart &
+Szafir CHI 2019 — SOURCED; Helmholtz–Kohlrausch — SOURCED) and position already encodes depth in
+the most accurate channel (Cleveland & McGill — SOURCED). The nebula carries no other ordered
+variable, so "the land heats up toward the rim" survives there at no cost — **but** the critic
+measured the ramp at ≈ 1 JND (Oklab ΔE 0.022–0.030 over the ground, VERIFIED). Feel test 12 decides
+whether it stays.
 
-Why the chroma ramp came off the dots: chroma and lightness are not perceptually separable
-(Smart & Szafir CHI 2019 — SOURCED; Helmholtz–Kohlrausch — SOURCED), and position already encodes
-x in the most accurate channel (Cleveland & McGill — SOURCED). The nebula carries no other ordered
-variable, so "the land heats up eastward" survives there at no cost — **but** the critic measured
-the ramp at ≈ 1 JND (Oklab ΔE 0.022–0.030 over the ground, VERIFIED). Feel test 11 decides whether
-it stays; if strangers say "brighter" rather than "hotter", it goes.
-
-**Accessibility — what is and is not claimed.** Every meaning has a non-hue carrier: axis =
-position + compass word + label; region = its name on the land + a boundary tick on crossing; read =
-lightness; interaction = ember + geometry. **No CVD claim is made.** The referee's ΔE ≥ 0.05 gate
-*fails as specified* (critic, VERIFIED: min deuteranope ΔE 0.030 between families 91 and 325 at 39°
-spacing; sports co-locates 169 and 286, near-identical for a protan; tritanopia never simulated).
-Until two real CVD testers pass the "name the region from the land" test, the name and the tick are
-the carriers and the colour is a convenience. Region names are text on canvas plus an `aria-live`
-announcement on entry ("entering moto"); the lit compass word is announced too.
+**Accessibility — what is and is not claimed.** Every meaning has a non-hue carrier: kind = its name
+on the land + the sector name at the screen edge while pushing + a boundary tick on crossing; depth =
+position + the ring words + the label; read = lightness; interaction = ember + geometry. **No CVD
+claim is made.** Eight families 39° apart give simulated deuteranope ΔE as low as 0.030 between
+families 1 and 7 (critic, VERIFIED); until two real CVD testers pass "name the kind from the land",
+the name and the tick are the carriers and the colour is a convenience. Names are text on canvas plus
+`aria-live` announcements ("entering moto"; "deeper · horror"; "as extreme as this world goes").
 
 ## 5. The engine — how items get coordinates, and how far "stable" holds
 
 **Prototype today (staged):** each cell's region is the **argmax** of the fixed Gaussian region
 weights at that cell — a lookup nothing the user does can move. Border blur: a hashed 15 % of cells
-take the second-best region when its weight is ≥ 0.35 of the best (ESTIMATE) — the only serendipity
-left. Whether a cell is populated is a per-region supply constant decided by the hash alone.
-Affinity no longer touches placement; it moves the nebula glow, and is logged. The mixture sampler,
-the topic-teleport floor and the affinity-driven empty branch are gone.
+take the second-best region when its weight is ≥ 0.35 of the best (ESTIMATE). Whether a cell is
+populated is a per-region supply constant decided by the hash alone; cells beyond the rim are empty.
+Each cell remembers how **decisive** its place is (the argmax's share of all weights); the boundary
+tick fires only into a cell whose share ≥ 0.34, so the blended land near the hub never chatters
+(driver-checked: exactly one tick on a base & freeride → moto crossing at shares 0.42 / 0.48, and none on a
+golf → soccer crossing at 0.23 / 0.26). Affinity no longer touches
+placement; it moves the nebula glow, and is logged.
 
 **Production (to build):** each item classified once at the nightly drop (Message Batches, ≤ 24 h,
-50 % off — SOURCED) into a nominal `region_key` (the reliable judgement), an intensity 0–1 with a
-one-line reason, **two independent tone scores** (earnest 0–1, goofy 0–1 — never one bipolar
-number; deadpan MMA analysis and ironic chess are high on both), confidence, flags ⊂ {wry,
-ambiguous, unsafe}, `rubric_version`. Placement: `x = region.x + (intensity − region.intensity_mean)·k`
-with **`intensity_mean`, `k` and the region radius frozen in the edition table as editorial
-constants** (the daily mean is reported, never used — otherwise per-day normalisation sneaks back
-in; critic); `y = region.y + stable-hash scatter` until tone passes its gate; the cell is the
-nearest free cell **whose argmax region equals the item's region** (spiral until true — otherwise
-the label says "in chess" over golf dots; critic), collisions in item-id-hash order; the result is
-one frozen per-world-per-day JSON with a printed layout hash ("creators · 2026-09-02 · rubric v1 ·
-287 items").
+50 % off — SOURCED) into a nominal `sector` and `region_key` (the reliable judgement), an intensity
+0–1 with a one-line reason, a register tag with confidence, flags ⊂ {wry, ambiguous, unsafe},
+`rubric_version`. Placement: radius = `region.radius + (intensity − region.intensity_mean)·k` with
+**`intensity_mean`, `k` and the region's radial extent frozen in the edition table** (the daily mean
+is reported, never used — otherwise per-day normalisation sneaks back in; critic); bearing =
+`sector·45° + stable-hash scatter within the sector`; the cell is the nearest free cell **whose argmax
+region equals the item's region** (spiral until true), collisions in item-id-hash order; one frozen
+per-world-per-day JSON with a printed layout hash. For a fixed catalogue (movies) the drop is a
+one-time classification and the layout is frozen until the edition changes.
 
 **Exactly how far "stable by construction" holds:** within a day nothing can move, because position
-is a pure function of (item scores, edition table, collision order) and none depend on the user or
-on later arrivals *provided there are no intra-day top-ups* — with top-ups the layout is "stable by
-persistence" (persisted layout placed first, new items take only free cells) and must be called
-that (critic). Across days only the items change, at the announced drop. Across worlds the compass
-and the camera's plane position hold. It does **not** hold if the rubric or model version changes
-(an edition event), if coordinates are "fixed" later (an edition event), if anyone quantile-
-normalises an axis per day (rejected outright), or if the tiebreak lets rank or recency in (must
-be the id hash, in the verify suite). It never claims the **scores** are right — t-SNE/UMAP
-instability (Distill 2016, GhostUMAP2 — SOURCED) is replaced by scorer validity, the smaller and
-testable risk; on a legible map a wrong position is a visible lie for a whole day.
+is a pure function of (item scores, edition table, collision order) and none depend on the user or on
+later arrivals *provided there are no intra-day top-ups* — with top-ups the layout is "stable by
+persistence" and must be called that (critic). Across days only the items change, at the announced
+drop. Across worlds the wheel and the camera's (bearing, radius) hold. It does **not** hold if the
+rubric or model version changes (an edition event), if coordinates are "fixed" later (an edition
+event), if anyone quantile-normalises the radius per day (rejected outright), or if the tiebreak
+lets rank or recency in. It never claims the **scores** are right; on a legible map a wrong position
+is a visible lie for a whole day.
 
-**Steering is an explicit signal.** A ring or conveyor push is a stated wish, logged as
-`explicit_axis_pref` with plane coordinates, separate from the implicit dwell/steer-away channel.
-Calibrated in cells, not seconds (at V_MAX 880 px/s a full push crosses the staged world in
-≈ 2.3 s — SOURCED from the file): every **4 cells of net camera displacement** along an axis while
-armed is one event: +0.4 to regions lying ahead (`along > 0.15`), half-life shared with dwell for
-now (the critic's separate 30 s accumulator is an open item), ≤ 200 entries in `steerLog`, count on
-`field.dataset.steers`. **A push into the world's edge is logged too** — one `clamped: true` event
-per contact, no affinity change — and the live copy says *"as calm as this world gets"*: a doneness
-fact, not a failure. Steer-away gains axis attribution in the patent taxonomy (§9).
+**Steering is an explicit signal, decomposed on the wheel.** Camera displacement while armed is split
+into a radial component (deeper / shallower) and a tangential one (around the wheel); every 4 cells
+of net displacement on either is one event: regions **ahead** gain +0.4 — for a radial event, regions
+deeper than here weighted by how close their bearing is to the bearing you push toward (so from the
+hub "deeper" favours the kind under your thumb, not the whole rim); for a tangential event, regions
+around the wheel the way you turn. Logged with (bearing, radius, heading) in `steerLog` (≤ 200);
+count on `field.dataset.steers`. **A push into the rim is logged too** — one `clamped: true` event
+per contact, no affinity change — and the live copy says *"as extreme as this world goes"*. From the
+hub every direction is deeper; there is no shallower.
 
-**The arithmetic nobody can wish away** (ESTIMATE): 55 × 44 = 2,420 staged cells vs a 150–300 item
-daily world = 6–12 % fill. Decision: **the production world is bounded to the populated hull + one
-cell** (≈ 300 cells ≈ 15 × 20, ~2.5 phone screens) and the odometer counts populated cells; the
-staged 55 × 44 stays for the prototype only. Growing instead to 1,500–2,000 items/day costs ≈ $3–6
-per day per world on Haiku batch, $6–12 on Sonnet batch — ≈ $0.9–1.9k/month for ten worlds before
-double-scoring (ESTIMATE; "cents/day" in the plan is true only at ≤ 300 items on Haiku batch,
-≈ $0.0016/item). Shrink vs grow is a founder decision (§10).
+**The arithmetic nobody can wish away** (ESTIMATE): 1,517 cells inside the rim vs a 150–300 item daily
+world = 10–20 % fill at 0.85 density. Decision unchanged: **the production world is bounded to the
+populated hull of the wheel** and the odometer counts populated cells; the staged 47 × 47 stays for
+the prototype only. A fixed catalogue (movies, ~10k titles) inverts the problem — more items than
+cells — and needs the over-subscription rule (affinity chooses the fill) from day one.
 
 ## 6. The remote — what the screen does
 
-Under the simplicity doctrine the drift keeps **one primary control (the ring)** and adds no
-instrument; the compass lives inside the ring's footprint and the world switcher is a chip strip,
-closed by default.
+One primary control (the ring); no new instrument; the world switcher is a chip strip, closed by
+default.
 
-- **Ring compass.** Four 11 px chrome uppercase words (letter-spacing .08em, DESIGN.md micro-label)
-  at the rim, alpha .32 at rest so the legend is readable before any push (zero-input value);
-  .55 with a thumb in the ring; past the dead zone the word nearest the bearing becomes its
-  comparative in ember at .95 — diagonals light two (WILDER + GOOFIER is the founder's "down-right").
-  Eight 45° sectors with hysteresis (enter at .42, leave at .34 of the deflection — ESTIMATE) so
-  diagonal words never flicker; fade over ~400 ms after release; opacity only under reduced motion.
-  A word dims to `--faint` at the wall. No arcs, no colour on the ring, never a fifth word.
-- **You are here.** The 2.5 px `--dim` bead at `planePos()·0.7·r` inside the ring: the knob is what
-  you push, the bead is where you are; a fresh world shows it dead centre.
-- **The fly-out, once.** First ring touch of a session: the four words fly to the four screen edges
-  (600 ms, forge easing), hold 2.5 s, return — the compass teaches itself, then collapses. A
-  `sessionStorage` flag (try/catch, in-memory fallback) keeps it to once.
-- **The label speaks place; the ring speaks direction.** `world · in <region> · N % walked`, with
-  the axis words (`wild`, `goofy`, or the world's own `new`/`familiar`) only when no region
-  dominates — the place implies the coordinates, and that is what fits 390 px (critic). Region =
-  `dominantRegion()` with 0.1 hysteresis and a 0.34 share floor; 2 s cadence; never mid-gesture.
-  "Drifting toward …" prose is gone — belief is the glow.
-- **Worlds.** The chip opens a strip of world names; **W** cycles; Escape closes. Switching keeps
-  the plane coordinates; a 3.2 s hint says *"Same compass, new places — right is still wild, down is
-  still goofy"* (creators: *"here right means newer: breaking now"*). **Switching is ignored while a
-  thumb is down** (critic: mid-hold switches broke state). Per-world session state (walked cells,
-  trail, affinity) is *not* preserved across a switch yet — "the walked world never rewrites" holds
-  within a world, not across a round trip; open item.
-- **Haptics.** Boundary tick when the selection crosses into a different *placed* region (keyed on
-  the argmax, not the blurred fill, so it fires once per crossing — driver-checked); wall thud once
-  per contact; kind textures unchanged; reduced motion keeps the boundary tick only. Detent
-  intensity is never scaled by x — both Core Haptics scalars are spent on kind.
-- **Keyboard.** Shift + arrows steer by half a screen with the same words announced; arrows still
-  step dots; H home; W world.
+- **Ring compass.** Two words, 11 px chrome uppercase (letter-spacing .08em), alpha .32 at rest so the
+  legend is readable before a push, .55 with a thumb in the ring: **HOME** on the rim at the bearing
+  to the hub, **DEEPER** opposite. They turn with you. At the hub HOME becomes the world's shallow
+  word (*casual*, *mainstream* …) below the ring. While pushing, the word you head toward lights in
+  ember at .95 — DEEPER, or SHALLOWER in HOME's place — and the **kind ahead** lights with it at the
+  screen edge in the push direction ("DEEPER · HORROR"); ~90 ms of hysteresis so a wobbling thumb
+  never flickers the words; fade ≈ 400 ms after release; opacity only under reduced motion. DEEPER
+  dims to `--faint` at the rim.
+- **You are here.** The 2.5 px bead inside the ring at (bearing, radius·0.7·r): the knob is what you
+  push, the bead is where you are; at the hub it sits dead centre.
+- **The fly-out, once.** First ring touch of a session: the eight kind names leave the ring for their
+  bearings at the screen edge (600 ms, forge easing), hold 2.5 s, return — "directions are kinds"
+  teaches itself, then collapses. A `sessionStorage` flag (try/catch, in-memory fallback) keeps it to
+  once.
+- **The label speaks place; the ring speaks direction.** `world · in <region> · N % walked`, with the
+  depth word (*casual*, *extreme*, *mainstream*, *deep cut*, *new* …) only when no region dominates
+  (radius < 0.3 or > 0.7 — ESTIMATE). Region = `dominantRegion()` with 0.1 hysteresis and a 0.34 share
+  floor; 2 s cadence; never mid-gesture.
+- **Worlds.** The chip opens a strip of world names; **W** cycles; Escape closes; switching keeps
+  (bearing, radius); a 3.2 s hint says *"Same wheel, new kinds — the middle is what everyone watches;
+  push out for extreme"* (creators: *"here deeper means newer: the rim is breaking now"*; movies: *"the
+  rim is the deep end"*). **Switching is ignored while a thumb is down.** Per-world session state is
+  not preserved across a round trip yet (open item).
+- **Haptics.** Boundary tick when the selection crosses into a different, *decisive* placed region;
+  rim thud once per contact; kind textures unchanged; reduced motion keeps the boundary tick only.
+  Detent intensity is never scaled by depth — both Core Haptics scalars are spent on kind.
+- **Keyboard.** Shift + arrows steer by half a screen, decomposed on the wheel into one explicit
+  event, the same words announced; arrows step dots; H home; W world.
 - **Copy.** "A remote for your feed" is the explainer, never the product noun. The verb ships:
-  *You don't set your algorithm. You steer it.* (TikTok's Manage Topics and Steam's sliders mean
-  "has controls" is not the differentiator — SOURCED.)
+  *You don't set your algorithm. You steer it.*
 
 ## 7. What the prototype proves, and what it fakes
 
-Proves (CDP touch driver, `scratchpad/drive-drift.mjs`, all green on this file): pushing east moves
-the plane from x ≈ 0.04 to 0.89 and the label goes from "in basketball" to "in base & freeride";
-steer events accrue to the regions ahead (base & freeride 4.8 vs chess untouched by that push); the
-steer word is the world's own ("new" in creators, "wild" in sports) and the label follows it; the
-chip strip, W-cycle order and Escape work; a switch under a held thumb is ignored; **exactly one
-boundary tick** on a moto → base & freeride crossing; **one wall thud** per contact with the
-direction and the "as calm as this world gets" announcement and a clamped steer-log entry; the
-fly-out ran once without error; rev. 3 (bloom, textures, park lock, parked lift) and rev. 2
-(conveyor, release stop, recenter) are unchanged. Probe: zero console errors. `verify:driftpalette`
+Proves (CDP touch driver, `scratchpad/drive-drift.mjs`, all green on this file): from the hub a push
+east takes the radius from 0.1 to 1.0 and the label from "sports · casual" to "in football"; the steer
+word during the push is "deeper"; steer events accrue to the kinds ahead (football 3.5 vs the far
+side of the wheel ≈ 1); the rim is reached and logged as a clamped wish; switching to kitchen keeps
+(bearing 359°, radius 1.0) and lands "in home baking"; W cycles kitchen → creators → movies → sports →
+music; a switch under a held thumb is ignored; creators at the rim says "new" and its depth words are
+new / familiar; movies at the hub says "mainstream", a push west says "deeper · horror" before the
+sector is entered and "deeper" inside it, and lands "in extreme horror" with the card naming the
+region; at the hub the three test pushes read "deeper · horror", "deeper · drama", "deeper · comedy";
+**exactly one boundary tick** on a decisive base & freeride → moto crossing and **none** between the blended
+golf and soccer cells; **one rim thud** per contact at
+(180°, 1.0) with "as extreme as this world goes" and a clamped log entry; zero populated cells beyond
+the rim; the fly-out ran once without error; rev. 3 (bloom, textures, park lock, parked lift) and
+rev. 2 (conveyor, release stop, recenter) unchanged. Probe: zero console errors. `verify:driftpalette`
 asserts the grammar against the prototype's own tables.
 
 Fakes, disclosed on its face: positions come from a hand-placed table, not scores; there is no
@@ -350,96 +366,80 @@ For the driver (automatable):
 1. **Placement determinism** — `worldPlacement.verify.ts` (not yet written): identical daily JSON →
    byte-identical cells; with top-ups allowed, previously placed cells never move ("by persistence").
 2. **Scorer agreement gate** — 100 items × 3 raters: Spearman ≥ 0.7 rater-vs-scorer on intensity;
-   inter-rater ≥ 0.6; Krippendorff α ≥ 0.7 intensity / ≥ 0.6 tone vs the founder's labels; double-
-   score with shuffled exemplars, drop items differing > 0.2 (all ESTIMATE targets). Tone placement
-   stays locked until tone passes.
-3. **Region classification ≥ 90 %** against the founder's hand labels (ESTIMATE) — the judgement v1
+   inter-rater ≥ 0.6; Krippendorff α ≥ 0.7 intensity / ≥ 0.6 register vs the founder's labels; double-
+   score with shuffled exemplars, drop items differing > 0.2 (all ESTIMATE targets).
+3. **Sector classification ≥ 90 %** against the founder's hand labels (ESTIMATE) — the judgement v1
    actually relies on.
-4. **Intensity–tone correlation**; |ρ| > 0.7 collapses the plane to a diagonal.
-5. **LLM intensity runs low** — report the east-edge population before/after calibration.
+4. **Intensity–register correlation**; |ρ| > 0.7 means the register tag is redundant with depth.
+5. **LLM intensity runs low** (Nature 2025 — SOURCED) — report the rim population before and after
+   calibration.
 6. **Colour** — the verify suite's laws, plus the CVD test with two real testers before any claim.
 7. **Steering visibly obeyed — measured against the seeded counterfactual** (same cells materialised
-   with affinity zeroed; the deterministic seed makes it computable): share of ahead-region fill and
-   glow delta, steered vs unsteered. The referee's "≥ 60 % of new cells have greater x" gate was
-   vacuous — true of any eastward move by geometry (critic).
+   with affinity zeroed): share of ahead-kind fill and glow delta, steered vs unsteered.
 8. **Cost and fill** — measured $/item on Haiku batch vs ≈ $0.0016; the populated hull of a real
-   300-item day.
+   300-item day; for movies, the one-time cost of classifying the catalogue.
 
 For a human:
 
-9. **Learnability** — 5 uncoached strangers, 3 minutes, then "what happens if you push right? down?";
-   pass = 4/5 say wilder/more intense and goofier/sillier unprompted. Written for the world that
-   ships first (creators: "newer"), not for sports.
-10. **The nebula at 30 % brightness** — name the region under the thumb from the land alone in 2 s;
+9. **Learnability, on the wheel** — 5 uncoached strangers, 3 minutes, then "what happens if you push
+   away from the middle? sideways? toward HOME?"; pass = 4/5 say *more extreme / deeper*, *a different
+   kind*, and *back toward the middle / milder* unprompted. Written for the world that ships first.
+10. **The nebula at 30 % brightness** — name the kind under the thumb from the land alone in 2 s;
     again with a deuteranopia filter (name + tick).
-11. **The ramp** — sliding east, "hotter" (keep) or "brighter/newer" (drop)?
-12. **Remote vs ring** — does anyone expect intensity to track deflection and snap back on release?
-13. **Habit** — 7-day dogfood in the creators world with a ring-push counter; < 3 pushes per session
-    by day 7 means the compass is a demo feature and stays out of the Scout wedge (ESTIMATE).
-14. **Explicit vs inferred** — a 10 s east push while dwelling on chess changes unseen composition
-    without erasing the dwell-built affinity.
+11. **Remote vs ring** — does anyone expect depth to track deflection and snap back on release?
+12. **The ramp** — pushing out, "hotter" (keep) or "brighter / newer" (drop)?
+13. **The hub** — does the blended mainstream at the centre read as "everything" or as "nothing"?
+14. **Habit** — 7-day dogfood in the founder's world with a ring-push counter; < 3 pushes per session
+    by day 7 means the compass is a demo feature (ESTIMATE).
+15. **Movies, founder-fit** — does the founder actually browse films weekly? If not, the movie world
+    is a demo, not a wedge, whatever the fit of the corpus.
 
 ## 9. Plan and patent consequences (applied in this commit)
 
-- `docs/dot-field-drift.md` §4: density = supply; affinity chooses the fill; the mixture formula and
-  perpendicular exploration are deleted. §7: the exact stability claim. §9: this revision.
-- `docs/dot-field-navigation.md` §3: the hue budget is 8 families with the *name* as the taxonomy.
-- `docs/dot-field-strategy.md` §3½: velocity is the creators world's x; region is hue.
-- `docs/dot-field-plan.md`: worlds are editions; creators world ships first, bounded to its hull;
-  budget honesty; the weekly editorial task; the rev. 4 disclosure rule; the agreement gates.
-- `docs/patent/provisional-draft.md`: **never claim the 2-D plane, path selection over mood zones,
-  hue-by-angle or per-item scores as such** — Gracenote US 8,855,798, Sony US 7,858,868, Monkeymedia
-  US 6,281,899, Musicovery 2006, Moodstream 2008, Every Noise 2013 (SOURCED) are cited in the
-  Background. The claimable residue is a **dependent claim** on the existing signal method: target
-  positions determined by per-item attribute scores on named axes and invariant for the session;
-  heading events attributed as signed preference on those attributes; conditioning materialisation
-  of unvisited regions while visited regions remain immutable. §5 gains "Steer-toward (axis)" and
-  axis attribution for steer-away. Counsel charts against 8,855,798's sequential-path selection
-  before any commercial ship.
-- DSA marketing scopes any "non-profiling" claim to the walked world — unseen-territory tilt and
-  nebula glow *are* profiling.
+- `docs/dot-field-drift.md` §9: rev. 4 and rev. 5 recorded; §4/§7 stability language unchanged.
+- `docs/dot-field-plan.md`: the movie world as a candidate behind the founder-fit check; the
+  creators world still ships first.
+- `docs/patent/provisional-draft.md` §6A and claim 9: "named axes" generalised to **named
+  coordinates — two axes, or a bearing and a radius**; the Sony hue-by-angle distinction stands
+  (their hue is the mood angle; ours names a kind and is never claimed). Never claim the plane, the
+  wheel, path selection over zones, hue-by-angle or per-item scores as such — Gracenote US 8,855,798,
+  Sony US 7,858,868, Monkeymedia US 6,281,899, Musicovery 2006, Moodstream 2008, Every Noise 2013
+  (SOURCED); B&O MoodWheel 2015 is the shipped polar precedent.
+- `prototypes/README.md` P14 row; `scout/README.md` feel test 10 rewritten for the wheel.
 
-## 10. Decisions only the founder can make
+## 10. Decisions — taken and open
 
-1. **Sign the four words and the "pull back" reading.** CALM · WILD · SERIOUS · GOOFY; goofier is a
-   push *south*; pulling back is stop. If "pull back" meant calmer/westward, say so — the compass
-   does not change, only the hint copy.
-2. **Accept the demotion of the algorithm** to "a map plus a density sampler," and re-cut the
-   "territory reshapes as it learns you" demo around the compass and the glow.
-3. **Shrink or grow:** a ~300-cell hull (weakens the "drift" identity) or a 1,500–2,000-item corpus
-   at 5–7× classifier cost.
-4. **Creators world first** — the one you open daily; sports/music/kitchen only after gates 9 and 2.
-5. **CVD carrier:** declare name + boundary tick the sole carrier (and never call the colour
-   accessible), or gate on real testers, or add a second identity carrier (shape).
-6. **Cross-world hue consistency:** accept the 9-of-42 collision moves and drop the "same bearing →
-   same hue" claim, or hand-assign hues per world.
-7. **Top-ups:** none intra-day ("stable by construction") or allowed ("stable by persistence").
-8. **The wry glyph:** exclude ambiguous items or give them a shape (then shape enters the grammar).
+Taken today, by the founder's clarification:
 
-## 11. Open questions (nobody's to decide yet)
+1. **The wheel.** Bearing = kind, radius = intensity, the hub = mainstream. "Pull back" = shallower.
+2. **Register is a tag**, shown on the card as a word.
+3. **A movie world exists**, staged and private.
 
-- Sports centre crowding: soccer, football, basketball near the origin — is a seeded sub-arrangement
-  plus names enough, or do centre regions need a hand-drawn tiling?
-- Which of the founder's 3–10 niches actually have an *east*? Finance, parenting and tech may have a
-  thin intensity axis; each new world passes learnability or does not ship.
-- Will strangers ask "why did it change?" when the nebula glow moves without a push — and if so
-  should belief live only in the label?
-- If tone never clears α 0.6, y stays editorial forever: "one measured axis plus a curated one" —
-  still the product?
-- Is within-region x scatter by score visible enough to be worth the classifier call in v1, or is
-  region-only placement the honest v1?
-- Per-world session state across switches (walked cells, trail, affinity) — build the map of maps,
-  or accept that a world re-seeds on return?
-- A separate steer accumulator with its own half-life and per-push cap (the critic's saturation
-  finding: two events pin the glow) — before the first stranger test.
+Still the founder's:
+
+4. **Accept the demotion of the algorithm** to "a map plus a density sampler."
+5. **Shrink or grow** the v1 world; for movies, accept over-subscription (more titles than cells).
+6. **Creators world first**, or movies first if films are a weekly habit (must-prove 15).
+7. **CVD carrier:** name + tick only (and never call the colour accessible), or gate on real testers.
+8. **Sector order** per world: sign the eight kinds and their neighbours once (edition 1).
+9. **Top-ups:** none intra-day ("by construction") or allowed ("by persistence").
+
+## 11. Open questions
+
+- The hub: with two to four inner regions blending at radius 0.2–0.3, is "mainstream" felt as a
+  place or as noise? A hand-drawn hub tiling may be needed.
+- Eight kinds is a hard budget; sports already merges (soccer + football in *ball*). Which of the
+  founder's niches fit eight?
+- Deep-end sparsity: the rim is honestly sparse at 0.65 density and the camera reaches it; does the
+  half-empty screen at the rim read as "the edge of the world" or as broken?
+- Per-world session state across switches (walked cells, trail, affinity).
+- A separate steer accumulator with its own half-life and per-push cap (two events pin the glow).
+- Whether the within-region radius by score is worth the classifier call in v1.
 
 ## 12. Provenance
 
-Workflow `wf_fdb638ce-a09`: five lenses (semantics of direction; colour and perception; the engine
-and the corpus; the remote as a product; the skeptic's refutation), a referee (`map/referee.json`)
-and a critic who re-derived the referee's tables and contrasts against the file (`map/critic.json`).
-The critic's VERIFIED findings changed the build: the collision rule made deterministic and moved
-into code; fixed lightness replaced by the per-hue solver; region keys shortened; boundary keyed on
-the placed region; the wall logged and worded; mid-hold switching guarded; `xWords` for creators;
-"edition 0 (draft)" instead of "frozen"; the vacuous steering gate replaced by the counterfactual.
-The referee's hand tables are superseded by §3 — the code generated those, not a person.
+Workflow `wf_fdb638ce-a09`: five lenses, a referee (`map/referee.json`) and a critic who re-derived
+the referee's tables and contrasts against the file (`map/critic.json`); rev. 4 built to the ruling
+with the critic's VERIFIED corrections. Then the founder's clarification ("deeper or shallower is
+intensity, direction is category") reversed the geometry to a wheel in rev. 5, with the reasons in
+§0b. The tables in §3 were generated by the code, not written by a person.

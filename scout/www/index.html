@@ -29,6 +29,15 @@
      the nebula glow; the creators world's x is "familiar ↔ new" (breaking), stated on its face. The
      world tables are EDITION 0 (draft) until argued once; surf and rage-bait were removed. Rev. 4 stays
      private until the provisional is filed.
+     Rev. 5 (2026-09-02): the wheel. The founder's clarification — "deeper or shallower is intensity,
+     direction is category" — is a polar map, and it dissolved the panel's reason for the plane (tone on
+     the angle). So: the hub is the mainstream, the rim is the deep end, each bearing is a kind. Eight
+     sectors 45° apart carry the kinds and their hues (one hue per sector, exact — the collision rule is
+     gone); regions sit at (sector, radius); the ring shows HOME at the bearing to the hub and DEEPER
+     opposite, and while you push the depth word you head toward lights with the kind ahead at the screen
+     edge. Register (serious / goofy) is a tag on the card, not geometry. A fifth world — movies, on a
+     fixed catalogue with a genre wheel — is where the remote is most literally a remote. The camera is
+     clamped to the wheel: the rim is the wall ("as deep as this world goes"). Still private.
      Staged world, simulated steering — no model, and it says so. -->
 <!doctype html>
 <html lang="en">
@@ -250,8 +259,8 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
     <li>Your route is drawn on the land. The Trail tab is the journey as an object — tap any stop to glide back to it.</li>
     <li><em>Slow down</em> and the dots around your selection bloom into labels — read three neighbours while feeling one. Skim and they vanish; they must never clutter speed.</li>
     <li>Kinds feel different: a photo is a crisp click, a reel a rounder thud, a carousel a double tap. Full texture needs the Core Haptics plugin in the wrap; the stock tick only tells reels apart; on the web the sound carries it.</li>
-    <li><em>The map means something.</em> Right is wilder, left calmer, up more earnest, down goofier — in every world. The ring's four words are the compass; the label top-centre says where you are. Push east and hold: you are telling the algorithm "wilder", out loud.</li>
-    <li>Switch worlds (top-left chip, or W). New places, same compass. Read the place names on the land before you touch it.</li>
+    <li><em>The map is a wheel.</em> The middle is the mainstream; push out and it gets deeper — more extreme, more obscure, whatever this world's deep end is; each direction is a kind. HOME on the ring always points at the middle; DEEPER sits opposite. Push and the word you are heading for lights, with the kind ahead at the screen edge: you are telling the algorithm "deeper into horror", out loud.</li>
+    <li>Switch worlds (top-left chip, or W). New kinds, same wheel — your bearing and depth carry over. Read the kind names on the land before you touch it; the card names a place's register (serious, goofy) as a word, never as a colour.</li>
   </ul>
   <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
   <div class="note">Honest label: positions come from scores, not from learning — they cannot move
@@ -265,111 +274,121 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 <script>
 'use strict';
 /* ===================== staged world — one source of truth ====================================
-   A bounded territory: WCOLS×WROWS cells at 44px pitch, ~7 phone-screens wide. Every cell
+   A bounded territory: WCOLS×WROWS cells at 44px pitch with a wheel inscribed (rev. 5). Every cell
    derives everything from a seeded hash of its coordinates plus the steering weights at the
    moment it is FIRST seen — after that it is cached forever. The walked world never rewrites;
    only unseen territory responds to the thumb. That is the honesty contract of the demo.     */
-const SEED = 5417, PITCH = 44, JITTER = 4, WCOLS = 55, WROWS = 44;
+const SEED = 5417, PITCH = 44, JITTER = 4, WCOLS = 47, WROWS = 47;
+const HUB_C = WCOLS/2, HUB_R = WROWS/2, RIM = (Math.min(WCOLS, WROWS) - 3)/2;   // the wheel: hub cell and rim radius, in cells
 const WORLD_W = WCOLS*PITCH, WORLD_H = WROWS*PITCH, TOTAL_CELLS = WCOLS*WROWS;
 
-/* ===================== the semantic map — direction means the same thing in every world =====
-   x: calm ← → wild (intensity)   y: earnest ↑ ↓ goofy (tone). Regions are named places on that
-   plane at their natural coordinates in [-1, 1]²; their positions never move, so the geography
-   is stable BY CONSTRUCTION — a person learns "right is wilder, down is sillier" once and it holds
-   in every world. Hue is the region's own; chroma rises eastward (the wild side glows hotter);
-   lightness is read state. Coordinates and hues are ESTIMATES pending the cartography referee. */
-const AXES = { x: ['calm', 'wild'], y: ['serious', 'goofy'],
-  words: { x: [['calm', 'calmer'], ['wilder', 'wild']], y: [['serious', 'more serious'], ['goofier', 'goofy']] } };
-/* A world may override the x words when its east means something specific (the creators world
-   measures x — engagement velocity vs the niche baseline — so its compass says so on its face). */
+/* ===================== the wheel — direction is a kind, depth is intensity, the hub is the mainstream ==
+   Polar, by the founder's own sentence: "deeper or shallower is intensity, direction is category."
+   Eight sectors 45° apart (0 = east, counter-clockwise) carry a world's KINDS and their hues — one hue
+   per sector, the same sector index wearing the same hue in every world. Regions are named places at
+   (sector, radius ∈ [0,1]); their positions never move, so the geography is stable BY CONSTRUCTION.
+   Radius is the world's own depth pair (casual → extreme, mainstream → deep cut …); the ring's words are
+   universal: HOME toward the hub, DEEPER away from it. Register (serious / goofy) is a tag on the card —
+   never geometry, never printed on a dot. All coordinates are EDITION 0 (draft) — argued by nobody yet. */
+const WHEEL = { home: 'home', lit: ['shallower', 'deeper'] };            // at the hub the ring shows the world's own shallow word
 const WORLDS = {
-  sports: { name: 'sports', edition: 0, regions: [
-    { key:'chess',           x:-0.92, y:-0.35, authors:['Board & Clock','Ilse Marr'],     caps:['Queen sac on move 19. The engine hated it. The room did not.','Blitz at the park tables until the light went.','Endgame study: two knights, one lesson.'] },
-    { key:'golf',            x:-0.72, y:-0.10, authors:['Dawn Patrol Links','Rey Alonso'], caps:['Seven a.m., first tee, nobody else awake.','Read the break wrong three times. Fourth one dropped.','The par-three over water, finally, dry.'] },
-    { key:'pub games',       x:-0.66, y: 0.55, authors:['Lane 9 Lounge','Kip Dorsey'],     caps:['The 7-10 split. We do not talk about it.','Darts final, last leg, the whole pub silent.','Pool hustle, two quarters, one life lesson.'] },
-    { key:'bat & ball',      x:-0.35, y:-0.15, authors:['Dugout Radio','Nia Feld'],        caps:['Extra innings and the lights hum.','A pickoff so slow it counted as art.','Day five of the test match and the tea was decisive.'] },
-    { key:'soccer',          x:-0.10, y:-0.30, authors:['Sunday League FC','Tomas Reko'],  caps:['Ninety minutes, one goal, all of it.','A pass that opened the whole pitch like a door.','The keeper read it. Nobody else did.'] },
-    { key:'basketball',      x: 0.05, y: 0.05, authors:['Blacktop Notes','Jay Okon'],      caps:['Left-hand finish under two defenders.','Pickup at dusk. Winners stay. Legends mostly leave.','The crossover that ended a friendship.'] },
-    { key:'football',        x: 0.22, y:-0.45, authors:['Friday Lights','Coach Bram'],      caps:['Fourth and one. Everybody knew. It worked anyway.','Film study: the pull block nobody watched.','Homecoming, mud, a two-point conversion.'] },
-    { key:'trick shots',     x: 0.20, y: 0.80, authors:['Blooper Reel','Nell Park'],       caps:['Bottle flip off the roof, first try, witnesses.','The mascot fell. The mascot got up. Legend.','Trick shot, forty takes, one miracle.'] },
-    { key:'skate & bmx',     x: 0.45, y: 0.50, authors:['Ledge Life','Mo Castillo'],       caps:['Kickflip down the six after forty tries.','The security guard became the cameraman.','A slam so clean it got a round of applause.'] },
-    { key:'mma & boxing',    x: 0.70, y:-0.40, authors:['Cage Corner','Rafa Osei'],        caps:['Round three, both gassed, nobody quit.','A guillotine from nowhere.','Twelve rounds of jab, and then the jab was enough.'] },
-    { key:'moto',            x: 0.76, y: 0.25, authors:['Two Stroke Sunday','Vee Lindgren'], caps:['Whip over the triple. Landing negotiable.','Rebuilt the top end in the parking lot.','Mud so deep the bike just stayed.'] },
-    { key:'base & freeride', x: 0.92, y:-0.15, authors:['Exit Point','Kaia Storm'],        caps:['Three seconds of quiet, then the canopy.','Big-mountain line, first descent, all fall line.','Wingsuit through the notch. Do not.'] },
+  sports: { name: 'sports', edition: 0, depth: ['casual', 'extreme'],
+    sectors: ['ball', 'court', 'combat', 'motor', 'air & mountain', 'wheels', 'mind & pub', 'club & field'], regions: [
+    { key:'soccer',          sector:0, radius:0.30, authors:['Sunday League FC','Tomas Reko'],  caps:['Ninety minutes, one goal, all of it.','A pass that opened the whole pitch like a door.','The keeper read it. Nobody else did.'] },
+    { key:'football',        sector:0, radius:0.60, tag:'serious', authors:['Friday Lights','Coach Bram'], caps:['Fourth and one. Everybody knew. It worked anyway.','Film study: the pull block nobody watched.','Homecoming, mud, a two-point conversion.'] },
+    { key:'basketball',      sector:1, radius:0.30, authors:['Blacktop Notes','Jay Okon'],      caps:['Left-hand finish under two defenders.','Pickup at dusk. Winners stay. Legends mostly leave.','The crossover that ended a friendship.'] },
+    { key:'mma & boxing',    sector:2, radius:0.80, tag:'serious', authors:['Cage Corner','Rafa Osei'], caps:['Round three, both gassed, nobody quit.','A guillotine from nowhere.','Twelve rounds of jab, and then the jab was enough.'] },
+    { key:'moto',            sector:3, radius:0.70, authors:['Two Stroke Sunday','Vee Lindgren'], caps:['Whip over the triple. Landing negotiable.','Rebuilt the top end in the parking lot.','Mud so deep the bike just stayed.'] },
+    { key:'base & freeride', sector:4, radius:0.95, tag:'serious', authors:['Exit Point','Kaia Storm'], caps:['Three seconds of quiet, then the canopy.','Big-mountain line, first descent, all fall line.','Wingsuit through the notch. Do not.'] },
+    { key:'trick shots',     sector:5, radius:0.30, tag:'goofy', authors:['Blooper Reel','Nell Park'], caps:['Bottle flip off the roof, first try, witnesses.','The mascot fell. The mascot got up. Legend.','Trick shot, forty takes, one miracle.'] },
+    { key:'skate & bmx',     sector:5, radius:0.65, authors:['Ledge Life','Mo Castillo'],       caps:['Kickflip down the six after forty tries.','The security guard became the cameraman.','A slam so clean it got a round of applause.'] },
+    { key:'pub games',       sector:6, radius:0.25, tag:'goofy', authors:['Lane 9 Lounge','Kip Dorsey'], caps:['The 7-10 split. We do not talk about it.','Darts final, last leg, the whole pub silent.','Pool hustle, two quarters, one life lesson.'] },
+    { key:'chess',           sector:6, radius:0.65, tag:'serious', authors:['Board & Clock','Ilse Marr'], caps:['Queen sac on move 19. The engine hated it. The room did not.','Blitz at the park tables until the light went.','Endgame study: two knights, one lesson.'] },
+    { key:'golf',            sector:7, radius:0.20, authors:['Dawn Patrol Links','Rey Alonso'], caps:['Seven a.m., first tee, nobody else awake.','Read the break wrong three times. Fourth one dropped.','The par-three over water, finally, dry.'] },
+    { key:'bat & ball',      sector:7, radius:0.50, authors:['Dugout Radio','Nia Feld'],        caps:['Extra innings and the lights hum.','A pickoff so slow it counted as art.','Day five of the test match and the tea was decisive.'] },
   ] },
-  music: { name: 'music', edition: 0, regions: [
-    { key:'classical',  x:-0.90, y:-0.40, authors:['Fourth Movement','Léa Baum'],      caps:['The oboe held the room for eleven seconds.','Rehearsal note: less, then even less.','A Bach partita on a Tuesday, for nobody.'] },
-    { key:'folk',       x:-0.60, y:-0.10, authors:['Porch Sessions','Hank Ory'],       caps:['Three chords and the porch light.','The song her grandmother hummed, finally written down.','A murder ballad, sweetly.'] },
-    { key:'jazz',       x:-0.48, y:-0.50, authors:['Late Set','Dee Okafor'],           caps:['The bassist quoted the head backwards. Grins.','Second set, half the room, all the music.','Trading fours until the bartender begged.'] },
-    { key:'musicals',   x:-0.30, y: 0.40, authors:['Stage Door','Priya Nair'],         caps:['The eleven o’clock number landed at nine forty.','Tap break. The floor forgave us.','Understudy night. Understudy triumph.'] },
-    { key:'pop',        x: 0.00, y: 0.10, authors:['Hook City','Sam Aldana'],          caps:['The chorus arrives eight seconds early and it rules.','Bridge, key change, confetti.','A demo that should stay a demo. It did not.'] },
-    { key:'hip-hop',    x: 0.20, y:-0.10, authors:['Cypher Corner','Marcus Vell'],     caps:['Bars over a loop of a broken fan.','The beat switch at 2:10.','Freestyle, first take, no punch-ins.'] },
-    { key:'electronic', x: 0.45, y:-0.25, authors:['Modular Sundays','Ines Roth'],     caps:['Patch cables, one knob, forty minutes.','The drop that made the floor into one animal.','Field recording of a fridge, now a kick drum.'] },
-    { key:'novelty',    x:-0.15, y: 0.88, authors:['Kazoo Orchestra','Bo Tinsley'],    caps:['A love song to a parking meter.','Twelve kazoos, one anthem.','The rap about our cat, remastered.'] },
-    { key:'punk',       x: 0.62, y: 0.35, authors:['Basement Show','Riot Kettle'],      caps:['Ninety seconds, three chords, one broken string.','The pit opened and the ceiling tile fell.','Merch table was a suitcase.'] },
-    { key:'metal',      x: 0.88, y:-0.30, authors:['Down Tuned','Sigrid Voss'],        caps:['Blast beats at a tempo that has a name.','The breakdown. You know the one.','Seven strings, no apologies.'] },
+  music: { name: 'music', edition: 0, depth: ['mellow', 'intense'],
+    sectors: ['pop', 'hip-hop', 'electronic', 'rock', 'roots', 'jazz', 'stage', 'novelty'], regions: [
+    { key:'pop',        sector:0, radius:0.20, authors:['Hook City','Sam Aldana'],          caps:['The chorus arrives eight seconds early and it rules.','Bridge, key change, confetti.','A demo that should stay a demo. It did not.'] },
+    { key:'hip-hop',    sector:1, radius:0.40, authors:['Cypher Corner','Marcus Vell'],     caps:['Bars over a loop of a broken fan.','The beat switch at 2:10.','Freestyle, first take, no punch-ins.'] },
+    { key:'electronic', sector:2, radius:0.55, authors:['Modular Sundays','Ines Roth'],     caps:['Patch cables, one knob, forty minutes.','The drop that made the floor into one animal.','Field recording of a fridge, now a kick drum.'] },
+    { key:'punk',       sector:3, radius:0.60, tag:'goofy', authors:['Basement Show','Riot Kettle'], caps:['Ninety seconds, three chords, one broken string.','The pit opened and the ceiling tile fell.','Merch table was a suitcase.'] },
+    { key:'metal',      sector:3, radius:0.92, tag:'serious', authors:['Down Tuned','Sigrid Voss'], caps:['Blast beats at a tempo that has a name.','The breakdown. You know the one.','Seven strings, no apologies.'] },
+    { key:'folk',       sector:4, radius:0.25, authors:['Porch Sessions','Hank Ory'],       caps:['Three chords and the porch light.','The song her grandmother hummed, finally written down.','A murder ballad, sweetly.'] },
+    { key:'classical',  sector:4, radius:0.60, tag:'serious', authors:['Fourth Movement','Léa Baum'], caps:['The oboe held the room for eleven seconds.','Rehearsal note: less, then even less.','A Bach partita on a Tuesday, for nobody.'] },
+    { key:'jazz',       sector:5, radius:0.45, authors:['Late Set','Dee Okafor'],           caps:['The bassist quoted the head backwards. Grins.','Second set, half the room, all the music.','Trading fours until the bartender begged.'] },
+    { key:'musicals',   sector:6, radius:0.35, tag:'goofy', authors:['Stage Door','Priya Nair'], caps:['The eleven o’clock number landed at nine forty.','Tap break. The floor forgave us.','Understudy night. Understudy triumph.'] },
+    { key:'novelty',    sector:7, radius:0.30, tag:'goofy', authors:['Kazoo Orchestra','Bo Tinsley'], caps:['A love song to a parking meter.','Twelve kazoos, one anthem.','The rap about our cat, remastered.'] },
   ] },
-  kitchen: { name: 'kitchen', edition: 0, regions: [
-    { key:'tea & bread',    x:-0.90, y:-0.20, authors:['Slow Crumb','Ama Kessie'],      caps:['The crumb finally opened. Four years.','Steeping, timed, quiet.','A loaf that took two days and a nap.'] },
-    { key:'meal prep',      x:-0.55, y:-0.50, authors:['Sunday Boxes','Renna Cole'],     caps:['Twelve boxes, one pan, done by noon.','The rice ratio that finally behaved.','Roasted everything. Regret nothing.'] },
-    { key:'home baking',    x:-0.40, y: 0.30, authors:['Flour Dusted','Otis Vane'],      caps:['Croissants, attempt nine. Layers!','A birthday cake that leaned but delivered.','Cookies for the neighbours, and then not.'] },
-    { key:'fermentation',   x:-0.25, y:-0.70, authors:['Brine Lab','Teo Marsh'],         caps:['Day 14: the kraut has opinions.','Koji on rice, the whole room smells like spring.','A hot sauce that took six months to be polite.'] },
-    { key:'street food',    x: 0.10, y: 0.20, authors:['Cart Life','Mei Lun'],           caps:['Two dollars, one skewer, the whole night.','The line was the point.','Tacos at a truck that only opens when it rains.'] },
-    { key:'grilling',       x: 0.35, y:-0.10, authors:['Smoke Ring','Big Del'],           caps:['Fourteen hours. The bark is a religion.','Reverse sear, forward flavour.','The grill lid as weather report.'] },
-    { key:'molecular',      x: 0.50, y:-0.70, authors:['Bench Kitchen','Dr. Lise Aro'],  caps:['Spherified olive. Tasted like an olive. Success?','A foam that survived the walk to the table.','Liquid nitrogen and one very brave sorbet.'] },
-    { key:'hot chili',      x: 0.80, y:-0.15, authors:['Scoville Club','Paz Ruiz'],       caps:['Reaper salsa. The spoon regretted it.','Growing them was the easy part.','Milk on standby, pride on the line.'] },
-    { key:'kitchen fails',  x: 0.20, y: 0.85, authors:['Burnt Offerings','Nan Petty'],    caps:['The soufflé, in the moment before.','Salt for sugar. Full batch.','A pancake that reached the ceiling.'] },
-    { key:'eating contest', x: 0.88, y: 0.55, authors:['Plate Speed','Gus Halloway'],     caps:['Forty-two dumplings, a personal best, a personal reckoning.','The hot-dog method, explained once.','Pie contest. Hands-free. No mercy.'] },
+  kitchen: { name: 'kitchen', edition: 0, depth: ['comfort', 'extreme'],
+    sectors: ['baking', 'prep', 'ferment', 'lab', 'heat', 'street', 'contest', 'fails'], regions: [
+    { key:'tea & bread',    sector:0, radius:0.20, authors:['Slow Crumb','Ama Kessie'],      caps:['The crumb finally opened. Four years.','Steeping, timed, quiet.','A loaf that took two days and a nap.'] },
+    { key:'home baking',    sector:0, radius:0.50, authors:['Flour Dusted','Otis Vane'],      caps:['Croissants, attempt nine. Layers!','A birthday cake that leaned but delivered.','Cookies for the neighbours, and then not.'] },
+    { key:'meal prep',      sector:1, radius:0.30, tag:'serious', authors:['Sunday Boxes','Renna Cole'], caps:['Twelve boxes, one pan, done by noon.','The rice ratio that finally behaved.','Roasted everything. Regret nothing.'] },
+    { key:'fermentation',   sector:2, radius:0.60, tag:'serious', authors:['Brine Lab','Teo Marsh'], caps:['Day 14: the kraut has opinions.','Koji on rice, the whole room smells like spring.','A hot sauce that took six months to be polite.'] },
+    { key:'molecular',      sector:3, radius:0.85, tag:'serious', authors:['Bench Kitchen','Dr. Lise Aro'], caps:['Spherified olive. Tasted like an olive. Success?','A foam that survived the walk to the table.','Liquid nitrogen and one very brave sorbet.'] },
+    { key:'grilling',       sector:4, radius:0.45, authors:['Smoke Ring','Big Del'],           caps:['Fourteen hours. The bark is a religion.','Reverse sear, forward flavour.','The grill lid as weather report.'] },
+    { key:'hot chili',      sector:4, radius:0.85, authors:['Scoville Club','Paz Ruiz'],       caps:['Reaper salsa. The spoon regretted it.','Growing them was the easy part.','Milk on standby, pride on the line.'] },
+    { key:'street food',    sector:5, radius:0.30, authors:['Cart Life','Mei Lun'],           caps:['Two dollars, one skewer, the whole night.','The line was the point.','Tacos at a truck that only opens when it rains.'] },
+    { key:'eating contest', sector:6, radius:0.90, tag:'goofy', authors:['Plate Speed','Gus Halloway'], caps:['Forty-two dumplings, a personal best, a personal reckoning.','The hot-dog method, explained once.','Pie contest. Hands-free. No mercy.'] },
+    { key:'kitchen fails',  sector:7, radius:0.50, tag:'goofy', authors:['Burnt Offerings','Nan Petty'], caps:['The soufflé, in the moment before.','Salt for sugar. Full batch.','A pancake that reached the ceiling.'] },
   ] },
-  creators: { name: 'creators', edition: 0, xWords: ['familiar', 'new'], xLit: ['more familiar', 'newer'],
-    hint: 'Same compass, new places — here right means newer: breaking now.', regions: [
-    { key:'essays',          x:-0.82, y:-0.50, authors:['Long Form','Ada Quill'],          caps:['A twenty-minute video about a four-second clip.','The essay that made a niche a nation.','Chapter markers as an act of respect.'] },
-    { key:'tutorials',       x:-0.55, y:-0.70, authors:['Show Don’t Tell','Marco Beni'],   caps:['The keyframe trick, at last, in one shot.','Colour grade in ninety seconds, no plugins.','A microphone comparison that ended arguments.'] },
-    { key:'storytime',       x:-0.40, y: 0.20, authors:['Pull Up A Chair','Jules Fenn'],   caps:['So the landlord shows up in a kayak.','Part three, and yes there is a part four.','The wedding, the dog, the fireworks.'] },
-    { key:'daily vlogs',     x:-0.25, y: 0.45, authors:['Slow Mornings','Noor Adib'],      caps:['Coffee, inbox, the good light at four.','Filmed the commute. Cut the commute.','A Tuesday, honestly.'] },
-    { key:'hooks & cuts',    x: 0.05, y:-0.15, authors:['First Three Seconds','Val Ostrow'], caps:['Cold open on the reveal. Retention up.','Jump cut every 1.8 seconds. Yes really.','The hook that was a question with no answer.'] },
-    { key:'breakouts',       x: 0.50, y:-0.45, authors:['Growth Chart','Ines Farah'],      caps:['From 400 followers to 40k in a week. Here is the post.','The account that did one thing eleven times.','A niche found its narrator this week.'] },
-    { key:'reaction',        x: 0.45, y: 0.60, authors:['Watching You Watch','Dom Reyes'],  caps:['Paused it forty times. Shocked forty times.','The face at 0:07 is the whole video.','Reacting to a reaction. It is turtles.'] },
-    { key:'trends & sounds', x: 0.72, y: 0.50, authors:['Sound On','Kit Mora'],            caps:['The audio has 40k uses and a shelf life of days.','Transition trend, third wave, still rising.','A dance you can do sitting down.'] },
-    { key:'memes',           x: 0.30, y: 0.90, authors:['Template Farm','Pixel Ruth'],     caps:['The format died Tuesday. Long live the format.','A caption that did more than the clip.','Low effort, high yield, no notes.'] },
-    { key:'hot takes',       x: 0.88, y: 0.05, authors:['Comment Section','Blaze Ortiz'],   caps:['A take nobody asked for, delivered loudly.','Duet this if you disagree. Everyone did.','Hot take, cold room, warm comments.'] },
+  creators: { name: 'creators', edition: 0, depth: ['familiar', 'new'],
+    hint: 'Same wheel — here deeper means newer: the rim is breaking now.',
+    sectors: ['long-form', 'how-to', 'story', 'craft', 'growth', 'reaction', 'trends', 'takes'], regions: [
+    { key:'essays',          sector:0, radius:0.25, tag:'serious', authors:['Long Form','Ada Quill'], caps:['A twenty-minute video about a four-second clip.','The essay that made a niche a nation.','Chapter markers as an act of respect.'] },
+    { key:'tutorials',       sector:1, radius:0.30, authors:['Show Don’t Tell','Marco Beni'],   caps:['The keyframe trick, at last, in one shot.','Colour grade in ninety seconds, no plugins.','A microphone comparison that ended arguments.'] },
+    { key:'storytime',       sector:2, radius:0.30, authors:['Pull Up A Chair','Jules Fenn'],   caps:['So the landlord shows up in a kayak.','Part three, and yes there is a part four.','The wedding, the dog, the fireworks.'] },
+    { key:'daily vlogs',     sector:2, radius:0.60, authors:['Slow Mornings','Noor Adib'],      caps:['Coffee, inbox, the good light at four.','Filmed the commute. Cut the commute.','A Tuesday, honestly.'] },
+    { key:'hooks & cuts',    sector:3, radius:0.50, authors:['First Three Seconds','Val Ostrow'], caps:['Cold open on the reveal. Retention up.','Jump cut every 1.8 seconds. Yes really.','The hook that was a question with no answer.'] },
+    { key:'breakouts',       sector:4, radius:0.75, authors:['Growth Chart','Ines Farah'],      caps:['From 400 followers to 40k in a week. Here is the post.','The account that did one thing eleven times.','A niche found its narrator this week.'] },
+    { key:'reaction',        sector:5, radius:0.55, authors:['Watching You Watch','Dom Reyes'],  caps:['Paused it forty times. Shocked forty times.','The face at 0:07 is the whole video.','Reacting to a reaction. It is turtles.'] },
+    { key:'memes',           sector:6, radius:0.55, tag:'goofy', authors:['Template Farm','Pixel Ruth'], caps:['The format died Tuesday. Long live the format.','A caption that did more than the clip.','Low effort, high yield, no notes.'] },
+    { key:'trends & sounds', sector:6, radius:0.88, authors:['Sound On','Kit Mora'],            caps:['The audio has 40k uses and a shelf life of days.','Transition trend, third wave, still rising.','A dance you can do sitting down.'] },
+    { key:'hot takes',       sector:7, radius:0.90, authors:['Comment Section','Blaze Ortiz'],   caps:['A take nobody asked for, delivered loudly.','Duet this if you disagree. Everyone did.','Hot take, cold room, warm comments.'] },
+  ] },
+  /* movies: a fixed catalogue, so the map is literally a map — positions frozen for real. Staged from a
+     hand-written list of real titles (facts), no catalogue API, no posters. The remote is a remote here. */
+  movies: { name: 'movies', edition: 0, depth: ['mainstream', 'deep cut'],
+    hint: 'Same wheel, new kinds — the middle is what everyone watches; the rim is the deep end.',
+    sectors: ['comedy', 'romance', 'drama', 'thriller', 'horror', 'action', 'sci-fi', 'animation'], regions: [
+    { key:'crowd comedy',    sector:0, radius:0.30, tag:'goofy', authors:['Judd Apatow','Universal'], caps:['Superbad (2007)','Bridesmaids (2011)','The Hangover (2009)'] },
+    { key:'cult comedy',     sector:0, radius:0.80, tag:'goofy', authors:['Coen brothers','Edgar Wright'], caps:['The Big Lebowski (1998)','Hot Fuzz (2007)','Withnail & I (1987)'] },
+    { key:'rom-coms',        sector:1, radius:0.30, authors:['Nora Ephron','Working Title'],   caps:['When Harry Met Sally (1989)','Notting Hill (1999)','Crazy Rich Asians (2018)'] },
+    { key:'slow romance',    sector:1, radius:0.75, authors:['Wong Kar-wai','Céline Sciamma'], caps:['In the Mood for Love (2000)','Portrait of a Lady on Fire (2019)','Before Sunrise (1995)'] },
+    { key:'prestige drama',  sector:2, radius:0.35, tag:'serious', authors:['Focus Features','Searchlight'], caps:['Moonlight (2016)','Nomadland (2020)','The Social Network (2010)'] },
+    { key:'arthouse',        sector:2, radius:0.85, tag:'serious', authors:['A24','Criterion'], caps:['Aftersun (2022)','Jeanne Dielman (1975)','Stalker (1979)'] },
+    { key:'big thrillers',   sector:3, radius:0.30, authors:['David Fincher','Warner Bros.'],  caps:['Gone Girl (2014)','The Bourne Identity (2002)','Heat (1995)'] },
+    { key:'slow-burn noir',  sector:3, radius:0.80, authors:['Park Chan-wook','Denis Villeneuve'], caps:['Oldboy (2003)','Prisoners (2013)','Memories of Murder (2003)'] },
+    { key:'popcorn horror',  sector:4, radius:0.35, authors:['Blumhouse','James Wan'],          caps:['The Conjuring (2013)','Get Out (2017)','A Quiet Place (2018)'] },
+    { key:'extreme horror',  sector:4, radius:0.90, authors:['Ari Aster','Julia Ducournau'],    caps:['Hereditary (2018)','Raw (2016)','Martyrs (2008)'] },
+    { key:'tentpoles',       sector:5, radius:0.30, authors:['Marvel Studios','Tom Cruise'],    caps:['Top Gun: Maverick (2022)','Mad Max: Fury Road (2015)','Mission: Impossible – Fallout (2018)'] },
+    { key:'martial arts',    sector:5, radius:0.70, authors:['Gareth Evans','Shaw Brothers'],   caps:['The Raid (2011)','Police Story (1985)','Ip Man (2008)'] },
+    { key:'space opera',     sector:6, radius:0.30, authors:['Lucasfilm','Legendary'],          caps:['Dune: Part Two (2024)','Star Wars (1977)','Guardians of the Galaxy (2014)'] },
+    { key:'hard sci-fi',     sector:6, radius:0.80, tag:'serious', authors:['Andrei Tarkovsky','Shane Carruth'], caps:['Solaris (1972)','Primer (2004)','Arrival (2016)'] },
+    { key:'family animated', sector:7, radius:0.25, authors:['Pixar','DreamWorks'],             caps:['Inside Out (2015)','How to Train Your Dragon (2010)','Spider-Man: Into the Spider-Verse (2018)'] },
+    { key:'anime & indie',   sector:7, radius:0.70, authors:['Studio Ghibli','Cartoon Saloon'],  caps:['Spirited Away (2001)','Wolfwalkers (2020)','Perfect Blue (1997)'] },
   ] },
 };
 const WORLD_KEYS = Object.keys(WORLDS);
 let worldKey = 'sports', CURRENTS = WORLDS.sports.regions, WORLD_SEED = SEED;
-/* Hue names the region and nothing else. It is assigned from the region's bearing around the world's
-   centre, quantized to eight families 39° apart, so neighbouring places wear neighbouring colours and
-   colour approximates location without becoming it; the band around ember (hsl 5–50) is never used —
-   ember is the one interaction accent. ≤8 hues per world (Healey/Ware: the categorical budget). */
+/* Hue names the KIND and nothing else: sector i wears family hue i, in every world — the same bearing is
+   the same colour everywhere, exactly. Eight families 39° apart from hsl 52; the band around ember
+   (hsl 5–51) is never used — ember is the one interaction accent. ≤8 hues per world by construction. */
 const HUE_FAMILIES = 8, HUE_START = 52, HUE_SPAN = 312;   // 52 → 364(=4): the ember band 5–51 stays empty
-function placeRegions(){                                   // world coordinates → cell centres; chroma follows x
+const SECTOR_DEG = 360 / HUE_FAMILIES;                     // sector i sits at bearing i·45°, 0 = east, counter-clockwise
+function sectorHue(i){ return (HUE_START + i * (HUE_SPAN / HUE_FAMILIES)) % 360; }
+function placeRegions(){                                   // (sector, radius) → cell centre; chroma follows depth (nebula only)
   CURRENTS.forEach((R, i) => {
-    R.cc = 1.5 + (R.x + 1)/2 * (WCOLS - 3); R.cr = 1.5 + (R.y + 1)/2 * (WROWS - 3);
-    R.spread = R.spread || 6.2;                            // cells; a region is a place, not a point
-    R.sat = Math.round(18 + 26 * (R.x + 1)/2);             // the wild side glows hotter (chroma = intensity, redundant with x)
-    const bearing = (Math.atan2(-R.y, R.x) + Math.PI*2) % (Math.PI*2);          // 0 = east, counter-clockwise
-    R.family = Math.floor(bearing / (Math.PI*2) * HUE_FAMILIES) % HUE_FAMILIES;
-    R.density = (Math.abs(R.x) + Math.abs(R.y) >= 1.1) ? 0.65 : 0.85;            // supply: the corners are honestly sparser
+    R.bearing = R.sector * SECTOR_DEG;
+    const a = R.bearing * Math.PI / 180;
+    R.cc = HUB_C + R.radius * RIM * Math.cos(a); R.cr = HUB_R - R.radius * RIM * Math.sin(a);   // screen y grows downward
+    R.spread = 3.6 + 2.6 * R.radius;                       // cells; inner places are tighter, the deep end sprawls (ESTIMATE)
+    R.sat = Math.round(18 + 26 * R.radius);                // deeper glows hotter — on the nebula only, never on a dot
+    R.family = R.sector; R.hue = sectorHue(R.sector);
+    R.density = R.radius >= 0.75 ? 0.65 : 0.85;            // supply: the deep end is honestly sparser (ESTIMATE)
     R.idx = i;
   });
-  // collision rule (deterministic, index order): a region sharing a family with an earlier region closer
-  // than 0.5 plane-units moves to the nearest family — cyclic index distance, 7↔0 adjacent, ties → lower
-  // family — in which every member is ≥ 0.5 away. The table in the docs is this code's output.
-  const dist = (A, B) => Math.hypot(A.x - B.x, A.y - B.y);
-  for (let i = 0; i < CURRENTS.length; i++){
-    const R = CURRENTS[i], earlier = CURRENTS.slice(0, i);
-    const clash = fam => earlier.some(E => E.family === fam && dist(E, R) < 0.5);
-    if (clash(R.family)){
-      let best = -1, bestD = 99;
-      for (let fam = 0; fam < HUE_FAMILIES; fam++){
-        if (clash(fam)) continue;
-        const d = Math.min((fam - R.family + HUE_FAMILIES) % HUE_FAMILIES, (R.family - fam + HUE_FAMILIES) % HUE_FAMILIES);
-        if (d < bestD || (d === bestD && fam < best)){ bestD = d; best = fam; }
-      }
-      if (best >= 0) R.family = best;
-    }
-    R.hue = (HUE_START + R.family * (HUE_SPAN / HUE_FAMILIES)) % 360;
-  }
 }
 placeRegions();
 const SERENDIPITY = 0.15;   // border blur only — never a topic teleport (referee ruling)
@@ -388,18 +407,33 @@ function currentWeights(c, r){
   }
   return w;
 }
-/* where the viewport centre sits on the plane, in [-1,1]² — the coordinates the label speaks */
-function planePos(){
-  const cx = (camX + innerWidth/2)/PITCH, cy = (camY + innerHeight/2)/PITCH;
-  return [ Math.max(-1, Math.min(1, (cx - 1.5)/(WCOLS - 3)*2 - 1)), Math.max(-1, Math.min(1, (cy - 1.5)/(WROWS - 3)*2 - 1)) ];
+/* where the viewport centre sits on the wheel: [bearing°, radius] — bearing 0 = east, counter-clockwise;
+   radius 0 is the hub (the mainstream), 1 is the rim (as deep as this world goes) */
+function polarPos(){
+  const cx = (camX + innerWidth/2)/PITCH - HUB_C, cy = (camY + innerHeight/2)/PITCH - HUB_R;
+  return [ (Math.atan2(-cy, cx) * 180/Math.PI + 360) % 360, Math.min(1, Math.hypot(cx, cy) / RIM) ];
 }
-function axisWord(v, axis){                                // the label speaks place in absolutes; the ring speaks direction
-  const a = Math.abs(v), side = v < 0 ? 0 : 1;
-  if (a < 0.6) return '';
-  const W = WORLDS[worldKey];
-  if (axis === 'x' && W.xWords) return W.xWords[side];       // a world that names its own x is named by it everywhere
-  return AXES.words[axis][side][side ? 1 : 0];
+const HUB = 0.15;                                          // inside this radius the kind is undefined: you are in the mainstream
+function sectorAt(bearing){ return Math.round(bearing / SECTOR_DEG) % HUE_FAMILIES; }
+function depthWord(radius){                                // the label speaks place in the world's own words
+  const d = WORLDS[worldKey].depth; return radius < 0.3 ? d[0] : radius > 0.7 ? d[1] : '';
 }
+/* what a push means from here — a depth word (deeper / shallower), the kind ahead, or both. Measured one
+   half-screen ahead of the viewport centre along the push, so the words describe where you are going. */
+function aheadPolar(dirX, dirY){                           // [bearing°, radius] half a screen ahead along a push
+  const m = Math.hypot(dirX, dirY) || 1;
+  const ax = (camX + innerWidth/2 + dirX/m * innerHeight*0.5)/PITCH - HUB_C, ay = (camY + innerHeight/2 + dirY/m * innerHeight*0.5)/PITCH - HUB_R;
+  return [ (Math.atan2(-ay, ax) * 180/Math.PI + 360) % 360, Math.hypot(ax, ay) / RIM ];
+}
+function headingWords(dirX, dirY){
+  const [b, r] = polarPos(), [bA, rA] = aheadPolar(dirX, dirY);
+  const depth = rA > r + 0.06 ? WHEEL.lit[1] : rA < r - 0.06 ? WHEEL.lit[0] : '';
+  // the kind ahead is named until you are clearly inside a place (r ≥ 0.3), whenever you head into another sector, and whenever depth alone says nothing
+  const kind = (r < 0.3 || sectorAt(bA) !== sectorAt(b) || !depth) && rA >= HUB ? WORLDS[worldKey].sectors[sectorAt(bA)] : '';
+  return [depth, kind].filter(Boolean);
+}
+function cellDepth(c, r){ return Math.hypot(c + 0.5 - HUB_C, r + 0.5 - HUB_R) / RIM; }
+let DISC_CELLS = 0; for (let r = 0; r < WROWS; r++) for (let c = 0; c < WCOLS; c++) if (cellDepth(c, r) <= 1) DISC_CELLS++;
 let labelRegion = -1;
 function dominantRegion(){                                 // the place under the viewport centre, with hysteresis at borders
   const w = currentWeights(Math.round((camX + innerWidth/2)/PITCH - 0.5), Math.round((camY + innerHeight/2)/PITCH - 0.5));
@@ -431,14 +465,14 @@ function getCell(c, r){
   let best = 0, second = -1;
   for (let i = 1; i < w.length; i++) if (w[i] > w[best]) best = i;
   for (let i = 0; i < w.length; i++) if (i !== best && (second < 0 || w[i] > w[second])) second = i;
-  const reg = best;
+  const reg = best, total = w.reduce((a, v) => a + v, 0), share = w[best] / total;   // how decisive the place is here
   let cur = best;
   if (second >= 0 && rd() < SERENDIPITY && w[second] >= 0.35 * w[best]) cur = second;
   // density = supply: a per-region constant decided by the hash alone — affinity never empties or fills a cell
-  const empty = rd() > CURRENTS[cur].density;
+  const empty = cellDepth(c, r) > 1 || rd() > CURRENTS[cur].density;   // beyond the rim is dark land
   const C = CURRENTS[cur];
-  cell = empty ? { empty: true, c, r, key: k, reg } : {
-    c, r, key: k, cur, reg,
+  cell = empty ? { empty: true, c, r, key: k, reg, share } : {
+    c, r, key: k, cur, reg, share,
     author: C.authors[Math.floor(rd()*C.authors.length)],
     cap: C.caps[Math.floor(rd()*C.caps.length)],
     kind: KINDS[Math.floor(rd()*KINDS.length)],
@@ -482,19 +516,21 @@ let glide = null, glideTimer = 0;
 let wallHit = false, wallDir = [0, 0];
 const steerAcc = [0, 0], steerLog = [];
 function clampCam(){
-  const mX = WORLD_W - innerWidth, mY = WORLD_H - innerHeight;
-  const bx = mX > 0 ? Math.max(0, Math.min(mX, camX)) : mX/2, by = mY > 0 ? Math.max(0, Math.min(mY, camY)) : mY/2;
+  // the rim: the viewport centre never leaves the wheel — beyond it is dark land, and the thud says so
+  const hubX = HUB_C*PITCH, hubY = HUB_R*PITCH, maxR = RIM*PITCH;
+  const vx = camX + innerWidth/2 - hubX, vy = camY + innerHeight/2 - hubY, vr = Math.hypot(vx, vy);
+  let bx = camX, by = camY, outward = [0, 0];
+  if (vr > maxR){ const k = maxR / vr; bx = hubX + vx*k - innerWidth/2; by = hubY + vy*k - innerHeight/2; outward = [vx/vr, vy/vr]; }
   const hit = (bx !== camX || by !== camY) && conveyorOn;
-  wallDir = hit ? [Math.sign(camX - bx), Math.sign(camY - by)] : [0, 0];   // which edge: as wild as this world gets
+  wallDir = hit ? outward : [0, 0];                          // which way the rim is: as deep as this world goes
   if (hit && !wallHit){
     wallHit = true; detent(performance.now(), 'wall'); field.dataset.wall = (field.dataset.wall|0) + 1;
-    // the wish "calmer than this world has" is logged as an explicit, clamped preference — no affinity changes
-    const [px, py] = planePos(), W = WORLDS[worldKey], xw = W.xWords || AXES.x;
-    steerLog.push({ sx: wallDir[0], sy: wallDir[1], clamped: true, x: +px.toFixed(2), y: +py.toFixed(2), t: Math.round(performance.now()) });
+    // the wish "deeper than this world has" is logged as an explicit, clamped preference — no affinity changes
+    const [pb, pr] = polarPos();
+    steerLog.push({ dr: 1, dth: 0, clamped: true, bearing: Math.round(pb), radius: +pr.toFixed(2), t: Math.round(performance.now()) });
     if (steerLog.length > 200) steerLog.shift();
     field.dataset.steers = steerLog.length;
-    const word = wallDir[0] < 0 ? xw[0] : wallDir[0] > 0 ? xw[1] : wallDir[1] < 0 ? AXES.y[0] : AXES.y[1];
-    document.getElementById('live').textContent = 'as ' + word + ' as this world gets';
+    document.getElementById('live').textContent = 'as ' + WORLDS[worldKey].depth[1] + ' as this world goes';
   } else if (!hit) wallHit = false;
   camX = bx; camY = by;
 }
@@ -574,7 +610,7 @@ function settleDwell(now){
 function setSelection(cell, now, tick){
   if (sel && sel.key === cell.key) return;
   const prev = sel; sel = cell;
-  const crossed = prev && prev.reg !== cell.reg;                                   // a new place, by the land's own argmax
+  const crossed = prev && prev.reg !== cell.reg && cell.share >= 0.34;             // a new place, by the land's own argmax — blends at the hub never tick
   if (tick){ detent(now, crossed ? 'boundary' : cell.kind); spawnSparks(cell); }   // a new place is a longer tick
   if (crossed){ document.getElementById('live').textContent = 'entering ' + CURRENTS[cell.reg].key; }
   swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;
@@ -670,7 +706,7 @@ const swell = spring(550, 30);
 swell.value = 1; swell.target = 1;
 let dispNow = new Map();
 const bloomRecs = new Map(); let bloomOn = false, lastBloomCount = -1, bloomSel = null, bloomNear = [];
-let sectorX = 0, sectorY = 0, ringLit = 0, flyT0 = 0, lastLitWord = '';
+let litWords = [], litPending = '', litPendingT = 0, ringLit = 0, flyT0 = 0, lastLitWord = '';
 const byDist = (a, b) => a[0] - b[0];
 const placedPills = []; let lastLabelHit = -1, lastLabelSkipped = -1;
 
@@ -1065,59 +1101,75 @@ function draw(now){
   ctx.fillStyle = puckActive ? '#E8833A' : '#565C6E';
   ctx.beginPath(); ctx.arc(puckCX + kx, puckCY + ky, PUCK.knob, 0, 7); ctx.fill();
 
-  // the compass: the ring's four words are the axes (a world may name its own x). The word you push
-  // toward lights in its comparative; eight 45° sectors with hysteresis so diagonals don't flicker;
-  // words fade back over 400ms after release; the first ring touch flies the words to the edges once.
+  // the compass, on a wheel: HOME marks the bearing to the hub on the rim and DEEPER sits opposite — the
+  // legend is two words and it turns with you. The kinds are printed on the land at their bearings. While
+  // you push, the depth word you head toward lights (and SHALLOWER replaces HOME), the kind ahead lights
+  // at the screen edge, both announced; ~90ms of hysteresis so a wobbling thumb never flickers the words.
+  // The first ring touch flies the eight kind names out to their bearings once, then they collapse.
   {
-    const W = WORLDS[worldKey], xw = W.xWords || AXES.x, xl = W.xLit || [AXES.words.x[0][1], AXES.words.x[1][0]];
-    const yw = AXES.y, yl = [AXES.words.y[0][1], AXES.words.y[1][0]];
-    let pushX = 0, pushY = 0;
-    if (puckActive){
-      const mag = Math.hypot(kx, ky) || 1;
-      const cx = kx/mag, cy = ky/mag, on = 0.42, off = 0.34;      // sin 22.5° ≈ .38: enter at .42, leave at .34
-      sectorX = Math.abs(cx) >= (sectorX ? off : on) && mag > PUCK.dead ? Math.sign(cx) : 0;
-      sectorY = Math.abs(cy) >= (sectorY ? off : on) && mag > PUCK.dead ? Math.sign(cy) : 0;
-      pushX = sectorX; pushY = sectorY;
-    } else if (conveyorOn){ pushX = Math.sign(egDir[0]); pushY = Math.sign(egDir[1]); sectorX = sectorY = 0; }
-    else { sectorX = sectorY = 0; }
-    ringLit += ((puckActive || conveyorOn ? 1 : 0) - ringLit) * Math.min(1, dt * 7.5);   // ≈400ms release fade
-    if (reduceMotion) ringLit = (puckActive || conveyorOn) ? 1 : 0;
-    // one-time fly-out: the compass teaches itself, then collapses
+    const W = WORLDS[worldKey];
+    const [bearing, radius] = polarPos();
+    const atHub = radius < HUB;
+    let dirX = 0, dirY = 0, pushing = false;
+    if (puckActive && Math.hypot(kx, ky) > PUCK.dead){ dirX = kx; dirY = ky; pushing = true; }
+    else if (conveyorOn && (egDir[0] || egDir[1])){ dirX = egDir[0]; dirY = egDir[1]; pushing = true; }
+    const want = pushing ? headingWords(dirX, dirY) : [];
+    const wantKey = want.join('·');
+    if (wantKey !== litPending){ litPending = wantKey; litPendingT = now; }
+    if (!pushing || now - litPendingT > 90 || reduceMotion) litWords = want;
+    ringLit += ((pushing || puckActive ? 1 : 0) - ringLit) * Math.min(1, dt * 7.5);   // ≈400ms release fade
+    if (reduceMotion) ringLit = (pushing || puckActive) ? 1 : 0;
     let fly = 0;
     if (flyT0){ const e = (now - flyT0)/1000; fly = e < 0.6 ? forge(e/0.6) : e < 3.1 ? 1 : e < 3.7 ? 1 - forge((e-3.1)/0.6) : 0; if (e >= 3.7) flyT0 = 0; }
     const [rx0, ry0] = reticle();
-    const edgeOf = { W: [14, ry0, 'left'], E: [innerWidth - 14, ry0, 'right'], N: [innerWidth/2, 96, 'center'], S: [innerWidth/2, innerHeight - 150, 'center'] };
     ctx.font = '11px -apple-system, "Segoe UI", system-ui, sans-serif'; ctx.textBaseline = 'middle';
     try { ctx.letterSpacing = '0.08em'; } catch(e){}
-    const words = [[pushX < 0 ? xl[0] : xw[0], puckCX - PUCK.r - 8, puckCY, pushX < 0, 'right', 'W', wallDir[0] < 0],
-                   [pushX > 0 ? xl[1] : xw[1], puckCX + PUCK.r + 8, puckCY, pushX > 0, 'left', 'E', wallDir[0] > 0],
-                   [pushY < 0 ? yl[0] : yw[0], puckCX, puckCY - PUCK.r - 12, pushY < 0, 'center', 'N', wallDir[1] < 0],
-                   [pushY > 0 ? yl[1] : yw[1], puckCX, puckCY + PUCK.r + 12, pushY > 0, 'center', 'S', wallDir[1] > 0]];
-    for (const [w, x, y, lit, align, side, atWall] of words){
-      const [ex, ey, ealign] = edgeOf[side];
-      const px_ = x + (ex - x)*fly, py_ = y + (ey - y)*fly;
-      ctx.textAlign = fly > 0.5 ? ealign : align;
-      ctx.globalAlpha = atWall ? 0.18 : (lit ? 0.95 : 0.32 + 0.23*ringLit + 0.4*fly);
-      ctx.fillStyle = lit ? '#E8833A' : '#8A8FA3';
-      ctx.fillText(w.toUpperCase(), px_, py_);
+    // a word just outside the ring along a unit vector (ux, uy): aligned away from the ring so it never overlaps it
+    const ringWord = (ux, uy, text, alpha, ember) => {
+      const d = PUCK.r + 9, x = puckCX + ux*d, y = puckCY + uy*d;
+      ctx.textAlign = Math.abs(ux) < 0.45 ? 'center' : (ux < 0 ? 'right' : 'left');
+      ctx.globalAlpha = alpha; ctx.fillStyle = ember ? '#E8833A' : '#8A8FA3';
+      ctx.fillText(text.toUpperCase(), x, y + (Math.abs(ux) < 0.45 ? Math.sign(uy || 1) * 4 : 0));
+    };
+    const a = bearing*Math.PI/180;
+    const hx_ = atHub ? 0 : -Math.cos(a), hy_ = atHub ? 1 : Math.sin(a);   // screen unit vector toward the hub (down = mainstream when you are in it)
+    const shallowLit = litWords.includes(WHEEL.lit[0]), deepLit = litWords.includes(WHEEL.lit[1]);
+    const atRim = wallDir[0] !== 0 || wallDir[1] !== 0;
+    const rest = 0.32 + 0.23*ringLit;
+    if (!fly){
+      ringWord(hx_, hy_, atHub ? W.depth[0] : (shallowLit ? WHEEL.lit[0] : WHEEL.home), shallowLit ? 0.95 : rest, shallowLit);
+      ringWord(-hx_, -hy_, WHEEL.lit[1], atRim ? 0.18 : (deepLit ? 0.95 : rest), deepLit);
     }
-    try { ctx.letterSpacing = '0px'; } catch(e){}
-    // you are here: a bead inside the ring at your place on the plane — the knob is what you push, the bead is where you are
-    { const [bx, by] = planePos();
+    // one-time fly-out: the eight kinds leave the ring for their bearings at the screen edge, hold, and return
+    if (fly > 0){
+      ctx.textAlign = 'center';
+      for (let i = 0; i < HUE_FAMILIES; i++){
+        const name = W.sectors[i]; if (!name) continue;
+        const sa = i * SECTOR_DEG * Math.PI/180, ux = Math.cos(sa), uy = -Math.sin(sa);
+        const x0 = puckCX + ux*(PUCK.r + 10), y0 = puckCY + uy*(PUCK.r + 10);
+        const ex = innerWidth/2 + ux*(innerWidth/2 - 48), ey = ry0 + uy*(uy < 0 ? (ry0 - 100) : (innerHeight - 160 - ry0));
+        ctx.globalAlpha = 0.25 + 0.6*fly; ctx.fillStyle = `hsl(${sectorHue(i)} 40% 78%)`;
+        ctx.fillText(name.toUpperCase(), x0 + (ex - x0)*fly, y0 + (ey - y0)*fly);
+      }
+    }
+    // you are here: a bead inside the ring at your place on the wheel — the knob is what you push, the bead is where you are
+    { const bx = Math.cos(a)*radius*0.7*PUCK.r, by = -Math.sin(a)*radius*0.7*PUCK.r;
       ctx.globalAlpha = puckActive ? 0.9 : 0.5; ctx.fillStyle = '#8A8FA3';
-      ctx.beginPath(); ctx.arc(puckCX + bx*0.7*PUCK.r, puckCY + by*0.7*PUCK.r, 2.5, 0, 7); ctx.fill(); }
-    // the same word, large and faint, at the edge you are travelling toward — the primary carrier while pushing
-    if ((pushX || pushY) && !fly){
-      ctx.font = '11px -apple-system, "Segoe UI", system-ui, sans-serif'; ctx.fillStyle = '#E8833A'; ctx.globalAlpha = 0.85;
-      try { ctx.letterSpacing = '0.08em'; } catch(e){}
-      if (pushX > 0){ ctx.textAlign = 'right'; ctx.fillText(xl[1].toUpperCase(), innerWidth - 14, ry0); }
-      if (pushX < 0){ ctx.textAlign = 'left'; ctx.fillText(xl[0].toUpperCase(), 14, ry0); }
-      if (pushY < 0){ ctx.textAlign = 'center'; ctx.fillText(yl[0].toUpperCase(), innerWidth/2, 96); }
-      if (pushY > 0){ ctx.textAlign = 'center'; ctx.fillText(yl[1].toUpperCase(), innerWidth/2, innerHeight - 150); }
-      try { ctx.letterSpacing = '0px'; } catch(e){}
-      const litWord = [pushX > 0 ? xl[1] : pushX < 0 ? xl[0] : '', pushY > 0 ? yl[1] : pushY < 0 ? yl[0] : ''].filter(Boolean).join(' · ');
+      ctx.beginPath(); ctx.arc(puckCX + bx, puckCY + by, 2.5, 0, 7); ctx.fill(); }
+    // the same words, at the screen edge you are travelling toward — the primary carrier while pushing
+    if (pushing && litWords.length && !fly){
+      const m = Math.hypot(dirX, dirY) || 1, ux = dirX/m, uy = dirY/m;
+      // the point where the push ray from the reticle meets the safe frame (14px sides, 96 top, 150 bottom)
+      const tx = ux > 0 ? (innerWidth - 14 - rx0)/ux : ux < 0 ? (14 - rx0)/ux : 1e9;
+      const ty = uy > 0 ? (innerHeight - 150 - ry0)/uy : uy < 0 ? (96 - ry0)/uy : 1e9;
+      const t = Math.min(tx, ty), ex = rx0 + ux*t, ey = ry0 + uy*t;
+      ctx.fillStyle = '#E8833A'; ctx.globalAlpha = 0.85;
+      ctx.textAlign = tx < ty ? (ux > 0 ? 'right' : 'left') : 'center';
+      ctx.fillText(litWords.join(' · ').toUpperCase(), ex, ey);
+      const litWord = litWords.join(' · ');
       if (litWord !== lastLitWord){ lastLitWord = litWord; document.getElementById('live').textContent = litWord; }
     } else if (lastLitWord){ lastLitWord = ''; }
+    try { ctx.letterSpacing = '0px'; } catch(e){}
     ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
   }
 
@@ -1140,13 +1192,16 @@ function draw(now){
 
 /* ===================== the one rAF loop ==================================================== */
 let lastT = 0, lastUi = 0, lastPathAt = 0, lastPage = 0, prevCamX = 0, prevCamY = 0;
-function steerEvent(sx, sy){
-  const [pxp, pyp] = planePos();
+function steerEvent(dr, dth, headB){                      // dr: +1 deeper / −1 shallower; dth: ±1 around the wheel (counter-clockwise +); headB: bearing you push toward
+  const [b, rad] = polarPos();
   for (let i = 0; i < CURRENTS.length; i++){
-    const R = CURRENTS[i], along = (R.x - pxp)*sx + (R.y - pyp)*sy;
+    const R = CURRENTS[i];
+    const dPos = ((R.bearing - b + 540) % 360) - 180, dHead = ((R.bearing - (headB ?? b) + 540) % 360) - 180;   // signed degrees
+    // ahead: deeper than here in the direction you push (from the hub that is the whole story), or around the wheel the way you turn
+    const along = (R.radius - rad) * dr * Math.max(0, Math.cos(dHead * Math.PI/180)) + Math.sin(dPos * Math.PI/180) * dth;
     if (along > 0.15) affinityBoost(i, 0.4);
   }
-  steerLog.push({ sx, sy, x: +pxp.toFixed(2), y: +pyp.toFixed(2), t: Math.round(performance.now()) });
+  steerLog.push({ dr, dth, bearing: Math.round(b), radius: +rad.toFixed(2), head: Math.round(headB ?? b), t: Math.round(performance.now()) });
   if (steerLog.length > 200) steerLog.shift();
   field.dataset.steers = steerLog.length;
 }
@@ -1191,12 +1246,16 @@ function frame(t){
   // along an axis while armed is one explicit event — regions that lie ahead gain affinity, which in this
   // demo changes only the nebula glow (the walked world never rewrites). Logged for the harness.
   if (armed && (Math.abs(wantX) > 10 || Math.abs(wantY) > 10)){
-    steerAcc[0] += camX - prevCamX; steerAcc[1] += camY - prevCamY;
-    const sx = Math.abs(wantX) > 10 ? Math.sign(wantX) : 0, sy = Math.abs(wantY) > 10 ? Math.sign(wantY) : 0;
-    if (Math.abs(steerAcc[0]) >= 4*PITCH){ steerEvent(Math.sign(steerAcc[0]), 0); steerAcc[0] = 0; }
-    if (Math.abs(steerAcc[1]) >= 4*PITCH){ steerEvent(0, Math.sign(steerAcc[1])); steerAcc[1] = 0; }
-    const W = WORLDS[worldKey], xw = W.xWords || AXES.x;
-    field.dataset.steer = [sx > 0 ? xw[1] : sx < 0 ? xw[0] : '', sy > 0 ? AXES.y[1] : sy < 0 ? AXES.y[0] : ''].filter(Boolean).join(' ');
+    // the displacement is decomposed on the wheel: radial (deeper / shallower) and tangential (around it).
+    // From the hub every direction is deeper.
+    const [b, rad] = polarPos(), a = b*Math.PI/180, dx = camX - prevCamX, dy = camY - prevCamY;
+    let ur = [Math.cos(a), -Math.sin(a)], ut = [-Math.sin(a), -Math.cos(a)];
+    if (rad < HUB){ const m = Math.hypot(wantX, wantY) || 1; ur = [wantX/m, wantY/m]; ut = [0, 0]; }
+    steerAcc[0] += dx*ur[0] + dy*ur[1]; steerAcc[1] += dx*ut[0] + dy*ut[1];
+    const headB = aheadPolar(wantX, wantY)[0];
+    if (Math.abs(steerAcc[0]) >= 4*PITCH){ steerEvent(Math.sign(steerAcc[0]), 0, headB); steerAcc[0] = 0; }
+    if (Math.abs(steerAcc[1]) >= 4*PITCH){ steerEvent(0, Math.sign(steerAcc[1]), headB); steerAcc[1] = 0; }
+    field.dataset.steer = headingWords(wantX, wantY).join(' ');
   } else { steerAcc[0] = steerAcc[1] = 0; if (field.dataset.steer) field.dataset.steer = ''; }
   prevCamX = camX; prevCamY = camY;
 
@@ -1406,7 +1465,7 @@ function cardContent(cell){
   document.getElementById('cage').textContent = ageStr(cell.mins);
   document.getElementById('ccap').textContent = cell.cap;
   document.getElementById('ckind').textContent = kindStr(cell);
-  document.getElementById('ccur').textContent = CURRENTS[cell.cur].key;
+  document.getElementById('ccur').textContent = CURRENTS[cell.cur].key + (CURRENTS[cell.cur].tag ? ' · ' + CURRENTS[cell.cur].tag : '');
 }
 let announceTimer = 0;
 function announce(cell){
@@ -1513,18 +1572,18 @@ document.getElementById('tabTrail').addEventListener('click', () => setView(true
 /* ===================== instruments ========================================================= */
 setInterval(() => { if (!touching) updateDriftLabel(); }, 2000);
 function updateDriftLabel(){
-  const [x, y] = planePos();
+  const [bearing, radius] = polarPos();
   const el = document.getElementById('driftlabel');
   let populated = 0; for (const c of cells.values()) if (!c.empty) populated++;
-  const pct = Math.round(100*populated/(TOTAL_CELLS*0.82));                 // of the cells a full walk would fill (ESTIMATE of mean density)
+  const pct = Math.round(100*populated/(DISC_CELLS*0.8));                   // of the cells inside the rim a full walk would fill (ESTIMATE of mean density)
   const here = dominantRegion();
-  // priority: the place implies the coordinates, so axis words appear only when no place dominates (fits 390px)
-  const parts = [WORLDS[worldKey].name, here >= 0 ? 'in ' + CURRENTS[here].key : [axisWord(x, 'x'), axisWord(y, 'y')].filter(Boolean).join(' · ')].filter(Boolean);
+  // priority: the place implies the depth, so the depth word appears only when no place dominates (fits 390px)
+  const parts = [WORLDS[worldKey].name, here >= 0 ? 'in ' + CURRENTS[here].key : depthWord(radius)].filter(Boolean);
   // belief glow moves on the label's clock, never mid-gesture
   if (!touching) for (let i = 0; i < CURRENTS.length; i++) CURRENTS[i].glow = 0.18 + 0.12 * Math.max(0, Math.min(1, affinity[i] / 4));
   el.innerHTML = '<b></b>';
   el.querySelector('b').textContent = parts.join(' · ') + ' · ' + pct + '% walked';
-  field.dataset.plane = x.toFixed(2) + ',' + y.toFixed(2); field.dataset.world = worldKey;
+  field.dataset.plane = Math.round(bearing) + ',' + radius.toFixed(2); field.dataset.world = worldKey;
 }
 const homeBtn = document.getElementById('homebtn');
 const ARROWS = ['→','↘','↓','↙','←','↖','↑','↗'];
@@ -1588,10 +1647,12 @@ field.addEventListener('keydown', e => {
   else if (k === 'w' || k === 'W'){ e.preventDefault(); switchWorld(WORLD_KEYS[(WORLD_KEYS.indexOf(worldKey) + 1) % WORLD_KEYS.length]); return; }
   if (e.shiftKey && (dc || dr)){                             // steer by keyboard: half a screen, one explicit event, the word spoken
     e.preventDefault();
+    const words = headingWords(dc, dr);
+    { const [b] = polarPos(), a = b*Math.PI/180, mv = [dc*innerWidth/2, dr*innerHeight/2];
+      const rad = mv[0]*Math.cos(a) - mv[1]*Math.sin(a), tan = -mv[0]*Math.sin(a) - mv[1]*Math.cos(a);
+      steerEvent(Math.abs(rad) >= Math.abs(tan) ? Math.sign(rad) : 0, Math.abs(tan) > Math.abs(rad) ? Math.sign(tan) : 0, aheadPolar(dc, dr)[0]); }
     startGlide(camX + dc*innerWidth/2, camY + dr*innerHeight/2, 350);
-    steerEvent(dc, dr);
-    const W = WORLDS[worldKey], xl = W.xLit || [AXES.words.x[0][1], AXES.words.x[1][0]];
-    document.getElementById('live').textContent = [dc > 0 ? xl[1] : dc < 0 ? xl[0] : '', dr > 0 ? AXES.words.y[1][0] : dr < 0 ? AXES.words.y[0][1] : ''].filter(Boolean).join(' · ');
+    document.getElementById('live').textContent = words.join(' · ');
     return;
   }
   else return;
@@ -1629,21 +1690,21 @@ function resetWorld(){
   boot(); updateDriftLabel();
 }
 document.getElementById('restart').addEventListener('click', resetWorld);
-/* switching worlds keeps the compass and changes the places: same axes, new regions, fresh geography */
+/* switching worlds keeps the wheel and changes the kinds: same bearing and depth, new regions, fresh geography */
 const worldChip = document.getElementById('worldchip'), worldStrip = document.getElementById('worldstrip');
 function switchWorld(key){
   if (!WORLDS[key] || touching) return;                       // never under a held thumb — lift first, then switch
-  const [keepX, keepY] = planePos();                          // your place on the plane survives the switch
+  const [keepB, keepR] = polarPos();                          // your place on the wheel survives the switch
   worldKey = key; CURRENTS = WORLDS[key].regions; WORLD_SEED = SEED ^ (WORLD_KEYS.indexOf(key) * 7919);
   placeRegions(); affinity = new Array(CURRENTS.length).fill(0); buildPalette(); buildSprites();
   if (postOn) closePost();
   resetWorld(); renderWorldChrome(); worldStrip.classList.remove('on'); worldChip.setAttribute('aria-expanded', 'false');
-  camX = (1.5 + (keepX + 1)/2 * (WCOLS - 3)) * PITCH - innerWidth/2;   // same coordinates, new places
-  camY = (1.5 + (keepY + 1)/2 * (WROWS - 3)) * PITCH - innerHeight/2; clampCam();
+  { const a = keepB*Math.PI/180;                              // same bearing and depth, new kinds
+    camX = (HUB_C + keepR*RIM*Math.cos(a)) * PITCH - innerWidth/2; camY = (HUB_R - keepR*RIM*Math.sin(a)) * PITCH - innerHeight/2; clampCam(); }
   { const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55); const c = nearestCell(wx, wy);
     if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; } }
   updateDriftLabel();
-  hintEl.textContent = WORLDS[key].hint || ('Same compass, new places — right is still ' + AXES.x[1] + ', down is still ' + AXES.y[1] + '.');
+  hintEl.textContent = WORLDS[key].hint || ('Same wheel, new kinds — the middle is what everyone watches; push out for ' + WORLDS[key].depth[1] + '.');
   hintEl.style.opacity = '1'; setTimeout(() => { hintEl.style.opacity = '0'; }, 3200);
 }
 function renderWorldChrome(){

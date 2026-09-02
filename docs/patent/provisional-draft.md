@@ -278,33 +278,47 @@ identical items, positions, and read states ("tape rewind"), preserving spatial 
 bounded worlds a coverage odometer (percentage of cells materialized/visited) restores
 finishability as a spatial fact.
 
-### 6A. Attribute-scored placement on named axes
+### 6A. Attribute-scored placement on named coordinates
 
-In a further embodiment the field is a bounded plane whose two axes carry named attributes
-(reference: an intensity axis and a register axis, presented to the user as four compass words
-on the locomotion control — e.g., CALM/WILD and SERIOUS/GOOFY — with comparatives displayed in
-the interaction colour while a displacement is commanded). Named regions are assigned fixed
-plane coordinates in a versioned region table (an "edition"); each content item is assigned a
-region and per-item attribute scores by a classifier executed once per publication interval
-(reference: a daily batch), and its target position is a pure function of (item scores, region
-table, deterministic collision order), so that positions are invariant for at least the session
-and, absent republication, for the publication interval. Region identity is rendered as hue
-selected from a family table by the region centroid's bearing about the plane origin, with a
-deterministic collision rule spacing same-hue regions apart; read state is rendered as
-lightness solved per hue to a constant contrast against the ground; an ordered intensity ramp,
-where present, is rendered only on a background ("nebula") layer and never on a target. Heading
-and displacement events of §5 are attributed as signed preferences on the named axes and are
-logged with the plane coordinate at which they occurred; accumulated axis preference conditions
-the choice of item for unvisited cells and a per-region belief indication (reference: nebula
-alpha 0.18–0.30 updated at the label cadence and never during a gesture), while materialized
-cells remain immutable per §6. Crossing into a differently placed region emits a distinct
-feedback transient; reaching the plane boundary emits a distinct transient once per contact and
-dims the corresponding compass word. Switching between plane instances ("worlds") preserves the
-plane coordinate of the viewport. A world whose x axis is a measured quantity (reference: 24 h
-engagement velocity against a baseline, frozen at publication) presents its own axis words.
-Nothing in this embodiment claims the two-dimensional arrangement, the path selection, or the
-hue-by-bearing mapping as such (see Background); the contribution is their combination with the
-selection engine of §2, the feedback grammar of §3 and the signal acquisition of §5.
+In a further embodiment the field is a bounded region whose two coordinates carry named
+attributes. In a first variant the coordinates are two Cartesian axes (reference: an intensity
+axis and a register axis, presented as four compass words on the locomotion control — e.g.,
+CALM/WILD and SERIOUS/GOOFY). In a second, preferred variant the coordinates are polar: the
+bearing about a hub names a nominal category (reference: eight sectors of 45°, each carrying a
+kind and a hue) and the radius carries an ordinal intensity attribute in the field's own words
+(reference: casual → extreme; mainstream → deep cut), the hub being the field's mainstream and
+the rim its bound; the locomotion control then displays a home word at the bearing toward the hub
+and a depth word opposite, both turning with the viewport's position, and while a displacement is
+commanded the depth word toward which the user heads is emphasized in the interaction colour
+together with the name of the category ahead, both announced to assistive technology. Named
+regions are assigned fixed coordinates in a versioned region table (an "edition"); each content
+item is assigned a region and per-item attribute scores by a classifier executed once per
+publication interval (reference: a daily batch; for a fixed catalogue, once per edition), and its
+target position is a pure function of (item scores, region table, deterministic collision order),
+so that positions are invariant for at least the session and, absent republication, for the
+publication interval. Region identity is rendered as hue selected from a family table by the
+region's bearing about the origin (in the polar variant one hue per sector, identical across
+fields); read state is rendered as lightness solved per hue to a constant contrast against the
+ground; an ordered intensity ramp, where present, is rendered only on a background ("nebula")
+layer and never on a target; a register attribute, where present, is rendered as a word on the
+preview and never as a visual channel of the target. Heading and displacement events of §5 are
+attributed as signed preferences on the named coordinates — in the polar variant decomposed into
+a radial component (deeper / shallower) and a tangential component (toward a neighbouring
+category), with the commanded heading recorded so that a radial event from the hub favours the
+category under the heading — and are logged with the coordinate at which they occurred;
+accumulated preference conditions the choice of item for unvisited cells and a per-region belief
+indication (reference: nebula alpha 0.18–0.30 updated at the label cadence and never during a
+gesture), while materialized cells remain immutable per §6. Crossing into a differently placed
+region whose placement is decisive (reference: argmax share ≥ 0.34) emits a distinct feedback
+transient; reaching the field's bound emits a distinct transient once per contact, dims the
+corresponding word and logs a clamped preference. Switching between field instances ("worlds")
+preserves the viewport's coordinate. A field whose intensity coordinate is a measured quantity
+(reference: 24 h engagement velocity against a baseline, frozen at publication) presents its own
+depth words. Nothing in this embodiment claims the two-dimensional or polar arrangement, the
+path selection, or the hue-by-bearing mapping as such (see Background; Sony US 7,858,868 maps hue
+to a mood angle, and Bang & Olufsen's MoodWheel (2015) is a shipped polar precedent); the
+contribution is their combination with the selection engine of §2, the feedback grammar of §3
+and the signal acquisition of §5.
 
 ### 7. Locomotion with an asymmetric envelope
 
@@ -413,14 +427,16 @@ US 10,891,049 proactively in the non-provisional rather than letting the examine
   reference image); the abstract lattice is the distinguishing hook. Before any commercial ship
   of this embodiment obtain a professional claim chart on KDDI US 9,244,544, Amazon US 9,389,718
   / 10,353,570, Google US 10,365,719 and Immersion US 8,264,465.
-- **Named-axis placement (§6A) — dependent only.** Do NOT claim the two-dimensional semantic
-  plane, path or steer selection over mood zones, hue-by-angle / saturation-by-strength, or
-  per-item attribute scores as such: Gracenote US 8,855,798, Sony US 7,858,868, Monkeymedia
-  US 6,281,899, Musicovery (2006), Moodstream (2008) and Every Noise at Once (2013) anticipate
-  each. Claim 9 rides on claim 1: the residue is positions fixed by scores on *named* axes for the
-  session, heading events attributed as *signed preference on those axes*, and that preference
-  conditioning only unvisited regions. Chart specifically against 8,855,798's sequential-path
-  selection before any commercial ship of a steerable world.
+- **Named-coordinate placement (§6A) — dependent only.** Do NOT claim the two-dimensional
+  semantic plane or the polar wheel, path or steer selection over mood zones, hue-by-angle /
+  saturation-by-strength, or per-item attribute scores as such: Gracenote US 8,855,798, Sony
+  US 7,858,868, Monkeymedia US 6,281,899, Musicovery (2006), Moodstream (2008), Every Noise at
+  Once (2013) and Bang & Olufsen MoodWheel (2015) anticipate each. Claim 9 rides on claim 1: the
+  residue is positions fixed by scores on *named* coordinates for the session, heading and
+  displacement events attributed as *signed preference on those coordinates* (radial and
+  tangential in the polar variant, with the heading recorded), and that preference conditioning
+  only unvisited regions. Chart specifically against 8,855,798's sequential-path selection and
+  7,858,868's angular mood layout before any commercial ship of a steerable world.
 
 ## INFORMAL EXAMPLE CLAIMS (scaffolding for non-provisional drafting)
 
@@ -453,10 +469,12 @@ US 10,891,049 proactively in the non-provisional rather than letting the examine
    emphasizes the corresponding host item in place; and wherein the classified preference
    events are attributed to the corresponding host items.
 9. The method of claim 1, wherein the positions of the targets are determined from per-item
-   attribute scores on at least two named axes according to a versioned region table and are
+   attribute scores on at least two named coordinates — two axes, or a bearing naming a category
+   and a radius carrying an intensity attribute — according to a versioned region table and are
    invariant for at least the session; wherein heading and displacement events are attributed
-   as signed preference on said named axes; and wherein said attributed preference conditions
-   the materialization of unvisited field regions while visited regions remain immutable.
+   as signed preference on said named coordinates; and wherein said attributed preference
+   conditions the materialization of unvisited field regions while visited regions remain
+   immutable.
 10. A system comprising a touch display, a haptic actuator, and one or more processors
    configured to perform the method of any preceding claim.
 
@@ -484,11 +502,14 @@ silence while parked, deterministic row paging, the cancel ellipse, the velocity
 release, and that release always dismisses the proxy field; the field and drift pages were
 exercised during development by equivalent synthetic-touch drivers that are not part of the
 repository's checked-in suites. A working audio-hook extraction pipeline
-(`scout/scripts/hook-cutter.mjs`) demonstrates the §9 audio embodiment. The named-axis embodiment
-(§6A) is implemented in `prototypes/the-drift.html` revision 4 (four staged worlds on an edition-0
-region table, the ring compass, boundary and boundary-of-plane transients, displacement-counted
-axis preference with a log, world switching that preserves the plane coordinate) with the colour
-grammar held in `src/lib/driftPalette.ts` and asserted by `src/lib/driftPalette.verify.ts`
-against the prototype's own tables; the private synthetic-touch driver asserts one boundary
-transient per region crossing, one boundary-of-plane transient per contact, the logged clamped
-preference, and that the label and axis words follow the active world.
+(`scout/scripts/hook-cutter.mjs`) demonstrates the §9 audio embodiment. The named-coordinate embodiment
+(§6A) is implemented in `prototypes/the-drift.html` revision 5 in its polar variant (five staged
+worlds — including a fixed film catalogue — on an edition-0 region table of eight sectors, the
+ring's home and depth words, category names emphasized at the screen edge, boundary and rim
+transients, displacement-counted radial and tangential preference with a heading-aware log, world
+switching that preserves bearing and radius) with the colour grammar and wheel geometry held in
+`src/lib/driftPalette.ts` and asserted by `src/lib/driftPalette.verify.ts` against the prototype's
+own tables; revision 4 implemented the Cartesian variant. The private synthetic-touch driver
+asserts one boundary transient per crossing into a decisive region and none between blended
+cells, one rim transient per contact with the logged clamped preference, that no target is
+placed beyond the rim, and that the label and depth words follow the active world.

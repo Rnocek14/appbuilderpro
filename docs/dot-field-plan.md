@@ -82,6 +82,16 @@ ESTIMATE). A 1,500–2,000-item world is ≈ $3–12/day; ten worlds ≈ $0.9–
 double-scoring. Shrink-vs-grow is decision 3 in `dot-field-map.md` §10 — decide it with the
 real $/item from the first week, not before.
 
+**1.2a A candidate world with a fixed catalogue: movies (rev. 5, private).** The map is most
+literally a map, and the remote most literally a remote, over a catalogue that does not change daily:
+positions frozen for real, a one-time classification, posters built for a glance, read state =
+watched (a Letterboxd import turns years of viewing into a walked map), the phone as the remote and
+the TV as the screen. The prototype carries a staged movie world on a genre wheel. Before it becomes
+more than a demo: **founder fit** — do you browse films at least weekly? — then the catalogue reality
+(no public Netflix catalogue; TMDB metadata + deep links to wherever a title streams; TMDB commercial
+terms UNVERIFIED). "Control your algorithm" becomes "pilot a map" here, which is the honest promise
+for a fixed catalogue. Decision 6 in `dot-field-map.md` §10.
+
 **1.2b The editorial job the pipeline did not budget.** Hand-placed regions plus a per-world
 "what wild means here" rubric are an ongoing weekly task for a solo founder, not a one-time
 build: argue the coordinates once with one literate stranger (edition 1), then review the drop
@@ -189,9 +199,11 @@ remain in the drawer — see `dot-field-applications.md`.)*
    user #1, reachable by your own accounts, dogfoodable every morning. A corpus that scores
    perfectly on the mechanic but fails this test (the producer sample-library variant) is an
    adjacency for later or an acquirer's expansion slide, never an entry point.
-6. Worlds are editions. A region table (key, coordinates, rubric, classifier version) is
+6. Worlds are editions. A region table (sectors, radii, rubric, classifier version) is
    versioned and frozen; any change is a new edition announced at the drop — never silent,
    never mid-day, never backfilled. Every coordinate change breaks someone's spatial memory.
+   The wheel's words are universal (HOME · DEEPER); each world names only its kinds and its
+   depth pair.
 7. The register axis is a coordinate, never a verdict. "Goofy" is a compass word and a region's
    place; no tone label is ever printed on a creator's post, and no value word enters the
    compass. Any "non-profiling" marketing claim is scoped to the walked world — unseen-territory

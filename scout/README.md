@@ -76,11 +76,13 @@ Walk it every morning for two weeks, then answer honestly:
    reel / carousel as click / thud / double-tap. If a texture reads as a *different* event rather
    than a different *kind*, flatten it toward the photo profile.
 
-10. **The compass (rev. 4):** hand the phone over cold. After three minutes ask "what happens if
-    you push right? down?" — 4 of 5 should say *wilder / more intense* and *goofier / sillier*
-    unprompted. If they can't, the four words become permanent chrome or the y axis goes; a
-    tutorial is not an option. (In the creators world right means *newer* — test the world that
-    ships.) And: does anyone expect the intensity to snap back when they let go of the ring?
+10. **The wheel (rev. 5):** hand the phone over cold. After three minutes ask "what happens if
+    you push away from the middle? sideways? toward HOME?" — 4 of 5 should say *more extreme /
+    deeper*, *a different kind* and *back toward the middle / milder* unprompted. If they can't,
+    the two ring words become permanent chrome; a tutorial is not an option. (In the creators
+    world deeper means *newer*, in movies *deep cut* — test the world that ships.) And: does
+    anyone expect the depth to snap back when they let go of the ring? Does the blended middle
+    read as "everything" or as "nothing"?
 11. **The nebula at 30% brightness:** can an uncoached person name the region under their thumb
     from the land alone within two seconds? Then again with a deuteranopia filter on — the name
     and the boundary tick must carry it, the colour is a convenience.

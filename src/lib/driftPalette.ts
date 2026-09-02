@@ -1,11 +1,12 @@
-// driftPalette.ts — the pure core of the drift's colour grammar (docs/dot-field-map.md §5).
+// driftPalette.ts — the pure core of the drift's colour grammar and wheel geometry (docs/dot-field-map.md).
 //
-// One meaning per channel: HUE names the region and nothing else; LIGHTNESS is read state; the
-// intensity ramp lives on the nebula layer only; ember #E8833A is the one interaction accent and
-// its hue band is never used for data. Hue is assigned from a region's bearing around the world's
-// centre, quantized to eight families, with a deterministic collision rule so two regions that
-// share a family are never closer than 0.5 plane-units. The prototype (prototypes/the-drift.html)
-// embeds the same rules; the verify suite reads the prototype's WORLDS table and checks both agree.
+// Rev. 5: the map is a WHEEL. Direction is a kind, depth is intensity, the hub is the mainstream. Eight
+// sectors 45° apart (0 = east, counter-clockwise) carry a world's kinds; a region sits at (sector, radius).
+// One meaning per channel: HUE names the kind — sector i wears family hue i in every world, exactly —
+// and nothing else; LIGHTNESS is read state, solved per hue to one contrast; the intensity ramp lives on
+// the nebula layer only; ember #E8833A is the one interaction accent and its hue band is never used for
+// data. The prototype (prototypes/the-drift.html) embeds the same rules; the verify suite reads the
+// prototype's WORLDS table and checks both agree.
 
 export const EMBER_HEX = '#E8833A';
 export const GROUND_HEX = '#0B0E14';
@@ -13,39 +14,39 @@ export const HUE_FAMILIES = 8;
 export const HUE_START = 52;          // first family hue; the band 5–51 around ember stays empty
 export const HUE_SPAN = 312;          // 52 → 364 (= 4)
 export const EMBER_BAND: [number, number] = [5, 51];
-export const MIN_SAME_FAMILY_DISTANCE = 0.5;
-export const CONSUMER_COMPASS = { x: ['calm', 'wild'], y: ['serious', 'goofy'] } as const;
+export const SECTOR_DEG = 360 / HUE_FAMILIES;
+export const HUB = 0.15;              // inside this radius the kind is undefined: the mainstream
+export const MIN_SAME_SECTOR_RADIAL_GAP = 0.3;   // two regions in one sector are told apart by depth (and name)
+export const DEEP_END = 0.75;         // from here out supply is honestly sparser
+export const WHEEL_WORDS = { home: 'home', lit: ['shallower', 'deeper'] } as const;   // at the hub the ring shows the world's own shallow word
 
-export interface Region { key: string; x: number; y: number; family?: number; hue?: number }
+export type Register = 'serious' | 'goofy';
+export interface Region { key: string; sector: number; radius: number; tag?: Register; bearing?: number; hue?: number; family?: number; density?: number }
+export interface World { name: string; edition: number; depth: [string, string]; sectors: (string | null)[]; regions: Region[]; hint?: string }
 
-export function familyHue(family: number): number {
-  return (HUE_START + family * (HUE_SPAN / HUE_FAMILIES)) % 360;
+export function sectorHue(sector: number): number {
+  return (HUE_START + sector * (HUE_SPAN / HUE_FAMILIES)) % 360;
 }
+export function sectorBearing(sector: number): number { return sector * SECTOR_DEG; }
+export function densityFor(radius: number): number { return radius >= DEEP_END ? 0.65 : 0.85; }
+export function nebulaSaturation(radius: number): number { return Math.round(18 + 26 * radius); }
 
-/** Bearing around the world centre, 0 = east, counter-clockwise; screen y grows downward. */
-export function bearingOf(r: Region): number {
-  return (Math.atan2(-r.y, r.x) + Math.PI * 2) % (Math.PI * 2);
-}
-
-/** Assign hue families in index order with the collision rule — the single source of truth. */
-export function assignFamilies<T extends Region>(regions: T[]): T[] {
-  const dist = (a: Region, b: Region) => Math.hypot(a.x - b.x, a.y - b.y);
-  regions.forEach((r) => { r.family = Math.floor(bearingOf(r) / (Math.PI * 2) * HUE_FAMILIES) % HUE_FAMILIES; });
-  for (let i = 0; i < regions.length; i++) {
-    const r = regions[i]; const earlier = regions.slice(0, i);
-    const clash = (fam: number) => earlier.some((e) => e.family === fam && dist(e, r) < MIN_SAME_FAMILY_DISTANCE);
-    if (clash(r.family!)) {
-      let best = -1; let bestD = 99;
-      for (let fam = 0; fam < HUE_FAMILIES; fam++) {
-        if (clash(fam)) continue;
-        const d = Math.min((fam - r.family! + HUE_FAMILIES) % HUE_FAMILIES, (r.family! - fam + HUE_FAMILIES) % HUE_FAMILIES);
-        if (d < bestD || (d === bestD && fam < best)) { bestD = d; best = fam; }
-      }
-      if (best >= 0) r.family = best;
-    }
-    r.hue = familyHue(r.family!);
+/** Give every region its bearing, hue and density from its sector and radius — the single source of truth. */
+export function placeRegions<T extends Region>(regions: T[]): T[] {
+  for (const r of regions) {
+    r.bearing = sectorBearing(r.sector);
+    r.family = r.sector;
+    r.hue = sectorHue(r.sector);
+    r.density = densityFor(r.radius);
   }
   return regions;
+}
+
+/** Cell-lattice position of a region on a world of `cols`×`rows` cells with the wheel inscribed. */
+export function cellOf(r: Region, cols: number, rows: number): [number, number] {
+  const hubC = cols / 2; const hubR = rows / 2; const rim = (Math.min(cols, rows) - 3) / 2;
+  const a = sectorBearing(r.sector) * Math.PI / 180;
+  return [hubC + r.radius * rim * Math.cos(a), hubR - r.radius * rim * Math.sin(a)];
 }
 
 /* lightness is the read state and nothing else. A fixed L lets hue leak into brightness — an HSL
@@ -70,7 +71,6 @@ export function dotColour(hue: number, read: boolean): string {
   const s = read ? DOT_SATURATION.read : DOT_SATURATION.unread;
   return `hsl(${hue} ${s}% ${lightnessFor(hue, s, read ? READ_CONTRAST : UNREAD_CONTRAST)}%)`;
 }
-export function nebulaSaturation(x: number): number { return Math.round(18 + 26 * (x + 1) / 2); }
 
 /* ---- colour maths for the verify suite ---- */
 export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
