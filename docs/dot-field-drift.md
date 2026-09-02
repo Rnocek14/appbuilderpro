@@ -82,13 +82,18 @@ What the engine reads (per-cell, decaying — session half-life 90s):
 **Steer-away is the paradigm's proprietary signal**: no scroll feed can distinguish "scrolled
 past" from "actively turned away from," because turning has a direction and a thumb-cost.
 
-What the engine writes — only *unseen territory ahead*: `P ∝ 0.55·continuity (the world must
-never semantically teleport) + 0.30·affinity + 0.15·exploration`. Exploration is injected
-*perpendicular* to the heading (serendipity ahead reads as disobedience; to the sides it reads
-as terrain you may turn toward), renders at full color in-viewport, and never floors below
-15% — bubble resistance is structural, not informational. Density may thicken toward taste and
-thin where you speed past, but only in unmaterialized cells, floored so no direction becomes a
-wall. Density behind you never changes — settled law wins over "honest visualization."
+What the engine writes — only *unseen territory ahead*, and less than this section first
+claimed. **Rev. 4 ruling (`dot-field-map.md` §5):** positions are a placement lookup on a fixed
+region table, not a sampler — the mixture `0.55·continuity + 0.30·affinity + 0.15·exploration`
+and the perpendicular-exploration rule are deleted. **Density = supply**: how many cells a region
+fills is a per-region constant decided by the hash alone (0.85 populated, 0.65 at the extremes —
+ESTIMATE), floored so no bearing becomes a wall; affinity never empties or fills a cell.
+**Affinity chooses the fill**: which item occupies a not-yet-materialized, over-subscribed cell,
+and how brightly the region's nebula glows (the engine's belief, on the label's 2 s clock).
+Serendipity survives only as **border blur** — a hashed 15% of border cells take the second-best
+region when its weight is ≥ 0.35 of the best — never as a topic teleport. Steering is logged as
+an explicit axis preference in its own right (§9). Density behind you never changes — settled law
+wins over "honest visualization."
 
 **Legibility instruments, exactly this many:** a one-line drift label ("39% walked · drifting
 toward slow food · old maps"), updated ≤ every 2s and never mid-gesture; the trail drawn on
@@ -142,14 +147,15 @@ entered knowingly. Sell the instrument (operator seats), corpus connectors, then
 
 `prototypes/the-drift.html` implements everything in §3–§5: the gated conveyor with asymmetric
 envelope, detents from relative motion, recenter-on-lift with grace and cancel, immutable
-walked-world cache, dwell-weighted sampling of unseen territory with a 15% serendipity floor
-and floored density, the drift label, the trail drawn on the land, the trail-as-object tab
+walked-world cache, argmax placement of unseen territory with a 15% border blur and per-region
+supply density (rev. 4), the drift label, the trail drawn on the land, the trail-as-object tab
 with glide-back, home bearing, odometer, reduce-motion step-paging, keyboard drift.
 
-What it deliberately fakes, disclosed on its face: the "algorithm" is twelve seeded currents
-and a mixture sampler, not a model; **projection stability at real embedding scale is the open,
-unproven risk** (a real engine must guarantee no semantic teleports under streaming updates —
-this is the hard part); edge-fetch latency is simulated (real budget: <100ms perceived against
+What it deliberately fakes, disclosed on its face: the "algorithm" is a hand-placed region
+table and a density sampler, not a model; **placement is stable by construction within a day and
+across worlds — a lookup, not a projection — so the old "projection stability" risk is retired
+for placement only; scorer validity, rubric versioning and centre crowding are the residual
+risks** (`dot-field-map.md` §5, with the exact conditions under which the claim fails); edge-fetch latency is simulated (real budget: <100ms perceived against
 a 300ms–1s rank/fetch/moderate pipeline); and every direction paying off is a property of the
 staging. The demo proves one thing, and it's the thing that matters first: **the control loop
 is legible and steering feels causal.**
@@ -220,3 +226,30 @@ a parked lift could open a neighbour of the card's post; labels near the screen 
 clamped back onto the thumb). Fourteen minor findings were folded in where cheap — per-label
 text measured once, colours precomputed, the ring scanned once per selection, restart clearing
 the new state, frame-rate-independent fades that snap under reduced motion.
+
+## 9. Revision 4 — the map (2026-09-02)
+
+The founder's next sentence: *"you hop in the drift and you can control your algorithm … if you
+go so far right you are in extreme sports and from there the deeper you go the more extreme, the
+more you pull back the goofier … it's almost like a remote of what you want to see … the colors
+and everything should mean something."* A seven-agent panel ruled on it; the ruling, the edition-0
+world tables generated from the code, the colour grammar, the exact stability claim, the must-prove
+list and the founder decisions are in **`docs/dot-field-map.md`** — this section only records what
+changed in the file.
+
+Direction now means the same thing in every consumer world — right WILD, left CALM, up SERIOUS,
+down GOOFY — and named regions sit at fixed coordinates as nebulas whose positions never move. The
+ring grew a four-word compass (comparatives light in ember while pushing; one fly-out per session;
+a you-are-here bead), the label speaks place (`sports · in mma & boxing · 31% walked`), a chip strip
+switches worlds while keeping your coordinates (W cycles; ignored under a held thumb), a boundary
+tick marks crossing into a new placed region and a wall thud marks the edge ("as calm as this
+world gets" — logged as a clamped preference). Hue names the region (8 families by bearing with a
+deterministic collision rule, never in the ember band); lightness is read state and is *solved* per
+hue so every dot sits at the same contrast; the intensity ramp lives on the nebula only; the glow
+is the engine's belief. `getCell()` is a placement (argmax + 15% border blur + supply density);
+steering is displacement-counted (one explicit event per 4 cells) and logged. The creators world
+names its own x — familiar ↔ new — on its face. Everything above §8 that this contradicts is
+amended in place (§4, §7). `src/lib/driftPalette.ts` + `verify:driftpalette` hold the grammar's
+laws against the prototype's own tables.
+
+**Rev. 4 stays private until the provisional is filed** — the shared artifact is at rev. 3.

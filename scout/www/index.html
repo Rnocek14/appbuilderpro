@@ -19,6 +19,16 @@
      detent: a photo is a crisp click, a reel a rounder thud, a carousel a double tap (full
      texture through Core Haptics in the wrap; the stock tick can only tell reels apart; on the
      web the tick's sound carries it). Plus the seed's park lock: a resting thumb never ticks.
+     Rev. 4 (2026-09-02): the map means something. Direction is the same in every consumer world —
+     right is WILD, left CALM, up SERIOUS, down GOOFY — and regions (chess … basketball … BASE) sit at
+     hand-placed coordinates as named nebulas whose positions never move: geography is stable by
+     construction (a placement lookup, not an embedding projection). The referee's rulings: y is an
+     editorial region coordinate, never a per-item tone label; hue names the region (8 families by
+     bearing, never in the ember band); the intensity ramp lives on the nebula layer only; dots are
+     placed, not sampled — steering is logged as an explicit preference and in this demo changes only
+     the nebula glow; the creators world's x is "familiar ↔ new" (breaking), stated on its face. The
+     world tables are EDITION 0 (draft) until argued once; surf and rage-bait were removed. Rev. 4 stays
+     private until the provisional is filed.
      Staged world, simulated steering — no model, and it says so. -->
 <!doctype html>
 <html lang="en">
@@ -28,6 +38,7 @@
 <title>Scout</title>
 <style>
 :root{
+  --sab: env(safe-area-inset-bottom, 0px);
   --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
   --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
   --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
@@ -59,6 +70,16 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   font:12px var(--mono); color:var(--faint); z-index:40; max-width:92vw; white-space:nowrap;
   overflow:hidden; text-overflow:ellipsis}
 .driftlabel b{color:var(--dim); font-weight:400}
+.worldchip{position:fixed; top:calc(env(safe-area-inset-top,0px) + 10px); left:14px; z-index:40; font:13px var(--chrome);
+  color:var(--ink); border:1px solid var(--line); border-radius:999px; padding:4px 12px; background:rgba(19,24,34,.7);
+  backdrop-filter:blur(6px)}
+.worldchip:hover{border-color:rgba(232,131,58,.4)}
+.worldstrip{position:fixed; top:calc(env(safe-area-inset-top,0px) + 44px); left:14px; z-index:40; display:none; gap:6px;
+  padding:6px; background:rgba(19,24,34,.85); border:1px solid var(--line); border-radius:12px; backdrop-filter:blur(8px)}
+.worldstrip.on{display:flex}
+.worldstrip button{font:13px var(--chrome); color:var(--dim); border:1px solid transparent; border-radius:999px; padding:4px 12px}
+.worldstrip button[aria-pressed="true"]{color:var(--ink); border-color:var(--line); background:var(--surface-2)}
+.worldstrip button:hover{color:var(--ink)}
 .hapchip{position:fixed; left:50%; transform:translateX(-50%);
   bottom:calc(env(safe-area-inset-bottom,0px) + 162px); z-index:41;
   font:11px var(--mono); color:var(--dim); background:rgba(19,24,34,.8); border:1px solid var(--line);
@@ -72,7 +93,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 #field:focus{outline:none}
 #field:focus-visible{outline:none; box-shadow:inset 0 0 0 2px var(--ember-soft)}
 #fieldcv{position:absolute; inset:0; width:100%; height:100%}
-#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 136px); transform:translateX(-50%);
+#hint{position:fixed; left:50%; bottom:calc(env(safe-area-inset-bottom,0px) + 176px); transform:translateX(-50%);   /* above the compass word, never on it */
   font:italic 14px var(--serif); color:var(--faint); z-index:20; pointer-events:none;
   transition:opacity 400ms; white-space:nowrap}
 #vig{position:fixed; inset:0; pointer-events:none; z-index:17; opacity:0; transition:opacity 300ms;
@@ -177,6 +198,8 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   <button class="tab" id="tabTrail" role="tab" aria-selected="false">Trail</button>
 </div>
 <div class="driftlabel" id="driftlabel"></div>
+<button class="worldchip" id="worldchip" aria-haspopup="true" aria-expanded="false" aria-label="Switch world"></button>
+<div class="worldstrip" id="worldstrip" role="group" aria-label="Worlds"></div>
 <div class="pulse" id="pulse"></div>
 <div class="hapchip" id="hapchip"></div>
 
@@ -209,7 +232,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 
 <button id="homebtn" aria-label="Glide back to where you started"></button>
 
-<div class="keys">arrows move · Enter opens<br>H home · Esc closes</div>
+<div class="keys">arrows move · Shift+arrows steer · Enter opens<br>H home · W next world · Esc closes</div>
 <div class="hud">
   <span>scout v0 · staged world, simulated steering · <a href="seed.html" style="color:inherit">seed →</a></span>
   <button id="restart" aria-label="Restart">⟲</button>
@@ -227,12 +250,14 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
     <li>Your route is drawn on the land. The Trail tab is the journey as an object — tap any stop to glide back to it.</li>
     <li><em>Slow down</em> and the dots around your selection bloom into labels — read three neighbours while feeling one. Skim and they vanish; they must never clutter speed.</li>
     <li>Kinds feel different: a photo is a crisp click, a reel a rounder thud, a carousel a double tap. Full texture needs the Core Haptics plugin in the wrap; the stock tick only tells reels apart; on the web the sound carries it.</li>
+    <li><em>The map means something.</em> Right is wilder, left calmer, up more earnest, down goofier — in every world. The ring's four words are the compass; the label top-centre says where you are. Push east and hold: you are telling the algorithm "wilder", out loud.</li>
+    <li>Switch worlds (top-left chip, or W). New places, same compass. Read the place names on the land before you touch it.</li>
   </ul>
   <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
-  <div class="note">Honest label: the "algorithm" is a seeded simulation — 2,420 cells, twelve
-  staged currents, a dwell-weighted sampler for territory you haven't walked yet. What's real is
-  the steering loop, the trail, and the feel. A real engine would put embeddings under the same
-  thumb — and keeping THAT geography stable at scale is the open, unproven risk.</div>
+  <div class="note">Honest label: positions come from scores, not from learning — they cannot move
+  today. Steering moves you; it is also logged as a preference, and in this demo the only thing that
+  preference changes is the glow of the land ahead. Tomorrow's world is new. The staged content is a
+  seeded simulation; the steering loop, the compass and the feel are real.</div>
 </div>
 
 <div class="sr" aria-live="polite" id="live"></div>
@@ -247,55 +272,144 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 const SEED = 5417, PITCH = 44, JITTER = 4, WCOLS = 55, WROWS = 44;
 const WORLD_W = WCOLS*PITCH, WORLD_H = WROWS*PITCH, TOTAL_CELLS = WCOLS*WROWS;
 
-const CURRENTS = [
-  { key:'lake mornings',   hue:208, sat:34, authors:['Mara Quist','Otto Reyes','Harbor Bakehouse'],
-    caps:['Fog on the lake until nine, then this.','We put the canoe in before work. Ten minutes of glass water.','Ice out on the lake. Spring is now legally allowed.','The heron was back this morning. Same rock, same attitude.','Low tide of the year at the quarry — you can walk the whole ledge.'] },
-  { key:'workshop hands',  hue:30,  sat:38, authors:['Walworth Makers','Theo Lindt','Driftless Ceramics'],
-    caps:['New batch of walnut boards milled. The grain on the fourth one, though.','We got the kiln to temperature. Everything else today is a bonus.','Wheel-thrown, once-fired, still warm.','Rebuilt the front hub. The bike is now 60% new parts, same soul.','The apprentice pulled her first perfect shot today. Proud is the word.'] },
-  { key:'night skies',     hue:232, sat:30, authors:['Kettle Moraine Sky','Wren Adler','Ida Kovac'],
-    caps:['Night sky over the kettle. No edits, just cold hands.','Storm rolled through at six — the light after was unreal.','A whole hour of moon and then the clouds took it back.','Meteor count: eleven. Coffee count: three.','The tower lights went off at two and the sky doubled.'] },
-  { key:'slow food',       hue:14,  sat:36, authors:['The Slow Ferment','Nightjar Coffee','June Halloran'],
-    caps:['Third attempt at the sourdough crumb and I finally believe the hype.','The dough knows when you rush it. Today I did not rush it.','Espresso experiments continue. This one tasted like a plum, no notes.','First tomato of the year. It weighs almost nothing and it is everything.','The market opens at seven. The good rhubarb is gone by eight.'] },
-  { key:'trail work',      hue:132, sat:26, authors:['Badger Trail Assoc','Lake Geneva Runners','Cole Brandt'],
-    caps:['The trail crew finished the boardwalk over the marsh. Go before it gets loud.','Saturday long run, 14 miles, one gas station donut earned.','The last mile of the ridge trail at golden hour.','New blazes on the north loop — the confusing fork is finally honest.','Culvert cleared, bridge decked, blisters counted.'] },
-  { key:'print & ink',     hue:268, sat:24, authors:['Prairie Loom Studio','Anna Marsh','Jon Petras'],
-    caps:['Two colors, one screen, forty prints. My arms know about it.','Sketchbook page 100. Started this thing in February.','A whole hour of sun in the print shop and I used it on this.','The mural on Main got its last coat today.','Found the negatives from the 2019 ice storm. Printing a few tonight.'] },
-  { key:'field recordings',hue:186, sat:28, authors:['Marsh Light Sound','Sam Aldana','Dee Okafor'],
-    caps:['Practice room, hour three. The bridge finally sounds like a bridge.','New strings, old songs.','The choir learned the hard passage. It only took a season.','Six-string Saturday. The dog remains the only audience that matters.','Recorded the marsh at dawn. The redwings carry the top line.'] },
-  { key:'garden logs',     hue:96,  sat:26, authors:['Ruthie Vance','Priya Nair','Field Notes WI'],
-    caps:['The ferns took over the north wall and honestly, let them.','The bees made it through winter. All three hives.','Barn swallows are back in the eaves, loud and on schedule.','Reading porch season has officially begun.','Painted the studio floor. Regret nothing yet.'] },
-  { key:'old maps',        hue:44,  sat:22, authors:['Delavan Camera Club','Otto Reyes','Anna Marsh'],
-    caps:['Found a 1962 topo map of the county at the estate sale.','The courthouse archive smells like every good afternoon.','Scanned the plat books. The lake had a different name once.','A very serious meeting about who gets the sunny chair.','The depot sign is back up, letters regilded.'] },
-  { key:'small machines',  hue:200, sat:18, authors:['Theo Lindt','Pinecliff Climbing','Walworth Makers'],
-    caps:['The lathe is level. The floor was the problem all along.','Flashed the little roof problem after six tries.','Tuned the press to a whisper. It only took a decade.','New belt, old motor, correct hum.','The drone mapped the orchard in nine minutes flat.'] },
-  { key:'harbor town',     hue:340, sat:22, authors:['Harbor Bakehouse','June Halloran','Dee Okafor'],
-    caps:['The ferry ran late and nobody minded.','Main Street at six, before the day claims it.','The bakery line wrapped the corner and held its manners.','New awnings on the old block. The green was the right call.','The pier lights came on early tonight.'] },
-  { key:'cold water',      hue:216, sat:40, authors:['Lake Geneva Runners','Wren Adler','Cole Brandt'],
-    caps:['Fifty-one degrees. In anyway.','The swim buoys went out today — summer is administratively real.','Mist on the water and one very committed kayaker.','The plunge crew hit 100 consecutive days.','Goggles fogged, spirits high.'] },
-];
+/* ===================== the semantic map — direction means the same thing in every world =====
+   x: calm ← → wild (intensity)   y: earnest ↑ ↓ goofy (tone). Regions are named places on that
+   plane at their natural coordinates in [-1, 1]²; their positions never move, so the geography
+   is stable BY CONSTRUCTION — a person learns "right is wilder, down is sillier" once and it holds
+   in every world. Hue is the region's own; chroma rises eastward (the wild side glows hotter);
+   lightness is read state. Coordinates and hues are ESTIMATES pending the cartography referee. */
+const AXES = { x: ['calm', 'wild'], y: ['serious', 'goofy'],
+  words: { x: [['calm', 'calmer'], ['wilder', 'wild']], y: [['serious', 'more serious'], ['goofier', 'goofy']] } };
+/* A world may override the x words when its east means something specific (the creators world
+   measures x — engagement velocity vs the niche baseline — so its compass says so on its face). */
+const WORLDS = {
+  sports: { name: 'sports', edition: 0, regions: [
+    { key:'chess',           x:-0.92, y:-0.35, authors:['Board & Clock','Ilse Marr'],     caps:['Queen sac on move 19. The engine hated it. The room did not.','Blitz at the park tables until the light went.','Endgame study: two knights, one lesson.'] },
+    { key:'golf',            x:-0.72, y:-0.10, authors:['Dawn Patrol Links','Rey Alonso'], caps:['Seven a.m., first tee, nobody else awake.','Read the break wrong three times. Fourth one dropped.','The par-three over water, finally, dry.'] },
+    { key:'pub games',       x:-0.66, y: 0.55, authors:['Lane 9 Lounge','Kip Dorsey'],     caps:['The 7-10 split. We do not talk about it.','Darts final, last leg, the whole pub silent.','Pool hustle, two quarters, one life lesson.'] },
+    { key:'bat & ball',      x:-0.35, y:-0.15, authors:['Dugout Radio','Nia Feld'],        caps:['Extra innings and the lights hum.','A pickoff so slow it counted as art.','Day five of the test match and the tea was decisive.'] },
+    { key:'soccer',          x:-0.10, y:-0.30, authors:['Sunday League FC','Tomas Reko'],  caps:['Ninety minutes, one goal, all of it.','A pass that opened the whole pitch like a door.','The keeper read it. Nobody else did.'] },
+    { key:'basketball',      x: 0.05, y: 0.05, authors:['Blacktop Notes','Jay Okon'],      caps:['Left-hand finish under two defenders.','Pickup at dusk. Winners stay. Legends mostly leave.','The crossover that ended a friendship.'] },
+    { key:'football',        x: 0.22, y:-0.45, authors:['Friday Lights','Coach Bram'],      caps:['Fourth and one. Everybody knew. It worked anyway.','Film study: the pull block nobody watched.','Homecoming, mud, a two-point conversion.'] },
+    { key:'trick shots',     x: 0.20, y: 0.80, authors:['Blooper Reel','Nell Park'],       caps:['Bottle flip off the roof, first try, witnesses.','The mascot fell. The mascot got up. Legend.','Trick shot, forty takes, one miracle.'] },
+    { key:'skate & bmx',     x: 0.45, y: 0.50, authors:['Ledge Life','Mo Castillo'],       caps:['Kickflip down the six after forty tries.','The security guard became the cameraman.','A slam so clean it got a round of applause.'] },
+    { key:'mma & boxing',    x: 0.70, y:-0.40, authors:['Cage Corner','Rafa Osei'],        caps:['Round three, both gassed, nobody quit.','A guillotine from nowhere.','Twelve rounds of jab, and then the jab was enough.'] },
+    { key:'moto',            x: 0.76, y: 0.25, authors:['Two Stroke Sunday','Vee Lindgren'], caps:['Whip over the triple. Landing negotiable.','Rebuilt the top end in the parking lot.','Mud so deep the bike just stayed.'] },
+    { key:'base & freeride', x: 0.92, y:-0.15, authors:['Exit Point','Kaia Storm'],        caps:['Three seconds of quiet, then the canopy.','Big-mountain line, first descent, all fall line.','Wingsuit through the notch. Do not.'] },
+  ] },
+  music: { name: 'music', edition: 0, regions: [
+    { key:'classical',  x:-0.90, y:-0.40, authors:['Fourth Movement','Léa Baum'],      caps:['The oboe held the room for eleven seconds.','Rehearsal note: less, then even less.','A Bach partita on a Tuesday, for nobody.'] },
+    { key:'folk',       x:-0.60, y:-0.10, authors:['Porch Sessions','Hank Ory'],       caps:['Three chords and the porch light.','The song her grandmother hummed, finally written down.','A murder ballad, sweetly.'] },
+    { key:'jazz',       x:-0.48, y:-0.50, authors:['Late Set','Dee Okafor'],           caps:['The bassist quoted the head backwards. Grins.','Second set, half the room, all the music.','Trading fours until the bartender begged.'] },
+    { key:'musicals',   x:-0.30, y: 0.40, authors:['Stage Door','Priya Nair'],         caps:['The eleven o’clock number landed at nine forty.','Tap break. The floor forgave us.','Understudy night. Understudy triumph.'] },
+    { key:'pop',        x: 0.00, y: 0.10, authors:['Hook City','Sam Aldana'],          caps:['The chorus arrives eight seconds early and it rules.','Bridge, key change, confetti.','A demo that should stay a demo. It did not.'] },
+    { key:'hip-hop',    x: 0.20, y:-0.10, authors:['Cypher Corner','Marcus Vell'],     caps:['Bars over a loop of a broken fan.','The beat switch at 2:10.','Freestyle, first take, no punch-ins.'] },
+    { key:'electronic', x: 0.45, y:-0.25, authors:['Modular Sundays','Ines Roth'],     caps:['Patch cables, one knob, forty minutes.','The drop that made the floor into one animal.','Field recording of a fridge, now a kick drum.'] },
+    { key:'novelty',    x:-0.15, y: 0.88, authors:['Kazoo Orchestra','Bo Tinsley'],    caps:['A love song to a parking meter.','Twelve kazoos, one anthem.','The rap about our cat, remastered.'] },
+    { key:'punk',       x: 0.62, y: 0.35, authors:['Basement Show','Riot Kettle'],      caps:['Ninety seconds, three chords, one broken string.','The pit opened and the ceiling tile fell.','Merch table was a suitcase.'] },
+    { key:'metal',      x: 0.88, y:-0.30, authors:['Down Tuned','Sigrid Voss'],        caps:['Blast beats at a tempo that has a name.','The breakdown. You know the one.','Seven strings, no apologies.'] },
+  ] },
+  kitchen: { name: 'kitchen', edition: 0, regions: [
+    { key:'tea & bread',    x:-0.90, y:-0.20, authors:['Slow Crumb','Ama Kessie'],      caps:['The crumb finally opened. Four years.','Steeping, timed, quiet.','A loaf that took two days and a nap.'] },
+    { key:'meal prep',      x:-0.55, y:-0.50, authors:['Sunday Boxes','Renna Cole'],     caps:['Twelve boxes, one pan, done by noon.','The rice ratio that finally behaved.','Roasted everything. Regret nothing.'] },
+    { key:'home baking',    x:-0.40, y: 0.30, authors:['Flour Dusted','Otis Vane'],      caps:['Croissants, attempt nine. Layers!','A birthday cake that leaned but delivered.','Cookies for the neighbours, and then not.'] },
+    { key:'fermentation',   x:-0.25, y:-0.70, authors:['Brine Lab','Teo Marsh'],         caps:['Day 14: the kraut has opinions.','Koji on rice, the whole room smells like spring.','A hot sauce that took six months to be polite.'] },
+    { key:'street food',    x: 0.10, y: 0.20, authors:['Cart Life','Mei Lun'],           caps:['Two dollars, one skewer, the whole night.','The line was the point.','Tacos at a truck that only opens when it rains.'] },
+    { key:'grilling',       x: 0.35, y:-0.10, authors:['Smoke Ring','Big Del'],           caps:['Fourteen hours. The bark is a religion.','Reverse sear, forward flavour.','The grill lid as weather report.'] },
+    { key:'molecular',      x: 0.50, y:-0.70, authors:['Bench Kitchen','Dr. Lise Aro'],  caps:['Spherified olive. Tasted like an olive. Success?','A foam that survived the walk to the table.','Liquid nitrogen and one very brave sorbet.'] },
+    { key:'hot chili',      x: 0.80, y:-0.15, authors:['Scoville Club','Paz Ruiz'],       caps:['Reaper salsa. The spoon regretted it.','Growing them was the easy part.','Milk on standby, pride on the line.'] },
+    { key:'kitchen fails',  x: 0.20, y: 0.85, authors:['Burnt Offerings','Nan Petty'],    caps:['The soufflé, in the moment before.','Salt for sugar. Full batch.','A pancake that reached the ceiling.'] },
+    { key:'eating contest', x: 0.88, y: 0.55, authors:['Plate Speed','Gus Halloway'],     caps:['Forty-two dumplings, a personal best, a personal reckoning.','The hot-dog method, explained once.','Pie contest. Hands-free. No mercy.'] },
+  ] },
+  creators: { name: 'creators', edition: 0, xWords: ['familiar', 'new'], xLit: ['more familiar', 'newer'],
+    hint: 'Same compass, new places — here right means newer: breaking now.', regions: [
+    { key:'essays',          x:-0.82, y:-0.50, authors:['Long Form','Ada Quill'],          caps:['A twenty-minute video about a four-second clip.','The essay that made a niche a nation.','Chapter markers as an act of respect.'] },
+    { key:'tutorials',       x:-0.55, y:-0.70, authors:['Show Don’t Tell','Marco Beni'],   caps:['The keyframe trick, at last, in one shot.','Colour grade in ninety seconds, no plugins.','A microphone comparison that ended arguments.'] },
+    { key:'storytime',       x:-0.40, y: 0.20, authors:['Pull Up A Chair','Jules Fenn'],   caps:['So the landlord shows up in a kayak.','Part three, and yes there is a part four.','The wedding, the dog, the fireworks.'] },
+    { key:'daily vlogs',     x:-0.25, y: 0.45, authors:['Slow Mornings','Noor Adib'],      caps:['Coffee, inbox, the good light at four.','Filmed the commute. Cut the commute.','A Tuesday, honestly.'] },
+    { key:'hooks & cuts',    x: 0.05, y:-0.15, authors:['First Three Seconds','Val Ostrow'], caps:['Cold open on the reveal. Retention up.','Jump cut every 1.8 seconds. Yes really.','The hook that was a question with no answer.'] },
+    { key:'breakouts',       x: 0.50, y:-0.45, authors:['Growth Chart','Ines Farah'],      caps:['From 400 followers to 40k in a week. Here is the post.','The account that did one thing eleven times.','A niche found its narrator this week.'] },
+    { key:'reaction',        x: 0.45, y: 0.60, authors:['Watching You Watch','Dom Reyes'],  caps:['Paused it forty times. Shocked forty times.','The face at 0:07 is the whole video.','Reacting to a reaction. It is turtles.'] },
+    { key:'trends & sounds', x: 0.72, y: 0.50, authors:['Sound On','Kit Mora'],            caps:['The audio has 40k uses and a shelf life of days.','Transition trend, third wave, still rising.','A dance you can do sitting down.'] },
+    { key:'memes',           x: 0.30, y: 0.90, authors:['Template Farm','Pixel Ruth'],     caps:['The format died Tuesday. Long live the format.','A caption that did more than the clip.','Low effort, high yield, no notes.'] },
+    { key:'hot takes',       x: 0.88, y: 0.05, authors:['Comment Section','Blaze Ortiz'],   caps:['A take nobody asked for, delivered loudly.','Duet this if you disagree. Everyone did.','Hot take, cold room, warm comments.'] },
+  ] },
+};
+const WORLD_KEYS = Object.keys(WORLDS);
+let worldKey = 'sports', CURRENTS = WORLDS.sports.regions, WORLD_SEED = SEED;
+/* Hue names the region and nothing else. It is assigned from the region's bearing around the world's
+   centre, quantized to eight families 39° apart, so neighbouring places wear neighbouring colours and
+   colour approximates location without becoming it; the band around ember (hsl 5–50) is never used —
+   ember is the one interaction accent. ≤8 hues per world (Healey/Ware: the categorical budget). */
+const HUE_FAMILIES = 8, HUE_START = 52, HUE_SPAN = 312;   // 52 → 364(=4): the ember band 5–51 stays empty
+function placeRegions(){                                   // world coordinates → cell centres; chroma follows x
+  CURRENTS.forEach((R, i) => {
+    R.cc = 1.5 + (R.x + 1)/2 * (WCOLS - 3); R.cr = 1.5 + (R.y + 1)/2 * (WROWS - 3);
+    R.spread = R.spread || 6.2;                            // cells; a region is a place, not a point
+    R.sat = Math.round(18 + 26 * (R.x + 1)/2);             // the wild side glows hotter (chroma = intensity, redundant with x)
+    const bearing = (Math.atan2(-R.y, R.x) + Math.PI*2) % (Math.PI*2);          // 0 = east, counter-clockwise
+    R.family = Math.floor(bearing / (Math.PI*2) * HUE_FAMILIES) % HUE_FAMILIES;
+    R.density = (Math.abs(R.x) + Math.abs(R.y) >= 1.1) ? 0.65 : 0.85;            // supply: the corners are honestly sparser
+    R.idx = i;
+  });
+  // collision rule (deterministic, index order): a region sharing a family with an earlier region closer
+  // than 0.5 plane-units moves to the nearest family — cyclic index distance, 7↔0 adjacent, ties → lower
+  // family — in which every member is ≥ 0.5 away. The table in the docs is this code's output.
+  const dist = (A, B) => Math.hypot(A.x - B.x, A.y - B.y);
+  for (let i = 0; i < CURRENTS.length; i++){
+    const R = CURRENTS[i], earlier = CURRENTS.slice(0, i);
+    const clash = fam => earlier.some(E => E.family === fam && dist(E, R) < 0.5);
+    if (clash(R.family)){
+      let best = -1, bestD = 99;
+      for (let fam = 0; fam < HUE_FAMILIES; fam++){
+        if (clash(fam)) continue;
+        const d = Math.min((fam - R.family + HUE_FAMILIES) % HUE_FAMILIES, (R.family - fam + HUE_FAMILIES) % HUE_FAMILIES);
+        if (d < bestD || (d === bestD && fam < best)){ bestD = d; best = fam; }
+      }
+      if (best >= 0) R.family = best;
+    }
+    R.hue = (HUE_START + R.family * (HUE_SPAN / HUE_FAMILIES)) % 360;
+  }
+}
+placeRegions();
+const SERENDIPITY = 0.15;   // border blur only — never a topic teleport (referee ruling)
 const KINDS = ['photo','photo','photo','photo','photo','photo','reel','reel','reel','carousel','carousel'];
 
-function hash2(c, r){ let h = (c*73856093) ^ (r*19349663) ^ SEED; h = (h ^ (h>>>13)) >>> 0; return h; }
+function hash2(c, r){ let h = (c*73856093) ^ (r*19349663) ^ WORLD_SEED; h = (h ^ (h>>>13)) >>> 0; return h; }
 function rng(seed){ let s = seed>>>0; return () => (s = (s*1664525 + 1013904223)>>>0, s/4294967296); }
 
-const MACRO = 12;
-function macroAnchor(mc, mr){
-  const r = rng(hash2(mc*7 + 3, mr*7 + 11));
-  return { cur: Math.floor(r()*CURRENTS.length),
-           x: (mc + 0.2 + r()*0.6) * MACRO, y: (mr + 0.2 + r()*0.6) * MACRO };
-}
+/* a cell's current comes from the regions around it — Gaussian weight by distance to each region's
+   fixed centre, with a small floor so no cell is ever voiceless. Nothing here depends on the user. */
 function currentWeights(c, r){
-  const mc = Math.floor(c/MACRO), mr = Math.floor(r/MACRO);
   const w = new Array(CURRENTS.length).fill(0);
-  for (let dm = -1; dm <= 1; dm++) for (let dn = -1; dn <= 1; dn++){
-    const a = macroAnchor(mc+dm, mr+dn);
-    const dx = c - a.x, dy = r - a.y;
-    w[a.cur] += Math.exp(-(dx*dx + dy*dy) / (2*7*7));
+  for (let i = 0; i < CURRENTS.length; i++){
+    const R = CURRENTS[i], dx = c + 0.5 - R.cc, dy = r + 0.5 - R.cr;
+    w[i] = Math.exp(-(dx*dx + dy*dy) / (2*R.spread*R.spread)) + 0.015;
   }
   return w;
 }
+/* where the viewport centre sits on the plane, in [-1,1]² — the coordinates the label speaks */
+function planePos(){
+  const cx = (camX + innerWidth/2)/PITCH, cy = (camY + innerHeight/2)/PITCH;
+  return [ Math.max(-1, Math.min(1, (cx - 1.5)/(WCOLS - 3)*2 - 1)), Math.max(-1, Math.min(1, (cy - 1.5)/(WROWS - 3)*2 - 1)) ];
+}
+function axisWord(v, axis){                                // the label speaks place in absolutes; the ring speaks direction
+  const a = Math.abs(v), side = v < 0 ? 0 : 1;
+  if (a < 0.6) return '';
+  const W = WORLDS[worldKey];
+  if (axis === 'x' && W.xWords) return W.xWords[side];       // a world that names its own x is named by it everywhere
+  return AXES.words[axis][side][side ? 1 : 0];
+}
+let labelRegion = -1;
+function dominantRegion(){                                 // the place under the viewport centre, with hysteresis at borders
+  const w = currentWeights(Math.round((camX + innerWidth/2)/PITCH - 0.5), Math.round((camY + innerHeight/2)/PITCH - 0.5));
+  let best = 0, total = 0; for (let i = 0; i < w.length; i++){ total += w[i]; if (w[i] > w[best]) best = i; }
+  const share = w[best] / total, keep = labelRegion >= 0 ? w[labelRegion] / total : 0;
+  if (labelRegion < 0 || share > keep + 0.1) labelRegion = best;
+  return (w[labelRegion] / total) > 0.34 ? labelRegion : -1;
+}
 
-const affinity = new Array(CURRENTS.length).fill(0);
+let affinity = new Array(CURRENTS.length).fill(0);
 function affinityBoost(i, amt){ affinity[i] = Math.max(0, Math.min(8, affinity[i] + amt)); }
 setInterval(() => { for (let i = 0; i < affinity.length; i++) affinity[i] *= 0.9622; }, 5000);
 function topCurrents(n){
@@ -312,20 +426,19 @@ function getCell(c, r){
   if (cell) return cell;
   const rd = rng(hash2(c, r));
   const w = currentWeights(c, r);
-  let best = 0; for (let i = 1; i < w.length; i++) if (w[i] > w[best]) best = i;
+  // placement, not sampling: the region is the argmax at this cell — a lookup that nothing the user does
+  // can move. Border blur: a hashed 15% of cells take the second-best region when it is within reach.
+  let best = 0, second = -1;
+  for (let i = 1; i < w.length; i++) if (w[i] > w[best]) best = i;
+  for (let i = 0; i < w.length; i++) if (i !== best && (second < 0 || w[i] > w[second])) second = i;
+  const reg = best;
   let cur = best;
-  if (rd() < 0.15){ cur = Math.floor(rd()*CURRENTS.length); }
-  else {
-    let total = 0; const mix = w.map((wv, i) => { const m = wv * (1 + affinity[i]*1.5); total += m; return m; });
-    let pick = rd()*total;
-    for (let i = 0; i < mix.length; i++){ pick -= mix[i]; if (pick <= 0){ cur = i; break; } }
-  }
-  const hot = Math.max(...affinity);
-  const rel = hot > 0 ? affinity[cur]/hot : 1;
-  const empty = rd() < Math.min(0.40, 0.10 + 0.28*(1 - rel)*(hot > 1 ? 1 : 0.3));
+  if (second >= 0 && rd() < SERENDIPITY && w[second] >= 0.35 * w[best]) cur = second;
+  // density = supply: a per-region constant decided by the hash alone — affinity never empties or fills a cell
+  const empty = rd() > CURRENTS[cur].density;
   const C = CURRENTS[cur];
-  cell = empty ? { empty: true, c, r, key: k } : {
-    c, r, key: k, cur,
+  cell = empty ? { empty: true, c, r, key: k, reg } : {
+    c, r, key: k, cur, reg,
     author: C.authors[Math.floor(rd()*C.authors.length)],
     cap: C.caps[Math.floor(rd()*C.caps.length)],
     kind: KINDS[Math.floor(rd()*KINDS.length)],
@@ -337,17 +450,53 @@ function getCell(c, r){
   cells.set(k, cell);
   return cell;
 }
-function curColor(i){ const C = CURRENTS[i]; return `hsl(${C.hue} ${C.sat+22}% 62%)`; }
+/* one meaning per channel: HUE = region; LIGHTNESS = read state; the intensity ramp lives on the nebula only. */
+/* lightness is the read state and nothing else. A fixed L lets hue leak into brightness (an HSL
+   yellow at L40 clears 4.5:1 against the ground while a blue at the same L fails 3:1), so every hue
+   is solved to the same contrast against --ground: read dots READ_CONTRAST, unread UNREAD_CONTRAST.
+   A read blue is exactly as dim as a read yellow. Mirrors src/lib/driftPalette.ts;
+   verify:driftpalette keeps the two in step. */
+const READ_CONTRAST = 3.5, UNREAD_CONTRAST = 8, GROUND_HEX = '#0B0E14';
+function hslToRgb(h, s, l){
+  const S = s / 100, L = l / 100, c = (1 - Math.abs(2 * L - 1)) * S, hp = ((h % 360) + 360) % 360 / 60, x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (hp < 1) [r, g, b] = [c, x, 0]; else if (hp < 2) [r, g, b] = [x, c, 0]; else if (hp < 3) [r, g, b] = [0, c, x];
+  else if (hp < 4) [r, g, b] = [0, x, c]; else if (hp < 5) [r, g, b] = [x, 0, c]; else [r, g, b] = [c, 0, x];
+  const m = L - c / 2; return [r + m, g + m, b + m];
+}
+function relLum([r, g, b]){ const lin = c => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b); }
+const GROUND_LUM = relLum([1, 3, 5].map(k => parseInt(GROUND_HEX.slice(k, k + 2), 16) / 255));
+function lightnessFor(h, s, target){
+  let lo = 10, hi = 96;
+  for (let k = 0; k < 28; k++){ const mid = (lo + hi) / 2; if ((relLum(hslToRgb(h, s, mid)) + 0.05) / (GROUND_LUM + 0.05) < target) lo = mid; else hi = mid; }
+  return Math.round(hi * 10) / 10;
+}
+function curColor(i){ const h = CURRENTS[i].hue; return `hsl(${h} 52% ${lightnessFor(h, 52, UNREAD_CONTRAST)}%)`; }
+function readColor(i){ const h = CURRENTS[i].hue; return `hsl(${h} 30% ${lightnessFor(h, 30, READ_CONTRAST)}%)`; }
 
 /* ===================== camera ============================================================== */
 const field = document.getElementById('field');
 let camX = 0, camY = 0, camVX = 0, camVY = 0;
 let glide = null, glideTimer = 0;
 
+let wallHit = false, wallDir = [0, 0];
+const steerAcc = [0, 0], steerLog = [];
 function clampCam(){
   const mX = WORLD_W - innerWidth, mY = WORLD_H - innerHeight;
-  camX = mX > 0 ? Math.max(0, Math.min(mX, camX)) : mX/2;
-  camY = mY > 0 ? Math.max(0, Math.min(mY, camY)) : mY/2;
+  const bx = mX > 0 ? Math.max(0, Math.min(mX, camX)) : mX/2, by = mY > 0 ? Math.max(0, Math.min(mY, camY)) : mY/2;
+  const hit = (bx !== camX || by !== camY) && conveyorOn;
+  wallDir = hit ? [Math.sign(camX - bx), Math.sign(camY - by)] : [0, 0];   // which edge: as wild as this world gets
+  if (hit && !wallHit){
+    wallHit = true; detent(performance.now(), 'wall'); field.dataset.wall = (field.dataset.wall|0) + 1;
+    // the wish "calmer than this world has" is logged as an explicit, clamped preference — no affinity changes
+    const [px, py] = planePos(), W = WORLDS[worldKey], xw = W.xWords || AXES.x;
+    steerLog.push({ sx: wallDir[0], sy: wallDir[1], clamped: true, x: +px.toFixed(2), y: +py.toFixed(2), t: Math.round(performance.now()) });
+    if (steerLog.length > 200) steerLog.shift();
+    field.dataset.steers = steerLog.length;
+    const word = wallDir[0] < 0 ? xw[0] : wallDir[0] > 0 ? xw[1] : wallDir[1] < 0 ? AXES.y[0] : AXES.y[1];
+    document.getElementById('live').textContent = 'as ' + word + ' as this world gets';
+  } else if (!hit) wallHit = false;
+  camX = bx; camY = by;
 }
 function screenToWorld(sx, sy){ return [sx + camX, sy + camY]; }
 
@@ -376,6 +525,8 @@ const TEXTURE = {
   photo:    { intensity: 0.55, sharpness: 0.75, count: 1, gap: 0,  cap: 'selection', vibe: 12,           tone: 1900, body: 150, ms: 8,  gain: 0.13 },
   reel:     { intensity: 0.85, sharpness: 0.30, count: 1, gap: 0,  cap: 'impact',    vibe: 18,           tone: 1150, body: 105, ms: 16, gain: 0.17 },
   carousel: { intensity: 0.60, sharpness: 0.60, count: 2, gap: 34, cap: 'selection', vibe: [8, 22, 8],   tone: 1700, body: 150, ms: 8,  gain: 0.13, double: 34 },
+  boundary: { intensity: 0.70, sharpness: 0.40, count: 1, gap: 0,  cap: 'impact',    vibe: 20,           tone: 700,  body: 90,  ms: 22, gain: 0.16 },   // crossing into another region
+  wall:     { intensity: 0.90, sharpness: 0.30, count: 1, gap: 0,  cap: 'impact',    vibe: 30,           tone: 420,  body: 70,  ms: 30, gain: 0.20 },   // the world ends here
 };
 /* BLOOM: the ring nearest the selection swells into labels while the selection moves slowly over
    the world — thumb speed plus streaming speed, one law for both grips. Shows under 350px/s,
@@ -383,8 +534,13 @@ const TEXTURE = {
    read), at most six, never over the selection itself (a keep-out disc the thumb sits in). */
 const BLOOM = { R: PITCH*1.65, MAX: 6, SHOW_BELOW: 350, HIDE_ABOVE: 560, K: 520, C: 34, OUT: 15, KEEP_OUT: 26,
   FONT: '11px -apple-system, "Segoe UI", system-ui, sans-serif' };
-const CUR_FILL = CURRENTS.map((C, i) => curColor(i));
-const CUR_STROKE = CURRENTS.map(C => `hsla(${C.hue} ${C.sat+20}% 60% / .45)`);
+let CUR_FILL = [], CUR_STROKE = [], CUR_READ = [];
+function buildPalette(){
+  CUR_FILL = CURRENTS.map((C, i) => curColor(i));
+  CUR_READ = CURRENTS.map((C, i) => readColor(i));
+  CUR_STROKE = CURRENTS.map(C => `hsla(${C.hue} ${C.sat+20}% 60% / .45)`);
+}
+buildPalette();
 /* a label that identifies: drop a leading article, keep two words for organisation names */
 function shortName(author){
   const all = author.split(' '), w = all.filter((x, i) => !(i === 0 && /^(the|a|an)$/i.test(x)));
@@ -418,7 +574,9 @@ function settleDwell(now){
 function setSelection(cell, now, tick){
   if (sel && sel.key === cell.key) return;
   const prev = sel; sel = cell;
-  if (tick){ detent(now, cell.kind); spawnSparks(cell); }
+  const crossed = prev && prev.reg !== cell.reg;                                   // a new place, by the land's own argmax
+  if (tick){ detent(now, crossed ? 'boundary' : cell.kind); spawnSparks(cell); }   // a new place is a longer tick
+  if (crossed){ document.getElementById('live').textContent = 'entering ' + CURRENTS[cell.reg].key; }
   swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;
   cardContent(cell);
   dwellStart = now;
@@ -512,6 +670,7 @@ const swell = spring(550, 30);
 swell.value = 1; swell.target = 1;
 let dispNow = new Map();
 const bloomRecs = new Map(); let bloomOn = false, lastBloomCount = -1, bloomSel = null, bloomNear = [];
+let sectorX = 0, sectorY = 0, ringLit = 0, flyT0 = 0, lastLitWord = '';
 const byDist = (a, b) => a[0] - b[0];
 const placedPills = []; let lastLabelHit = -1, lastLabelSkipped = -1;
 
@@ -528,8 +687,9 @@ let armT = 0, bandT = 0;
    home. Displacement = velocity vector, same envelope, same release-stops-dead law. While
    steering, selection becomes the reticle near screen center that the world streams past. */
 const PUCK = { r: 44, knob: 14, dead: 7, max: 40 };
-let puckMode = false, puckCX = 0, puckCY = 0;
-function sizePuck(){ puckCX = innerWidth/2; puckCY = innerHeight - 92; }
+let puckMode = false, puckCX = 0, puckCY = 0, flewOnce = false;
+function sizePuck(){ puckCX = innerWidth/2; puckCY = innerHeight - 92 - safeBottom(); }
+function safeBottom(){ const v = getComputedStyle(document.documentElement).getPropertyValue('--sab'); return parseFloat(v) || 0; }
 function reticle(){ return [innerWidth/2, innerHeight*0.42]; }
 
 let lastMoveAt = 0;
@@ -554,6 +714,7 @@ field.addEventListener('pointerdown', e => {
   const now = performance.now();
   if (Math.hypot(px - puckCX, py - puckCY) < PUCK.r + 10){
     puckMode = true;                              // the thumb is home; the world does the walking
+    try { if (!sessionStorage.getItem('drift.compass.flew')){ sessionStorage.setItem('drift.compass.flew', '1'); flyT0 = now; } } catch(e){ if (!flyT0 && !flewOnce){ flewOnce = true; flyT0 = now; } }
     cardEl.classList.add('docked');
     if (firstTouch){ firstTouch = false; hintEl.style.opacity = '0'; fadeHapchipSoon(); }
     return;
@@ -638,8 +799,9 @@ field.addEventListener('pointerleave', () => { hovering = false; armT = bandT = 
 const eg = { N: document.getElementById('egN'), S: document.getElementById('egS'),
              W: document.getElementById('egW'), E: document.getElementById('egE') };
 const vig = document.getElementById('vig');
+let egDir = [0, 0];
 function setEdgeGlow(tx, ty, on){
-  conveyorOn = on;
+  conveyorOn = on; egDir = on ? [Math.abs(tx) > 10 ? Math.sign(tx) : 0, Math.abs(ty) > 10 ? Math.sign(ty) : 0] : [0, 0];
   eg.W.classList.toggle('on', on && tx < -10); eg.E.classList.toggle('on', on && tx > 10);
   eg.N.classList.toggle('on', on && ty < -10); eg.S.classList.toggle('on', on && ty > 10);
 }
@@ -681,10 +843,14 @@ function makeSprite(size, stops){
   const x = c.getContext('2d'); x.fillStyle = g; x.fillRect(0, 0, size, size);
   return c;
 }
-const glowSprites = CURRENTS.map(C =>
-  makeSprite(64, [[0, `hsla(${C.hue} ${C.sat+42}% 64% / .85)`], [0.35, `hsla(${C.hue} ${C.sat+38}% 56% / .28)`], [1, 'hsla(0 0% 0% / 0)']]));
-const nebulaSprites = CURRENTS.map(C =>
-  makeSprite(256, [[0, `hsla(${C.hue} ${C.sat+28}% 48% / .21)`], [0.55, `hsla(${C.hue} ${C.sat+20}% 38% / .08)`], [1, 'hsla(0 0% 0% / 0)']]));
+let glowSprites = [], nebulaSprites = [];
+function buildSprites(){
+  glowSprites = CURRENTS.map(C =>
+    makeSprite(64, [[0, `hsla(${C.hue} ${C.sat+42}% 64% / .85)`], [0.35, `hsla(${C.hue} ${C.sat+38}% 56% / .28)`], [1, 'hsla(0 0% 0% / 0)']]));
+  nebulaSprites = CURRENTS.map(C =>            // peak alpha .30 so belief can scale it .18 → .30 at draw time
+    makeSprite(256, [[0, `hsla(${C.hue} ${C.sat+28}% 48% / .30)`], [0.55, `hsla(${C.hue} ${C.sat+20}% 38% / .11)`], [1, 'hsla(0 0% 0% / 0)']]));
+}
+buildSprites();
 const bloomSprite = makeSprite(128, [[0, 'rgba(255,244,230,.95)'], [0.18, 'rgba(232,131,58,.55)'], [0.5, 'rgba(232,131,58,.16)'], [1, 'rgba(0,0,0,0)']]);
 const sparkSprite = makeSprite(24, [[0, 'rgba(255,236,214,.95)'], [0.5, 'rgba(232,131,58,.4)'], [1, 'rgba(0,0,0,0)']]);
 
@@ -701,21 +867,26 @@ function spawnSparks(cell){
 }
 const comet = [];
 
+let drawDt = 0.016;
 function draw(now){
+  const dt = drawDt;
   ctx.clearRect(0, 0, innerWidth, innerHeight);
   const pad = PITCH;
   const c0 = Math.max(0, Math.floor((camX - pad)/PITCH)), c1 = Math.min(WCOLS-1, Math.ceil((camX + innerWidth + pad)/PITCH));
   const r0 = Math.max(0, Math.floor((camY - pad)/PITCH)), r1 = Math.min(WROWS-1, Math.ceil((camY + innerHeight + pad)/PITCH));
 
   ctx.globalCompositeOperation = 'lighter';
-  // the weather layer: topic currents as nebulas — legible before a single touch
-  const m0c = Math.floor(c0/MACRO)-1, m1c = Math.floor(c1/MACRO)+1;
-  const m0r = Math.floor(r0/MACRO)-1, m1r = Math.floor(r1/MACRO)+1;
-  for (let mr = m0r; mr <= m1r; mr++) for (let mc = m0c; mc <= m1c; mc++){
-    const a = macroAnchor(mc, mr);
-    const x = a.x*PITCH - camX, y = a.y*PITCH - camY;
-    if (x < -300 || y < -300 || x > innerWidth+300 || y > innerHeight+300) continue;
-    ctx.drawImage(nebulaSprites[a.cur], x-230, y-230, 460, 460);
+  // the weather layer: regions as nebulas at their fixed places on the plane — legible before a touch
+  const nameSpots = [];
+  for (let i = 0; i < CURRENTS.length; i++){
+    const R = CURRENTS[i];
+    const x = R.cc*PITCH - camX, y = R.cr*PITCH - camY, sz = 460 * (R.spread/6.2);
+    if (x < -sz || y < -sz || x > innerWidth+sz || y > innerHeight+sz) continue;
+    ctx.globalAlpha = (R.glow || 0.18) / 0.30;          // belief: the one thing steering visibly changes in this demo
+    ctx.drawImage(nebulaSprites[i], x - sz/2, y - sz/2, sz, sz);
+    ctx.globalAlpha = 1;
+    const ny = y - R.spread*PITCH*0.42;                    // where the name will sit
+    if (x > -80 && x < innerWidth + 80 && ny > 96 && ny < innerHeight - 150) nameSpots.push([R, x, y]);   // clear of the chrome above and the ring below
   }
 
   // the trail, drawn on the land: a worn glowing route
@@ -733,6 +904,19 @@ function draw(now){
     ctx.globalCompositeOperation = 'lighter';
   }
 
+  // place names on the land — a map you can read before you touch it
+  if (nameSpots.length){
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.font = 'italic 13px Charter, Georgia, "Times New Roman", serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const [R, x, y] of nameSpots){
+      const here = sel && sel.cur === R.idx;
+      ctx.globalAlpha = here ? 0.62 : 0.30;
+      ctx.fillStyle = `hsl(${R.hue} ${R.sat+30}% 78%)`;
+      ctx.fillText(R.key, x, y - R.spread*PITCH*0.42);
+    }
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+    ctx.globalCompositeOperation = 'lighter';
+  }
   // glow pass, then core pass — read dots are cooled embers, unread are lit
   const camSpd = Math.hypot(camVX, camVY);
   const streak = !reduceMotion && camSpd > 350;
@@ -751,7 +935,7 @@ function draw(now){
   }
   // sparks fly on every crossing
   for (let i = sparks.length-1; i >= 0; i--){
-    const p = sparks[i], t = (now - p.t0)/p.life;
+    const p = sparks[i], t = Math.max(0, (now - p.t0)/p.life);
     if (t >= 1){ sparks.splice(i, 1); continue; }
     const x = p.x + p.vx*t*(p.life/1000) - camX, y = p.y + p.vy*t*(p.life/1000) - camY;
     ctx.globalAlpha = (1-t)*0.8;
@@ -784,8 +968,8 @@ function draw(now){
     const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
     const isSel = cell === sel;
     const rad = Math.max(0.5, isSel ? 5.5*(1 + 0.55*swell.value) : 5);
-    ctx.globalAlpha = cell.read && !isSel ? 0.30 : 1;
-    ctx.fillStyle = isSel ? '#F5EDE0' : CUR_FILL[cell.cur];
+    ctx.globalAlpha = 1;                                 // read state is a solid colour, not an alpha — it stays legal
+    ctx.fillStyle = isSel ? '#F5EDE0' : (cell.read ? CUR_READ[cell.cur] : CUR_FILL[cell.cur]);
     ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
   }
   // neighbour bloom: swollen dots and their labels, placed outward from the selection so the
@@ -847,7 +1031,7 @@ function draw(now){
   // touch ripples
   ctx.strokeStyle = 'rgba(232,131,58,.5)';
   for (let i = ripples.length-1; i >= 0; i--){
-    const p = ripples[i], t = (now - p.t0)/450;
+    const p = ripples[i], t = Math.max(0, (now - p.t0)/450);   // a frame stamp can precede the touch stamp
     if (t >= 1){ ripples.splice(i, 1); continue; }
     ctx.globalAlpha = (1-t)*0.5; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(p.x-camX, p.y-camY, 12 + t*70, 0, 7); ctx.stroke();
@@ -881,6 +1065,62 @@ function draw(now){
   ctx.fillStyle = puckActive ? '#E8833A' : '#565C6E';
   ctx.beginPath(); ctx.arc(puckCX + kx, puckCY + ky, PUCK.knob, 0, 7); ctx.fill();
 
+  // the compass: the ring's four words are the axes (a world may name its own x). The word you push
+  // toward lights in its comparative; eight 45° sectors with hysteresis so diagonals don't flicker;
+  // words fade back over 400ms after release; the first ring touch flies the words to the edges once.
+  {
+    const W = WORLDS[worldKey], xw = W.xWords || AXES.x, xl = W.xLit || [AXES.words.x[0][1], AXES.words.x[1][0]];
+    const yw = AXES.y, yl = [AXES.words.y[0][1], AXES.words.y[1][0]];
+    let pushX = 0, pushY = 0;
+    if (puckActive){
+      const mag = Math.hypot(kx, ky) || 1;
+      const cx = kx/mag, cy = ky/mag, on = 0.42, off = 0.34;      // sin 22.5° ≈ .38: enter at .42, leave at .34
+      sectorX = Math.abs(cx) >= (sectorX ? off : on) && mag > PUCK.dead ? Math.sign(cx) : 0;
+      sectorY = Math.abs(cy) >= (sectorY ? off : on) && mag > PUCK.dead ? Math.sign(cy) : 0;
+      pushX = sectorX; pushY = sectorY;
+    } else if (conveyorOn){ pushX = Math.sign(egDir[0]); pushY = Math.sign(egDir[1]); sectorX = sectorY = 0; }
+    else { sectorX = sectorY = 0; }
+    ringLit += ((puckActive || conveyorOn ? 1 : 0) - ringLit) * Math.min(1, dt * 7.5);   // ≈400ms release fade
+    if (reduceMotion) ringLit = (puckActive || conveyorOn) ? 1 : 0;
+    // one-time fly-out: the compass teaches itself, then collapses
+    let fly = 0;
+    if (flyT0){ const e = (now - flyT0)/1000; fly = e < 0.6 ? forge(e/0.6) : e < 3.1 ? 1 : e < 3.7 ? 1 - forge((e-3.1)/0.6) : 0; if (e >= 3.7) flyT0 = 0; }
+    const [rx0, ry0] = reticle();
+    const edgeOf = { W: [14, ry0, 'left'], E: [innerWidth - 14, ry0, 'right'], N: [innerWidth/2, 96, 'center'], S: [innerWidth/2, innerHeight - 150, 'center'] };
+    ctx.font = '11px -apple-system, "Segoe UI", system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    try { ctx.letterSpacing = '0.08em'; } catch(e){}
+    const words = [[pushX < 0 ? xl[0] : xw[0], puckCX - PUCK.r - 8, puckCY, pushX < 0, 'right', 'W', wallDir[0] < 0],
+                   [pushX > 0 ? xl[1] : xw[1], puckCX + PUCK.r + 8, puckCY, pushX > 0, 'left', 'E', wallDir[0] > 0],
+                   [pushY < 0 ? yl[0] : yw[0], puckCX, puckCY - PUCK.r - 12, pushY < 0, 'center', 'N', wallDir[1] < 0],
+                   [pushY > 0 ? yl[1] : yw[1], puckCX, puckCY + PUCK.r + 12, pushY > 0, 'center', 'S', wallDir[1] > 0]];
+    for (const [w, x, y, lit, align, side, atWall] of words){
+      const [ex, ey, ealign] = edgeOf[side];
+      const px_ = x + (ex - x)*fly, py_ = y + (ey - y)*fly;
+      ctx.textAlign = fly > 0.5 ? ealign : align;
+      ctx.globalAlpha = atWall ? 0.18 : (lit ? 0.95 : 0.32 + 0.23*ringLit + 0.4*fly);
+      ctx.fillStyle = lit ? '#E8833A' : '#8A8FA3';
+      ctx.fillText(w.toUpperCase(), px_, py_);
+    }
+    try { ctx.letterSpacing = '0px'; } catch(e){}
+    // you are here: a bead inside the ring at your place on the plane — the knob is what you push, the bead is where you are
+    { const [bx, by] = planePos();
+      ctx.globalAlpha = puckActive ? 0.9 : 0.5; ctx.fillStyle = '#8A8FA3';
+      ctx.beginPath(); ctx.arc(puckCX + bx*0.7*PUCK.r, puckCY + by*0.7*PUCK.r, 2.5, 0, 7); ctx.fill(); }
+    // the same word, large and faint, at the edge you are travelling toward — the primary carrier while pushing
+    if ((pushX || pushY) && !fly){
+      ctx.font = '11px -apple-system, "Segoe UI", system-ui, sans-serif'; ctx.fillStyle = '#E8833A'; ctx.globalAlpha = 0.85;
+      try { ctx.letterSpacing = '0.08em'; } catch(e){}
+      if (pushX > 0){ ctx.textAlign = 'right'; ctx.fillText(xl[1].toUpperCase(), innerWidth - 14, ry0); }
+      if (pushX < 0){ ctx.textAlign = 'left'; ctx.fillText(xl[0].toUpperCase(), 14, ry0); }
+      if (pushY < 0){ ctx.textAlign = 'center'; ctx.fillText(yl[0].toUpperCase(), innerWidth/2, 96); }
+      if (pushY > 0){ ctx.textAlign = 'center'; ctx.fillText(yl[1].toUpperCase(), innerWidth/2, innerHeight - 150); }
+      try { ctx.letterSpacing = '0px'; } catch(e){}
+      const litWord = [pushX > 0 ? xl[1] : pushX < 0 ? xl[0] : '', pushY > 0 ? yl[1] : pushY < 0 ? yl[0] : ''].filter(Boolean).join(' · ');
+      if (litWord !== lastLitWord){ lastLitWord = litWord; document.getElementById('live').textContent = litWord; }
+    } else if (lastLitWord){ lastLitWord = ''; }
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic'; ctx.globalAlpha = 1;
+  }
+
   // the needle the world streams past
   if (puckActive){
     const [rx, ry] = reticle();
@@ -899,7 +1139,17 @@ function draw(now){
 }
 
 /* ===================== the one rAF loop ==================================================== */
-let lastT = 0, lastUi = 0, lastPathAt = 0, lastPage = 0;
+let lastT = 0, lastUi = 0, lastPathAt = 0, lastPage = 0, prevCamX = 0, prevCamY = 0;
+function steerEvent(sx, sy){
+  const [pxp, pyp] = planePos();
+  for (let i = 0; i < CURRENTS.length; i++){
+    const R = CURRENTS[i], along = (R.x - pxp)*sx + (R.y - pyp)*sy;
+    if (along > 0.15) affinityBoost(i, 0.4);
+  }
+  steerLog.push({ sx, sy, x: +pxp.toFixed(2), y: +pyp.toFixed(2), t: Math.round(performance.now()) });
+  if (steerLog.length > 200) steerLog.shift();
+  field.dataset.steers = steerLog.length;
+}
 const trailPath = [];
 function frame(t){
   requestAnimationFrame(frame);
@@ -937,6 +1187,18 @@ function frame(t){
     } else { armT = 0; bandT = 0; }
   } else { armT = 0; bandT = 0; }
   setEdgeGlow(wantX, wantY, armed && (Math.abs(wantX) > 10 || Math.abs(wantY) > 10));
+  // steering IS a preference. It is measured in cells, not seconds: every 4 cells of net camera travel
+  // along an axis while armed is one explicit event — regions that lie ahead gain affinity, which in this
+  // demo changes only the nebula glow (the walked world never rewrites). Logged for the harness.
+  if (armed && (Math.abs(wantX) > 10 || Math.abs(wantY) > 10)){
+    steerAcc[0] += camX - prevCamX; steerAcc[1] += camY - prevCamY;
+    const sx = Math.abs(wantX) > 10 ? Math.sign(wantX) : 0, sy = Math.abs(wantY) > 10 ? Math.sign(wantY) : 0;
+    if (Math.abs(steerAcc[0]) >= 4*PITCH){ steerEvent(Math.sign(steerAcc[0]), 0); steerAcc[0] = 0; }
+    if (Math.abs(steerAcc[1]) >= 4*PITCH){ steerEvent(0, Math.sign(steerAcc[1])); steerAcc[1] = 0; }
+    const W = WORLDS[worldKey], xw = W.xWords || AXES.x;
+    field.dataset.steer = [sx > 0 ? xw[1] : sx < 0 ? xw[0] : '', sy > 0 ? AXES.y[1] : sy < 0 ? AXES.y[0] : ''].filter(Boolean).join(' ');
+  } else { steerAcc[0] = steerAcc[1] = 0; if (field.dataset.steer) field.dataset.steer = ''; }
+  prevCamX = camX; prevCamY = camY;
 
   if (reduceMotion){
     camVX = camVY = 0;
@@ -1055,6 +1317,7 @@ function frame(t){
     }
   }
 
+  drawDt = dt;
   draw(t);
   positionCard((touching || hovering) && !puckMode);
 }
@@ -1250,11 +1513,18 @@ document.getElementById('tabTrail').addEventListener('click', () => setView(true
 /* ===================== instruments ========================================================= */
 setInterval(() => { if (!touching) updateDriftLabel(); }, 2000);
 function updateDriftLabel(){
-  const tops = topCurrents(2);
+  const [x, y] = planePos();
   const el = document.getElementById('driftlabel');
-  const pct = Math.round(100*cells.size/TOTAL_CELLS);
-  el.innerHTML = pct + '% walked<b></b>';
-  el.querySelector('b').textContent = tops.length ? ' · drifting toward ' + tops.join(' · ') : '';
+  let populated = 0; for (const c of cells.values()) if (!c.empty) populated++;
+  const pct = Math.round(100*populated/(TOTAL_CELLS*0.82));                 // of the cells a full walk would fill (ESTIMATE of mean density)
+  const here = dominantRegion();
+  // priority: the place implies the coordinates, so axis words appear only when no place dominates (fits 390px)
+  const parts = [WORLDS[worldKey].name, here >= 0 ? 'in ' + CURRENTS[here].key : [axisWord(x, 'x'), axisWord(y, 'y')].filter(Boolean).join(' · ')].filter(Boolean);
+  // belief glow moves on the label's clock, never mid-gesture
+  if (!touching) for (let i = 0; i < CURRENTS.length; i++) CURRENTS[i].glow = 0.18 + 0.12 * Math.max(0, Math.min(1, affinity[i] / 4));
+  el.innerHTML = '<b></b>';
+  el.querySelector('b').textContent = parts.join(' · ') + ' · ' + pct + '% walked';
+  field.dataset.plane = x.toFixed(2) + ',' + y.toFixed(2); field.dataset.world = worldKey;
 }
 const homeBtn = document.getElementById('homebtn');
 const ARROWS = ['→','↘','↓','↙','←','↖','↑','↗'];
@@ -1315,6 +1585,15 @@ field.addEventListener('keydown', e => {
   else if (k === 'ArrowDown') dr = 1; else if (k === 'ArrowUp') dr = -1;
   else if (k === 'Enter' && sel){ e.preventDefault(); openPost(sel); return; }
   else if (k === 'h' || k === 'H'){ e.preventDefault(); homeBtn.click(); return; }
+  else if (k === 'w' || k === 'W'){ e.preventDefault(); switchWorld(WORLD_KEYS[(WORLD_KEYS.indexOf(worldKey) + 1) % WORLD_KEYS.length]); return; }
+  if (e.shiftKey && (dc || dr)){                             // steer by keyboard: half a screen, one explicit event, the word spoken
+    e.preventDefault();
+    startGlide(camX + dc*innerWidth/2, camY + dr*innerHeight/2, 350);
+    steerEvent(dc, dr);
+    const W = WORLDS[worldKey], xl = W.xLit || [AXES.words.x[0][1], AXES.words.x[1][0]];
+    document.getElementById('live').textContent = [dc > 0 ? xl[1] : dc < 0 ? xl[0] : '', dr > 0 ? AXES.words.y[1][0] : dr < 0 ? AXES.words.y[0][1] : ''].filter(Boolean).join(' · ');
+    return;
+  }
   else return;
   e.preventDefault();
   if (!sel) return;
@@ -1333,13 +1612,14 @@ field.addEventListener('keydown', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape'){
-    if (postOn) closePost();
+    if (worldStrip.classList.contains('on')){ worldStrip.classList.remove('on'); worldChip.setAttribute('aria-expanded', 'false'); }
+    else if (postOn) closePost();
     else document.getElementById('feelcard').classList.remove('on');
   }
 });
 
 /* ===================== HUD + boot ========================================================== */
-document.getElementById('restart').addEventListener('click', () => {
+function resetWorld(){
   cells.clear(); mediaCache.clear(); affinity.fill(0); journey.length = 0; trailPath.length = 0;
   sparks.length = 0; ripples.length = 0; comet.length = 0;
   sel = null; dispNow.clear();
@@ -1347,7 +1627,40 @@ document.getElementById('restart').addEventListener('click', () => {
   ticks = 0; field.dataset.ticks = 0;
   camVX = camVY = 0; glide = null; clearTimeout(glideTimer);
   boot(); updateDriftLabel();
+}
+document.getElementById('restart').addEventListener('click', resetWorld);
+/* switching worlds keeps the compass and changes the places: same axes, new regions, fresh geography */
+const worldChip = document.getElementById('worldchip'), worldStrip = document.getElementById('worldstrip');
+function switchWorld(key){
+  if (!WORLDS[key] || touching) return;                       // never under a held thumb — lift first, then switch
+  const [keepX, keepY] = planePos();                          // your place on the plane survives the switch
+  worldKey = key; CURRENTS = WORLDS[key].regions; WORLD_SEED = SEED ^ (WORLD_KEYS.indexOf(key) * 7919);
+  placeRegions(); affinity = new Array(CURRENTS.length).fill(0); buildPalette(); buildSprites();
+  if (postOn) closePost();
+  resetWorld(); renderWorldChrome(); worldStrip.classList.remove('on'); worldChip.setAttribute('aria-expanded', 'false');
+  camX = (1.5 + (keepX + 1)/2 * (WCOLS - 3)) * PITCH - innerWidth/2;   // same coordinates, new places
+  camY = (1.5 + (keepY + 1)/2 * (WROWS - 3)) * PITCH - innerHeight/2; clampCam();
+  { const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55); const c = nearestCell(wx, wy);
+    if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; } }
+  updateDriftLabel();
+  hintEl.textContent = WORLDS[key].hint || ('Same compass, new places — right is still ' + AXES.x[1] + ', down is still ' + AXES.y[1] + '.');
+  hintEl.style.opacity = '1'; setTimeout(() => { hintEl.style.opacity = '0'; }, 3200);
+}
+function renderWorldChrome(){
+  worldChip.textContent = WORLDS[worldKey].name + ' ▾';
+  worldStrip.textContent = '';
+  for (const k of WORLD_KEYS){
+    const b = document.createElement('button'); b.textContent = WORLDS[k].name;
+    b.setAttribute('aria-pressed', String(k === worldKey));
+    b.addEventListener('click', () => switchWorld(k));
+    worldStrip.appendChild(b);
+  }
+}
+worldChip.addEventListener('click', () => {
+  const open = !worldStrip.classList.contains('on');
+  worldStrip.classList.toggle('on', open); worldChip.setAttribute('aria-expanded', String(open));
 });
+renderWorldChrome();
 document.getElementById('snd').addEventListener('click', e => {
   sndOn = !sndOn; e.currentTarget.setAttribute('aria-pressed', String(sndOn));
 });

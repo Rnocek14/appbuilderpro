@@ -58,6 +58,18 @@ transients (e.g., linear resonant actuators with programmable transient interfac
 ubiquitous in mobile devices since approximately 2016 but are not used as the primary feedback
 spine of any mainstream content-navigation interface.
 
+Two-dimensional semantic arrangements of media are themselves known and are not claimed herein:
+Gracenote, US 8,855,798, discloses a two-dimensional energy × valence grid of media items with
+selection of a sequential path across zones and zone colouring by item count; Sony, US 7,858,868,
+discloses mood-classified items arranged by angle with hue mapped to mood angle and saturation to
+mood strength; Monkeymedia, US 6,281,899, discloses steering a focal point across a topic space to
+select content; and the shipped services Musicovery (2006), Getty Moodstream (2008) and Every Noise
+at Once (2013) present music on named two-dimensional axes. None of these discloses hysteresis-
+governed nearest-target selection with synchronous per-crossing feedback, per-interval kinematic
+classification of preference, or the attribution of heading events as signed preference on the
+axes of arrangement while visited regions remain immutable; the named-axis embodiment of §6A is
+directed only to that combination.
+
 Known prior art, acknowledged and distinguished (from a live prior-art sweep, 2026-09-01):
 area-cursor selection with the nearest-target property (Grossman & Balakrishnan, "The Bubble
 Cursor," CHI 2005) lacks hysteresis for continuous scrubbing, haptic confirmation, and any
@@ -238,7 +250,8 @@ kinematics. Reference taxonomy and weights:
 | Open (commit) | lift-open | +1.0 (+ per-second open dwell, capped) |
 | Back-scrub | reversal > 120° within ~800 ms returning to a just-left region | +0.5 |
 | Direction persistence | heading held within ±25° over ≥ 3 crossings | +0.4 to the heading |
-| **Steer-away** | heading change > ~100° sustained ≥ 2 crossings initiated while a preview was displayed | **−0.6 to the abandoned neighborhood, decaying with distance** |
+| **Steer-away** | heading change > ~100° sustained ≥ 2 crossings initiated while a preview was displayed | **−0.6 to the abandoned neighborhood, decaying with distance**; where targets are arranged on named axes (§6A), additionally a signed preference on the axis of retreat (e.g., retreating from the high-intensity edge is "too intense") |
+| Steer-toward (axis) | net field displacement ≥ 4 target pitches along a named axis commanded through the locomotion control (§7) while armed | +0.4 · sign on that axis to regions lying ahead, half-life ~30 s; logged as an explicit axis preference with the field coordinate; a displacement into the field's boundary is logged once per contact as a clamped preference with no weight change |
 
 Signals decay with configurable half-lives (reference: in-session taste 90 s; heading intent
 30 s; persistent profile ~14 days). During active scrubbing the stream yields approximately
@@ -251,16 +264,47 @@ that field adaptation is perceptible within a single session.
 
 ### 6. Adaptive territory materialization
 
-In steered embodiments, unvisited cells are materialized on first visibility by sampling a
+In one steered embodiment, unvisited cells are materialized on first visibility by sampling a
 mixture (reference: 0.55 local continuity, 0.30 accumulated affinity projected on heading,
 0.15 exploration injected perpendicular to heading, annealed ~40%→15%, reduced to ~8% under
-high direction-persistence and raised to ~25% under prolonged low signal). Local density may
+high direction-persistence and raised to ~25% under prolonged low signal). In the named-axis
+embodiment of §6A the region of every cell is instead a fixed placement and accumulated
+preference conditions only which item fills an unvisited cell and the rendered belief
+indication of each region. Local density may
 thin toward a floor in low-affinity regions ahead — never behind, and never below a floor that
 would create impassable voids. **Materialized cells are immutable for the session** (the
 assignment, not the generating recipe, is cached), so revisiting any region reproduces
 identical items, positions, and read states ("tape rewind"), preserving spatial memory. In
 bounded worlds a coverage odometer (percentage of cells materialized/visited) restores
 finishability as a spatial fact.
+
+### 6A. Attribute-scored placement on named axes
+
+In a further embodiment the field is a bounded plane whose two axes carry named attributes
+(reference: an intensity axis and a register axis, presented to the user as four compass words
+on the locomotion control — e.g., CALM/WILD and SERIOUS/GOOFY — with comparatives displayed in
+the interaction colour while a displacement is commanded). Named regions are assigned fixed
+plane coordinates in a versioned region table (an "edition"); each content item is assigned a
+region and per-item attribute scores by a classifier executed once per publication interval
+(reference: a daily batch), and its target position is a pure function of (item scores, region
+table, deterministic collision order), so that positions are invariant for at least the session
+and, absent republication, for the publication interval. Region identity is rendered as hue
+selected from a family table by the region centroid's bearing about the plane origin, with a
+deterministic collision rule spacing same-hue regions apart; read state is rendered as
+lightness solved per hue to a constant contrast against the ground; an ordered intensity ramp,
+where present, is rendered only on a background ("nebula") layer and never on a target. Heading
+and displacement events of §5 are attributed as signed preferences on the named axes and are
+logged with the plane coordinate at which they occurred; accumulated axis preference conditions
+the choice of item for unvisited cells and a per-region belief indication (reference: nebula
+alpha 0.18–0.30 updated at the label cadence and never during a gesture), while materialized
+cells remain immutable per §6. Crossing into a differently placed region emits a distinct
+feedback transient; reaching the plane boundary emits a distinct transient once per contact and
+dims the corresponding compass word. Switching between plane instances ("worlds") preserves the
+plane coordinate of the viewport. A world whose x axis is a measured quantity (reference: 24 h
+engagement velocity against a baseline, frozen at publication) presents its own axis words.
+Nothing in this embodiment claims the two-dimensional arrangement, the path selection, or the
+hue-by-bearing mapping as such (see Background); the contribution is their combination with the
+selection engine of §2, the feedback grammar of §3 and the signal acquisition of §5.
 
 ### 7. Locomotion with an asymmetric envelope
 
@@ -369,6 +413,14 @@ US 10,891,049 proactively in the non-provisional rather than letting the examine
   reference image); the abstract lattice is the distinguishing hook. Before any commercial ship
   of this embodiment obtain a professional claim chart on KDDI US 9,244,544, Amazon US 9,389,718
   / 10,353,570, Google US 10,365,719 and Immersion US 8,264,465.
+- **Named-axis placement (§6A) — dependent only.** Do NOT claim the two-dimensional semantic
+  plane, path or steer selection over mood zones, hue-by-angle / saturation-by-strength, or
+  per-item attribute scores as such: Gracenote US 8,855,798, Sony US 7,858,868, Monkeymedia
+  US 6,281,899, Musicovery (2006), Moodstream (2008) and Every Noise at Once (2013) anticipate
+  each. Claim 9 rides on claim 1: the residue is positions fixed by scores on *named* axes for the
+  session, heading events attributed as *signed preference on those axes*, and that preference
+  conditioning only unvisited regions. Chart specifically against 8,855,798's sequential-path
+  selection before any commercial ship of a steerable world.
 
 ## INFORMAL EXAMPLE CLAIMS (scaffolding for non-provisional drafting)
 
@@ -400,7 +452,12 @@ US 10,891,049 proactively in the non-provisional rather than letting the examine
    arranged to preserve the items' relative positions; wherein assigning the selection
    emphasizes the corresponding host item in place; and wherein the classified preference
    events are attributed to the corresponding host items.
-9. A system comprising a touch display, a haptic actuator, and one or more processors
+9. The method of claim 1, wherein the positions of the targets are determined from per-item
+   attribute scores on at least two named axes according to a versioned region table and are
+   invariant for at least the session; wherein heading and displacement events are attributed
+   as signed preference on said named axes; and wherein said attributed preference conditions
+   the materialization of unvisited field regions while visited regions remain immutable.
+10. A system comprising a touch display, a haptic actuator, and one or more processors
    configured to perform the method of any preceding claim.
 
 ## FIGURES (to attach)
@@ -427,4 +484,11 @@ silence while parked, deterministic row paging, the cancel ellipse, the velocity
 release, and that release always dismisses the proxy field; the field and drift pages were
 exercised during development by equivalent synthetic-touch drivers that are not part of the
 repository's checked-in suites. A working audio-hook extraction pipeline
-(`scout/scripts/hook-cutter.mjs`) demonstrates the §9 audio embodiment.
+(`scout/scripts/hook-cutter.mjs`) demonstrates the §9 audio embodiment. The named-axis embodiment
+(§6A) is implemented in `prototypes/the-drift.html` revision 4 (four staged worlds on an edition-0
+region table, the ring compass, boundary and boundary-of-plane transients, displacement-counted
+axis preference with a log, world switching that preserves the plane coordinate) with the colour
+grammar held in `src/lib/driftPalette.ts` and asserted by `src/lib/driftPalette.verify.ts`
+against the prototype's own tables; the private synthetic-touch driver asserts one boundary
+transient per region crossing, one boundary-of-plane transient per contact, the logged clamped
+preference, and that the label and axis words follow the active world.

@@ -76,6 +76,17 @@ Walk it every morning for two weeks, then answer honestly:
    reel / carousel as click / thud / double-tap. If a texture reads as a *different* event rather
    than a different *kind*, flatten it toward the photo profile.
 
+10. **The compass (rev. 4):** hand the phone over cold. After three minutes ask "what happens if
+    you push right? down?" — 4 of 5 should say *wilder / more intense* and *goofier / sillier*
+    unprompted. If they can't, the four words become permanent chrome or the y axis goes; a
+    tutorial is not an option. (In the creators world right means *newer* — test the world that
+    ships.) And: does anyone expect the intensity to snap back when they let go of the ring?
+11. **The nebula at 30% brightness:** can an uncoached person name the region under their thumb
+    from the land alone within two seconds? Then again with a deuteranopia filter on — the name
+    and the boundary tick must carry it, the colour is a convenience.
+12. **Hotter or brighter:** sliding east, does the land get "hotter" (keep the nebula ramp) or
+    "brighter / newer" (drop it — the ramp is ≈ one JND and brightness is winning)?
+
 ## The second page: the seed (P15)
 
 The build also carries `www/seed.html`, derived from `prototypes/the-seed.html` — an

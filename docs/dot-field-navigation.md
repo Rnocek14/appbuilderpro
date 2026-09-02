@@ -83,8 +83,10 @@ within one dot of the finger, the card readable the instant you stop. Park a thu
 
 ## 3. The information-architecture laws
 
-- **A dot is ~3 bits.** Channel budget at 10px: hue (≤5 values, one taxonomy the user
-  already knows) + fade (read/unread) carry the data; **size, halo, and motion belong to
+- **A dot is ~3 bits.** Channel budget at 10px: hue (≤8 region families per world — the
+  region's printed *name* is the taxonomy the user knows; five was the pre-map budget and the map
+  ruling of 2026-09-02, `dot-field-map.md` §4, raised it with the name as the carrier) + fade
+  (read/unread) carry the data; **size, halo, and motion belong to
   the interface** — nothing in the data may impersonate interaction state, and motion is
   rationed to 1–3 dots ("live now"), or the field reads as broken.
 - **One soft semantic axis.** Newest enters top, the day flows downward, rows stay

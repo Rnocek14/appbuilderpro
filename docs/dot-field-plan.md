@@ -26,6 +26,10 @@ permanently. The 12-month conversion clock starts at filing — calendar it now.
 US 9,244,544 and Amazon US 9,389,718 cited and distinguished. That embodiment's ancestors are
 so well known that it is the one most exposed to a "we saw it in a demo" argument: it stays in
 the private repo until the filing receipt exists.)
+(Map amendment, 2026-09-02: drift rev. 4 — steering by *named semantic axes* with positions
+fixed by per-item scores — is a claimable dependent variant (draft claim 9). The shared Drift
+artifact stays at rev. 3; no clip of the compass, no post, no republish until the receipt exists.
+The 2-D plane itself is prior art and is never claimed — `dot-field-map.md` §9.)
 
 **0.2 Entity hygiene (same week, ~1 hour + state fee).** The drift IP + apps live in one
 entity; the 50-account content engine stays in another (or stays personal). Never bundle them
@@ -65,10 +69,26 @@ fold the field into FableForge as a flagship component, keep the patent). This g
 argued with — it is the entire reason the plan exists.
 
 **1.2 Scout pipeline v1 (I build this with you).** One niche — whichever you scout hardest
-yourself. A daily batch job (cents/day): pull the niche's last 24h of short-form signals from
-your existing research pipeline, select ~150–300 items, assign currents/cells once, freeze the
-layout, publish one world/day at a fixed hour. No accounts, no login — app opens straight into
-today's world.
+yourself: **the creators world ships first**, on its edition-0 region table (`dot-field-map.md`
+§3), because it is the one you open daily. A daily batch job: pull the niche's last 24h of
+short-form signals from your existing research pipeline, select ~150–300 items, classify each
+once (region key; intensity with a one-line reason; two independent tone scores kept locked
+until they pass the agreement gate), place them by the frozen table — absolute scores, never a
+per-day normalisation — bound the world to its populated hull plus one cell, freeze the layout,
+print the layout hash, publish one world/day at a fixed hour. Honest empty land where supply is
+thin. No accounts, no login — app opens straight into today's world.
+*Budget honesty:* "cents/day" holds only at ≤ 300 items on Haiku batch (≈ $0.0016/item,
+ESTIMATE). A 1,500–2,000-item world is ≈ $3–12/day; ten worlds ≈ $0.9–1.9k/month before
+double-scoring. Shrink-vs-grow is decision 3 in `dot-field-map.md` §10 — decide it with the
+real $/item from the first week, not before.
+
+**1.2b The editorial job the pipeline did not budget.** Hand-placed regions plus a per-world
+"what wild means here" rubric are an ongoing weekly task for a solo founder, not a one-time
+build: argue the coordinates once with one literate stranger (edition 1), then review the drop
+weekly for items the table mis-places. Sports, music and kitchen follow the creators world only
+after two gates pass — the five-stranger learnability test ("what happens if you push right?
+down?" — 4/5 say wilder and goofier unprompted) and the scorer agreement gate (Spearman ≥ 0.7
+on intensity, α ≥ 0.6 on tone vs your own labels; all ESTIMATE targets, `dot-field-map.md` §8).
 
 **1.3 Dogfood two weeks.** You, every morning, before scripting videos. Honest log: did it
 actually change which trends you caught?
@@ -169,6 +189,13 @@ remain in the drawer — see `dot-field-applications.md`.)*
    user #1, reachable by your own accounts, dogfoodable every morning. A corpus that scores
    perfectly on the mechanic but fails this test (the producer sample-library variant) is an
    adjacency for later or an acquirer's expansion slide, never an entry point.
+6. Worlds are editions. A region table (key, coordinates, rubric, classifier version) is
+   versioned and frozen; any change is a new edition announced at the drop — never silent,
+   never mid-day, never backfilled. Every coordinate change breaks someone's spatial memory.
+7. The register axis is a coordinate, never a verdict. "Goofy" is a compass word and a region's
+   place; no tone label is ever printed on a creator's post, and no value word enters the
+   compass. Any "non-profiling" marketing claim is scoped to the walked world — unseen-territory
+   fill and nebula glow *are* profiling.
 
 ## THE THREE DECISIONS ONLY YOU CAN MAKE (decide before month 6)
 

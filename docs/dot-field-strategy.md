@@ -94,12 +94,18 @@ content right."* This corrects the skeptic's throughput verdict, which conflated
   scrubbing ≈ one hour of scroll telemetry. When the pipeline is built, per-crossing
   micro-signals are the core data asset, not a footnote.
 - **The demo this unlocks:** make the learning visible — 60 seconds of scrubbing while the
-  territory reshapes on camera and the label names your taste; side-by-side counter vs a
+  land's glow and fill answer you on camera and the label names where you are (rev. 4 ruling:
+  the territory itself never moves — positions are a placement lookup; `dot-field-map.md` §0); side-by-side counter vs a
   scroll feed ("them: 9/min · you: 150/min"). Speed is the hook, the psychic-fast algorithm
   is the session-one aha, closure + the trail remain the ritual. The three layers stack.
 - **Caveat kept:** comb-speed gives texture, not comprehension — content must stay
   scent-first (sub-400ms thumbnails/hooks, which short-form already is), and raw velocity
   decays like all novelty; visible learning and the finishable day carry week three.
+
+- **Map amendment (2026-09-02):** velocity is not a colour. In the creators world velocity is
+  the *x axis* (familiar ↔ new — the one world where x is measured rather than judged) and hue
+  names the region; nothing about virality is ever painted onto a dot. The compass is the remote:
+  "You don't set your algorithm. You steer it." (`dot-field-map.md` §1, §6.)
 
 Pitch, upgraded: *"Faster than scrolling — and it learns you in a minute."*
 
