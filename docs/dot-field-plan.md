@@ -21,6 +21,11 @@ and application number. **Iron rule: this happens before ANY public post, video,
 listing about the mechanism** — the US gives inventors a 12-month grace period but the EPO's
 absolute-novelty rule has none: a public demo before filing kills European rights
 permanently. The 12-month conversion clock starts at filing — calendar it now.
+(Seed amendment, 2026-09-02: the draft now carries §9A, the proxy-field embodiment — the
+"seed" of `docs/dot-field-seed.md` — as a dependent claim only, with ThumbSpace, KDDI
+US 9,244,544 and Amazon US 9,389,718 cited and distinguished. That embodiment's ancestors are
+so well known that it is the one most exposed to a "we saw it in a demo" argument: it stays in
+the private repo until the filing receipt exists.)
 
 **0.2 Entity hygiene (same week, ~1 hour + state fee).** The drift IP + apps live in one
 entity; the 50-account content engine stays in another (or stays personal). Never bundle them
@@ -37,6 +42,9 @@ matters: **does the detent land ON the crossing, or trail it?**
 (Audit note, 2026-09-01: Apple patched the programmatic switch-haptic trick in iOS 26.5 — the
 mobile web can no longer produce the detent at all. The native wrap is the *only* path to the
 feel on iPhone; web demos are visual + audio only, permanently.)
+The wrap bundles two pages: the drift, and the seed (P15) as a second page behind the same
+Taptic bridge, so the 32px-pitch detent can be checked the morning after the drift's — a
+script change, not a gate.
 
 **⛔ GATE A (end of week 2):** feel survives the wrap → continue. Detents trail the crossing →
 one decision: a 1–2 week SwiftUI/Metal spike of *just the scrub-detent loop*, or kill to the
@@ -47,7 +55,10 @@ write-up. No third option, no extension.
 **1.1 The stranger test (the most important data in the project).** Hand your phone to 3–5
 people who don't love you enough to lie. Say only: "try this." Watch the first 30 seconds
 without helping. Record: did they self-teach the scrub? did they smile or shrug? On day 2,
-did any of them *mention it or ask for it* unprompted?
+did any of them *mention it or ask for it* unprompted? **The seed stays out of this session**:
+Gate B measures a world, and a stranger's "huh, neat" on a familiar catalog would contaminate
+the day-2 signal. The seed gets its own five-minute, pre-registered micro-study after Gate A
+(the numbers are in `dot-field-seed.md` §5 — write them down before the test, not after).
 
 **⛔ GATE B:** ≥1 of 5 comes back unprompted → continue. 0 of 5 → the write-up path (publish,
 fold the field into FableForge as a flagship component, keep the patent). This gate cannot be
@@ -96,9 +107,15 @@ and trail-link → install %.
   30 days. The Mailbox/tbh window is 8–16 weeks from inflection and does not reopen.
 - **Retention path:** D30 ≥20–25%, verdicts/session holding → don't sell yet; start the
   **creator-asset drift** (Phase 3.3) and talk at months 9–12 from strength.
-- **Fallback (applications research, 2026-09-01):** if Scout misses the D30 gate, the platform
-  effort pivots to **Shopify "Drift Browse"** ($29/$99/$299 for visual catalogs, steer-away
-  heatmaps the free incumbent can't show) — merchants pay for conversion lift; exit 3–4× profit.
+- **Fallback (applications research 2026-09-01; re-specified by the seed referee 2026-09-02):**
+  if Scout misses the D30 gate, the platform effort pivots to **Shopify "Drift Browse"** — now
+  the **seed layer** over a merchant's *existing* collection grid (a theme app-embed block,
+  merchant-activated, mobile-only, per-theme grid adapters for Dawn and the top themes, "not
+  available on this theme" rather than mis-mapping) at $29/$99/$299. Cheaper than a new field.
+  Honest limits: on iPhone it is visual + audio only (no web haptic since iOS 26.5), so its
+  chart is dwell/scrub-past heatmap vs click heatmap and PDP click-through — never feel; and a
+  ship to many merchants triggers the four-patent claim chart (Phase 4) *before* the first
+  install. It does not move above Scout on the seed's account — rule 5 stands.
 - **Neither:** Halide posture (run it profitably, keep the patent) or execute the kill.
 
 **3.3 Creator-asset drift — world #2, the founder-fit version (retention path only).** The
@@ -120,9 +137,18 @@ remain in the drawer — see `dot-field-applications.md`.)*
 
 - **Data room:** retention dashboard (live, not slides), rejection-latency distribution,
   verdicts-per-session chart, the consent-clean dataset, IP chain (provisional → budget the
-  non-provisional ~$8–15K with attorney, **plus a professional claim chart of Google's
-  US 10,365,719 — detent-on-crossing haptics, the one identified FTO risk — before any
-  commercial ship of the detent mechanic**), AI-provenance page, press/naming trail.
+  non-provisional ~$8–15K with attorney, **plus a professional four-patent claim chart before
+  any commercial ship of the detent mechanic**: Google US 10,365,719 — whose independent
+  claims are narrower than "detent-on-crossing" (all require a symbol queue plus an expanded
+  item display with synchronized haptics), but the seed's lit-tile-plus-chip-plus-detent sits
+  closer to that language than the field's dot swell; Immersion US 8,264,465 (scroll-
+  commensurate haptic repetition, active to 2028-07-27 — the seed's hold-repeat paging is the
+  exposure; drop hold-repeat if the chart says so); KDDI US 9,244,544 (in-screen reduced
+  touchpad with per-icon vibration and on-page pointer, active to 2032-09-01 — the seed must
+  never carry a miniature image; the abstract lattice is the distinguishing hook); Amazon
+  US 9,389,718 / 10,353,570 (hold-to-invoke thumb proxy areas distinct from the items, with
+  highlight and haptic). The field's own exposure is unchanged apart from the '719 correction.),
+  AI-provenance page, press/naming trail.
 - **The rooms:** Canva / Adobe / CapCut / Envato / Epidemic Sound (wound: every creator-asset
   library is a search box over a grid — nobody owns *browse* for assets; comp: Splice→Spitfire
   ~$50M for a judging-dense audio catalog) + **Match Group always as the second room** (they
@@ -167,6 +193,7 @@ strangers, the three decisions, every conversation with a human buyer.
 **Me, on your word:** the Scout pipeline + daily world assembler, the metrics dashboard, the
 trail-card generator + public trail pages, the naming write-up draft, the ranker experiment,
 the IP-assignment/provenance one-pagers, the creator-asset world, the free small-web Stumble
-field demo, and any spike a gate demands.
+field demo, the seed micro-study protocol and its Shopify app-embed spike (fallback only), and
+any spike a gate demands.
 
 **Next physical action: the provisional and the wrap. Both fit in one week. Gate A is waiting.**

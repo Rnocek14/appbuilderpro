@@ -18,7 +18,7 @@ If it doesn't, this was the cheapest possible kill.*
 ```bash
 cd scout
 npm install
-npm run sync:web        # regenerates www/ from prototypes/the-drift.html
+npm run sync:web        # regenerates www/ from prototypes/the-drift.html (+ the-seed.html as seed.html)
 npx cap add ios         # generates the ios/ Xcode project (first time only)
 npx cap sync ios
 npx cap open ios        # opens Xcode
@@ -41,6 +41,14 @@ web, live in the wrap:
 - **Open** → `impact(MEDIUM)`, a rounder thunk.
 - The "?" card's **test tap** should now say `native Taptic ✓`.
 - The audio ratchet stays on as reinforcement; toggle with ♪.
+- **What the plugin actually does** (@capacitor/haptics 8.0.2 iOS source, read from the npm
+  tarball 2026-09-02): `selectionStart()` creates *and prepares* the selection generator;
+  `selectionChanged()` is a **no-op unless `selectionStart()` ran**, and re-prepares after
+  each tick; `impact()` allocates a fresh, *unprepared* impact generator per call. A prepared
+  generator goes cold after a few seconds, so both pages re-call `selectionStart()` every
+  1.5 s while the thumb is parked. Feel test #7: park for five seconds, then cross one dot —
+  does that first tick land on time? If not, the Core Haptics plugin in `ios-extras/` (which
+  can `prepare()` explicitly) is the next step.
 
 If the fixed selection tick feels too soft or too uniform after real use, `ios-extras/`
 carries an optional Core Haptics plugin (`DetentHaptics.swift` + `.m`) with per-tick
@@ -60,6 +68,18 @@ Walk it every morning for two weeks, then answer honestly:
    imperceptible. If ticks read late, that's the one finding that forces a native-Swift spike
    of the scrub loop — a finding worth having in week one, not month six.)
 5. After two weeks: do you still open it? That answer, not the demo, decides the pipeline.
+
+## The second page: the seed (P15)
+
+The build also carries `www/seed.html`, derived from `prototypes/the-seed.html` — an
+ordinary catalog with one dot you hold; a 2-column proxy grid blooms under the thumb at 32px
+pitch (the drift's is 44px). The HUD links the two pages. Same bridge, one extra question:
+
+6. At 32px pitch, does the detent still land *on* the crossing, and does a resting thumb stay
+   silent for 20 seconds? If either fails, retune `HYST`/`PARK_*` first, then raise the
+   pitch to 36px — before any other work. Do this the morning *after* the drift's test, and
+   keep the seed out of the stranger sessions (Gate B measures a world, not a widget). The
+   pre-registered micro-study for the seed is in `docs/dot-field-seed.md` §5.
 
 ## What this is not (yet)
 

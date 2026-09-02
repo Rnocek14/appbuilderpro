@@ -85,6 +85,50 @@ heading-kinematics negative ("steer-away"), preference-conditioned materializati
 unvisited territory with immutability of visited territory, and the locomotion and trail
 mechanisms disclosed herein.
 
+[Counsel note: the paragraph below characterizes what each reference teaches. Statements in the
+specification are binding admissions; consider listing these references neutrally here ("the
+applicant is aware of…") and carrying the characterizations in the non-provisional's IDS
+instead, keeping only the closing distinguishing sentence.]
+Further prior art relevant to the proxy-field embodiment of §9A, acknowledged and
+distinguished (live sweep, 2026-09-02): Karlson & Bederson, "ThumbSpace," INTERACT 2007, and
+Karlson & Bederson, CHI 2008, disclose an abstract, non-miniature proxy region within thumb
+reach, partitioned into one sub-region per on-screen object with the objects' relative
+arrangement preserved, an in-place "object cursor" highlighting the corresponding real object,
+a directional ten-pixel jump to the nearest object, lift-to-commit with drag-to-cancel, and
+proxy-driven scrolling of a focused widget — without haptic feedback, without hysteresis, and
+without preference-signal acquisition; the same work measured such a proxy at roughly 2.5×
+the selection time of direct touch. Nacenta et al., "Radar View," CHI 2005; Aliakseyeu et al.,
+"Bubble Radar," AVI 2006; Guiard et al., "Object Pointing," GI 2004; Baudisch et al.,
+"Drag-and-Pop," INTERACT 2003; Bezerianos & Balakrishnan, "Vacuum," CHI 2005; and Yu et al.,
+"BezelSpace/CornerSpace," MobileHCI 2013 disclose miniature or proxy representations that bring
+distant targets within reach. Kurtenbach, US 5,689,667 (expired), discloses hold-to-reveal
+marking menus with stroke-to-select; shipped hold-bloom-slide-lift controls include Pinterest's
+press-and-hold pin menu (July 2013), Facebook Reactions (2016), and Palm webOS Quick Launch
+(2009). KDDI, US 9,244,544 (in force), claims a reduced reference image of the display acting as
+an in-screen touchpad with a vibration when the finger overlaps each reduced icon and a pointer
+displayed on the original image; Amazon, US 9,389,718 and US 10,353,570 (in force), claim
+thumb-reachable input areas distinct from the locations of the selectable items they control,
+presented on a held squeeze, with visual distinction of the associated item and haptic
+indication. Poupyrev & Maruyama, UIST 2003, and Pielot et al., "PocketMenu," MobileHCI 2012,
+disclose a tactile click per item while dragging over a compact list control; Apple, US
+10,175,759, claims an index scrubber with rate-limited tactile outputs; Apple, US 9,678,571,
+claims omitting a tactile output when the previous one is too recent; Immersion, US 7,148,875
+and US 8,188,981 (both expired), disclose pulses as a cursor traverses icons and menu borders.
+Android 9 "Quick Scrub" and the iOS 14 Home Screen page-indicator (Apple, US 11,416,127 family)
+disclose holding a persistent indicator, scrubbing with per-page haptics, and auto-advancing
+when the finger persists past a boundary; Apple, US 8,689,128, discloses a scrubbing rate applied
+when contact leaves a scrubber region; Onshape, WO 2017/199221, discloses hysteresis before
+locking a touch selection; Guo et al., SIGIR 2013, infers relevance from touch kinematics. On
+US 10,365,719 the applicant notes that all three independent claims require a symbol queue and
+an expanded item display with synchronized haptics. The §9A embodiment is distinguished from
+the foregoing by the combination of hysteresis-governed nearest-target selection with a
+speed-gated park lock over a hold-revealed abstract lattice mapped to exactly the host items
+currently displayed, synchronous skip-never-queue crossing events, in-place host emphasis with
+an occlusion fallback, deterministic single-row host translation that retains and re-associates
+the selected proxy target, and per-interval preference classification attributed to host items;
+no independent claim is directed to the proxy region, the boundary translation, or the
+translation feedback event as such.
+
 ## SUMMARY
 
 Disclosed is a content navigation method in which items of a collection are laid out as
@@ -127,7 +171,9 @@ taxonomy (≤ ~5–7 values); luminance/opacity encodes read state (read items f
 opacity, making session coverage visible as texture); size, halo, and motion are reserved for
 interaction state. A field may be bounded (a finite "world" with edges and a coverage
 odometer) or a viewport onto a larger bounded territory. Item-to-cell assignment is computed
-at most once per session boundary and never during an active touch ("stable geography").
+at most once per session boundary and is never rearranged during an active touch ("stable
+geography"); in the proxy-field embodiment of §9A the target-to-item association may advance
+by whole rows during host translation while the target positions themselves remain fixed.
 
 ### 2. Selection engine
 
@@ -153,8 +199,10 @@ selection-feedback haptic generator (e.g., the platform's picker-detent transien
 at touch start and released at touch end; (b) a short vibration pulse (~10–12 ms); (c) a
 synthesized audio tick (~4–8 ms transient comprising a ~1.9 kHz component, a low-frequency
 body ~150 Hz, and noise, with ±3% playback-rate jitter per event so rapid sequences read as a
-mechanical ratchet); (d) actuation of a hidden platform switch control where (a)–(b) are
-unavailable. An activation primer (short pulse or generator preparation) is emitted at touch
+mechanical ratchet). Carriers available on some platform versions have included actuation of a
+hidden platform switch control where (a)–(b) were unavailable; that path is no longer available
+on current mobile web platforms and the audio carrier (c) is the sole web fallback. An
+activation primer (short pulse or generator preparation) is emitted at touch
 start; a distinct stronger transient may accompany commit.
 
 Selection visuals follow a two-spring system: selection-indicator position uses a critically
@@ -258,6 +306,47 @@ presents the identical corpus as a first-class list. The signal-acquisition meth
 independent of the specific rendering and may be embodied in any continuous-selection
 interface with discrete targets.
 
+#### 9A. Proxy-field embodiment ("the seed")
+
+In a further embodiment the two-dimensional field of §1 is a transient proxy field presented
+over an ordinary scrolling host view (for example a two-column product list) that is otherwise
+operated by conventional direct touch. A persistent activation target is displayed within the
+operating digit's rest zone. Upon sustained contact with the activation target (reference
+170 ms; any value below the platform long-press interval), or upon displacement exceeding a
+small threshold (reference 8 px) before that interval elapses, a proxy field is presented
+centred on the contact point, comprising one abstract target (a dot, not a miniature image of
+the host) per content item currently fully displayed by the host view, arranged to preserve
+the items' relative row and column positions, at a pitch of approximately 32–36 px. A brief
+contact shorter than the sustained-contact interval presents the proxy field transiently
+(reference 600 ms) and dismisses it without commit, teaching the sustained gesture. The
+selection engine of §2 operates over the proxy targets with a hysteresis factor tuned to the
+proxy pitch (reference 0.70, with a re-entry factor of 0.62 within 50 ms) and a park lock that
+freezes selection while pointer speed remains below a threshold (reference 20 px/s for 120 ms)
+until displacement exceeds a fraction of the pitch (reference 0.35). The feedback grammar of §3
+emits one synchronous discrete event per proxy-target crossing, rate-limited by skipping rather
+than queuing. The preview of §4 is the host view's own item, emphasized in place (opacity,
+border, and a scale of approximately 1.035 applied in the same frame as the feedback event),
+optionally revealing an alternate representation of the item after a dwell threshold
+(reference 250 ms); when the emphasized host item lies within an occlusion radius of the
+contact point (reference 60 px), a compact representation of it is displayed adjacent to the
+proxy field instead. When the selection lies in a boundary row of the proxy field and the
+pointer is displaced beyond the proxy boundary by a threshold fraction of the pitch (reference
+0.6), the host view is translated by one item-row extent per additional pitch of displacement,
+the previously selected proxy target is retained and re-associated with the host item newly
+displayed at its position, and a feedback event on a carrier distinct from the crossing event
+accompanies each translation; no crossing event is emitted while the host translates beneath a
+stationary pointer. Release commits the emphasized host item subject to the velocity guard of
+§2 (reference: no commit above 700 px/s; commit target resolved by projection of at most 0.45
+pitch), is suppressed while the pointer is within the translation region and within an arming
+interval after presentation (reference 120 ms), and always dismisses the proxy field; a pointer
+leaving an elliptical region about the contact point (reference semi-axes 90 × 152 px) clears
+the selection without commit and re-arms on re-entry. The signal acquisition of §5 attributes
+each selection interval to the corresponding host item (dwell-classified felt, scrub-past, and
+kept events); heading-kinematics events are not computed where the proxy has fewer than three
+columns. Because the host view remains directly operable throughout, this embodiment satisfies
+single-pointer accessibility requirements without an alternative view. A reference
+implementation is `prototypes/the-seed.html` (P15), exercised by a synthetic touch driver.
+
 ## CLAIM-DRAFTING NOTES FOR THE NON-PROVISIONAL (attorney guidance, not filed text)
 
 Per the 2026-09-01 prior-art sweep: do NOT pursue broad claims on (a) haptic detents on item
@@ -270,10 +359,22 @@ weighted recommender input; preference-conditioned territory materialization wit
 visited-region immutability; and the combined system. Cite GaZIR, US 2013/0246383, and
 US 10,891,049 proactively in the non-provisional rather than letting the examiner find them.
 
+- **Proxy-field embodiment (§9A) — dependent only.** Do not pursue independent claims on the
+  proxy region, on boundary-persistence translation of the host, on a distinct page-turn
+  feedback event, or on rate-limited crossing haptics as such: each is anticipated (ThumbSpace
+  2007; Android 9 Quick Scrub; iOS 14 page dots; Apple US 8,689,128; Apple US 9,678,571;
+  Immersion US 8,264,465). Claim 8 rides on claim 1's signal method — its value is showing the
+  hysteresis + detent + kinematic-signal stack independent of the dot-field rendering. The
+  embodiment must never carry a miniature image of the host (KDDI US 9,244,544 claims a reduced
+  reference image); the abstract lattice is the distinguishing hook. Before any commercial ship
+  of this embodiment obtain a professional claim chart on KDDI US 9,244,544, Amazon US 9,389,718
+  / 10,353,570, Google US 10,365,719 and Immersion US 8,264,465.
+
 ## INFORMAL EXAMPLE CLAIMS (scaffolding for non-provisional drafting)
 
 1. A method of acquiring user-preference signals, comprising: presenting items as targets at
-   substantially fixed positions in a two-dimensional field; tracking a continuous pointer
+   positions fixed for at least the duration of a selection gesture in a two-dimensional
+   field; tracking a continuous pointer
    gesture; assigning a selection to the nearest target subject to a hysteresis criterion;
    emitting a synchronous discrete feedback event on each selection change; classifying each
    selection interval by dwell duration and gesture kinematics into weighted preference
@@ -293,7 +394,13 @@ US 10,891,049 proactively in the non-provisional rather than letting the examine
 7. The method of claim 1, wherein field translation is commanded by an intent-gated edge
    region or a displacement control region, ramps in over an attack interval, terminates
    within one frame of release, and emits feedback events on relative target crossings.
-8. A system comprising a touch display, a haptic actuator, and one or more processors
+8. The method of claim 1, wherein the two-dimensional field is a proxy field presented in
+   response to sustained contact on a persistent activation target and comprising one abstract
+   target for each content item currently displayed by a separate scrolling host view,
+   arranged to preserve the items' relative positions; wherein assigning the selection
+   emphasizes the corresponding host item in place; and wherein the classified preference
+   events are attributed to the corresponding host items.
+9. A system comprising a touch display, a haptic actuator, and one or more processors
    configured to perform the method of any preceding claim.
 
 ## FIGURES (to attach)
@@ -311,8 +418,13 @@ FIG. 8 — trail object: in-field path, dwell weights, re-walk.
 
 ## REDUCTION TO PRACTICE
 
-Working implementations exist as of September 1, 2026, in the inventor's private repository
-(`prototypes/the-field.html`, `prototypes/the-drift.html`, native wrapper under `scout/`),
-including an automated driven test suite verifying the hysteresis, envelope, intent-gate, and
-immutability behaviors described above, and a working audio-hook extraction pipeline
-(`scout/scripts/hook-cutter.mjs`) demonstrating the §9 audio embodiment.
+Working implementations exist as of September 2, 2026, in the inventor's private repository
+(`prototypes/the-field.html`, `prototypes/the-drift.html`, `prototypes/the-seed.html`, native
+wrapper under `scout/`). Each page passes the repository's generic behavioural prober. The
+proxy-field embodiment (§9A) is exercised by a synthetic-touch walkthrough
+(`scripts/seed-walkthrough.mjs`) asserting the hold/peek distinction, one detent per crossing,
+silence while parked, deterministic row paging, the cancel ellipse, the velocity guard on
+release, and that release always dismisses the proxy field; the field and drift pages were
+exercised during development by equivalent synthetic-touch drivers that are not part of the
+repository's checked-in suites. A working audio-hook extraction pipeline
+(`scout/scripts/hook-cutter.mjs`) demonstrates the §9 audio embodiment.

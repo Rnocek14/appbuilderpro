@@ -1,0 +1,914 @@
+<!-- P15 · the-seed — a concept probe, not a product claim.
+     The question: can an ORDINARY page be felt? A catalog scrolls exactly as it always has.
+     One persistent dot sits where the thumb rests. Hold it and a small grid of dots blooms
+     under the thumb — a thumb-scale proxy of the garments on screen, same arrangement. Scrub
+     the proxy: one detent per dot, and the PAGE lights the piece you are on (the preview is
+     the page itself, never something under the thumb). Push past the last row and the page
+     turns under you, a row at a time. Lift to open. Drag away to let go of everything.
+     Inevitable when: a tap on the dot teaches the hold in one try; the thumb never travels
+     more than a coin's width to judge a screenful; paging feels like a ratchet, not a jump;
+     and someone reaches for the dot on a page that doesn't have one. Staged data, real timing. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Scout · Seed</title>
+<style>
+:root{
+  --ground:#0B0E14; --surface:#131822; --surface-2:#1B2230; --line:#232B3B;
+  --ink:#E8E4DA; --dim:#8A8FA3; --faint:#565C6E;
+  --ember:#E8833A; --ember-soft:rgba(232,131,58,.14);
+  --ok:#6FBF8B; --warn:#D9A441; --blocked:#C25E5E; --judgment:#9B8CC9;
+  --serif:Charter, Georgia, "Times New Roman", serif;
+  --chrome:-apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono:ui-monospace, "SF Mono", Menlo, monospace;
+  --forge:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box; margin:0; padding:0}
+html,body{height:100%; overscroll-behavior:none}
+body{background:var(--ground); color:var(--ink); font:14px var(--chrome); overflow:hidden;
+  -webkit-user-select:none; user-select:none; -webkit-tap-highlight-color:transparent}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+button:focus-visible{outline:2px solid var(--ember); outline-offset:2px; border-radius:8px}
+::selection{background:var(--ember-soft)}
+
+/* ---------- the ordinary page ---------- */
+.top{position:fixed; top:0; left:0; right:0; z-index:40; pointer-events:none;
+  padding:calc(env(safe-area-inset-top,0px) + 14px) 16px 14px; display:flex; justify-content:space-between;
+  align-items:baseline; background:linear-gradient(var(--ground) 40%, rgba(11,14,20,.86) 75%, transparent)}
+.brand{font:18px var(--serif); letter-spacing:.01em}
+.brand i{color:var(--dim); font-style:normal; margin-left:8px; font:13px var(--chrome)}
+.pulse{font:12px var(--mono); font-variant-numeric:tabular-nums; color:var(--dim)}
+#page{position:fixed; inset:0; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; z-index:10}
+#page:focus{outline:none}
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:10px;
+  padding:calc(env(safe-area-inset-top,0px) + 64px) 12px 220px}
+.tile{display:block; text-align:left; position:relative; background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; padding:10px; transition:opacity 180ms var(--forge), transform 180ms var(--forge),
+  border-color 180ms}
+.tile .art{height:118px; display:grid; place-items:center}
+.tile svg{width:100px; height:100px; filter:drop-shadow(0 6px 10px rgba(0,0,0,.35))}
+.tile .cap{display:flex; justify-content:space-between; gap:8px; align-items:baseline; margin-top:6px}
+.tile .nm{font:13px var(--chrome); color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.tile .pr{font:12.5px var(--mono); color:var(--dim); font-variant-numeric:tabular-nums}
+.tile .mark{position:absolute; top:9px; right:9px; width:6px; height:6px; border-radius:50%; background:transparent;
+  transition:background 200ms, box-shadow 200ms}
+.tile.felt .mark{background:var(--ember); opacity:.55}
+.tile.kept .mark{background:var(--ember); opacity:1; box-shadow:0 0 0 3px var(--ember-soft)}
+.grid.bloomed .tile{opacity:var(--page-dim, .7)}
+.grid.bloomed .tile.lit{opacity:1; transform:scale(1.035); border-color:rgba(232,131,58,.65);
+  box-shadow:0 0 0 1px rgba(232,131,58,.25), 0 12px 32px rgba(0,0,0,.4); z-index:2}
+.grid.bloomed.let-go .tile{opacity:1}
+.tile .art.alt{display:none}
+.tile.alt .art.front{display:none}
+.tile.alt .art.alt{display:grid}
+.tile .art.alt svg{transform:scaleX(-1)}
+.tile .sz{display:none; font:12px var(--mono); color:var(--ember); font-variant-numeric:tabular-nums; white-space:nowrap}
+.tile.alt .pr{display:none}
+.tile.alt .sz{display:inline}
+.seed.away{opacity:.18}
+
+/* ---------- the seed and its bloom ---------- */
+.seed{position:fixed; right:22px; bottom:calc(env(safe-area-inset-bottom,0px) + 98px); width:52px; height:52px;
+  border-radius:50%; touch-action:none; -webkit-touch-callout:none; z-index:30; border:1px solid var(--line);
+  background:radial-gradient(circle, rgba(232,131,58,.24), rgba(232,131,58,0) 70%), rgba(19,24,34,.7);
+  transition:opacity 200ms, transform 200ms var(--forge)}
+.seed::after{content:''; position:absolute; left:50%; top:50%; width:10px; height:10px; margin:-5px -5px;
+  border-radius:50%; background:var(--ember); box-shadow:0 0 14px rgba(232,131,58,.85);
+  animation:breathe 3.2s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:scale(1); opacity:.85} 50%{transform:scale(1.25); opacity:1}}
+.seed.held::after{animation:none; transform:scale(.55); opacity:.6}
+body[data-state="bloom"] .seed, body[data-state="peek"] .seed{opacity:.28; transform:scale(.9)}
+#bloomcv{position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:35}
+.chip{position:fixed; left:0; top:0; z-index:36; pointer-events:none; font:12px var(--chrome); color:var(--ink);
+  background:rgba(19,24,34,.94); border:1px solid rgba(232,131,58,.45); border-radius:8px; padding:5px 9px;
+  opacity:0; transition:opacity 120ms; white-space:nowrap; will-change:transform}
+.chip.on{opacity:1}
+.chip b{font:12px var(--mono); color:var(--ember); font-weight:400; margin-left:8px}
+.hint{position:fixed; right:100px; bottom:calc(env(safe-area-inset-bottom,0px) + 112px); z-index:31;
+  font:italic 14px var(--serif); color:var(--faint); opacity:0; transition:opacity 300ms; pointer-events:none;
+  text-align:right; max-width:52vw}   /* left of the bloom plate, never on top of it */
+.hint.on{opacity:1}
+
+/* ---------- the item sheet ---------- */
+.sheet{position:fixed; left:0; right:0; bottom:0; z-index:60; background:var(--surface); border-top:1px solid var(--line);
+  border-radius:18px 18px 0 0; padding:16px 20px calc(env(safe-area-inset-bottom,0px) + 18px);
+  transform:translateY(105%); transition:transform 420ms var(--forge); max-height:82vh; overflow:hidden}
+.sheet.on{transform:none}
+.sheet .grab{width:36px; height:4px; border-radius:2px; background:var(--line); margin:0 auto 12px}
+.sheet .big{height:min(34vh,240px); display:grid; place-items:center; background:var(--surface-2); border-radius:12px}
+.sheet .big svg{width:min(28vh,200px); height:min(28vh,200px); filter:drop-shadow(0 10px 18px rgba(0,0,0,.45))}
+.sheet h3{font:400 22px var(--serif); margin-top:14px; text-wrap:balance}
+.sheet .row{display:flex; justify-content:space-between; align-items:baseline; margin-top:4px}
+.sheet .kind{font:13px var(--chrome); color:var(--dim)}
+.sheet .price{font:15px var(--mono); color:var(--ink); font-variant-numeric:tabular-nums}
+.sheet .acts{display:flex; gap:10px; margin-top:16px; align-items:center}
+.sheet .keep{flex:1; height:44px; border-radius:10px; background:var(--ember); color:#141008; font-weight:500}
+.sheet .keep[aria-pressed="true"]{background:var(--ember-soft); color:var(--ember); border:1px solid rgba(232,131,58,.5)}
+.sheet .close{height:44px; padding:0 16px; border-radius:10px; border:1px solid var(--line); color:var(--dim)}
+.sheet .close:hover,.sheet .keep:hover{filter:brightness(1.08)}
+
+/* ---------- prototype chrome ---------- */
+.hapchip{position:fixed; left:14px; bottom:calc(env(safe-area-inset-bottom,0px) + 44px); z-index:41;
+  font:11px var(--mono); color:var(--dim); background:rgba(19,24,34,.8); border:1px solid var(--line);
+  border-radius:999px; padding:4px 12px; transition:opacity 600ms; white-space:nowrap; max-width:70vw;
+  overflow:hidden; text-overflow:ellipsis}
+.hapchip:empty{display:none}
+.hapchip a{color:var(--ember); text-decoration:none}
+.hud{position:fixed; left:14px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); display:flex; align-items:center; gap:10px;
+  font:11px var(--chrome); color:var(--faint); z-index:45}
+.hud button{border:1px solid var(--line); border-radius:6px; width:22px; height:22px; color:var(--faint)}
+.hud button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+.hud button[aria-pressed="false"]{opacity:.45; text-decoration:line-through}
+.card{position:fixed; left:14px; bottom:calc(env(safe-area-inset-bottom,0px) + 44px); width:min(88vw,340px); z-index:46;
+  background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px 16px; display:none}
+.card.on{display:block}
+.card h4{font:500 13px var(--chrome); margin-bottom:8px}
+.card ul{margin-left:16px; display:grid; gap:6px; font-size:12.5px; color:var(--dim); line-height:1.45}
+.card .note{margin-top:10px; font-size:11px; color:var(--faint); line-height:1.4}
+.card .haprow{margin-top:10px; display:flex; align-items:center; gap:8px; font:11px var(--mono); color:var(--faint)}
+.card .haprow button{border:1px solid var(--line); border-radius:6px; padding:2px 8px; color:var(--dim)}
+.card .haprow button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
+.keys{position:fixed; right:20px; bottom:calc(env(safe-area-inset-bottom,0px) + 12px); font:11px var(--chrome);
+  color:var(--faint); z-index:45; text-align:right}
+@media (hover:none){.keys{display:none}}
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important; animation:none !important}
+}
+</style>
+</head>
+<body data-state="rest">
+
+<header class="top">
+  <div class="brand">Atelier<i>new in</i></div>
+  <div class="pulse" id="pulse"></div>
+</header>
+
+<main id="page" aria-label="Catalog"><div class="grid" id="grid"></div></main>
+
+<canvas id="bloomcv" aria-hidden="true"></canvas>
+<div class="chip" id="chip" aria-hidden="true"></div>
+<div class="hint" id="hint" aria-hidden="true"></div>
+<button class="seed" id="seed" aria-haspopup="grid" aria-expanded="false" aria-label="The seed. Hold to feel the page; arrows move, Enter opens, Escape lets go"></button>
+
+<section class="sheet" id="sheet" aria-label="Item" aria-hidden="true">
+  <div class="grab"></div>
+  <div class="big" id="sbig"></div>
+  <h3 id="sname"></h3>
+  <div class="row"><span class="kind" id="skind"></span><span class="price" id="sprice"></span></div>
+  <div class="acts">
+    <button class="keep" id="skeep" aria-pressed="false">Keep</button>
+    <button class="close" id="sclose">Close</button>
+  </div>
+</section>
+
+<div class="hapchip" id="hapchip"></div>
+<div class="keys">Enter on the dot blooms · arrows move · Enter opens · Esc lets go</div>
+<div class="hud">
+  <span>scout v0 · the seed — staged catalog · <a href="index.html" style="color:inherit">← drift</a></span>
+  <button id="restart" aria-label="Restart">⟲</button>
+  <button id="snd" aria-label="Tick sound" aria-pressed="true">♪</button>
+  <button id="feel" aria-label="What to feel for">?</button>
+</div>
+<div class="card" id="feelcard">
+  <h4>What to feel for</h4>
+  <ul>
+    <li>The page is an ordinary catalog. Scroll it, tap a piece — nothing new. Then rest your thumb on the <em>dot</em> and hold.</li>
+    <li>A small grid blooms under the thumb: one dot per piece on screen, same arrangement. You can't see it — your thumb covers it. You feel it. The <em>page</em> shows where you are.</li>
+    <li>Scrub the grid. One tick per piece. Park between two dots: it must not flicker.</li>
+    <li>Push past the bottom row and hold: the page turns under you, one row per tick. Pull back: it stops.</li>
+    <li>Rest on a piece and it turns to show its second view. Lift to open it. Fling and lift: nothing opens. Drag far off the dot: everything lets go.</li>
+    <li>The honest test: after a screenful, did your thumb move more than a coin's width?</li>
+  </ul>
+  <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
+  <div class="note">Honest label: forty staged garments, drawn not photographed. What's real is the
+  hold, the proxy mapping, the detents, the paging and the lift. The haptic detent exists only
+  inside a native wrap — iPhone Safari has no web vibration (and the ringer switch silences the tick). The
+  mechanism has ancestors (ThumbSpace 2007; two live patents) — see docs/dot-field-seed.md.</div>
+</div>
+
+<div class="sr" aria-live="polite" id="live"></div>
+
+<script>
+'use strict';
+/* ===================== staged data — the single source of truth ============================ */
+const CATALOG = [
+  ['Linen camp shirt','shirt','#C9B79C',48], ['Boxy heavyweight tee','tee','#2E3440',28],
+  ['Wide-leg trouser','pants','#3F5A73',72], ['Field jacket','jacket','#6B7C59',118],
+  ['Bias slip dress','dress','#8B3A3A',86], ['Wool crew knit','knit','#DCD6C8',94],
+  ['Pleated midi skirt','skirt','#7A6C8C',64], ['Cargo short','shorts','#B87C4C',42],
+  ['Long overcoat','coat','#4A3B32',210], ['Zip hoodie','hoodie','#A8B6C1',68],
+  ['Oxford shirt','shirt','#A8B6C1',58], ['Pocket tee','tee','#C9B79C',24],
+  ['Tapered chino','pants','#B87C4C',66], ['Chore jacket','jacket','#3F5A73',124],
+  ['Shirt dress','dress','#6B7C59',92], ['Ribbed turtleneck','knit','#2E3440',78],
+  ['Wrap skirt','skirt','#8B3A3A',56], ['Linen short','shorts','#DCD6C8',38],
+  ['Mac coat','coat','#C9B79C',180], ['Pullover hoodie','hoodie','#4A3B32',62],
+  ['Band-collar shirt','shirt','#2E3440',54], ['Striped tee','tee','#A8B6C1',30],
+  ['Pleated trouser','pants','#4A3B32',84], ['Bomber','jacket','#7A6C8C',138],
+  ['Tiered dress','dress','#DCD6C8',98], ['Cardigan knit','knit','#6B7C59',88],
+  ['Denim skirt','skirt','#3F5A73',52], ['Running short','shorts','#2E3440',34],
+  ['Duffle coat','coat','#8B3A3A',240], ['Cropped hoodie','hoodie','#C9B79C',58],
+  ['Flannel shirt','shirt','#8B3A3A',62], ['Long-sleeve tee','tee','#6B7C59',32],
+  ['Track pant','pants','#7A6C8C',58], ['Denim jacket','jacket','#A8B6C1',108],
+  ['Knit dress','dress','#3F5A73',104], ['Mohair sweater','knit','#B87C4C',132],
+  ['Satin skirt','skirt','#C9B79C',70], ['Tailored short','shorts','#7A6C8C',46],
+  ['Puffer coat','coat','#2E3440',190], ['Half-zip hoodie','hoodie','#6B7C59',72],
+];
+/* availability — the second view's payload (a mirrored drawing alone would test nothing) */
+const SIZES = ['XS–XL','S–L','S–XL','M–XL','XS–M','one size','S–XL','S–L','M–XL','XS–XL',
+  'S–XL','XS–L','S–L','M only','XS–XL','S–XL','S–L','S–XL','M–XL','XS–XL',
+  'S–L','XS–XL','S–XL','M–XL','XS–L','S–XL','S–L','S–XL','M only','XS–L',
+  'S–XL','XS–XL','S–L','S–XL','XS–M','S–L','S–XL','M–XL','S–L','S–XL'];
+const N = CATALOG.length;
+let COLS = 2, ROWS = Math.ceil(N/COLS);        // measured at bloom — the proxy mirrors the host's real columns
+
+/* ===================== the seed's laws — ESTIMATES, tuned in the wrap ====================== */
+const SEED = {
+  HOLD_MS: 170,              // stationary press before bloom — under iOS Haptic Touch "fast" (~200ms)
+  MOVE_BLOOM_PX: 8,          // a drag this far before HOLD_MS blooms at once (the marking-menu expert path)
+  ARM_MS: 120,               // no lift-to-open until this long after bloom — a tap can never open
+  TAP_PEEK_MS: 600,          // a plain tap blooms for this long with the page dimmed, then retracts — the tap teaches the hold
+  TAP_HINT_MAX: 3,           // the hint line accompanies the first taps only; the peek stays
+  PITCH_X: 34, PITCH_Y: 32,  // proxy dot pitch under the thumb (tiles ~179×167 — roughly a 1:5 map)
+  ANCHOR_ROW: 2,             // the dot row the thumb lands on (0 = top) — two rows up, one down
+  HYST: 0.70, HYST_REENTRY: 0.62, REENTRY_MS: 50,   // the field's ratio law, re-tuned: at 32px pitch 0.80 leaves a 3.6px band, under the thumb's ~1mm resolution
+  PARK_SPEED: 20, PARK_MS: 120, PARK_UNLOCK: 0.35,  // a resting thumb locks selection until it moves 0.35 pitch
+  DETENT_GAP: 30, DETENT_GAP_FAST: 40, FAST: 900,    // one detent per crossing, skip never queue (900 = 1200×32/44)
+  NO_OPEN_SPEED: 700, PROJECT_S: 0.045, PROJECT_MAX_PX: 14,   // ≈22 dots/s; projection capped at 0.45 pitch
+  PAGE_OVERSHOOT: 0.6,       // push past the edge row by 0.6 pitch → the page turns one row
+  PAGE_FIRST_MS: 260, PAGE_REPEAT_MS: 170,           // hold-repeat: first waits, then a row every 170ms (≈1100px/s, the cap)
+  CANCEL_X: 90, CANCEL_Y: 152, CANCEL_REARM_PX: 12,  // an ellipse around the bloom; paging can never read as cancel
+  FELT_MS: 300,              // a selection held this long is felt; a scrub-past is not
+  SECONDARY_MS: 250,         // dwell before the lit tile shows its second view (back view + sizes) — the "mobile hover" payload under test
+  MIN_ROWS: 2,               // fewer fully visible rows than this (landscape) → no bloom, say why
+  SCROLL_QUIET_MS: 120,      // the host must have stopped scrolling this long before a bloom maps it
+  PREPARE_MS: 1500,          // re-prepare the native generator while parked — it goes cold in a few seconds
+  PAGE_DIM: 0.70,            // the other tiles dim to 70% — a list is for side-by-side comparison; 0.42 is the A/B alternate
+  OCCLUDE_R: 60,             // a lit tile this close to the thumb gets the callout chip beside the plate instead of above itself
+  SCROLL_MS: 160, SNAP_PX: 6,// a page step's glide; bloom snaps the page to a row boundary beyond this
+};
+
+/* ===================== drawn garments ===================================================== */
+function shade(hex, k){
+  const n = parseInt(hex.slice(1), 16), r = (n>>16)&255, g = (n>>8)&255, b = n&255;
+  const f = v => Math.max(0, Math.min(255, Math.round(v*k)));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
+function garment(kind, hue){
+  const dark = shade(hue, 0.55), light = shade(hue, 1.25);
+  const S = `fill="${hue}" stroke="${dark}" stroke-width="1.6" stroke-linejoin="round"`;
+  const L = `fill="none" stroke="${dark}" stroke-width="1.4" stroke-linecap="round"`;
+  let body = '';
+  switch (kind){
+    case 'tee':
+      body = `<path ${S} d="M34 28 L48 16 Q60 26 72 16 L86 28 L94 46 L80 52 L78 104 L42 104 L40 52 L26 46 Z"/>
+              <path ${L} d="M48 16 Q60 30 72 16"/>`; break;
+    case 'shirt':
+      body = `<path ${S} d="M34 28 L48 16 Q60 26 72 16 L86 28 L94 46 L80 52 L78 106 L42 106 L40 52 L26 46 Z"/>
+              <path ${L} d="M50 16 L60 32 L70 16 M60 32 L60 106"/>
+              <circle cx="60" cy="48" r="1.7" fill="${dark}"/><circle cx="60" cy="64" r="1.7" fill="${dark}"/>
+              <circle cx="60" cy="80" r="1.7" fill="${dark}"/>`; break;
+    case 'hoodie':
+      body = `<path ${S} d="M32 36 L46 24 Q60 34 74 24 L88 36 L96 54 L82 60 L80 106 L40 106 L38 60 L24 54 Z"/>
+              <path ${S} d="M46 24 Q60 2 74 24 Q60 36 46 24 Z"/>
+              <rect x="46" y="80" width="28" height="16" rx="3" ${L}/>
+              <path ${L} d="M56 36 L56 48 M64 36 L64 48"/>`; break;
+    case 'jacket':
+      body = `<path ${S} d="M30 30 L48 18 L60 42 L72 18 L90 30 L96 50 L82 56 L80 106 L40 106 L38 56 L24 50 Z"/>
+              <path ${L} d="M48 18 L60 42 L72 18 M60 42 L60 106"/>
+              <path fill="${light}" d="M48 18 L60 42 L54 46 L44 24 Z M72 18 L60 42 L66 46 L76 24 Z" opacity=".55"/>`; break;
+    case 'coat':
+      body = `<path ${S} d="M30 30 L48 18 L60 40 L72 18 L90 30 L98 56 L84 60 L86 114 L34 114 L36 60 L22 56 Z"/>
+              <path ${L} d="M48 18 L60 40 L72 18 M60 40 L60 114"/>
+              <rect x="34" y="70" width="52" height="6" rx="2" fill="${dark}" opacity=".7"/>`; break;
+    case 'knit':
+      body = `<path ${S} d="M32 30 L48 18 Q60 30 72 18 L88 30 L96 50 L82 56 L80 104 L40 104 L38 56 L24 50 Z"/>
+              <path ${L} d="M40 96 L80 96 M40 100 L80 100 M48 18 Q60 34 72 18"/>
+              <path ${L} d="M26 42 L36 44 M94 42 L84 44" opacity=".6"/>`; break;
+    case 'dress':
+      body = `<path ${S} d="M44 18 L76 18 L80 46 L96 112 L24 112 L40 46 Z"/>
+              <path ${L} d="M40 46 L80 46 M48 18 Q60 30 72 18"/>`; break;
+    case 'skirt':
+      body = `<path ${S} d="M40 40 L80 40 L96 108 L24 108 Z"/>
+              <rect x="38" y="34" width="44" height="8" rx="2" fill="${dark}"/>
+              <path ${L} d="M52 46 L46 106 M68 46 L74 106" opacity=".5"/>`; break;
+    case 'pants':
+      body = `<path ${S} d="M40 14 L80 14 L86 112 L66 112 L60 62 L54 112 L34 112 Z"/>
+              <rect x="38" y="10" width="44" height="8" rx="2" fill="${dark}"/>`; break;
+    case 'shorts':
+      body = `<path ${S} d="M40 22 L80 22 L86 70 L64 70 L60 50 L56 70 L34 70 Z"/>
+              <rect x="38" y="18" width="44" height="8" rx="2" fill="${dark}"/>`; break;
+  }
+  return `<svg viewBox="0 0 120 120" aria-hidden="true">${body}</svg>`;
+}
+const KIND_LABEL = { tee:'T-shirt', shirt:'Shirt', hoodie:'Hoodie', jacket:'Jacket', coat:'Coat', knit:'Knitwear',
+  dress:'Dress', skirt:'Skirt', pants:'Trousers', shorts:'Shorts' };
+
+/* ===================== build the ordinary page ============================================= */
+const $ = id => document.getElementById(id);
+const page = $('page'), grid = $('grid'), seed = $('seed'), cv = $('bloomcv'), ctx = cv.getContext('2d');
+const chip = $('chip'), hintEl = $('hint'), live = $('live');
+const tiles = [];
+CATALOG.forEach(([name, kind, hue, price], i) => {
+  const b = document.createElement('button');
+  b.className = 'tile'; b.dataset.i = i; b.setAttribute('aria-label', `${name}, ${price} dollars`);
+  b.innerHTML = `<div class="art front">${garment(kind, hue)}</div><div class="art alt">${garment(kind, shade(hue, 0.82))}</div>
+    <div class="cap"><span class="nm">${name}</span><span class="pr">$${price}</span><span class="sz">${SIZES[i]}</span></div><span class="mark"></span>`;
+  grid.appendChild(b); tiles.push(b);
+});
+grid.style.setProperty('--page-dim', SEED.PAGE_DIM);
+grid.addEventListener('click', e => {
+  const t = e.target.closest('.tile');
+  if (t && !bloomed) openSheet(+t.dataset.i);
+});
+
+/* geometry of the page, measured once (and on resize) — analytic afterwards, no reads in rAF */
+let ROW_H = 186, PAD_TOP = 64, TILE_W = 179, TILE_H = 176, GAP = 10, LEFT = 12, R = 4, ANCHOR = 2;
+function measure(){
+  const a = tiles[0].getBoundingClientRect();
+  let cols = 1;                                          // the host's real column count: tiles sharing the first row's top
+  for (let i = 1; i < tiles.length; i++){ if (Math.abs(tiles[i].getBoundingClientRect().top - a.top) < 2) cols++; else break; }
+  COLS = Math.max(1, cols); ROWS = Math.ceil(N / COLS);
+  const b = tiles[Math.min(1, tiles.length - 1)].getBoundingClientRect(), c = tiles[COLS].getBoundingClientRect();
+  ROW_H = c.top - a.top; TILE_W = a.width; TILE_H = a.height; GAP = COLS > 1 ? b.left - a.right : 0; LEFT = a.left;
+  PAD_TOP = a.top + page.scrollTop;
+  R = Math.min(5, Math.floor((page.clientHeight - PAD_TOP) / ROW_H));   // fully visible rows only — no floor
+  ANCHOR = Math.min(SEED.ANCHOR_ROW, Math.max(0, R - 1));
+  cv.width = Math.round(innerWidth * DPR); cv.height = Math.round(innerHeight * DPR);
+}
+const DPR = Math.min(2, devicePixelRatio || 1);
+const maxTop = () => Math.max(0, ROWS - R);
+function tileRect(i){                                  // fixed-position rect of tile i, analytic
+  const r = Math.floor(i / COLS), c = i % COLS;
+  return { x: LEFT + c * (TILE_W + GAP), y: PAD_TOP + r * ROW_H - page.scrollTop, w: TILE_W, h: TILE_H };
+}
+
+/* ===================== haptics + sound (the field's ladder, unchanged) ===================== */
+let sndOn = true, audioCtx = null, tickBuf = null;
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const canVibe = 'vibrate' in navigator;
+const CapHaptics = (window.Capacitor && window.Capacitor.isNativePlatform &&
+  window.Capacitor.isNativePlatform()) ? window.Capacitor.registerPlugin('Haptics') : null;
+function hapticTick(){
+  if (CapHaptics){ CapHaptics.selectionChanged().catch(() => {}); return; }
+  if (canVibe) navigator.vibrate(12);       // iOS web has no carrier at all — the tick is sound there
+}
+function hapticStart(){
+  if (CapHaptics){ CapHaptics.selectionStart().catch(() => {}); return; }
+  if (canVibe) navigator.vibrate(5);
+}
+function hapticEnd(){ if (CapHaptics) CapHaptics.selectionEnd().catch(() => {}); }
+function hapticOpen(){ if (CapHaptics) CapHaptics.impact({ style: 'MEDIUM' }).catch(() => {}); }
+function hapticPage(){ if (CapHaptics){ CapHaptics.impact({ style: 'LIGHT' }).catch(() => {}); return; } hapticTick(); }
+let lastTickAt = 0;
+function playTick(rate, gain){
+  if (!(sndOn && audioCtx && tickBuf)) return;
+  const s = audioCtx.createBufferSource(); s.buffer = tickBuf;
+  s.playbackRate.value = rate * (0.97 + Math.random()*0.06);
+  const g = audioCtx.createGain(); g.gain.value = gain + Math.random()*0.03;
+  s.connect(g); g.connect(audioCtx.destination); s.start();
+}
+function detent(now){
+  const gap = speed > SEED.FAST ? SEED.DETENT_GAP_FAST : SEED.DETENT_GAP;
+  if (now - lastTickAt < gap) return;
+  lastTickAt = now; hapticTick(); playTick(1, 0.13);
+  document.body.dataset.ticks = ++ticks; window.__seed.tickTimes.push(now);
+}
+function pageDetent(now){ lastTickAt = now; hapticPage(); playTick(0.68, 0.18); document.body.dataset.pages = ++pages; window.__seed.pageTimes.push(now); }
+function initAudio(){
+  if (audioCtx) return;
+  try{
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const sr = audioCtx.sampleRate, n = Math.floor(sr*0.008), b = audioCtx.createBuffer(1, n, sr);
+    const ch = b.getChannelData(0);
+    for (let i = 0; i < n; i++){
+      const t = i/sr;
+      ch[i] = (Math.sin(2*Math.PI*1900*t)*0.6 + Math.sin(2*Math.PI*150*t)*0.35 + (Math.random()*2-1)*0.25) * Math.exp(-t*820);
+    }
+    tickBuf = b;
+  }catch(e){ audioCtx = null; }
+}
+
+/* ===================== springs ============================================================= */
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function spring(k, c, v0){ return { value: v0||0, v: 0, target: v0||0, k, c }; }
+function step(s, dt){
+  if (reduceMotion){ s.value = s.target; s.v = 0; return; }
+  const n = Math.max(1, Math.ceil(dt/0.008)), h = dt/n;
+  for (let i = 0; i < n; i++){ const a = -s.k*(s.value - s.target) - s.c*s.v; s.v += a*h; s.value += s.v*h; }
+}
+const swell = spring(550, 30, 1);
+const veil = spring(300, 26, 0);        // the grid's presence, 0 → 1
+
+/* ===================== state =============================================================== */
+let pressed = false, bloomed = false, cancelled = false, kb = false, pid = null, holdTimer = 0, bloomAt = 0;
+let px = 0, py = 0, sx = 0, sy = 0, downX = 0, downY = 0, speed = 0, velX = 0, velY = 0, samples = [], lastMoveAt = 0;
+let dots = [], sel = null, topRow = 0, dwellStart = 0, lastDeselAt = new Map(), chipW = 120;
+let lastPageAt = 0, pageDir = 0, pageRepeats = 0, ratchet = 0, edgeSaid = false;
+let ticks = 0, pages = 0, tapHints = 0, parkLock = null, parkSince = 0, peeking = false, peekTimer = 0, altTile = null;
+let lastScrollAt = -1e9, lastPrepareAt = 0, announced = false, lastW = innerWidth, awayTimer = 0;
+window.__seed = { tickTimes: [], pageTimes: [], bloomAt: 0 };
+let scrollFrom = 0, scrollTo = 0, scrollT0 = 0, scrolling = false, ripple = 0, running = false, lastT = 0;
+const felt = new Set(), kept = new Set(), opened = new Set();
+let sheetIdx = -1;
+
+function setState(s){ document.body.dataset.state = s; }
+function updatePulse(){
+  $('pulse').textContent = `felt ${felt.size} · ${N}` + (kept.size ? ` · kept ${kept.size}` : '');
+  document.body.dataset.felt = felt.size;
+}
+let hintTimer = 0;
+function hint(text, ms){
+  hintEl.textContent = text; hintEl.classList.add('on');
+  clearTimeout(hintTimer); hintTimer = setTimeout(() => hintEl.classList.remove('on'), ms || 2200);
+}
+
+/* ===================== the bloom =========================================================== */
+function buildDots(){
+  dots = [];
+  for (let r = 0; r < R; r++) for (let c = 0; c < COLS; c++){
+    const idx = (topRow + r) * COLS + c;
+    const x = sx + (c - (COLS - 1)) * SEED.PITCH_X, y = sy + (r - ANCHOR) * SEED.PITCH_Y;
+    const d = { r, c, idx, empty: idx >= N, x, y, ax: spring(700, 42, sx), ay: spring(700, 42, sy) };
+    d.ax.target = x; d.ay.target = y;
+    dots.push(d);
+  }
+}
+function remap(){                                       // same dots, new rows underneath
+  for (const d of dots){ d.idx = (topRow + d.r) * COLS + d.c; d.empty = d.idx >= N; }
+}
+function bloom(snap = true){
+  if (bloomed) return;
+  measure();
+  if (R < SEED.MIN_ROWS){ hint('turn the phone upright', 1800); return; }   // a proxy of one half-visible row maps nothing
+  bloomed = true; cancelled = false; edgeSaid = false; announced = false;
+  const now = performance.now(); bloomAt = now; window.__seed.bloomAt = now; lastPrepareAt = now;
+  pageDir = 0; pageRepeats = 0; ratchet = 0; parkLock = null; parkSince = 0;
+  seed.setAttribute('aria-expanded', 'true');
+  topRow = Math.max(0, Math.min(maxTop(), Math.round(page.scrollTop / ROW_H)));
+  if (snap && Math.abs(page.scrollTop - topRow * ROW_H) > SEED.SNAP_PX) glideTo(topRow * ROW_H, now);   // dots map only to whole rows
+  const rect = seed.getBoundingClientRect(), cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+  sx = Math.max(cx - 20, Math.min(cx + 20, downX)); sy = Math.max(cy - 20, Math.min(cy + 20, downY));   // the anchor dot sits under the thumb
+  buildDots();
+  veil.target = 1; ripple = performance.now();
+  grid.classList.add('bloomed'); grid.classList.remove('let-go');
+  setState('bloom'); seed.classList.add('held');
+  hapticStart();
+  sel = null;
+  const under = dots.find(d => d.r === ANCHOR && d.c === COLS - 1 && !d.empty);
+  setSelection(under || nearestDot(px, py), performance.now(), false);
+  startLoop();
+}
+function collapse(){
+  if (!bloomed) return;
+  bloomed = false; kb = false;
+  settleDwell(performance.now());
+  if (sel){ tiles[sel.idx].classList.remove('lit'); sel = null; }
+  if (altTile){ altTile.classList.remove('alt'); altTile = null; }
+  peeking = false; clearTimeout(peekTimer); document.body.dataset.callout = '0';
+  seed.setAttribute('aria-expanded', 'false'); live.textContent = '';
+  for (const d of dots){ d.ax.target = sx; d.ay.target = sy; }
+  veil.target = 0;
+  grid.classList.remove('bloomed', 'let-go');
+  chip.classList.remove('on');
+  seed.classList.remove('held');
+  setState(sheetIdx >= 0 ? 'sheet' : 'rest');
+  document.body.dataset.sel = '';
+  hapticEnd();
+}
+
+/* ===================== selection: nearest + hysteresis (the field's law, at proxy pitch) === */
+function nearestDot(x, y){
+  let best = null, bd = Infinity;
+  for (const d of dots){
+    if (d.empty) continue;
+    const dx = d.x - x, dy = d.y - y, q = dx*dx + dy*dy;
+    if (q < bd){ bd = q; best = d; }
+  }
+  return best;
+}
+function trySelect(x, y, now){
+  const cand = nearestDot(x, y);
+  if (!cand || cand === sel) return;
+  if (sel){
+    const curd = Math.hypot(sel.x - x, sel.y - y), cd = Math.hypot(cand.x - x, cand.y - y);
+    const th = (now - (lastDeselAt.get(cand.idx) || -1e9)) < SEED.REENTRY_MS ? SEED.HYST_REENTRY : SEED.HYST;
+    if (!(cd < curd * th)) return;
+    lastDeselAt.set(sel.idx, now);
+  }
+  setSelection(cand, now, true);
+}
+function settleDwell(now){
+  if (sel && now - dwellStart >= SEED.FELT_MS && !felt.has(sel.idx)){
+    felt.add(sel.idx); tiles[sel.idx].classList.add('felt'); updatePulse();
+  }
+}
+function setSelection(d, now, tick){
+  if (!d || d === sel) return;
+  if (sel){ settleDwell(now); tiles[sel.idx].classList.remove('lit'); }
+  if (altTile){ altTile.classList.remove('alt'); altTile = null; }
+  sel = d; dwellStart = now;
+  tiles[d.idx].classList.add('lit');
+  if (tick) detent(now);
+  swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;
+  const [name, , , price] = CATALOG[d.idx];
+  chip.textContent = ''; chip.append(name); const b = document.createElement('b'); b.textContent = '$' + price; chip.append(b);
+  chip.classList.add('on'); chipW = chip.offsetWidth || 120; announced = false;
+  document.body.dataset.sel = d.idx; document.body.dataset.top = topRow;
+}
+/* the tile's idx changed under a parked thumb (paging) — re-point the selection without moving it */
+function reselectSame(now){
+  if (!sel) return;
+  const d = dots.find(x => x.r === sel.r && x.c === sel.c);
+  if (!d || d.empty){ const n = nearestDot(px, py); if (n) { const keep = sel; sel = null; tiles[keep.idx].classList.remove('lit'); setSelection(n, now, false); } return; }
+  tiles.forEach(t => t.classList.remove('lit'));
+  if (altTile){ altTile.classList.remove('alt'); altTile = null; }
+  sel = d; dwellStart = now;
+  tiles[d.idx].classList.add('lit');
+  swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.6;
+  const [name, , , price] = CATALOG[d.idx];
+  chip.textContent = ''; chip.append(name); const b = document.createElement('b'); b.textContent = '$' + price; chip.append(b);
+  chipW = chip.offsetWidth || 120; announced = false;
+  document.body.dataset.sel = d.idx; document.body.dataset.top = topRow;
+}
+
+/* ===================== paging: push past the edge row, the page turns a row at a time ===== */
+function checkPaging(now){
+  if (!bloomed || cancelled || kb) return;
+  const bottomY = sy + (R - 1 - ANCHOR) * SEED.PITCH_Y + SEED.PAGE_OVERSHOOT * SEED.PITCH_Y;
+  const topY = sy - ANCHOR * SEED.PITCH_Y - SEED.PAGE_OVERSHOOT * SEED.PITCH_Y;
+  const dir = py > bottomY ? 1 : py < topY ? -1 : 0;
+  if (dir !== pageDir){                                   // entering the band: one row, at once
+    pageDir = dir; pageRepeats = 0; ratchet = 0; edgeSaid = false;
+    if (dir){ pageStep(dir, now); lastPageAt = now; }
+    return;
+  }
+  if (!dir) return;
+  // distance ratchet: the lattice continues past the edge — every further pitch is one more row, deterministic
+  const beyond = dir > 0 ? py - bottomY : topY - py;
+  const v = Math.floor(beyond / SEED.PITCH_Y);
+  if (v > ratchet){ ratchet = v; pageStep(dir, now); lastPageAt = now; pageRepeats = 0; return; }
+  // hold-repeat: park past the edge and the page keeps turning — first repeat waits, then a steady ratchet
+  const wait = pageRepeats === 0 ? SEED.PAGE_FIRST_MS : SEED.PAGE_REPEAT_MS;
+  if (now - lastPageAt >= wait){ pageStep(dir, now); lastPageAt = now; pageRepeats++; }
+}
+function pageStep(dir, now){
+  const nt = Math.max(0, Math.min(maxTop(), topRow + dir));
+  if (nt === topRow){
+    if (!edgeSaid){ edgeSaid = true; hint(dir > 0 ? 'that is the end' : 'that is the top', 1400); }
+    return;
+  }
+  topRow = nt;
+  remap(); glideTo(topRow * ROW_H, now); pageDetent(now); reselectSame(now);
+}
+function glideTo(target, now){
+  scrollFrom = page.scrollTop; scrollTo = target; scrollT0 = now; scrolling = true;
+  if (reduceMotion){ page.scrollTop = target; scrolling = false; }
+}
+const forge = t => 1 - Math.pow(1 - t, 3);
+
+/* ===================== pointer ============================================================= */
+function sample(x, y, now){
+  px = x; py = y; lastMoveAt = now;
+  samples.push([now, x, y]); while (samples.length && now - samples[0][0] > 80) samples.shift();
+  if (samples.length > 1){
+    // window floored at one frame: a burst of moves inside 8ms is a fling, never "no data"
+    const a = samples[0], dt = Math.max(0.008, (now - a[0])/1000);
+    velX = (x - a[1])/dt; velY = (y - a[2])/dt; speed = Math.hypot(velX, velY);
+  }
+}
+seed.addEventListener('contextmenu', e => e.preventDefault());
+function startPeek(){                                     // a short bloom that retracts on its own — it teaches the hold
+  peeking = true; setState('peek');
+  if (tapHints < SEED.TAP_HINT_MAX){ tapHints++; hint('hold the dot', 1600); }
+  clearTimeout(peekTimer); peekTimer = setTimeout(() => { if (peeking) collapse(); }, SEED.TAP_PEEK_MS);
+}
+function peek(){                                          // a tap never scrolls: the peek blooms without the row snap
+  const rect = seed.getBoundingClientRect();
+  px = downX = rect.left + rect.width/2; py = downY = rect.top + rect.height/2; speed = 0;
+  bloom(false); if (bloomed) startPeek();
+}
+seed.addEventListener('pointerdown', e => {
+  if (pressed || sheetIdx >= 0) return;
+  e.preventDefault(); initAudio();
+  if (peeking) collapse();
+  pressed = true; pid = e.pointerId; kb = false;
+  try { seed.setPointerCapture(pid); } catch(err){}
+  samples = []; speed = velX = velY = 0; downX = e.clientX; downY = e.clientY;
+  sample(e.clientX, e.clientY, performance.now());
+  seed.classList.add('held');
+  clearTimeout(holdTimer); holdTimer = setTimeout(tryBloom, SEED.HOLD_MS);
+});
+function tryBloom(){                                       // never map a host that is still moving
+  if (!pressed || bloomed) return;
+  const quietIn = SEED.SCROLL_QUIET_MS - (performance.now() - lastScrollAt);
+  if (quietIn > 0){ clearTimeout(holdTimer); holdTimer = setTimeout(tryBloom, quietIn); return; }
+  bloom();
+}
+function abandon(){                                        // the system took the touch: nothing may open, everything lets go
+  if (!pressed && !bloomed) return;
+  pressed = false; clearTimeout(holdTimer);
+  seed.classList.remove('held');
+  if (bloomed && !peeking) collapse();
+}
+function letGo(now){
+  cancelled = true;
+  if (sel){ settleDwell(now); tiles[sel.idx].classList.remove('lit'); sel = null; }
+  chip.classList.remove('on'); grid.classList.add('let-go');
+  document.body.dataset.sel = '';
+  hint('let go', 1200);
+}
+function handleMove(x, y, now){
+  sample(x, y, now);
+  if (!bloomed){                                          // a drag never waits for the timer
+    if (Math.hypot(x - downX, y - downY) >= SEED.MOVE_BLOOM_PX){ clearTimeout(holdTimer); tryBloom(); }
+    return;
+  }
+  const ex = (px - sx) / SEED.CANCEL_X, ey = (py - sy) / SEED.CANCEL_Y;
+  if (!cancelled && ex*ex + ey*ey > 1){ letGo(now); return; }
+  if (cancelled){                                         // not sticky: come back inside and the grid re-arms
+    const rx = (px - sx) / (SEED.CANCEL_X - SEED.CANCEL_REARM_PX), ry = (py - sy) / (SEED.CANCEL_Y - SEED.CANCEL_REARM_PX);
+    if (rx*rx + ry*ry > 1) return;
+    cancelled = false; grid.classList.remove('let-go');
+  }
+  // park lock (set by the frame loop while the thumb rests): a resting thumb rolls a few px — that must never tick.
+  // Moving 0.35 pitch away from the resting point unlocks it; the lock is never placed from inside a move.
+  if (speed >= SEED.PARK_SPEED) parkSince = 0;
+  if (parkLock && Math.hypot(px - parkLock.x, py - parkLock.y) > SEED.PARK_UNLOCK * SEED.PITCH_Y){ parkLock = null; parkSince = 0; }
+  if (!parkLock) trySelect(px, py, now);
+  checkPaging(now);
+}
+seed.addEventListener('pointermove', e => {
+  if (!pressed || e.pointerId !== pid) return;
+  const now = performance.now();
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+  // each coalesced sample keeps its own timestamp (same base as performance.now()); a burst is not zero time
+  const ts = ev => (ev.timeStamp && ev.timeStamp < 1e12 && ev.timeStamp <= now + 5) ? ev.timeStamp : now;
+  if (evs.length) for (const ev of evs) handleMove(ev.clientX, ev.clientY, ts(ev));
+  else handleMove(e.clientX, e.clientY, ts(e));
+});
+function lift(e){
+  if (!pressed || (e && e.pointerId !== pid)) return;
+  pressed = false; clearTimeout(holdTimer);
+  seed.classList.remove('held');
+  const now = performance.now();
+  if (!bloomed){ peek(); return; }
+  const armed = now - bloomAt >= SEED.ARM_MS, travelling = pageDir !== 0;   // release never opens while the page turns
+  if (!armed){ startPeek(); return; }                                      // a slow tap still teaches
+  if (armed && !travelling && !cancelled && sel && speed < SEED.NO_OPEN_SPEED){
+    let dx = velX*SEED.PROJECT_S, dy = velY*SEED.PROJECT_S; const m = Math.hypot(dx, dy);
+    if (m > SEED.PROJECT_MAX_PX){ dx *= SEED.PROJECT_MAX_PX/m; dy *= SEED.PROJECT_MAX_PX/m; }
+    const proj = nearestDot(px + dx, py + dy);
+    if (proj && proj !== sel) setSelection(proj, now, false);
+    const idx = sel.idx;
+    collapse();
+    openSheet(idx);
+    return;
+  }
+  collapse();
+}
+seed.addEventListener('pointerup', lift);
+seed.addEventListener('pointercancel', abandon);            // only pointerup may commit
+seed.addEventListener('lostpointercapture', () => { if (pressed) abandon(); });
+for (const ev of ['blur', 'pagehide']) addEventListener(ev, abandon);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') abandon(); });
+
+/* ===================== keyboard: the same grid without a thumb ============================ */
+function kbBloom(){
+  const rect = seed.getBoundingClientRect();
+  px = downX = rect.left + rect.width/2; py = downY = rect.top + rect.height/2; speed = 0;
+  bloom(); if (bloomed) kb = true;
+}
+seed.addEventListener('click', e => {                     // VoiceOver / Switch Control activate with a synthesized click
+  if (e.detail !== 0 || pressed || bloomed || sheetIdx >= 0) return;
+  initAudio(); kbBloom();
+});
+seed.addEventListener('keydown', e => {
+  const now = performance.now();
+  if (e.key === 'Enter' || e.key === ' '){
+    e.preventDefault(); initAudio();
+    if (!bloomed) kbBloom();
+    else if (sel){ const idx = sel.idx; collapse(); openSheet(idx); }
+    return;
+  }
+  if (!bloomed) return;
+  if (e.key === 'Escape'){ e.preventDefault(); collapse(); return; }
+  const dr = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+  const dc = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+  if (!dr && !dc) return;
+  e.preventDefault();
+  if (!sel) return;
+  let r = sel.r + dr, c = Math.max(0, Math.min(COLS - 1, sel.c + dc));
+  if (r < 0 || r >= R){
+    const nt = Math.max(0, Math.min(maxTop(), topRow + (r < 0 ? -1 : 1)));
+    if (nt === topRow){ hint(r < 0 ? 'that is the top' : 'that is the end', 1400); return; }
+    topRow = nt; remap(); glideTo(topRow * ROW_H, now); pageDetent(now);
+    r = Math.max(0, Math.min(R - 1, r));
+    const d = dots.find(x => x.r === r && x.c === c);
+    if (d && !d.empty){ const keep = sel; sel = null; tiles[keep.idx].classList.remove('lit'); setSelection(d, now, false); }
+    return;
+  }
+  const d = dots.find(x => x.r === r && x.c === c);
+  if (d && !d.empty) setSelection(d, now, true);
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && sheetIdx >= 0){ e.preventDefault(); closeSheet(); }
+  else if (e.key === '?' ) { $('feelcard').classList.toggle('on'); }
+});
+
+/* ===================== the sheet =========================================================== */
+const sheet = $('sheet');
+function openSheet(i){
+  sheetIdx = i;
+  const [name, kind, hue, price] = CATALOG[i];
+  $('sbig').innerHTML = garment(kind, hue);
+  $('sname').textContent = name;
+  $('skind').textContent = KIND_LABEL[kind];
+  $('sprice').textContent = '$' + price;
+  $('skeep').setAttribute('aria-pressed', kept.has(i) ? 'true' : 'false');
+  $('skeep').textContent = kept.has(i) ? 'Kept' : 'Keep';
+  sheet.classList.add('on'); sheet.setAttribute('aria-hidden', 'false');
+  setState('sheet');
+  hapticOpen();
+  if (!felt.has(i)){ felt.add(i); tiles[i].classList.add('felt'); }
+  opened.add(i); updatePulse();
+  $('sclose').focus();
+}
+function closeSheet(){
+  sheet.classList.remove('on'); sheet.setAttribute('aria-hidden', 'true');
+  sheetIdx = -1; setState('rest');
+  seed.focus({ preventScroll: true });
+}
+$('sclose').addEventListener('click', closeSheet);
+$('skeep').addEventListener('click', () => {
+  if (sheetIdx < 0) return;
+  if (kept.has(sheetIdx)) kept.delete(sheetIdx); else kept.add(sheetIdx);
+  tiles[sheetIdx].classList.toggle('kept', kept.has(sheetIdx));
+  $('skeep').setAttribute('aria-pressed', kept.has(sheetIdx) ? 'true' : 'false');
+  $('skeep').textContent = kept.has(sheetIdx) ? 'Kept' : 'Keep';
+  hapticOpen(); updatePulse();
+});
+
+/* ===================== the loop: springs, glide, paint ===================================== */
+function startLoop(){ if (!running){ running = true; lastT = performance.now(); requestAnimationFrame(frame); } }
+function frame(t){
+  const dt = Math.min(0.032, (t - lastT)/1000 || 0.016); lastT = t;
+  const now = performance.now();
+  if (pressed && now - lastMoveAt > 80){ speed *= 0.6; velX *= 0.6; velY *= 0.6; }
+  if (bloomed && pressed && !kb && !cancelled){                 // the park lock is decided here, at rest
+    if (speed < SEED.PARK_SPEED){
+      if (!parkSince) parkSince = now;
+      else if (!parkLock && now - parkSince > SEED.PARK_MS) parkLock = { x: px, y: py };
+    } else parkSince = 0;
+  }
+  if (bloomed && pressed) checkPaging(now);
+  if (scrolling){
+    const k = Math.min(1, (now - scrollT0) / SEED.SCROLL_MS);
+    page.scrollTop = scrollFrom + (scrollTo - scrollFrom) * forge(k);
+    if (k >= 1) scrolling = false;
+  }
+  for (const d of dots){ step(d.ax, dt); step(d.ay, dt); }
+  step(swell, dt); step(veil, dt);
+  if (bloomed && sel && !peeking && !altTile && now - dwellStart >= SEED.SECONDARY_MS){ altTile = tiles[sel.idx]; altTile.classList.add('alt'); }
+  if (bloomed && sel && !announced && now - dwellStart >= SEED.FELT_MS){   // one announcement per dwelt item, never per crossing
+    announced = true; const [nm, , , pr] = CATALOG[sel.idx]; live.textContent = `${nm}, ${pr} dollars, sizes ${SIZES[sel.idx]}`;
+  }
+  if (bloomed && parkLock && CapHaptics && now - lastPrepareAt > SEED.PREPARE_MS){ hapticStart(); lastPrepareAt = now; }
+  paint(now);
+  if (bloomed && sel) placeChip();
+  const settled = !bloomed && veil.value < 0.01 && !scrolling;
+  if (settled){ running = false; ctx.clearRect(0, 0, cv.width, cv.height); return; }
+  requestAnimationFrame(frame);
+}
+function placeChip(){
+  const r = tileRect(sel.idx);
+  const cw = chipW, ch = 26;
+  const nx = Math.max(r.x, Math.min(r.x + r.w, px)), ny = Math.max(r.y, Math.min(r.y + r.h, py));
+  const occluded = Math.hypot(nx - px, ny - py) < SEED.OCCLUDE_R;      // the thumb covers the lit tile
+  let x, y;
+  if (occluded){                                                         // callout beside the plate, never under the thumb
+    x = sx - (COLS - 1) * SEED.PITCH_X - 16 - cw - 10; y = sy - ch/2;
+  } else {
+    x = r.x + r.w/2 - cw/2; y = r.y - ch - 8;
+    if (y < PAD_TOP - 10) y = r.y + r.h + 8;
+  }
+  x = Math.max(8, Math.min(innerWidth - cw - 8, x));
+  chip.style.transform = `translate(${x}px, ${y}px)`;
+  document.body.dataset.callout = occluded ? '1' : '0';
+}
+function paint(now){
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  const a = veil.value; if (a <= 0.005) return;
+  const dimAll = cancelled ? 0.35 : 1;
+  // the plate: a faint field the dots live on, so the eye reads "grid" even under a thumb
+  if (dots.length){
+    const x0 = sx - (COLS - 1) * SEED.PITCH_X - 16, x1 = sx + 16;
+    const y0 = sy - ANCHOR * SEED.PITCH_Y - 16, y1 = sy + (R - 1 - ANCHOR) * SEED.PITCH_Y + 16;
+    ctx.globalAlpha = a * 0.9 * dimAll;
+    ctx.fillStyle = 'rgba(19,24,34,.78)'; ctx.strokeStyle = 'rgba(232,131,58,.28)'; ctx.lineWidth = 1;
+    roundRect(x0, y0, x1 - x0, y1 - y0, 14); ctx.fill(); ctx.stroke();
+    // paging affordances: a faint chevron where the page can still turn
+    ctx.fillStyle = 'rgba(232,228,218,.35)';
+    if (topRow < maxTop()) chevron(sx - (COLS - 1) * SEED.PITCH_X / 2, y1 - 6, 1);
+    if (topRow > 0) chevron(sx - (COLS - 1) * SEED.PITCH_X / 2, y0 + 6, -1);
+  }
+  // ripple at bloom
+  const rt = (now - ripple) / 260;
+  if (rt < 1 && !reduceMotion){
+    ctx.globalAlpha = (1 - rt) * 0.5; ctx.strokeStyle = '#E8833A'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(sx, sy, 18 + rt * 60, 0, Math.PI * 2); ctx.stroke();
+  }
+  // tether: the selected dot to the lit tile — "this dot IS that piece"
+  if (sel && bloomed && !cancelled){
+    const r = tileRect(sel.idx);
+    const tx = Math.max(r.x, Math.min(r.x + r.w, sel.ax.value)), ty = Math.max(r.y, Math.min(r.y + r.h, sel.ay.value));
+    ctx.globalAlpha = a * 0.28; ctx.strokeStyle = '#E8833A'; ctx.lineWidth = 1; ctx.setLineDash([3, 5]);
+    ctx.beginPath(); ctx.moveTo(sel.ax.value, sel.ay.value); ctx.lineTo(tx, ty); ctx.stroke(); ctx.setLineDash([]);
+  }
+  for (const d of dots){
+    const x = d.ax.value, y = d.ay.value;
+    if (d.empty){
+      ctx.globalAlpha = a * 0.22 * dimAll; ctx.strokeStyle = '#8A8FA3'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI*2); ctx.stroke(); continue;
+    }
+    const isSel = d === sel && !cancelled, wasFelt = felt.has(d.idx), isKept = kept.has(d.idx);
+    if (isSel){
+      const s = 1 + 0.45 * (1 - Math.min(1, Math.abs(1 - swell.value) * 2.2));
+      const g = ctx.createRadialGradient(x, y, 0, x, y, 18 * s);
+      g.addColorStop(0, 'rgba(232,131,58,.45)'); g.addColorStop(1, 'rgba(232,131,58,0)');
+      ctx.globalAlpha = a; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 18 * s, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#E8833A'; ctx.beginPath(); ctx.arc(x, y, 5.5 * s, 0, Math.PI*2); ctx.fill();
+    } else {
+      ctx.globalAlpha = a * dimAll * (wasFelt ? 0.9 : 0.6);
+      ctx.fillStyle = isKept ? '#E8833A' : wasFelt ? 'rgba(232,131,58,.55)' : '#E8E4DA';
+      ctx.beginPath(); ctx.arc(x, y, wasFelt ? 4 : 4.5, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function roundRect(x, y, w, h, r){
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+function chevron(x, y, dir){
+  ctx.beginPath(); ctx.moveTo(x - 4, y - 2.5*dir); ctx.lineTo(x, y + 1.5*dir); ctx.lineTo(x + 4, y - 2.5*dir);
+  ctx.lineTo(x + 4, y - 0.5*dir); ctx.lineTo(x, y + 3.5*dir); ctx.lineTo(x - 4, y - 0.5*dir); ctx.closePath(); ctx.fill();
+}
+
+/* ===================== chrome ============================================================== */
+$('restart').addEventListener('click', () => {
+  if (bloomed) collapse();
+  if (sheetIdx >= 0) closeSheet();
+  felt.clear(); kept.clear(); opened.clear(); ticks = pages = 0; document.body.dataset.ticks = 0; document.body.dataset.pages = 0;
+  tiles.forEach(t => t.classList.remove('felt', 'kept', 'lit'));
+  page.scrollTop = 0; updatePulse();
+  hint('hold the dot', 3000);
+});
+$('snd').addEventListener('click', e => {
+  sndOn = !sndOn; e.currentTarget.setAttribute('aria-pressed', String(sndOn));
+});
+$('feel').addEventListener('click', () => $('feelcard').classList.toggle('on'));
+$('haptest').addEventListener('click', () => {
+  initAudio();
+  const out = $('hapresult');
+  if (CapHaptics){ CapHaptics.impact({ style: 'HEAVY' }).catch(() => {}); out.textContent = 'native Taptic ✓'; }
+  else if (canVibe){ const ok = navigator.vibrate(120); out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen'; }
+  else { playTick(1, 0.2); out.textContent = isIOS ? 'no web vibration on iPhone — tick played (ringer on?)' : 'no vibration API — tick played'; }
+});
+const hapchip = $('hapchip');
+const embedded = (() => { try { return window.self !== window.top; } catch(e){ return true; } })();
+(function setupHapchip(){
+  if (CapHaptics){ hapchip.textContent = ''; return; }
+  if (canVibe && embedded){
+    hapchip.textContent = 'ticks are muted in embedded previews — ';
+    const a = document.createElement('a'); a.href = location.href; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = 'open full screen for haptics ↗'; hapchip.appendChild(a);
+  } else if (!canVibe && isIOS) hapchip.textContent = 'iPhone Safari has no web vibration — ringer on, the ticks carry it; the detent lives in the wrap';
+  else hapchip.textContent = '';
+  setTimeout(() => { hapchip.style.opacity = '0'; }, 7000);
+})();
+page.addEventListener('scroll', () => {
+  const now = performance.now(); lastScrollAt = now;
+  if (bloomed){                                            // something other than a page step moved the host: the map is stale
+    if (!scrolling && Math.abs(page.scrollTop - topRow * ROW_H) > SEED.SNAP_PX) collapse();
+    return;
+  }
+  if (!pressed){ seed.classList.add('away'); clearTimeout(awayTimer); awayTimer = setTimeout(() => seed.classList.remove('away'), 180); }
+}, { passive: true });
+addEventListener('resize', () => {                        // a browser toolbar only changes height — that must not break a bloom
+  if (innerWidth !== lastW){ lastW = innerWidth; if (bloomed) collapse(); }
+  if (!bloomed) measure();
+});
+
+/* ===================== zero-input value: the page is already useful ======================= */
+measure(); updatePulse(); setState('rest');
+document.body.dataset.top = 0; document.body.dataset.sel = ''; document.body.dataset.ticks = 0; document.body.dataset.pages = 0; document.body.dataset.callout = '0';
+setTimeout(() => { if (!hintEl.classList.contains('on')) hint('hold the dot', 4200); }, 900);
+</script>
+</body>
+</html>

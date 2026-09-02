@@ -173,6 +173,7 @@
     "verify:pitchfindings": "tsx src/lib/garvis/prospects/pitchFindings.verify.ts",
     "walkthrough:prototypes": "node scripts/prototype-walkthrough.mjs",
     "walkthrough:claims": "node scripts/claims-walkthrough.mjs",
+    "walkthrough:seed": "node scripts/seed-walkthrough.mjs",
     "probe:prototypes": "node scripts/probe.mjs prototypes/*.html",
     "verify:prototypesource": "node scripts/prototype-source-audit.mjs",
     "probe:generated": "tsx scripts/generated-app-probe.mjs --fixtures",

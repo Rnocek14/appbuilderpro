@@ -158,7 +158,6 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 @media (hover:none){.keys{display:none}}
 
 .sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
-#swhaptic{position:absolute; left:-9999px; top:0; pointer-events:none}
 
 @media (prefers-reduced-motion: reduce){
   *{transition:none !important; animation:none !important}
@@ -206,7 +205,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 
 <div class="keys">arrows move · Enter opens<br>H home · Esc closes</div>
 <div class="hud">
-  <span>scout v0 · staged world, simulated steering</span>
+  <span>scout v0 · staged world, simulated steering · <a href="seed.html" style="color:inherit">seed →</a></span>
   <button id="restart" aria-label="Restart">⟲</button>
   <button id="snd" aria-label="Tick sound" aria-pressed="true">♪</button>
   <button id="feel" aria-label="What to feel for">?</button>
@@ -228,7 +227,6 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   thumb — and keeping THAT geography stable at scale is the open, unproven risk.</div>
 </div>
 
-<input type="checkbox" switch id="swhaptic" tabindex="-1" aria-hidden="true">
 <div class="sr" aria-live="polite" id="live"></div>
 
 <script>
@@ -394,19 +392,18 @@ function setSelection(cell, now, tick){
 
 /* detents — synchronous, ≥30ms gap, skip never queue, never during a system glide.
    Haptic carrier, best-first: native Taptic via Capacitor when wrapped (selectionChanged IS
-   the iOS picker-detent generator), navigator.vibrate on Android web, the Safari switch tick
-   as a last resort. All of this is inert on plain web — window.Capacitor simply isn't there. */
+   the iOS picker-detent generator), navigator.vibrate on Android web. iOS web has no carrier
+   (Apple patched the switch tick in iOS 26.5) — sound carries it there. All of this is inert on plain web — window.Capacitor simply isn't there. */
 let sndOn = true, audioCtx = null, tickBuf = null;
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const canVibe = 'vibrate' in navigator;
-const swEl = document.getElementById('swhaptic');
 const CapHaptics = (window.Capacitor && window.Capacitor.isNativePlatform &&
   window.Capacitor.isNativePlatform()) ? window.Capacitor.registerPlugin('Haptics') : null;
 function hapticTick(){
   if (CapHaptics){ CapHaptics.selectionChanged().catch(() => {}); return; }
   if (canVibe) navigator.vibrate(12);
-  else if (isIOS) { try { swEl.click(); } catch(e){} }
+  // iOS web has no carrier since iOS 26.5 patched the switch trick — the tick is sound there
 }
 function hapticStart(){
   if (CapHaptics){ CapHaptics.selectionStart().catch(() => {}); return; }
@@ -1144,8 +1141,7 @@ document.getElementById('haptest').addEventListener('click', () => {
     const ok = navigator.vibrate(120);
     out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen';
   } else if (isIOS){
-    try { swEl.click(); } catch(e){}
-    out.textContent = 'no vibration API on iOS Safari — tried the switch tick';
+    out.textContent = 'no web vibration on iPhone — ringer on, the tick carries it; the detent lives in the wrap';
   } else out.textContent = 'no vibration API in this browser';
 });
 

@@ -142,7 +142,6 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 .card .haprow button:hover{color:var(--ember); border-color:rgba(232,131,58,.4)}
 
 .sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
-#swhaptic{position:absolute; left:-9999px; top:0; pointer-events:none}
 
 @media (prefers-reduced-motion: reduce){
   *{transition:none !important; animation:none !important}
@@ -207,7 +206,6 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 </div>
 <div class="hapchip" id="hapchip"></div>
 
-<input type="checkbox" switch id="swhaptic" tabindex="-1" aria-hidden="true">
 <div class="sr" aria-live="polite" id="live"></div>
 
 <script>
@@ -387,13 +385,12 @@ let sndOn = true, audioCtx = null, tickBuf = null;
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const canVibe = 'vibrate' in navigator;
-const swEl = document.getElementById('swhaptic');
 function detent(now){
   const gap = speed > 1200 ? 40 : 30;
   if (now - lastTickAt < gap) return;
   lastTickAt = now;
   if (canVibe) navigator.vibrate(12);
-  else if (isIOS) { try { swEl.click(); } catch(e){} }   // Safari switch haptic — free if it works, silent if not
+  // iOS web has no carrier since iOS 26.5 patched the switch trick — the tick is sound there
   if (sndOn && audioCtx && tickBuf){
     const s = audioCtx.createBufferSource(); s.buffer = tickBuf;
     s.playbackRate.value = 0.97 + Math.random()*0.06;
@@ -777,8 +774,7 @@ document.getElementById('haptest').addEventListener('click', () => {
     const ok = navigator.vibrate(120);
     out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen';
   } else if (isIOS){
-    try { swEl.click(); } catch(e){}
-    out.textContent = 'no vibration API on iOS Safari — tried the switch tick';
+    out.textContent = 'no web vibration on iPhone — ringer on, the tick carries it; the detent lives in the wrap';
   } else out.textContent = 'no vibration API in this browser';
 });
 
