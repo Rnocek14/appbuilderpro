@@ -89,6 +89,14 @@ Walk it every morning for two weeks, then answer honestly:
 12. **Hotter or brighter:** sliding east, does the land get "hotter" (keep the nebula ramp) or
     "brighter / newer" (drop it — the ramp is ≈ one JND and brightness is winning)?
 
+## Real worlds in the wrap
+
+`npm run sync:web` also copies every edition under `prototypes/worlds/` into `www/worlds/`, so a
+world the pipeline wrote (`docs/dot-field-shorts.md`) appears in the drift's chip strip offline. A
+fixture edition shows staged art and says *fixture — no player*; a real one opens YouTube's player
+inline. Two things to check the first morning: does autoplay with sound start on the tap, and does
+closing the post stop it dead?
+
 ## The second page: the seed (P15)
 
 The build also carries `www/seed.html`, derived from `prototypes/the-seed.html` — an

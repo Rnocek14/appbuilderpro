@@ -11,7 +11,7 @@
 //
 // Deliberately dumb string surgery — if a marker stops matching, it throws rather than
 // shipping a silently stale or half-patched app.
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, copyFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,9 +34,18 @@ function derive(srcName, outName, edits){
 // the HUD label and a hairline link to the other page.
 derive('the-drift.html', 'index.html', [
   ['<title>P14 · The Drift</title>', '<title>Scout</title>'],
-  ['<span>P14 · the drift — staged world, simulated steering</span>',
-   '<span>scout v0 · staged world, simulated steering · <a href="seed.html" style="color:inherit">seed →</a></span>'],
+  ['<span id="hudlabel">P14 · the drift — staged world, simulated steering</span>',
+   '<span id="hudlabel">scout v0 · staged world, simulated steering · <a href="seed.html" style="color:inherit">seed →</a></span>'],
 ]);
+// real worlds ride along: every edition JSON under prototypes/worlds/ is bundled so the drift can load it offline
+const worldsSrc = join(protos, 'worlds');
+if (existsSync(worldsSrc)){
+  mkdirSync(join(www, 'worlds'), { recursive: true });
+  for (const f of readdirSync(worldsSrc).filter(f => f.endsWith('.json'))){
+    copyFileSync(join(worldsSrc, f), join(www, 'worlds', f));
+    console.log(`scout/www/worlds/${f} copied`);
+  }
+}
 derive('the-seed.html', 'seed.html', [
   ['<title>P15 · The Seed</title>', '<title>Scout · Seed</title>'],
   ['<span>P15 · the seed — staged catalog, real timing</span>',

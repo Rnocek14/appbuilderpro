@@ -38,6 +38,11 @@
      edge. Register (serious / goofy) is a tag on the card, not geometry. A fifth world — movies, on a
      fixed catalogue with a genre wheel — is where the remote is most literally a remote. The camera is
      clamped to the wheel: the rim is the wall ("as deep as this world goes"). Still private.
+     Real worlds (2026-09-02): a world edition written by scripts/shorts-drop.ts — real YouTube Shorts
+     placed on the wheel by src/lib/worldPlacement.ts, one frozen JSON with a layout hash — is loaded
+     from worlds/*.json at boot and joins the chip strip. Its cells are placed, not sampled; a dot
+     opens YouTube's own player; the footer names the source, the date and the hash. Without a key the
+     pipeline writes a fixture drop that says it is one and never shows a player.
      Staged world, simulated steering — no model, and it says so. -->
 <!doctype html>
 <html lang="en">
@@ -139,6 +144,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 
 /* ---------- post view ---------- */
 #post{position:fixed; inset:0; background:var(--ground); z-index:50; display:none; flex-direction:column}
+#post iframe{display:block; border:0; background:#000; height:min(62vh, 177vw); aspect-ratio:9/16; margin:0 auto; max-width:100%}
 #post.on{display:flex}
 #post .top{display:flex; align-items:center; gap:8px; padding:calc(env(safe-area-inset-top,0px) + 12px) 16px 10px}
 #post .top .tdot{width:9px; height:9px; border-radius:50%; box-shadow:0 0 8px currentColor}
@@ -233,6 +239,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   <div class="top"><span class="tdot" id="ptdot"></span><b id="pauthor"></b><span class="age" id="page"></span>
     <button id="pclose" aria-label="Close post">✕</button></div>
   <canvas id="pmedia" width="800" height="620"></canvas>
+  <iframe id="pframe" title="YouTube player" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" style="display:none"></iframe>
   <div class="cap" id="pcap"></div>
   <div class="meta" id="pmeta"></div>
 </div>
@@ -243,7 +250,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 
 <div class="keys">arrows move · Shift+arrows steer · Enter opens<br>H home · W next world · Esc closes</div>
 <div class="hud">
-  <span>scout v0 · staged world, simulated steering · <a href="seed.html" style="color:inherit">seed →</a></span>
+  <span id="hudlabel">scout v0 · staged world, simulated steering · <a href="seed.html" style="color:inherit">seed →</a></span>
   <button id="restart" aria-label="Restart">⟲</button>
   <button id="snd" aria-label="Tick sound" aria-pressed="true">♪</button>
   <button id="feel" aria-label="What to feel for">?</button>
@@ -266,7 +273,10 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   <div class="note">Honest label: positions come from scores, not from learning — they cannot move
   today. Steering moves you; it is also logged as a preference, and in this demo the only thing that
   preference changes is the glow of the land ahead. Tomorrow's world is new. The staged content is a
-  seeded simulation; the steering loop, the compass and the feel are real.</div>
+  seeded simulation; the steering loop, the compass and the feel are real. A world loaded from
+  <code>worlds/*.json</code> is real content placed by the pipeline — its source, date and layout hash
+  are in the footer — and opening a dot plays YouTube's own player. You control this app's algorithm,
+  not YouTube's.</div>
 </div>
 
 <div class="sr" aria-live="polite" id="live"></div>
@@ -371,6 +381,22 @@ const WORLDS = {
   ] },
 };
 const WORLD_KEYS = Object.keys(WORLDS);
+/* a REAL world: an edition JSON from scripts/shorts-drop.ts — regions on the wheel, items already placed
+   into cells by src/lib/worldPlacement.ts. Nothing here is sampled: a cell is an item or it is empty. */
+function installWorld(J){
+  if (!J || !Array.isArray(J.regions) || !Array.isArray(J.cells) || !Array.isArray(J.items) || !J.name) return false;
+  const byId = new Map(J.items.map(it => [it.id, it])), placed = new Map();
+  for (const p of J.cells){ const it = byId.get(p.id); if (it) placed.set(p.c + ',' + p.r, it); }
+  const regions = J.regions.map(R => ({ ...R, authors: [], caps: [] }));
+  WORLDS[J.name] = { name: J.name, edition: J.edition, depth: J.depth, sectors: J.sectors, regions, placed,
+    regionIndex: new Map(regions.map((R, i) => [R.key, i])), items: J.items.length, source: J.source, date: J.date,
+    hash: J.layoutHash || '', rubric: J.rubric || '',
+    hint: J.source === 'youtube' ? 'Real shorts from YouTube, placed by rubric ' + (J.rubric || '') + ' — open a dot to play.'
+                                 : 'A fixture drop — real shorts land here once the pipeline runs with a key.' };
+  if (!WORLD_KEYS.includes(J.name)) WORLD_KEYS.push(J.name);
+  if (typeof renderWorldChrome === 'function') renderWorldChrome();
+  return true;
+}
 let worldKey = 'sports', CURRENTS = WORLDS.sports.regions, WORLD_SEED = SEED;
 /* Hue names the KIND and nothing else: sector i wears family hue i, in every world — the same bearing is
    the same colour everywhere, exactly. Eight families 39° apart from hsl 52; the band around ember
@@ -466,6 +492,19 @@ function getCell(c, r){
   for (let i = 1; i < w.length; i++) if (w[i] > w[best]) best = i;
   for (let i = 0; i < w.length; i++) if (i !== best && (second < 0 || w[i] > w[second])) second = i;
   const reg = best, total = w.reduce((a, v) => a + v, 0), share = w[best] / total;   // how decisive the place is here
+  const W = WORLDS[worldKey];
+  if (W.placed){                                             // a real world: the pipeline placed every item; nothing is sampled
+    const it = W.placed.get(k), ri = it ? W.regionIndex.get(it.region) : -1;
+    cell = it && ri >= 0 ? {
+      c, r, key: k, cur: ri, reg: ri, share: 1,
+      author: it.channel, cap: it.title, kind: 'reel', dur: it.seconds, frames: 1,
+      mins: Math.max(1, Math.round((Date.now() - Date.parse(it.publishedAt)) / 60000)), art: hash2(c*3+1, r*3+2),
+      x: c*PITCH + PITCH/2 + (rd()*2-1)*JITTER, y: r*PITCH + PITCH/2 + (rd()*2-1)*JITTER,
+      read: false, item: it,
+    } : { empty: true, c, r, key: k, reg, share };
+    cells.set(k, cell);
+    return cell;
+  }
   let cur = best;
   if (second >= 0 && rd() < SERENDIPITY && w[second] >= 0.35 * w[best]) cur = second;
   // density = supply: a per-region constant decided by the hash alone — affinity never empties or fills a cell
@@ -1455,8 +1494,23 @@ function kindStr(p){
        : p.kind === 'carousel' ? `carousel · ${p.frames} frames` : 'photo';
 }
 function handleOf(name){ return '@' + name.toLowerCase().replace(/[^a-z]+/g, ''); }
+/* a real item's thumbnail, drawn over the staged art once it arrives — only if the same cell is still wanted */
+const thumbCache = new Map();
+function drawThumb(cell, ctx2, w, h, stillWanted){
+  const url = cell.item && cell.item.thumb; if (!url) return;
+  let img = thumbCache.get(url);
+  const paint = () => {
+    if (!stillWanted() || !img.naturalWidth) return;
+    const s = Math.max(w/img.naturalWidth, h/img.naturalHeight), dw = img.naturalWidth*s, dh = img.naturalHeight*s;
+    ctx2.drawImage(img, (w - dw)/2, (h - dh)/2, dw, dh);
+  };
+  if (img && img.complete){ paint(); return; }
+  if (!img){ img = new Image(); img.decoding = 'async'; img.referrerPolicy = 'no-referrer'; thumbCache.set(url, img); img.src = url; }
+  img.addEventListener('load', paint, { once: true });
+}
 function cardContent(cell){
   cmx.drawImage(art(cell, 330, 150), 0, 0);
+  drawThumb(cell, cmx, 330, 150, () => sel === cell);
   const col = curColor(cell.cur);
   const td = document.getElementById('ctdot');
   td.style.background = col; td.style.color = col;
@@ -1479,19 +1533,29 @@ function announce(cell){
 let postOn = false;
 const postEl = document.getElementById('post');
 const journey = [];
+let postCell = null;
 function openPost(cell){
-  postOn = true;
-  const pm = document.getElementById('pmedia');
-  pm.height = Math.round(Math.min(innerHeight*0.55, innerWidth*0.78));
-  pm.width = innerWidth;
-  pm.getContext('2d').drawImage(art(cell, innerWidth, pm.height), 0, 0);
+  postOn = true; postCell = cell;
+  const pm = document.getElementById('pmedia'), frame = document.getElementById('pframe');
+  if (cell.item && cell.item.embedId){                       // a real short: YouTube's own player, nothing copied
+    pm.style.display = 'none'; frame.style.display = 'block';
+    frame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');   // granted only when a real player opens
+    frame.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(cell.item.embedId) + '?playsinline=1&rel=0&modestbranding=1&autoplay=1';
+  } else {
+    frame.style.display = 'none'; frame.removeAttribute('src'); pm.style.display = '';
+    pm.height = Math.round(Math.min(innerHeight*0.55, innerWidth*0.78));
+    pm.width = innerWidth;
+    pm.getContext('2d').drawImage(art(cell, innerWidth, pm.height), 0, 0);
+    drawThumb(cell, pm.getContext('2d'), pm.width, pm.height, () => postOn && postCell === cell);
+  }
   const col = curColor(cell.cur);
   const td = document.getElementById('ptdot');
   td.style.background = col; td.style.color = col;
   document.getElementById('pauthor').textContent = cell.author + '  ' + handleOf(cell.author);
   document.getElementById('page').textContent = ageStr(cell.mins);
   document.getElementById('pcap').textContent = cell.cap;
-  document.getElementById('pmeta').textContent = kindStr(cell) + ' · ' + CURRENTS[cell.cur].key;
+  document.getElementById('pmeta').textContent = kindStr(cell) + ' · ' + CURRENTS[cell.cur].key +
+    (cell.item ? (cell.item.embedId ? ' · YouTube' : ' · fixture — no player') : '');
   postEl.classList.add('on');
   document.getElementById('pclose').focus();
   hapticOpen();
@@ -1499,7 +1563,8 @@ function openPost(cell){
   affinityBoost(cell.cur, 1.0);
 }
 function closePost(){
-  postOn = false; postEl.classList.remove('on');
+  postOn = false; postCell = null; postEl.classList.remove('on');
+  { const frame = document.getElementById('pframe'); frame.removeAttribute('src'); frame.style.display = 'none'; document.getElementById('pmedia').style.display = ''; }
   cardEl.classList.add('docked');
   maybeRecenter();
   field.focus();
@@ -1575,7 +1640,9 @@ function updateDriftLabel(){
   const [bearing, radius] = polarPos();
   const el = document.getElementById('driftlabel');
   let populated = 0; for (const c of cells.values()) if (!c.empty) populated++;
-  const pct = Math.round(100*populated/(DISC_CELLS*0.8));                   // of the cells inside the rim a full walk would fill (ESTIMATE of mean density)
+  const Wp = WORLDS[worldKey];
+  const pct = Wp.placed ? Math.round(100*populated/Math.max(1, Wp.items))    // of today's drop, how much has passed under you
+                        : Math.round(100*populated/(DISC_CELLS*0.8));        // of the cells inside the rim a full walk would fill (ESTIMATE of mean density)
   const here = dominantRegion();
   // priority: the place implies the depth, so the depth word appears only when no place dominates (fits 390px)
   const parts = [WORLDS[worldKey].name, here >= 0 ? 'in ' + CURRENTS[here].key : depthWord(radius)].filter(Boolean);
@@ -1707,8 +1774,14 @@ function switchWorld(key){
   hintEl.textContent = WORLDS[key].hint || ('Same wheel, new kinds — the middle is what everyone watches; push out for ' + WORLDS[key].depth[1] + '.');
   hintEl.style.opacity = '1'; setTimeout(() => { hintEl.style.opacity = '0'; }, 3200);
 }
+const hudEl = document.getElementById('hudlabel'), HUD_STAGED = hudEl ? hudEl.innerHTML : '';
 function renderWorldChrome(){
-  worldChip.textContent = WORLDS[worldKey].name + ' ▾';
+  const W = WORLDS[worldKey];
+  worldChip.textContent = W.name + ' ▾';
+  if (hudEl){                                                // the footer is the honesty line: staged, or real with its provenance
+    if (W.placed) hudEl.textContent = `${W.name} · ${W.source === 'youtube' ? 'YouTube' : 'fixture'} · ${W.date} · ${W.items} shorts · ${W.hash.slice(0, 8)}`;
+    else hudEl.innerHTML = HUD_STAGED;
+  }
   worldStrip.textContent = '';
   for (const k of WORLD_KEYS){
     const b = document.createElement('button'); b.textContent = WORLDS[k].name;
@@ -1741,6 +1814,10 @@ function boot(){
 }
 boot();
 field.focus();
+// real worlds: any edition the pipeline wrote. Served over http (or bundled in the wrap) — from file:// the fetch
+// fails and the staged worlds stand alone, which is fine and said nowhere loudly.
+if (location.protocol !== 'file:')                        // file:// cannot fetch a sibling; served or bundled pages can
+  fetch('worlds/shorts.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(J => { if (J && installWorld(J)) console.info('real world loaded:', J.name, J.source, J.date, J.layoutHash); }).catch(() => {});
 </script>
 </body>
 </html>

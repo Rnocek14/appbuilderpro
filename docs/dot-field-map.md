@@ -363,8 +363,10 @@ Tomorrow's world is new."*
 
 For the driver (automatable):
 
-1. **Placement determinism** — `worldPlacement.verify.ts` (not yet written): identical daily JSON →
-   byte-identical cells; with top-ups allowed, previously placed cells never move ("by persistence").
+1. **Placement determinism** — `worldPlacement.verify.ts` **passes**: identical input → byte-identical
+   cells and hash; input order irrelevant; with the previous layout supplied, placed cells never move
+   on a top-up ("by persistence"); without it the suite reports how many moved. The production placer
+   is `src/lib/worldPlacement.ts`; the shorts pipeline uses it (`docs/dot-field-shorts.md`).
 2. **Scorer agreement gate** — 100 items × 3 raters: Spearman ≥ 0.7 rater-vs-scorer on intensity;
    inter-rater ≥ 0.6; Krippendorff α ≥ 0.7 intensity / ≥ 0.6 register vs the founder's labels; double-
    score with shuffled exemplars, drop items differing > 0.2 (all ESTIMATE targets).

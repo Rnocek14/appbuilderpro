@@ -1,0 +1,1737 @@
+{
+ "name": "shorts",
+ "edition": 0,
+ "rubric": "v0-keyword",
+ "source": "fixture",
+ "date": "2026-09-02",
+ "depth": [
+  "casual",
+  "extreme"
+ ],
+ "sectors": [
+  "ball",
+  "court",
+  "combat",
+  "motor",
+  "air & mountain",
+  "wheels",
+  "mind & pub",
+  "club & field"
+ ],
+ "regions": [
+  {
+   "key": "soccer",
+   "sector": 0,
+   "radius": 0.3
+  },
+  {
+   "key": "nfl",
+   "sector": 0,
+   "radius": 0.6,
+   "tag": "serious"
+  },
+  {
+   "key": "basketball",
+   "sector": 1,
+   "radius": 0.3
+  },
+  {
+   "key": "dunks",
+   "sector": 1,
+   "radius": 0.6
+  },
+  {
+   "key": "boxing",
+   "sector": 2,
+   "radius": 0.5
+  },
+  {
+   "key": "mma",
+   "sector": 2,
+   "radius": 0.85,
+   "tag": "serious"
+  },
+  {
+   "key": "rally",
+   "sector": 3,
+   "radius": 0.45
+  },
+  {
+   "key": "moto",
+   "sector": 3,
+   "radius": 0.75
+  },
+  {
+   "key": "ski & snow",
+   "sector": 4,
+   "radius": 0.55
+  },
+  {
+   "key": "base & wingsuit",
+   "sector": 4,
+   "radius": 0.95,
+   "tag": "serious"
+  },
+  {
+   "key": "skate",
+   "sector": 5,
+   "radius": 0.45
+  },
+  {
+   "key": "bmx & parkour",
+   "sector": 5,
+   "radius": 0.75
+  },
+  {
+   "key": "darts & pool",
+   "sector": 6,
+   "radius": 0.25,
+   "tag": "goofy"
+  },
+  {
+   "key": "chess",
+   "sector": 6,
+   "radius": 0.6,
+   "tag": "serious"
+  },
+  {
+   "key": "golf",
+   "sector": 7,
+   "radius": 0.2
+  },
+  {
+   "key": "cricket",
+   "sector": 7,
+   "radius": 0.5
+  }
+ ],
+ "items": [
+  {
+   "id": "fx-00-0",
+   "title": "Clean soccer line #shorts",
+   "channel": "Fixture soccer",
+   "channelId": "fx-channel-0",
+   "publishedAt": "2026-09-01T12:00:00.000Z",
+   "seconds": 15,
+   "views": 1000,
+   "thumb": null,
+   "embedId": null,
+   "region": "soccer",
+   "sector": 0,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-00-1",
+   "title": "Wild soccer session #shorts",
+   "channel": "Fixture soccer",
+   "channelId": "fx-channel-0",
+   "publishedAt": "2026-08-31T11:00:00.000Z",
+   "seconds": 52,
+   "views": 8919,
+   "thumb": null,
+   "embedId": null,
+   "region": "soccer",
+   "sector": 0,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-00-2",
+   "title": "Quiet soccer finish #shorts",
+   "channel": "Fixture soccer",
+   "channelId": "fx-channel-0",
+   "publishedAt": "2026-08-30T10:00:00.000Z",
+   "seconds": 89,
+   "views": 16838,
+   "thumb": null,
+   "embedId": null,
+   "region": "soccer",
+   "sector": 0,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-00-3",
+   "title": "Late soccer take #shorts",
+   "channel": "Fixture soccer",
+   "channelId": "fx-channel-0",
+   "publishedAt": "2026-08-29T09:00:00.000Z",
+   "seconds": 126,
+   "views": 24757,
+   "thumb": null,
+   "embedId": null,
+   "region": "soccer",
+   "sector": 0,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-00-4",
+   "title": "First soccer attempt #shorts",
+   "channel": "Fixture soccer",
+   "channelId": "fx-channel-0",
+   "publishedAt": "2026-08-28T08:00:00.000Z",
+   "seconds": 163,
+   "views": 32676,
+   "thumb": null,
+   "embedId": null,
+   "region": "soccer",
+   "sector": 0,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-01-0",
+   "title": "Clean nfl line #shorts",
+   "channel": "Fixture nfl",
+   "channelId": "fx-channel-1",
+   "publishedAt": "2026-08-27T07:00:00.000Z",
+   "seconds": 50,
+   "views": 40595,
+   "thumb": null,
+   "embedId": null,
+   "region": "nfl",
+   "sector": 0,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-01-1",
+   "title": "Wild nfl session #shorts",
+   "channel": "Fixture nfl",
+   "channelId": "fx-channel-1",
+   "publishedAt": "2026-09-01T06:00:00.000Z",
+   "seconds": 87,
+   "views": 48514,
+   "thumb": null,
+   "embedId": null,
+   "region": "nfl",
+   "sector": 0,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-01-2",
+   "title": "Quiet nfl finish #shorts",
+   "channel": "Fixture nfl",
+   "channelId": "fx-channel-1",
+   "publishedAt": "2026-08-31T05:00:00.000Z",
+   "seconds": 124,
+   "views": 56433,
+   "thumb": null,
+   "embedId": null,
+   "region": "nfl",
+   "sector": 0,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-01-3",
+   "title": "Late nfl take #shorts",
+   "channel": "Fixture nfl",
+   "channelId": "fx-channel-1",
+   "publishedAt": "2026-08-30T04:00:00.000Z",
+   "seconds": 161,
+   "views": 64352,
+   "thumb": null,
+   "embedId": null,
+   "region": "nfl",
+   "sector": 0,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-01-4",
+   "title": "First nfl attempt #shorts",
+   "channel": "Fixture nfl",
+   "channelId": "fx-channel-1",
+   "publishedAt": "2026-08-29T03:00:00.000Z",
+   "seconds": 48,
+   "views": 72271,
+   "thumb": null,
+   "embedId": null,
+   "region": "nfl",
+   "sector": 0,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-02-0",
+   "title": "Clean basketball line #shorts",
+   "channel": "Fixture basketball",
+   "channelId": "fx-channel-2",
+   "publishedAt": "2026-08-28T02:00:00.000Z",
+   "seconds": 85,
+   "views": 80190,
+   "thumb": null,
+   "embedId": null,
+   "region": "basketball",
+   "sector": 1,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-02-1",
+   "title": "Wild basketball session #shorts",
+   "channel": "Fixture basketball",
+   "channelId": "fx-channel-2",
+   "publishedAt": "2026-08-27T01:00:00.000Z",
+   "seconds": 122,
+   "views": 88109,
+   "thumb": null,
+   "embedId": null,
+   "region": "basketball",
+   "sector": 1,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-02-2",
+   "title": "Quiet basketball finish #shorts",
+   "channel": "Fixture basketball",
+   "channelId": "fx-channel-2",
+   "publishedAt": "2026-09-01T00:00:00.000Z",
+   "seconds": 159,
+   "views": 6028,
+   "thumb": null,
+   "embedId": null,
+   "region": "basketball",
+   "sector": 1,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-02-3",
+   "title": "Late basketball take #shorts",
+   "channel": "Fixture basketball",
+   "channelId": "fx-channel-2",
+   "publishedAt": "2026-08-30T23:00:00.000Z",
+   "seconds": 46,
+   "views": 13947,
+   "thumb": null,
+   "embedId": null,
+   "region": "basketball",
+   "sector": 1,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-02-4",
+   "title": "First basketball attempt #shorts",
+   "channel": "Fixture basketball",
+   "channelId": "fx-channel-2",
+   "publishedAt": "2026-08-29T22:00:00.000Z",
+   "seconds": 83,
+   "views": 21866,
+   "thumb": null,
+   "embedId": null,
+   "region": "basketball",
+   "sector": 1,
+   "radius": 0.3
+  },
+  {
+   "id": "fx-03-0",
+   "title": "Clean dunks line #shorts",
+   "channel": "Fixture dunks",
+   "channelId": "fx-channel-3",
+   "publishedAt": "2026-08-28T21:00:00.000Z",
+   "seconds": 120,
+   "views": 29785,
+   "thumb": null,
+   "embedId": null,
+   "region": "dunks",
+   "sector": 1,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-03-1",
+   "title": "Wild dunks session #shorts",
+   "channel": "Fixture dunks",
+   "channelId": "fx-channel-3",
+   "publishedAt": "2026-08-27T20:00:00.000Z",
+   "seconds": 157,
+   "views": 37704,
+   "thumb": null,
+   "embedId": null,
+   "region": "dunks",
+   "sector": 1,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-03-2",
+   "title": "Quiet dunks finish #shorts",
+   "channel": "Fixture dunks",
+   "channelId": "fx-channel-3",
+   "publishedAt": "2026-08-26T19:00:00.000Z",
+   "seconds": 44,
+   "views": 45623,
+   "thumb": null,
+   "embedId": null,
+   "region": "dunks",
+   "sector": 1,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-03-3",
+   "title": "Late dunks take #shorts",
+   "channel": "Fixture dunks",
+   "channelId": "fx-channel-3",
+   "publishedAt": "2026-08-31T18:00:00.000Z",
+   "seconds": 81,
+   "views": 53542,
+   "thumb": null,
+   "embedId": null,
+   "region": "dunks",
+   "sector": 1,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-03-4",
+   "title": "First dunks attempt #shorts",
+   "channel": "Fixture dunks",
+   "channelId": "fx-channel-3",
+   "publishedAt": "2026-08-30T17:00:00.000Z",
+   "seconds": 118,
+   "views": 61461,
+   "thumb": null,
+   "embedId": null,
+   "region": "dunks",
+   "sector": 1,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-04-0",
+   "title": "Clean boxing line #shorts",
+   "channel": "Fixture boxing",
+   "channelId": "fx-channel-4",
+   "publishedAt": "2026-08-29T16:00:00.000Z",
+   "seconds": 155,
+   "views": 69380,
+   "thumb": null,
+   "embedId": null,
+   "region": "boxing",
+   "sector": 2,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-04-1",
+   "title": "Wild boxing session #shorts",
+   "channel": "Fixture boxing",
+   "channelId": "fx-channel-4",
+   "publishedAt": "2026-08-28T15:00:00.000Z",
+   "seconds": 42,
+   "views": 77299,
+   "thumb": null,
+   "embedId": null,
+   "region": "boxing",
+   "sector": 2,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-04-2",
+   "title": "Quiet boxing finish #shorts",
+   "channel": "Fixture boxing",
+   "channelId": "fx-channel-4",
+   "publishedAt": "2026-08-27T14:00:00.000Z",
+   "seconds": 79,
+   "views": 85218,
+   "thumb": null,
+   "embedId": null,
+   "region": "boxing",
+   "sector": 2,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-04-3",
+   "title": "Late boxing take #shorts",
+   "channel": "Fixture boxing",
+   "channelId": "fx-channel-4",
+   "publishedAt": "2026-08-26T13:00:00.000Z",
+   "seconds": 116,
+   "views": 3137,
+   "thumb": null,
+   "embedId": null,
+   "region": "boxing",
+   "sector": 2,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-04-4",
+   "title": "First boxing attempt #shorts",
+   "channel": "Fixture boxing",
+   "channelId": "fx-channel-4",
+   "publishedAt": "2026-08-31T12:00:00.000Z",
+   "seconds": 153,
+   "views": 11056,
+   "thumb": null,
+   "embedId": null,
+   "region": "boxing",
+   "sector": 2,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-05-0",
+   "title": "Clean mma line #shorts",
+   "channel": "Fixture mma",
+   "channelId": "fx-channel-5",
+   "publishedAt": "2026-08-30T11:00:00.000Z",
+   "seconds": 40,
+   "views": 18975,
+   "thumb": null,
+   "embedId": null,
+   "region": "mma",
+   "sector": 2,
+   "radius": 0.85
+  },
+  {
+   "id": "fx-05-1",
+   "title": "Wild mma session #shorts",
+   "channel": "Fixture mma",
+   "channelId": "fx-channel-5",
+   "publishedAt": "2026-08-29T10:00:00.000Z",
+   "seconds": 77,
+   "views": 26894,
+   "thumb": null,
+   "embedId": null,
+   "region": "mma",
+   "sector": 2,
+   "radius": 0.85
+  },
+  {
+   "id": "fx-05-2",
+   "title": "Quiet mma finish #shorts",
+   "channel": "Fixture mma",
+   "channelId": "fx-channel-5",
+   "publishedAt": "2026-08-28T09:00:00.000Z",
+   "seconds": 114,
+   "views": 34813,
+   "thumb": null,
+   "embedId": null,
+   "region": "mma",
+   "sector": 2,
+   "radius": 0.85
+  },
+  {
+   "id": "fx-05-3",
+   "title": "Late mma take #shorts",
+   "channel": "Fixture mma",
+   "channelId": "fx-channel-5",
+   "publishedAt": "2026-08-27T08:00:00.000Z",
+   "seconds": 151,
+   "views": 42732,
+   "thumb": null,
+   "embedId": null,
+   "region": "mma",
+   "sector": 2,
+   "radius": 0.85
+  },
+  {
+   "id": "fx-05-4",
+   "title": "First mma attempt #shorts",
+   "channel": "Fixture mma",
+   "channelId": "fx-channel-5",
+   "publishedAt": "2026-08-26T07:00:00.000Z",
+   "seconds": 38,
+   "views": 50651,
+   "thumb": null,
+   "embedId": null,
+   "region": "mma",
+   "sector": 2,
+   "radius": 0.85
+  },
+  {
+   "id": "fx-06-0",
+   "title": "Clean rally line #shorts",
+   "channel": "Fixture rally",
+   "channelId": "fx-channel-6",
+   "publishedAt": "2026-08-31T06:00:00.000Z",
+   "seconds": 75,
+   "views": 58570,
+   "thumb": null,
+   "embedId": null,
+   "region": "rally",
+   "sector": 3,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-06-1",
+   "title": "Wild rally session #shorts",
+   "channel": "Fixture rally",
+   "channelId": "fx-channel-6",
+   "publishedAt": "2026-08-30T05:00:00.000Z",
+   "seconds": 112,
+   "views": 66489,
+   "thumb": null,
+   "embedId": null,
+   "region": "rally",
+   "sector": 3,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-06-2",
+   "title": "Quiet rally finish #shorts",
+   "channel": "Fixture rally",
+   "channelId": "fx-channel-6",
+   "publishedAt": "2026-08-29T04:00:00.000Z",
+   "seconds": 149,
+   "views": 74408,
+   "thumb": null,
+   "embedId": null,
+   "region": "rally",
+   "sector": 3,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-06-3",
+   "title": "Late rally take #shorts",
+   "channel": "Fixture rally",
+   "channelId": "fx-channel-6",
+   "publishedAt": "2026-08-28T03:00:00.000Z",
+   "seconds": 36,
+   "views": 82327,
+   "thumb": null,
+   "embedId": null,
+   "region": "rally",
+   "sector": 3,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-06-4",
+   "title": "First rally attempt #shorts",
+   "channel": "Fixture rally",
+   "channelId": "fx-channel-6",
+   "publishedAt": "2026-08-27T02:00:00.000Z",
+   "seconds": 73,
+   "views": 90246,
+   "thumb": null,
+   "embedId": null,
+   "region": "rally",
+   "sector": 3,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-07-0",
+   "title": "Clean moto line #shorts",
+   "channel": "Fixture moto",
+   "channelId": "fx-channel-7",
+   "publishedAt": "2026-08-26T01:00:00.000Z",
+   "seconds": 110,
+   "views": 8165,
+   "thumb": null,
+   "embedId": null,
+   "region": "moto",
+   "sector": 3,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-07-1",
+   "title": "Wild moto session #shorts",
+   "channel": "Fixture moto",
+   "channelId": "fx-channel-7",
+   "publishedAt": "2026-08-31T00:00:00.000Z",
+   "seconds": 147,
+   "views": 16084,
+   "thumb": null,
+   "embedId": null,
+   "region": "moto",
+   "sector": 3,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-07-2",
+   "title": "Quiet moto finish #shorts",
+   "channel": "Fixture moto",
+   "channelId": "fx-channel-7",
+   "publishedAt": "2026-08-29T23:00:00.000Z",
+   "seconds": 34,
+   "views": 24003,
+   "thumb": null,
+   "embedId": null,
+   "region": "moto",
+   "sector": 3,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-07-3",
+   "title": "Late moto take #shorts",
+   "channel": "Fixture moto",
+   "channelId": "fx-channel-7",
+   "publishedAt": "2026-08-28T22:00:00.000Z",
+   "seconds": 71,
+   "views": 31922,
+   "thumb": null,
+   "embedId": null,
+   "region": "moto",
+   "sector": 3,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-07-4",
+   "title": "First moto attempt #shorts",
+   "channel": "Fixture moto",
+   "channelId": "fx-channel-7",
+   "publishedAt": "2026-08-27T21:00:00.000Z",
+   "seconds": 108,
+   "views": 39841,
+   "thumb": null,
+   "embedId": null,
+   "region": "moto",
+   "sector": 3,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-08-0",
+   "title": "Clean ski & snow line #shorts",
+   "channel": "Fixture ski & snow",
+   "channelId": "fx-channel-8",
+   "publishedAt": "2026-08-26T20:00:00.000Z",
+   "seconds": 145,
+   "views": 47760,
+   "thumb": null,
+   "embedId": null,
+   "region": "ski & snow",
+   "sector": 4,
+   "radius": 0.55
+  },
+  {
+   "id": "fx-08-1",
+   "title": "Wild ski & snow session #shorts",
+   "channel": "Fixture ski & snow",
+   "channelId": "fx-channel-8",
+   "publishedAt": "2026-08-25T19:00:00.000Z",
+   "seconds": 32,
+   "views": 55679,
+   "thumb": null,
+   "embedId": null,
+   "region": "ski & snow",
+   "sector": 4,
+   "radius": 0.55
+  },
+  {
+   "id": "fx-08-2",
+   "title": "Quiet ski & snow finish #shorts",
+   "channel": "Fixture ski & snow",
+   "channelId": "fx-channel-8",
+   "publishedAt": "2026-08-30T18:00:00.000Z",
+   "seconds": 69,
+   "views": 63598,
+   "thumb": null,
+   "embedId": null,
+   "region": "ski & snow",
+   "sector": 4,
+   "radius": 0.55
+  },
+  {
+   "id": "fx-08-3",
+   "title": "Late ski & snow take #shorts",
+   "channel": "Fixture ski & snow",
+   "channelId": "fx-channel-8",
+   "publishedAt": "2026-08-29T17:00:00.000Z",
+   "seconds": 106,
+   "views": 71517,
+   "thumb": null,
+   "embedId": null,
+   "region": "ski & snow",
+   "sector": 4,
+   "radius": 0.55
+  },
+  {
+   "id": "fx-08-4",
+   "title": "First ski & snow attempt #shorts",
+   "channel": "Fixture ski & snow",
+   "channelId": "fx-channel-8",
+   "publishedAt": "2026-08-28T16:00:00.000Z",
+   "seconds": 143,
+   "views": 79436,
+   "thumb": null,
+   "embedId": null,
+   "region": "ski & snow",
+   "sector": 4,
+   "radius": 0.55
+  },
+  {
+   "id": "fx-09-0",
+   "title": "Clean base & wingsuit line #shorts",
+   "channel": "Fixture base & wingsuit",
+   "channelId": "fx-channel-9",
+   "publishedAt": "2026-08-27T15:00:00.000Z",
+   "seconds": 30,
+   "views": 87355,
+   "thumb": null,
+   "embedId": null,
+   "region": "base & wingsuit",
+   "sector": 4,
+   "radius": 0.95
+  },
+  {
+   "id": "fx-09-1",
+   "title": "Wild base & wingsuit session #shorts",
+   "channel": "Fixture base & wingsuit",
+   "channelId": "fx-channel-9",
+   "publishedAt": "2026-08-26T14:00:00.000Z",
+   "seconds": 67,
+   "views": 5274,
+   "thumb": null,
+   "embedId": null,
+   "region": "base & wingsuit",
+   "sector": 4,
+   "radius": 0.95
+  },
+  {
+   "id": "fx-09-2",
+   "title": "Quiet base & wingsuit finish #shorts",
+   "channel": "Fixture base & wingsuit",
+   "channelId": "fx-channel-9",
+   "publishedAt": "2026-08-25T13:00:00.000Z",
+   "seconds": 104,
+   "views": 13193,
+   "thumb": null,
+   "embedId": null,
+   "region": "base & wingsuit",
+   "sector": 4,
+   "radius": 0.95
+  },
+  {
+   "id": "fx-09-3",
+   "title": "Late base & wingsuit take #shorts",
+   "channel": "Fixture base & wingsuit",
+   "channelId": "fx-channel-9",
+   "publishedAt": "2026-08-30T12:00:00.000Z",
+   "seconds": 141,
+   "views": 21112,
+   "thumb": null,
+   "embedId": null,
+   "region": "base & wingsuit",
+   "sector": 4,
+   "radius": 0.95
+  },
+  {
+   "id": "fx-09-4",
+   "title": "First base & wingsuit attempt #shorts",
+   "channel": "Fixture base & wingsuit",
+   "channelId": "fx-channel-9",
+   "publishedAt": "2026-08-29T11:00:00.000Z",
+   "seconds": 28,
+   "views": 29031,
+   "thumb": null,
+   "embedId": null,
+   "region": "base & wingsuit",
+   "sector": 4,
+   "radius": 0.95
+  },
+  {
+   "id": "fx-10-0",
+   "title": "Clean skate line #shorts",
+   "channel": "Fixture skate",
+   "channelId": "fx-channel-10",
+   "publishedAt": "2026-08-28T10:00:00.000Z",
+   "seconds": 65,
+   "views": 36950,
+   "thumb": null,
+   "embedId": null,
+   "region": "skate",
+   "sector": 5,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-10-1",
+   "title": "Wild skate session #shorts",
+   "channel": "Fixture skate",
+   "channelId": "fx-channel-10",
+   "publishedAt": "2026-08-27T09:00:00.000Z",
+   "seconds": 102,
+   "views": 44869,
+   "thumb": null,
+   "embedId": null,
+   "region": "skate",
+   "sector": 5,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-10-2",
+   "title": "Quiet skate finish #shorts",
+   "channel": "Fixture skate",
+   "channelId": "fx-channel-10",
+   "publishedAt": "2026-08-26T08:00:00.000Z",
+   "seconds": 139,
+   "views": 52788,
+   "thumb": null,
+   "embedId": null,
+   "region": "skate",
+   "sector": 5,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-10-3",
+   "title": "Late skate take #shorts",
+   "channel": "Fixture skate",
+   "channelId": "fx-channel-10",
+   "publishedAt": "2026-08-25T07:00:00.000Z",
+   "seconds": 26,
+   "views": 60707,
+   "thumb": null,
+   "embedId": null,
+   "region": "skate",
+   "sector": 5,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-10-4",
+   "title": "First skate attempt #shorts",
+   "channel": "Fixture skate",
+   "channelId": "fx-channel-10",
+   "publishedAt": "2026-08-30T06:00:00.000Z",
+   "seconds": 63,
+   "views": 68626,
+   "thumb": null,
+   "embedId": null,
+   "region": "skate",
+   "sector": 5,
+   "radius": 0.45
+  },
+  {
+   "id": "fx-11-0",
+   "title": "Clean bmx & parkour line #shorts",
+   "channel": "Fixture bmx & parkour",
+   "channelId": "fx-channel-11",
+   "publishedAt": "2026-08-29T05:00:00.000Z",
+   "seconds": 100,
+   "views": 76545,
+   "thumb": null,
+   "embedId": null,
+   "region": "bmx & parkour",
+   "sector": 5,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-11-1",
+   "title": "Wild bmx & parkour session #shorts",
+   "channel": "Fixture bmx & parkour",
+   "channelId": "fx-channel-11",
+   "publishedAt": "2026-08-28T04:00:00.000Z",
+   "seconds": 137,
+   "views": 84464,
+   "thumb": null,
+   "embedId": null,
+   "region": "bmx & parkour",
+   "sector": 5,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-11-2",
+   "title": "Quiet bmx & parkour finish #shorts",
+   "channel": "Fixture bmx & parkour",
+   "channelId": "fx-channel-11",
+   "publishedAt": "2026-08-27T03:00:00.000Z",
+   "seconds": 24,
+   "views": 2383,
+   "thumb": null,
+   "embedId": null,
+   "region": "bmx & parkour",
+   "sector": 5,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-11-3",
+   "title": "Late bmx & parkour take #shorts",
+   "channel": "Fixture bmx & parkour",
+   "channelId": "fx-channel-11",
+   "publishedAt": "2026-08-26T02:00:00.000Z",
+   "seconds": 61,
+   "views": 10302,
+   "thumb": null,
+   "embedId": null,
+   "region": "bmx & parkour",
+   "sector": 5,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-11-4",
+   "title": "First bmx & parkour attempt #shorts",
+   "channel": "Fixture bmx & parkour",
+   "channelId": "fx-channel-11",
+   "publishedAt": "2026-08-25T01:00:00.000Z",
+   "seconds": 98,
+   "views": 18221,
+   "thumb": null,
+   "embedId": null,
+   "region": "bmx & parkour",
+   "sector": 5,
+   "radius": 0.75
+  },
+  {
+   "id": "fx-12-0",
+   "title": "Clean darts & pool line #shorts",
+   "channel": "Fixture darts & pool",
+   "channelId": "fx-channel-12",
+   "publishedAt": "2026-08-30T00:00:00.000Z",
+   "seconds": 135,
+   "views": 26140,
+   "thumb": null,
+   "embedId": null,
+   "region": "darts & pool",
+   "sector": 6,
+   "radius": 0.25
+  },
+  {
+   "id": "fx-12-1",
+   "title": "Wild darts & pool session #shorts",
+   "channel": "Fixture darts & pool",
+   "channelId": "fx-channel-12",
+   "publishedAt": "2026-08-28T23:00:00.000Z",
+   "seconds": 22,
+   "views": 34059,
+   "thumb": null,
+   "embedId": null,
+   "region": "darts & pool",
+   "sector": 6,
+   "radius": 0.25
+  },
+  {
+   "id": "fx-12-2",
+   "title": "Quiet darts & pool finish #shorts",
+   "channel": "Fixture darts & pool",
+   "channelId": "fx-channel-12",
+   "publishedAt": "2026-08-27T22:00:00.000Z",
+   "seconds": 59,
+   "views": 41978,
+   "thumb": null,
+   "embedId": null,
+   "region": "darts & pool",
+   "sector": 6,
+   "radius": 0.25
+  },
+  {
+   "id": "fx-12-3",
+   "title": "Late darts & pool take #shorts",
+   "channel": "Fixture darts & pool",
+   "channelId": "fx-channel-12",
+   "publishedAt": "2026-08-26T21:00:00.000Z",
+   "seconds": 96,
+   "views": 49897,
+   "thumb": null,
+   "embedId": null,
+   "region": "darts & pool",
+   "sector": 6,
+   "radius": 0.25
+  },
+  {
+   "id": "fx-12-4",
+   "title": "First darts & pool attempt #shorts",
+   "channel": "Fixture darts & pool",
+   "channelId": "fx-channel-12",
+   "publishedAt": "2026-08-25T20:00:00.000Z",
+   "seconds": 133,
+   "views": 57816,
+   "thumb": null,
+   "embedId": null,
+   "region": "darts & pool",
+   "sector": 6,
+   "radius": 0.25
+  },
+  {
+   "id": "fx-13-0",
+   "title": "Clean chess line #shorts",
+   "channel": "Fixture chess",
+   "channelId": "fx-channel-13",
+   "publishedAt": "2026-08-24T19:00:00.000Z",
+   "seconds": 20,
+   "views": 65735,
+   "thumb": null,
+   "embedId": null,
+   "region": "chess",
+   "sector": 6,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-13-1",
+   "title": "Wild chess session #shorts",
+   "channel": "Fixture chess",
+   "channelId": "fx-channel-13",
+   "publishedAt": "2026-08-29T18:00:00.000Z",
+   "seconds": 57,
+   "views": 73654,
+   "thumb": null,
+   "embedId": null,
+   "region": "chess",
+   "sector": 6,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-13-2",
+   "title": "Quiet chess finish #shorts",
+   "channel": "Fixture chess",
+   "channelId": "fx-channel-13",
+   "publishedAt": "2026-08-28T17:00:00.000Z",
+   "seconds": 94,
+   "views": 81573,
+   "thumb": null,
+   "embedId": null,
+   "region": "chess",
+   "sector": 6,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-13-3",
+   "title": "Late chess take #shorts",
+   "channel": "Fixture chess",
+   "channelId": "fx-channel-13",
+   "publishedAt": "2026-08-27T16:00:00.000Z",
+   "seconds": 131,
+   "views": 89492,
+   "thumb": null,
+   "embedId": null,
+   "region": "chess",
+   "sector": 6,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-13-4",
+   "title": "First chess attempt #shorts",
+   "channel": "Fixture chess",
+   "channelId": "fx-channel-13",
+   "publishedAt": "2026-08-26T15:00:00.000Z",
+   "seconds": 18,
+   "views": 7411,
+   "thumb": null,
+   "embedId": null,
+   "region": "chess",
+   "sector": 6,
+   "radius": 0.6
+  },
+  {
+   "id": "fx-14-0",
+   "title": "Clean golf line #shorts",
+   "channel": "Fixture golf",
+   "channelId": "fx-channel-14",
+   "publishedAt": "2026-08-25T14:00:00.000Z",
+   "seconds": 55,
+   "views": 15330,
+   "thumb": null,
+   "embedId": null,
+   "region": "golf",
+   "sector": 7,
+   "radius": 0.2
+  },
+  {
+   "id": "fx-14-1",
+   "title": "Wild golf session #shorts",
+   "channel": "Fixture golf",
+   "channelId": "fx-channel-14",
+   "publishedAt": "2026-08-24T13:00:00.000Z",
+   "seconds": 92,
+   "views": 23249,
+   "thumb": null,
+   "embedId": null,
+   "region": "golf",
+   "sector": 7,
+   "radius": 0.2
+  },
+  {
+   "id": "fx-14-2",
+   "title": "Quiet golf finish #shorts",
+   "channel": "Fixture golf",
+   "channelId": "fx-channel-14",
+   "publishedAt": "2026-08-29T12:00:00.000Z",
+   "seconds": 129,
+   "views": 31168,
+   "thumb": null,
+   "embedId": null,
+   "region": "golf",
+   "sector": 7,
+   "radius": 0.2
+  },
+  {
+   "id": "fx-14-3",
+   "title": "Late golf take #shorts",
+   "channel": "Fixture golf",
+   "channelId": "fx-channel-14",
+   "publishedAt": "2026-08-28T11:00:00.000Z",
+   "seconds": 16,
+   "views": 39087,
+   "thumb": null,
+   "embedId": null,
+   "region": "golf",
+   "sector": 7,
+   "radius": 0.2
+  },
+  {
+   "id": "fx-14-4",
+   "title": "First golf attempt #shorts",
+   "channel": "Fixture golf",
+   "channelId": "fx-channel-14",
+   "publishedAt": "2026-08-27T10:00:00.000Z",
+   "seconds": 53,
+   "views": 47006,
+   "thumb": null,
+   "embedId": null,
+   "region": "golf",
+   "sector": 7,
+   "radius": 0.2
+  },
+  {
+   "id": "fx-15-0",
+   "title": "Clean cricket line #shorts",
+   "channel": "Fixture cricket",
+   "channelId": "fx-channel-15",
+   "publishedAt": "2026-08-26T09:00:00.000Z",
+   "seconds": 90,
+   "views": 54925,
+   "thumb": null,
+   "embedId": null,
+   "region": "cricket",
+   "sector": 7,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-15-1",
+   "title": "Wild cricket session #shorts",
+   "channel": "Fixture cricket",
+   "channelId": "fx-channel-15",
+   "publishedAt": "2026-08-25T08:00:00.000Z",
+   "seconds": 127,
+   "views": 62844,
+   "thumb": null,
+   "embedId": null,
+   "region": "cricket",
+   "sector": 7,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-15-2",
+   "title": "Quiet cricket finish #shorts",
+   "channel": "Fixture cricket",
+   "channelId": "fx-channel-15",
+   "publishedAt": "2026-08-24T07:00:00.000Z",
+   "seconds": 164,
+   "views": 70763,
+   "thumb": null,
+   "embedId": null,
+   "region": "cricket",
+   "sector": 7,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-15-3",
+   "title": "Late cricket take #shorts",
+   "channel": "Fixture cricket",
+   "channelId": "fx-channel-15",
+   "publishedAt": "2026-08-29T06:00:00.000Z",
+   "seconds": 51,
+   "views": 78682,
+   "thumb": null,
+   "embedId": null,
+   "region": "cricket",
+   "sector": 7,
+   "radius": 0.5
+  },
+  {
+   "id": "fx-15-4",
+   "title": "First cricket attempt #shorts",
+   "channel": "Fixture cricket",
+   "channelId": "fx-channel-15",
+   "publishedAt": "2026-08-28T05:00:00.000Z",
+   "seconds": 88,
+   "views": 86601,
+   "thumb": null,
+   "embedId": null,
+   "region": "cricket",
+   "sector": 7,
+   "radius": 0.5
+  }
+ ],
+ "cells": [
+  {
+   "c": 2,
+   "r": 27,
+   "id": "fx-09-1",
+   "region": "base & wingsuit"
+  },
+  {
+   "c": 2,
+   "r": 28,
+   "id": "fx-09-2",
+   "region": "base & wingsuit"
+  },
+  {
+   "c": 2,
+   "r": 29,
+   "id": "fx-09-3",
+   "region": "base & wingsuit"
+  },
+  {
+   "c": 3,
+   "r": 27,
+   "id": "fx-09-4",
+   "region": "base & wingsuit"
+  },
+  {
+   "c": 3,
+   "r": 28,
+   "id": "fx-09-0",
+   "region": "base & wingsuit"
+  },
+  {
+   "c": 9,
+   "r": 12,
+   "id": "fx-07-3",
+   "region": "moto"
+  },
+  {
+   "c": 9,
+   "r": 13,
+   "id": "fx-07-0",
+   "region": "moto"
+  },
+  {
+   "c": 9,
+   "r": 14,
+   "id": "fx-07-1",
+   "region": "moto"
+  },
+  {
+   "c": 10,
+   "r": 12,
+   "id": "fx-07-4",
+   "region": "moto"
+  },
+  {
+   "c": 10,
+   "r": 13,
+   "id": "fx-07-2",
+   "region": "moto"
+  },
+  {
+   "c": 10,
+   "r": 19,
+   "id": "fx-08-1",
+   "region": "ski & snow"
+  },
+  {
+   "c": 10,
+   "r": 20,
+   "id": "fx-08-0",
+   "region": "ski & snow"
+  },
+  {
+   "c": 10,
+   "r": 21,
+   "id": "fx-08-2",
+   "region": "ski & snow"
+  },
+  {
+   "c": 10,
+   "r": 33,
+   "id": "fx-11-3",
+   "region": "bmx & parkour"
+  },
+  {
+   "c": 10,
+   "r": 34,
+   "id": "fx-11-2",
+   "region": "bmx & parkour"
+  },
+  {
+   "c": 10,
+   "r": 35,
+   "id": "fx-11-1",
+   "region": "bmx & parkour"
+  },
+  {
+   "c": 11,
+   "r": 20,
+   "id": "fx-08-4",
+   "region": "ski & snow"
+  },
+  {
+   "c": 11,
+   "r": 21,
+   "id": "fx-08-3",
+   "region": "ski & snow"
+  },
+  {
+   "c": 11,
+   "r": 33,
+   "id": "fx-11-0",
+   "region": "bmx & parkour"
+  },
+  {
+   "c": 11,
+   "r": 34,
+   "id": "fx-11-4",
+   "region": "bmx & parkour"
+  },
+  {
+   "c": 15,
+   "r": 15,
+   "id": "fx-06-3",
+   "region": "rally"
+  },
+  {
+   "c": 15,
+   "r": 16,
+   "id": "fx-06-2",
+   "region": "rally"
+  },
+  {
+   "c": 15,
+   "r": 17,
+   "id": "fx-06-1",
+   "region": "rally"
+  },
+  {
+   "c": 15,
+   "r": 29,
+   "id": "fx-10-3",
+   "region": "skate"
+  },
+  {
+   "c": 15,
+   "r": 30,
+   "id": "fx-10-0",
+   "region": "skate"
+  },
+  {
+   "c": 15,
+   "r": 31,
+   "id": "fx-10-1",
+   "region": "skate"
+  },
+  {
+   "c": 16,
+   "r": 15,
+   "id": "fx-06-0",
+   "region": "rally"
+  },
+  {
+   "c": 16,
+   "r": 16,
+   "id": "fx-06-4",
+   "region": "rally"
+  },
+  {
+   "c": 16,
+   "r": 29,
+   "id": "fx-10-4",
+   "region": "skate"
+  },
+  {
+   "c": 16,
+   "r": 30,
+   "id": "fx-10-2",
+   "region": "skate"
+  },
+  {
+   "c": 20,
+   "r": 35,
+   "id": "fx-13-0",
+   "region": "chess"
+  },
+  {
+   "c": 20,
+   "r": 36,
+   "id": "fx-13-3",
+   "region": "chess"
+  },
+  {
+   "c": 21,
+   "r": 27,
+   "id": "fx-12-0",
+   "region": "darts & pool"
+  },
+  {
+   "c": 21,
+   "r": 28,
+   "id": "fx-12-1",
+   "region": "darts & pool"
+  },
+  {
+   "c": 21,
+   "r": 29,
+   "id": "fx-12-2",
+   "region": "darts & pool"
+  },
+  {
+   "c": 21,
+   "r": 35,
+   "id": "fx-13-4",
+   "region": "chess"
+  },
+  {
+   "c": 21,
+   "r": 36,
+   "id": "fx-13-1",
+   "region": "chess"
+  },
+  {
+   "c": 22,
+   "r": 27,
+   "id": "fx-12-3",
+   "region": "darts & pool"
+  },
+  {
+   "c": 22,
+   "r": 28,
+   "id": "fx-12-4",
+   "region": "darts & pool"
+  },
+  {
+   "c": 22,
+   "r": 36,
+   "id": "fx-13-2",
+   "region": "chess"
+  },
+  {
+   "c": 23,
+   "r": 11,
+   "id": "fx-04-0",
+   "region": "boxing"
+  },
+  {
+   "c": 23,
+   "r": 12,
+   "id": "fx-04-3",
+   "region": "boxing"
+  },
+  {
+   "c": 23,
+   "r": 13,
+   "id": "fx-04-2",
+   "region": "boxing"
+  },
+  {
+   "c": 24,
+   "r": 11,
+   "id": "fx-04-4",
+   "region": "boxing"
+  },
+  {
+   "c": 24,
+   "r": 12,
+   "id": "fx-04-1",
+   "region": "boxing"
+  },
+  {
+   "c": 24,
+   "r": 26,
+   "id": "fx-14-2",
+   "region": "golf"
+  },
+  {
+   "c": 25,
+   "r": 4,
+   "id": "fx-05-0",
+   "region": "mma"
+  },
+  {
+   "c": 25,
+   "r": 5,
+   "id": "fx-05-1",
+   "region": "mma"
+  },
+  {
+   "c": 25,
+   "r": 6,
+   "id": "fx-05-2",
+   "region": "mma"
+  },
+  {
+   "c": 25,
+   "r": 26,
+   "id": "fx-14-3",
+   "region": "golf"
+  },
+  {
+   "c": 25,
+   "r": 27,
+   "id": "fx-14-4",
+   "region": "golf"
+  },
+  {
+   "c": 26,
+   "r": 4,
+   "id": "fx-05-3",
+   "region": "mma"
+  },
+  {
+   "c": 26,
+   "r": 5,
+   "id": "fx-05-4",
+   "region": "mma"
+  },
+  {
+   "c": 26,
+   "r": 26,
+   "id": "fx-14-0",
+   "region": "golf"
+  },
+  {
+   "c": 26,
+   "r": 27,
+   "id": "fx-14-1",
+   "region": "golf"
+  },
+  {
+   "c": 27,
+   "r": 18,
+   "id": "fx-02-2",
+   "region": "basketball"
+  },
+  {
+   "c": 27,
+   "r": 19,
+   "id": "fx-02-1",
+   "region": "basketball"
+  },
+  {
+   "c": 27,
+   "r": 20,
+   "id": "fx-02-0",
+   "region": "basketball"
+  },
+  {
+   "c": 28,
+   "r": 18,
+   "id": "fx-02-4",
+   "region": "basketball"
+  },
+  {
+   "c": 28,
+   "r": 19,
+   "id": "fx-02-3",
+   "region": "basketball"
+  },
+  {
+   "c": 28,
+   "r": 21,
+   "id": "fx-00-1",
+   "region": "soccer"
+  },
+  {
+   "c": 28,
+   "r": 22,
+   "id": "fx-00-0",
+   "region": "soccer"
+  },
+  {
+   "c": 28,
+   "r": 23,
+   "id": "fx-00-3",
+   "region": "soccer"
+  },
+  {
+   "c": 28,
+   "r": 31,
+   "id": "fx-15-2",
+   "region": "cricket"
+  },
+  {
+   "c": 28,
+   "r": 32,
+   "id": "fx-15-1",
+   "region": "cricket"
+  },
+  {
+   "c": 28,
+   "r": 33,
+   "id": "fx-15-0",
+   "region": "cricket"
+  },
+  {
+   "c": 29,
+   "r": 21,
+   "id": "fx-00-2",
+   "region": "soccer"
+  },
+  {
+   "c": 29,
+   "r": 22,
+   "id": "fx-00-4",
+   "region": "soccer"
+  },
+  {
+   "c": 29,
+   "r": 31,
+   "id": "fx-15-4",
+   "region": "cricket"
+  },
+  {
+   "c": 29,
+   "r": 32,
+   "id": "fx-15-3",
+   "region": "cricket"
+  },
+  {
+   "c": 33,
+   "r": 15,
+   "id": "fx-03-2",
+   "region": "dunks"
+  },
+  {
+   "c": 33,
+   "r": 16,
+   "id": "fx-03-3",
+   "region": "dunks"
+  },
+  {
+   "c": 33,
+   "r": 17,
+   "id": "fx-03-0",
+   "region": "dunks"
+  },
+  {
+   "c": 34,
+   "r": 15,
+   "id": "fx-03-1",
+   "region": "dunks"
+  },
+  {
+   "c": 34,
+   "r": 16,
+   "id": "fx-03-4",
+   "region": "dunks"
+  },
+  {
+   "c": 35,
+   "r": 20,
+   "id": "fx-01-1",
+   "region": "nfl"
+  },
+  {
+   "c": 35,
+   "r": 21,
+   "id": "fx-01-2",
+   "region": "nfl"
+  },
+  {
+   "c": 35,
+   "r": 22,
+   "id": "fx-01-3",
+   "region": "nfl"
+  },
+  {
+   "c": 36,
+   "r": 20,
+   "id": "fx-01-4",
+   "region": "nfl"
+  },
+  {
+   "c": 36,
+   "r": 21,
+   "id": "fx-01-0",
+   "region": "nfl"
+  }
+ ],
+ "unplaced": [],
+ "layoutHash": "3a860b01",
+ "counts": {
+  "fetched": 80,
+  "shorts": 80,
+  "placed": 80,
+  "perRegion": {
+   "soccer": 5,
+   "nfl": 5,
+   "basketball": 5,
+   "dunks": 5,
+   "boxing": 5,
+   "mma": 5,
+   "rally": 5,
+   "moto": 5,
+   "ski & snow": 5,
+   "base & wingsuit": 5,
+   "skate": 5,
+   "bmx & parkour": 5,
+   "darts & pool": 5,
+   "chess": 5,
+   "golf": 5,
+   "cricket": 5
+  }
+ }
+}
