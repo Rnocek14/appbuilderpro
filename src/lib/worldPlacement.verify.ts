@@ -60,11 +60,21 @@ const changed = items(200); changed[7] = { ...changed[7], sector: (changed[7].se
 assert.notEqual(placeItems(changed, REGIONS, GEO).hash, A.hash, 'moving an item did not change the hash');
 console.log('  ok   the layout hash sees a moved item');
 
-// 7. an unknown region is an error, never a silent drop
+// 7. bad input is an error, never a silent drop: unknown region, non-finite radius or sector, duplicate ids, duplicate region keys
 assert.throws(() => placeItems([{ id: 'x', region: 'nope', sector: 0, radius: 0.5 }], REGIONS, GEO), /unknown region/);
+assert.throws(() => placeItems([{ id: 'x', region: 'k0a', sector: 0, radius: NaN }], REGIONS, GEO), /finite/);
+assert.throws(() => placeItems([{ id: 'x', region: 'k0a', sector: 0.5, radius: 0.5 }], REGIONS, GEO), /finite/);
+assert.throws(() => placeItems([{ id: 'x', region: 'k0a', sector: 0, radius: 0.5 }, { id: 'x', region: 'k0a', sector: 0, radius: 0.6 }], REGIONS, GEO), /duplicate item id/);
+assert.throws(() => placeItems([], [{ key: 'bad', sector: 0, radius: NaN }], GEO), /finite/);
+assert.throws(() => placeItems([], [{ key: 'a', sector: 0, radius: 0.5 }, { key: 'a', sector: 0, radius: 0.5 }], GEO), /duplicate region key/);
+// 7b. two items claiming one persisted cell: the winner is decided by the hash order, not by input order
+{ const pair: Item[] = [{ id: 'p1', region: 'k0a', sector: 0, radius: 0.3 }, { id: 'p2', region: 'k0a', sector: 0, radius: 0.3 }];
+  const claim = new Map<string, [number, number]>([['p1', [30, 23]], ['p2', [30, 23]]]);
+  const L1 = placeItems(pair, REGIONS, GEO, claim), L2 = placeItems([pair[1], pair[0]], REGIONS, GEO, claim);
+  assert.deepEqual(L1, L2, 'a persisted-cell conflict was resolved by input order'); }
 // 8. the spiral ring is complete and ordered
 assert.equal(ring(2).length, 16); assert.deepEqual(ring(1)[0], [-1, -1]);
-console.log('  ok   unknown regions throw; the spiral ring is complete and ordered');
+console.log('  ok   unknown regions, non-finite numbers, duplicate ids and duplicate keys throw; persisted conflicts resolve by hash order; the spiral ring is complete and ordered');
 
 // 9. the prototype's staged geometry uses the same formulas — the two must never drift apart
 const src = readFileSync(new URL('../../prototypes/the-drift.html', import.meta.url), 'utf8');

@@ -8,7 +8,7 @@
 // here fetches, reads the clock, or looks at a user.
 //
 // You control THIS app's algorithm, not YouTube's: the drop is the day's selection, the placement is a
-// lookup, and steering changes the glow and the fill. The player on open is YouTube's own.
+// lookup, and steering changes the glow only — nothing you do fills or empties a cell. The player on open is YouTube's own.
 
 import { placeItems, type Item, type Layout, type WheelRegion } from './worldPlacement';
 
@@ -53,7 +53,8 @@ export function isShortCandidate(v: { seconds: number; title: string; descriptio
 /** Rubric v0: ± per keyword hit, clamped. A placeholder with a name, not a classifier. */
 export function radiusAdjust(v: { title: string; description: string }, rubric: WorldSpec['rubric']): number {
   const text = (v.title + ' ' + v.description).toLowerCase();
-  const hits = (words: string[]) => words.reduce((n, w) => n + (text.includes(w.toLowerCase()) ? 1 : 0), 0);
+  const word = (w: string) => new RegExp('\\b' + w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');   // whole words: "show" never hits "shower"
+  const hits = (words: string[]) => words.reduce((n, w) => n + (word(w).test(text) ? 1 : 0), 0);
   const raw = 0.025 * (hits(rubric.deeper) - hits(rubric.shallower));
   return Math.max(-MAX_RADIUS_ADJUST, Math.min(MAX_RADIUS_ADJUST, raw));
 }

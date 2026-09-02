@@ -3,7 +3,8 @@
      a territory — 55×44 cells of staged topic currents, far bigger than a screen. Scrub as
      before; push into an edge with intent and the world flows under your thumb (you push, it
      never pushes: attack 180ms, release zero, the thumb always has right of way); what you dwell
-     on tilts what unseen territory materializes ahead; the walked world is immutable forever; a
+     on tilted what unseen territory materialized ahead (since rev. 4 it changes only the glow — cells
+     are placed, not sampled); the walked world is immutable forever; a
      trail line is drawn on the land and the journey is an object you can re-walk. Travel has
      two grips, both operator-tested: the edge conveyor, and the drift ring — a spring-loaded
      puck in the thumb's home whose displacement is the velocity vector, with selection handed
@@ -260,7 +261,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   <ul>
     <li>Scrub as before. To travel, rest your thumb in the <em>ring</em> at the bottom and push — any direction, any amount. The world flows, ticking past the needle near center. Release: it stops dead. You push, it never pushes.</li>
     <li>The edges still work too: push into one <em>with intent</em> and hold. Brush one casually mid-scrub and the world must not move.</li>
-    <li>Dwell on what you like, then keep drifting that way — unseen territory ahead materializes thicker with it, and the label top-left names the pull.</li>
+    <li>Dwell on what you like — the nebula of that kind glows brighter ahead. Nothing else changes: cells are placed, not sampled, and the label top-centre names the place you are in.</li>
     <li>The glowing weather under the dots is real information: each nebula is a topic current. Read the land before you touch it.</li>
     <li>Back-scrub your own path: the exact same dots, same positions, your fades intact. The walked world never rewrites.</li>
     <li>Your route is drawn on the land. The Trail tab is the journey as an object — tap any stop to glide back to it.</li>
@@ -274,9 +275,9 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
   today. Steering moves you; it is also logged as a preference, and in this demo the only thing that
   preference changes is the glow of the land ahead. Tomorrow's world is new. The staged content is a
   seeded simulation; the steering loop, the compass and the feel are real. A world loaded from
-  <code>worlds/*.json</code> is real content placed by the pipeline — its source, date and layout hash
-  are in the footer — and opening a dot plays YouTube's own player. You control this app's algorithm,
-  not YouTube's.</div>
+  <code>worlds/*.json</code> is an edition the pipeline wrote; the footer says which kind — <em>YouTube</em>
+  (real shorts, YouTube's own player on open) or <em>fixture</em> (synthetic items, no player). Either way
+  you control this app's algorithm, not YouTube's.</div>
 </div>
 
 <div class="sr" aria-live="polite" id="live"></div>
@@ -384,17 +385,20 @@ const WORLD_KEYS = Object.keys(WORLDS);
 /* a REAL world: an edition JSON from scripts/shorts-drop.ts — regions on the wheel, items already placed
    into cells by src/lib/worldPlacement.ts. Nothing here is sampled: a cell is an item or it is empty. */
 function installWorld(J){
-  if (!J || !Array.isArray(J.regions) || !Array.isArray(J.cells) || !Array.isArray(J.items) || !J.name) return false;
+  if (!J || !Array.isArray(J.regions) || !Array.isArray(J.cells) || !Array.isArray(J.items) || !J.name ||
+      !Array.isArray(J.depth) || J.depth.length !== 2 || !Array.isArray(J.sectors)) return false;
+  if (WORLDS[J.name] && !WORLDS[J.name].placed){ console.warn('world file ignored: "' + J.name + '" is a staged world here'); return false; }
   const byId = new Map(J.items.map(it => [it.id, it])), placed = new Map();
   for (const p of J.cells){ const it = byId.get(p.id); if (it) placed.set(p.c + ',' + p.r, it); }
   const regions = J.regions.map(R => ({ ...R, authors: [], caps: [] }));
   WORLDS[J.name] = { name: J.name, edition: J.edition, depth: J.depth, sectors: J.sectors, regions, placed,
-    regionIndex: new Map(regions.map((R, i) => [R.key, i])), items: J.items.length, source: J.source, date: J.date,
+    regionIndex: new Map(regions.map((R, i) => [R.key, i])), items: placed.size, source: J.source, date: J.date,   // the odometer counts what was actually placed
     hash: J.layoutHash || '', rubric: J.rubric || '',
     hint: J.source === 'youtube' ? 'Real shorts from YouTube, placed by rubric ' + (J.rubric || '') + ' — open a dot to play.'
                                  : 'A fixture drop — real shorts land here once the pipeline runs with a key.' };
   if (!WORLD_KEYS.includes(J.name)) WORLD_KEYS.push(J.name);
   if (typeof renderWorldChrome === 'function') renderWorldChrome();
+  if (worldKey === J.name && typeof switchWorld === 'function') switchWorld(J.name);   // a live edition replaced: rebuild the land
   return true;
 }
 let worldKey = 'sports', CURRENTS = WORLDS.sports.regions, WORLD_SEED = SEED;
@@ -498,7 +502,7 @@ function getCell(c, r){
     cell = it && ri >= 0 ? {
       c, r, key: k, cur: ri, reg: ri, share: 1,
       author: it.channel, cap: it.title, kind: 'reel', dur: it.seconds, frames: 1,
-      mins: Math.max(1, Math.round((Date.now() - Date.parse(it.publishedAt)) / 60000)), art: hash2(c*3+1, r*3+2),
+      mins: Number.isFinite(Date.parse(it.publishedAt)) ? Math.max(1, Math.round((Date.now() - Date.parse(it.publishedAt)) / 60000)) : null, art: hash2(c*3+1, r*3+2),
       x: c*PITCH + PITCH/2 + (rd()*2-1)*JITTER, y: r*PITCH + PITCH/2 + (rd()*2-1)*JITTER,
       read: false, item: it,
     } : { empty: true, c, r, key: k, reg, share };
@@ -575,6 +579,17 @@ function clampCam(){
 }
 function screenToWorld(sx, sy){ return [sx + camX, sy + camY]; }
 
+/* the nearest populated cell anywhere on screen — for a sparse real world where the ±2-cell scan finds nothing */
+function nearestVisibleCell(wx, wy){
+  const c0 = Math.max(0, Math.floor(camX/PITCH)), c1 = Math.min(WCOLS-1, Math.ceil((camX + innerWidth)/PITCH));
+  const r0 = Math.max(0, Math.floor(camY/PITCH)), r1 = Math.min(WROWS-1, Math.ceil((camY + innerHeight)/PITCH));
+  let best = null, bd = Infinity;
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+    const cell = getCell(c, r); if (!cell || cell.empty) continue;
+    const d = (cell.x - wx)**2 + (cell.y - wy)**2; if (d < bd){ bd = d; best = cell; }
+  }
+  return best;
+}
 function nearestCell(wx, wy){
   const cc = Math.round(wx/PITCH - 0.5), cr = Math.round(wy/PITCH - 0.5);
   let best = null, bd = Infinity;
@@ -1488,9 +1503,11 @@ function art(cell, w, h){
   return cvv;
 }
 const cm = document.getElementById('cmedia'), cmx = cm.getContext('2d');
-function ageStr(m){ return m < 60 ? m + 'm' : Math.round(m/60) + 'h'; }
+function ageStr(m){ if (m == null || !Number.isFinite(m)) return ''; return m < 60 ? m + 'm' : m < 1440 ? Math.round(m/60) + 'h' : Math.round(m/1440) + 'd'; }
 function kindStr(p){
-  return p.kind === 'reel' ? `reel · ${Math.floor(p.dur/60)}:${String(p.dur%60).padStart(2,'0')}`
+  const mmss = `${Math.floor(p.dur/60)}:${String(p.dur%60).padStart(2,'0')}`;
+  if (p.item) return `short · ${mmss}`;
+  return p.kind === 'reel' ? `reel · ${mmss}`
        : p.kind === 'carousel' ? `carousel · ${p.frames} frames` : 'photo';
 }
 function handleOf(name){ return '@' + name.toLowerCase().replace(/[^a-z]+/g, ''); }
@@ -1515,7 +1532,7 @@ function cardContent(cell){
   const td = document.getElementById('ctdot');
   td.style.background = col; td.style.color = col;
   document.getElementById('cauthor').textContent = cell.author;
-  document.getElementById('chandle').textContent = handleOf(cell.author);
+  document.getElementById('chandle').textContent = cell.item ? (cell.item.embedId ? 'on YouTube' : 'fixture') : handleOf(cell.author);
   document.getElementById('cage').textContent = ageStr(cell.mins);
   document.getElementById('ccap').textContent = cell.cap;
   document.getElementById('ckind').textContent = kindStr(cell);
@@ -1551,12 +1568,13 @@ function openPost(cell){
   const col = curColor(cell.cur);
   const td = document.getElementById('ptdot');
   td.style.background = col; td.style.color = col;
-  document.getElementById('pauthor').textContent = cell.author + '  ' + handleOf(cell.author);
+  document.getElementById('pauthor').textContent = cell.author + '  ' + (cell.item ? (cell.item.embedId ? '· YouTube' : '· fixture') : handleOf(cell.author));
   document.getElementById('page').textContent = ageStr(cell.mins);
   document.getElementById('pcap').textContent = cell.cap;
   document.getElementById('pmeta').textContent = kindStr(cell) + ' · ' + CURRENTS[cell.cur].key +
     (cell.item ? (cell.item.embedId ? ' · YouTube' : ' · fixture — no player') : '');
   postEl.classList.add('on');
+  for (const el of document.body.children) if (el !== postEl && el.id !== 'live') el.inert = true;   // Tab stays in the dialog; Escape still closes it unless the player itself has focus
   document.getElementById('pclose').focus();
   hapticOpen();
   markRead(cell, true);
@@ -1564,6 +1582,7 @@ function openPost(cell){
 }
 function closePost(){
   postOn = false; postCell = null; postEl.classList.remove('on');
+  for (const el of document.body.children) el.inert = false;
   { const frame = document.getElementById('pframe'); frame.removeAttribute('src'); frame.style.display = 'none'; document.getElementById('pmedia').style.display = ''; }
   cardEl.classList.add('docked');
   maybeRecenter();
@@ -1750,7 +1769,7 @@ document.addEventListener('keydown', e => {
 function resetWorld(){
   cells.clear(); mediaCache.clear(); affinity.fill(0); journey.length = 0; trailPath.length = 0;
   sparks.length = 0; ripples.length = 0; comet.length = 0;
-  sel = null; dispNow.clear();
+  sel = null; dispNow.clear(); cardEl.classList.add('hidden');
   bloomRecs.clear(); bloomOn = false; bloomSel = null; bloomNear = []; lastBloomCount = -1; parkLock = null; parkSince = 0;
   ticks = 0; field.dataset.ticks = 0;
   camVX = camVY = 0; glide = null; clearTimeout(glideTimer);
@@ -1768,8 +1787,9 @@ function switchWorld(key){
   resetWorld(); renderWorldChrome(); worldStrip.classList.remove('on'); worldChip.setAttribute('aria-expanded', 'false');
   { const a = keepB*Math.PI/180;                              // same bearing and depth, new kinds
     camX = (HUB_C + keepR*RIM*Math.cos(a)) * PITCH - innerWidth/2; camY = (HUB_R - keepR*RIM*Math.sin(a)) * PITCH - innerHeight/2; clampCam(); }
-  { const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55); const c = nearestCell(wx, wy);
-    if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; } }
+  { const [wx, wy] = screenToWorld(innerWidth/2, innerHeight*0.55); const c = nearestCell(wx, wy) || nearestVisibleCell(wx, wy);
+    if (c){ setSelection(c, performance.now(), false); hx.value = hx.target = c.x; hy.value = hy.target = c.y; }
+    else { sel = null; cardEl.classList.add('hidden'); } }                     // nothing on screen: no selection, no stale card, Enter opens nothing
   updateDriftLabel();
   hintEl.textContent = WORLDS[key].hint || ('Same wheel, new kinds — the middle is what everyone watches; push out for ' + WORLDS[key].depth[1] + '.');
   hintEl.style.opacity = '1'; setTimeout(() => { hintEl.style.opacity = '0'; }, 3200);
@@ -1816,8 +1836,14 @@ boot();
 field.focus();
 // real worlds: any edition the pipeline wrote. Served over http (or bundled in the wrap) — from file:// the fetch
 // fails and the staged worlds stand alone, which is fine and said nowhere loudly.
-if (location.protocol !== 'file:')                        // file:// cannot fetch a sibling; served or bundled pages can
-  fetch('worlds/shorts.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(J => { if (J && installWorld(J)) console.info('real world loaded:', J.name, J.source, J.date, J.layoutHash); }).catch(() => {});
+if (location.protocol !== 'file:'){                       // file:// cannot fetch a sibling; served or bundled pages can
+  const load = f => fetch('worlds/' + f, { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+    .then(J => { if (J && installWorld(J)) console.info((J.source === 'youtube' ? 'real' : 'fixture') + ' world loaded:', J.name, J.date, J.layoutHash); })
+    .catch(e => console.warn('world file unreadable: worlds/' + f, e && e.message));
+  fetch('worlds/index.json', { cache: 'no-store' }).then(r => r.ok ? r.json() : null)
+    .then(M => { const list = M && Array.isArray(M.worlds) ? M.worlds.filter(f => /^[\w.-]+\.json$/.test(f)) : ['shorts.json']; list.forEach(load); })
+    .catch(() => load('shorts.json'));
+}
 </script>
 </body>
 </html>

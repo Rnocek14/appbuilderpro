@@ -77,9 +77,10 @@ until they pass the agreement gate), place them by the frozen table — absolute
 per-day normalisation — bound the world to its populated hull plus one cell, freeze the layout,
 print the layout hash, publish one world/day at a fixed hour. Honest empty land where supply is
 thin. No accounts, no login — app opens straight into today's world.
-*Real content (2026-09-02):* the pipeline exists — `scripts/shorts-drop.ts` pulls YouTube Shorts per
-region through the Data API, places them with `src/lib/worldPlacement.ts`, and writes one frozen
-edition the drift loads (`docs/dot-field-shorts.md`). The first real run needs `YOUTUBE_API_KEY`
+*Real content (2026-09-02):* the fetch → place → freeze half of the pipeline exists —
+`scripts/shorts-drop.ts` pulls YouTube Shorts per region through the Data API, places them with
+`src/lib/worldPlacement.ts`, and writes one frozen edition the drift loads (`docs/dot-field-shorts.md`);
+the classifier, the tone scores, the hull bound and a scheduled daily drop do not (§7 there). The first real run needs `YOUTUBE_API_KEY`
 in the repo's environment; until then it writes a fixture that says it is one. The API terms for a
 commercial browse layer over Shorts are a counsel line item before Gate B.
 *Budget honesty:* "cents/day" holds only at ≤ 300 items on Haiku batch (≈ $0.0016/item,

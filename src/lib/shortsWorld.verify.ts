@@ -24,6 +24,7 @@ const R = SPORTS_SHORTS.rubric;
 assert.ok(Math.abs(radiusAdjust({ title: 'insane brutal knockout crash extreme world record fastest', description: '' }, R)) <= MAX_RADIUS_ADJUST + 1e-9);
 assert.ok(radiusAdjust({ title: 'beginner tutorial basics', description: '' }, R) < 0);
 assert.equal(radiusAdjust({ title: 'a plain title', description: '' }, R), 0);
+assert.equal(radiusAdjust({ title: 'the bigger-hearted casualties drilled in', description: '' }, R), 0, 'substrings must not count as keyword hits');
 assert.equal(RUBRIC_VERSION, 'v0-keyword', 'rename the rubric when it stops being a keyword list');
 console.log(`  ok   rubric ${RUBRIC_VERSION} moves an item at most ±${MAX_RADIUS_ADJUST} from its region`);
 

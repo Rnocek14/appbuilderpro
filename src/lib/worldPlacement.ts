@@ -38,8 +38,18 @@ export function fnv1a(s: string): string {
   return h.toString(16).padStart(8, '0');
 }
 
+function assertFinite(what: string, sector: number, radius: number): void {
+  if (!Number.isInteger(sector) || !Number.isFinite(radius)) throw new Error(`${what}: sector and radius must be finite numbers (got ${sector}, ${radius})`);
+}
+
 export function layoutRegions(regions: WheelRegion[], geo: Geometry): PlacedRegion[] {
   const w = wheelOf(geo);
+  const keys = new Set<string>();
+  for (const R of regions) {
+    assertFinite(`region ${R.key}`, R.sector, R.radius);
+    if (keys.has(R.key)) throw new Error(`duplicate region key "${R.key}"`);
+    keys.add(R.key);
+  }
   return regions.map((R) => {
     const bearing = R.sector * SECTOR_DEG; const a = bearing * Math.PI / 180;
     return { ...R, bearing, cc: w.hubC + R.radius * w.rim * Math.cos(a), cr: w.hubR - R.radius * w.rim * Math.sin(a), spread: SPREAD_BASE + SPREAD_PER_RADIUS * R.radius };
@@ -84,7 +94,17 @@ export function ring(d: number): [number, number][] {
 export function placeItems(items: Item[], regions: WheelRegion[], geo: Geometry, persisted?: Map<string, [number, number]>): Layout {
   const placedR = layoutRegions(regions, geo);
   const keyIndex = new Map(placedR.map((R, i) => [R.key, i]));
-  for (const it of items) if (!keyIndex.has(it.region)) throw new Error(`item ${it.id}: unknown region "${it.region}"`);
+  const ids = new Set<string>();
+  for (const it of items) {
+    if (!keyIndex.has(it.region)) throw new Error(`item ${it.id}: unknown region "${it.region}"`);
+    assertFinite(`item ${it.id}`, it.sector, it.radius);
+    if (ids.has(it.id)) throw new Error(`duplicate item id "${it.id}"`);
+    ids.add(it.id);
+  }
+  // one visiting order for everything — a hash of the id, then the id — so input order never matters,
+  // including which of two items claiming the same persisted cell wins
+  const order = (A: Item, B: Item) => (fnv1a(A.id) < fnv1a(B.id) ? -1 : fnv1a(A.id) > fnv1a(B.id) ? 1 : A.id < B.id ? -1 : A.id > B.id ? 1 : 0);
+  const sorted = [...items].sort(order);
   const occupied = new Set<string>();
   const cells: Placement[] = [];
   const unplaced: string[] = [];
@@ -94,16 +114,15 @@ export function placeItems(items: Item[], regions: WheelRegion[], geo: Geometry,
     if (v === undefined) { v = argmaxAt(c, r, placedR).index; argmaxCache.set(k, v); }
     return v;
   };
-  // persisted items first: they keep their cells, whatever the rule would say today
+  // persisted items first: they keep their cells, whatever the rule would say today ("stable by persistence")
   const remaining: Item[] = [];
-  for (const it of items) {
+  for (const it of sorted) {
     const keep = persisted?.get(it.id);
-    if (keep && keep[0] >= 0 && keep[1] >= 0 && keep[0] < geo.cols && keep[1] < geo.rows && !occupied.has(keep[0] + ',' + keep[1])) {
+    if (keep && Number.isInteger(keep[0]) && Number.isInteger(keep[1]) && keep[0] >= 0 && keep[1] >= 0 && keep[0] < geo.cols && keep[1] < geo.rows && !occupied.has(keep[0] + ',' + keep[1])) {
       occupied.add(keep[0] + ',' + keep[1]); cells.push({ c: keep[0], r: keep[1], id: it.id, region: it.region });
     } else remaining.push(it);
   }
-  // then the rest, in hash order — input order never matters
-  remaining.sort((A, B) => (fnv1a(A.id) < fnv1a(B.id) ? -1 : fnv1a(A.id) > fnv1a(B.id) ? 1 : A.id < B.id ? -1 : A.id > B.id ? 1 : 0));
+  // then the rest, in the same order
   for (const it of remaining) {
     const [tc, tr] = targetCell(it, geo);
     const want = keyIndex.get(it.region)!;
