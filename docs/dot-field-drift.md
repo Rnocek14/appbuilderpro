@@ -153,3 +153,70 @@ this is the hard part); edge-fetch latency is simulated (real budget: <100ms per
 a 300ms–1s rank/fetch/moderate pipeline); and every direction paying off is a property of the
 staging. The demo proves one thing, and it's the thing that matters first: **the control loop
 is legible and steering feels causal.**
+
+## 8. Revision 3 — two kinds of scent (2026-09-02)
+
+The founder, having felt both prototypes: "I feel like this beats scrolling. Is there anything to
+make it better?" The paradigm's one honest weakness has always been scent — a dot tells you its
+topic by colour and nothing else until you stop and read a card. Two additions attack that, both
+felt or drawn, neither a control. Plus one port from the seed. All numbers are ESTIMATES until
+the wrap says otherwise.
+
+**8.1 Neighbour bloom — scent for the eye.** While the selection moves slowly over the world (thumb
+speed plus streaming speed under 350 px/s — one law for both grips) the ring of dots nearest the selection — at most six, within
+1.65 pitch — swells and grows a label: the author's first name and a kind glyph (● photo,
+▶ reel, ▤ carousel), set in an 18 px pill placed *outward* from the selection so the thumb
+never covers it. Placement tries three positions in order (outward, beside the dot, mirrored),
+each clamped inside the field and relieved of overlaps, and rejects any that touches a 26 px
+keep-out disc around the selection; if none survives, the dot swells and gets no pill — no
+label beats a label under the thumb. Neighbours straight above or below get a centred pill.
+Labels identify: a leading article is dropped and organisation names keep two words. Off-screen
+neighbours get no label. Labels fade in
+on a spring (k 520, c 34, one soft overshoot) and vanish the moment the thumb passes 560 px/s — at that speed the selection changes about
+thirteen times a second and no label can be read (hysteresis, so a pause never flickers and a
+skim is never cluttered; leaving is three times faster than arriving). Read dots bloom dimmer.
+The effect: you read three neighbours while feeling one, which is a straight multiplier on
+verdicts per second — the number the whole thesis rests on. Works in both grips: around the
+thumb when scrubbing, around the reticle when steering with the ring.
+
+**8.2 Haptic texture — scent for the thumb.** Every kind has its own detent, one event per
+crossing, never a queued second:
+
+| Kind | Core Haptics (wrap + DetentHaptics plugin) | Stock Capacitor | Android web | Web tick |
+|---|---|---|---|---|
+| photo | intensity 0.55 · sharpness 0.75 | `selectionChanged` | 12 ms | 1.9 kHz + 150 Hz body, 8 ms |
+| reel | 0.85 · 0.30 — a rounder thud | `impact LIGHT` | 18 ms (inside the spec's 20 ms wall) | 1.15 kHz + 105 Hz, 16 ms, louder |
+| carousel | 0.60 · 0.60, **two transients 34 ms apart in one pattern** | `selectionChanged` (indistinguishable from photo) | 8 · 22 · 8 ms pattern | doubled transient in one buffer |
+
+The doubled transient needs room: above ~650 px/s the next crossing would land inside it, so
+the carousel collapses to a single hit at speed (native, vibrate and audio agree) and the
+ratchet stays even; below that speed the detent gap arms from the *end* of the pattern, so a
+double can never overlap the next crossing. Under reduced motion, page steps refresh the
+selection in every grip and the "page turned" cue is a primer, never a detent — so the only
+ticks are real crossings and each carries its kind.
+
+Honest limits: the full texture needs the Core Haptics plugin in `scout/ios-extras/` (now
+extended with `count`/`gap`); the stock tick can only make reels feel different; on the web the
+tick's *sound* carries the texture and the iPhone ringer switch can silence it. The thumb
+learning "that felt like a reel" before the eye arrives is the claim to test in the wrap.
+
+**8.3 Park lock (ported from the seed).** A thumb still for 60 ms (no pointer sample moved) or
+under 20 px/s, held 120 ms, locks selection until it moves 0.35 pitch. A resting thumb rolls a
+few px on glass and must never tick. Decided in the frame loop at rest, never inside a move. A
+lift while parked opens exactly what the card shows — the 60 ms velocity projection is for a
+moving thumb only, and a roll under the lock is noise, not aim.
+
+**What the driver proves:** parked on the field, six labels bloom; a ±2 px roll of the parked
+thumb adds no ticks; a fast skim shows zero labels while moving and they return within half a
+second of slowing; each detent carries its kind (`data-tick`) and a count (`data-ticks`). What
+it cannot prove: whether the labels *read* at a glance on a phone, and whether the textures are
+distinguishable under a real thumb. Feel tests 8–9 in `scout/README.md`.
+
+*Review pass (2026-09-02):* three adversarial reviewers and six verifiers read the revision; six
+defects were confirmed and fixed (reduced-motion paging left the selection stale under the park
+lock and ticked a kind-less "photo" without a crossing; the carousel's second transient could
+overlap the next detent; the camera-speed gate had no hysteresis and blinked at the threshold;
+a parked lift could open a neighbour of the card's post; labels near the screen edge were
+clamped back onto the thumb). Fourteen minor findings were folded in where cheap — per-label
+text measured once, colours precomputed, the ring scanned once per selection, restart clearing
+the new state, frame-rate-independent fades that snap under reduced motion.

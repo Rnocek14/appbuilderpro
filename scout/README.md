@@ -68,6 +68,13 @@ Walk it every morning for two weeks, then answer honestly:
    imperceptible. If ticks read late, that's the one finding that forces a native-Swift spike
    of the scrub loop — a finding worth having in week one, not month six.)
 5. After two weeks: do you still open it? That answer, not the demo, decides the pipeline.
+8. **Neighbour bloom (rev. 3):** stop on a dot — do the labels around it *read* at arm's length,
+   and do they get out of the way the instant you skim? If they ever show during a skim, lower
+   `BLOOM.HIDE_ABOVE`.
+9. **Haptic texture (rev. 3):** with eyes closed, cross ten dots — can you call reels before you
+   look? With the stock tick only reels differ; install `ios-extras/DetentHaptics` for photo /
+   reel / carousel as click / thud / double-tap. If a texture reads as a *different* event rather
+   than a different *kind*, flatten it toward the photo profile.
 
 ## The second page: the seed (P15)
 

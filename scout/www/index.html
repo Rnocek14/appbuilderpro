@@ -13,6 +13,12 @@
      field. Inevitable when: brushing an edge mid-scrub never yanks the world; holding the east
      edge feels like wading a current and releasing stops it dead; back-scrubbing meets the exact
      same dots; and the first screenshot makes someone ask what app that is.
+     Rev. 3 (2026-09-02): two kinds of scent. For the eye — the ring of dots nearest the
+     selection blooms into readable labels while the thumb is slow and vanishes the moment it
+     skims (read three neighbours while feeling one). For the thumb — every kind has its own
+     detent: a photo is a crisp click, a reel a rounder thud, a carousel a double tap (full
+     texture through Core Haptics in the wrap; the stock tick can only tell reels apart; on the
+     web the tick's sound carries it). Plus the seed's park lock: a resting thumb never ticks.
      Staged world, simulated steering — no model, and it says so. -->
 <!doctype html>
 <html lang="en">
@@ -219,6 +225,8 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
     <li>The glowing weather under the dots is real information: each nebula is a topic current. Read the land before you touch it.</li>
     <li>Back-scrub your own path: the exact same dots, same positions, your fades intact. The walked world never rewrites.</li>
     <li>Your route is drawn on the land. The Trail tab is the journey as an object — tap any stop to glide back to it.</li>
+    <li><em>Slow down</em> and the dots around your selection bloom into labels — read three neighbours while feeling one. Skim and they vanish; they must never clutter speed.</li>
+    <li>Kinds feel different: a photo is a crisp click, a reel a rounder thud, a carousel a double tap. Full texture needs the Core Haptics plugin in the wrap; the stock tick only tells reels apart; on the web the sound carries it.</li>
   </ul>
   <div class="haprow"><button id="haptest">test tap</button><span id="hapresult"></span></div>
   <div class="note">Honest label: the "algorithm" is a seeded simulation — 2,420 cells, twelve
@@ -358,6 +366,33 @@ function nearestCell(wx, wy){
 /* ===================== selection: hysteresis + detents (settled laws) ====================== */
 let sel = null, lastDeselAt = new Map(), lastTickAt = 0, dwellStart = 0;
 const HYST = 0.80, HYST_REENTRY = 0.70, REENTRY_MS = 50;
+/* rev. 3 — all ESTIMATES, tuned in the wrap.
+   TEXTURE: what a kind feels like. Native, full: Core Haptics transients (intensity, sharpness,
+   count) through the DetentHaptics plugin. Native, coarse: Capacitor's stock generators — a
+   photo is selectionChanged, a reel impact LIGHT, a carousel falls back to the selection tick
+   (one event per crossing, never a queued second). Android web: vibrate patterns. Everywhere:
+   the tick's timbre (tone, body, length, and a doubled transient for carousels — one buffer). */
+const TEXTURE = {
+  photo:    { intensity: 0.55, sharpness: 0.75, count: 1, gap: 0,  cap: 'selection', vibe: 12,           tone: 1900, body: 150, ms: 8,  gain: 0.13 },
+  reel:     { intensity: 0.85, sharpness: 0.30, count: 1, gap: 0,  cap: 'impact',    vibe: 18,           tone: 1150, body: 105, ms: 16, gain: 0.17 },
+  carousel: { intensity: 0.60, sharpness: 0.60, count: 2, gap: 34, cap: 'selection', vibe: [8, 22, 8],   tone: 1700, body: 150, ms: 8,  gain: 0.13, double: 34 },
+};
+/* BLOOM: the ring nearest the selection swells into labels while the selection moves slowly over
+   the world — thumb speed plus streaming speed, one law for both grips. Shows under 350px/s,
+   hides above 560px/s (hysteresis — at 560 the selection changes ~13×/s and no label can be
+   read), at most six, never over the selection itself (a keep-out disc the thumb sits in). */
+const BLOOM = { R: PITCH*1.65, MAX: 6, SHOW_BELOW: 350, HIDE_ABOVE: 560, K: 520, C: 34, OUT: 15, KEEP_OUT: 26,
+  FONT: '11px -apple-system, "Segoe UI", system-ui, sans-serif' };
+const CUR_FILL = CURRENTS.map((C, i) => curColor(i));
+const CUR_STROKE = CURRENTS.map(C => `hsla(${C.hue} ${C.sat+20}% 60% / .45)`);
+/* a label that identifies: drop a leading article, keep two words for organisation names */
+function shortName(author){
+  const all = author.split(' '), w = all.filter((x, i) => !(i === 0 && /^(the|a|an)$/i.test(x)));
+  return all.length >= 3 ? w.slice(0, 2).join(' ') : w[0];
+}
+/* PARK (ported from the seed): a thumb under 20px/s for 120ms locks selection until it moves 0.35 pitch */
+const PARK = { SPEED: 20, MS: 120, UNLOCK: 0.35 };
+let parkLock = null, parkSince = 0, ticks = 0;
 
 function trySelect(wx, wy, now){
   const cand = nearestCell(wx, wy);
@@ -383,7 +418,7 @@ function settleDwell(now){
 function setSelection(cell, now, tick){
   if (sel && sel.key === cell.key) return;
   const prev = sel; sel = cell;
-  if (tick){ detent(now); spawnSparks(cell); }
+  if (tick){ detent(now, cell.kind); spawnSparks(cell); }
   swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;
   cardContent(cell);
   dwellStart = now;
@@ -398,11 +433,15 @@ let sndOn = true, audioCtx = null, tickBuf = null;
 const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const canVibe = 'vibrate' in navigator;
-const CapHaptics = (window.Capacitor && window.Capacitor.isNativePlatform &&
-  window.Capacitor.isNativePlatform()) ? window.Capacitor.registerPlugin('Haptics') : null;
-function hapticTick(){
-  if (CapHaptics){ CapHaptics.selectionChanged().catch(() => {}); return; }
-  if (canVibe) navigator.vibrate(12);
+const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const CapHaptics = isNative ? window.Capacitor.registerPlugin('Haptics') : null;
+const DetentH = (isNative && window.Capacitor.isPluginAvailable && window.Capacitor.isPluginAvailable('DetentHaptics'))
+  ? window.Capacitor.registerPlugin('DetentHaptics') : null;   // scout/ios-extras — full texture when installed
+function hapticTick(kind, single){
+  const T = TEXTURE[kind] || TEXTURE.photo;
+  if (DetentH){ DetentH.tick({ intensity: T.intensity, sharpness: T.sharpness, count: single ? 1 : T.count, gap: T.gap }).catch(() => {}); return; }
+  if (CapHaptics){ (T.cap === 'impact' ? CapHaptics.impact({ style: 'LIGHT' }) : CapHaptics.selectionChanged()).catch(() => {}); return; }
+  if (canVibe) navigator.vibrate(single && Array.isArray(T.vibe) ? T.vibe[0] : T.vibe);
   // iOS web has no carrier since iOS 26.5 patched the switch trick — the tick is sound there
 }
 function hapticStart(){
@@ -411,31 +450,47 @@ function hapticStart(){
 }
 function hapticEnd(){ if (CapHaptics) CapHaptics.selectionEnd().catch(() => {}); }
 function hapticOpen(){ if (CapHaptics) CapHaptics.impact({ style: 'MEDIUM' }).catch(() => {}); }
-function detent(now){
+function detent(now, kind){
   if (glide) return;
   const gap = speed > 1200 || conveyorOn ? 40 : 30;
   if (now - lastTickAt < gap) return;
-  lastTickAt = now;
-  hapticTick();
-  if (sndOn && audioCtx && tickBuf){
-    const s = audioCtx.createBufferSource(); s.buffer = tickBuf;
+  kind = TEXTURE[kind] ? kind : 'photo';
+  const T = TEXTURE[kind];
+  // a doubled transient needs room: above ~650px/s the next crossing would land inside it, so the
+  // carousel collapses to one hit and the ratchet stays even; otherwise the gap arms from the pattern's END
+  const single = !!T.double && speed > 650;
+  lastTickAt = now + (single ? 0 : (T.double || 0));
+  hapticTick(kind, single);
+  field.dataset.tick = kind; field.dataset.ticks = ++ticks;
+  const buf = single ? tickBufs[kind + ':single'] : tickBufs[kind];
+  if (sndOn && audioCtx && buf){
+    const s = audioCtx.createBufferSource(); s.buffer = buf;
     s.playbackRate.value = 0.97 + Math.random()*0.06;
-    const g = audioCtx.createGain(); g.gain.value = 0.13 + Math.random()*0.03;
+    const g = audioCtx.createGain(); g.gain.value = T.gain + Math.random()*0.03;
     s.connect(g); g.connect(audioCtx.destination); s.start();
   }
+}
+const tickBufs = {};
+function makeTick(T){
+  const sr = audioCtx.sampleRate, len = T.ms/1000 + (T.double ? T.double/1000 + T.ms/1000 : 0);
+  const b = audioCtx.createBuffer(1, Math.floor(sr*len), sr), ch = b.getChannelData(0);
+  const decay = 6.5 / (T.ms/1000);                       // the transient dies inside its own length
+  const hit = (t0, amp) => {
+    for (let i = Math.floor(t0*sr); i < ch.length; i++){
+      const t = i/sr - t0; if (t < 0) continue;
+      const e = Math.exp(-t*decay); if (e < 0.002) break;
+      ch[i] += amp * (Math.sin(2*Math.PI*T.tone*t)*0.6 + Math.sin(2*Math.PI*T.body*t)*0.35 + (Math.random()*2-1)*0.25) * e;
+    }
+  };
+  hit(0, 1); if (T.double) hit(T.double/1000, 0.8);
+  return b;
 }
 function initAudio(){
   if (audioCtx) return;
   try{
     audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-    const sr = audioCtx.sampleRate, n = Math.floor(sr*0.008), b = audioCtx.createBuffer(1, n, sr);
-    const ch = b.getChannelData(0);
-    for (let i = 0; i < n; i++){
-      const t = i/sr;
-      ch[i] = (Math.sin(2*Math.PI*1900*t)*0.6 + Math.sin(2*Math.PI*150*t)*0.35 + (Math.random()*2-1)*0.25)
-            * Math.exp(-t*820);
-    }
-    tickBuf = b;
+    for (const k of Object.keys(TEXTURE)){ tickBufs[k] = makeTick(TEXTURE[k]); if (TEXTURE[k].double) tickBufs[k + ':single'] = makeTick({ ...TEXTURE[k], double: 0 }); }
+    tickBuf = tickBufs.photo;
   }catch(e){ audioCtx = null; }
 }
 
@@ -456,6 +511,9 @@ const hx = spring(900, 60), hy = spring(900, 60);
 const swell = spring(550, 30);
 swell.value = 1; swell.target = 1;
 let dispNow = new Map();
+const bloomRecs = new Map(); let bloomOn = false, lastBloomCount = -1, bloomSel = null, bloomNear = [];
+const byDist = (a, b) => a[0] - b[0];
+const placedPills = []; let lastLabelHit = -1, lastLabelSkipped = -1;
 
 /* ===================== pointer + conveyor ================================================== */
 let touching = false, hovering = false, px = 0, py = 0, speed = 0, velX = 0, velY = 0;
@@ -516,6 +574,9 @@ field.addEventListener('pointermove', e => {
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     for (const ev of evs){
       vel(now, ev.clientX, ev.clientY);
+      // the park lock (from the seed): a resting thumb rolls a few px and must never tick
+      if (parkLock && Math.hypot(ev.clientX - parkLock.x, ev.clientY - parkLock.y) > PARK.UNLOCK*PITCH){ parkLock = null; parkSince = 0; }
+      if (parkLock) continue;
       const [wx, wy] = screenToWorld(ev.clientX, ev.clientY);
       trySelect(wx, wy, now);
     }
@@ -538,16 +599,20 @@ function endTouch(e, open){
     return;
   }
   touching = false; armT = bandT = 0; setEdgeGlow(0, 0, false);
+  const parked = !!parkLock;                       // a resting thumb's roll is noise, not aim
+  parkLock = null; parkSince = 0;
   const now = performance.now();
   settleDwell(now);
   if (open && speed < 1000 && sel){
-    const a = samples[0], dt = (now - a[0])/1000;
-    let lx = px, ly = py;
-    if (dt > 0.004){ lx += velX*0.06; ly += velY*0.06; }
-    const [wx, wy] = screenToWorld(lx, ly);
-    const proj = nearestCell(wx, wy);
-    if (proj && sel && proj.key !== sel.key) setSelection(proj, now, false);
-    openPost(sel);
+    if (!parked){                                  // the 60ms projection is for a moving thumb only
+      const a = samples[0], dt = (now - a[0])/1000;
+      let lx = px, ly = py;
+      if (dt > 0.004){ lx += velX*0.06; ly += velY*0.06; }
+      const [wx, wy] = screenToWorld(lx, ly);
+      const proj = nearestCell(wx, wy);
+      if (proj && sel && proj.key !== sel.key) setSelection(proj, now, false);
+    }
+    openPost(sel);                                 // parked: open exactly what the card shows
   } else if (sel){
     maybeRecenter();
   }
@@ -596,6 +661,10 @@ function startGlide(toX, toY, dur){
   glide = { fromX: camX, fromY: camY, toX, toY, t0: performance.now(), dur };
 }
 function forge(t){ return 1 - Math.pow(1 - t, 3); }
+function pill(x, y, w, h, r){
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
 
 /* ===================== canvas renderer — the luminous field ================================ */
 const cv = document.getElementById('fieldcv'), ctx = cv.getContext('2d');
@@ -716,9 +785,57 @@ function draw(now){
     const isSel = cell === sel;
     const rad = Math.max(0.5, isSel ? 5.5*(1 + 0.55*swell.value) : 5);
     ctx.globalAlpha = cell.read && !isSel ? 0.30 : 1;
-    ctx.fillStyle = isSel ? '#F5EDE0' : curColor(cell.cur);
+    ctx.fillStyle = isSel ? '#F5EDE0' : CUR_FILL[cell.cur];
     ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
   }
+  // neighbour bloom: swollen dots and their labels, placed outward from the selection so the
+  // thumb never covers them; one pass of overlap relief; clamped inside the field
+  let bloomCount = 0, labelHit = 0, labelSkipped = 0;
+  if (bloomRecs.size){
+    ctx.font = BLOOM.FONT; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    const ax = (sel ? sel.x : hx.value) - camX, ay = (sel ? sel.y : hy.value) - camY, h = 18;
+    placedPills.length = 0;
+    const keepOut = (L, T, W, H) => {                 // circle–rect: does this pill touch the thumb's disc?
+      const cx = Math.max(L, Math.min(L + W, ax)), cy = Math.max(T, Math.min(T + H, ay));
+      return Math.hypot(cx - ax, cy - ay) < BLOOM.KEEP_OUT;
+    };
+    for (const rec of bloomRecs.values()){
+      const a = Math.max(0, Math.min(1, rec.a.value)); if (a <= 0.01) continue;
+      const cell = rec.cell, d = dispNow.get(cell.key);
+      const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
+      if (x < -6 || x > innerWidth + 6 || y < 0 || y > innerHeight) continue;   // an off-screen dot gets no label
+      ctx.globalAlpha = a * (cell.read ? 0.55 : 1); ctx.fillStyle = CUR_FILL[cell.cur];
+      ctx.beginPath(); ctx.arc(x, y, 5 + 3.5*a, 0, 7); ctx.fill();
+      const ux0 = x - ax, uy0 = y - ay, um = Math.hypot(ux0, uy0) || 1, ux = ux0/um, uy = uy0/um, w = rec.w;
+      // candidates, in order: outward (centred when the neighbour is straight above/below), lateral, mirrored
+      const out = BLOOM.OUT + 4, side = ux >= 0 ? 1 : -1;
+      const cands = Math.abs(ux) < 0.5
+        ? [[x - w/2, y + uy*(out + 12) - h/2], [x + side*out, y - h/2], [x - side*out - w, y - h/2]]
+        : [[side > 0 ? x + ux*out : x + ux*out - w, y + uy*BLOOM.OUT - h/2], [x + side*out, y - h/2], [side > 0 ? x - out - w : x + out, y - uy*BLOOM.OUT - h/2]];
+      if (side < 0) cands[1] = [x - out - w, y - h/2];
+      let chosen = null;
+      for (let [left, top] of cands){
+        left = Math.max(4, Math.min(innerWidth - w - 4, left)); top = Math.max(60, Math.min(innerHeight - h - 132, top));
+        for (const p of placedPills){
+          if (left < p.left + p.w && left + w > p.left && top < p.top + p.h && top + h > p.top){ left += ux*16; top += (uy || 0.7)*16; }
+        }
+        left = Math.max(4, Math.min(innerWidth - w - 4, left)); top = Math.max(60, Math.min(innerHeight - h - 132, top));
+        if (!keepOut(left, top, w, h)){ chosen = [left, top]; break; }
+      }
+      if (!chosen){ labelSkipped++; continue; }      // no label beats a label under the thumb
+      const [left, top] = chosen;
+      placedPills.push({ left, top, w, h });
+      if (keepOut(left, top, w, h)) labelHit++;
+      ctx.globalAlpha = a * 0.92; ctx.fillStyle = 'rgba(19,24,34,.9)'; pill(left, top, w, h, 6); ctx.fill();
+      ctx.globalAlpha = a; ctx.lineWidth = 1; ctx.strokeStyle = CUR_STROKE[cell.cur]; ctx.stroke();
+      ctx.fillStyle = cell.read ? '#8A8FA3' : '#E8E4DA'; ctx.fillText(rec.text, left + 7, top + h/2 + 0.5);
+      if (rec.a.target === 1 && a > 0.3) bloomCount++;   // count what a person can read, arriving ring only
+    }
+    ctx.globalAlpha = 1; ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+  }
+  if (bloomCount !== lastBloomCount){ lastBloomCount = bloomCount; field.dataset.bloom = bloomCount; }
+  if (labelHit !== lastLabelHit || labelSkipped !== lastLabelSkipped){ lastLabelHit = labelHit; lastLabelSkipped = labelSkipped; field.dataset.labelHit = labelHit; field.dataset.labelSkipped = labelSkipped; }
+
   // halo ring
   if (sel){
     const active = touching || hovering;
@@ -789,6 +906,11 @@ function frame(t){
   const dt = Math.min(0.032, (t - lastT)/1000 || 0.016); lastT = t;
 
   if (t - lastMoveAt > 80){ const f = Math.max(0, 1 - dt*8); velX *= f; velY *= f; speed *= f; }
+  if (touching && !puckMode){
+    const resting = t - lastMoveAt > 60 || speed < PARK.SPEED;   // stillness directly, not the decayed estimate
+    if (resting){ if (!parkSince) parkSince = t; else if (!parkLock && t - parkSince > PARK.MS) parkLock = { x: px, y: py }; }
+    else parkSince = 0;
+  } else { parkLock = null; parkSince = 0; }
   let wantX = 0, wantY = 0, armed = false;
   if (puckMode && touching){
     const dx = px - puckCX, dy = py - puckCY, mag = Math.hypot(dx, dy);
@@ -821,8 +943,11 @@ function frame(t){
     if (armed && t - lastPage > 350){
       lastPage = t;
       camX += Math.sign(Math.round(wantX))*innerWidth/2; camY += Math.sign(Math.round(wantY))*innerHeight/2;
-      clampCam(); detent(performance.now());
-      if (puckMode){ const [rx, ry] = reticle(); trySelect(rx + camX, ry + camY, performance.now()); }
+      clampCam();
+      const nowMs = performance.now();
+      if (puckMode){ const [rx, ry] = reticle(); trySelect(rx + camX, ry + camY, nowMs); }
+      else if (touching || hovering){ const [wx, wy] = screenToWorld(px, py); trySelect(wx, wy, nowMs); }
+      hapticStart();                                // "the page turned": a primer, never a detent — no gap, no counter
     }
   } else {
     camVX += (wantX - camVX) * Math.min(1, dt*11);
@@ -892,6 +1017,42 @@ function frame(t){
       if (Math.abs(rec.dx) + Math.abs(rec.dy) > 0.15) next.set(k, rec);
     }
     dispNow = next;
+  }
+
+  // neighbour bloom: the ring nearest the selection swells into labels while the thumb is slow —
+  // scent for the eye. Hysteretic on speed so a skim never clutters and a pause never flickers.
+  {
+    const active = touching || hovering;
+    const rel = speed + Math.hypot(camVX, camVY);   // the selection's speed over the world, in either grip
+    if (rel > BLOOM.HIDE_ABOVE || !active || !sel || postOn) bloomOn = false;
+    else if (rel < BLOOM.SHOW_BELOW) bloomOn = true;
+    if (bloomOn && sel !== bloomSel){               // the ring depends only on sel: scan once per selection, not per frame
+      bloomSel = sel; bloomNear = [];
+      const cc = Math.round(sel.x/PITCH - 0.5), cr = Math.round(sel.y/PITCH - 0.5);
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++){
+        const cell = getCell(cc+dc, cr+dr);
+        if (!cell || cell.empty || cell === sel) continue;
+        const d = Math.hypot(cell.x - sel.x, cell.y - sel.y);
+        if (d <= BLOOM.R) bloomNear.push([d, cell]);
+      }
+      bloomNear.sort(byDist); bloomNear = bloomNear.slice(0, BLOOM.MAX).map(x => x[1]);
+    }
+    const want = new Set();
+    if (bloomOn) for (const cell of bloomNear){
+      want.add(cell.key);
+      if (!bloomRecs.has(cell.key)){
+        ctx.font = BLOOM.FONT;                      // measured once per label, never per frame
+        const text = shortName(cell.author) + '  ' + (cell.kind === 'reel' ? '▶' : cell.kind === 'carousel' ? '▤' : '●');
+        bloomRecs.set(cell.key, { cell, text, w: ctx.measureText(text).width + 14, a: spring(BLOOM.K, BLOOM.C) });
+      }
+    }
+    for (const [k, rec] of bloomRecs){
+      rec.a.target = want.has(k) ? 1 : 0;
+      if (want.has(k)) step(rec.a, dt);
+      else if (reduceMotion) rec.a.value = 0;
+      else { rec.a.value *= Math.pow(bloomOn ? 0.72 : 0.45, dt*60); rec.a.v = 0; }   // leaving is faster than arriving, frame-rate independent
+      if (!want.has(k) && rec.a.value < 0.02) bloomRecs.delete(k);
+    }
   }
 
   draw(t);
@@ -1136,7 +1297,7 @@ document.getElementById('haptest').addEventListener('click', () => {
   const out = document.getElementById('hapresult');
   if (CapHaptics){
     CapHaptics.impact({ style: 'HEAVY' }).catch(() => {});
-    out.textContent = 'native Taptic ✓';
+    out.textContent = DetentH ? 'native Core Haptics ✓ — full texture' : 'native Taptic ✓ — stock tick (reels differ; add DetentHaptics for full texture)';
   } else if (canVibe){
     const ok = navigator.vibrate(120);
     out.textContent = ok ? 'vibration fired — felt it?' : 'vibration blocked here — open full screen';
@@ -1182,6 +1343,8 @@ document.getElementById('restart').addEventListener('click', () => {
   cells.clear(); mediaCache.clear(); affinity.fill(0); journey.length = 0; trailPath.length = 0;
   sparks.length = 0; ripples.length = 0; comet.length = 0;
   sel = null; dispNow.clear();
+  bloomRecs.clear(); bloomOn = false; bloomSel = null; bloomNear = []; lastBloomCount = -1; parkLock = null; parkSince = 0;
+  ticks = 0; field.dataset.ticks = 0;
   camVX = camVY = 0; glide = null; clearTimeout(glideTimer);
   boot(); updateDriftLabel();
 });
