@@ -161,6 +161,14 @@ clamped wish; world switching keeps bearing and depth and is ignored under a hel
 world loads, every placed cell's region matches its item's, and opening a fixture dot shows the
 fixture wording and no player; zero console errors.
 
+**First external signal.** Three people close to the founder (a brother and two friends) have tried
+the web version and reacted strongly positively. That is real and it is the weakest category of
+evidence, because people who know you tend to be kind and because the web version has no haptics.
+It counts as a pilot, not a gate: the plan's stranger test is written for people "who don't love you
+enough to lie." What is worth extracting from those three now: did they teach themselves the scrub
+and the ring without help, did any of them describe it as driving or steering unprompted, and did any
+of them ask to use it again on a later day.
+
 **Not proven, and these are the three that matter:**
 
 1. **Whether the tick lands on the crossing on a real iPhone.** Only the native wrap can answer this,
@@ -205,7 +213,10 @@ while visited regions stay immutable; commit on release with velocity lookahead;
 trail; the intent-gated conveyor and ring; the proxy field; and positions determined from per-item
 scores on named coordinates (two axes, or a bearing and a radius) with heading events attributed as
 signed preference on them. **Not filed.** The US allows a 12-month grace period after public
-disclosure; Europe allows none.
+disclosure; Europe allows none. Demonstrations so far: the founder, plus three people known to him,
+privately, on the web version; nothing posted. A demonstration to people without a duty of
+confidence can count as disclosure in Europe, so the dates should be logged, the three asked to keep
+it private, and the filing made promptly.
 
 ## 7. Content and economics
 
