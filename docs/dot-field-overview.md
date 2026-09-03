@@ -161,13 +161,17 @@ clamped wish; world switching keeps bearing and depth and is ignored under a hel
 world loads, every placed cell's region matches its item's, and opening a fixture dot shows the
 fixture wording and no player; zero console errors.
 
-**First external signal.** Three people close to the founder (a brother and two friends) have tried
-the web version and reacted strongly positively. That is real and it is the weakest category of
-evidence, because people who know you tend to be kind and because the web version has no haptics.
-It counts as a pilot, not a gate: the plan's stranger test is written for people "who don't love you
-enough to lie." What is worth extracting from those three now: did they teach themselves the scrub
-and the ring without help, did any of them describe it as driving or steering unprompted, and did any
-of them ask to use it again on a later day.
+**First external signal.** Three people close to the founder have tried the web version, without
+haptics. Their reactions, as reported, each land on a different claim: one friend, asked what he
+thought, read it as *"scanning a large amount of info, like a research project"* (the bandwidth claim,
+and an unprompted research framing rather than an entertainment one); a second was fully impressed,
+said he *"can't believe it's not a thing,"* called the algorithm controller an amazing idea, and used
+it on a computer with a mouse (the control-loop claim survives without touch or haptics); the
+founder's brother, not technical, really enjoyed it (the learnability claim). This is real and it is
+the softest category of evidence, because people who know you tend to be kind. It counts as a pilot
+that passed, not as a gate: the plan's stranger test is written for people "who don't love you enough
+to lie." Still to extract from the three: whether the brother taught himself the scrub and the ring
+unaided, and whether any of them opened it again on a later day.
 
 **Not proven, and these are the three that matter:**
 
