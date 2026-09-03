@@ -3,8 +3,8 @@
 //   npm run verify:shortsworld
 import assert from 'node:assert/strict';
 import { parseIsoDuration, isShortCandidate, radiusAdjust, itemsFrom, buildEdition, fixtureVideos, SPORTS_SHORTS,
-  MAX_RADIUS_ADJUST, RUBRIC_VERSION, SHORTS_MAX_SECONDS } from './shortsWorld';
-import { placeItems, layoutRegions, argmaxAt } from './worldPlacement';
+  MAX_RADIUS_ADJUST, RUBRIC_VERSION, SHORTS_MAX_SECONDS, LAND_FILL } from './shortsWorld';
+import { placeItems, layoutRegions, argmaxAt, territorySizes } from './worldPlacement';
 
 console.log('shortsWorld.verify — a real world, honestly labelled\n');
 
@@ -72,6 +72,12 @@ console.log(`  ok   youtube edition: ${items.length} of ${yt.length} kept (embed
 // the per-region cap is by id order, never by rank
 const capped = buildEdition(fixtureVideos(spec, '2026-09-02', 9), spec, '2026-09-02', 'fixture', 4);
 assert.ok(Object.values(capped.counts.perRegion).every((n) => n <= 4));
+// supply is bounded by land: a dense drop never leaves an item unplaced, and no region exceeds its territory
+const dense = buildEdition(fixtureVideos(spec, '2026-09-02', 60), spec, '2026-09-02', 'fixture', 50);
+assert.equal(dense.unplaced.length, 0, 'a land-capped drop must place everything');
+const land = territorySizes(dense.regions, { cols: 47, rows: 47 });
+for (const [key, n] of Object.entries(dense.counts.perRegion)) assert.ok(n <= Math.floor(LAND_FILL * (land.get(key) || 0)), `${key}: ${n} items on ${land.get(key)} cells of land`);
+console.log(`  ok   land-capped: ${dense.items.length} items placed, none unplaced; smallest territory ${Math.min(...land.values())} cells`);
 // placement here and in the core agree (same function, same geometry)
 const direct = placeItems(capped.items.map((it) => ({ id: it.id, region: it.region, sector: it.sector, radius: it.radius })), capped.regions, { cols: 47, rows: 47 });
 assert.equal(direct.hash, capped.layoutHash);

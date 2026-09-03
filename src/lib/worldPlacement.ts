@@ -143,6 +143,19 @@ export function placeItems(items: Item[], regions: WheelRegion[], geo: Geometry,
   return { cells, unplaced, hash: layoutHash(cells) };
 }
 
+/** How many cells inside the rim belong to each region's argmax land — the honest ceiling on how many
+ *  items that region can hold. Supply is bounded by land: a region with 30 cells cannot show 40 items. */
+export function territorySizes(regions: WheelRegion[], geo: Geometry): Map<string, number> {
+  const placedR = layoutRegions(regions, geo);
+  const sizes = new Map<string, number>(placedR.map((R) => [R.key, 0]));
+  for (let r = 0; r < geo.rows; r++) for (let c = 0; c < geo.cols; c++) {
+    if (cellDepth(c, r, geo) > 1) continue;
+    const k = placedR[argmaxAt(c, r, placedR).index].key;
+    sizes.set(k, (sizes.get(k) || 0) + 1);
+  }
+  return sizes;
+}
+
 export function layoutHash(cells: Placement[]): string {
   return fnv1a([...cells].sort((A, B) => A.c - B.c || A.r - B.r).map((p) => `${p.c},${p.r},${p.id}`).join('\n'));
 }

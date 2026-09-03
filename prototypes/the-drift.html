@@ -1554,7 +1554,7 @@ let postCell = null;
 function openPost(cell){
   postOn = true; postCell = cell;
   const pm = document.getElementById('pmedia'), frame = document.getElementById('pframe');
-  if (cell.item && cell.item.embedId){                       // a real short: YouTube's own player, nothing copied
+  if (cell.item && cell.item.embedId && !window.DRIFT_SANDBOX){   // a real short: YouTube's own player, nothing copied
     pm.style.display = 'none'; frame.style.display = 'block';
     frame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');   // granted only when a real player opens
     frame.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(cell.item.embedId) + '?playsinline=1&rel=0&modestbranding=1&autoplay=1';
@@ -1572,7 +1572,12 @@ function openPost(cell){
   document.getElementById('page').textContent = ageStr(cell.mins);
   document.getElementById('pcap').textContent = cell.cap;
   document.getElementById('pmeta').textContent = kindStr(cell) + ' · ' + CURRENTS[cell.cur].key +
-    (cell.item ? (cell.item.embedId ? ' · YouTube' : ' · fixture — no player') : '');
+    (cell.item ? (cell.item.embedId ? (window.DRIFT_SANDBOX ? ' · YouTube — this preview cannot embed the player; tap the title to watch' : ' · YouTube') : ' · fixture — no player') : '');
+  if (cell.item && cell.item.embedId && window.DRIFT_SANDBOX){   // a host that blocks the player: the title becomes the way out to YouTube
+    const cap = document.getElementById('pcap'); cap.textContent = '';
+    const a = document.createElement('a'); a.href = 'https://www.youtube.com/shorts/' + encodeURIComponent(cell.item.embedId);
+    a.target = '_blank'; a.rel = 'noopener'; a.style.color = 'inherit'; a.textContent = cell.item.title; cap.appendChild(a);
+  }
   postEl.classList.add('on');
   for (const el of document.body.children) if (el !== postEl && el.id !== 'live') el.inert = true;   // Tab stays in the dialog; Escape still closes it unless the player itself has focus
   document.getElementById('pclose').focus();

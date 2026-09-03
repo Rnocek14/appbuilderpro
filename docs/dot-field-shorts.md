@@ -142,8 +142,16 @@ clears the player; the W-cycle includes `shorts`; every earlier check (rev. 2–
 
 ## 7. Not done, said plainly
 
-- **No real drop has run here.** The sandbox reaches YouTube's image host; the API returned 403
-  without a key, as expected. The first real run needs `YOUTUBE_API_KEY` in the repo's environment.
+- **The first real drops ran on 2026-09-03** with `--per 40`. The first pass placed 618 of 629 and
+  left 11 unplaced in soccer and golf, whose inner territory holds fewer than 40 cells; that exposed
+  the rule now in the code: a region's cap is the smaller of the requested cap and 85 % of its own
+  land (`territorySizes`, ESTIMATE share). Two queries also pulled the wrong sport ("rally" returned
+  volleyball rallies; "bmx" returned a child on a bicycle) and were sharpened. The second pass: 26
+  searches, 948 videos fetched, 946 short-form, 602 placed, 0 unplaced, layout `e4bf9bd4`, about
+  2,619 units by the script's own count (the API does not report usage, so unit costs stay
+  UNVERIFIED; both runs fit inside one free day). Language bleed remains: the English relevance
+  bias is soft and Portuguese, Korean and Uzbek shorts appear; query curation is the weekly editorial
+  task the plan names. The edition is committed as `prototypes/worlds/shorts.json`.
 - **No scheduler.** The script is meant to run once a day; nothing runs it yet.
 - **A review pass** (four reviewers, two verifiers per finding) confirmed thirty defects in the first
   cut, all fixed in the same day: input validation and duplicate handling in the placer, quota and

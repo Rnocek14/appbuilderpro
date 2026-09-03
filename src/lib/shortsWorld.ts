@@ -10,13 +10,14 @@
 // You control THIS app's algorithm, not YouTube's: the drop is the day's selection, the placement is a
 // lookup, and steering changes the glow only — nothing you do fills or empties a cell. The player on open is YouTube's own.
 
-import { placeItems, type Item, type Layout, type WheelRegion } from './worldPlacement';
+import { placeItems, territorySizes, type Item, type Layout, type WheelRegion } from './worldPlacement';
 
 export const RUBRIC_VERSION = 'v0-keyword';
 export const SHORTS_MAX_SECONDS = 180;          // Shorts may run to three minutes since late 2024 (SOURCED: YouTube)
 export const SHORTS_SURE_SECONDS = 60;          // at or under a minute, short-form without asking
 export const MAX_RADIUS_ADJUST = 0.10;          // the rubric moves an item at most this far from its region's radius
 export const RADIUS_MIN = 0.18; export const RADIUS_MAX = 0.97;
+export const LAND_FILL = 0.85;                  // a region takes at most this share of its own land's cells (ESTIMATE)
 export const GEOMETRY = { cols: 47, rows: 47 };
 
 export type Register = 'serious' | 'goofy';
@@ -76,10 +77,13 @@ export function itemsFrom(videos: RawVideo[], spec: WorldSpec, source: Edition['
 
 export function buildEdition(videos: RawVideo[], spec: WorldSpec, date: string, source: Edition['source'], perRegionCap = 24): Edition {
   const all = itemsFrom(videos, spec, source);
-  // cap per region in id order — deterministic, never by rank
-  const perRegion: Record<string, number> = {}; const items: EditionItem[] = [];
-  for (const it of all) { perRegion[it.region] = (perRegion[it.region] || 0); if (perRegion[it.region] < perRegionCap) { perRegion[it.region]++; items.push(it); } }
+  // cap per region in id order — deterministic, never by rank — and never more than its land can hold:
+  // an inner region owns few cells, so its cap is the smaller of the requested cap and LAND_FILL of its territory
   const regions: WheelRegion[] = spec.regions.map((R) => ({ key: R.key, sector: R.sector, radius: R.radius }));
+  const land = territorySizes(regions, GEOMETRY);
+  const capFor = (key: string) => Math.min(perRegionCap, Math.floor(LAND_FILL * (land.get(key) || 0)));
+  const perRegion: Record<string, number> = {}; const items: EditionItem[] = [];
+  for (const it of all) { perRegion[it.region] = (perRegion[it.region] || 0); if (perRegion[it.region] < capFor(it.region)) { perRegion[it.region]++; items.push(it); } }
   const layout = placeItems(items.map((it): Item => ({ id: it.id, region: it.region, sector: it.sector, radius: it.radius })), regions, GEOMETRY);
   return {
     name: spec.name, edition: 0, rubric: RUBRIC_VERSION, source, date, depth: spec.depth, sectors: spec.sectors,
@@ -101,12 +105,12 @@ export const SPORTS_SHORTS: WorldSpec = {
     { key: 'dunks',           sector: 1, radius: 0.60, queries: ['dunk contest #shorts', 'streetball #shorts'] },
     { key: 'boxing',          sector: 2, radius: 0.50, queries: ['boxing knockout #shorts'] },
     { key: 'mma',             sector: 2, radius: 0.85, tag: 'serious', queries: ['mma finish #shorts', 'ufc #shorts'] },
-    { key: 'rally',           sector: 3, radius: 0.45, queries: ['rally #shorts'] },
+    { key: 'rally',           sector: 3, radius: 0.45, queries: ['rally car #shorts', 'wrc rally #shorts'] },
     { key: 'moto',            sector: 3, radius: 0.75, queries: ['motocross whip #shorts', 'supercross #shorts'] },
     { key: 'ski & snow',      sector: 4, radius: 0.55, queries: ['ski jump #shorts', 'snowboard #shorts'] },
     { key: 'base & wingsuit', sector: 4, radius: 0.95, tag: 'serious', queries: ['wingsuit #shorts', 'base jump #shorts'] },
     { key: 'skate',           sector: 5, radius: 0.45, queries: ['skateboarding #shorts'] },
-    { key: 'bmx & parkour',   sector: 5, radius: 0.75, queries: ['bmx #shorts', 'parkour #shorts'] },
+    { key: 'bmx & parkour',   sector: 5, radius: 0.75, queries: ['bmx tricks #shorts', 'parkour #shorts'] },
     { key: 'darts & pool',    sector: 6, radius: 0.25, tag: 'goofy', queries: ['darts 180 #shorts', 'pool trick shot #shorts'] },
     { key: 'chess',           sector: 6, radius: 0.60, tag: 'serious', queries: ['chess blitz #shorts'] },
     { key: 'golf',            sector: 7, radius: 0.20, queries: ['golf swing #shorts'] },

@@ -139,7 +139,7 @@ synthetic-touch driver before every push.
   writes one frozen edition JSON with a layout hash, plus a manifest the drift loads at boot. The
   drift treats a real world's cells as placed, shows the real thumbnail, and opens YouTube's own
   player inline. Without an API key the script writes a fixture that is labelled as one and never
-  opens a player. **No real drop has run yet**; the key does not exist.
+  opens a player. **The first real drop ran on 2026-09-03**: 948 videos fetched, 946 short-form, 602 placed on the wheel with none unplaced, inside one day's free quota.
 - **Pure cores with verify suites**: the colour grammar (checked against the prototype's own tables),
   the placement core (determinism, order independence, persistence, hash sensitivity, input
   validation), and the shorts world (filters, rubric bounds, edition shape, fixture honesty).
