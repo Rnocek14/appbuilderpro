@@ -132,6 +132,8 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 #card.docked .media{display:none}
 #card.hidden{opacity:0}
 #card .media{display:block; width:100%; height:150px; background:var(--surface-2)}
+#cpreview{position:absolute; left:0; top:0; width:100%; height:150px; display:none; border:0; background:#000; pointer-events:none; overflow:hidden}
+#card.docked #cpreview{display:none}
 #card .body{padding:10px 12px 11px}
 #card .who{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--dim)}
 #card .who .tdot{width:8px; height:8px; border-radius:50%; flex:none; box-shadow:0 0 8px currentColor}
@@ -229,6 +231,7 @@ button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--ember); ou
 
 <div id="card" class="docked" aria-hidden="true">
   <canvas class="media" id="cmedia" width="330" height="150"></canvas>
+  <div id="cpreview" aria-hidden="true"></div>
   <div class="body">
     <div class="who"><span class="tdot" id="ctdot"></span><b id="cauthor"></b><span id="chandle"></span><span class="age" id="cage"></span></div>
     <div class="cap" id="ccap"></div>
@@ -669,6 +672,7 @@ function setSelection(cell, now, tick){
   if (crossed){ document.getElementById('live').textContent = 'entering ' + CURRENTS[cell.reg].key; }
   swell.target = 1; swell.v = 0; swell.value = reduceMotion ? 1 : 0.55;
   cardContent(cell);
+  schedulePreview(cell);
   dwellStart = now;
   announce(cell);
 }
@@ -1010,12 +1014,14 @@ function draw(now){
   // glow pass, then core pass — read dots are cooled embers, unread are lit
   const camSpd = Math.hypot(camVX, camVY);
   const streak = !reduceMotion && camSpd > 350;
+  const [prx, pry] = reticle();                            // thumbnails nearest the reticle load first
   const sx = streak ? -camVX*0.02 : 0, sy = streak ? -camVY*0.02 : 0;
   for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
     const cell = getCell(c, r);
     if (!cell || cell.empty || cell === sel) continue;
     const d = dispNow.get(cell.key);
     const x = cell.x - camX + (d ? d.dx : 0), y = cell.y - camY + (d ? d.dy : 0);
+    if (cell.item) prefetchThumb(cell, (x - prx)**2 + (y - pry)**2);
     const g = glowSprites[cell.cur];
     if (cell.read){ ctx.globalAlpha = 0.10; ctx.drawImage(g, x-13, y-13, 26, 26); }
     else {
@@ -1511,19 +1517,83 @@ function kindStr(p){
        : p.kind === 'carousel' ? `carousel · ${p.frames} frames` : 'photo';
 }
 function handleOf(name){ return '@' + name.toLowerCase().replace(/[^a-z]+/g, ''); }
-/* a real item's thumbnail, drawn over the staged art once it arrives — only if the same cell is still wanted */
-const thumbCache = new Map();
+/* ---- instant preview. Thumbnails are prefetched around the reticle (nearest first, six in flight) so the card
+   paints on the same frame the selection changes; the selected item jumps the queue. After a short dwell a MUTED
+   preview of the short plays inside the card — YouTube's own player, one instance reused — never in a host that
+   blocks players (DRIFT_SANDBOX), never under reduced motion, never while the post is open. An edition may carry
+   thumbnails inline as thumbData (the artifact does, since its host blocks image hosts). ---- */
+const thumbCache = new Map(), thumbQueue = []; let thumbInFlight = 0; const THUMB_CONCURRENCY = 6;
+function thumbSrc(it){ return it.thumbData || (it.embedId ? 'https://i.ytimg.com/vi/' + encodeURIComponent(it.embedId) + '/mqdefault.jpg' : it.thumb); }
+function startThumb(img, url){
+  thumbInFlight++;
+  const done = () => { thumbInFlight--; pumpThumbs(); };
+  img.addEventListener('load', done, { once: true }); img.addEventListener('error', done, { once: true });
+  img.src = url;
+}
+function pumpThumbs(){
+  thumbQueue.sort((a, b) => a[0] - b[0]);
+  while (thumbInFlight < THUMB_CONCURRENCY && thumbQueue.length){
+    const [, url] = thumbQueue.shift(), img = thumbCache.get(url);
+    if (img && !img.src) startThumb(img, url);
+  }
+}
+function prefetchThumb(cell, priority){
+  const url = cell.item && thumbSrc(cell.item); if (!url || thumbCache.has(url)) return;
+  const img = new Image(); img.decoding = 'async'; img.referrerPolicy = 'no-referrer'; thumbCache.set(url, img);
+  thumbQueue.push([priority, url]); pumpThumbs();
+}
 function drawThumb(cell, ctx2, w, h, stillWanted){
-  const url = cell.item && cell.item.thumb; if (!url) return;
-  let img = thumbCache.get(url);
+  const url = cell.item && thumbSrc(cell.item); if (!url) return;
+  if (!thumbCache.has(url)) prefetchThumb(cell, -1);
+  const img = thumbCache.get(url);
+  if (!img.src) startThumb(img, url);                         // the selection never waits behind the queue
   const paint = () => {
     if (!stillWanted() || !img.naturalWidth) return;
-    const s = Math.max(w/img.naturalWidth, h/img.naturalHeight), dw = img.naturalWidth*s, dh = img.naturalHeight*s;
+    const sc = Math.max(w/img.naturalWidth, h/img.naturalHeight), dw = img.naturalWidth*sc, dh = img.naturalHeight*sc;
     ctx2.drawImage(img, (w - dw)/2, (h - dh)/2, dw, dh);
   };
-  if (img && img.complete){ paint(); return; }
-  if (!img){ img = new Image(); img.decoding = 'async'; img.referrerPolicy = 'no-referrer'; thumbCache.set(url, img); img.src = url; }
+  if (img.complete && img.naturalWidth){ paint(); return; }
   img.addEventListener('load', paint, { once: true });
+}
+const PREVIEW_DWELL = 650;                                  // ms still on a real short before its muted preview starts (ESTIMATE)
+let previewTimer = 0, previewCell = null, ytPlayer = null, ytLoading = false, ytPending = null;
+function previewAllowed(){ return !window.DRIFT_SANDBOX && !reduceMotion; }
+function ensureYT(cb){
+  if (window.YT && window.YT.Player){ cb(); return; }
+  ytPending = cb;
+  if (!ytLoading){
+    ytLoading = true;
+    window.onYouTubeIframeAPIReady = () => { const f = ytPending; ytPending = null; if (f) f(); };
+    const sc = document.createElement('script'); sc.src = 'https://www.youtube.com/iframe_api'; sc.async = true;
+    sc.onerror = () => { ytLoading = false; ytPending = null; };
+    document.head.appendChild(sc);
+  }
+}
+function schedulePreview(cell){
+  stopPreview();
+  if (!cell || !cell.item || !cell.item.embedId || !previewAllowed()) return;
+  previewTimer = setTimeout(() => startPreview(cell), PREVIEW_DWELL);
+}
+function startPreview(cell){
+  if (sel !== cell || postOn) return;
+  ensureYT(() => {
+    if (sel !== cell || postOn) return;
+    previewCell = cell;
+    const el = document.getElementById('cpreview'); if (el) el.style.display = 'block';
+    const id = cell.item.embedId;
+    try {
+      if (!ytPlayer){
+        ytPlayer = new YT.Player('cpreview', { videoId: id,
+          playerVars: { autoplay: 1, mute: 1, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, disablekb: 1, loop: 1, playlist: id },
+          events: { onReady: e => { e.target.mute(); if (previewCell === cell) e.target.playVideo(); else e.target.pauseVideo(); } } });
+      } else { ytPlayer.mute(); ytPlayer.loadVideoById(id); }
+    } catch (e) { stopPreview(); }
+  });
+}
+function stopPreview(){
+  clearTimeout(previewTimer); previewTimer = 0; previewCell = null;
+  const el = document.getElementById('cpreview'); if (el) el.style.display = 'none';
+  if (ytPlayer && typeof ytPlayer.pauseVideo === 'function'){ try { ytPlayer.pauseVideo(); } catch (e) {} }
 }
 function cardContent(cell){
   cmx.drawImage(art(cell, 330, 150), 0, 0);
@@ -1552,7 +1622,7 @@ const postEl = document.getElementById('post');
 const journey = [];
 let postCell = null;
 function openPost(cell){
-  postOn = true; postCell = cell;
+  postOn = true; postCell = cell; stopPreview();
   const pm = document.getElementById('pmedia'), frame = document.getElementById('pframe');
   if (cell.item && cell.item.embedId && !window.DRIFT_SANDBOX){   // a real short: YouTube's own player, nothing copied
     pm.style.display = 'none'; frame.style.display = 'block';
@@ -1587,6 +1657,7 @@ function openPost(cell){
 }
 function closePost(){
   postOn = false; postCell = null; postEl.classList.remove('on');
+  if (sel) schedulePreview(sel);
   for (const el of document.body.children) el.inert = false;
   { const frame = document.getElementById('pframe'); frame.removeAttribute('src'); frame.style.display = 'none'; document.getElementById('pmedia').style.display = ''; }
   cardEl.classList.add('docked');
@@ -1774,7 +1845,7 @@ document.addEventListener('keydown', e => {
 function resetWorld(){
   cells.clear(); mediaCache.clear(); affinity.fill(0); journey.length = 0; trailPath.length = 0;
   sparks.length = 0; ripples.length = 0; comet.length = 0;
-  sel = null; dispNow.clear(); cardEl.classList.add('hidden');
+  sel = null; dispNow.clear(); cardEl.classList.add('hidden'); stopPreview();
   bloomRecs.clear(); bloomOn = false; bloomSel = null; bloomNear = []; lastBloomCount = -1; parkLock = null; parkSince = 0;
   ticks = 0; field.dataset.ticks = 0;
   camVX = camVY = 0; glide = null; clearTimeout(glideTimer);

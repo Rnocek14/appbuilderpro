@@ -112,8 +112,15 @@ duplicate.
   W-cycle gain them. A file named like a staged world is refused with a console warning.
 - Its cells are **placed, not sampled**: a cell is the item the pipeline put there or it is empty.
   The boundary tick and label work unchanged on the region table.
-- The card shows the real thumbnail over the staged art once it loads (only if the same dot is still
-  selected), the channel name with *on YouTube* (never an invented handle), and *short · m:ss*.
+- **The preview is instant.** Thumbnails are prefetched around the reticle as the field draws (nearest
+  first, six in flight; the selection jumps the queue), so the card paints the real thumbnail on the
+  frame the selection changes, with the channel name and *on YouTube* (never an invented handle) and
+  *short · m:ss*. After 650 ms still on a real short (ESTIMATE) a **muted preview plays inside the
+  card** through YouTube's own player, one instance reused across selections; it stops the moment the
+  selection moves, never plays under reduced motion, never while the post is open, and never in a host
+  that blocks players. An edition may carry thumbnails inline (`thumbData`); the private artifact does,
+  because its host blocks image and frame hosts, which is why it links out to YouTube instead of
+  embedding.
   Opening a dot with a player id shows **YouTube's own player** (privacy-enhanced embed, inline
   playback) in the post view, keeps keyboard focus inside the dialog, and stops the player on close; a
   fixture item shows the staged art and the words *fixture — no player*.
